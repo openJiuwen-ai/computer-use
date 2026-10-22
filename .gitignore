@@ -13,3 +13,4 @@ build.log
 nohup.out
 probe_*.png
 .DS_Store
+os_adapter/*/.build/
