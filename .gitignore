@@ -1,0 +1,15 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+*.egg-info/
+engine/backends/macos/.build/
+engine/backends/windows/.build/
+engine/src/computer_use/_resources/
+engine.bak-*/
+service.log
+service.pid
+build.log
+nohup.out
+probe_*.png
+.DS_Store
