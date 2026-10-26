@@ -5,7 +5,10 @@ import CryptoKit
 /// eviction: forgotten requests are rejected, never admitted as new work.
 final class RequestLedger {
     enum Admission { case start, replay(Data), inProgress, expired, conflict }
-    private struct Entry { let fingerprint: Data; var response: Data? }
+    private struct Entry {
+        let fingerprint: Data
+        var response: Data?
+    }
     private var entries = [Int64: Entry]()
     private var order = [Int64]()
     private var highest: Int64 = 0
@@ -14,7 +17,8 @@ final class RequestLedger {
     private let maxBytes: Int
 
     init(maxEntries: Int = 64, maxBytes: Int = 8 * 1024 * 1024) {
-        self.maxEntries = maxEntries; self.maxBytes = maxBytes
+        self.maxEntries = maxEntries
+        self.maxBytes = maxBytes
     }
 
     func begin(id: Int64, request: Data) -> Admission {
@@ -33,7 +37,9 @@ final class RequestLedger {
 
     func finish(id: Int64, response: Data) {
         guard var entry = entries[id], entry.response == nil else { return }
-        entry.response = response; entries[id] = entry; bytes += response.count
+        entry.response = response
+        entries[id] = entry
+        bytes += response.count
         trim()
     }
 

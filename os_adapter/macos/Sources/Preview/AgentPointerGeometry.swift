@@ -4,8 +4,7 @@ import CoreGraphics
 /// final AppKit conversion; image pixels and Retina scale never enter here.
 enum AgentPointerGeometry {
     static func valid(_ rect: CGRect) -> Bool {
-        [rect.minX, rect.minY, rect.width, rect.height].allSatisfy(\.isFinite)
-            && rect.width > 0 && rect.height > 0
+        [rect.minX, rect.minY, rect.width, rect.height].allSatisfy(\.isFinite) && rect.width > 0 && rect.height > 0
     }
 
     static func appKit(_ rect: CGRect, primaryHeight: CGFloat) -> CGRect {

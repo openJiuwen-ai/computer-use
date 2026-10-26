@@ -3,13 +3,13 @@ import ApplicationServices
 
 /// Native window catalogue, validated handles and immutable text pages.
 /// Semantic composition, tree expansion policy and rendering belong to Python.
-@MainActor
-final class NativeApplicationReader {
+@MainActor final class NativeApplicationReader {
     private typealias Identity = ApplicationElements.Identity
     private let registry: ApplicationElements
     private let inspection: NativeElementInspection
     init(registry: ApplicationElements, inspection: NativeElementInspection) {
-        self.registry = registry; self.inspection = inspection
+        self.registry = registry
+        self.inspection = inspection
     }
 
     struct ReadRoot {
@@ -17,11 +17,14 @@ final class NativeApplicationReader {
         let application: NSRunningApplication
         let scope: String
         let ancestors: [AXUIElement]
+        let observedInteractionSurface: AXUIElement?
         let validate: () throws -> Void
     }
 
     func readRoot(_ ref: String) throws -> ReadRoot {
-        guard let target = registry.target(ref) else { throw DriverError("element reference expired; read its window again", code: .staleTarget) }
+        guard let target = registry.target(ref) else {
+            throw DriverError("element reference expired; read its window again", code: .staleTarget)
+        }
         // Inspection is allowed for disabled controls and blocked backgrounds.
         // Keep identity checks separate from input preparation and permission to act.
         let validate = {
@@ -29,26 +32,39 @@ final class NativeApplicationReader {
             try self.inspection.validateTargetIdentity(target)
         }
         try validate()
-        return ReadRoot(element: target.element, application: target.application, scope: target.scope,
-            ancestors: target.ancestors, validate: validate)
+        return ReadRoot(
+            element: target.element, application: target.application, scope: target.scope, ancestors: target.ancestors,
+            observedInteractionSurface: target.observedInteractionSurface, validate: validate)
     }
 
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any] {
-        guard let snapshot = registry.text(ref) else { throw DriverError("snapshot expired; read the element again to capture a new Value", code: .snapshotExpired) }
+        guard let snapshot = registry.text(ref) else {
+            throw DriverError("snapshot expired; read the element again to capture a new Value", code: .snapshotExpired)
+        }
         guard let value = snapshot.value else {
-            throw DriverError("the observed element has no readable string Value", next: "read the app or use its screenshot; an unavailable value is not empty text")
+            throw DriverError(
+                "the observed element has no readable string Value",
+                next: "read the app or use its screenshot; an unavailable value is not empty text")
         }
         let text = value as NSString
-        guard offset <= text.length else { throw DriverError("text offset exceeds observed Value length \(text.length)", code: .invalidRequest) }
+        guard offset <= text.length else {
+            throw DriverError("text offset exceeds observed Value length \(text.length)", code: .invalidRequest)
+        }
         func insidePair(_ index: Int) -> Bool {
             index > 0 && index < text.length && (0xD800...0xDBFF).contains(text.character(at: index - 1))
                 && (0xDC00...0xDFFF).contains(text.character(at: index))
         }
-        guard !insidePair(offset) else { throw DriverError("text offset splits a Unicode surrogate pair; use the previous page's next offset", code: .invalidRequest) }
+        guard !insidePair(offset) else {
+            throw DriverError(
+                "text offset splits a Unicode surrogate pair; use the previous page's next offset",
+                code: .invalidRequest)
+        }
         var end = offset + min(length, text.length - offset)
         if insidePair(end) { end -= 1 }
-        return ["text": text.substring(with: NSRange(location: offset, length: end - offset)),
-                "offset": offset, "total": text.length, "next": end < text.length ? end as Any : NSNull()]
+        return [
+            "text": text.substring(with: NSRange(location: offset, length: end - offset)), "offset": offset,
+            "total": text.length, "next": end < text.length ? end as Any : NSNull()
+        ]
     }
 
     struct Window {
@@ -57,35 +73,117 @@ final class NativeApplicationReader {
         let element: AXUIElement
         var kind: String = "window"
         var parent: String? = nil
+        var parentUnknown: Bool = false
+        var nativeID: CGWindowID? = nil
         var modal: Bool? = nil
         var document: String? = nil
     }
 
-    func windows(_ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], reportIssue: ((String) -> Void)? = nil) throws -> [Window] {
+    func windows(
+        _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
+        purpose: NativeWindowQueryPurpose = .observation, reportIssue: ((String) -> Void)? = nil
+    ) throws -> [Window] {
+        guard
+            case .catalogue(let windows) = try collectWindows(
+                app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose, projection: .catalogue,
+                reportIssue: reportIssue)
+        else { preconditionFailure("catalogue adapter received a boundary projection") }
+        return windows
+    }
+
+    func keyboardBoundary(_ app: NSRunningApplication, contentRoot: AXUIElement) throws
+        -> NativeKeyboardBoundaryProjection<AXUIElement>
+    {
+        guard
+            case .boundary(let result) = try collectWindows(
+                app, contentRoot: contentRoot, purpose: .inputValidation, projection: .keyboardDispatch)
+        else { preconditionFailure("boundary adapter received a catalogue") }
+        return result
+    }
+
+    private enum Projection: Equatable { case catalogue, keyboardDispatch }
+    private enum Collection {
+        case catalogue([Window])
+        case boundary(NativeKeyboardBoundaryProjection<AXUIElement>)
+    }
+
+    private func collectWindows(
+        _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
+        purpose: NativeWindowQueryPurpose, projection: Projection, reportIssue: ((String) -> Void)? = nil
+    ) throws -> Collection {
+        var boundaryIssue: String?
+        func issue(_ detail: String) {
+            if boundaryIssue == nil { boundaryIssue = detail }
+            reportIssue?(detail)
+        }
         try RequestDiagnostics.checkCancellation()
-        guard AXIsProcessTrusted() else { return [] }
-        let incarnation = nativeWindows.first { $0.process.pid == app.processIdentifier }?.process.incarnation
-            ?? NativeProcessIdentity.read(app.processIdentifier)?.incarnation
+        guard AXIsProcessTrusted() else {
+            return projection == .catalogue
+                ? .catalogue([]) : .boundary(.init(windows: [], issue: "AX trust unavailable"))
+        }
+        let process =
+            nativeWindows.first { $0.process.pid == app.processIdentifier }?.process
+            ?? NativeProcessIdentity.read(app.processIdentifier)
+        let incarnation = process?.incarnation
         let root = AXUIElementCreateApplication(app.processIdentifier)
         AXMessaging.configure(root)
-        let rootRead = AXAccess.read(root, kAXWindowsAttribute)
-        let declaredRoots = rootRead.value as? [AXUIElement] ?? []
-        if rootRead.value as? [AXUIElement] == nil { reportIssue?("AXWindows catalogue unavailable or malformed") }
-        var candidates = declaredRoots
-        for key in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
-            if let raw = inspection.attribute(root, key), CFGetTypeID(raw) == AXUIElementGetTypeID() {
-                candidates.append(unsafeDowncast(raw, to: AXUIElement.self))
-            }
-        }
-        if let focused = WindowGeometry.inputWindow(pid: app.processIdentifier) { candidates.append(focused) }
+        // Only this synchronous input collector can consume the helper's last
+        // actual declaration attempt. Observation and final receiver samples
+        // retain their independent reads; no earlier array is fed to helpers.
+        let capture: NativeWindowDeclarationCapture? =
+            purpose == .inputValidation ? process.map { NativeWindowDeclarationCapture(root: root, process: $0) } : nil
+        defer { capture?.close() }
+        let sources: NativeWindowCandidateQuery.Sources<AXUIElement> = NativeWindowCandidateQuery.collect(
+            purpose: purpose,
+            declared: {
+                let read = AXAccess.read(root, kAXWindowsAttribute)
+                if projection == .keyboardDispatch {
+                    guard let raw = read.value, let elements = NativeWindowDeclarationCapture.completeElements(raw)
+                    else {
+                        issue("AXWindows catalogue unavailable or malformed")
+                        return []
+                    }
+                    return elements
+                }
+                if read.value as? [AXUIElement] == nil { issue("AXWindows catalogue unavailable or malformed") }
+                return read.value as? [AXUIElement] ?? []
+            },
+            hints: {
+                var hints = [AXUIElement]()
+                for key in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+                    if let raw = inspection.attribute(root, key), CFGetTypeID(raw) == AXUIElementGetTypeID() {
+                        hints.append(unsafeDowncast(raw, to: AXUIElement.self))
+                    }
+                }
+                return hints
+            },
+            inputWindow: {
+                let observer: NativeWindowsReadObserver?
+                if let capture {
+                    observer = { pid, root, read in capture.record(pid: pid, root: root, read: read) }
+                } else {
+                    observer = nil
+                }
+                return WindowGeometry.inputWindow(pid: app.processIdentifier, onWindowsRead: observer)
+            },
+            latestDeclared: {
+                // This additional non-AX identity query only decides reuse. Unknown
+                // or changed process identity takes the original fresh getter path.
+                guard let capture else { return nil }
+                return capture.take(currentProcess: NativeProcessIdentity.read(app.processIdentifier))
+            })
+        let declaredRoots = sources.declared
+        var candidates = sources.candidates
         var result = [Window]()
         var owners = [(child: AXUIElement, parent: AXUIElement)]()
+        var unknownBoundaryParents = [AXUIElement]()
         let surfaceRoles = [kAXWindowRole, kAXSheetRole, "AXPopover"]
         var focus = AXAccess.element(root, kAXFocusedUIElementAttribute), focusPath = [AXUIElement]()
         var focusedSurface: AXUIElement?
         let focusDeadline = ProcessInfo.processInfo.systemUptime + 0.1
         while let node = focus, focusPath.count < 32, ProcessInfo.processInfo.systemUptime < focusDeadline,
-              !focusPath.contains(where: { CFEqual($0, node) }) {
+            !focusPath.contains(where: { CFEqual($0, node) })
+        {
             try RequestDiagnostics.checkCancellation()
             focusPath.append(node)
             if surfaceRoles.contains(inspection.attribute(node, kAXRoleAttribute) as? String ?? "") {
@@ -95,93 +193,244 @@ final class NativeApplicationReader {
             }
             focus = AXAccess.element(node, kAXParentAttribute)
         }
-        if focus != nil { reportIssue?("focused surface ancestry incomplete") }
+        if focus != nil { issue("focused surface ancestry incomplete") }
         // AppKit attaches popovers to their anchor control, not necessarily to
         // AXWindows or a window's immediate children. Discover surface roots
         // through actual child edges; never infer ownership from screen overlap.
         let surfaceDeadline = ProcessInfo.processInfo.systemUptime + 0.4
         var scanned = [AXUIElement]()
-        func nestedSurfaces(_ parent: AXUIElement) throws -> [AXUIElement] {
+        let surfaceRelations = AXRelationReader()
+        var surfaceIssues = Set<String>()
+        func surfaceIssue(_ detail: String) { if surfaceIssues.insert(detail).inserted { issue(detail) } }
+        func nestedSurfaces(_ parent: AXUIElement, recursive: Bool) throws -> [AXUIElement] {
             var pending = [parent], found = [AXUIElement](), index = 0
-            while index < pending.count, scanned.count < 512,
-                  ProcessInfo.processInfo.systemUptime < surfaceDeadline {
-                let node = pending[index]; index += 1
+            while index < pending.count, scanned.count < 512, ProcessInfo.processInfo.systemUptime < surfaceDeadline {
+                let node = pending[index]
+                index += 1
                 try RequestDiagnostics.checkCancellation()
                 if scanned.contains(where: { CFEqual($0, node) }) { continue }
                 scanned.append(node)
-                for child in AXAccess.elements(node, kAXChildrenAttribute, limit: 128) ?? [] {
-                    if ProcessInfo.processInfo.systemUptime >= surfaceDeadline { break }
+                let available = max(0, 512 - scanned.count - (pending.count - index))
+                let relation = try surfaceRelations.read(
+                    node, source: "surface-discovery", property: kAXChildrenAttribute, limit: available,
+                    withinBudget: {
+                        try RequestDiagnostics.checkCancellation()
+                        return ProcessInfo.processInfo.systemUptime < surfaceDeadline
+                    })
+                guard case .page(let page) = relation else {
+                    if case .failure(let failure) = relation,
+                        (available == 0 || !["unsupported", "absent"].contains(failure["state"] as? String ?? "")
+                            || failure["nativeCode"] as? Int32 == AXError.notImplemented.rawValue)
+                    {
+                        surfaceIssue(
+                            "attached surface children unavailable: "
+                                + (failure["detail"] as? String ?? "unknown AX query failure"))
+                    }
+                    continue
+                }
+                if page.prefix.count < page.total || page.issue != nil {
+                    surfaceIssue("attached surface discovery incomplete: child/node budget or changing relation")
+                }
+                for child in page.targets {
+                    if ProcessInfo.processInfo.systemUptime >= surfaceDeadline {
+                        surfaceIssue("attached surface discovery incomplete: time budget")
+                        break
+                    }
                     if surfaceRoles.contains(inspection.attribute(child, kAXRoleAttribute) as? String ?? "") {
                         found.append(child)
-                    } else { pending.append(child) }
+                    } else if recursive {
+                        pending.append(child)
+                    }
                 }
             }
+            if index < pending.count { surfaceIssue("attached surface discovery incomplete: time/node budget") }
             return found
         }
         var cursor = 0
         while cursor < candidates.count {
             try RequestDiagnostics.checkCancellation()
-            let element = WindowGeometry.presentedWindow(candidates[cursor], pid: app.processIdentifier); cursor += 1
+            let element = WindowGeometry.presentedWindow(candidates[cursor], pid: app.processIdentifier)
+            cursor += 1
             var pid: pid_t = 0
             guard AXUIElementGetPid(element, &pid) == .success, pid == app.processIdentifier,
-                  let role = inspection.attribute(element, kAXRoleAttribute) as? String,
-                  ([kAXWindowRole, kAXSheetRole, "AXPopover"].contains(role) || declaredRoots.contains { CFEqual($0, element) }),
-                  !result.contains(where: { CFEqual($0.element, element) }) else { continue }
-            let subrole = inspection.attribute(element, kAXSubroleAttribute) as? String ?? ""
-            let kind = role == "AXPopover" ? "popover" : role == kAXSheetRole ? "sheet" : ["AXDialog", "AXSystemDialog"].contains(subrole) ? "dialog"
-                : ["AXFloatingWindow", "AXSystemFloatingWindow"].contains(subrole) ? "panel" : "window"
-            result.append(Window(ref: registry.reference(for: Identity(pid: pid, launched: app.launchDate, element: element, incarnation: incarnation)),
-                title: inspection.attribute(element, kAXTitleAttribute) as? String ?? "", element: element,
-                kind: kind, modal: inspection.attribute(element, kAXModalAttribute) as? Bool))
+                let role = inspection.attribute(element, kAXRoleAttribute) as? String,
+                ([kAXWindowRole, kAXSheetRole, "AXPopover"].contains(role)
+                    || declaredRoots.contains { CFEqual($0, element) }),
+                !result.contains(where: { CFEqual($0.element, element) })
+            else {
+                if projection == .keyboardDispatch && !result.contains(where: { CFEqual($0.element, element) }) {
+                    issue("surface candidate identity or role unavailable")
+                }
+                continue
+            }
+            if projection == .keyboardDispatch {
+                // Private per-collection keys never allocate or rewrite public aliases.
+                // Unread presentation fields stay inside this collector and are
+                // removed by the typed boundary adapter before returning.
+                result.append(
+                    Window(
+                        ref: "boundary:\(result.count)", title: "", element: element,
+                        kind: role == kAXSheetRole ? "sheet" : role == "AXPopover" ? "popover" : role,
+                        modal: inspection.attribute(element, kAXModalAttribute) as? Bool))
+            } else {
+                let subrole = inspection.attribute(element, kAXSubroleAttribute) as? String ?? ""
+                let kind =
+                    role == "AXPopover"
+                    ? "popover"
+                    : role == kAXSheetRole
+                        ? "sheet"
+                        : ["AXDialog", "AXSystemDialog"].contains(subrole)
+                            ? "dialog"
+                            : ["AXFloatingWindow", "AXSystemFloatingWindow"].contains(subrole) ? "panel" : "window"
+                result.append(
+                    Window(
+                        ref: registry.reference(
+                            for: Identity(
+                                pid: pid, launched: app.launchDate, element: element, incarnation: incarnation)),
+                        title: inspection.attribute(element, kAXTitleAttribute) as? String ?? "", element: element,
+                        kind: kind, modal: inspection.attribute(element, kAXModalAttribute) as? Bool))
+            }
             // Sheets are often absent from AXWindows. Explicit native ownership
             // is retained; title, screen position and current focus prove no owner.
-            for child in inspection.attribute(element, "AXSheets") as? [AXUIElement] ?? [] {
+            let sheets: [AXUIElement]
+            if projection == .keyboardDispatch {
+                let read = AXAccess.read(element, "AXSheets")
+                switch read {
+                case .value(let raw):
+                    if let values = NativeWindowDeclarationCapture.completeElements(raw) {
+                        sheets = values
+                    } else {
+                        issue("AXSheets malformed")
+                        sheets = []
+                    }
+                case .unsupported, .unavailable(.noValue): sheets = []
+                default:
+                    issue("AXSheets unavailable")
+                    sheets = []
+                }
+            } else {
+                sheets = inspection.attribute(element, "AXSheets") as? [AXUIElement] ?? []
+            }
+            for child in sheets {
                 owners.append((child, element))
                 candidates.append(child)
             }
-            for child in try nestedSurfaces(element) {
-                owners.append((child, element)); candidates.append(child)
+            // Discovery reads still expand every window. Input validation may
+            // exclude only contents proven outside its interaction range;
+            // AXWindows, focus ancestors, AXSheets and immediate surface
+            // children are always live. In particular, this keeps global
+            // modals and all ancestor sheets without walking their file lists
+            // again before each character sent to a nested Go To sheet.
+            let recursive =
+                try contentRoot.map { selected in
+                    try NativeWindowBoundary.exploreContents(
+                        of: element, root: selected, same: { CFEqual($0, $1) },
+                        parent: { node in
+                            try RequestDiagnostics.checkCancellation()
+                            return AXAccess.element(node, kAXParentAttribute)
+                        },
+                        isApplication: { node in
+                            var pid: pid_t = 0
+                            return AXUIElementGetPid(node, &pid) == .success && pid == app.processIdentifier
+                                && inspection.attribute(node, kAXRoleAttribute) as? String == kAXApplicationRole
+                        })
+                } ?? true
+            for child in try nestedSurfaces(element, recursive: recursive) {
+                owners.append((child, element))
+                candidates.append(child)
             }
+        }
+        // The retained object is only a pruning hint. A popover may be
+        // reachable solely through an anchor inside an excluded ancestor.
+        // Rediscover it through live child edges before declaring it closed;
+        // never authorize input from the retained object alone.
+        if let contentRoot, !result.contains(where: { CFEqual($0.element, contentRoot) }) {
+            return try collectWindows(
+                app, nativeWindows: nativeWindows, purpose: purpose, projection: projection, reportIssue: reportIssue)
         }
         for index in result.indices {
             try RequestDiagnostics.checkCancellation()
             let item = result[index]
             var parent = owners.first { CFEqual($0.child, item.element) }?.parent
-            if parent == nil, let raw = inspection.attribute(item.element, kAXParentAttribute), CFGetTypeID(raw) == AXUIElementGetTypeID() {
+            if parent == nil, let raw = inspection.attribute(item.element, kAXParentAttribute),
+                CFGetTypeID(raw) == AXUIElementGetTypeID()
+            {
                 parent = unsafeDowncast(raw, to: AXUIElement.self)
             }
-            if let parent, let owner = result.first(where: { !CFEqual($0.element, item.element) && CFEqual($0.element, parent) }) {
+            if projection == .keyboardDispatch,
+                !NativeKeyboardBoundaryPolicy.parentKnown(
+                    child: item.element, parent: parent, application: root, windows: result.map(\.element),
+                    same: { CFEqual($0, $1) })
+            {
+                unknownBoundaryParents.append(item.element)
+            }
+            if let parent,
+                let owner = result.first(where: { !CFEqual($0.element, item.element) && CFEqual($0.element, parent) })
+            {
                 result[index].parent = owner.ref
                 // AXSheet is the native document-modal role; an explicit false
                 // or unavailable owner is never changed into application-wide modality.
                 if item.kind == "sheet" && item.modal == nil { result[index].modal = true }
             }
         }
+        if projection == .keyboardDispatch {
+            // Native parents were not queried. Only the flat/no-modal policy
+            // may accept this graph; any required unknown goes to the parent Gate.
+            let rows = result.map { item in
+                NativeKeyboardBoundaryProjection<AXUIElement>.Window(
+                    key: item.ref, element: item.element,
+                    role: item.kind == "sheet" ? kAXSheetRole : item.kind == "popover" ? "AXPopover" : item.kind,
+                    modal: item.modal, parent: item.parent,
+                    parentKnown: !unknownBoundaryParents.contains(where: { CFEqual($0, item.element) }))
+            }
+            return .boundary(.init(windows: rows, issue: boundaryIssue))
+        }
         // Merge only one-to-one native matches. Same-title/overlapping windows
         // must not collapse, nor may a sheet borrow its parent's identity.
         var remapped = [String: String]()
+        var exactNativeIDs = [String: CGWindowID]()
         // Read each AX hint once, not once per pair of AX/native windows.
-        let matchesByWindow = try result.map { item -> [NativeWindows.Window] in
+        let hints = try result.map { item in
             try RequestDiagnostics.checkCancellation()
-            guard let hint = WindowGeometry.hint(item.element) else { return [] }
+            return WindowGeometry.hint(item.element)
+        }
+        let matchesByWindow = hints.map { raw -> [NativeWindows.Window] in
+            guard let hint = raw else { return [] }
             return nativeWindows.filter {
-                $0.process.pid == app.processIdentifier && WindowSelection.identifies(
-                    .init(id: $0.mapping.id, frame: $0.mapping.frame, title: $0.mapping.title ?? "", visible: $0.onScreen),
-                    hint: hint)
+                $0.process.pid == app.processIdentifier
+                    && WindowSelection.identifies(
+                        .init(
+                            id: $0.mapping.id, frame: $0.mapping.frame, title: $0.mapping.title ?? "",
+                            visible: $0.onScreen), hint: hint)
             }
         }
         for (index, item) in result.enumerated() {
             let matches = matchesByWindow[index]
             if matches.count == 1, let native = matches.first,
-               matchesByWindow.filter({ $0.contains { $0.mapping.id == native.mapping.id } }).count == 1 {
+                matchesByWindow.filter({ $0.contains { $0.mapping.id == native.mapping.id } }).count == 1
+            {
                 remapped[item.ref] = registry.windowReference(native, element: item.element)
+                if hints[index]?.id == native.mapping.id, let ref = remapped[item.ref] {
+                    exactNativeIDs[ref] = native.mapping.id
+                }
             }
         }
         try RequestDiagnostics.checkCancellation()
         var mapped = result.map { item in
-            Window(ref: remapped[item.ref] ?? item.ref, title: item.title, element: item.element,
-                kind: item.kind, parent: item.parent.map { remapped[$0] ?? $0 }, modal: item.modal)
+            Window(
+                ref: remapped[item.ref] ?? item.ref, title: item.title, element: item.element, kind: item.kind,
+                parent: item.parent.map { remapped[$0] ?? $0 },
+                nativeID: exactNativeIDs[remapped[item.ref] ?? item.ref], modal: item.modal)
         }
+        // A native child (including system sharing controls) may report the
+        // application as AXParent. Keep it visible, but do not invent another
+        // independent document. Only exact, same-process native IDs qualify.
+        let relations = windowParents(mapped, native: nativeWindows, pid: app.processIdentifier)
+        for index in mapped.indices {
+            mapped[index].parent = relations.parents[mapped[index].ref]
+            mapped[index].parentUnknown = relations.unresolved.contains(mapped[index].ref)
+        }
+        if !relations.unresolved.isEmpty { issue("some native window parent relationships could not be confirmed") }
         // Identical titles are insufficient for choosing a newly opened file.
         // Preserve each exact window's own native URI, without inspecting its
         // contents, guessing from a parent or querying unrelated unique titles.
@@ -191,10 +440,27 @@ final class NativeApplicationReader {
             try RequestDiagnostics.checkCancellation()
             guard ProcessInfo.processInfo.systemUptime < documentDeadline else { break }
             if let raw = inspection.attribute(mapped[index].element, kAXDocumentAttribute),
-               let value = (raw as? String) ?? (raw as? URL)?.absoluteString, !value.isEmpty {
+                let value = (raw as? String) ?? (raw as? URL)?.absoluteString, !value.isEmpty
+            {
                 mapped[index].document = value
             }
         }
-        return mapped
+        return .catalogue(mapped)
+    }
+
+    func windowParents(_ windows: [Window], native: [NativeWindows.Window], pid: pid_t) -> NativeWindowParents.Result {
+        var facts = windows.map {
+            NativeWindowParents.Window(ref: $0.ref, pid: pid, id: $0.nativeID, parent: $0.parent)
+        }
+        let axRefs = Set(windows.map(\.ref))
+        var parents = [CGWindowID: CGWindowID]()
+        for window in native {
+            let ref = registry.windowReference(window)
+            if !axRefs.contains(ref) {
+                facts.append(.init(ref: ref, pid: window.process.pid, id: window.mapping.id, parent: nil))
+            }
+            if let parent = window.parentID { parents[window.mapping.id] = parent }
+        }
+        return NativeWindowParents.supplement(facts, native: parents)
     }
 }

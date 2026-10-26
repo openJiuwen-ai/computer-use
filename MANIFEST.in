@@ -1,0 +1,10 @@
+include README.md README_CN.md LICENSE OPEN_SOURCE_SOFTWARE_NOTICE.md
+include setup.py
+include os_adapter/macos/Package.swift
+include os_adapter/linux/pyproject.toml os_adapter/linux/requirements.lock
+recursive-include os_adapter/macos/Sources *.swift
+recursive-include os_adapter/linux/src *.py
+recursive-include os_adapter/windows/Sources *.cs
+recursive-include os_adapter/windows/Build *.cs *.py
+recursive-include os_adapter/windows/Workers *.cs
+recursive-include os_adapter/assets/agent-pointer *.svg *.json

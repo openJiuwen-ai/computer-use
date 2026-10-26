@@ -30,30 +30,31 @@ import ApplicationServices
     private var attempted: [pid_t: NativeProcessIdentity] = [:]
 
     func ensure(_ app: NSRunningApplication) -> Outcome {
-        guard !app.isTerminated,
-              let process = NativeProcessIdentity.read(app.processIdentifier) else {
+        guard !app.isTerminated, let process = NativeProcessIdentity.read(app.processIdentifier) else {
             return Outcome(kind: .processUnavailable)
         }
         let element = AXUIElementCreateApplication(process.pid)
         AXUIElementSetMessagingTimeout(element, 0.3)
-        return request(process, isCurrent: {
-            !app.isTerminated && NativeProcessIdentity.read(process.pid) == process
-        }, readEnabled: { attribute in
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, attribute.rawValue as CFString, &value) == .success,
-                  let value, CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil }
-            return CFBooleanGetValue((value as! CFBoolean))
-        }, writeEnabled: { attribute in
-            AXUIElementSetAttributeValue(element, attribute.rawValue as CFString, kCFBooleanTrue)
-        })
+        return request(
+            process, isCurrent: { !app.isTerminated && NativeProcessIdentity.read(process.pid) == process },
+            readEnabled: { attribute in
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(element, attribute.rawValue as CFString, &value) == .success,
+                    let value, CFGetTypeID(value) == CFBooleanGetTypeID()
+                else { return nil }
+                return CFBooleanGetValue((value as! CFBoolean))
+            },
+            writeEnabled: { attribute in
+                AXUIElementSetAttributeValue(element, attribute.rawValue as CFString, kCFBooleanTrue)
+            })
     }
 
     /// Injectable native operations keep request ordering, ambiguous errors and
     /// process-lifetime suppression testable without operating anyone's apps.
-    func request(_ process: NativeProcessIdentity,
-                 isCurrent: () -> Bool,
-                 readEnabled: (Attribute) -> Bool?,
-                 writeEnabled: (Attribute) -> AXError) -> Outcome {
+    func request(
+        _ process: NativeProcessIdentity, isCurrent: () -> Bool, readEnabled: (Attribute) -> Bool?,
+        writeEnabled: (Attribute) -> AXError
+    ) -> Outcome {
         guard isCurrent() else { return Outcome(kind: .processUnavailable) }
         guard attempted[process.pid] != process else { return Outcome(kind: .alreadyAttempted) }
         // Remember the attempt, not just success. In particular cannotComplete

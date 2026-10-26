@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72" fill="none">
+  <title>A — 冷瓷白 · 圆形渐隐光晕</title>
+  <desc>Porcelain-white agent pointer with a circular grey-blue halo fading smoothly to transparent. Canvas 72x72; hotspot 27,25.5; halo radius 33.75; peak halo opacity 40%.</desc>
+  <defs>
+    <path id="shape" d="M 29.6025 27.0375
+      L 42.9225 36.375
+      C 43.7775 36.975 43.5675 38.325 42.5325 38.5725
+      L 37.6575 39.7275
+      C 36.5775 39.9825 35.6175 40.605 34.95 41.49
+      L 32.6175 44.5875
+      C 31.95 45.4725 30.5475 45.12 30.39 44.0175
+      L 28.275 27.825
+      C 28.17 27.075 28.9875 26.595 29.6025 27.0375
+      Z "/>
+    <path id="halo-shape" d="M 69.75 36
+      C 69.75 54.63960975 54.63960975 69.75 36 69.75
+      C 17.36039025 69.75 2.25 54.63960975 2.25 36
+      C 2.25 17.36039025 17.36039025 2.25 36 2.25
+      C 54.63960975 2.25 69.75 17.36039025 69.75 36 Z"/>
+    <radialGradient id="halo" gradientUnits="userSpaceOnUse" cx="36" cy="36" r="33.75">
+      <stop offset="0" stop-color="#A5BBCB" stop-opacity="0.4000000"/>
+      <stop offset="0.0625" stop-color="#A5BBCB" stop-opacity="0.3931670"/>
+      <stop offset="0.125" stop-color="#A5BBCB" stop-opacity="0.3731670"/>
+      <stop offset="0.1875" stop-color="#A5BBCB" stop-opacity="0.3414652"/>
+      <stop offset="0.25" stop-color="#A5BBCB" stop-opacity="0.3003956"/>
+      <stop offset="0.3125" stop-color="#A5BBCB" stop-opacity="0.2529991"/>
+      <stop offset="0.375" stop-color="#A5BBCB" stop-opacity="0.2027972"/>
+      <stop offset="0.4375" stop-color="#A5BBCB" stop-opacity="0.1535004"/>
+      <stop offset="0.5" stop-color="#A5BBCB" stop-opacity="0.1086523"/>
+      <stop offset="0.5625" stop-color="#A5BBCB" stop-opacity="0.0712086"/>
+      <stop offset="0.625" stop-color="#A5BBCB" stop-opacity="0.0430522"/>
+      <stop offset="0.6875" stop-color="#A5BBCB" stop-opacity="0.0244419"/>
+      <stop offset="0.75" stop-color="#A5BBCB" stop-opacity="0.0133984"/>
+      <stop offset="0.8125" stop-color="#A5BBCB" stop-opacity="0.0062800"/>
+      <stop offset="0.875" stop-color="#A5BBCB" stop-opacity="0.0020599"/>
+      <stop offset="0.9375" stop-color="#A5BBCB" stop-opacity="0.0002841"/>
+      <stop offset="1" stop-color="#A5BBCB" stop-opacity="0.0000000"/>
+    </radialGradient>
+    <clipPath id="inside"><use href="#shape"/></clipPath>
+    <linearGradient id="body-tone" gradientUnits="userSpaceOnUse" x1="30" y1="27" x2="40.2" y2="45">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="0.45" stop-color="#F3F4F4" stop-opacity="1"/>
+      <stop offset="0.8" stop-color="#DDE3E6" stop-opacity="1"/>
+      <stop offset="1" stop-color="#BCCBD1" stop-opacity="1"/>
+    </linearGradient>
+    <radialGradient id="soft-light" gradientUnits="userSpaceOnUse" cx="30.15" cy="27.9" r="12.3">
+      <stop stop-color="#FFFFFF" stop-opacity="0.36"/>
+      <stop offset=".52" stop-color="#FFFFFF" stop-opacity="0.058"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="28.5" y1="27" x2="40.5" y2="44.25">
+      <stop stop-color="#FFFFFF" stop-opacity=".92"/>
+      <stop offset=".40" stop-color="#F3F8FF" stop-opacity=".60"/>
+      <stop offset=".64" stop-color="#CCD8E8" stop-opacity=".10"/>
+      <stop offset="1" stop-color="#E5EEF7" stop-opacity=".58"/>
+    </linearGradient>
+    <linearGradient id="glint" gradientUnits="userSpaceOnUse" x1="29.25" y1="28.05" x2="31.8" y2="38.7">
+      <stop stop-color="#FFFFFF" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-40%" y="-30%" width="180%" height="175%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0.675" stdDeviation="0.975" flood-color="#1D2C40" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+  <use href="#halo-shape" fill="url(#halo)"/>
+  <use id="body" href="#shape" fill="url(#body-tone)" filter="url(#shadow)"/>
+  <use href="#shape" fill="url(#soft-light)"/>
+  <use href="#shape" stroke="#40515D" stroke-opacity="0.85" stroke-width="1.35" stroke-linejoin="round"/>
+  <g clip-path="url(#inside)">
+    <use href="#shape" stroke="url(#rim)" stroke-width="0.57" stroke-linejoin="round"/>
+    <path d="M 29.25 28.2 L 30.09 34.53 C 30.345 36.315 30.705 37.485 31.32 38.64" stroke="url(#glint)" stroke-width="0.33" stroke-linecap="round"/>
+  </g>
+</svg>
