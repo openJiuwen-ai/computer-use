@@ -11,46 +11,82 @@ extension NativeElementControl {
         let enabled: Bool?
         let applicationMenuContext: Bool
         let foreground: Bool
+        var document: NativeDocumentContext? = nil
     }
 
     func nativeActionFacts(_ ref: String) throws -> ActionFacts {
-        guard let target = registry.target(ref) else { throw DriverError("element reference expired", code: .staleTarget) }
+        guard let target = registry.target(ref) else {
+            throw DriverError("element reference expired", code: .staleTarget)
+        }
         try BackgroundTarget(target.application).validate()
         try inspection.validateTargetIdentity(target)
         let role = inspection.attribute(target.element, kAXRoleAttribute) as? String
-        return ActionFacts(role: role, actions: try declaredActions(target.element),
+        var facts = ActionFacts(
+            role: role, actions: try declaredActions(target.element),
             enabled: (inspection.attribute(target.element, kAXEnabledAttribute) as? NSNumber)?.boolValue,
             applicationMenuContext: [kAXMenuBarRole, kAXMenuBarItemRole].contains(role ?? "")
-                || target.ancestors.contains { inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole },
+                || target.ancestors.contains {
+                    inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole
+                },
             foreground: BackgroundTarget(target.application).isForeground)
+        if let window = target.observedInteractionSurface,
+            inspection.attribute(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
+        {
+            facts.document = NativeDocumentContext(application: target.application, window: window)
+        }
+        return facts
     }
 
-    func executeNativeAction(_ ref: String, action: String, description: String?, onDispatch: @MainActor () throws -> Void) throws {
+    func executeNativeAction(
+        _ ref: String, action: String, description: String?, onDispatch: @MainActor () throws -> Void,
+        onReturned: @MainActor () -> Void = {}
+    ) throws {
         let target = try inputTarget(ref)
         let facts = try nativeActionFacts(ref)
         guard !facts.applicationMenuContext else {
-            throw DriverError("application menu actions require the menu-context preparation unit", code: .inputUnavailable)
+            throw DriverError(
+                "application menu actions require the menu-context preparation unit", code: .inputUnavailable)
         }
-        guard let actions = facts.actions,
-              actions.filter({ $0.name == action && $0.description == description }).count == 1 else {
+        guard NativeAction.matches(facts.actions, name: action, description: description) else {
             throw DriverError("the selected native action is no longer declared", code: .inputUnavailable)
         }
         let background = BackgroundTarget(target.application)
         if action == kAXRaiseAction, !BackgroundTarget.isExclusive, !background.isForeground {
             throw DriverError("raising a background window requires exclusive mode", code: .modeUnsupported)
         }
-        if !background.allowsMenuPopup, [kAXPressAction, kAXPickAction].contains(action), inspection.opensMenu(target.element) {
+        if !background.allowsMenuPopup, [kAXPressAction, kAXPickAction].contains(action),
+            inspection.opensMenu(target.element)
+        {
             throw DriverError("opening an application menu is unavailable in this desktop mode", code: .modeUnsupported)
         }
         try inspection.requireEnabled(target.element)
         try inspection.validateTargetIdentity(target)
         try background.validate(input: true)
         try RequestDiagnostics.checkCancellation()
-        try onDispatch() // Final window guard and barrier BEFORE the native call.
-        let status = AXMessaging.performAction(target.element, action as CFString)
+        let before =
+            [kAXCheckBoxRole, kAXRadioButtonRole].contains(facts.role ?? "") && action == kAXPressAction
+            ? NativeTogglePress.value(inspection.attribute(target.element, kAXValueAttribute)) : nil
+        try onDispatch()  // Final window guard and barrier BEFORE the native call.
+        var called = false
+        let status = AXMessaging.performAction(target.element, action as CFString, onCall: { called = true })
+        onReturned()
         guard status == .success else {
-            throw DriverError("native action returned AX error \(status.rawValue); effect unknown, not retried",
-                              code: .executionUnknown, effect: .possible)
+            if called, NativeTogglePress.mayConfirm(status),
+                NativeTogglePress.canObserve(action: action, role: facts.role, before: before), let role = facts.role,
+                let before
+            {
+                throw NativeTogglePress.Unconfirmed(role: role, before: before, status: status) { [inspection] in
+                    try inspection.validateTargetIdentity(target)
+                    try background.validate(input: true)
+                    // A control may disable itself after handling the press.
+                    // Readback needs its identity and role, not input readiness.
+                    guard inspection.attribute(target.element, kAXRoleAttribute) as? String == role else { return nil }
+                    return NativeTogglePress.value(inspection.attribute(target.element, kAXValueAttribute))
+                }
+            }
+            throw DriverError(
+                "native action returned AX error \(status.rawValue); effect unknown, not retried",
+                code: .executionUnknown, effect: .possible)
         }
     }
 }

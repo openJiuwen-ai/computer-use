@@ -2,8 +2,6 @@
 import PackageDescription
 
 let package = Package(
-    name: "ComputerUseDriver",
-    platforms: [.macOS(.v14)],
+    name: "ComputerUseDriver", platforms: [.macOS(.v14)],
     products: [.executable(name: "computer-use-driver", targets: ["ComputerUseDriver"])],
-    targets: [.executableTarget(name: "ComputerUseDriver", path: "Sources")]
-)
+    targets: [.executableTarget(name: "ComputerUseDriver", path: "Sources")])

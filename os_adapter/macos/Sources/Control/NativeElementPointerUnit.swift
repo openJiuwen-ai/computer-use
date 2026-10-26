@@ -3,7 +3,7 @@ import ApplicationServices
 
 /// Addressed pointer input on one retained native geometry object. A click
 /// uses its control; a scroll uses Python's selected scroll area and hit member.
-/// This unit neither finds an ancestor/member nor invokes a semantic AX action.
+/// This unit never chooses another target/member or invokes a semantic AX action.
 @MainActor struct NativeElementPointerUnit {
     let application: NSRunningApplication
     let window: AXUIElement
@@ -14,39 +14,231 @@ import ApplicationServices
     struct Geometry {
         let mapping: WindowGeometry.WindowMapping
         let frame: CGRect
+        // The window/known scroll-ancestor intersection, not a claim that all
+        // pixels are visible. AX hit evidence owns coverage at the chosen point.
         let visible: CGRect
-        var point: CGPoint { CGPoint(x: visible.midX, y: visible.midY) }
+        let candidate: NativeElementHitSelection.Candidate
+        var point: CGPoint { candidate.point }
 
         func same(as other: Geometry) -> Bool {
-            mapping.id == other.mapping.id && mapping.pid == other.mapping.pid
-                && mapping.frame == other.mapping.frame && frame == other.frame
+            mapping.id == other.mapping.id && mapping.pid == other.mapping.pid && mapping.frame == other.mapping.frame
+                && frame == other.frame && point == other.point
         }
     }
 
-    private func sample() throws -> (geometry: Geometry, hit: AXUIElement) {
+    private struct Sample {
+        let geometry: Geometry
+        let selection: NativeElementHitSelection.Selection<AXUIElement>
+        var hit: AXUIElement? { selection.observation.hit }
+        var accepted: Bool { selection.basis != .rejected }
+        var covered: Bool { selection.observation.evidence.relation == .otherWindow }
+    }
+
+    private func activationPoint() -> CGPoint? {
+        guard let raw = AXAccess.read(member ?? element, "AXActivationPoint").value,
+            CFGetTypeID(raw) == AXValueGetTypeID()
+        else { return nil }
+        var point = CGPoint.zero
+        // Treat the client-provided AXValue as a point hint, without guessing
+        // an AppKit coordinate transform. An exact AX hit must verify the hint.
+        return AXValueGetValue(unsafeDowncast(raw, to: AXValue.self), .cgPoint, &point) ? point : nil
+    }
+
+    private func clippedBounds(_ frame: CGRect, windowFrame: CGRect, until deadline: TimeInterval) throws -> CGRect {
+        var bounds = frame.intersection(windowFrame), current = AXAccess.element(element, kAXParentAttribute)
+        var seen = [AXUIElement]()
+        while let node = current, seen.count < 12, !CFEqual(node, window), !seen.contains(where: { CFEqual($0, node) }),
+            ProcessInfo.processInfo.systemUptime < deadline
+        {
+            try RequestDiagnostics.checkCancellation()
+            seen.append(node)
+            if AXAccess.read(node, kAXRoleAttribute).value as? String == kAXScrollAreaRole,
+                let clip = WindowGeometry.hint(node)?.frame
+            {
+                bounds = bounds.intersection(clip)
+            }
+            current = AXAccess.element(node, kAXParentAttribute)
+        }
+        // Incomplete ancestry is not a new input prerequisite. Only known
+        // scrolling boundaries clip; arbitrary container frames need not clip.
+        return bounds
+    }
+
+    private func hasCurrentParentPathToWindow(until deadline: TimeInterval) throws -> Bool {
+        try NativeElementHitSelection.reachesWindow(
+            member ?? element, window: window, same: { CFEqual($0, $1) },
+            parent: { AXAccess.element($0, kAXParentAttribute) },
+            isSurface: { node in
+                guard let role = AXAccess.read(node, kAXRoleAttribute).value as? String else { return true }
+                return [kAXWindowRole, kAXSheetRole, "AXPopover"].contains(role)
+            },
+            canContinue: {
+                try RequestDiagnostics.checkCancellation()
+                return ProcessInfo.processInfo.systemUptime < deadline
+            })
+    }
+
+    private func sample(frozen: Geometry? = nil) throws -> Sample {
         try RequestDiagnostics.checkCancellation()
         if AXAccess.read(element, kAXEnabledAttribute).value as? Bool == false {
             throw DriverError("the selected pointer element is disabled", code: .inputUnavailable)
         }
         let mapping = try NativeWindowUnit(application: application, window: window).mapping()
-        guard let frame = WindowGeometry.hint(element)?.frame,
-              frame.minX.isFinite, frame.minY.isFinite, frame.width.isFinite, frame.height.isFinite,
-              frame.width > 0, frame.height > 0 else {
-            throw DriverError("the selected element has no usable pointer geometry", code: .inputUnavailable)
-        }
-        let visible = frame.intersection(mapping.frame)
+        guard let frame = WindowGeometry.hint(element)?.frame, frame.minX.isFinite, frame.minY.isFinite,
+            frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0
+        else { throw DriverError("the selected element has no usable pointer geometry", code: .inputUnavailable) }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.15
+        // Scroll's element is the selected wheel region, not the requested
+        // click control. Preserve its center and viewport for the public hit
+        // refinement contract; click-specific search must not alter pages.
+        let expand = kind == .click
+        let visible =
+            expand
+            ? try clippedBounds(frame, windowFrame: mapping.frame, until: deadline) : frame.intersection(mapping.frame)
         guard !visible.isNull, visible.width > 0, visible.height > 0 else {
-            throw DriverError("the selected element is outside its window", code: .inputUnavailable)
+            throw DriverError(
+                "the selected element is outside its window or known scrolling bounds", code: .inputUnavailable)
         }
-        let value = Geometry(mapping: mapping, frame: frame, visible: visible)
-        var hit: AXUIElement?
-        let status = AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(application.processIdentifier),
-            Float(value.point.x), Float(value.point.y), &hit)
-        guard status == .success, let hit else {
-            throw DriverError("the element's native pointer hit cannot be read", code: .inputUnavailable)
+        let candidates: [NativeElementHitSelection.Candidate]
+        if let frozen {
+            guard visible.contains(frozen.point) else {
+                throw DriverError("element pointer geometry changed during the sequence", code: .inputUnavailable)
+            }
+            candidates = [frozen.candidate]
+        } else {
+            candidates = NativeElementHitSelection.candidates(
+                bounds: visible, activationPoint: expand ? activationPoint() : nil, expand: expand)
+        }
+        let pointer = NativePointerUnit(application: application, window: mapping, nativeWindow: window)
+        let root = AXUIElementCreateApplication(application.processIdentifier)
+        var boundedRoot: AXUIElement?
+        var observations = [[String: Any]]()
+        let selected = try NativeElementHitSelection.select(
+            candidates, exclusive: BackgroundTarget.isExclusive,
+            canContinue: { candidate in
+                try RequestDiagnostics.checkCancellation()
+                return frozen != nil || candidate.source == .center || ProcessInfo.processInfo.systemUptime < deadline
+            },
+            query: { candidate in
+                let queryRoot: AXUIElement
+                if let timeout = candidate.queryTimeout {
+                    if let boundedRoot {
+                        queryRoot = boundedRoot
+                    } else {
+                        let additional = AXUIElementCreateApplication(application.processIdentifier)
+                        AXUIElementSetMessagingTimeout(additional, timeout)
+                        boundedRoot = additional
+                        queryRoot = additional
+                    }
+                } else {
+                    queryRoot = root
+                }
+                // Apple scopes messaging timeout to this exact AX object, not
+                // equal objects. A separate root preserves the original center
+                // route without relying on successful timeout restoration.
+                var hit: AXUIElement?
+                let status = AXUIElementCopyElementAtPosition(
+                    queryRoot, Float(candidate.point.x), Float(candidate.point.y), &hit)
+                try RequestDiagnostics.checkCancellation()
+                var relation: NativeElementHitEvidence.Relation?
+                if status == .success, let hit {
+                    if CFEqual(hit, member ?? element) {
+                        relation = .target
+                    } else if let owner = WindowGeometry.owningWindow(
+                        hit, pid: application.processIdentifier, in: window)
+                    {
+                        relation = CFEqual(owner, window) ? .otherControl : .otherWindow
+                    } else {
+                        relation = .unknownOwner
+                    }
+                } else {
+                    relation = nil
+                }
+                var systemStatus: AXError?, systemWindow = false, coarseForeground = false
+                var systemRelation: String?, systemHitPID: pid_t?
+                // A provider can return its original window without descending
+                // into an exposed child. This is not a known sibling hit. Try
+                // the independent system-wide query only for that exact case;
+                // normal exact hits retain their original query and contract.
+                if expand, candidate.source == .center, status == .success, let current = hit, CFEqual(current, window),
+                    try hasCurrentParentPathToWindow(until: deadline), pointer.foregroundWindow(at: candidate.point)
+                {
+                    let system = AXUIElementCreateSystemWide()
+                    // Setting timeout on a system-wide object changes this
+                    // process's GLOBAL AX timeout. Keep the existing policy;
+                    // the original request deadline is checked around the read.
+                    try RequestDiagnostics.checkCancellation()
+                    var systemHit: AXUIElement?
+                    let queried = AXUIElementCopyElementAtPosition(
+                        system, Float(candidate.point.x), Float(candidate.point.y), &systemHit)
+                    systemStatus = queried
+                    systemRelation = NativeElementHitEvidence.result(queried, relation: nil).relation.rawValue
+                    try RequestDiagnostics.checkCancellation()
+                    if queried == .success, let systemHit {
+                        if CFEqual(systemHit, member ?? element) {
+                            systemRelation = "target"
+                            hit = systemHit
+                            relation = .target
+                        } else if CFEqual(systemHit, window) {
+                            systemRelation = "originalWindow"
+                            systemWindow = true
+                            // The geometry attempt still needs the physical
+                            // original foreground window after the AX query.
+                            coarseForeground = pointer.foregroundWindow(at: candidate.point)
+                            relation = .coarseAncestorWindow
+                        } else {
+                            systemRelation = "differentElement"
+                            if WindowGeometry.inputDiagnosticsEnabled {
+                                var pid: pid_t = 0
+                                if AXUIElementGetPid(systemHit, &pid) == .success {
+                                    systemHitPID = pid
+                                    if pid != application.processIdentifier { systemRelation = "otherApplication" }
+                                }
+                            }
+                        }
+                    }
+                    // All other system results preserve the original rejected
+                    // mismatch. They cannot enter background geometry fallback.
+                }
+                let evidence = NativeElementHitEvidence.result(status, relation: relation)
+                if WindowGeometry.inputDiagnosticsEnabled {
+                    var observation: [String: Any] = [
+                        "source": candidate.source.rawValue, "point": [candidate.point.x, candidate.point.y],
+                        "axStatus": status.rawValue, "relation": evidence.relation.rawValue
+                    ]
+                    if let systemStatus {
+                        observation["systemWideStatus"] = systemStatus.rawValue
+                        observation["systemWideOriginalWindow"] = systemWindow
+                        observation["systemWideRelation"] = systemRelation
+                        if let systemHitPID { observation["systemWideHitPID"] = systemHitPID }
+                    }
+                    observations.append(observation)
+                }
+                // The coarse ancestor case above and existing background
+                // geometry fallback use physical-window evidence. Exact hits
+                // and ordinary rejected points add no such query here; every
+                // delivery route still checks its final window later.
+                let foreground =
+                    evidence.relation == .coarseAncestorWindow
+                    ? coarseForeground
+                    : !BackgroundTarget.isExclusive && candidate.permitsGeometryFallback
+                        && evidence.permitsBackgroundGeometry ? pointer.foregroundWindow(at: candidate.point) : true
+                return .init(evidence: evidence, hit: status == .success ? hit : nil, foreground: foreground)
+            })
+        guard let selected else {
+            throw DriverError("the selected element has no usable pointer point", code: .inputUnavailable)
+        }
+        if WindowGeometry.inputDiagnosticsEnabled {
+            diagnose([
+                "kind": "element_pointer_hit", "window": mapping.id, "frozen": frozen != nil,
+                "basis": selected.basis.rawValue,
+                "selectedPoint": [selected.candidate.point.x, selected.candidate.point.y], "candidates": observations
+            ])
         }
         try RequestDiagnostics.checkCancellation()
-        return (value, hit)
+        return Sample(
+            geometry: Geometry(mapping: mapping, frame: frame, visible: visible, candidate: selected.candidate),
+            selection: selected)
     }
 
     func geometry() throws -> Geometry {
@@ -54,36 +246,49 @@ import ApplicationServices
         // A distinct member is selected by the Python semantic resolver and
         // guarded by its native fact dependencies. This unit never searches
         // children or accepts a hit merely because it lies in the rectangle.
-        guard CFEqual(sampled.hit, member ?? element) else {
-            throw DriverError("the element's center is not confirmed as this native hit target", code: .inputUnavailable)
+        guard sampled.accepted else {
+            throw DriverError(
+                "no sampled pointer point belongs to this native target or its available window route",
+                code: .inputUnavailable)
         }
         return sampled.geometry
     }
 
-    private func coveredByAnotherWindow(_ hit: AXUIElement) -> Bool {
-        // AXUIElementCopyElementAtPosition takes an application, not a window;
-        // Apple specifies that it resolves the application's topmost window.
-        // A confirmed different owner is recoverable window occlusion. A
-        // different/unknown hit within this window still needs member evidence
-        // and must not be treated as permission to click its rectangle.
-        guard let owner = WindowGeometry.owningWindow(hit, pid: application.processIdentifier, in: window) else { return false }
-        return !CFEqual(owner, window)
+    /// Query projection keeps a mismatching native hit visible so the public
+    /// resolver can prove an existing control-part relationship. It grants no
+    /// permission to dispatch to that hit or to the owner's rectangle.
+    func observedGeometry(allowWindowPreparation: Bool = false) throws -> (geometry: Geometry?, hit: AXUIElement?) {
+        let value = try sample()
+        let preparable = allowWindowPreparation && value.covered
+        return (value.accepted || preparable ? value.geometry : nil, value.hit)
     }
 
-    func conditions() throws -> (readiness: NativeReadiness, foreground: Bool, geometry: Bool, route: Bool, hit: AXUIElement?) {
-        let sampled: (geometry: Geometry, hit: AXUIElement)
-        do { sampled = try sample() }
-        catch let error as DriverError where error.code == .inputUnavailable || error.code == .modeUnsupported {
-            return (NativeReadiness([("geometry", "unknown")]), false, false, false, nil)
+    /// The original window may first need to be uncovered. This query never
+    /// accepts another control in that window, and dispatch still uses geometry().
+    func preparationGeometry() throws -> Geometry {
+        guard let value = try observedGeometry(allowWindowPreparation: true).geometry else {
+            throw DriverError(
+                "no sampled pointer point belongs to this native target or its available window route",
+                code: .inputUnavailable)
         }
-        guard CFEqual(sampled.hit, member ?? element) else {
-            if coveredByAnotherWindow(sampled.hit) {
-                return (NativeReadiness([("receiver", "no")]), false, true, false, sampled.hit)
-            }
+        return value
+    }
+
+    func conditions() throws -> (
+        readiness: NativeReadiness, foreground: Bool, geometry: Bool, route: Bool, hit: AXUIElement?
+    ) {
+        let sampled: Sample
+        do { sampled = try sample() } catch let error as DriverError
+            where error.code == .inputUnavailable || error.code == .modeUnsupported
+        { return (NativeReadiness([("geometry", "unknown")]), false, false, false, nil) }
+        guard sampled.accepted else {
+            if sampled.covered { return (NativeReadiness([("receiver", "no")]), false, true, false, sampled.hit) }
             return (NativeReadiness([("geometry", "unknown")]), false, false, false, sampled.hit)
         }
-        let pointer = NativePointerUnit(application: application, window: sampled.geometry.mapping)
-        let foreground = pointer.foregroundWindow(at: sampled.geometry.point), route = pointer.ready(at: sampled.geometry.point)
+        let pointer = NativePointerUnit(
+            application: application, window: sampled.geometry.mapping, nativeWindow: window)
+        let foreground = pointer.foregroundWindow(at: sampled.geometry.point),
+            route = pointer.ready(at: sampled.geometry.point, kind: kind)
         var required = [("receiver", route ? "yes" : "no")]
         if BackgroundTarget.isExclusive { required.append(("foreground", foreground ? "yes" : "no")) }
         return (NativeReadiness(required), foreground, true, route, sampled.hit)
@@ -91,38 +296,41 @@ import ApplicationServices
 
     private func validate(_ selected: Geometry, check: () throws -> Void) throws {
         try check()
-        guard try geometry().same(as: selected) else {
+        // Once a gesture has selected a point, validate that same point. Never
+        // move a second down to a newly discovered candidate after input began.
+        let sampled = try sample(frozen: selected)
+        guard sampled.accepted, sampled.geometry.same(as: selected) else {
             throw DriverError("element pointer geometry changed during the sequence", code: .inputUnavailable)
         }
     }
 
-    func prepare(foreground: Bool, check: @escaping @MainActor () throws -> Void,
-                 onPreparation: @escaping (String) -> Void) async throws {
+    func prepare(
+        foreground: Bool, check: @escaping @MainActor () throws -> Void,
+        onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
+    ) async throws {
         try check()
         let sampled = try sample()
         let selected = sampled.geometry
-        if !CFEqual(sampled.hit, member ?? element) {
-            guard coveredByAnotherWindow(sampled.hit) else {
-                throw DriverError("the element's center is not confirmed as this native hit target", code: .inputUnavailable)
+        if !sampled.accepted {
+            guard sampled.covered else {
+                throw DriverError(
+                    "no sampled pointer point belongs to this native target or its available window route",
+                    code: .inputUnavailable)
             }
             guard foreground else {
                 // No background primitive in this unit changes window order.
                 // Record unavailability before Python may choose authorized
                 // foreground preparation; no requested input has been sent.
-                throw NativePreparationUnavailable(description:
-                    "another window covers the element's native hit target; no pointer event sent")
+                throw NativePreparationUnavailable(
+                    description: "another window covers the element's native hit target; no pointer event sent")
             }
-            // Window-directed delivery alone cannot confirm this Element's
-            // hit through an overlapping document. Prepare the original window
-            // under the operation's foreground permission, then sample again.
-            let assist = ForegroundAssist()
-            try await assist.prepare(BackgroundTarget(application), window: selected.mapping.id,
-                pointerAt: selected.point, onAction: { onPreparation("foreground window activation") })
-        } else {
-            let pointer = NativePointerUnit(application: application, window: selected.mapping)
-            try await pointer.prepare(foreground: foreground, atNative: selected.point,
-                check: check, onPreparation: onPreparation)
         }
+        // Occlusion and ordinary preparation use the same exact-window
+        // contract, including explicit key preparation for standard documents.
+        let pointer = NativePointerUnit(application: application, window: selected.mapping, nativeWindow: window)
+        try await pointer.prepare(
+            foreground: foreground, atNative: selected.point, kind: kind, check: check, onPreparation: onPreparation,
+            onCleanupUnknown: onCleanupUnknown)
         // Preparation may move the same element or window. No requested mouse
         // event has been sent; the following inspect/delivery samples its new
         // geometry. Only an actual gesture freezes its own native coordinates.
@@ -130,16 +338,19 @@ import ApplicationServices
         _ = try geometry()
     }
 
-    func deliver(_ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void,
-                 onDispatch: () throws -> Void, onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void) async throws {
+    func deliver(
+        _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
+        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
+    ) async throws {
         guard request.kind == kind, request.start == nil, request.end == nil else {
             throw DriverError("element pointer contract requires its original addressed intent", code: .invalidRequest)
         }
         try check()
         let selected = try geometry()
-        let pointer = NativePointerUnit(application: application, window: selected.mapping)
-        try await pointer.deliver(request, from: selected.point, to: nil, viewport: selected.visible.size,
-            check: { try validate(selected, check: check) }, onDispatch: onDispatch,
-            onPosted: onPosted, onCleanupUnknown: onCleanupUnknown)
+        let pointer = NativePointerUnit(application: application, window: selected.mapping, nativeWindow: window)
+        try await pointer.deliver(
+            request, from: selected.point, to: nil, viewport: selected.visible.size,
+            check: { try validate(selected, check: check) }, onDispatch: onDispatch, onPosted: onPosted,
+            onCleanupUnknown: onCleanupUnknown, delivery: delivery)
     }
 }

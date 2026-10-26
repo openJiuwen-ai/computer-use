@@ -7,10 +7,17 @@ import Foundation
     private var deadline: Task<Void, Never>?
     private(set) var stopping = false
 
-    func start(timeoutMs: Int? = nil, onTimeout: (@MainActor () -> Void)? = nil, _ operation: @escaping @MainActor () async -> Void) -> Bool {
+    func start(
+        timeoutMs: Int? = nil, onTimeout: (@MainActor () -> Void)? = nil,
+        _ operation: @escaping @MainActor () async -> Void
+    ) -> Bool {
         guard !stopping, active == nil else { return false }
         active = Task { @MainActor in
-            defer { self.deadline?.cancel(); self.deadline = nil; self.active = nil }
+            defer {
+                self.deadline?.cancel()
+                self.deadline = nil
+                self.active = nil
+            }
             guard !self.stopping else { return }
             await operation()
         }

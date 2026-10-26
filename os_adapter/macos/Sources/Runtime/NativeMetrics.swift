@@ -8,6 +8,7 @@ import Foundation
         case targetValidation, documentValidation, recipientValidation, focusValidation, pointerValidation
         case preparedInputValidation, pointerFocusValidation, windowMembership, windowValidation, keyboardIntentCapture
         case observationWait, accessibilityRead, windowCapture, overviewCapture, capabilityEvaluation
+        case clickPlan, clickPreparation, clickTargetValidation, clickDispatch, clickRelease
     }
     enum Counter: String {
         case alreadyForeground, cachedWindowPreparation, nativeWindowSelection, activationNotification
@@ -30,12 +31,8 @@ import Foundation
         self.clock = clock
         self.started = clock()
     }
-    func start(_ phase: Phase) -> Interval? {
-        closed ? nil : Interval(owner: self, phase: phase, started: clock())
-    }
-    func count(_ counter: Counter) {
-        if !closed { counters[counter, default: 0] += 1 }
-    }
+    func start(_ phase: Phase) -> Interval? { closed ? nil : Interval(owner: self, phase: phase, started: clock()) }
+    func count(_ counter: Counter) { if !closed { counters[counter, default: 0] += 1 } }
     private func record(_ phase: Phase, since start: TimeInterval) {
         guard !closed else { return }
         var value = phases[phase] ?? (0, 0)
@@ -46,10 +43,13 @@ import Foundation
     func finish(method: String, status: String) -> [String: Any]? {
         guard !closed else { return nil }
         closed = true
-        return ["kind": "native_metrics", "version": 1, "method": method, "status": status,
-                "durationMs": max(0, clock() - started) * 1000,
-                "phases": Dictionary(uniqueKeysWithValues: phases.map { ($0.key.rawValue,
-                    ["count": $0.value.count, "durationMs": $0.value.durationMs] as [String: Any]) }),
-                "counters": Dictionary(uniqueKeysWithValues: counters.map { ($0.key.rawValue, $0.value) })]
+        return [
+            "kind": "native_metrics", "version": 1, "method": method, "status": status,
+            "durationMs": max(0, clock() - started) * 1000,
+            "phases": Dictionary(
+                uniqueKeysWithValues: phases.map {
+                    ($0.key.rawValue, ["count": $0.value.count, "durationMs": $0.value.durationMs] as [String: Any])
+                }), "counters": Dictionary(uniqueKeysWithValues: counters.map { ($0.key.rawValue, $0.value) })
+        ]
     }
 }

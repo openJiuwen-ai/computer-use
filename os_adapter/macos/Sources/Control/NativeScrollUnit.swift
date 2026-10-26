@@ -37,11 +37,12 @@ import ApplicationServices
             guard let parent = try element(current, kAXParentAttribute) else { return }
             if CFEqual(parent, expected) { return }
             let role = try read(parent, kAXRoleAttribute) as? String
-            guard !seen.contains(where: { CFEqual($0, parent) }),
-                  [kAXGroupRole, kAXUnknownRole].contains(role ?? "") else {
+            guard !seen.contains(where: { CFEqual($0, parent) }), [kAXGroupRole, kAXUnknownRole].contains(role ?? "")
+            else {
                 throw DriverError("the selected scrolling relationship has conflicting ownership", code: .staleTarget)
             }
-            seen.append(parent); current = parent
+            seen.append(parent)
+            current = parent
         }
         throw DriverError("scrolling parent validation exceeded its depth budget", code: .inputUnavailable)
     }
@@ -54,19 +55,23 @@ import ApplicationServices
             guard !seen.contains(where: { CFEqual($0, current) }) else { break }
             seen.append(current)
             let role = try read(current, kAXRoleAttribute) as? String
-            guard role != nil else { throw DriverError("scrolling ancestor role is unavailable", code: .inputUnavailable) }
+            guard role != nil else {
+                throw DriverError("scrolling ancestor role is unavailable", code: .inputUnavailable)
+            }
             if [kAXScrollAreaRole, kAXScrollBarRole].contains(role ?? "") {
-                found = CFEqual(current, region); break
+                found = CFEqual(current, region)
+                break
             }
             if [kAXWindowRole, kAXSheetRole, kAXApplicationRole].contains(role ?? "") { break }
             guard let parent = try element(current, kAXParentAttribute) else { break }
             current = parent
         }
-        guard found else { throw DriverError("the nearest scrolling region changed or cannot be confirmed", code: .inputUnavailable) }
-        guard try read(bar, kAXRoleAttribute) as? String == kAXScrollBarRole,
-              try read(button, kAXRoleAttribute) as? String == kAXButtonRole else {
-            throw DriverError("the selected native scroll control changed", code: .staleTarget)
+        guard found else {
+            throw DriverError("the nearest scrolling region changed or cannot be confirmed", code: .inputUnavailable)
         }
+        guard try read(bar, kAXRoleAttribute) as? String == kAXScrollBarRole,
+            try read(button, kAXRoleAttribute) as? String == kAXButtonRole
+        else { throw DriverError("the selected native scroll control changed", code: .staleTarget) }
         let orientation = try read(bar, kAXOrientationAttribute) as? String
         let subrole = try read(button, kAXSubroleAttribute) as? String
         guard ["AXIncrementPage", "AXDecrementPage"].contains(subrole ?? "") else {
@@ -76,16 +81,25 @@ import ApplicationServices
         if let direction {
             let spec = NativeScrollAction.pageButtonSpec(direction: direction, pages: 1)!
             if CFEqual(region, bar), orientation != spec.orientation {
-                throw DriverError("the addressed scroll bar does not confirm the requested axis", code: .inputUnavailable)
+                throw DriverError(
+                    "the addressed scroll bar does not confirm the requested axis", code: .inputUnavailable)
             }
-            try NativeScrollAction.validateScrollBar(role: kAXScrollBarRole, orientation: orientation, enabled: nil, spec: spec)
-            guard subrole == spec.subrole else { throw DriverError("page action does not match the requested direction", code: .invalidRequest) }
+            try NativeScrollAction.validateScrollBar(
+                role: kAXScrollBarRole, orientation: orientation, enabled: nil, spec: spec)
+            guard subrole == spec.subrole else {
+                throw DriverError("page action does not match the requested direction", code: .invalidRequest)
+            }
             relationships = [spec.scrollBar]
-        } else { relationships = ["AXVerticalScrollBar", "AXHorizontalScrollBar"] }
+        } else {
+            relationships = ["AXVerticalScrollBar", "AXHorizontalScrollBar"]
+        }
         if !CFEqual(region, bar) {
             var linked = false
             for key in relationships {
-                if try element(region, key).map({ CFEqual($0, bar) }) == true { linked = true; break }
+                if try element(region, key).map({ CFEqual($0, bar) }) == true {
+                    linked = true
+                    break
+                }
             }
             guard linked else { throw DriverError("the selected scroll bar left its region", code: .inputUnavailable) }
             try validateParent(bar, expected: region)
@@ -93,14 +107,17 @@ import ApplicationServices
         try validateParent(button, expected: bar)
         var count: CFIndex = 0
         guard AXUIElementGetAttributeValueCount(bar, kAXChildrenAttribute as CFString, &count) == .success,
-              (1...256).contains(count) else {
+            (1...256).contains(count)
+        else {
             throw DriverError("scroll-bar children cannot be checked within the native budget", code: .inputUnavailable)
         }
         var raw: CFArray?
         guard AXUIElementCopyAttributeValues(bar, kAXChildrenAttribute as CFString, 0, count, &raw) == .success,
-              let children = raw as? [AXUIElement], children.count == count,
-              children.contains(where: { CFEqual($0, button) }) else {
-            throw DriverError("the selected page button is no longer in the selected scroll bar", code: .inputUnavailable)
+            let children = raw as? [AXUIElement], children.count == count,
+            children.contains(where: { CFEqual($0, button) })
+        else {
+            throw DriverError(
+                "the selected page button is no longer in the selected scroll bar", code: .inputUnavailable)
         }
         for control in [requested, region, bar, button] {
             if try read(control, kAXEnabledAttribute) as? Bool == false {
@@ -109,13 +126,13 @@ import ApplicationServices
         }
         var actions: CFArray?
         guard AXUIElementCopyActionNames(button, &actions) == .success,
-              (actions as? [String])?.filter({ $0 == kAXPressAction }).count == 1 else {
-            throw DriverError("the page button no longer declares its press action", code: .inputUnavailable)
-        }
+            (actions as? [String])?.filter({ $0 == kAXPressAction }).count == 1
+        else { throw DriverError("the page button no longer declares its press action", code: .inputUnavailable) }
     }
 
-    func perform(_ request: NativeScrollIntent, check: () throws -> Void,
-                 onDispatch: () throws -> Void, onAccepted: () -> Void) async throws {
+    func perform(
+        _ request: NativeScrollIntent, check: () throws -> Void, onDispatch: () throws -> Void, onAccepted: () -> Void
+    ) async throws {
         for _ in 0..<request.pages {
             await Task.yield()
             try check()
@@ -123,8 +140,9 @@ import ApplicationServices
             try onDispatch()
             let status = AXMessaging.performAction(button, kAXPressAction as CFString)
             guard status == .success else {
-                throw DriverError("native page action returned AX error \(status.rawValue); effect unknown, not retried",
-                                  code: .executionUnknown, effect: .possible)
+                throw DriverError(
+                    "native page action returned AX error \(status.rawValue); effect unknown, not retried",
+                    code: .executionUnknown, effect: .possible)
             }
             onAccepted()
         }

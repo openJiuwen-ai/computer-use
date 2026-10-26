@@ -1,0 +1,16 @@
+"""Choose the negotiated click branch without changing other write intents."""
+
+from computer_use.interaction.write.routes.selection.model import CandidateSet
+from computer_use.pipeline import Contract, Pass
+
+
+def execute(value: CandidateSet, control: object) -> str:
+    """The native operation declares v1 candidates only after explicit negotiation."""
+    return (
+        "click"
+        if value.request.intent.kind == "click" and any(p.click is not None for p in value.request.facts.primitives)
+        else "legacy"
+    )
+
+
+stage = Pass.define(name="select_click_contract", function=execute, contract=Contract(CandidateSet, str))

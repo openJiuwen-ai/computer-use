@@ -1,0 +1,1 @@
+"""Terminal document-formatting stages."""

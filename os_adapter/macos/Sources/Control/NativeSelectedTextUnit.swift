@@ -15,14 +15,21 @@ import ApplicationServices
 
     func contract(replace: Bool) -> Contract? {
         guard let role = AXAccess.read(element, kAXRoleAttribute).value as? String, !role.isEmpty,
-              AXAccess.read(element, "AXEditable").value as? Bool != false,
-              AXAccess.writable(element, kAXSelectedTextAttribute).value == true,
-              !replace || AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true else { return nil }
+            AXAccess.read(element, "AXEditable").value as? Bool != false,
+            AXAccess.writable(element, kAXSelectedTextAttribute).value == true,
+            !replace || AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true
+        else { return nil }
+        // The keyboard recipe owns selection on marker-backed rich editors.
+        // Offering a ready numeric SelectedText setter would bypass that plan
+        // before its Command-key window route has been prepared.
+        if replace, NativeReplacementUnit(element: element).contract() == .selectAll { return nil }
         return Contract(role: role, replace: replace)
     }
 
     func readiness(_ expected: Contract) throws -> NativeReadiness {
-        let receiver = try NativeReceiverSnapshot.read(application: application, window: window, receiverRelation: receiverRelation).receiver(element)
+        let receiver = try NativeReceiverSnapshot.read(
+            application: application, window: window, receiverRelation: receiverRelation
+        ).receiver(element)
         // Insertion uses the editor's current selection; it does not need the
         // whole value or a readable extent. Full replacement does.
         if !expected.replace { return NativeReadiness([("receiver", receiver)]) }
@@ -34,31 +41,35 @@ import ApplicationServices
     private func validate(_ expected: Contract, check: @MainActor () throws -> Void) throws {
         try check()
         guard contract(replace: expected.replace) == expected,
-              AXAccess.read(element, kAXEnabledAttribute).value as? Bool != false else {
-            throw DriverError("the selected native text-edit contract changed", code: .inputUnavailable)
-        }
+            AXAccess.read(element, kAXEnabledAttribute).value as? Bool != false
+        else { throw DriverError("the selected native text-edit contract changed", code: .inputUnavailable) }
         try BackgroundTarget(application).validate(input: true)
         try RequestDiagnostics.checkCancellation()
     }
 
-    func prepare(_ expected: Contract, foreground: Bool, check: @escaping @MainActor () throws -> Void,
-                 onPreparation: @escaping @MainActor (String) -> Void) async throws {
-        let receiver = NativeReceiverPreparation(application: application, window: window, element: element, receiverRelation: receiverRelation)
-        try await receiver.prepare(foreground: foreground,
-            check: { try validate(expected, check: check) }, ready: { try readiness(expected).ready },
-            onPreparation: onPreparation)
+    func prepare(
+        _ expected: Contract, foreground: Bool, check: @escaping @MainActor () throws -> Void,
+        onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void = {}
+    ) async throws {
+        let receiver = NativeReceiverPreparation(
+            application: application, window: window, element: element, receiverRelation: receiverRelation)
+        try await receiver.prepare(
+            foreground: foreground, check: { try validate(expected, check: check) },
+            ready: { try readiness(expected).ready }, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
     }
 
     /// Selection mutation and content mutation share the dispatch barrier. An
     /// uncertain setter result is not permission to send the text via keys.
-    func deliver(_ expected: Contract, text: String, check: @escaping @MainActor () throws -> Void,
-                 onDispatch: @escaping @MainActor () throws -> Void,
-                 onPosted: @escaping @MainActor () -> Void) async throws -> Bool {
+    func deliver(
+        _ expected: Contract, text: String, check: @escaping @MainActor () throws -> Void,
+        onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void
+    ) async throws -> Bool {
         try validateText(text)
         func ready() throws {
             try validate(expected, check: check)
             guard try readiness(expected).ready else {
-                throw DriverError("native editor receiver or selection changed; no further text sent", code: .inputUnavailable)
+                throw DriverError(
+                    "native editor receiver or selection changed; no further text sent", code: .inputUnavailable)
             }
         }
         try ready()
@@ -81,15 +92,17 @@ import ApplicationServices
         try ready()
         if expected.replace {
             guard NativeReplacementUnit(element: element).snapshot()?.full == true else {
-                throw DriverError("the editor does not have a confirmed full-text selection; no replacement text sent",
-                                  code: .inputUnavailable)
+                throw DriverError(
+                    "the editor does not have a confirmed full-text selection; no replacement text sent",
+                    code: .inputUnavailable)
             }
         }
         try onDispatch()
         let status = AXMessaging.setAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString)
         guard status == .success else {
-            throw DriverError("native selected-text edit returned AX error \(status.rawValue); effect unknown, not retried",
-                              code: .executionUnknown, effect: .possible)
+            throw DriverError(
+                "native selected-text edit returned AX error \(status.rawValue); effect unknown, not retried",
+                code: .executionUnknown, effect: .possible)
         }
         onPosted()
         return false

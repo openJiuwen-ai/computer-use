@@ -1,0 +1,98 @@
+"""Translate one confirmed UI-image gesture to one retained native capture."""
+
+from __future__ import annotations
+
+import hashlib
+from typing import TYPE_CHECKING
+
+from computer_use.diagnostics import localFailure
+from computer_use.interaction.query.instances.scope import allowed, refresh, validate_session
+from computer_use.native.contracts import Intent
+from computer_use.session.interface_images import frame, signature
+
+if TYPE_CHECKING:
+    from computer_use.interaction.controller import SessionController
+    from computer_use.interaction.records import UIHandle
+    from computer_use.protocol.records import Record
+    from computer_use.session.interface_images import InterfaceImage
+    from computer_use.types import ActionResult, Point
+
+
+class InterfacePointerPipeline:
+    """Execute a gesture in an App or Window screenshot's coordinate space.
+
+    Check the delivered image and current window membership, then map the gesture
+    to its captured native member window. Revalidate composite-image layout
+    before dispatch, then return the mapped window's action result.
+
+    Attributes:
+        controller: Supplies current UI membership, captured windows, and action execution.
+    """
+
+    def __init__(self, controller: SessionController) -> None:
+        self.controller = controller
+
+    async def run(self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record) -> ActionResult:
+        """Validate the delivered image mapping and execute the gesture on its native window.
+
+        Args:
+            ui: App or Window whose current image defines the coordinate space.
+            intent: Pointer operation, such as click or drag.
+            points: Gesture points in delivered-image pixels, from the top-left origin.
+            options: Mouse button, click count, and other validated gesture options.
+
+        Returns:
+            The action receipt for the mapped member window.
+        """
+        validate_session(self.controller, ui)
+        image = ui._image
+        if image is None or image.expired or hashlib.sha256(image.png).digest() != image.digest:
+            raise localFailure(
+                "this UI has no current image mapping",
+                'read and inspect this App/Window with view="image" or "both"',
+                "snapshot_expired",
+            )
+        adapters = self.controller.adapters
+        if adapters.image_delivery_required() and image.delivered != adapters.image_delivery_epoch():
+            raise localFailure(
+                "this image has not been delivered to the model",
+                "return the screenshot and choose coordinates in the next call",
+                "input_unavailable",
+            )
+        mapped = tuple(image.hit(point) for point in points)
+        piece = mapped[0][0]
+        if any(other.window != piece.window for other, point in mapped):
+            raise localFailure(
+                "a UI drag must start and end in one captured member window",
+                "use an authorized exclusive desktop image for a cross-window drag",
+                "mode_unsupported",
+            )
+        await refresh(self.controller, ui)
+        if image.membership != signature(allowed(ui)):
+            image.expired = True
+            raise localFailure(
+                "the window membership or modal layout changed", "read this UI image again", "snapshot_expired"
+            )
+        if len(image.pieces) > 1:
+            await self.check_layout(image)
+        if intent == "drag":
+            start, end = mapped[0][1], mapped[1][1]
+            parameters = dict(fromX=start[0], fromY=start[1], toX=end[0], toY=end[1])
+        else:
+            x, y = mapped[0][1]
+            parameters = dict(x=x, y=y, **options)
+        return await self.controller._execute(ui, Intent(intent, parameters), piece.image.target)
+
+    async def check_layout(self, image: InterfaceImage) -> None:
+        """Require captured member windows to retain their size and relative positions."""
+        shifts = []
+        for piece in image.pieces:
+            current = await self.controller.reader.images.window(piece.image.target)
+            old, new = frame(piece.image), frame(current)
+            if any(abs(a - b) > 1e-6 for a, b in zip(old[2:], new[2:])):
+                image.expired = True
+                raise localFailure("a member window changed size", "read this UI image again", "snapshot_expired")
+            shifts.append((new[0] - old[0], new[1] - old[1]))
+        if any(any(abs(a - b) > 1e-6 for a, b in zip(shifts[0], shift)) for shift in shifts[1:]):
+            image.expired = True
+            raise localFailure("relative window positions changed", "read this UI image again", "snapshot_expired")

@@ -2,6 +2,10 @@ import AppKit
 import Foundation
 import Darwin
 
+// The short-lived activation adapter must not inherit an NSApplication event
+// context. It only invokes one public running-process activation and exits.
+if let status = ForegroundActivation.runIfRequested(CommandLine.arguments) { exit(status) }
+
 let app = NSApplication.shared
 // AppKit may activate an accessory app while finishing launch if its first
 // request already created a window. Keep launch prohibited, then enable the
@@ -11,16 +15,21 @@ app.setActivationPolicy(.prohibited)
 signal(SIGPIPE, SIG_IGN)
 
 if CommandLine.arguments.contains("--check-permissions") || CommandLine.arguments.contains("--request-permissions") {
-    do { try writeJSON(Driver.permissionStatus(request: CommandLine.arguments.contains("--request-permissions"))) }
-    catch { exit(1) }
+    do {
+        try writeJSON(Driver.permissionStatus(request: CommandLine.arguments.contains("--request-permissions")))
+    } catch { exit(1) }
     exit(0)
 }
 
-if let metadata = try? JSONSerialization.data(withJSONObject: [
-    "kind": "backend", "version": "0.0.1",
-    "desktopMode": ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "shared",
-    "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]
-], options: [.sortedKeys]), let line = String(data: metadata, encoding: .utf8) { diagnose(line) }
+if let metadata = try? JSONSerialization.data(
+    withJSONObject: [
+        "kind": "backend", "version": "0.0.1",
+        "desktopMode": ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "shared",
+        "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]
+    ], options: [.sortedKeys]), let line = String(data: metadata, encoding: .utf8)
+{
+    diagnose(line)
+}
 
 let driver = Driver()
 
@@ -34,8 +43,7 @@ let terminationSignals = [SIGTERM, SIGINT, SIGHUP].map { number in
     return source
 }
 
-@MainActor
-func startReading() {
+@MainActor func startReading() {
     // Blocking stdin reads stay off the AppKit main run loop.
     DispatchQueue.global(qos: .userInitiated).async {
         var pending = Data()
@@ -67,8 +75,7 @@ func startReading() {
     }
 }
 
-@MainActor
-final class ApplicationDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
             NSApplication.shared.setActivationPolicy(.accessory)

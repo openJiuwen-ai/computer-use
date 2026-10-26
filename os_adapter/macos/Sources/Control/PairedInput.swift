@@ -5,6 +5,7 @@ import Foundation
 @MainActor final class PairedInput<Event> {
     private let source: AnyObject?
     private let post: (Event) -> Void
+    private let postRelease: (Event) -> Void
     private let canRelease: () -> Bool
     private let skipped: () -> Void
     private let settle: () async -> Void
@@ -12,12 +13,17 @@ import Foundation
     private var held: [Event] = []
     private var released = false
 
-    init(source: AnyObject? = nil, post: @escaping (Event) -> Void, canRelease: @escaping () -> Bool,
-         skipped: @escaping () -> Void = {},
-         settleUnpaired: Bool = false,
-         settle: @escaping () async -> Void = PairedInput.settleDelivery) {
+    init(
+        source: AnyObject? = nil, post: @escaping (Event) -> Void, canRelease: @escaping () -> Bool,
+        postRelease: ((Event) -> Void)? = nil, skipped: @escaping () -> Void = {}, settleUnpaired: Bool = false,
+        settle: @escaping () async -> Void = PairedInput.settleDelivery
+    ) {
         self.source = source
-        self.post = post; self.canRelease = canRelease; self.skipped = skipped; self.settle = settle
+        self.post = post
+        self.postRelease = postRelease ?? post
+        self.canRelease = canRelease
+        self.skipped = skipped
+        self.settle = settle
         self.settleUnpaired = settleUnpaired
     }
 
@@ -32,8 +38,11 @@ import Foundation
         guard !pending.isEmpty else { return }
         // Ordinary focus/window validation may now fail; release only requires
         // the original delivery process. Never release into a recycled PID.
-        guard canRelease() else { skipped(); return }
-        for event in pending { post(event) }
+        guard canRelease() else {
+            skipped()
+            return
+        }
+        for event in pending { postRelease(event) }
         released = true
     }
 
@@ -55,7 +64,10 @@ import Foundation
         // post-release interval and let shutdown discard a queued mouse-up.
         // Keep that same bounded interval on both paths, inside the input lease.
         // This is delivery settling, not proof of an application's outcome.
-        if released || settleUnpaired { released = false; await settle() }
+        if released || settleUnpaired {
+            released = false
+            await settle()
+        }
     }
 
     private static func settleDelivery() async {

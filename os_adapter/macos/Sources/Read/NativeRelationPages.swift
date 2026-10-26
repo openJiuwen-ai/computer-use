@@ -18,9 +18,12 @@ import Foundation
     private var order = [String]()
     private var elements = 0
 
-    init(maxEntries: Int = 256, maxPrefix: Int = 8192, maxElements: Int = 32768,
-         equal: @escaping (Value, Value) -> Bool) {
-        self.maxEntries = maxEntries; self.maxPrefix = maxPrefix; self.maxElements = maxElements
+    init(
+        maxEntries: Int = 256, maxPrefix: Int = 8192, maxElements: Int = 32768, equal: @escaping (Value, Value) -> Bool
+    ) {
+        self.maxEntries = maxEntries
+        self.maxPrefix = maxPrefix
+        self.maxElements = maxElements
         self.equal = equal
     }
 
@@ -36,18 +39,22 @@ import Foundation
     }
 
     func validate(_ selection: Selection, total: Int, prefix: [Value]) throws {
-        guard selection.total == nil || selection.total == total,
-              prefix.count >= selection.prefix.count,
-              zip(selection.prefix, prefix).allSatisfy({ equal($0.0, $0.1) }) else {
-            throw DriverError("native relation changed before continuation; read its source again", code: .snapshotExpired)
+        guard selection.total == nil || selection.total == total, prefix.count >= selection.prefix.count,
+            zip(selection.prefix, prefix).allSatisfy({ equal($0.0, $0.1) })
+        else {
+            throw DriverError(
+                "native relation changed before continuation; read its source again", code: .snapshotExpired)
         }
     }
 
     func retain(source: String, property: String, total: Int, prefix: [Value]) -> String? {
-        guard prefix.count < total, prefix.count < maxPrefix, prefix.count <= maxElements, maxEntries > 0 else { return nil }
+        guard prefix.count < total, prefix.count < maxPrefix, prefix.count <= maxElements, maxEntries > 0 else {
+            return nil
+        }
         let cursor = UUID().uuidString
         entries[cursor] = Selection(source: source, property: property, total: total, prefix: prefix)
-        order.append(cursor); elements += prefix.count
+        order.append(cursor)
+        elements += prefix.count
         while order.count > maxEntries || elements > maxElements {
             let expired = order.removeFirst()
             elements -= entries.removeValue(forKey: expired)?.prefix.count ?? 0

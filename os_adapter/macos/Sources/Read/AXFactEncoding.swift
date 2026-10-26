@@ -7,16 +7,25 @@ enum AXFactEncoding {
     /// A successful value getter may still be an AppKit default for an
     /// undeclared attribute. Retain the declaration result separately from a
     /// legitimate zero/empty value; a failed catalogue is unknown, not absent.
-    static func advertisedFieldFailures(_ fields: [String], status: AXError, names: CFArray?) -> [String: [String: Any]] {
+    static func advertisedFieldFailures(_ fields: [String], status: AXError, names: CFArray?) -> [String: [String: Any]]
+    {
         guard status == .success, let names = names as? [String], !names.contains(where: { $0.isEmpty }) else {
-            return Dictionary(uniqueKeysWithValues: fields.map {
-                ($0, ["state": "error", "detail": "native attribute catalogue unavailable (AXError \(status.rawValue))"])
-            })
+            return Dictionary(
+                uniqueKeysWithValues: fields.map {
+                    (
+                        $0,
+                        [
+                            "state": "error",
+                            "detail": "native attribute catalogue unavailable (AXError \(status.rawValue))"
+                        ]
+                    )
+                })
         }
         let declared = Set(names)
-        return Dictionary(uniqueKeysWithValues: fields.filter { !declared.contains($0) }.map {
-            ($0, ["state": "unsupported", "detail": "not advertised by the accessibility provider"])
-        })
+        return Dictionary(
+            uniqueKeysWithValues: fields.filter { !declared.contains($0) }.map {
+                ($0, ["state": "unsupported", "detail": "not advertised by the accessibility provider"])
+            })
     }
 
     static func status(_ error: AXError) -> [String: Any] {
@@ -26,7 +35,10 @@ enum AXFactEncoding {
         case .noValue: state = "absent"
         default: state = "error"
         }
-        return ["state": state, "detail": "AXError \(error.rawValue)"]
+        return [
+            "state": state, "detail": "AXError \(error.rawValue)", "nativeCode": error.rawValue,
+            "nativeDomain": "AXError"
+        ]
     }
 
     static func scalar(_ value: CFTypeRef?, elementReference: String? = nil) -> (value: Any?, failure: [String: Any]?) {
@@ -49,6 +61,21 @@ enum AXFactEncoding {
         }
         if type == AXValueGetTypeID() {
             let raw = unsafeDowncast(value, to: AXValue.self)
+            // AX geometry uses global screen coordinates. Keep the provider's
+            // origin and dimensions, including negative positions and zero
+            // sizes; collection does not establish visibility or clickability.
+            if AXValueGetType(raw) == .cgPoint {
+                var point = CGPoint.zero
+                if AXValueGetValue(raw, .cgPoint, &point), point.x.isFinite, point.y.isFinite {
+                    return (["x": Double(point.x), "y": Double(point.y)], nil)
+                }
+            }
+            if AXValueGetType(raw) == .cgSize {
+                var size = CGSize.zero
+                if AXValueGetValue(raw, .cgSize, &size), size.width.isFinite, size.height.isFinite {
+                    return (["width": Double(size.width), "height": Double(size.height)], nil)
+                }
+            }
             if AXValueGetType(raw) == .axError {
                 var error = AXError.failure
                 if AXValueGetValue(raw, .axError, &error) { return (nil, status(error)) }
@@ -65,18 +92,30 @@ enum AXFactEncoding {
 
     static func actions(_ error: AXError, _ raw: CFArray?) -> [String: Any] {
         guard error == .success, let values = raw as? [Any] else {
-            return ["state": "unavailable", "items": [[String: Any]](),
-                    "detail": error == .success ? "provider returned no action array" : "AXError \(error.rawValue)"]
+            return [
+                "state": "unavailable", "items": [[String: Any]](),
+                "detail": error == .success ? "provider returned no action array" : "AXError \(error.rawValue)"
+            ]
         }
         var items = [[String: Any]](), invalid = [String]()
         for (index, value) in values.prefix(128).enumerated() {
             guard let name = value as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  name.utf16.count <= 4096 else { invalid.append("\(index)"); continue }
-            items.append(["name": name, "descriptionStatus": ["state": "timeout", "detail": "description not yet queried"]])
+                name.utf16.count <= 4096
+            else {
+                invalid.append("\(index)")
+                continue
+            }
+            items.append([
+                "name": name, "descriptionStatus": ["state": "timeout", "detail": "description not yet queried"]
+            ])
         }
-        var result: [String: Any] = ["state": values.count == items.count ? "complete" : "partial", "items": items, "total": values.count]
+        var result: [String: Any] = [
+            "state": values.count == items.count ? "complete" : "partial", "items": items, "total": values.count
+        ]
         var detail = [String]()
-        if !invalid.isEmpty { detail.append("unusable action name at native indices \(invalid.joined(separator: ","))") }
+        if !invalid.isEmpty {
+            detail.append("unusable action name at native indices \(invalid.joined(separator: ","))")
+        }
         if values.count > 128 { detail.append("action count budget") }
         if !detail.isEmpty { result["detail"] = detail.joined(separator: "; ") }
         return result
@@ -86,21 +125,32 @@ enum AXFactEncoding {
         guard error == .success else { return ["descriptionStatus": status(error)] }
         guard let value else { return ["descriptionStatus": ["state": "absent"]] }
         guard CFGetTypeID(value) == CFStringGetTypeID() else {
-            return ["descriptionStatus": ["state": "error", "detail": "provider returned a non-string action description"]]
+            return [
+                "descriptionStatus": ["state": "error", "detail": "provider returned a non-string action description"]
+            ]
         }
         let text = value as! String
         if text.utf16.count > 16_384 {
-            return ["description": String(text.unicodeScalars.prefix(4096)),
-                    "descriptionStatus": ["state": "truncated", "totalUnits": text.utf16.count, "detail": "action description preview only"]]
+            return [
+                "description": String(text.unicodeScalars.prefix(4096)),
+                "descriptionStatus": [
+                    "state": "truncated", "totalUnits": text.utf16.count, "detail": "action description preview only"
+                ]
+            ]
         }
         return ["description": text]
     }
 
     static func relationFailure(source: String, property: String, error: AXError? = nil) -> [String: Any] {
         let failure = error.map(status) ?? ["state": "timeout", "detail": "collection time budget"]
-        var result: [String: Any] = ["source": source, "property": property, "targets": [String](),
-                                    "certainty": "unknown", "state": failure["state"]!, "detail": failure["detail"]!]
-        if failure["state"] as? String == "absent" { result["certainty"] = "confirmed"; result["total"] = 0 }
+        var result: [String: Any] = [
+            "source": source, "property": property, "targets": [String](), "certainty": "unknown",
+            "state": failure["state"]!, "detail": failure["detail"]!
+        ]
+        if failure["state"] as? String == "absent" {
+            result["certainty"] = "confirmed"
+            result["total"] = 0
+        }
         return result
     }
 }

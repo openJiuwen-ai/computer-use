@@ -16,13 +16,22 @@ import Foundation
     private(set) var cleanup = "complete"
     private var clipboard: String?
     private let onEffect: () -> Void
+    var click: NativeClickEvidence?
 
-    init(target: [String: Any], detail: String = "Native action dispatched; application effect unconfirmed.",
-         confirmation: String = "unavailable", onEffect: @escaping () -> Void) {
-        self.target = target; self.detail = detail; self.confirmation = confirmation; self.onEffect = onEffect
+    init(
+        target: [String: Any], detail: String = "Native action dispatched; application effect unconfirmed.",
+        confirmation: String = "unavailable", onEffect: @escaping () -> Void
+    ) {
+        self.target = target
+        self.detail = detail
+        self.confirmation = confirmation
+        self.onEffect = onEffect
     }
 
-    func recordPreparation(_ change: String) { preparation.append(change); onEffect() }
+    func recordPreparation(_ change: String) {
+        preparation.append(change)
+        onEffect()
+    }
     func recordAccepted() { acceptedCount += 1 }
     func recordCleanupUnknown() { cleanup = "unknown" }
 
@@ -37,21 +46,30 @@ import Foundation
     }
 
     func recordFailure(_ error: Error) {
-        errorCode = (error as? ClassifiedFailure)?.code ?? .executionFailed
-        detail = String(describing: error)
+        // The request/operation timer cancels the Swift task. Preserve that
+        // known deadline cause instead of exposing an opaque CancellationError.
+        // An earlier caller cancellation has no expired deadline and stays one.
+        let expired =
+            error is CancellationError
+            && RequestDiagnostics.deadline.map { ProcessInfo.processInfo.systemUptime >= $0 } == true
+        let cause: Error = expired ? RequestDeadlineExceeded() : error
+        errorCode = (cause as? ClassifiedFailure)?.code ?? .executionFailed
+        detail = String(describing: cause)
         confirmation = "notRequested"
         if acceptedCount > 0 { dispatch = "partial" }
     }
 
     var succeeded: Bool { errorCode == nil && cleanup == "complete" }
     var wire: [String: Any] {
-        var value: [String: Any] = ["target": target, "dispatch": dispatch,
-            "detail": clipboard.map { "\(detail) \($0)" } ?? detail,
+        var value: [String: Any] = [
+            "target": target, "dispatch": dispatch, "detail": clipboard.map { "\(detail) \($0)" } ?? detail,
             "preparation": preparation, "confirmation": confirmation, "cleanup": cleanup,
             "errorCode": errorCode?.rawValue as Any? ?? NSNull(),
             "retryReason": (cleanup == "complete" ? retryReason : nil) as Any? ?? NSNull(),
-            "context": context as Any? ?? NSNull()]
+            "context": context as Any? ?? NSNull()
+        ]
         if let application { value["application"] = application }
+        if let click { value["click"] = click.wire }
         return value
     }
 }

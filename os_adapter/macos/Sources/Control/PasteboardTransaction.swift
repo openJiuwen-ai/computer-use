@@ -2,11 +2,8 @@ import AppKit
 
 /// A single explicit paste temporarily owns the clipboard. Materialize every
 /// existing representation before changing it; preserve detected later copies.
-@MainActor
-final class PasteboardTransaction {
-    enum RestoreResult {
-        case restored, ownershipLost, failed
-    }
+@MainActor final class PasteboardTransaction {
+    enum RestoreResult { case restored, ownershipLost, failed }
 
     private typealias Contents = [[NSPasteboard.PasteboardType: Data]]
     private let pasteboard: NSPasteboard
@@ -20,7 +17,8 @@ final class PasteboardTransaction {
         initialChange = pasteboard.changeCount
         original = try Self.contents(of: pasteboard)
         guard pasteboard.changeCount == initialChange else {
-            throw DriverError("clipboard changed or could not be read before paste; no paste sent", code: .inputUnavailable)
+            throw DriverError(
+                "clipboard changed or could not be read before paste; no paste sent", code: .inputUnavailable)
         }
     }
 
@@ -30,14 +28,16 @@ final class PasteboardTransaction {
             var data = [NSPasteboard.PasteboardType: Data]()
             for type in item.types {
                 guard let bytes = item.data(forType: type) else {
-                    throw DriverError("current clipboard cannot be fully preserved; no paste sent", code: .inputUnavailable)
+                    throw DriverError(
+                        "current clipboard cannot be fully preserved; no paste sent", code: .inputUnavailable)
                 }
                 data[type] = bytes
             }
             items.append(data)
         }
         guard !items.isEmpty || (pasteboard.types ?? []).isEmpty else {
-            throw DriverError("clipboard changed or could not be read before paste; no paste sent", code: .inputUnavailable)
+            throw DriverError(
+                "clipboard changed or could not be read before paste; no paste sent", code: .inputUnavailable)
         }
         return items
     }
@@ -46,8 +46,9 @@ final class PasteboardTransaction {
     /// writer can replace a representation without calling clearContents(), so
     /// retaining the generation alone does not authorize overwriting its copy.
     private func matches(_ contents: Contents, generation: Int) -> Bool {
-        guard pasteboard.changeCount == generation,
-              let current = try? Self.contents(of: pasteboard), current == contents else { return false }
+        guard pasteboard.changeCount == generation, let current = try? Self.contents(of: pasteboard),
+            current == contents
+        else { return false }
         return pasteboard.changeCount == generation
     }
 
@@ -67,9 +68,7 @@ final class PasteboardTransaction {
         ownedContents = []
         try validateOwnership()
         let written = pasteboard.writeObjects([item])
-        if let ownedChange, matches(temporary, generation: ownedChange) {
-            ownedContents = temporary
-        }
+        if let ownedChange, matches(temporary, generation: ownedChange) { ownedContents = temporary }
         guard written, ownedContents == temporary else {
             throw DriverError("could not place text on the clipboard; no paste sent", code: .inputUnavailable)
         }
@@ -78,7 +77,8 @@ final class PasteboardTransaction {
 
     func validateOwnership() throws {
         guard let ownedChange, let ownedContents, matches(ownedContents, generation: ownedChange) else {
-            throw DriverError("clipboard changed before the paste command; no further input sent", code: .inputUnavailable,
+            throw DriverError(
+                "clipboard changed before the paste command; no further input sent", code: .inputUnavailable,
                 next: "inspect the target before deciding whether to paste again")
         }
     }
@@ -105,9 +105,7 @@ final class PasteboardTransaction {
         var items = [NSPasteboardItem]()
         for representations in original {
             let item = NSPasteboardItem()
-            for (type, data) in representations {
-                guard item.setData(data, forType: type) else { return .failed }
-            }
+            for (type, data) in representations { guard item.setData(data, forType: type) else { return .failed } }
             items.append(item)
         }
         // Preparing every representation first avoids clearing the temporary
@@ -121,9 +119,7 @@ final class PasteboardTransaction {
         let written = writeItems?(items) ?? pasteboard.writeObjects(items)
         guard pasteboard.changeCount == restoreChange else { return .ownershipLost }
         guard written else { return .failed }
-        guard matches(original, generation: restoreChange) else {
-            return .ownershipLost
-        }
+        guard matches(original, generation: restoreChange) else { return .ownershipLost }
         return .restored
     }
 }

@@ -9,10 +9,8 @@ func object(_ value: Any?, keys: Set<String>) throws -> [String: Any] {
 }
 
 func string(_ value: Any?, label: String, nonempty: Bool = true) throws -> String {
-    guard let value = value as? String,
-          !nonempty || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        throw DriverError("\(label) must be \(nonempty ? "a nonempty" : "a") string", code: .invalidRequest)
-    }
+    guard let value = value as? String, !nonempty || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else { throw DriverError("\(label) must be \(nonempty ? "a nonempty" : "a") string", code: .invalidRequest) }
     return value
 }
 
@@ -79,17 +77,14 @@ enum RequestDiagnostics {
 
 struct RequestDeadlineExceeded: Error, CustomStringConvertible { let description = "request deadline exceeded" }
 
-func diagnose(_ message: String) {
-    writeDiagnostic(message)
-}
+func diagnose(_ message: String) { writeDiagnostic(message) }
 
-func diagnose(_ fields: [String: Any]) {
-    writeDiagnostic(fields)
-}
+func diagnose(_ fields: [String: Any]) { writeDiagnostic(fields) }
 
 private func writeDiagnostic(_ message: Any) {
     if let id = RequestDiagnostics.id,
-       var data = try? JSONSerialization.data(withJSONObject: ["requestId": id, "message": message]) {
+        var data = try? JSONSerialization.data(withJSONObject: ["requestId": id, "message": message])
+    {
         data.append(10)
         try? FileHandle.standardError.write(contentsOf: data)
     } else {

@@ -4,7 +4,10 @@ struct AgentPointerVisualState {
     private var idleSince: Double?
 
     mutating func begin() { active = true }
-    mutating func finish(at time: Double) { active = false; idleSince = time }
+    mutating func finish(at time: Double) {
+        active = false
+        idleSince = time
+    }
     mutating func observeNewWindow(at time: Double) { idleSince = time }
 
     func opacity(at time: Double) -> Float {

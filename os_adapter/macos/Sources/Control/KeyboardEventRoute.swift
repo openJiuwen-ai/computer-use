@@ -9,11 +9,12 @@ enum KeyboardEventRoute: Equatable {
     /// The caller must already establish the focused AX object's presenter and
     /// owning window. A WebArea is evidence only through actual AX containment,
     /// never through application names, titles or process-name heuristics.
-    static func resolve(hostWindow: UInt32, focusWindow: UInt32?,
-                        webAreaWindow: UInt32?, hasHostedWebArea: Bool) -> Self {
-        guard hasHostedWebArea,
-              focusWindow == nil || focusWindow == hostWindow,
-              webAreaWindow == nil || webAreaWindow == hostWindow else { return .service }
+    static func resolve(hostWindow: UInt32, focusWindow: UInt32?, webAreaWindow: UInt32?, hasHostedWebArea: Bool)
+        -> Self
+    {
+        guard hasHostedWebArea, focusWindow == nil || focusWindow == hostWindow,
+            webAreaWindow == nil || webAreaWindow == hostWindow
+        else { return .service }
         return .host
     }
 }
