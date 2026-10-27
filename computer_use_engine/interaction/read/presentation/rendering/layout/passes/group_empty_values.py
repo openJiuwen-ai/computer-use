@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.rendering.layout.empty_values import compactEmptyValues
+from computer_use.interaction.read.presentation.rendering.layout.empty_values import compact_empty_values
 from computer_use.interaction.read.presentation.rendering.layout.packing import apply_layout
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 def group_empty_values(
     lines: list[str], roots: Sequence[NodeView], context: Record, format_field: FormatField
 ) -> list[str]:
-    return compactEmptyValues(lines, roots, context.get("focusedRef"))
+    return compact_empty_values(lines, roots, context.get("focusedRef"))
 
 
 def execute(frame: LayoutFrame, control: Control) -> LayoutFrame:

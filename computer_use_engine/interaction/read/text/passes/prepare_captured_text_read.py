@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.text.model import TextReadPlan
 from computer_use.interaction.requests import ReadText
 from computer_use.pipeline import Contract, Pass
@@ -23,7 +23,7 @@ def create(*, validate_snapshot: Callable[[Binding], None]) -> Callable[[ReadTex
         validate_snapshot(request.snapshot["binding"])
         source = request.snapshot.get("text")
         if source is None:
-            raise localFailure(
+            raise local_failure(
                 "this element has no complete captured text value",
                 "read the element and inspect its available text fields",
                 "observation_incomplete",

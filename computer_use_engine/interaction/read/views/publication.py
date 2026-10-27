@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, cast
 
 from computer_use.interaction.query.instances.scope import allowed
-from computer_use.interaction.read.presentation.content import DisplayText, join, json_value as quoted, template
+from computer_use.interaction.read.presentation.content import DisplayText, join, template
+from computer_use.interaction.read.presentation.content import json_value as quoted
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.preparation import prepareSnapshot
+from computer_use.interaction.read.presentation.preparation import prepare_snapshot
 from computer_use.protocol.primitives import frozen
-from computer_use.session.events import observationCompleted
+from computer_use.session.events import observation_completed
 from computer_use.session.interfaces import ApplicationEntry
-from computer_use.session.observation import lazyObservation
-from computer_use.session.observation_data import retainObservationData
+from computer_use.session.observation import lazy_observation
+from computer_use.session.observation_data import retain_observation_data
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
@@ -40,7 +42,7 @@ def tree_text(
         snapshot: Captured native facts and semantic tree to render.
         details: Include source-accounted fields, actions, and relationships.
     """
-    prepared = prepareSnapshot(snapshot, compact=True, public_api=True)
+    prepared = prepare_snapshot(snapshot, compact=True, public_api=True)
     return tree_document(controller, target, snapshot, prepared=prepared, details=details).text
 
 
@@ -106,6 +108,8 @@ def publish(
     refs = {ref: node for _, snapshot in trees for ref, node in snapshot.refs.items()}
     windows, instance, identity = {}, None, None
     if owner is not None:
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         state = owner._instance
         if state.anchor is not None:
             permitted = allowed(owner)
@@ -167,9 +171,9 @@ def publish(
                 ),
             ),
         )
-    result = lazyObservation(document, screenshot)
-    retainObservationData(result, roots, refs, windows, instance, identity)
-    observationCompleted(
+    result = lazy_observation(document, screenshot)
+    retain_observation_data(result, roots, refs, windows, instance, identity)
+    observation_completed(
         dict(
             source=controller,
             owner=owner,
@@ -195,11 +199,14 @@ def directory_text(controller: SessionController, ui: UIHandle, directory: Direc
         ui: App or Window handle whose instance and observation bounds constrain the operation.
         directory: Observed application/window catalogue, including incomplete relationships.
     """
+    # pylint: disable-next=protected-access
     instance = ui._instance
     selected = cast("WorkingWindow", instance.anchor).root.root_window
     view = (
         "App instance"
+        # pylint: disable-next=protected-access
         if ui._anchor is None
+        # pylint: disable-next=protected-access
         else template("Window {0}", next(ref for ref, key in instance.windows.items() if key == ui._anchor))
     )
     lines = [template("App: {0}.", quoted(cast("WorkingWindow", instance.anchor).name)), template("View: {0}.", view)]
@@ -240,16 +247,17 @@ def directory_text(controller: SessionController, ui: UIHandle, directory: Direc
         choices = controller.interfaces.discovery.publish_choices(
             cast("WorkingWindow", instance.anchor).name, directory
         )
+
+        def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for item in _source_items:
+                if controller.interfaces.references.window(item.id, directory["session"]) not in instance.members:
+                    yield template("{0} {1!r}; computer.app({0})", item.id, item.displayName)
+
         lines.append(
             template(
                 "Other independent or unconfirmed windows: {0}",
                 join(
-                    (
-                        template("{0} {1!r}; computer.app({0})", item.id, item.displayName)
-                        for item in choices
-                        if controller.interfaces.references.window(item.id, directory["session"])
-                        not in instance.members
-                    ),
+                    _iter_item(iter(choices)),
                     "; ",
                 ),
             )

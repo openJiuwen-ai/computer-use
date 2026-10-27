@@ -61,6 +61,8 @@ class NativeText:
         count = self.call("Text", "get_character_count", obj)
         integer(count, 0, 2147483647)
         selected = self.call("Text", "get_n_selections", obj)
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(selected) is not int or selected not in (0, 1):
             raise Failure("The control does not expose one unambiguous insertion point.", "input_unavailable")
         if selected:

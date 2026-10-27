@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.policy import sameBlocking
+from computer_use.interaction.read.presentation.compression.policy import same_blocking
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView, ViewNode
@@ -55,17 +55,22 @@ def outline(state: ProjectionView, edit: ProjectionEditor, node: ViewNode) -> No
             or "disclosureLevel" not in row
             or row["disclosureLevel"] == parent["disclosureLevel"] + 1
         )
-        if (
-            row["role"] == "row"
-            and parent is not None
-            and acyclic(row)
-            and not row.get("incompleteDisclosureRelation")
-            and compatible_level
-            and parent.get("expanded") is not False
-            and parent.get("disclosing") is not False
-            and sameBlocking(row, parent)
-            and parent.get("outlineDepth", 0) < 128
-        ):
+        matches_compatible_level = (
+            True
+            if (
+                row["role"] == "row"
+                and parent is not None
+                and acyclic(row)
+                and not row.get("incompleteDisclosureRelation")
+                and compatible_level
+                and parent.get("expanded") is not False
+                and parent.get("disclosing") is not False
+                and same_blocking(row, parent)
+                and parent.get("outlineDepth", 0) < 128
+            )
+            else False
+        )
+        if matches_compatible_level:
             edit.children(parent, (*parent["children"], row))
             edit.annotate(row, "outlineDepth", parent.get("outlineDepth", 0) + 1)
             edit.event(sourceRef=row["ref"], kind="outline", targetRef=parent["ref"])

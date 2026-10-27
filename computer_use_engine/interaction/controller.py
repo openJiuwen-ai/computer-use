@@ -8,10 +8,10 @@ import weakref
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast, overload
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.pipeline import SessionPipeline
 from computer_use.interaction.read.acquisition.images.desktop.service import NativeDesktopReader
-from computer_use.interaction.read.acquisition.reader import capturedChildren, capturedField
+from computer_use.interaction.read.acquisition.reader import captured_children, captured_field
 from computer_use.interaction.read.app import NativeAppReader
 from computer_use.interaction.read.pages import ContentPages
 from computer_use.interaction.requests import (
@@ -28,14 +28,14 @@ from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
 from computer_use.native.scopes import RunningApplication, window_binding
 from computer_use.native.transport import ConnectionPort
-from computer_use.protocol.captures import captureMetadata
+from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.observation import NativeNode
 from computer_use.protocol.primitives import finite, frozen
-from computer_use.protocol.session import desktopMode, nativeProtocolVersion
+from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION, desktop_mode
 from computer_use.session.bindings import SessionBindings
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
-from computer_use.session.events import observationCompleted, observationsInvalidated
-from computer_use.session.observation_data import retainObservationData
+from computer_use.session.events import observation_completed, observations_invalidated
+from computer_use.session.observation_data import retain_observation_data
 
 if TYPE_CHECKING:
     from typing import Mapping, NoReturn, Sequence
@@ -45,12 +45,14 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.images.overview import WindowOverview
     from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.interaction.read.model import WindowSelectionRequired
-    from computer_use.interaction.records import ElementPath as LookupPath, ElementSnapshot
+    from computer_use.interaction.records import ElementPath as LookupPath
+    from computer_use.interaction.records import ElementSnapshot
     from computer_use.interaction.requests import InteractionRequest
     from computer_use.native.contracts import OperationTarget
     from computer_use.native.port import NativePort
     from computer_use.protocol.png import PNG
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts, Record
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import Record
     from computer_use.session.state import AppState
     from computer_use.types import ActionResult, Observation, TextPage
 
@@ -79,10 +81,12 @@ class SessionController:
             DesktopImageAccess(adapters.register_image, adapters.image_delivery_epoch, adapters.image_delivery_required)
         )
         self.transport = (
-            port.connection if port is not None else Connection(self.invalidate, protocol_version=nativeProtocolVersion)
+            port.connection
+            if port is not None
+            else Connection(self.invalidate, protocol_version=NATIVE_PROTOCOL_VERSION)
         )
         self.port = port or ConnectionPort(
-            self.transport, HostPolicy(desktopMode(), os.environ.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1")
+            self.transport, HostPolicy(desktop_mode(), os.environ.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1")
         )
         self.reader, self.desktop_reader = NativeAppReader(self.port), NativeDesktopReader(self.port)
         self.engine, self.pages = Engine(self.port), ContentPages()
@@ -92,33 +96,38 @@ class SessionController:
         self.interfaces = AgentInterfacePipeline(self)
 
     @overload
-    async def run(
-        self, request: ReadApp | ReadDesktop | ObserveUI | ObserveDesktop | ObserveElement
-    ) -> Observation: ...
+    async def run(self, request: ReadApp | ReadDesktop | ObserveUI | ObserveDesktop | ObserveElement) -> Observation:
+        pass
 
     @overload
-    async def run(self, request: ReadElement) -> tuple[Observation, ElementSnapshot]: ...
+    async def run(self, request: ReadElement) -> tuple[Observation, ElementSnapshot]:
+        pass
 
     @overload
-    async def run(self, request: ReadText | ObserveText) -> TextPage: ...
+    async def run(self, request: ReadText | ObserveText) -> TextPage:
+        pass
 
     @overload
-    async def run(self, request: FindElement | ResolveElement) -> ElementSnapshot: ...
+    async def run(self, request: FindElement | ResolveElement) -> ElementSnapshot:
+        pass
 
     @overload
-    async def run(self, request: ListApplications) -> tuple[NativeApplicationSummary, ...]: ...
+    async def run(self, request: ListApplications) -> tuple[NativeApplicationSummary, ...]:
+        pass
 
     @overload
-    async def run(self, request: DiscoverApps) -> list[AppInfo]: ...
+    async def run(self, request: DiscoverApps) -> list[AppInfo]:
+        pass
 
     @overload
-    async def run(self, request: ExecuteAction | ActOnElement | UIKeyboard | UIPointer) -> ActionResult: ...
+    async def run(self, request: ExecuteAction | ActOnElement | UIKeyboard | UIPointer) -> ActionResult:
+        pass
 
     async def run(self, request: InteractionRequest) -> InteractionResult:
         return await self.pipeline.arun(request)
 
-    def publishObservation(self, event: Record) -> None:
-        observationCompleted(dict(source=self, **event))
+    def publish_observation(self, event: Record) -> None:
+        observation_completed(dict(source=self, **event))
 
     def register(self, owner: object, scope: Record) -> None:
         self.bindings.register(owner, scope)
@@ -132,14 +141,14 @@ class SessionController:
     def invalidate(self) -> None:
         self.desktop.reset()
         self.bindings.invalidate()
-        observationsInvalidated(self)
+        observations_invalidated(self)
         # Handles retain their prior session identity so subsequent validation
         # detects expiration.
 
-    def validateElement(self, target: Binding) -> None:
-        self.bindings.validateElement(target, self.transport.session)
+    def validate_element(self, target: Binding) -> None:
+        self.bindings.validate_element(target, self.transport.session)
 
-    validateSnapshot = validateElement
+    validateSnapshot = validate_element
 
     def _catalogue(self, state: AppState, directory: DirectoryFacts, windows: Mapping[str, str]) -> None:
         self.bindings.catalogue(state, directory, windows)
@@ -157,19 +166,21 @@ class SessionController:
 
     @staticmethod
     def unavailable(method: str) -> NoReturn:
-        raise localFailure(
+        raise local_failure(
             method + " is not connected to protocol 6 yet",
             "use the supported App/Element routes in this session; no legacy fallback was attempted",
             "mode_unsupported",
         )
 
-    async def readDesktop(self, full: bool = False) -> Observation:
+    async def read_desktop(self, full: bool = False) -> Observation:
         return await self.run(ReadDesktop(full))
 
     async def read(
         self,
         owner: object,
         full: bool = False,
+        # API, protocol, and native binding names retain their established spelling.
+        # pylint: disable-next=invalid-name
         menuPath: Sequence[str] | None = None,
         subtree: None = None,
     ) -> Observation:
@@ -198,7 +209,7 @@ class SessionController:
         from computer_use.interaction.read.app import window_summary_content
         from computer_use.interaction.read.presentation.content import json_value, template
         from computer_use.interaction.read.presentation.document import DisplayDocument
-        from computer_use.session.observation import lazyObservation
+        from computer_use.session.observation import lazy_observation
 
         lines = [
             template("App: {}.", json_value(state.name)),
@@ -222,13 +233,13 @@ class SessionController:
         if choices.overview is not None:
             lines.append(choices.overview.document)
         document = DisplayDocument.join(lines)
-        result = lazyObservation(
+        result = lazy_observation(
             document, None, details_document=document, overview=self._overview_image(choices.overview)
         )
-        retainObservationData(
+        retain_observation_data(
             result, [], [], state.windows, state.selection.root.root_window if state.selection else None
         )
-        observationCompleted(
+        observation_completed(
             dict(
                 source=self,
                 owner=owner,
@@ -286,15 +297,15 @@ class SessionController:
                     binding=replace(target, node=node, capture=None),
                     scope_kind=tree.scope_kind,
                     source=dict(ref=ref, observed=tree.facts["observed"]),
-                    text=capturedField(tree, ref, tree.value_fields.get(ref), nodes=native_nodes),
-                    children=capturedChildren(tree, ref, relations=child_relations),
+                    text=captured_field(tree, ref, tree.value_fields.get(ref), nodes=native_nodes),
+                    children=captured_children(tree, ref, relations=child_relations),
                 )
                 for ref, node in tree.refs.items()
             },
         )
 
-    def elementSnapshot(self, owner: object, ref: str) -> ElementSnapshot:
-        return self.bindings.elementSnapshot(owner, ref, self.transport.session)
+    def element_snapshot(self, owner: object, ref: str) -> ElementSnapshot:
+        return self.bindings.element_snapshot(owner, ref, self.transport.session)
 
     def _overview_image(self, overview: WindowOverview | None) -> PNG | None:
         """Register the overview contact sheet as observation-only image context."""
@@ -376,7 +387,7 @@ class SessionController:
             ),
         )
 
-    def appRef(self, owner: object, coordinates: bool = False) -> Binding:
+    def app_ref(self, owner: object, coordinates: bool = False) -> Binding:
         """Resolve the current window binding or its delivered coordinate capture.
 
         Args:
@@ -389,12 +400,12 @@ class SessionController:
         state = self.state(owner)
         observed = cast("AppObservation", state.observation)
         if observed is None:
-            raise localFailure("this App has no current window observation", "call App.read first", "stale_target")
-        self.validateElement(observed.target)
+            raise local_failure("this App has no current window observation", "call App.read first", "stale_target")
+        self.validate_element(observed.target)
         if not coordinates:
             return window_binding(observed.target)
         if observed.image is None or state.capture_expired:
-            raise localFailure(
+            raise local_failure(
                 "this App has no current window image",
                 "read the App and inspect capture availability",
                 "snapshot_expired",
@@ -403,23 +414,28 @@ class SessionController:
             cast("WindowImage", observed.image).target.capture,
             self.adapters.image_delivery_epoch(),
         ):
-            raise localFailure(
+            raise local_failure(
                 "current window image has not been returned to the model",
                 "return the window image, then choose coordinates in the next call",
                 "input_unavailable",
             )
         return cast("WindowImage", observed.image).target
 
-    def keyboardTarget(self, owner: object) -> dict[str, Binding]:
-        return dict(appRef=self.appRef(owner))
+    def keyboard_target(self, owner: object) -> dict[str, Binding]:
+        return dict(appRef=self.app_ref(owner))
 
-    def checkCoordinates(self, owner: object, x: float, y: float, operation: str = "click") -> None:
-        self.appRef(owner, True)
-        dimensions = captureMetadata(
+    def check_coordinates(self, owner: object, x: float, y: float, operation: str = "click") -> None:
+        self.app_ref(owner, True)
+        dimensions = capture_metadata(
             cast("WindowImage", cast("AppObservation", self.state(owner).observation).image).image
         )
-        if not finite(x) or not finite(y) or not 0 <= x < dimensions["width"] or not 0 <= y < dimensions["height"]:
-            raise localFailure(
+        invalid_finite = (
+            True
+            if not finite(x) or not finite(y) or not 0 <= x < dimensions["width"] or not 0 <= y < dimensions["height"]
+            else False
+        )
+        if invalid_finite:
+            raise local_failure(
                 "coordinates are outside this App's observed PNG", "use window-image pixels for " + operation
             )
 
@@ -437,7 +453,7 @@ class SessionController:
         if owner is None:
             ref = self.desktop.target(coordinates=method in ("click", "scroll", "drag"))
             if params.get("desktopRef") != ref:
-                raise localFailure("desktop observation changed", "read the desktop again", "stale_target", "Desktop")
+                raise local_failure("desktop observation changed", "read the desktop again", "stale_target", "Desktop")
             observed = self.desktop.observed(ref)
             target = Binding(observed["binding"]["session"], None, None, None, capture=ref)
             parameter = "desktopRef"
@@ -451,7 +467,7 @@ class SessionController:
             app_keyboard=owner is not None and method in ("typeText", "paste", "pressKey"),
         )
 
-    async def actElement(
+    async def act_element(
         self,
         owner: object,
         snapshot: ElementSnapshot,
@@ -502,18 +518,19 @@ class SessionController:
         """Return the handle's live, observed accessibility root for path lookup."""
         target = self.state(owner).query_target
         if target is None:
-            raise localFailure("this App has no observed query root", "call App.read first", "stale_target")
-        self.validateElement(target)
+            raise local_failure("this App has no observed query root", "call App.read first", "stale_target")
+        self.validate_element(target)
         if target.node is None:
-            raise localFailure(
+            raise local_failure(
                 "this window has no accessible query root", "use its observed window image", "observation_incomplete"
             )
         return target
 
+    # pylint: disable-next=invalid-name
     async def find(self, owner: object, path: LookupPath, timeoutMs: int, enabled: bool) -> ElementSnapshot:
         return await self.run(FindElement(owner, path, timeoutMs, enabled))
 
-    async def readElement(
+    async def read_element(
         self,
         owner: object,
         snapshot: ElementSnapshot,
@@ -525,6 +542,7 @@ class SessionController:
     ) -> tuple[Observation, ElementSnapshot]:
         return await self.run(ReadElement(owner, snapshot, query, offset, previous, cursor))
 
+    # pylint: disable-next=invalid-name
     async def readText(self, owner: object, snapshot: ElementSnapshot, options: Record) -> TextPage:
         return await self.run(ReadText(owner, snapshot, options))
 

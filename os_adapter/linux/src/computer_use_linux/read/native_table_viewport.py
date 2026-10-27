@@ -58,6 +58,8 @@ class TableViewport:
         ):
             return None
         span = self.call("TableCell", "get_row_column_span", cell)
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if not isinstance(span, (list, tuple)) or len(span) != 4 or any(type(v) is not int for v in span):
             return None
         if not 0 <= span[0] < shape[0] or not 0 <= span[1] < shape[1] or not 1 <= span[2] <= shape[0] - span[0]:

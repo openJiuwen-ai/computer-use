@@ -28,29 +28,29 @@ _NON_VALUE_ROLES = {
     "zoomButton",
     "minimizeButton",
 }
-valuePreviewLimit = 1200
+VALUE_PREVIEW_LIMIT = 1200
 
 
 def unique(values: Any) -> list[Any]:
     return list(dict.fromkeys(values))
 
 
-def isWindow(node: NodeView) -> bool:
+def is_window(node: NodeView) -> bool:
     return node["role"] in ("window", "sheet")
 
 
-def isDialog(node: NodeView) -> bool:
+def is_dialog(node: NodeView) -> bool:
     return node["role"] == "sheet" or node.get("subrole") in ("dialog", "systemDialog")
 
 
-def isHidden(node: NodeView) -> bool:
+def is_hidden(node: NodeView) -> bool:
     # Explicitly hidden is different from an off-screen/occluded modal.
     # Unknown or conflicting native visibility cannot waive modal blocking.
     return node.get("visible") is False and node.get("showing") is False
 
 
-def isActiveModal(node: NodeView) -> bool:
-    return bool(node.get("modal")) and not isHidden(node)
+def is_active_modal(node: NodeView) -> bool:
+    return bool(node.get("modal")) and not is_hidden(node)
 
 
 def disclosure(node: NodeView) -> bool | None:
@@ -63,7 +63,7 @@ def disclosure(node: NodeView) -> bool | None:
     return None
 
 
-def carriesValue(node: NodeView) -> bool:
+def carries_value(node: NodeView) -> bool:
     return bool(
         node.get("valueExpected")
         or node["role"]
@@ -72,9 +72,9 @@ def carriesValue(node: NodeView) -> bool:
     )
 
 
-def hasDisplayValue(node: NodeView) -> bool:
+def has_display_value(node: NodeView) -> bool:
     caps = node.get("capabilities", {})
-    return carriesValue(node) or (
+    return carries_value(node) or (
         "value" in node
         and (
             node["value"] != ""
@@ -88,7 +88,7 @@ def hasDisplayValue(node: NodeView) -> bool:
     )
 
 
-def hasIncompleteChildren(node: NodeView) -> bool:
+def has_incomplete_children(node: NodeView) -> bool:
     return (
         any(k in node for k in ("partialReason", "nextChildOffset", "childrenStart", "childrenEnd"))
         or bool(node.get("childOmissions"))
@@ -96,40 +96,40 @@ def hasIncompleteChildren(node: NodeView) -> bool:
     )
 
 
-def hasTextSelection(node: NodeView) -> bool:
+def has_text_selection(node: NodeView) -> bool:
     return node["selectionRange"]["length"] > 0 if "selectionRange" in node else bool(node.get("selectedText"))
 
 
-def selectedTextDescendants(node: NodeView) -> list[Any]:
+def selected_text_descendants(node: NodeView) -> list[Any]:
     "Collect descendant nodes that report a nonempty text selection."
     result = []
     for child in node["children"]:
         if child["role"] in ("application", "window"):
             continue
-        result.extend([child] if hasTextSelection(child) else selectedTextDescendants(child))
+        result.extend([child] if has_text_selection(child) else selected_text_descendants(child))
     return result
 
 
-def valueLabel(node: NodeView) -> str:
+def value_label(node: NodeView) -> str:
     "Choose the value-field label from document, numeric, and descendant-text facts."
     if node.get("valueKind") == "document":
         return "Document text"
 
-    def hasText(child: NodeView) -> bool:
+    def has_text(child: NodeView) -> bool:
         return (
             not child.get("valueIsNumber") and "value" in child and child["role"] in _TEXT_ROLES | {"staticText"}
-        ) or any(hasText(c) for c in child["children"])
+        ) or any(has_text(c) for c in child["children"])
 
     return (
         "Native value"
         if node.get("valueIsNumber")
         and node["role"] in ("group", "cell", "row", "unknown", "textField")
-        and any(hasText(c) for c in node["children"])
+        and any(has_text(c) for c in node["children"])
         else "Value"
     )
 
 
-def withInteractions(root: NodeView, inherited: Sequence[str] | None = None) -> SemanticNode:
+def with_interactions(root: NodeView, inherited: Sequence[str] | None = None) -> SemanticNode:
     """Annotate semantic nodes with their declared and inherited interaction state.
 
     Args:
@@ -143,15 +143,15 @@ def withInteractions(root: NodeView, inherited: Sequence[str] | None = None) -> 
         Args:
             node: Source/projected node in this exact view; its native identity is unchanged.
         """
-        if isActiveModal(node):
+        if is_active_modal(node):
             return [node["ref"]]
-        if isWindow(node):
+        if is_window(node):
             return []
         return [ref for child in node["children"] for ref in modals(child)]
 
     own = (
         sorted(unique(root.get("ownedModals", []) + [ref for child in root["children"] for ref in modals(child)]))
-        if isWindow(root) or isActiveModal(root)
+        if is_window(root) or is_active_modal(root)
         else []
     )
     incoming = [] if root["ref"] in inherited or root["role"] == "window" else inherited
@@ -164,23 +164,23 @@ def withInteractions(root: NodeView, inherited: Sequence[str] | None = None) -> 
             if "capabilities" in root and blocked
             else {}
         ),
-        "children": [withInteractions(child, blocked) for child in root["children"]],
+        "children": [with_interactions(child, blocked) for child in root["children"]],
     }
 
 
-def interactionView(root: SemanticNode, includeBackground: bool) -> SemanticNode:
+def interaction_view(root: SemanticNode, include_background: bool) -> SemanticNode:
     """Select the visible interaction scope from the annotated semantic tree.
 
     Args:
         root: Root of the requested semantic view; native bindings remain separate.
     """
     node = root
-    if not includeBackground and root.get("blockedBy"):
+    if not include_background and root.get("blockedBy"):
 
-        def containsModal(child: NodeView) -> bool:
-            return child["ref"] in root["blockedBy"] or any(containsModal(c) for c in child["children"])
+        def contains_modal(child: NodeView) -> bool:
+            return child["ref"] in root["blockedBy"] or any(contains_modal(c) for c in child["children"])
 
-        children = [child for child in root["children"] if containsModal(child)]
+        children = [child for child in root["children"] if contains_modal(child)]
         if children and len(children) != len(root["children"]):
             node = {
                 **root,
@@ -193,4 +193,4 @@ def interactionView(root: SemanticNode, includeBackground: bool) -> SemanticNode
             }
             node.pop("childrenRead", None)
             node.pop("childCount", None)
-    return {**node, "children": [interactionView(c, includeBackground) for c in node["children"]]}
+    return {**node, "children": [interaction_view(c, include_background) for c in node["children"]]}

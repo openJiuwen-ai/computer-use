@@ -1,14 +1,16 @@
 "Host delivery callbacks; these records do not execute computer operations."
 
+# Private variables hold mutable session state.
+# pylint: disable-next=invalid-name
 _action_handler = None
 
 
-def setActionHandler(handler):
+def set_action_handler(handler):
     global _action_handler
     _action_handler = handler
 
 
-def actionCompleted(receipt):
+def action_completed(receipt):
     try:
         if _action_handler:
             _action_handler(receipt)
@@ -26,24 +28,25 @@ def actionCompleted(receipt):
         ) from error
 
 
+# pylint: disable-next=invalid-name
 _observation_handler = None
 
 
-def setObservationHandler(handler):
+def set_observation_handler(handler):
     global _observation_handler
     _observation_handler = handler
 
 
-def observationCompleted(observation):
+def observation_completed(observation):
     if _observation_handler:
         _observation_handler(dict(kind="observed", observation=observation))
 
 
-def observationsInvalidated(source):
+def observations_invalidated(source):
     if _observation_handler:
         _observation_handler(dict(kind="invalidate", source=source))
 
 
-def pendingObservationsDiscarded(source):
+def pending_observations_discarded(source):
     if _observation_handler:
         _observation_handler(dict(kind="discard-pending", source=source))

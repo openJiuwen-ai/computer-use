@@ -2,25 +2,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.formatting import jsonString, numberString
+from computer_use.interaction.read.presentation.formatting import json_string, number_string
 
 if TYPE_CHECKING:
     from typing import Any, Mapping
 
 
-def pngSummary(width: int, height: int, bytes: int) -> str:
+def png_summary(width: int, height: int, image_bytes: int) -> str:
     return (
         f"PNG image ("
-        f"{numberString(width)}"
+        f"{number_string(width)}"
         f"x"
-        f"{numberString(height)}"
+        f"{number_string(height)}"
         f" px; "
-        f"{numberString(bytes)}"
+        f"{number_string(image_bytes)}"
         f" bytes; use printImage(...) to display)"
     )
 
 
-def windowStateNotes(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
+def window_state_notes(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
     "Sample facts and conditional guidance; never a pixel freshness verdict."
     state = metadata.get("windowState") if metadata is not None else None
     if state is None:
@@ -42,17 +42,17 @@ def windowStateNotes(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
     return tuple(notes)
 
 
-def windowStateSummary(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
-    notes = windowStateNotes(metadata)
+def window_state_summary(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
+    notes = window_state_notes(metadata)
     return notes[:1] + (
         ("Off-screen window or background owner; pixels may lag accessibility.",) if len(notes) > 1 else ()
     )
 
 
-def renderImageCaption(width: int, height: int, facts: Mapping[str, Any]) -> str:
+def render_image_caption(width: int, height: int, facts: Mapping[str, Any]) -> str:
     return (
         _base_caption(width, height, facts)
-        + "".join("\nImage note: " + jsonString(reason) for reason in facts.get("stopReasons", ()))
+        + "".join("\nImage note: " + json_string(reason) for reason in facts.get("stopReasons", ()))
         + _visual_text(facts.get("visualText"))
     )
 
@@ -65,10 +65,11 @@ def _visual_text(visual: Mapping[str, Any] | None) -> str:
         return "\nVisual text (Windows OCR): unavailable. " + visual.get("reason", "")
     lines = [
         "\nVisual text (Windows OCR, " + str(visual["language"]) + "): recognized text and image-pixel rectangles "
-        "(x, y, width, height). These are visual hints, not UIA elements or proof of clickability; recognition may be wrong."
+        "(x, y, width, height). These are visual hints, not UIA elements or proof of clickability; "
+        "recognition may be wrong."
     ]
     lines.extend(
-        "\t" + jsonString(line["text"]) + " " + str(tuple(line["rect"][k] for k in ("x", "y", "width", "height")))
+        "\t" + json_string(line["text"]) + " " + str(tuple(line["rect"][k] for k in ("x", "y", "width", "height")))
         for line in visual["lines"]
     )
     if visual["truncated"] or visual["status"] == "partial":
@@ -82,7 +83,7 @@ def _base_caption(width: int, height: int, facts: Mapping[str, Any]) -> str:
     Args:
         facts: Native evidence used by the stage; observation is not input authority.
     """
-    size = numberString(width) + "x" + numberString(height)
+    size = number_string(width) + "x" + number_string(height)
     kind = facts["kind"]
     if kind == "unknown":
         return f"Image: {size} px; source unknown; do not infer App.click coordinates."

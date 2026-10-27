@@ -14,6 +14,8 @@ class DisplayReferences:
 
     def __init__(self, session: str, limit: int = 16384) -> None:
         self.session = session
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(limit) is not int or limit < 1:
             raise ValueError("Invalid display reference capacity")
         self._refs, self._next, self._limit = OrderedDict(), 0, limit

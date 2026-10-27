@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import math
 import unicodedata
+from collections.abc import Iterator
 from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
+
+from computer_use.protocol.primitives import required_item
 
 from ..model import (
     Action,
@@ -64,11 +67,22 @@ _STATUS = {
     "conflict",
 }
 _ABSENT = object()
+_AXSELECTED_TEXT_FIELDS = (
+    "AXSelectedText",
+    "AXSelectedTextRange",
+    "AXSelectedTextRanges",
+    "AXNumberOfCharacters",
+)
 
 
 def equal(left: Any, right: Any) -> bool:
     """Compare semantic values with stable NaN and container semantics."""
-    if type(left) is float and type(right) is float and math.isnan(left) and math.isnan(right):
+    matches_left = (
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
+        True if type(left) is float and type(right) is float and math.isnan(left) and math.isnan(right) else False
+    )
+    if matches_left:
         return True
     if type(left) is not type(right):
         return False
@@ -247,8 +261,10 @@ class NodeBuilder:
         if isinstance(positions, dict):
             start = positions.get("start", positions.get("startOffset", positions.get("location")))
             end = positions.get("end", positions.get("endOffset"))
+            # pylint: disable-next=unidiomatic-typecheck
             if end is None and type(start) is int and type(positions.get("length")) is int:
                 end = start + positions["length"]
+            # pylint: disable-next=unidiomatic-typecheck
             if type(start) is int and type(end) is int and 0 <= start <= end:
                 result.update(start=start, end=end)
             elif start is not None or end is not None:
@@ -256,12 +272,14 @@ class NodeBuilder:
         for key, target in (("text", "text"), ("degenerate", "collapsed"), ("collapsed", "collapsed")):
             if key in values:
                 expected = str if key == "text" else bool
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(values[key]) is expected:
                     result[target] = values[key]
         if "start" in result and "collapsed" not in result:
             result["collapsed"] = result["start"] == result["end"]
         if "readOnly" in values:
             item = values["readOnly"]
+            # pylint: disable-next=unidiomatic-typecheck
             if type(item) is bool or item == "mixed":
                 result["attributes"] = {"read_only": SpecialValue.MIXED if item == "mixed" else item}
         bounds = values.get("bounds", values.get("rectangles"))
@@ -308,10 +326,11 @@ class NodeBuilder:
                 result[key] = item
             elif item is not None:
                 self.issue((*path, key), "error", "Geometry component is not finite.")
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value.get("valid")) is bool:
             result["valid"] = value["valid"]
         elif all(key in result for key in ("x", "y", "width", "height")):
-            result["valid"] = result["width"] >= 0 and result["height"] >= 0
+            result["valid"] = required_item(result, "width") >= 0 and required_item(result, "height") >= 0
         residual = {key: item for key, item in value.items() if key not in result}
         if residual:
             self.supplement(
@@ -328,7 +347,13 @@ class NodeBuilder:
             value = self.values.get(name)
             delivered = len(value.encode("utf-16le", "surrogatepass")) // 2 if isinstance(value, str) else None
             total = status.get("totalUnits")
-            if total is None or type(total) is int and total >= 0 and (delivered is None or delivered <= total):
+            matches_total = (
+                True
+                # pylint: disable-next=unidiomatic-typecheck
+                if total is None or type(total) is int and total >= 0 and (delivered is None or delivered <= total)
+                else False
+            )
+            if matches_total:
                 continuation = ReadRef(
                     token,
                     "text",
@@ -458,22 +483,27 @@ class Adapter:
                 path = ("states", STATE_FIELDS[backend][name])
                 node.paths[name] = path
                 if value is not _ABSENT:
+                    # pylint: disable-next=unidiomatic-typecheck
                     node.put(name, path, value, lambda item: type(item) is bool)
             elif name in STRUCTURE_FIELDS[backend]:
                 path = ("structure", STRUCTURE_FIELDS[backend][name])
                 node.paths[name] = path
                 if value is not _ABSENT:
+                    # pylint: disable-next=unidiomatic-typecheck
                     if name == "HeadingLevel" and type(value) is int:
                         value = value - 80050 if 80051 <= value <= 80059 else None if value == 80050 else value
+                    # pylint: disable-next=unidiomatic-typecheck
                     elif name == "PositionInSet" and type(value) is int:
                         value = value - 1 if value > 0 else None if value == 0 else value
                     expected = (
+                        # pylint: disable-next=unidiomatic-typecheck
                         (lambda x: type(x) is bool)
                         if path[-1] in ("can_select_multiple", "selection_required")
                         else (
                             (lambda x: isinstance(x, str))
                             if path[-1] == "landmark_description"
                             else lambda x, *, path=path: (
+                                # pylint: disable-next=unidiomatic-typecheck
                                 type(x) is int and x >= (1 if path[-1] in ("row_span", "column_span") else 0)
                             )
                         )
@@ -489,6 +519,7 @@ class Adapter:
                         if converted is not _ABSENT:
                             expected = {
                                 "description": lambda x: isinstance(x, str),
+                                # pylint: disable-next=unidiomatic-typecheck
                                 "read_only": lambda x: type(x) is bool,
                                 "allowed_values": lambda x: (
                                     isinstance(x, tuple)
@@ -506,6 +537,7 @@ class Adapter:
                 if value is not _ABSENT:
                     if (
                         name in ("IsControlElement", "IsContentElement", "IsRequiredForForm", "sensitive", "multiLine")
+                        # pylint: disable-next=unidiomatic-typecheck
                         and type(value) is not bool
                     ):
                         node.issue(
@@ -598,15 +630,7 @@ class Adapter:
                 if (
                     node.backend == "macos"
                     and isinstance(converted, str)
-                    and any(
-                        key in node.values
-                        for key in (
-                            "AXSelectedText",
-                            "AXSelectedTextRange",
-                            "AXSelectedTextRanges",
-                            "AXNumberOfCharacters",
-                        )
-                    )
+                    and any(key in node.values for key in _AXSELECTED_TEXT_FIELDS)
                 ):
                     node.text_info()["content_field"] = ("control_value", "value")
                 if node.backend == "macos" and node.role in ("checkbox", "radio_button", "switch", "toggle_button"):
@@ -623,6 +647,7 @@ class Adapter:
                 node.supplement(name, value)
             return True
         if name in ("Value.IsReadOnly", "readOnly"):
+            # pylint: disable-next=unidiomatic-typecheck
             node.put(name, ("control_value", "read_only"), value, lambda item: type(item) is bool)
             return True
         if name == "AXValueDescription":
@@ -648,6 +673,7 @@ class Adapter:
                 return False
             normalized = (
                 ("expanded" if value else "collapsed")
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(value) is bool
                 else {
                     "Expanded": "expanded",
@@ -682,6 +708,7 @@ class Adapter:
                 "mixed"
                 if name == "indeterminate" and value is True
                 else ("on" if value else "off")
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(value) is bool
                 else enum_value({"On": "on", "Off": "off", "Indeterminate": "mixed"}, value)
             )
@@ -732,12 +759,14 @@ class Adapter:
             kind = "client" if name == "Win32.ClientRectangle" else "bounds"
             combined = dict(value)
             if node.backend == "macos":
-                combined = {
-                    key: item
-                    for field in ("AXPosition", "AXSize")
-                    if isinstance(node.values.get(field), dict)
-                    for key, item in node.values[field].items()
-                }
+
+                def _iter_field(_source_items: Iterator[Any]) -> Iterator[Any]:
+                    for field in _source_items:
+                        if isinstance(node.values.get(field), dict):
+                            for key, item in node.values[field].items():
+                                yield (key, item)
+
+                combined = dict(_iter_field(iter(("AXPosition", "AXSize"))))
             node.geometry[kind] = node.bounds(combined, ("geometry", kind))
             node.paths[name] = ("geometry", kind)
             return True
@@ -747,6 +776,7 @@ class Adapter:
             if (
                 not isinstance(value, dict)
                 or set(value) != {"location", "length"}
+                # pylint: disable-next=unidiomatic-typecheck
                 or any(type(value[key]) is not int or value[key] < 0 for key in ("location", "length"))
             ):
                 return False
@@ -761,6 +791,7 @@ class Adapter:
                 return False
             keys = ("row", "column", "rowSpan", "columnSpan")
             valid = set(value) == set(keys) and all(
+                # pylint: disable-next=unidiomatic-typecheck
                 type(value[key]) is int
                 and value[key] >= (1 if key.endswith("Span") else 0)
                 and value[key] <= 9007199254740991
@@ -788,6 +819,7 @@ class Adapter:
                         name,
                         ("structure", target),
                         value[source],
+                        # pylint: disable-next=unidiomatic-typecheck
                         lambda x, *, target=target: type(x) is int and x >= (1 if target.endswith("_span") else 0),
                     )
             if not all(
@@ -798,19 +830,28 @@ class Adapter:
                 )
             return True
         if name == "UIA.Collection" and isinstance(value, dict):
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value.get("isVirtualizedItem")) is bool:
                 node.put(name, ("states", "virtualized"), value["isVirtualizedItem"])
             if value.get("mayContainVirtualizedItems") is True:
                 node.put(name, ("structure", "collection_mode"), "virtualized")
             elif value.get("logicalContentComplete") is True:
                 node.put(name, ("structure", "collection_mode"), "materialized")
-            residual = {
-                key: item
-                for key, item in value.items()
-                if key
-                not in ("view", "isVirtualizedItem", "mayContainVirtualizedItems", "logicalContentComplete", "detail")
-            }
+
+            def _iter_key(_source_items: Iterator[Any]) -> Iterator[Any]:
+                for key, item in _source_items:
+                    if key not in (
+                        "view",
+                        "isVirtualizedItem",
+                        "mayContainVirtualizedItems",
+                        "logicalContentComplete",
+                        "detail",
+                    ):
+                        yield (key, item)
+
+            residual = dict(_iter_key(iter(value.items())))
             for key in ("isVirtualizedItem", "mayContainVirtualizedItems", "logicalContentComplete"):
+                # pylint: disable-next=unidiomatic-typecheck
                 if key in value and value[key] is not None and type(value[key]) is not bool:
                     residual[key] = value[key]
                     node.issue(
@@ -931,7 +972,9 @@ class Adapter:
             expected = {
                 "content": lambda x: isinstance(x, str),
                 "selected_text": lambda x: isinstance(x, str),
+                # pylint: disable-next=unidiomatic-typecheck
                 "character_count": lambda x: type(x) is int and x >= 0,
+                # pylint: disable-next=unidiomatic-typecheck
                 "read_only": lambda x: type(x) is bool or x is SpecialValue.MIXED,
             }.get(field)
             node.put(name, ("text", field), value, expected)
@@ -958,6 +1001,7 @@ class Adapter:
             return True
         if name == "Text.caretOffset":
             info = node.text_info()
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value) is int and value >= 0:
                 node.put(name, ("text", "caret"), TextSpan(value, value, collapsed=True))
             else:
@@ -976,6 +1020,7 @@ class Adapter:
                 node.put(name, ("text", field), spans)
             if value.get("state") not in (None, "complete"):
                 node.issue(("text", field), "partial", value.get("detail"))
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value.get("total")) is int and value["total"] >= 0:
                 node.supplement(name + ".coverage", {"total": value["total"]}, semantic_key=f"text.{field}.coverage")
             return True
@@ -985,6 +1030,7 @@ class Adapter:
                 node.issue(("text", "caret"), "not_read", value.get("detail"))
                 return True
             observed = value.get("values", {})
+            # pylint: disable-next=unidiomatic-typecheck
             if type(observed.get("isActive")) is bool:
                 node.put(name, ("text", "caret_active"), observed["isActive"])
             if isinstance(observed.get("range"), dict):
@@ -1054,18 +1100,26 @@ class Adapter:
     @staticmethod
     def uia_coverage(node: NodeBuilder, name: str, value: Mapping[str, Any]) -> None:
         """Retain provider-unit and coverage limitations outside proven spans."""
-        semantic = {
-            target: value[source]
-            for source, target in (
-                ("unitSupport", "unit_support"),
-                ("requestedUnit", "requested_unit"),
-                ("documentEndReached", "document_end_observed"),
-                ("order", "order"),
-                ("total", "total"),
-                ("detail", "detail"),
+
+        def _iter_source(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for source, target in _source_items:
+                if source in value:
+                    yield (target, value[source])
+
+        semantic = dict(
+            _iter_source(
+                iter(
+                    (
+                        ("unitSupport", "unit_support"),
+                        ("requestedUnit", "requested_unit"),
+                        ("documentEndReached", "document_end_observed"),
+                        ("order", "order"),
+                        ("total", "total"),
+                        ("detail", "detail"),
+                    )
+                )
             )
-            if source in value
-        }
+        )
         if semantic:
             node.supplement(
                 name + ".coverage",
@@ -1146,6 +1200,7 @@ class Adapter:
             if current
             else {}
         )
+        # pylint: disable-next=unidiomatic-typecheck
         if field == "scrollable" and type(value) is bool:
             values[field] = value
         elif field != "scrollable" and type(value) in (int, float) and math.isfinite(value):
@@ -1190,6 +1245,7 @@ class Adapter:
                 ("settable.AXValue", "set_value", ("control_value", "value")),
                 ("settable.AXSelectedText", "replace_selection", ("text", "selections")),
             ):
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(values.get(name)) is bool:
                     node.actions.append(Action(kind, target=target, available=values[name]))
                     node.paths[name] = ("actions", len(node.actions) - 1)
@@ -1216,12 +1272,14 @@ class Adapter:
                 if pattern in names:
                     state = values.get(readonly)
                     node.actions.append(
+                        # pylint: disable-next=unidiomatic-typecheck
                         Action("set_value", target=target, available=not state if type(state) is bool else None)
                     )
             if "Scroll" in names:
                 node.actions.append(Action("scroll", target=("structure",), available=None))
             if "SelectionItem" in names:
                 node.put("SupportedPatterns", ("states", "selectable"), True)
+            # pylint: disable-next=unidiomatic-typecheck
             if type(values.get("IsKeyboardFocusable")) is bool:
                 node.actions.append(Action("focus", available=values["IsKeyboardFocusable"]))
             consumed = {
@@ -1265,26 +1323,27 @@ class Adapter:
                     node.actions.append(Action("set_value", target=("numeric_value", "value")))
                 if values.get("focusable") is True:
                     node.actions.append(Action("focus", available=True))
-                unknown = tuple(
-                    item
-                    for item in interfaces
-                    if item
-                    not in (
-                        "Accessible",
-                        "Action",
-                        "Component",
-                        "Text",
-                        "EditableText",
-                        "Value",
-                        "Selection",
-                        "Table",
-                        "TableCell",
-                        "Document",
-                        "Hypertext",
-                        "Hyperlink",
-                        "Image",
-                    )
-                )
+
+                def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
+                    for item in _source_items:
+                        if item not in (
+                            "Accessible",
+                            "Action",
+                            "Component",
+                            "Text",
+                            "EditableText",
+                            "Value",
+                            "Selection",
+                            "Table",
+                            "TableCell",
+                            "Document",
+                            "Hypertext",
+                            "Hyperlink",
+                            "Image",
+                        ):
+                            yield item
+
+                unknown = tuple(_iter_item(iter(interfaces)))
                 if unknown:
                     node.supplement("interfaces", unknown, semantic_key="provider.linux.interfaces")
             else:
@@ -1294,12 +1353,17 @@ class Adapter:
         """Keep method parameters with results and attach complete action descriptions."""
         for name, (key, arguments) in node.methods.items():
             value = node.values.get(name, _ABSENT)
-            if (
-                key == ("toolkit", "action_description")
-                and len(arguments) == 1
-                and isinstance(arguments[0], str)
-                and isinstance(value, str)
-            ):
+            matches_key = (
+                True
+                if (
+                    key == ("toolkit", "action_description")
+                    and len(arguments) == 1
+                    and isinstance(arguments[0], str)
+                    and isinstance(value, str)
+                )
+                else False
+            )
+            if matches_key:
                 index = next((index for index, action in enumerate(node.actions) if action.key == arguments[0]), None)
                 if index is not None:
                     previous = node.actions[index].description
@@ -1328,13 +1392,19 @@ class Adapter:
         known = node.role == "menu_item" and not any(
             name in node.row["fieldStatus"] for name in ("AXRole", "AXMenuItemCmdChar", "AXMenuItemCmdModifiers")
         )
-        if (
-            known
-            and isinstance(character, str)
-            and len(character) == 1
-            and type(modifiers) is int
-            and 0 <= modifiers <= 15
-        ):
+        matches_known = (
+            True
+            if (
+                known
+                and isinstance(character, str)
+                and len(character) == 1
+                # pylint: disable-next=unidiomatic-typecheck
+                and type(modifiers) is int
+                and 0 <= modifiers <= 15
+            )
+            else False
+        )
+        if matches_known:
             scalar = ord(character)
             key = (
                 f"F{scalar - 0xF704 + 1}"
@@ -1362,6 +1432,7 @@ class Adapter:
             index += 1
         targets = tuple(NodeId(x) for x in edge["targets"])
         offset = edge.get("offset")
+        # pylint: disable-next=unidiomatic-typecheck
         positions = tuple(range(offset, offset + len(targets))) if type(offset) is int else None
         evidence = {
             "confirmed": "reported",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-def formatFailure(failure: Mapping[str, Any], method: str | None = None) -> str:
+def format_failure(failure: Mapping[str, Any], method: str | None = None) -> str:
     prefix = f"{method} [{failure['target']}]: " if method else ""
     effect = {"none": "no action dispatched by this command", "partial": "input may have partially executed"}.get(
         failure["effect"], "the command may have changed UI state"
@@ -17,7 +17,7 @@ class ComputerUseError(Exception):
     """Operation failure with structured effects and recovery guidance."""
 
     def __init__(self, failure: Mapping[str, Any], *, method: str | None = None, cause: BaseException | None = None):
-        super().__init__(formatFailure(failure, method))
+        super().__init__(format_failure(failure, method))
         self.name = "ComputerUseError"
         self.code = failure["code"]
         self.effect = failure["effect"]
@@ -29,7 +29,7 @@ class ComputerUseError(Exception):
             self.__cause__ = cause
 
 
-def publicErrorCode(code: str) -> str:
+def public_error_code(code: str) -> str:
     if code in {
         "stale_target",
         "snapshot_expired",

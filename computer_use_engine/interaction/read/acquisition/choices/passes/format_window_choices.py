@@ -30,6 +30,8 @@ def create(*, services: NativeAppReader) -> Callable[[WindowChoiceDraft, Control
 
         request, overview, current = value.request, value.overview, value.current
         if request.selection is not None:
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
             services._selection(
                 request.application,
                 request.name,

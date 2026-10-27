@@ -121,6 +121,8 @@ class NativeFocusDiscovery:
             yield obj
             count = self._call("get_child_count", obj)
             require(
+                # Exact types preserve scalar validation and identity contracts.
+                # pylint: disable-next=unidiomatic-typecheck
                 type(count) is int and 0 <= count <= 2147483647,
                 "The native focused-object search is incomplete.",
                 "input_unavailable",

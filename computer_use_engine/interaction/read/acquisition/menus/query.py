@@ -16,7 +16,7 @@ from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.native.contracts import Binding
 from computer_use.native.query.graph import NativeGraph
 from computer_use.native.query.path import TargetQuery
-from computer_use.native.semantics import UNKNOWN, roleName
+from computer_use.native.semantics import UNKNOWN, role_name
 
 if TYPE_CHECKING:
     from typing import NoReturn, Sequence
@@ -25,7 +25,8 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
     from computer_use.native.port import NativePort
     from computer_use.pipeline.core import Control
-    from computer_use.protocol.records import FactNode, NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import FactNode
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 def menu_failure(code: str, detail: str) -> ComputerUseError:
@@ -73,7 +74,7 @@ class MenuQuery(TargetQuery):
         role = await self._field(token, "role")
         if role is UNKNOWN or not isinstance(role, str) or not role:
             self.fail("observation_incomplete", "A menu element has an unread native role.")
-        return roleName(self.platform, role)
+        return role_name(self.platform, role)
 
     async def resolve_menu(self, path: Sequence[str], *, _control: Control | None = None) -> Binding:
         from computer_use.interaction.read.acquisition.menus.model import MenuPathRequest
@@ -134,7 +135,7 @@ class WindowMenus(NativeGraph):
                 raw = await self._field(token, "role")
                 if raw is UNKNOWN or not isinstance(raw, str) or not raw:
                     self.fail("observation_incomplete", "A window branch has an unread native role.")
-                role = roleName(self.platform, raw)
+                role = role_name(self.platform, raw)
                 if token != self.root.node and role in ("window", "sheet"):
                     continue
                 if role == "menuBar":
@@ -144,13 +145,18 @@ class WindowMenus(NativeGraph):
                 # Virtual containers can contain millions of children. Do not
                 # let an unfinishable branch consume all other menu discovery.
                 # It remains explicitly unread, not an inferred menu-free area.
-                if (
-                    edge.get("state") == "partial"
-                    and edge.get("certainty") == "confirmed"
-                    and edge.get("offset", 0) == 0
-                    and edge.get("cursor") is not None
-                    and edge.get("total", 0) > self.max_nodes - len(self.nodes)
-                ):
+                matches_edge = (
+                    True
+                    if (
+                        edge.get("state") == "partial"
+                        and edge.get("certainty") == "confirmed"
+                        and edge.get("offset", 0) == 0
+                        and edge.get("cursor") is not None
+                        and edge.get("total", 0) > self.max_nodes - len(self.nodes)
+                    )
+                    else False
+                )
+                if matches_edge:
                     gaps.append(
                         "A window branch has more children than the menu-discovery budget; its subtree is unread."
                     )

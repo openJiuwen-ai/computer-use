@@ -4,6 +4,7 @@ import asyncio
 import atexit
 import codecs
 import json
+import logging
 import math
 import os
 import subprocess
@@ -12,22 +13,30 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from computer_use.diagnostics import diagnostic, localFailure, sdkVersion
+from computer_use.diagnostics import SDK_VERSION, diagnostic, local_failure
 from computer_use.errors import ComputerUseError
-from computer_use.native.preview import getPreviewHandler, readPreviews
-from computer_use.paths import nativeDriver
-from computer_use.protocol.captures import captureMetadata
+from computer_use.native.preview import get_preview_handler, read_previews
+from computer_use.paths import native_driver
+from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.execution import (
-    decodeBegin,
-    decodeCaptureRequest,
-    decodeExecutionResult,
-    decodeInspectQuery,
-    decodeUnitCommand,
+    decode_begin,
+    decode_capture_request,
+    decode_execution_result,
+    decode_inspect_query,
+    decode_unit_command,
 )
-from computer_use.protocol.primitives import finite, record, safeInteger, trim
-from computer_use.protocol.session import decodeFailure, decodeHello, desktopMode, failureError, nativeProtocolVersion
+from computer_use.protocol.primitives import finite, record, safe_integer, trim
+from computer_use.protocol.session import (
+    NATIVE_PROTOCOL_VERSION,
+    decode_failure,
+    decode_hello,
+    desktop_mode,
+    failure_error,
+)
 
 requestCleanupGraceMs, driverTerminationGraceMs = 750, 1000
+
+_LOG = logging.getLogger(__name__)
 
 
 def _json(value):
@@ -44,19 +53,21 @@ def _now():
 
 
 class Connection:
-    def __init__(self, invalidate, driver=None, *, protocol_version=nativeProtocolVersion):
-        if type(protocol_version) is not int or protocol_version != nativeProtocolVersion:
+    def __init__(self, invalidate, driver=None, *, protocol_version=NATIVE_PROTOCOL_VERSION):
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(protocol_version) is not int or protocol_version != NATIVE_PROTOCOL_VERSION:
             raise ValueError("Unsupported native protocol version")
         self.protocol_version = protocol_version
         self.invalidate, self.driver = invalidate, driver
         self._child = self._pending = self._hello = self._handshake = self._retiring = None
         self._buffer = b""
-        self._requesting = self._waitingForExit = False
-        self._nextId, self._generation = 1, 0
+        self._requesting = self._waiting_for_exit = False
+        self._next_id, self._generation = 1, 0
         self._diagnostic = ""
         self._traces, self._readers = {}, set()
-        self._previewTransport = None
-        self._childUsesEOF = False
+        self._preview_transport = None
+        self._child_uses_eof = False
 
     @property
     def session(self):
@@ -71,7 +82,7 @@ class Connection:
         return frozenset(self._hello["capabilities"]) if self._hello is not None else frozenset()
 
     @property
-    def sessionIdentity(self):
+    def session_identity(self):
         "An internal lease cannot migrate across process retirement/reconnect."
         return (self._generation, self.session) if self._hello is not None else None
 
@@ -85,27 +96,27 @@ class Connection:
         if self._child is not None:
             return
         if self.driver is None and sys.platform not in ("darwin", "linux", "win32"):
-            raise localFailure(
+            raise local_failure(
                 f"platform {sys.platform} is not implemented",
                 "run the MCP server on a supported system with its matching backend",
                 "mode_unsupported",
                 "connection",
             )
-        driver = self.driver if self.driver is not None else nativeDriver()
+        driver = self.driver if self.driver is not None else native_driver()
         command = driver["command"]
         if self.driver is None and not Path(command).exists():
-            raise localFailure(
+            raise local_failure(
                 f"{sys.platform} driver missing",
                 "build the native driver on the MCP host, then read the App again",
                 "execution_failed",
                 "connection",
             )
-        self._buffer, self._diagnostic, self._nextId = b"", "", 1
+        self._buffer, self._diagnostic, self._next_id = b"", "", 1
         self._traces = {}
         windows = sys.platform == "win32"
         # Windows uses native stdio handles. The POSIX 3/4 descriptor bridge
         # and preview pipe are not part of its driver's transport contract.
-        preview = getPreviewHandler() if not windows else None
+        preview = get_preview_handler() if not windows else None
         read_fd = write_fd = -1
         lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
         if preview is not None:
@@ -145,18 +156,18 @@ class Connection:
             if write_fd >= 0:
                 os.close(write_fd)
         self._child = child
-        self._childUsesEOF = windows
+        self._child_uses_eof = windows
         if preview is not None:
             reader = asyncio.StreamReader()
             transport, _ = await asyncio.get_running_loop().connect_read_pipe(
                 lambda: asyncio.StreamReaderProtocol(reader), os.fdopen(read_fd, "rb", buffering=0)
             )
-            self._previewTransport = transport
-            self._track(readPreviews(reader, preview))
+            self._preview_transport = transport
+            self._track(read_previews(reader, preview))
         diagnostic(
             dict(
                 kind="connection",
-                sdkVersion=sdkVersion,
+                sdkVersion=SDK_VERSION,
                 platform=sys.platform,
                 desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "shared"),
                 executable=command,
@@ -174,16 +185,19 @@ class Connection:
             # TerminateProcess cannot run the driver's finally blocks. EOF
             # lets its reader cancel native work and release paired input.
             try:
-                if self._childUsesEOF:
+                if self._child_uses_eof:
                     child.stdin.close()
                 else:
                     child.terminate()
             except ProcessLookupError:
-                pass
+                _LOG.debug("Cancellation could not be delivered to the driver.", exc_info=True)
 
     async def _read_stdout(self, child):
         try:
-            while data := await child.stdout.read(65536):
+            while True:
+                data = await child.stdout.read(65536)
+                if not data:
+                    break
                 if self._child is child:
                     self._receive(data)
             if self._child is child:
@@ -219,7 +233,10 @@ class Connection:
             diagnostic(event)
 
         try:
-            while data := await child.stderr.read(65536):
+            while True:
+                data = await child.stderr.read(65536)
+                if not data:
+                    break
                 text = decoder.decode(data)
                 # Retired drivers still report cleanup. Their buffers/traces
                 # stay local and never alter a successor's failure context.
@@ -233,7 +250,7 @@ class Connection:
                     emit(buffer, partial=True)
                     buffer = ""
         except (OSError, ValueError):
-            pass
+            _LOG.debug("Cancellation could not be delivered to the driver.", exc_info=True)
         buffer += decoder.decode(b"", final=True)
         if buffer:
             emit(buffer, partial=True)
@@ -247,7 +264,7 @@ class Connection:
 
     async def request(self, method, params, options=None):
         if self._requesting:
-            raise localFailure("another system call is in progress", "await it before starting the next")
+            raise local_failure("another system call is in progress", "await it before starting the next")
         self._requesting = True
         try:
             return await self._request(method, params, options.get("timeoutMs") if options is not None else None)
@@ -263,10 +280,12 @@ class Connection:
             raise RuntimeError("driver input channel closed")
         self._child.stdin.write(_json(value).encode("utf-8"))
 
+    # API, protocol, and native binding names retain their established spelling.
+    # pylint: disable-next=invalid-name
     async def _negotiate(self, timeoutMs):
         if self._hello is not None:
             return
-        mode, loop = desktopMode(), asyncio.get_running_loop()
+        mode, loop = desktop_mode(), asyncio.get_running_loop()
         future = loop.create_future()
         timer = loop.call_later(
             timeoutMs / 1000, lambda: self.close(RuntimeError("protocol hello timed out; no system command was sent"))
@@ -279,37 +298,37 @@ class Connection:
 
     async def _request(self, method, params, budget):
         if method not in (None, "begin", "inspect", "execute", "finish", "capture"):
-            raise localFailure(
+            raise local_failure(
                 "unsupported native protocol-6 method", "use the native operation protocol", "invalid_request", method
             )
-        if self._pending is not None or self._waitingForExit:
-            raise localFailure("another system call is in progress", "await it before starting the next")
+        if self._pending is not None or self._waiting_for_exit:
+            raise local_failure("another system call is in progress", "await it before starting the next")
         if method == "begin":
             try:
-                params = decodeBegin(params)
+                params = decode_begin(params)
             except (TypeError, ValueError) as error:
-                raise localFailure(
+                raise local_failure(
                     str(error), "correct the native operation intent", "invalid_request", method
                 ) from error
         if method == "inspect":
             try:
-                params = {**params, "query": decodeInspectQuery(params.get("query"))}
+                params = {**params, "query": decode_inspect_query(params.get("query"))}
             except (TypeError, ValueError) as error:
-                raise localFailure(
+                raise local_failure(
                     str(error), "correct the native inspection request", "invalid_request", method
                 ) from error
         if method == "capture":
             try:
-                params = decodeCaptureRequest(params)
+                params = decode_capture_request(params)
             except (TypeError, ValueError) as error:
-                raise localFailure(
+                raise local_failure(
                     str(error), "correct the native capture scope or budget", "invalid_request", method
                 ) from error
         if method == "execute":
             try:
-                params = {**params, "command": decodeUnitCommand(params.get("command"))}
+                params = {**params, "command": decode_unit_command(params.get("command"))}
             except (TypeError, ValueError) as error:
-                raise localFailure(str(error), "correct the native unit command", "invalid_request", method) from error
+                raise local_failure(str(error), "correct the native unit command", "invalid_request", method) from error
         deadline = _now() + max(
             1,
             min(
@@ -321,7 +340,7 @@ class Connection:
         def remaining():
             value = math.ceil(deadline - _now())
             if value < 1:
-                raise localFailure(
+                raise local_failure(
                     "request budget exhausted before dispatch; no system command was sent",
                     "read the target again when ready",
                     "execution_failed",
@@ -330,29 +349,29 @@ class Connection:
             return value
 
         if self._retiring is not None:
-            self._waitingForExit = True
+            self._waiting_for_exit = True
             generation = self._generation
             try:
                 try:
                     await asyncio.wait_for(asyncio.shield(self._retiring), remaining() / 1000)
                 except TimeoutError:
-                    raise localFailure(
+                    raise local_failure(
                         "previous driver is still stopping",
                         "wait for it to exit before reading the app again; no replacement driver was started",
                         "execution_failed",
                         "connection",
                     ) from None
                 if generation != self._generation:
-                    raise localFailure(
+                    raise local_failure(
                         "connection closed before the request started",
                         "read the app again when ready",
                         "execution_failed",
                         "connection",
                     )
             finally:
-                self._waitingForExit = False
+                self._waiting_for_exit = False
         try:
-            desktopMode()
+            desktop_mode()
             remaining()
             await self._connect()
             await self._negotiate(remaining())
@@ -381,8 +400,8 @@ class Connection:
         if method is None:
             remaining()
             return dict(self._hello)
-        if not safeInteger(self._nextId):
-            error = localFailure(
+        if not safe_integer(self._next_id):
+            error = local_failure(
                 "request id space exhausted", "read the app in a new session", "execution_failed", method
             )
             self.close(error)
@@ -403,7 +422,7 @@ class Connection:
             else "nativeOperations"
         )
         if capability is not None and capability not in self._hello["capabilities"]:
-            raise localFailure(
+            raise local_failure(
                 f"backend does not provide {capability} in this desktop session",
                 ("use supported native elements, or connect a desktop with the required capture/input capabilities"),
                 "mode_unsupported",
@@ -414,61 +433,82 @@ class Connection:
             and "followRelations" in params.get("query", {})
             and "nativeFollowRelations" not in self._hello["capabilities"]
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeFollowRelations",
                 "rebuild the driver before requesting additional relationship collection",
                 "mode_unsupported",
                 method,
             )
         if method == "capture" and "nativeCaptureKinds" not in self._hello["capabilities"]:
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeCaptureKinds",
                 "rebuild the driver before using explicit native capture scopes",
                 "mode_unsupported",
                 method,
             )
-        if (
-            method == "begin" and params.get("mode") == "write" or method == "execute"
-        ) and "nativeBoundContracts" not in self._hello["capabilities"]:
-            raise localFailure(
+        missing_bound_contracts = (
+            True
+            if (method == "begin" and params.get("mode") == "write" or method == "execute")
+            and "nativeBoundContracts" not in self._hello["capabilities"]
+            else False
+        )
+        if missing_bound_contracts:
+            raise local_failure(
                 "backend does not provide nativeBoundContracts",
                 "rebuild the native driver before using the contract-bound execution protocol",
                 "mode_unsupported",
                 method,
             )
-        if (
-            method == "begin"
-            and params.get("mode") == "write"
-            or method == "inspect"
-            and params.get("query", {}).get("kind") in ("inputContext", "launch")
-        ) and "nativeUnitReadinessV2" not in self._hello["capabilities"]:
-            raise localFailure(
+        missing_unit_readiness = (
+            True
+            if (
+                method == "begin"
+                and params.get("mode") == "write"
+                or method == "inspect"
+                and params.get("query", {}).get("kind") in ("inputContext", "launch")
+            )
+            and "nativeUnitReadinessV2" not in self._hello["capabilities"]
+            else False
+        )
+        if missing_unit_readiness:
+            raise local_failure(
                 "backend does not provide nativeUnitReadinessV2",
                 "rebuild the driver before using per-unit execution readiness",
                 "mode_unsupported",
                 method,
             )
-        if (
-            method == "begin"
-            and params.get("intent", {}).get("kind") == "launch"
-            or method == "inspect"
-            and params.get("query", {}).get("kind") == "launch"
-            or method == "execute"
-            and params.get("command", {}).get("kind") == "launch_application"
-        ) and "nativeLaunch" not in self._hello["capabilities"]:
-            raise localFailure(
+        missing_launch_support = (
+            True
+            if (
+                method == "begin"
+                and params.get("intent", {}).get("kind") == "launch"
+                or method == "inspect"
+                and params.get("query", {}).get("kind") == "launch"
+                or method == "execute"
+                and params.get("command", {}).get("kind") == "launch_application"
+            )
+            and "nativeLaunch" not in self._hello["capabilities"]
+            else False
+        )
+        if missing_launch_support:
+            raise local_failure(
                 "backend does not provide nativeLaunch",
                 "rebuild the native driver before launching through the execution pipeline",
                 "mode_unsupported",
                 method,
             )
-        if (
-            method == "begin"
-            and params.get("intent", {}).get("kind") in ("click", "openMenu")
-            and params.get("target", {}).get("capture") is None
-            and "nativeActionIntents" not in self._hello["capabilities"]
-        ):
-            raise localFailure(
+        missing_action_intents = (
+            True
+            if (
+                method == "begin"
+                and params.get("intent", {}).get("kind") in ("click", "openMenu")
+                and params.get("target", {}).get("capture") is None
+                and "nativeActionIntents" not in self._hello["capabilities"]
+            )
+            else False
+        )
+        if missing_action_intents:
+            raise local_failure(
                 "backend does not provide nativeActionIntents",
                 "update the native driver before using this execution route",
                 "mode_unsupported",
@@ -479,7 +519,7 @@ class Connection:
             and params.get("intent", {}).get("kind") in ("focus", "key")
             and "nativeKeyboardIntents" not in self._hello["capabilities"]
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeKeyboardIntents",
                 "update the native driver before preparing or sending keys",
                 "mode_unsupported",
@@ -490,20 +530,25 @@ class Connection:
             and params.get("intent", {}).get("kind") in ("insert", "paste")
             and "nativeTextInput" not in self._hello["capabilities"]
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeTextInput",
                 "update the native driver before inserting or pasting text",
                 "mode_unsupported",
                 method,
             )
-        if (
-            method == "begin"
-            and params.get("mode") == "write"
-            and params.get("target", {}).get("node") is None
-            and params.get("target", {}).get("surface") is not None
-            and "nativeWindowScope" not in self._hello["capabilities"]
-        ):
-            raise localFailure(
+        missing_window_scope = (
+            True
+            if (
+                method == "begin"
+                and params.get("mode") == "write"
+                and params.get("target", {}).get("node") is None
+                and params.get("target", {}).get("surface") is not None
+                and "nativeWindowScope" not in self._hello["capabilities"]
+            )
+            else False
+        )
+        if missing_window_scope:
+            raise local_failure(
                 "backend does not provide nativeWindowScope",
                 "update the driver before resolving a target inside a native operation",
                 "mode_unsupported",
@@ -514,19 +559,24 @@ class Connection:
             and params.get("query", {}).get("within")
             and "nativeWindowScope" not in self._hello["capabilities"]
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeWindowScope",
                 "update the driver before binding logical target constraints",
                 "mode_unsupported",
                 method,
             )
-        if (
-            method == "inspect"
-            and "actuator" in params.get("query", {})
-            and params["query"]["actuator"].get("relation") == "containedEditor"
-            and "nativeActuators" not in self._hello["capabilities"]
-        ):
-            raise localFailure(
+        missing_native_actuators = (
+            True
+            if (
+                method == "inspect"
+                and "actuator" in params.get("query", {})
+                and params["query"]["actuator"].get("relation") == "containedEditor"
+                and "nativeActuators" not in self._hello["capabilities"]
+            )
+            else False
+        )
+        if missing_native_actuators:
+            raise local_failure(
                 "backend does not provide nativeActuators",
                 "update the driver before selecting an internal editor",
                 "mode_unsupported",
@@ -537,7 +587,7 @@ class Connection:
             and params.get("query", {}).get("actuator", {}).get("relation") == "scrollPage"
             and "nativeScroll" not in self._hello["capabilities"]
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeScroll",
                 "update the driver before selecting native page scrolling",
                 "mode_unsupported",
@@ -548,7 +598,7 @@ class Connection:
             and params.get("command", {}).get("kind") == "native_scroll"
             and not {"nativeScroll", "nativeScrollPattern"} & set(self._hello["capabilities"])
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide native scrolling",
                 "update the driver before executing native scrolling",
                 "mode_unsupported",
@@ -559,7 +609,7 @@ class Connection:
             and params.get("query", {}).get("actuator", {}).get("relation") == "scrollPointer"
             and "nativeElementScroll" not in self._hello["capabilities"]
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeElementScroll",
                 "update the driver before selecting an element wheel route",
                 "mode_unsupported",
@@ -570,7 +620,7 @@ class Connection:
             and params.get("query", {}).get("actuator", {}).get("contentPath")
             and "nativeScrollContentPath" not in self._hello["capabilities"]
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeScrollContentPath",
                 "update the driver before selecting moving scroll content",
                 "mode_unsupported",
@@ -579,14 +629,14 @@ class Connection:
         if method == "begin" and params.get("mode") == "write" and params.get("target", {}).get("capture") is not None:
             capability = "nativeDesktopInput" if params["target"].get("surface") is None else "nativePointer"
             if capability not in self._hello["capabilities"]:
-                raise localFailure(
+                raise local_failure(
                     "backend does not provide " + capability,
                     "update the driver before using this observed input scope",
                     "mode_unsupported",
                     method,
                 )
-        id__value, trace_id = self._nextId, str(uuid.uuid4())
-        self._nextId += 1
+        id__value, trace_id = self._next_id, str(uuid.uuid4())
+        self._next_id += 1
         self._traces[id__value] = trace_id
         if len(self._traces) > 1024:
             self._traces.pop(next(iter(self._traces)))
@@ -634,7 +684,7 @@ class Connection:
             )
             grace = max(0, pending["startedAt"] + timeout_ms_local + requestCleanupGraceMs - _now())
 
-            def terminalTimeout():
+            def terminal_timeout():
                 if self._pending is pending:
                     self.close(
                         RuntimeError(
@@ -645,7 +695,7 @@ class Connection:
                         )
                     )
 
-            pending["timer"] = loop.call_later(grace / 1000, terminalTimeout)
+            pending["timer"] = loop.call_later(grace / 1000, terminal_timeout)
             self._cancel_pending(pending)
 
         pending["timer"] = loop.call_later(timeout_ms_local / 1000, timeout)
@@ -681,21 +731,21 @@ class Connection:
                 if line.startswith(b"\xef\xbb\xbf"):
                     raise ValueError("protocol: BOM is not allowed")
 
-                def invalidConstant(value):
+                def invalid_constant(value):
                     raise ValueError("protocol: invalid JSON constant " + value)
 
-                value = json.loads(line.decode("utf-8", errors="strict"), parse_constant=invalidConstant)
+                value = json.loads(line.decode("utf-8", errors="strict"), parse_constant=invalid_constant)
                 if not isinstance(value, dict):
                     raise ValueError("protocol: expected response object")
                 if self._handshake is not None:
                     if self._buffer:
                         raise ValueError("protocol: unsolicited data after hello")
-                    self._hello = decodeHello(value, desktopMode(), self.protocol_version)
+                    self._hello = decode_hello(value, desktop_mode(), self.protocol_version)
                     if (
                         os.environ.get("COMPUTER_USE_DEMO_FOREGROUND") == "1"
                         and "demoForeground" not in self._hello["capabilities"]
                     ):
-                        raise localFailure(
+                        raise local_failure(
                             "demoForeground is not supported by this native backend",
                             "rebuild the backend on the MCP host or disable demoForeground",
                             "mode_unsupported",
@@ -708,12 +758,17 @@ class Connection:
                         handshake["future"].set_result(None)
                     continue
                 response = record(value, ["version", "session", "id", "error" if "error" in value else "result"])
-                if (
-                    not finite(response["version"])
-                    or response["version"] != self.protocol_version
-                    or self._hello is None
-                    or response["session"] != self._hello["session"]
-                ):
+                invalid_finite = (
+                    True
+                    if (
+                        not finite(response["version"])
+                        or response["version"] != self.protocol_version
+                        or self._hello is None
+                        or response["session"] != self._hello["session"]
+                    )
+                    else False
+                )
+                if invalid_finite:
                     raise ValueError("protocol: response belongs to a different version or session")
                 pending = self._pending
                 if pending is None or not finite(response["id"]) or response["id"] != pending["id"]:
@@ -722,10 +777,10 @@ class Connection:
                     raise ValueError("protocol: unsolicited data after response")
                 result = error = failure = None
                 if "error" in response:
-                    failure = decodeFailure(response["error"])
-                    error = failureError(pending["method"], failure)
+                    failure = decode_failure(response["error"])
+                    error = failure_error(pending["method"], failure)
                 else:
-                    result = decodeExecutionResult(pending["method"], response["result"])
+                    result = decode_execution_result(pending["method"], response["result"])
                 desktop_capture = (
                     pending["method"] == "capture" and result is not None and result.get("kind") == "desktopCapture"
                 )
@@ -739,12 +794,12 @@ class Connection:
                 if desktop_capture and result is not None:
                     summary = {
                         **result,
-                        "screenshot": dict(source="desktop", **(captureMetadata(result["screenshot"]) or {}))
+                        "screenshot": dict(source="desktop", **(capture_metadata(result["screenshot"]) or {}))
                         if result["screenshot"] is not None
                         else None,
                     }
                 elif pending["method"] == "capture" and result is not None:
-                    summary = {**result, "image": dict(source="window", **(captureMetadata(result["image"]) or {}))}
+                    summary = {**result, "image": dict(source="window", **(capture_metadata(result["image"]) or {}))}
                 diagnostic(
                     dict(
                         kind="command_end",
@@ -773,7 +828,8 @@ class Connection:
         except Exception as error:
             self.close(error)
 
-    def _command_target(self, method, params):
+    @staticmethod
+    def _command_target(method, params):
         return dict(screen="desktop") if method == "capture" and params.get("kind") == "desktop" else None
 
     def _cancel_pending(self, pending):
@@ -785,12 +841,12 @@ class Connection:
         try:
             self._write(dict(version=self.protocol_version, session=self._hello["session"], cancel=pending["id"]))
         except Exception:
-            pass
+            _LOG.debug("Cancellation could not be delivered to the driver.", exc_info=True)
 
     def close(self, error=None):
         error = error if error is not None else RuntimeError("connection closed")
         self._generation += 1
-        child_value, pending_value, uses_eof = self._child, self._pending, self._childUsesEOF
+        child_value, pending_value, uses_eof = self._child, self._pending, self._child_uses_eof
         if pending_value is not None:
             self._cancel_pending(pending_value)
         self._child = self._hello = None
@@ -850,16 +906,16 @@ class Connection:
         self.invalidate()
         self._buffer = b""
         atexit.unregister(self._on_exit)
-        if self._previewTransport is not None:
-            self._previewTransport.close()
-            self._previewTransport = None
+        if self._preview_transport is not None:
+            self._preview_transport.close()
+            self._preview_transport = None
         if child_value is not None:
             child_value.stdin.close()
             if child_value.returncode is None and not uses_eof:
                 try:
                     child_value.terminate()
                 except ProcessLookupError:
-                    pass
+                    _LOG.debug("Cancellation could not be delivered to the driver.", exc_info=True)
 
             async def retire():
                 try:
@@ -877,7 +933,7 @@ class Connection:
                             try:
                                 child_value.kill()
                             except ProcessLookupError:
-                                pass
+                                _LOG.debug("Cancellation could not be delivered to the driver.", exc_info=True)
                         await child_value.wait()
                 finally:
                     if self._retiring is asyncio.current_task():
@@ -885,6 +941,6 @@ class Connection:
 
             self._retiring = asyncio.create_task(retire())
 
-    async def waitClosed(self):
+    async def wait_closed(self):
         if self._retiring is not None:
             await asyncio.shield(self._retiring)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import weakref
 
 from computer_use._identity import FrozenRecord
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.agent.requests import (
     ActOnElement,
     DiscoverApps,
@@ -18,44 +18,46 @@ from computer_use.interaction.agent.requests import (
     UIPointer,
 )
 from computer_use.protocol.primitives import nonempty
-from computer_use.protocol.validation import validateKey, validatePasteText, validateText
+from computer_use.protocol.validation import validate_key, validate_paste_text, validate_text
 from computer_use.session.operations import operation
 
 from . import parameters
-from .handles import handleCreated
+from .handles import handle_created
 
 
-def observationState(state=None, *, document=None):
+def observation_state(state=None, *, document=None):
     if document is not None:
-        from computer_use.session.observation import lazyObservation
+        from computer_use.session.observation import lazy_observation
 
-        return lazyObservation(document, (state or {}).get("screenshot"))
+        return lazy_observation(document, (state or {}).get("screenshot"))
     return FrozenRecord(state, display=state["text"])
 
 
 def _text(text, paste=False):
     try:
-        (validatePasteText if paste else validateText)(text)
+        (validate_paste_text if paste else validate_text)(text)
     except Exception as error:
-        raise localFailure(
+        raise local_failure(
             str(error), "use paste for multiline text; send control keys separately with pressKey"
         ) from error
 
 
 def _key(key):
     try:
-        validateKey(key)
+        validate_key(key)
     except Exception as error:
-        raise localFailure(str(error), "use a documented key name or modifier chord") from error
+        raise local_failure(str(error), "use a documented key name or modifier chord") from error
 
 
 class Computer:
     def __init__(self):
-        from .factory import sessionController
+        from .factory import session_controller
 
-        self._controller, self._apps = sessionController(), weakref.WeakValueDictionary()
+        self._controller, self._apps = session_controller(), weakref.WeakValueDictionary()
 
     def app(self, selector):
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(selector) is int:
             parameters.reference(selector, "application reference")
             scope, key = self._controller.interfaces.application(selector), ("reference", selector)
@@ -63,12 +65,12 @@ class Computer:
             try:
                 nonempty(selector, "selector")
             except Exception as error:
-                raise localFailure(
+                raise local_failure(
                     str(error), "use an app name or a published integer application reference"
                 ) from error
             scope, key = dict(selector=selector), ("selector", selector)
         else:
-            raise localFailure(
+            raise local_failure(
                 "app expects an integer reference or application selector string",
                 "use listApps() to discover application instances",
             )
@@ -78,6 +80,8 @@ class Computer:
             self._apps[key] = app
         return app
 
+    # API, protocol, and native binding names retain their established spelling.
+    # pylint: disable-next=invalid-name
     async def listApps(self):
         return await operation(lambda: self._controller.run(DiscoverApps()))
 
@@ -87,7 +91,7 @@ class Computer:
 
     async def click(self, options=None, *, at):
         click, (x, y) = parameters.click(options), parameters.point(at)
-        self._controller.desktop.checkCoordinates(x, y)
+        self._controller.desktop.check_coordinates(x, y)
         return await self._controller.act(
             "click", dict(desktopRef=self._controller.desktop.target(True), x=x, y=y, **click)
         )
@@ -95,7 +99,7 @@ class Computer:
     async def scroll(self, direction, *, at, pages=1):
         parameters.scroll(direction, pages)
         x, y = parameters.point(at)
-        self._controller.desktop.checkCoordinates(x, y)
+        self._controller.desktop.check_coordinates(x, y)
         return await self._controller.act(
             "scroll", dict(desktopRef=self._controller.desktop.target(True), x=x, y=y, direction=direction, pages=pages)
         )
@@ -103,9 +107,9 @@ class Computer:
     async def drag(self, start, end):
         start, end = parameters.point(start), parameters.point(end)
         if start == end:
-            raise localFailure("drag start and end must differ", "use click for a stationary gesture")
+            raise local_failure("drag start and end must differ", "use click for a stationary gesture")
         for x, y in (start, end):
-            self._controller.desktop.checkCoordinates(x, y)
+            self._controller.desktop.check_coordinates(x, y)
         return await self._controller.act(
             "drag",
             dict(
@@ -113,10 +117,12 @@ class Computer:
             ),
         )
 
+    # pylint: disable-next=invalid-name
     async def typeText(self, text):
         _text(text)
         return await self._controller.act("typeText", dict(desktopRef=self._controller.desktop.target(), text=text))
 
+    # pylint: disable-next=invalid-name
     async def pressKey(self, key):
         _key(key)
         return await self._controller.act("pressKey", dict(desktopRef=self._controller.desktop.target(), key=key))
@@ -132,8 +138,10 @@ class UI:
         controller.register(self, scope)
 
     async def element(self, target, *, timeoutMs=3000):
+        # pylint: disable-next=unidiomatic-typecheck
         if type(timeoutMs) is not int or not 0 <= timeoutMs <= 10000:
-            raise localFailure("timeoutMs must be an integer in 0-10000", "omit it to use 3000 ms")
+            raise local_failure("timeoutMs must be an integer in 0-10000", "omit it to use 3000 ms")
+        # pylint: disable-next=unidiomatic-typecheck
         if type(target) is int:
             parameters.reference(target, "element reference")
         snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeoutMs)))
@@ -157,9 +165,10 @@ class UI:
     async def drag(self, start, end):
         start, end = parameters.point(start), parameters.point(end)
         if start == end:
-            raise localFailure("drag start and end must differ", "use click for a stationary gesture")
+            raise local_failure("drag start and end must differ", "use click for a stationary gesture")
         return await operation(lambda: self._controller.run(UIPointer(self, "drag", (start, end), {})))
 
+    # pylint: disable-next=invalid-name
     async def typeText(self, text):
         _text(text)
         return await operation(lambda: self._controller.run(UIKeyboard(self, "typeText", dict(text=text))))
@@ -168,6 +177,7 @@ class UI:
         _text(text, paste=True)
         return await operation(lambda: self._controller.run(UIKeyboard(self, "paste", dict(text=text))))
 
+    # pylint: disable-next=invalid-name
     async def pressKey(self, key):
         _key(key)
         return await operation(lambda: self._controller.run(UIKeyboard(self, "pressKey", dict(key=key))))
@@ -180,7 +190,7 @@ class App(UI):
 
         self._instance = InstanceState(scope["selector"])
         self._anchor, self._image = None, None
-        handleCreated(self, dict(kind="App", controller=controller, selector=scope["selector"]))
+        handle_created(self, dict(kind="App", controller=controller, selector=scope["selector"]))
 
     def window(self, ref):
         parameters.reference(ref, "window reference")
@@ -192,7 +202,7 @@ class Window(UI):
         super().__init__(controller, scope, _internal=_internal)
         self._app, self._instance, self._anchor, self._image = _app, _app._instance, _anchor, None
         self._window_identity = controller.state(self).selection.root
-        handleCreated(self, dict(kind="Window", controller=controller, owner=_app, selector=scope["selector"]))
+        handle_created(self, dict(kind="Window", controller=controller, owner=_app, selector=scope["selector"]))
 
 
 class Element:
@@ -200,7 +210,7 @@ class Element:
         if not _internal:
             raise TypeError("Use await app.element(target) or await window.element(target)")
         self._controller, self._owner, self._snapshot = controller, owner, snapshot
-        handleCreated(self, dict(kind="Element", controller=controller, owner=owner, snapshot=snapshot, query=None))
+        handle_created(self, dict(kind="Element", controller=controller, owner=owner, snapshot=snapshot, query=None))
 
     async def _act(self, intent, args=None):
         return await operation(
@@ -211,10 +221,12 @@ class Element:
         parameters.cursor(cursor)
         return await operation(lambda: self._controller.run(ObserveElement(self._owner, self._snapshot, cursor)))
 
+    # pylint: disable-next=invalid-name
     async def readText(self, *, cursor=None, length=4096):
         parameters.cursor(cursor)
+        # pylint: disable-next=unidiomatic-typecheck
         if type(length) is not int or not 1 <= length <= 16384:
-            raise localFailure(
+            raise local_failure(
                 "length must be an integer in 1-16384 code points", "use readText(length=4096) or a smaller page"
             )
         return await operation(lambda: self._controller.run(ObserveText(self._owner, self._snapshot, cursor, length)))
@@ -226,16 +238,19 @@ class Element:
         parameters.scroll(direction, pages)
         return await self._act("scroll", dict(direction=direction, pages=pages))
 
+    # pylint: disable-next=invalid-name
     async def typeText(self, text, *, replace=False):
         _text(text)
+        # pylint: disable-next=unidiomatic-typecheck
         if type(replace) is not bool:
-            raise localFailure("replace must be a bool", "use replace=True only for full control replacement")
+            raise local_failure("replace must be a bool", "use replace=True only for full control replacement")
         return await self._act("replace" if replace else "insert", dict(text=text))
 
     async def paste(self, text):
         _text(text, paste=True)
         return await self._act("paste", dict(text=text))
 
+    # pylint: disable-next=invalid-name
     async def pressKey(self, key):
         _key(key)
         return await self._act("key", dict(key=key))
@@ -243,18 +258,20 @@ class Element:
     async def focus(self):
         return await self._act("focus")
 
+    # pylint: disable-next=invalid-name
     async def openMenu(self):
         return await self._act("openMenu")
 
+    # pylint: disable-next=invalid-name
     async def performAction(self, action):
         try:
             nonempty(action, "action")
         except Exception as error:
-            raise localFailure(str(error), "copy a Secondary Actions name from this element") from error
+            raise local_failure(str(error), "copy a Secondary Actions name from this element") from error
         return await self._act("action", dict(action=action))
 
 
-def computerForController(controller):
+def computer_for_controller(controller):
     computer = object.__new__(Computer)
     computer._controller, computer._apps = controller, weakref.WeakValueDictionary()
     return computer

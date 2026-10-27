@@ -47,7 +47,7 @@ def _slice(text: str, start: int, end: int, unit: str | None) -> str | None:
     if not 0 <= start <= end <= len(encoded) // width:
         return None
     try:
-        return encoded[start * width : end * width].decode(encoding)
+        return encoded[slice(start * width, end * width)].decode(encoding)
     except UnicodeDecodeError:
         return None
 
@@ -108,6 +108,8 @@ def embedded_summaries(node: Mapping[str, Any], ref: str, aliases: Mapping[str, 
         or coverage.get("conflicting")
     ):
         return output
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if type(coverage.get("total")) is int and coverage["total"] != len(embedded):
         return output
     length = _length(text, unit)
@@ -124,6 +126,7 @@ def embedded_summaries(node: Mapping[str, Any], ref: str, aliases: Mapping[str, 
 
     for token, span in embedded:
         start, end = span.get("start"), span.get("end")
+        # pylint: disable-next=unidiomatic-typecheck
         if type(start) is not int or type(end) is not int or start < previous:
             return output
         if end < start or previous_span == (start, end) and start == end:
@@ -159,6 +162,7 @@ def line_summaries(node: Mapping[str, Any], ref: str) -> list[str]:
     pieces, previous, remaining = [], 0, 1000
     for span in spans:
         start, end, content = span.get("start"), span.get("end"), span.get("text")
+        # pylint: disable-next=unidiomatic-typecheck
         if type(start) is not int or type(end) is not int:
             pieces.append("span unconfirmed" + (": " + literal(content) if content is not None else ""))
             continue

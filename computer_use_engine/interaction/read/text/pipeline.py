@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.acquisition.text.model import CapturedTextRequest
 from computer_use.interaction.read.acquisition.text.pipeline import CapturedTextPipeline
 from computer_use.interaction.read.text.model import TextReadPlan
@@ -54,7 +54,7 @@ class CaptureTextPage(Node["TextReadPlan", "TextReadPlan"]):
         except ValueError as error:
             if cast("CapturedField", plan.source).value is None:
                 raise
-            raise localFailure(str(error), "continue with the next offset returned by readText") from error
+            raise local_failure(str(error), "continue with the next offset returned by readText") from error
         return replace(plan, page=page)
 
     def _run(self, value: TextReadPlan, control: Control) -> TextReadPlan:
@@ -83,6 +83,8 @@ class ControllerTextReadPipeline(Pipeline["ReadText", "TextPage"]):
             steps=[
                 prepare_captured_text_read(validate_snapshot=controller.validateSnapshot),
                 CaptureTextPage(controller),
+                # The pipeline shares retained bindings with their owning service.
+                # pylint: disable-next=protected-access
                 materialize_captured_text(captured_text=controller._captured_text),
             ],
         )

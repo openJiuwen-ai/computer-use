@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 from computer_use.interaction.write.model import WriteRequest
 from computer_use.native.contracts import ApplicationBinding
 from computer_use.pipeline import Contract, Pass
-from computer_use.protocol.element_path import elementPath
+from computer_use.protocol.element_path import element_path
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import WriteArguments
@@ -23,32 +23,54 @@ def parse_request(value: WriteArguments, _: object) -> WriteRequest:
     """
     intent, target, path, query_timeout_ms = value[:4]
     forward_current = value[4] if len(value) == 5 else False
-    if type(query_timeout_ms) is not int or not 0 <= query_timeout_ms <= 10000 or path is None and query_timeout_ms:
+    invalid_query_timeout_ms = (
+        True
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(query_timeout_ms) is not int or not 0 <= query_timeout_ms <= 10000 or path is None and query_timeout_ms
+        else False
+    )
+    if invalid_query_timeout_ms:
         raise ValueError("A bounded query wait requires an element path")
-    if (
-        isinstance(target, ApplicationBinding) != (intent.kind == "launch")
-        or intent.kind == "launch"
-        and (intent.parameters or path is not None)
-    ):
+    invalid_target = (
+        True
+        if (
+            isinstance(target, ApplicationBinding) != (intent.kind == "launch")
+            or intent.kind == "launch"
+            and (intent.parameters or path is not None)
+        )
+        else False
+    )
+    if invalid_target:
         raise ValueError("Launch requires an observed installation and has no element path or parameters")
     query_root = None
     if path is not None:
-        path = elementPath(path)
-        if (
-            cast("Binding", target).node is None
-            or cast("Binding", target).capture is not None
-            or cast("Binding", target).instance is None
-            or cast("Binding", target).surface is None
-        ):
+        path = element_path(path)
+        invalid_cast = (
+            True
+            if (
+                cast("Binding", target).node is None
+                or cast("Binding", target).capture is not None
+                or cast("Binding", target).instance is None
+                or cast("Binding", target).surface is None
+            )
+            else False
+        )
+        if invalid_cast:
             raise ValueError("A scoped path requires an observed accessible working-window root")
         query_root, target = target, replace(target, node=None)
     if forward_current:
-        if (
-            path is not None
-            or cast("Binding", target).node is None
-            or cast("Binding", target).capture is not None
-            or intent.kind not in ("insert", "paste", "key", "focus")
-        ):
+        invalid_path = (
+            True
+            if (
+                path is not None
+                or cast("Binding", target).node is None
+                or cast("Binding", target).capture is not None
+                or intent.kind not in ("insert", "paste", "key", "focus")
+            )
+            else False
+        )
+        if invalid_path:
             raise ValueError("Current receiver forwarding requires a fixed container and keyboard intent")
         return WriteRequest(intent, replace(target, node=None), forward_scope=target)
     return WriteRequest(intent, target, query_root, path, query_timeout_ms)

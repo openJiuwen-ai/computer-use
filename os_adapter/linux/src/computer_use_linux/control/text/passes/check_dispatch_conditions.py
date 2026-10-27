@@ -13,7 +13,8 @@ def check_dispatch_conditions(contract, ctx, guard, ax):
     target, within, kind = contract["target"], contract["within"], contract["kind"]
     selection = contract.get("selection")
     obj, enabled, editable, interfaces, _ = guard(target, within, ctx, selection, check=True)
-    if not enabled or not editable or kind == "insert" and "Text" not in interfaces:
+    invalid_enabled = True if not enabled or not editable or kind == "insert" and "Text" not in interfaces else False
+    if invalid_enabled:
         raise Failure("The original control no longer supports this native text operation.", "input_unavailable")
     if kind == "insert" and text_codec(ax, obj) != contract["codec"]:
         raise Failure("The native text provider changed before insertion.", "stale_target")

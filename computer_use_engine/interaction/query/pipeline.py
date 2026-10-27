@@ -137,6 +137,8 @@ class FindElementPipeline(Pipeline["FindElement", "ElementSnapshot"]):
         return Sequence(
             name="FindElementPipeline",
             steps=[
+                # The pipeline shares retained bindings with their owning service.
+                # pylint: disable-next=protected-access
                 prepare_element_lookup(query_root=controller._query_root, state_of=controller.state),
                 Scope(
                     name="LookupCallScope",
@@ -163,6 +165,7 @@ class FindElementPipeline(Pipeline["FindElement", "ElementSnapshot"]):
                         ],
                     ),
                 ),
+                # pylint: disable-next=protected-access
                 build_lookup_snapshot(snapshots=controller._snapshots),
             ],
         )

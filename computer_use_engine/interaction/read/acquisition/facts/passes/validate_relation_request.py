@@ -27,6 +27,8 @@ def validate_relation_request(request: RelationReadRequest, control: Control) ->
     nonempty(property_name, "native relation property")
     if cursor_value is not None:
         nonempty(cursor_value, "native relation cursor")
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if type(limit_value) is not int or not 1 <= limit_value <= 2000:
         raise ValueError("Native relation page limit must be an integer in 1..2000")
     return request

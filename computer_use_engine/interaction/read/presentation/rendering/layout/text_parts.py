@@ -5,12 +5,11 @@ import re
 from typing import TYPE_CHECKING
 
 import regex
-
 from computer_use._json import loads as jsonLoads
-from computer_use.interaction.read.presentation.formatting import jsonString
+from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.interaction.read.presentation.policy import editing
-from computer_use.interaction.read.presentation.tree import hasIncompleteChildren
-from computer_use.protocol.primitives import utf16Length
+from computer_use.interaction.read.presentation.tree import has_incomplete_children
+from computer_use.protocol.primitives import utf16_length
 
 if TYPE_CHECKING:
     from typing import Any, Sequence
@@ -19,10 +18,41 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 _GENERIC = {"show_menu", "scroll_into_view"}
+_NAME_FIELDS = (
+    "name",
+    "description",
+    "identifier",
+    "help",
+    "url",
+    "placeholder",
+    "focused",
+    "focusable",
+    "selected",
+    "selectable",
+    "pressable",
+)
+_SELECTED_TEXT_FIELDS = (
+    "selectedText",
+    "valueExpected",
+    "valueIsNumber",
+    "titleRef",
+    "labelTargets",
+    "incompleteLabelRelation",
+    "linkedLabel",
+    "subrole",
+    "modal",
+    "ownedModals",
+    "blockedBy",
+    "preserveGroup",
+    "expandable",
+    "expanded",
+    "disclosing",
+    "submenu",
+)
 
 
-def compactTextParts(
-    lines: list[str], roots: Sequence[NodeView], focusedRef: str | None, format: FormatField
+def compact_text_parts(
+    lines: list[str], roots: Sequence[NodeView], focused_ref: str | None, formatter: FormatField
 ) -> list[str]:
     """Combine adjacent caption parts while retaining their source-field records.
 
@@ -34,7 +64,7 @@ def compactTextParts(
     """
     candidates = {}
 
-    def collect(parent: NodeView, inTable: bool = False) -> None:
+    def collect(parent: NodeView, in_table: bool = False) -> None:
         """Collect.
 
         Args:
@@ -43,66 +73,33 @@ def compactTextParts(
 
         def eligible_text_part(node: NodeView, index: int | None, value: Any, container: bool) -> bool:
             """Require each original projection condition in its original order."""
-            if not (index is not None and not inTable and container):
+            if not (index is not None and not in_table and container):
                 return False
-            if not ("control" not in parent and not hasIncompleteChildren(parent) and not parent.get("preserveGroup")):
+            if not (
+                "control" not in parent and not has_incomplete_children(parent) and not parent.get("preserveGroup")
+            ):
                 return False
             if not (not parent.get("subrole") and not editing(parent) and not parent.get("selectedText")):
                 return False
-            if not (not parent.get("selected") and parent["ref"] != focusedRef and not parent.get("focused")):
+            if not (not parent.get("selected") and parent["ref"] != focused_ref and not parent.get("focused")):
                 return False
-            if not (node["role"] == "staticText" and value and utf16Length(value) <= 160):
+            if not (node["role"] == "staticText" and value and utf16_length(value) <= 160):
                 return False
             if not (
                 not re.search(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", value)
                 and not node["children"]
-                and not hasIncompleteChildren(node)
+                and not has_incomplete_children(node)
             ):
                 return False
             if not (
-                node["ref"] != focusedRef
-                and not any(
-                    node.get(k)
-                    for k in (
-                        "name",
-                        "description",
-                        "identifier",
-                        "help",
-                        "url",
-                        "placeholder",
-                        "focused",
-                        "focusable",
-                        "selected",
-                        "selectable",
-                        "pressable",
-                    )
-                )
+                node["ref"] != focused_ref
+                and not any(node.get(k) for k in _NAME_FIELDS)
                 and node.get("enabled") is not False
             ):
                 return False
             if not (
                 "selectionRange" not in node
-                and not any(
-                    node.get(k)
-                    for k in (
-                        "selectedText",
-                        "valueExpected",
-                        "valueIsNumber",
-                        "titleRef",
-                        "labelTargets",
-                        "incompleteLabelRelation",
-                        "linkedLabel",
-                        "subrole",
-                        "modal",
-                        "ownedModals",
-                        "blockedBy",
-                        "preserveGroup",
-                        "expandable",
-                        "expanded",
-                        "disclosing",
-                        "submenu",
-                    )
-                )
+                and not any(node.get(k) for k in _SELECTED_TEXT_FIELDS)
                 and "control" not in node
             ):
                 return False
@@ -121,7 +118,7 @@ def compactTextParts(
                 return False
             return True
 
-        inTable = inTable or parent["role"] in ("table", "row", "cell", "column", "outline", "list")
+        in_table = in_table or parent["role"] in ("table", "row", "cell", "column", "outline", "list")
         # Fact-backed projection has already proved which wrappers are purely
         # structural. Pack the resulting siblings, even if they had separate
         # transparent parents. Do not cross any retained container or control.
@@ -135,7 +132,7 @@ def compactTextParts(
             )
             if eligible_text_part(node, index, value, container):
                 candidates[node["ref"]] = dict(parent=parent, index=index, node=node)
-            collect(node, inTable)
+            collect(node, in_table)
 
     for root in roots:
         collect(root)
@@ -145,10 +142,10 @@ def compactTextParts(
         if match is None or match[2] not in candidates:
             return None
         source = candidates[match[2]]
-        value, body = format(source["node"]["value"]), match[4]
+        value, body = formatter(source["node"]["value"]), match[4]
         if not body.startswith(value):
             return None
-        suffix = body[len(value) :]
+        suffix = body[slice(len(value), None)]
         if (suffix and not suffix.startswith(", Secondary Actions: ")) or re.search(r"[\[\]\r\n]", suffix):
             return None
         facts = json.dumps(
@@ -173,33 +170,38 @@ def compactTextParts(
             continue
         run = [first]
 
-        def line(*, first: Record = first, run: list[Record] = run) -> str:
+        def line(first_part: Record, parts: list[Record]) -> str:
             return (
-                first["indent"]
+                first_part["indent"]
                 + "Text parts ["
-                + first["properties"]
+                + first_part["properties"]
                 + "]: "
-                + ", ".join(item["ref"] + " " + jsonString(item["node"]["value"]) for item in run)
+                + ", ".join(item["ref"] + " " + json_string(item["node"]["value"]) for item in parts)
             )
 
         while i + len(run) < len(lines):
             next_part = part(lines[i + len(run)])
-            if (
-                next_part is None
-                or next_part["parent"] is not first["parent"]
-                or next_part["index"] != run[-1]["index"] + 1
-                or next_part["indent"] != first["indent"]
-                or next_part["properties"] != first["properties"]
-                or next_part["facts"] != first["facts"]
-                or len(run) >= 8
-            ):
+            matches_next_part = (
+                True
+                if (
+                    next_part is None
+                    or next_part["parent"] is not first["parent"]
+                    or next_part["index"] != run[-1]["index"] + 1
+                    or next_part["indent"] != first["indent"]
+                    or next_part["properties"] != first["properties"]
+                    or next_part["facts"] != first["facts"]
+                    or len(run) >= 8
+                )
+                else False
+            )
+            if matches_next_part:
                 break
             run.append(next_part)
-            if utf16Length(line()) > 480:
+            if utf16_length(line(first, run)) > 480:
                 run.pop()
                 break
-        packed = line()
-        if len(run) >= 2 and utf16Length(packed) < utf16Length("\n".join(lines[i : i + len(run)])):
+        packed = line(first, run)
+        if len(run) >= 2 and utf16_length(packed) < utf16_length("\n".join(lines[slice(i, i + len(run))])):
             output.append(packed)
             i += len(run)
         else:
@@ -208,7 +210,7 @@ def compactTextParts(
     return output
 
 
-def expandTextParts(lines: list[str], format: FormatField) -> list[str]:
+def expand_text_parts(lines: list[str], formatter: FormatField) -> list[str]:
     """Restore grouped caption parts into individual rendered entries.
 
     Args:
@@ -227,7 +229,8 @@ def expandTextParts(lines: list[str], format: FormatField) -> list[str]:
             continue
         try:
             expanded = [
-                f"{match[1]}{e[1]} {match[2]} Value: {format(jsonLoads(e[2]))}" + (", " + match[3] if match[3] else "")
+                f"{match[1]}{e[1]} {match[2]} Value: {formatter(jsonLoads(e[2]))}"
+                + (", " + match[3] if match[3] else "")
                 for e in entries
             ]
         except (ValueError, TypeError):

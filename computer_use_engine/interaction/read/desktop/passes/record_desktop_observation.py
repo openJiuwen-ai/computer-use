@@ -26,9 +26,9 @@ def create(
         """
         request, observed = value
         desktop.record(observed)
-        from computer_use.session.observation import lazyObservation
+        from computer_use.session.observation import lazy_observation
 
-        state = lazyObservation(
+        state = lazy_observation(
             observed["document"], observed["screenshot"], details_document=observed["document"], overview=None
         )
         return (request, observed, state)

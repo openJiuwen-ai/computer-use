@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from computer_use._identity import FrozenRecord
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.acquisition.text.model import CapturedTextRequest
 from computer_use.interaction.read.acquisition.text.pipeline import CapturedTextPipeline
 from computer_use.interaction.read.element.agent import AgentElementReadPipeline
-from computer_use.interaction.read.facts.text_source import textSourceLabel
-from computer_use.session.results import textPageCompleted
+from computer_use.interaction.read.facts.text_source import text_source_label
+from computer_use.session.results import text_page_completed
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
@@ -57,7 +57,7 @@ class AgentTextReadPipeline:
             captured = fresh.get("text")
             source = fresh.get("source", {})
             if captured is None:
-                raise localFailure(
+                raise local_failure(
                     "this element has no complete captured text source",
                     "read the element or select its explicit text control",
                     "observation_incomplete",
@@ -67,11 +67,11 @@ class AgentTextReadPipeline:
         following = self.cursors.publish(target, value, end, source) if end < len(value) else None
         result = FrozenRecord(
             dict(text=value[position:end], total=len(value), next=following),
-            display=textSourceLabel(source)
+            display=text_source_label(source)
             + "\n"
             + repr(dict(text=value[position:end], total=len(value), next=following)),
         )
-        textPageCompleted(source, result)
+        text_page_completed(source, result)
         return cast("TextPage", result)
 
     async def complete(self, source: CapturedField) -> str:
@@ -90,14 +90,14 @@ class AgentTextReadPipeline:
         while True:
             page = await collector.arun(CapturedTextRequest(source, offset=offset, length=16384))
             if total is not None and total != page["total"]:
-                raise localFailure(
+                raise local_failure(
                     "captured text changed its declared range", "start a new readText()", "snapshot_expired"
                 )
             total = page["total"]
             chunks.append(page["text"])
             characters += len(page["text"])
             if characters > self.cursors.max_characters:
-                raise localFailure(
+                raise local_failure(
                     "text exceeds the bounded public capture cache",
                     "read a smaller explicit text region",
                     "observation_incomplete",
@@ -105,7 +105,7 @@ class AgentTextReadPipeline:
             if page["next"] is None:
                 return "".join(chunks)
             if page["next"] <= offset:
-                raise localFailure(
+                raise local_failure(
                     "native text continuation made no progress", "read this element again", "snapshot_expired"
                 )
             offset = page["next"]

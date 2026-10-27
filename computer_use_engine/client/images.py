@@ -4,18 +4,32 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.delivery.image_caption import pngSummary, renderImageCaption, windowStateNotes
-from computer_use.interaction.read.presentation.formatting import jsonString
-from computer_use.protocol.png import pngSize
+from computer_use.interaction.read.delivery.image_caption import png_summary, render_image_caption, window_state_notes
+from computer_use.interaction.read.presentation.formatting import json_string
+from computer_use.protocol.png import png_size
 from computer_use.session.images import (
     _source,
-    imageDelivered as imageDelivered,
-    imageDeliveryEpoch as imageDeliveryEpoch,
-    imageDeliveryRequired as imageDeliveryRequired,
-    imageMetadata as imageMetadata,
-    registerImage as register_session_image,
-    requireImageDelivery as requireImageDelivery,
-    resetImageDelivery as resetImageDelivery,
+)
+from computer_use.session.images import (
+    image_delivered as image_delivered,
+)
+from computer_use.session.images import (
+    image_delivery_epoch as image_delivery_epoch,
+)
+from computer_use.session.images import (
+    image_delivery_required as image_delivery_required,
+)
+from computer_use.session.images import (
+    image_metadata as image_metadata,
+)
+from computer_use.session.images import (
+    register_image as register_session_image,
+)
+from computer_use.session.images import (
+    require_image_delivery as require_image_delivery,
+)
+from computer_use.session.images import (
+    reset_image_delivery as reset_image_delivery,
 )
 
 if TYPE_CHECKING:
@@ -23,10 +37,10 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.document import DisplayDocument
 
 
-def registerImage(png, source):
+def register_image(png, source):
     def summary(image):
-        size = pngSize(image)
-        return pngSummary(size["width"], size["height"], len(image))
+        size = png_size(image)
+        return png_summary(size["width"], size["height"], len(image))
 
     return register_session_image(png, source, summary)
 
@@ -43,8 +57,8 @@ def _context_text(value: str | DisplayDocument | DisplayText | None) -> str | No
     return value
 
 
-def imageLabel(png, contextAlreadyShown=False):
-    size = pngSize(png)
+def image_label(png, context_already_shown=False):
+    size = png_size(png)
     known = _source(png)
     source = known["source"] if known is not None else None
     if source is None:
@@ -56,23 +70,23 @@ def imageLabel(png, contextAlreadyShown=False):
     else:
         context = _context_text(source.get("context"))
         if context is None:
-            context = "App selector: " + jsonString(source["selector"])
+            context = "App selector: " + json_string(source["selector"])
         stale = source.get("current", lambda: True)() is False
         identity = "Window reference: " + (source.get("window") if source.get("window") is not None else "unknown")
         if source.get("observed"):
-            identity += "; observation=" + jsonString(source["observed"]["id"])
+            identity += "; observation=" + json_string(source["observed"]["id"])
         facts = dict(
             kind="window",
             context=context,
             identity=identity,
             stale=stale,
-            omitContext=contextAlreadyShown and source.get("current", lambda: True)() is not False,
+            omitContext=context_already_shown and source.get("current", lambda: True)() is not False,
         )
     if source is not None and known["metadata"] is not None:
         facts["stopReasons"] = known["metadata"].get("stopReasons", ())
         # App.read already shows short state facts. If that context was shown,
         # retain only the detailed repaint guidance in the image caption.
-        notes = windowStateNotes(known["metadata"])
+        notes = window_state_notes(known["metadata"])
         facts["stopReasons"] += notes[1:] if facts.get("omitContext") else notes
         facts["visualText"] = known["metadata"].get("visualText")
-    return renderImageCaption(size["width"], size["height"], facts)
+    return render_image_caption(size["width"], size["height"], facts)

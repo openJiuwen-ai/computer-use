@@ -4,14 +4,16 @@ Observers may retain evidence for a handle, but must keep the handle weakly.
 The controller remains responsible for validating the original opaque binding.
 """
 
+# Private variables hold mutable session state.
+# pylint: disable-next=invalid-name
 _handler = None
 
 
-def setHandleHandler(handler):
+def set_handle_handler(handler):
     global _handler
     _handler = handler
 
 
-def handleCreated(handle, metadata):
+def handle_created(handle, metadata):
     if _handler is not None:
         _handler(handle, metadata)

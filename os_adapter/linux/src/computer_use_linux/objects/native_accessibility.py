@@ -18,7 +18,9 @@ class NativeAccessibility:
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi, Gio, GLib, GObject
 
-        self._A, self.Gio, self.GLib = Atspi, Gio, GLib
+        # API, protocol, and native binding names retain their established spelling.
+        # pylint: disable-next=invalid-name
+        self._a, self.Gio, self.GLib = Atspi, Gio, GLib
         self.native_key = GObject.Object.__hash__
         self.ctx, self.dead = None, {}
         self._state, self._failure = "new", None
@@ -37,11 +39,12 @@ class NativeAccessibility:
         )
 
     @property
+    # pylint: disable-next=invalid-name
     def A(self):
         # Existing callers also obtain native interface methods through A.
         # Guard this boundary so retained objects cannot bypass initialization.
         self._ensure_started()
-        return self._A
+        return self._a
 
     def _check(self):
         if self.ctx:
@@ -63,8 +66,8 @@ class NativeAccessibility:
             # bound admission/completion, not their internal blocking duration.
             connect_accessibility_bus(self.Gio, self.GLib)
             self._check()
-            self._A.set_timeout(250, 250)
-            status = self._A.init()
+            self._a.set_timeout(250, 250)
+            status = self._a.init()
             self._initialized = status == 0
             self._check()
             if status != 0:
@@ -72,7 +75,7 @@ class NativeAccessibility:
                     "AT-SPI initialization did not acquire a new provider (status " + str(status) + ").",
                     "observation_unavailable",
                 )
-            self.listener = self._A.EventListener.new(self.event)
+            self.listener = self._a.EventListener.new(self.event)
             self._check()
             if self.listener is None:
                 raise Failure("AT-SPI event listener is unavailable.", "observation_unavailable")
@@ -108,20 +111,20 @@ class NativeAccessibility:
         self.listener = None
         if self._initialized:
             self._initialized = False
-            self._A.exit()
+            self._a.exit()
 
     def refresh(self, obj):
         self._ensure_started()
         self._clear_cache(obj)
 
     def _clear_cache(self, obj):
-        clear = getattr(self._A.Accessible, "clear_cache_single", None)
+        clear = getattr(self._a.Accessible, "clear_cache_single", None)
         if clear is not None:
             clear(obj)
         else:
             # Older libraries have only recursive clear_cache, which can
             # invalidate descendants. Disable caching for this object instead.
-            self._A.Accessible.set_cache_mask(obj, self._A.Cache.NONE)
+            self._a.Accessible.set_cache_mask(obj, self._a.Cache.NONE)
 
     def event(self, event, *_):
         if self._state != "ready":
@@ -195,6 +198,8 @@ class NativeAccessibility:
 
     def children(self, obj, limit, notes):
         total = self.call(self.A.Accessible.get_child_count, obj)
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(total) is not int or total < 0:
             raise Failure("Native directory child count is unavailable.", "observation_incomplete")
         result = []

@@ -47,20 +47,29 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
         if reason is not None:
             exclusions.append(ClickSelectionExclusion(offer.route_family, reason, facts.observed))
             continue
-        if (key not in history.unavailable or key == refresh or refreshed_ready) and (
-            refresh is None or key == refresh or refreshed_ready
-        ):
+        matches_refreshed_ready = (
+            True
+            if (key not in history.unavailable or key == refresh or refreshed_ready)
+            and (refresh is None or key == refresh or refreshed_ready)
+            else False
+        )
+        if matches_refreshed_ready:
             if offer.admission == "ready":
                 ready.append(command)
             elif "background" in offer.preparation_options and key not in history.background_unavailable:
                 background.append(command)
         foreground_command = replace(command, foreground=True)
         fgkey = route_key(foreground_command)
-        if (
-            "foreground" in offer.preparation_options
-            and (fgkey not in history.unavailable or fgkey == refresh)
-            and (history.click_refresh is None or fgkey == history.click_refresh)
-        ):
+        matches_offer = (
+            True
+            if (
+                "foreground" in offer.preparation_options
+                and (fgkey not in history.unavailable or fgkey == refresh)
+                and (history.click_refresh is None or fgkey == history.click_refresh)
+            )
+            else False
+        )
+        if matches_offer:
             foreground.append(foreground_command)
         reason = (
             "priorFailure"

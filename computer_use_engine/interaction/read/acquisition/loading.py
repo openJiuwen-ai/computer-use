@@ -100,7 +100,12 @@ def _window_shell(observation: NativeObservation) -> bool:
             )
             if relation.kind in ("parent", "window"):
                 external.update(relation.targets)
-            if relation.kind == "labelled_by" and key == root and not limited and relation.evidence != "candidate":
+            matches_key = (
+                True
+                if relation.kind == "labelled_by" and key == root and not limited and relation.evidence != "candidate"
+                else False
+            )
+            if matches_key:
                 titles.update(relation.targets)
             if relation.kind == "children":
                 if key in children or limited or relation.evidence == "candidate":

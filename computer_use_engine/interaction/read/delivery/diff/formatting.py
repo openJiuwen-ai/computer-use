@@ -82,12 +82,17 @@ def _compare(before: DisplayTree, after: DisplayTree) -> _TreeComparison:
         if node.parent is not None:
             children.setdefault(node.parent, []).append(node.ref)
         facts = node.fields
-        if (
-            facts.get("partialReason") is not None
-            or facts.get("childOmissions")
-            or "nextChildOffset" in facts
-            or facts.get("childrenRead", 0) < facts.get("childCount", 0)
-        ):
+        matches_facts = (
+            True
+            if (
+                facts.get("partialReason") is not None
+                or facts.get("childOmissions")
+                or "nextChildOffset" in facts
+                or facts.get("childrenRead", 0) < facts.get("childCount", 0)
+            )
+            else False
+        )
+        if matches_facts:
             delta.context.add(node.ref)
     for ref in delta.changes:
         if ref in old and new[ref].parent is not None and _content(old[ref]) != _content(new[ref]):
@@ -128,13 +133,18 @@ def _related_context(deltas: list[_TreeComparison]) -> None:
                 relations.setdefault(target, []).append(node.ref)
         for ref, members in children.items():
             parent = nodes[ref].fields
-            if (
-                parent["role"] in ("group", "cell")
-                and not parent.get("name")
-                and not parent.get("description")
-                and len(members) > 1
-                and any(node.fields["role"] in ("staticText", "heading") for node in members)
-            ):
+            matches_parent = (
+                True
+                if (
+                    parent["role"] in ("group", "cell")
+                    and not parent.get("name")
+                    and not parent.get("description")
+                    and len(members) > 1
+                    and any(node.fields["role"] in ("staticText", "heading") for node in members)
+                )
+                else False
+            )
+            if matches_parent:
                 relations[ref].extend(node.ref for node in members)
         relationships.append({ref: tuple(dict.fromkeys(items)) for ref, items in relations.items()})
     pending = [(index, ref) for index, delta in enumerate(deltas) for ref in (*delta.changes, *delta.context)]
@@ -165,12 +175,17 @@ def plan_document_diff(
     not_observed: set[str] | frozenset[str] = frozenset(),
 ) -> DeltaPlan:
     """Choose complete or incremental delivery using only structured observation data."""
-    if (
-        not isinstance(before, DisplayDocument)
-        or not isinstance(after, DisplayDocument)
-        or before.context != after.context
-        or any(previous_refs[ref] != current_refs[ref] for ref in previous_refs.keys() & current_refs.keys())
-    ):
+    matches_before = (
+        True
+        if (
+            not isinstance(before, DisplayDocument)
+            or not isinstance(after, DisplayDocument)
+            or before.context != after.context
+            or any(previous_refs[ref] != current_refs[ref] for ref in previous_refs.keys() & current_refs.keys())
+        )
+        else False
+    )
+    if matches_before:
         return DeltaPlan()
     old_trees = [part for part in before.parts if isinstance(part, DisplayTree)]
     new_trees = [part for part in after.parts if isinstance(part, DisplayTree)]
@@ -199,7 +214,7 @@ def plan_document_diff(
     )
 
 
-def snapshotDiff(previous: Record, current: Record, notObserved: set[str] | None = None) -> str:
+def snapshot_diff(previous: Record, current: Record, not_observed: set[str] | None = None) -> str:
     """Explicitly plan and render a structured observation diff at the text boundary."""
     from computer_use.interaction.read.presentation.rendering.document import render_document
 
@@ -207,6 +222,6 @@ def snapshotDiff(previous: Record, current: Record, notObserved: set[str] | None
     if not isinstance(after, DisplayDocument):
         return current["text"]
     plan = plan_document_diff(
-        previous.get("document"), after, previous["refs"], current["refs"], set(notObserved or ())
+        previous.get("document"), after, previous["refs"], current["refs"], set(not_observed or ())
     )
     return render_document(after, plan, public_api=current.get("publicApi", False))

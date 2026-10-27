@@ -38,6 +38,8 @@ class NativeTypedText(NativeKeyboard):
         integer(count, 0, 2147483647)
         number = self.target.call("Text", "get_n_selections", obj)
         require(
+            # Exact types preserve scalar validation and identity contracts.
+            # pylint: disable-next=unidiomatic-typecheck
             type(number) is int and number in (0, 1),
             "Full replacement requires one unambiguous native selection.",
             "input_unavailable",

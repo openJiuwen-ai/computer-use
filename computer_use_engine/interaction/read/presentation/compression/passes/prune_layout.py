@@ -34,13 +34,18 @@ def prune_layout(
         and node.get("isControlElement") is False
         and node.get("isContentElement") is False
     )
-    if (
-        not state.keep(node)
-        and node["ref"] != state.context.get("focusedRef")
-        and removable
-        and (not scope.in_table or node["role"] not in ("cell", "column"))
-        and (len(node["children"]) <= 1 or sole_wrapper or raw_layout)
-    ):
+    matches_removable = (
+        True
+        if (
+            not state.keep(node)
+            and node["ref"] != state.context.get("focusedRef")
+            and removable
+            and (not scope.in_table or node["role"] not in ("cell", "column"))
+            and (len(node["children"]) <= 1 or sole_wrapper or raw_layout)
+        )
+        else False
+    )
+    if matches_removable:
         edit.elide(node, "splice", node["children"])
         return node["children"]
     return [node]

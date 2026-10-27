@@ -27,6 +27,8 @@ class Failure(Exception):
         code="execution_failed",
         target="desktop",
         effect="none",
+        # The error contract exposes a next field and accepts the matching keyword.
+        # pylint: disable-next=redefined-builtin
         next="Read the target again before continuing.",
     ):
         super().__init__(detail)
@@ -50,6 +52,8 @@ def fields(value, required, optional=()):
 
 
 def integer(value, minimum=0, maximum=9007199254740991):
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     require(type(value) is int and minimum <= value <= maximum, "Invalid integer.")
     return value
 

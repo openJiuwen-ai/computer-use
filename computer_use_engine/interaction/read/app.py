@@ -18,31 +18,39 @@ from computer_use.interaction.read.acquisition.components.support import (
 )
 from computer_use.interaction.read.acquisition.directory.service import NativeDirectory, select_surface
 from computer_use.interaction.read.acquisition.images.capture import NativeImages, WindowImage
-from computer_use.interaction.read.acquisition.images.overview import NativeOverview, WindowOverview as WindowOverview
-from computer_use.interaction.read.acquisition.menus.query import MenuRead as MenuRead, NativeMenus
+from computer_use.interaction.read.acquisition.images.overview import NativeOverview
+from computer_use.interaction.read.acquisition.images.overview import WindowOverview as WindowOverview
+from computer_use.interaction.read.acquisition.menus.query import MenuRead as MenuRead
+from computer_use.interaction.read.acquisition.menus.query import NativeMenus
 from computer_use.interaction.read.acquisition.reader import NativeReader
-from computer_use.interaction.read.delivery.image_caption import windowStateSummary
+from computer_use.interaction.read.delivery.image_caption import window_state_summary
 from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.interaction.read.model import AppObservation, MenuAppObservation, WindowSelectionRequired
-from computer_use.interaction.read.numbering.pipeline import numberSnapshots
+from computer_use.interaction.read.numbering.pipeline import number_snapshots
 from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.interaction.read.presentation.content import (
     DisplayText,
     join,
-    json_value as quoted,
     render_text,
     template,
+)
+from computer_use.interaction.read.presentation.content import (
+    json_value as quoted,
 )
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.native.contracts import Binding, Dispatch
 from computer_use.native.scopes import (
     RunningApplication,
-    SelectedApplicationWindow as SelectedApplicationWindow,
-    StartingApplication as StartingApplication,
     WorkingWindow,
     window_binding,
 )
-from computer_use.protocol.captures import captureMetadata
+from computer_use.native.scopes import (
+    SelectedApplicationWindow as SelectedApplicationWindow,
+)
+from computer_use.native.scopes import (
+    StartingApplication as StartingApplication,
+)
+from computer_use.protocol.captures import capture_metadata
 
 if TYPE_CHECKING:
     from typing import Any, Awaitable, Callable, Iterable, Sequence
@@ -52,7 +60,8 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
     from computer_use.native.port import NativePort
     from computer_use.pipeline.core import Control, T
-    from computer_use.protocol.records import ApplicationInfo, NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import ApplicationInfo
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 def failure(code: str, detail: str) -> ComputerUseError:
@@ -152,7 +161,7 @@ class NativeAppReader:
         session = snapshots[0].facts["session"]
         if self._element_references is None or self._element_references.session != session:
             self._element_references = DisplayReferences(session)
-        return numberSnapshots(snapshots, self._element_references, _control=_control)
+        return number_snapshots(snapshots, self._element_references, _control=_control)
 
     def window_aliases(self, directory: DirectoryFacts) -> dict[str, str]:
         if self._window_references is None or self._window_references.session != directory["session"]:
@@ -514,14 +523,27 @@ class NativeAppReader:
             ),
             None,
         )
-        if scope_confirmed and current is not None and current["accessibility"] and not current["nativeWindow"]:
+        matches_scope_confirmed = (
+            True
+            if scope_confirmed and current is not None and current["accessibility"] and not current["nativeWindow"]
+            else False
+        )
+        if matches_scope_confirmed:
             lines.append(
                 "Interaction: this view was found through accessibility, with no matched native window "
                 "in this observation."
             )
         focused = directory.get("focusedWindow")
         aliases = {window: ref for ref, window in windows.items()}
-        if scope_confirmed and focused in aliases and selected["window"] in aliases and focused != selected["window"]:
+        matches_scope_confirmed_condition = (
+            True
+            if scope_confirmed
+            and focused in aliases
+            and selected["window"] in aliases
+            and focused != selected["window"]
+            else False
+        )
+        if matches_scope_confirmed_condition:
             lines.append(
                 template(
                     "Interaction: the application reports focus in window {}; "
@@ -533,11 +555,11 @@ class NativeAppReader:
             )
         lines.append("Tree: full" if prepared is not None else "Tree: unavailable")
         if image is not None:
-            metadata = captureMetadata(image.image)
+            metadata = capture_metadata(image.image)
             lines.append(
                 template("Screenshot: window {}x{} px; origin=top-left", metadata["width"], metadata["height"])
             )
-            lines.extend(template("Image note: {}", quoted(note)) for note in windowStateSummary(metadata))
+            lines.extend(template("Image note: {}", quoted(note)) for note in window_state_summary(metadata))
             if image_precedes_tree:
                 lines.append("The screenshot was captured before the refreshed tree; their contents may differ.")
         else:

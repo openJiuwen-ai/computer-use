@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use._identity import FrozenRecord
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.native.query.directory import surfaces_query
 from computer_use.session.interfaces import ApplicationEntry
 
@@ -40,6 +40,8 @@ class ApplicationDiscoveryPipeline:
         for application in directory["applications"]:
             if application["isRunning"]:
                 try:
+                    # The pipeline shares retained bindings with their owning service.
+                    # pylint: disable-next=protected-access
                     surfaces = await self.directory._query(
                         surfaces_query(
                             application["id"],
@@ -80,7 +82,7 @@ class ApplicationDiscoveryPipeline:
                 )
             )
         if not result and directory["stopReasons"]:
-            raise localFailure(
+            raise local_failure(
                 "application discovery is incomplete: " + "; ".join(directory["stopReasons"]),
                 "retry discovery when the desktop is available",
                 "observation_incomplete",

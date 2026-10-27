@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import weakref
 from collections import OrderedDict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.native.contracts import Knowledge
 from computer_use.native.scopes import WorkingWindow
 
@@ -60,7 +61,7 @@ class ApplicationReferences:
     def resolve(self, ref, session):
         entry = self._entries.get(ref)
         if entry is None or entry.session != session:
-            raise localFailure(
+            raise local_failure(
                 "application reference is unknown or belongs to an expired session",
                 "call listApps() and choose a returned integer id",
                 "stale_target",
@@ -187,13 +188,17 @@ class InstanceState:
             if identity not in self.evidence and item.membership is Knowledge.YES:
                 self.evidence[identity] = WindowEvidence(identity, item.membership)
         self.directory = directory
-        self.members = {
-            item["window"]: item
-            for item in directory["surfaces"]
-            if (known := self.evidence.get(WindowIdentity.of(item))) is not None
-            and known.lifetime is WindowLifetime.RETAINED
-            and known.membership is Knowledge.YES
-        }
+
+        def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for item in _source_items:
+                if (
+                    (known := self.evidence.get(WindowIdentity.of(item))) is not None
+                    and known.lifetime is WindowLifetime.RETAINED
+                    and known.membership is Knowledge.YES
+                ):
+                    yield (item["window"], item)
+
+        self.members = dict(_iter_item(iter(directory["surfaces"])))
 
     def retire(self, identity: WindowIdentity) -> None:
         """Consume explicit fixed-window invalidation without guessing from errors."""

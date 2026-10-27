@@ -12,9 +12,11 @@ from computer_use.native.semantics import (
     FIELDS,
     PROPERTIES,
     RELATIONS,
-    UNKNOWN as UNKNOWN,
     field_value,
     normalize_control_values,
+)
+from computer_use.native.semantics import (
+    UNKNOWN as UNKNOWN,
 )
 
 
@@ -29,12 +31,19 @@ class NativeGraph:
         self.fields = tuple(fields)
         self.follow_relations = tuple(follow_relations)
         self.max_nodes, self.max_depth = max_nodes, max_depth
-        if (
-            type(max_nodes) is not int
-            or not 1 <= max_nodes <= 8192
-            or type(max_depth) is not int
-            or not 0 <= max_depth <= 40
-        ):
+        invalid_max_nodes = (
+            True
+            # Exact types preserve scalar validation and identity contracts.
+            if (
+                type(max_nodes) is not int  # pylint: disable=unidiomatic-typecheck
+                or not 1 <= max_nodes <= 8192
+                # pylint: disable-next=unidiomatic-typecheck
+                or type(max_depth) is not int
+                or not 0 <= max_depth <= 40
+            )
+            else False
+        )
+        if invalid_max_nodes:
             raise ValueError("Invalid native query budget")
         self.nodes, self.edges, self.completed_edges = {}, {}, {}
         self.node_sources, self.edge_sources, self.dependencies = {}, {}, {}
@@ -45,9 +54,9 @@ class NativeGraph:
         value["relations"].update(relations)
         value["actions"] |= actions
 
-    def _use_relation(self, token, property):
-        for observed in self.edge_sources.get((token, property), ()):
-            self._use(observed, token, relations=(property,))
+    def _use_relation(self, token, relation_property):
+        for observed in self.edge_sources.get((token, relation_property), ()):
+            self._use(observed, token, relations=(relation_property,))
 
     @property
     def basis(self):
@@ -70,16 +79,22 @@ class NativeGraph:
             self._use_relation(token, key)
         # A reverse edge may skip a layout wrapper on this confirmed forward
         # path. It must not point into a different control or outer window.
-        if (
-            edge is not None
-            and edge["state"] == "complete"
-            and edge["certainty"] == "confirmed"
-            and edge["targets"]
-            and (len(edge["targets"]) != 1 or edge["targets"][0] not in ancestors)
-        ):
+        matches_edge = (
+            True
+            if (
+                edge is not None
+                and edge["state"] == "complete"
+                and edge["certainty"] == "confirmed"
+                and edge["targets"]
+                and (len(edge["targets"]) != 1 or edge["targets"][0] not in ancestors)
+            )
+            else False
+        )
+        if matches_edge:
             self.fail("observation_incomplete", "The control containment has conflicting native parent evidence.")
 
-    def fail(self, code, detail):
+    @staticmethod
+    def fail(code, detail):
         raise ComputerUseError(
             dict(
                 code=code,
@@ -113,13 +128,18 @@ class NativeGraph:
             self.remaining(),
             **options,
         )
-        if (
-            batch["session"] != self.root.session
-            or batch["surface"] != self.root.surface
-            or batch["platform"] != self.platform
-            or batch["roots"] != [token]
-            or len(batch["nodes"]) > available
-        ):
+        invalid_available = (
+            True
+            if (
+                batch["session"] != self.root.session
+                or batch["surface"] != self.root.surface
+                or batch["platform"] != self.platform
+                or batch["roots"] != [token]
+                or len(batch["nodes"]) > available
+            )
+            else False
+        )
+        if invalid_available:
             raise ValueError("Native query returned a different scope or exceeded its budget")
         return batch
 
@@ -137,7 +157,7 @@ class NativeGraph:
                 self.edges[key] = relation
                 self.edge_sources[key] = [batch["observed"]["id"]]
 
-    async def _next_relation(self, token, property, cursor, limit):
+    async def _next_relation(self, token, relation_property, cursor, limit):
         # Native relation pages can collect the original target objects in the
         # same request. One slot is reserved for the already-known source node;
         # new facts still share the graph's total node/deadline budget.
@@ -152,9 +172,11 @@ class NativeGraph:
             # its first page and target facts together; _relation still checks
             # the original source, count, offset and completeness.
             batch = await self._collect_nodes(
-                token, limit + 1, 1, relation_page=dict(property=property, cursor=None, limit=limit)
+                token, limit + 1, 1, relation_page=dict(property=relation_property, cursor=None, limit=limit)
             )
-            relation = next((r for r in batch["relations"] if r["source"] == token and r["property"] == property), None)
+            relation = next(
+                (r for r in batch["relations"] if r["source"] == token and r["property"] == relation_property), None
+            )
             if relation is None:
                 self.fail("observation_incomplete", "The first relation page was not collected.")
             return dict(
@@ -166,42 +188,60 @@ class NativeGraph:
                 relation=relation,
             ), batch
         page = await self.port.query_relation(
-            self.operation, replace(self.root, node=token), property, cursor, limit, self.remaining()
+            self.operation, replace(self.root, node=token), relation_property, cursor, limit, self.remaining()
         )
         relation = page["relation"]
-        if (
-            page["session"] != self.root.session
-            or page["surface"] != self.root.surface
-            or page["platform"] != self.platform
-            or relation["source"] != token
-            or relation["property"] != property
-        ):
+        invalid_token = (
+            True
+            if (
+                page["session"] != self.root.session
+                or page["surface"] != self.root.surface
+                or page["platform"] != self.platform
+                or relation["source"] != token
+                or relation["property"] != relation_property
+            )
+            else False
+        )
+        if invalid_token:
             raise ValueError("Native query page changed its source or scope")
         # Different content relations can expose the same native objects.
         # Read their identities first so already-collected facts stay reusable.
-        if (
-            can_batch
-            and relation["certainty"] == "confirmed"
-            and relation["state"] in ("complete", "partial")
-            and any(target not in self.nodes for target in relation["targets"])
-        ):
+        matches_can_batch = (
+            True
+            if (
+                can_batch
+                and relation["certainty"] == "confirmed"
+                and relation["state"] in ("complete", "partial")
+                and any(target not in self.nodes for target in relation["targets"])
+            )
+            else False
+        )
+        if matches_can_batch:
             # A short final page must not fill spare slots from other relations.
             fact_limit = len(relation["targets"])
             batch = await self._collect_nodes(
-                token, fact_limit + 1, 1, relation_page=dict(property=property, cursor=cursor, limit=fact_limit)
+                token,
+                fact_limit + 1,
+                1,
+                relation_page=dict(property=relation_property, cursor=cursor, limit=fact_limit),
             )
             collected = next(
-                (r for r in batch["relations"] if r["source"] == token and r["property"] == property), None
+                (r for r in batch["relations"] if r["source"] == token and r["property"] == relation_property), None
             )
-            if (
-                collected is None
-                or collected["targets"] != relation["targets"]
-                or len(collected["targets"]) > limit
-                or collected.get("offset", 0) != relation.get("offset", 0)
-                or collected.get("total") != relation.get("total")
-                or collected["certainty"] != "confirmed"
-                or collected["state"] not in ("complete", "partial")
-            ):
+            matches_collected = (
+                True
+                if (
+                    collected is None
+                    or collected["targets"] != relation["targets"]
+                    or len(collected["targets"]) > limit
+                    or collected.get("offset", 0) != relation.get("offset", 0)
+                    or collected.get("total") != relation.get("total")
+                    or collected["certainty"] != "confirmed"
+                    or collected["state"] not in ("complete", "partial")
+                )
+                else False
+            )
+            if matches_collected:
                 self.fail("observation_incomplete", "Relation changed while collecting its target facts.")
             return page, batch
         return page, None
@@ -235,13 +275,18 @@ class NativeGraph:
                 self.operation, replace(self.root, node=token), key, None, min(2000, self.max_nodes), self.remaining()
             )
             relation = page["relation"]
-            if (
-                page["session"] != self.root.session
-                or page["surface"] != self.root.surface
-                or page["platform"] != self.platform
-                or relation["source"] != token
-                or relation["property"] != key
-            ):
+            invalid_token_condition = (
+                True
+                if (
+                    page["session"] != self.root.session
+                    or page["surface"] != self.root.surface
+                    or page["platform"] != self.platform
+                    or relation["source"] != token
+                    or relation["property"] != key
+                )
+                else False
+            )
+            if invalid_token_condition:
                 raise ValueError("Supplementary native relation changed its source or scope")
             self.edges[cache_key] = relation
             self.edge_sources[cache_key] = [page["observed"]["id"]]
@@ -249,9 +294,13 @@ class NativeGraph:
             self.fail("observation_incomplete", "Required native relation was not collected: " + kind)
         # Standard AX optional relationships use unsupported for leaf/absent
         # attributes. A failed read or an unqueried relation is not absence.
-        if relation["state"] == "absent" or (
-            (self.platform == "macos" or optional) and relation["state"] == "unsupported"
-        ):
+        matches_relation = (
+            True
+            if relation["state"] == "absent"
+            or ((self.platform == "macos" or optional) and relation["state"] == "unsupported")
+            else False
+        )
+        if matches_relation:
             result = []
         else:
             if (
@@ -271,26 +320,35 @@ class NativeGraph:
                 seen.add(cursor)
                 page, batch = await self._next_relation(token, key, cursor, min(2000, self.max_nodes - len(result)))
                 next_relation = page["relation"]
-                if (
-                    page["session"] != self.root.session
-                    or page["surface"] != self.root.surface
-                    or page["platform"] != self.platform
-                    or next_relation["source"] != token
-                    or next_relation["property"] != key
-                    or next_relation.get("offset", 0) != len(result)
-                    or next_relation.get("total") != relation.get("total")
-                    or next_relation["certainty"] != "confirmed"
-                    or next_relation["state"] not in ("complete", "partial")
-                ):
+                matches_token = (
+                    True
+                    if (
+                        page["session"] != self.root.session
+                        or page["surface"] != self.root.surface
+                        or page["platform"] != self.platform
+                        or next_relation["source"] != token
+                        or next_relation["property"] != key
+                        or next_relation.get("offset", 0) != len(result)
+                        or next_relation.get("total") != relation.get("total")
+                        or next_relation["certainty"] != "confirmed"
+                        or next_relation["state"] not in ("complete", "partial")
+                    )
+                    else False
+                )
+                if matches_token:
                     self.fail("observation_incomplete", "Relation changed while resolving the target.")
                 if batch is not None:
                     self._remember_nodes(batch)
                 self.edge_sources[cache_key].append(page["observed"]["id"])
                 result.extend(next_relation["targets"])
                 relation = next_relation
-            if len(result) > self.max_nodes or (
-                relation["state"] != "complete" and (not seen or relation.get("total") != len(result))
-            ):
+            matches_result = (
+                True
+                if len(result) > self.max_nodes
+                or (relation["state"] != "complete" and (not seen or relation.get("total") != len(result)))
+                else False
+            )
+            if matches_result:
                 self.fail("observation_incomplete", "The query needs a relation with an unread remainder.")
         self._use_relation(token, key)
         self.completed_edges[cache_key] = result

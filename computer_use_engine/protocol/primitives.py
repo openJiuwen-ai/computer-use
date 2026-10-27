@@ -21,25 +21,34 @@ _SPACE = (
 )
 
 
+def required_item(mapping: Mapping, key: Any) -> Any:
+    """Read a required mapping item with the usual KeyError semantics."""
+    missing = object()
+    value = mapping.get(key, missing)
+    if value is missing:
+        raise KeyError(key)
+    return value
+
+
 def trim(value: str) -> str:
     return value.strip(_SPACE)
 
 
-def trimStart(value: str) -> str:
+def trim_start(value: str) -> str:
     return value.lstrip(_SPACE)
 
 
-def trimEnd(value: str) -> str:
+def trim_end(value: str) -> str:
     return value.rstrip(_SPACE)
 
 
-def utf16Length(value: str) -> int:
+def utf16_length(value: str) -> int:
     return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
-def utf16Slice(value: str, start: int, end: int | None = None) -> str:
+def utf16_slice(value: str, start: int, end: int | None = None) -> str:
     data = value.encode("utf-16-le", errors="surrogatepass")
-    return data[start * 2 : end * 2 if end is not None else None].decode("utf-16-le", errors="surrogatepass")
+    return data[slice(start * 2, end * 2 if end is not None else None)].decode("utf-16-le", errors="surrogatepass")
 
 
 def finite(value: Any) -> bool:
@@ -51,7 +60,7 @@ def finite(value: Any) -> bool:
         return False
 
 
-def safeInteger(value: Any) -> bool:
+def safe_integer(value: Any) -> bool:
     return finite(value) and -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER and int(value) == value
 
 

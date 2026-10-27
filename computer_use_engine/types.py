@@ -27,31 +27,50 @@ ElementSelector: TypeAlias = int | str | ElementPath
 
 class Observation(Protocol):
     @property
-    def text(self) -> str: ...
+    def text(self) -> str:
+        pass
+
     @property
-    def screenshot(self) -> bytearray | None: ...
+    def screenshot(self) -> bytearray | None:
+        pass
 
 
 class AppInfo(Protocol):
     @property
-    def id(self) -> int: ...
+    def id(self) -> int:
+        pass
+
     @property
-    def displayName(self) -> str: ...
+    # API, protocol, and native binding names retain their established spelling.
+    # pylint: disable-next=invalid-name
+    def displayName(self) -> str:
+        pass
+
     @property
-    def isRunning(self) -> bool: ...
+    # pylint: disable-next=invalid-name
+    def isRunning(self) -> bool:
+        pass
 
 
 class ActionResult(Protocol):
     @property
-    def status(self) -> Literal["dispatched", "verified"]: ...
+    def status(self) -> Literal["dispatched", "verified"]:
+        pass
+
     @property
-    def detail(self) -> str: ...
+    def detail(self) -> str:
+        pass
 
 
 class TextPage(Protocol):
     @property
-    def text(self) -> str: ...
+    def text(self) -> str:
+        pass
+
     @property
-    def total(self) -> int: ...
+    def total(self) -> int:
+        pass
+
     @property
-    def next(self) -> str | None: ...
+    def next(self) -> str | None:
+        pass

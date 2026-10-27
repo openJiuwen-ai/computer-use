@@ -15,7 +15,7 @@ from computer_use.interaction.read.desktop.passes.record_desktop_observation imp
 )
 from computer_use.pipeline import Contract, Sequence
 from computer_use.pipeline.core import Node
-from computer_use.session.events import pendingObservationsDiscarded
+from computer_use.session.events import pending_observations_discarded
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
@@ -69,7 +69,7 @@ class DesktopReadRecovery(Node["ReadDesktop", "Observation"]):
             return await self.body.arun(request, control)
         except BaseException:
             self.controller.desktop.reset()
-            pendingObservationsDiscarded(self.controller)
+            pending_observations_discarded(self.controller)
             raise
 
     def _run(self, value: ReadDesktop, control: Control) -> Observation:
@@ -90,7 +90,7 @@ class ControllerDesktopReadPipeline(HostOperation):
             steps=[
                 CollectDesktop(controller),
                 record_desktop_observation(desktop=controller.desktop, observation_state=controller._observation_state),
-                publish_desktop_observation(publish_observation=controller.publishObservation),
+                publish_desktop_observation(publish_observation=controller.publish_observation),
             ],
         )
         super().__init__(DesktopReadRecovery(controller, body))

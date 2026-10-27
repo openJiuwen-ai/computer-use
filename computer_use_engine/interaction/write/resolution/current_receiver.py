@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.native.contracts import Knowledge
 from computer_use.native.query.graph import UNKNOWN, NativeGraph
-from computer_use.native.semantics import EDITING_FIELDS, LAYOUT_ROLES, editing_evidence, roleName
+from computer_use.native.semantics import EDITING_FIELDS, LAYOUT_ROLES, editing_evidence, role_name
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
@@ -66,7 +66,7 @@ class CurrentReceiverQuery(NativeGraph):
         raw = await self._field(token, "role")
         if raw is UNKNOWN:
             self.fail("observation_incomplete", "The current receiver role is unknown.")
-        role = roleName(self.platform, raw)
+        role = role_name(self.platform, raw)
         if role in LAYOUT_ROLES | {"window", "sheet", "dialog"}:
             self.fail("input_unavailable", "The reported focus is a container, not a confirmed keyboard recipient.")
         if intent.kind in ("insert", "paste"):
@@ -91,7 +91,7 @@ class CurrentReceiverQuery(NativeGraph):
             raw = await self._field(token, "role")
             if raw is UNKNOWN:
                 self.fail("observation_incomplete", "A receiver role is unknown.")
-            role = roleName(self.platform, raw)
+            role = role_name(self.platform, raw)
             if token != self.root.node and role in ("window", "sheet", "dialog"):
                 return  # A window Element does not follow separate modal windows.
             if path:

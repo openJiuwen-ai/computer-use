@@ -1,22 +1,27 @@
 import asyncio
 import codecs
+import logging
 
 from computer_use._json import loads as jsonLoads
-from computer_use.protocol.primitives import utf16Length
+from computer_use.protocol.primitives import utf16_length
 
+# Private variables hold mutable session state.
+# pylint: disable-next=invalid-name
 _handler = None
 
+_LOG = logging.getLogger(__name__)
 
-def setPreviewHandler(handler):
+
+def set_preview_handler(handler):
     global _handler
     _handler = handler
 
 
-def getPreviewHandler():
+def get_preview_handler():
     return _handler
 
 
-def isPreviewEvent(value):
+def is_preview_event(value):
     return isinstance(value, dict) and (
         value.get("kind") == "reset"
         or value.get("kind") == "frame"
@@ -26,7 +31,7 @@ def isPreviewEvent(value):
     )
 
 
-def latestPreviewSink(send):
+def latest_preview_sink(send):
     busy, pending = False, None
 
     async def drain():
@@ -37,7 +42,7 @@ def latestPreviewSink(send):
             try:
                 await send(event)
             except Exception:
-                pass
+                _LOG.debug("Preview delivery did not complete.", exc_info=True)
         busy = False
 
     def sink(event):
@@ -50,24 +55,27 @@ def latestPreviewSink(send):
     return sink
 
 
-async def readPreviews(stream, receive):
+async def read_previews(stream, receive):
     buffer, discard = "", False
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     try:
-        while chunk := await stream.read(65536):
+        while True:
+            chunk = await stream.read(65536)
+            if not chunk:
+                break
             for index, part in enumerate(decoder.decode(chunk).split("\n")):
                 if index:
                     if not discard and buffer:
                         try:
                             event = jsonLoads(buffer)
-                            if isPreviewEvent(event):
+                            if is_preview_event(event):
                                 receive(event)
                         except Exception:
-                            pass
+                            _LOG.debug("Preview delivery did not complete.", exc_info=True)
                     buffer, discard = "", False
                 if not discard:
                     buffer += part
-                    if utf16Length(buffer) > 8 * 1024 * 1024:
+                    if utf16_length(buffer) > 8 * 1024 * 1024:
                         buffer, discard = "", True
     except (OSError, ValueError):
-        pass
+        _LOG.debug("Preview delivery did not complete.", exc_info=True)

@@ -53,4 +53,5 @@ class AppState:
 
 
 if TYPE_CHECKING:
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts, Record
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import Record

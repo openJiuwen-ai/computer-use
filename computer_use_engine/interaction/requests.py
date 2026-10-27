@@ -10,7 +10,8 @@ from .agent.requests import INTERFACE_REQUESTS
 if TYPE_CHECKING:
     from typing import Sequence
 
-    from computer_use.interaction.records import ElementPath as LookupPath, ElementSnapshot
+    from computer_use.interaction.records import ElementPath as LookupPath
+    from computer_use.interaction.records import ElementSnapshot
     from computer_use.native.contracts import Intent, OperationTarget
     from computer_use.protocol.records import Record
 

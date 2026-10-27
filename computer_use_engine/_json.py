@@ -2,19 +2,20 @@
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from typing import Any
 
-from computer_use.interaction.read.presentation.formatting import jsonString, numberString
+from computer_use.interaction.read.presentation.formatting import json_string, number_string
 
 
 def loads(value):
     """Read standard JSON; Python's optional NaN/Infinity tokens are not wire JSON."""
 
-    def invalidConstant(token):
+    def invalid_constant(token):
         source = value if isinstance(value, str) else value.decode("utf-8", "replace")
         raise json.JSONDecodeError(f"Invalid JSON constant: {token}", source, 0)
 
-    return json.loads(value, parse_constant=invalidConstant)
+    return json.loads(value, parse_constant=invalid_constant)
 
 
 def dumps(value):
@@ -28,9 +29,9 @@ def dumps(value):
         if value is False:
             return "false"
         if isinstance(value, str):
-            return jsonString(value)
+            return json_string(value)
         if type(value) in (int, float):
-            return "null" if isinstance(value, float) and not math.isfinite(value) else numberString(value)
+            return "null" if isinstance(value, float) and not math.isfinite(value) else number_string(value)
         if isinstance(value, (Mapping, list, tuple)):
             identity = id(value)
             if identity in active:
@@ -41,21 +42,30 @@ def dumps(value):
                     # Numeric object property ordering is observable in budgets
                     # and original JSONL traces; preserve it during the port.
                     keys = list(value)
+
+                    def _iter_key(_source_items: Iterator[Any]) -> Iterator[Any]:
+                        for key in _source_items:
+                            is_array_index = (
+                                True
+                                if (
+                                    isinstance(key, str)
+                                    and key.isascii()
+                                    and key.isdecimal()
+                                    and str(int(key)) == key
+                                    and int(key) < 4294967295
+                                )
+                                else False
+                            )
+                            if is_array_index:
+                                yield key
+
                     indexes = sorted(
-                        (
-                            key
-                            for key in keys
-                            if isinstance(key, str)
-                            and key.isascii()
-                            and key.isdecimal()
-                            and str(int(key)) == key
-                            and int(key) < 4294967295
-                        ),
+                        _iter_key(iter(keys)),
                         key=int,
                     )
                     rest = [key for key in keys if key not in indexes]
                     return (
-                        "{" + ",".join(jsonString(str(key)) + ":" + encode(value[key]) for key in indexes + rest) + "}"
+                        "{" + ",".join(json_string(str(key)) + ":" + encode(value[key]) for key in indexes + rest) + "}"
                     )
                 return "[" + ",".join(encode(child) for child in value) + "]"
             finally:

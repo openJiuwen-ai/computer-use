@@ -141,6 +141,8 @@ class NativeFacts:
 
         def read():
             count = self.call("Text", "get_character_count", obj)
+            # Exact types preserve scalar validation and identity contracts.
+            # pylint: disable-next=unidiomatic-typecheck
             if type(count) is not int or not 0 <= count <= MAX_COUNT:
                 raise FieldUnavailable("error", "Invalid native character count.", raw_result=count)
             end = min(count, 262144)
@@ -148,6 +150,7 @@ class NativeFacts:
             if not isinstance(value, str):
                 raise FieldUnavailable("error", "Native Text returned no string.", raw_result=value)
             after = self.call("Text", "get_character_count", obj)
+            # pylint: disable-next=unidiomatic-typecheck
             if type(after) is not int or not 0 <= after <= MAX_COUNT:
                 raise FieldUnavailable(
                     "error",
@@ -178,16 +181,21 @@ class NativeFacts:
             value = self.cached(cache, name, lambda: self.call("Accessible", ATTRIBUTES[name], obj))
             if value is not None and name != "attributes" and not isinstance(value, str):
                 raise FieldUnavailable("error", "Native string field returned a different type.", raw_result=value)
-            if (
-                name == "attributes"
-                and value is not None
-                and (
-                    not isinstance(value, dict)
-                    or len(value) > 128
-                    or any(not isinstance(k, str) or not k or not isinstance(v, str) for k, v in value.items())
-                    or sum(len(k) + len(v) for k, v in value.items()) > 65536
+            invalid_name = (
+                True
+                if (
+                    name == "attributes"
+                    and value is not None
+                    and (
+                        not isinstance(value, dict)
+                        or len(value) > 128
+                        or any(not isinstance(k, str) or not k or not isinstance(v, str) for k, v in value.items())
+                        or sum(len(k) + len(v) for k, v in value.items()) > 65536
+                    )
                 )
-            ):
+                else False
+            )
+            if invalid_name:
                 raise FieldUnavailable(
                     "error", "Native attributes exceed the supported dictionary budget.", raw_result=value
                 )
@@ -204,6 +212,7 @@ class NativeFacts:
             interface, method = TABLE_COUNTS[name]
             self.require_interface(obj, cache, interface)
             value = self.call(interface, method, obj)
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value) is not int or not 0 <= value <= MAX_COUNT:
                 raise FieldUnavailable("error", "Invalid native table or selection count.", raw_result=value)
             return value
@@ -216,6 +225,7 @@ class NativeFacts:
             if (
                 not isinstance(value, (list, tuple))
                 or len(value) != 4
+                # pylint: disable-next=unidiomatic-typecheck
                 or any(type(v) is not int or not -MAX_COUNT <= v <= MAX_COUNT for v in value)
             ):
                 raise FieldUnavailable("error", "Invalid native row/column span result.", raw_result=value)
@@ -232,6 +242,7 @@ class NativeFacts:
             # dimensions and negative coordinates; visibility and usability
             # remain separate native facts for consumers to interpret.
             rect = {key: getattr(value, key, None) for key in ("x", "y", "width", "height")}
+            # pylint: disable-next=unidiomatic-typecheck
             if any(type(v) is not int or not -(2**31) <= v < 2**31 for v in rect.values()):
                 raise FieldUnavailable(
                     "error",
@@ -257,12 +268,14 @@ class NativeFacts:
             self.require_interface(obj, cache, "Text")
             method = "get_caret_offset" if name == "Text.caretOffset" else "get_character_count"
             value = self.call("Text", method, obj)
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value) is not int or not 0 <= value <= MAX_COUNT:
                 raise FieldUnavailable("error", "Invalid native text offset or count.", raw_result=value)
             return value
         if name == "Text.selections":
             self.require_interface(obj, cache, "Text")
             count = self.call("Text", "get_n_selections", obj)
+            # pylint: disable-next=unidiomatic-typecheck
             if type(count) is not int or not 0 <= count <= 64:
                 raise FieldUnavailable(
                     "error", "Native selection count exceeds the supported query budget.", raw_result=count
@@ -271,6 +284,7 @@ class NativeFacts:
             for index in range(count):
                 bounds = self.call("Text", "get_selection", obj, index)
                 start, end = getattr(bounds, "start_offset", None), getattr(bounds, "end_offset", None)
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(start) is not int or type(end) is not int or not 0 <= start <= end <= MAX_COUNT:
                     raw = (
                         bounds
@@ -372,6 +386,7 @@ class NativeFacts:
             if "Action" not in self.interfaces(obj, cache):
                 return dict(state="complete", items=[], total=0)
             total = self.call("Action", "get_n_actions", obj)
+            # pylint: disable-next=unidiomatic-typecheck
             if type(total) is not int or not 0 <= total <= MAX_COUNT:
                 rejected = total
                 total = None
@@ -417,6 +432,7 @@ class NativeFacts:
 
     def indexed_relation(self, obj, interface, count_method, item_method, limit, *, failures=None):
         total = self.call(interface, count_method, obj)
+        # pylint: disable-next=unidiomatic-typecheck
         if type(total) is not int or not 0 <= total <= MAX_COUNT:
             label = "child" if interface == "Accessible" else "selected child"
             raise FieldUnavailable("error", "Invalid native " + label + " count.", raw_result=total)
@@ -440,6 +456,7 @@ class NativeFacts:
             if failures is not None:
                 failures.append(status)
             return objects, total, "Relation count could not be rechecked: " + status.get("detail", status["state"])
+        # pylint: disable-next=unidiomatic-typecheck
         if type(after) is not int or after != total:
             record_gap(
                 failures,
@@ -449,29 +466,29 @@ class NativeFacts:
             return objects, total, "Native relation target count changed during collection."
         return objects, total, ""
 
-    def related(self, obj, property, limit, *, failures=None):
+    def related(self, obj, relation_property, limit, *, failures=None):
         """Read a native prefix. Holes never masquerade as a complete list."""
-        if property == "parent":
+        if relation_property == "parent":
             parent = self.call("Accessible", "get_parent", obj)
             return ([parent] if parent is not None else []), (1 if parent is not None else 0), ""
-        if property == "children":
+        if relation_property == "children":
             return self.indexed_relation(
                 obj, "Accessible", "get_child_count", "get_child_at_index", limit, failures=failures
             )
-        if property == "Selection.selectedChildren":
+        if relation_property == "Selection.selectedChildren":
             self.require_interface(obj, {}, "Selection")
             return self.indexed_relation(
                 obj, "Selection", "get_n_selected_children", "get_selected_child", limit, failures=failures
             )
-        if property.startswith("TableCell."):
+        if relation_property.startswith("TableCell."):
             self.require_interface(obj, {}, "TableCell")
-            if property == "TableCell.table":
+            if relation_property == "TableCell.table":
                 table = self.call("TableCell", "get_table", obj)
                 return ([table] if table is not None else []), (1 if table is not None else 0), ""
             method = {
                 "TableCell.rowHeaderCells": "get_row_header_cells",
                 "TableCell.columnHeaderCells": "get_column_header_cells",
-            }.get(property)
+            }.get(relation_property)
             if method is None:
                 raise FieldUnavailable("unsupported")
             headers = self.call("TableCell", method, obj)
@@ -487,9 +504,11 @@ class NativeFacts:
                     return objects, len(headers), f"Native table header {index} is unavailable."
                 objects.append(headers[index])
             return objects, len(headers), ""
-        if property not in ("labelled-by", "label-for"):
+        if relation_property not in ("labelled-by", "label-for"):
             raise FieldUnavailable("unsupported")
-        kind = getattr(self.ax.A.RelationType, "LABELLED_BY" if property == "labelled-by" else "LABEL_FOR", None)
+        kind = getattr(
+            self.ax.A.RelationType, "LABELLED_BY" if relation_property == "labelled-by" else "LABEL_FOR", None
+        )
         if kind is None:
             raise FieldUnavailable("unsupported")
         relations = self.call("Accessible", "get_relation_set", obj)
@@ -497,6 +516,7 @@ class NativeFacts:
             raise FieldUnavailable("error", "Invalid native relation set.", raw_result=relations)
         selected = [r for r in relations if r.get_relation_type() == kind]
         counts = [r.get_n_targets() for r in selected]
+        # pylint: disable-next=unidiomatic-typecheck
         if any(type(n) is not int or not 0 <= n <= MAX_COUNT for n in counts) or sum(counts) > MAX_COUNT:
             raise FieldUnavailable("error", "Invalid native relation target count.", raw_result=counts)
         total, objects = sum(counts), []
@@ -518,6 +538,7 @@ class NativeFacts:
 
     def table_dimensions(self, obj):
         shape = tuple(self.call("Table", method, obj) for method in ("get_n_rows", "get_n_columns"))
+        # pylint: disable-next=unidiomatic-typecheck
         if any(type(n) is not int or not 0 <= n <= 2147483647 for n in shape) or shape[0] * shape[1] > MAX_COUNT:
             raise FieldUnavailable("error", "Invalid native table dimensions.", raw_result=shape)
         return shape
@@ -552,25 +573,25 @@ class NativeFacts:
             gap = "Table coordinate prefix incomplete: " + status.get("detail", status["state"])
         return objects, total, gap, shape
 
-    def relation(self, node, property, *, limit=128, cursor=None, retain=None):
-        base = dict(source=node.ref, property=property, targets=[], certainty="confirmed")
+    def relation(self, node, relation_property, *, limit=128, cursor=None, retain=None):
+        base = dict(source=node.ref, property=relation_property, targets=[], certainty="confirmed")
         failures = []
         page = None
         if cursor is not None:
             page = self.store.pages.get(cursor)
-            if page is None or (page.node, page.property) != (node.ref, property):
+            if page is None or (page.node, page.property) != (node.ref, relation_property):
                 raise Failure("Relation continuation expired or belongs to another target.", "snapshot_expired")
         offset = page.offset if page else 0
-        coordinates = property in ("Table.viewportCandidates", "Table.cells")
+        coordinates = relation_property in ("Table.viewportCandidates", "Table.cells")
         try:
             if not coordinates and offset + limit > 8192:
                 raise FieldUnavailable("error", "Relation prefix verification exceeds 8192 targets.")
-            if property == "Table.viewportCandidates":
+            if relation_property == "Table.viewportCandidates":
                 from computer_use_linux.read.native_table_viewport import TableViewport
 
                 objects, total, gap, basis, detail = TableViewport(self).read(node.obj, limit, offset)
                 base["detail"] = detail
-            elif property == "Table.cells":
+            elif relation_property == "Table.cells":
                 objects, total, gap, basis = self.table_cells(node.obj, limit, offset, failures=failures)
                 # Equal products are not equal tables: 3x2 -> 2x3 changes every
                 # coordinate after the first row even if proxies are reused.
@@ -579,7 +600,7 @@ class NativeFacts:
                     "One target per coordinate; targets may repeat."
                 )
             else:
-                objects, total, gap = self.related(node.obj, property, offset + limit, failures=failures)
+                objects, total, gap = self.related(node.obj, relation_property, offset + limit, failures=failures)
                 keys = [self.ax.native_key(obj) for obj in objects]
             if coordinates:
                 # Table getters address row/column slots. A provider may return
@@ -590,7 +611,12 @@ class NativeFacts:
                     raise Failure("Native table coordinate space changed since the observed page.", "snapshot_expired")
                 base["detail"] += " Live coordinate page; values and native objects may change between reads."
             else:
-                if page and (page.total != total or tuple(keys[:offset]) != page.prefix or len(keys) < offset):
+                invalid_page = (
+                    True
+                    if page and (page.total != total or tuple(keys[:offset]) != page.prefix or len(keys) < offset)
+                    else False
+                )
+                if invalid_page:
                     raise Failure("Native relation changed since the observed page.", "snapshot_expired")
                 objects = objects[offset:]
             targets = [self.store.keep(node.surface, obj) for obj in objects]
@@ -604,16 +630,18 @@ class NativeFacts:
             if offset:
                 base["offset"] = offset
             if not objects and not total and not gap:
-                base["state"] = "absent" if property in ("parent", "TableCell.table") else "complete"
+                base["state"] = "absent" if relation_property in ("parent", "TableCell.table") else "complete"
             if gap:
                 base["detail"] = (base.get("detail", "") + (" " if "detail" in base else "") + gap)[:4096]
                 if failures:
                     base["failures"] = failures
             elif offset + len(objects) < total:
                 if coordinates:
-                    base["cursor"] = self.store.coordinate_page(node.ref, property, basis, total, offset + len(objects))
+                    base["cursor"] = self.store.coordinate_page(
+                        node.ref, relation_property, basis, total, offset + len(objects)
+                    )
                 elif len(keys) < 8192:
-                    base["cursor"] = self.store.page(node.ref, property, keys, total)
+                    base["cursor"] = self.store.page(node.ref, relation_property, keys, total)
             return base
         except (FieldUnavailable, self.ax.GLib.Error) as error:
             status = failure_status(error)
@@ -645,12 +673,18 @@ class NativeFacts:
                 ref, depth = pending.popleft()
                 if ref in seen:
                     continue
-                if nodes and (
-                    len(nodes) >= query["maxNodes"]
-                    or time.monotonic() >= self.until
-                    or wire_size >= WIRE_BUDGET
-                    or len(relations) + len(properties) > 16384
-                ):
+                matches_nodes = (
+                    True
+                    if nodes
+                    and (
+                        len(nodes) >= query["maxNodes"]
+                        or time.monotonic() >= self.until
+                        or wire_size >= WIRE_BUDGET
+                        or len(relations) + len(properties) > 16384
+                    )
+                    else False
+                )
+                if matches_nodes:
                     unread.add(ref)
                     continue
                 node = self.store.get(ref, target["surface"])

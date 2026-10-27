@@ -4,7 +4,7 @@ from ..protocol.primitives import frozen
 _views = WeakIdentityMap()
 
 
-def retainObservationData(state, roots, refs, windows=(), instance=None, identity=None):
+def retain_observation_data(state, roots, refs, windows=(), instance=None, identity=None):
     # JS Set iteration preserves the observed order (notably window enums).
     data = dict(roots=roots, refs=frozen(dict.fromkeys(refs)).keys(), windows=frozen(dict.fromkeys(windows)).keys())
     if instance is not None:
@@ -14,5 +14,5 @@ def retainObservationData(state, roots, refs, windows=(), instance=None, identit
     _views.set(state, data)
 
 
-def observationData(state):
+def observation_data(state):
     return _views.get(state)

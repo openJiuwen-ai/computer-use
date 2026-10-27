@@ -205,15 +205,17 @@ class ControllerElementReadPipeline(Pipeline["ReadElement", "tuple[Observation, 
                 plan_element_continuation(
                     capabilities_of=lambda: controller.transport.capabilities,
                     resolve_page=lambda cursor, target: controller.pages.resolve(cursor, target),
-                    validate_element=controller.validateElement,
+                    validate_element=controller.validate_element,
                 ),
                 CollectElementFacts(controller),
                 NumberElementFacts(controller),
+                # The pipeline shares retained bindings with their owning service.
+                # pylint: disable-next=protected-access
                 remember_element_observation(remember_snapshot=controller._remember, state_of=controller.state),
                 format_element_observation(),
                 PrepareElementDocument(),
                 PublishElementObservation(controller),
-                return_element_observation(element_snapshot=controller.elementSnapshot),
+                return_element_observation(element_snapshot=controller.element_snapshot),
             ],
         )
 

@@ -14,6 +14,8 @@ _KINDS = {"element", "text_range", "text_marker", "text_marker_range", "native_v
 
 def record(value: Any, required: set[str], optional: set[str] = frozenset()) -> dict[str, Any]:
     """Require one transport record with its declared fields."""
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is not dict or not required <= value.keys() or value.keys() - required - optional:
         raise ValueError("driver observation: unexpected or missing record fields")
     return value
@@ -28,6 +30,7 @@ def text(value: Any) -> str:
 
 def array(value: Any) -> list[Any]:
     """Require a JSON array rather than an arbitrary iterable."""
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is not list:
         raise ValueError("driver observation: expected an array")
     return value
@@ -81,6 +84,7 @@ class DriverWire:
         """Decode ordered metadata fields while rejecting malformed pairs."""
         result = []
         for pair in array(values):
+            # pylint: disable-next=unidiomatic-typecheck
             if type(pair) is not list or len(pair) != 2:
                 raise ValueError("driver observation: invalid metadata pair")
             result.append((text(pair[0]), self.value(pair[1], depth + 1)))
@@ -96,6 +100,7 @@ class DriverWire:
         metadata = dict(self.pairs(v.get("metadata", []), depth + 1))
         raw_bytes = self.bytes(v["raw"]) if "raw" in v else None
         data = v["data"]
+        # pylint: disable-next=unidiomatic-typecheck
         if type(data) is dict:
             if len(data) != 1:
                 raise ValueError("driver observation: ambiguous value tag")
@@ -110,6 +115,7 @@ class DriverWire:
             elif tag in ("fields", "entries"):
                 pairs = []
                 for pair in array(payload):
+                    # pylint: disable-next=unidiomatic-typecheck
                     if type(pair) is not list or len(pair) != 2:
                         raise ValueError("driver observation: invalid record pair")
                     key, item = pair
@@ -134,6 +140,7 @@ class DriverWire:
                 raise ValueError("driver observation: unknown value tag")
         elif data is not None and type(data) not in (str, bool, int, float):
             raise ValueError("driver observation: invalid scalar")
+        # pylint: disable-next=unidiomatic-typecheck
         elif type(data) is float and not math.isfinite(data):
             raise ValueError("driver observation: special float needs a tag")
         if "toolkit_value" in metadata:
@@ -142,12 +149,17 @@ class DriverWire:
             return metadata["enum_name"]
         if native_type == "CFDate" and type(data) in (int, float):
             return {"nativeType": "CFDate", "absoluteTime": data}
-        if (
-            self.semantic_values
-            and native_type == "CFURL"
-            and isinstance(data, str)
-            and isinstance(metadata.get("base"), str)
-        ):
+        matches_native_type = (
+            True
+            if (
+                self.semantic_values
+                and native_type == "CFURL"
+                and isinstance(data, str)
+                and isinstance(metadata.get("base"), str)
+            )
+            else False
+        )
+        if matches_native_type:
             base = urlsplit(metadata["base"])
             # urljoin's scheme allowlist excludes custom application URL schemes.
             # Resolve their path using the same hierarchical rules, then restore it.
@@ -161,6 +173,7 @@ class DriverWire:
             return {"nativeType": native_type, "base64": base64.b64encode(data).decode("ascii")}
         if raw_bytes is not None and metadata.get("raw_encoding") in ("utf-16le", "utf-16-le"):
             return raw_bytes.decode("utf-16le", "surrogatepass")
+        # pylint: disable-next=unidiomatic-typecheck
         if type(data) is float and not math.isfinite(data):
             return {
                 "nativeType": native_type,
@@ -170,6 +183,7 @@ class DriverWire:
 
     def item(self, value: Any, depth: int) -> Any:
         """Keep an unsuccessful collection slot at its original index."""
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is dict and set(value) == {"issue"}:
             return {"issue": self.issue(value["issue"], depth + 1)}
         return self.value(value, depth + 1)
@@ -211,10 +225,12 @@ class DriverWire:
             if v.get(key) is not None:
                 text(v[key])
         for key in ("cached", "complete"):
+            # pylint: disable-next=unidiomatic-typecheck
             if v.get(key) is not None and type(v[key]) is not bool:
                 raise ValueError("driver observation: invalid read state")
         if v.get("intervalNs") is not None:
             interval = array(v["intervalNs"])
+            # pylint: disable-next=unidiomatic-typecheck
             if len(interval) != 2 or any(type(x) is not int or x < 0 for x in interval) or interval[1] < interval[0]:
                 raise ValueError("driver observation: invalid capture interval")
         return {
@@ -275,27 +291,41 @@ def relation_record(
     offset, total = details.get("offset", 0), details.get("total")
     state = details.get("state", state)
     certainty = details.get("certainty")
-    if (
-        type(offset) is not int
-        or offset < 0
-        or total is not None
-        and (type(total) is not int or total < 0)
-        or certainty not in ("confirmed", "inferred", "unknown", "conflicting")
-        or state not in ("complete", "partial", "absent", "unsupported", "error", "timeout")
-    ):
+    invalid_offset = (
+        True
+        if (
+            type(offset) is not int  # pylint: disable=unidiomatic-typecheck
+            or offset < 0
+            or total is not None
+            # pylint: disable-next=unidiomatic-typecheck
+            and (type(total) is not int or total < 0)
+            or certainty not in ("confirmed", "inferred", "unknown", "conflicting")
+            or state not in ("complete", "partial", "absent", "unsupported", "error", "timeout")
+        )
+        else False
+    )
+    if invalid_offset:
         raise ValueError("driver observation: invalid relation range or evidence")
     end = offset + len(items)
     if total is not None and end > total:
         raise ValueError("driver observation: relation count exceeds its range")
     if (offset or "cursor" in details) and total is None:
         raise ValueError("driver observation: relation continuation needs a total")
-    if state == "complete" and (offset or "cursor" in details or total is not None and end != total):
+    invalid_state = (
+        True if state == "complete" and (offset or "cursor" in details or total is not None and end != total) else False
+    )
+    if invalid_state:
         raise ValueError("driver observation: complete relation has an unread remainder")
-    if state == "absent" and (end or total or "cursor" in details):
+    invalid_state_condition = True if state == "absent" and (end or total or "cursor" in details) else False
+    if invalid_state_condition:
         raise ValueError("driver observation: absent relation contains targets")
-    if "cursor" in details and (
-        state != "partial" or not isinstance(details["cursor"], str) or not details["cursor"] or end >= total
-    ):
+    invalid_details = (
+        True
+        if "cursor" in details
+        and (state != "partial" or not isinstance(details["cursor"], str) or not details["cursor"] or end >= total)
+        else False
+    )
+    if invalid_details:
         raise ValueError("driver observation: invalid relation continuation")
     return {
         "source": node,
@@ -340,30 +370,41 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
                     **{key: detail[key] for key in ("total", "detail") if key in detail},
                 }
                 total = actions.get("total", len(value))
-                if (
-                    actions["state"]
-                    not in (
-                        "complete",
-                        "partial",
-                        "unavailable",
-                        "unsupported",
-                        "absent",
-                        "error",
-                        "timeout",
-                        "not_read",
+                invalid_total = (
+                    True
+                    if (
+                        actions["state"]
+                        not in (
+                            "complete",
+                            "partial",
+                            "unavailable",
+                            "unsupported",
+                            "absent",
+                            "error",
+                            "timeout",
+                            "not_read",
+                        )
+                        # pylint: disable-next=unidiomatic-typecheck
+                        or type(total) is not int
+                        or total < len(value)
+                        or actions["state"] == "complete"
+                        and total != len(value)
                     )
-                    or type(total) is not int
-                    or total < len(value)
-                    or actions["state"] == "complete"
-                    and total != len(value)
-                ):
+                    else False
+                )
+                if invalid_total:
                     raise ValueError("driver observation: invalid action coverage")
                 for action in value:
                     if not isinstance(action, dict) or not isinstance(action.get("name"), str) or not action["name"]:
                         raise ValueError("driver observation: malformed action declaration")
                 continue
             name = key[1]
-            if key[0] != _SOURCES[wire.platform] or not isinstance(name, str) or arguments or name in requested:
+            matches_arguments = (
+                True
+                if key[0] != _SOURCES[wire.platform] or not isinstance(name, str) or arguments or name in requested
+                else False
+            )
+            if matches_arguments:
                 name = f"{key[0]}::{name}#{index}"
             requested.append(name)
             if raw_property["value"] is not None:

@@ -2,7 +2,8 @@
 
 import weakref
 
-from .png import PNG as PNG, decodePNG, pngSize
+from .png import PNG as PNG
+from .png import decode_png, png_size
 from .primitives import frozen
 from .schema import array, enum, identity, number, obj, string
 
@@ -53,32 +54,38 @@ _capture = obj(
 _captures = {}
 
 
-def decodeStamp(value):
+def decode_stamp(value):
     stamp = _stamp.parse(value)
     if stamp["completedAt"] < stamp["startedAt"]:
         raise ValueError("protocol: reversed observation interval")
     return frozen(stamp)
 
 
-def decodeCapture(value, kind, scope=None, observed=None):
+def decode_capture(value, kind, scope=None, observed=None):
     metadata = _capture.parse(value)
     base64 = metadata.pop("png")
     if "stopReasons" in metadata:
         metadata["stopReasons"] = tuple(metadata["stopReasons"])
     if metadata["kind"] != kind or (scope is not None and metadata["scope"] != scope):
         raise ValueError("protocol: image belongs to a different scope or kind")
-    if metadata["completedAt"] < metadata["startedAt"] or (
-        observed is not None
-        and (metadata["startedAt"] < observed["startedAt"] or metadata["completedAt"] > observed["completedAt"])
-    ):
+    invalid_metadata = (
+        True
+        if metadata["completedAt"] < metadata["startedAt"]
+        or (
+            observed is not None
+            and (metadata["startedAt"] < observed["startedAt"] or metadata["completedAt"] > observed["completedAt"])
+        )
+        else False
+    )
+    if invalid_metadata:
         raise ValueError("protocol: image capture is outside its observation interval")
     if "windowState" in metadata:
         state = metadata["windowState"]
         if kind != "window" or not metadata["startedAt"] <= state["sampledAt"] <= metadata["completedAt"]:
             raise ValueError("protocol: window state is outside its window capture interval")
         metadata["windowState"] = frozen(state)
-    png = decodePNG(base64)
-    size = pngSize(png)
+    png = decode_png(base64)
+    size = png_size(png)
     if metadata["width"] != size["width"] or metadata["height"] != size["height"]:
         raise ValueError("protocol: image dimensions do not match PNG")
     if "visualText" in metadata:
@@ -105,6 +112,6 @@ def decodeCapture(value, kind, scope=None, observed=None):
     return png
 
 
-def captureMetadata(png):
+def capture_metadata(png):
     item = _captures.get(id(png))
     return item[1] if item is not None and item[0]() is png else None

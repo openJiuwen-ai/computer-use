@@ -2,9 +2,13 @@ import asyncio
 from contextvars import ContextVar
 from functools import wraps
 
+# Private variables hold mutable session state.
+# pylint: disable-next=invalid-name
 _guard = None
 _nested = ContextVar("computer_use_nested", default=False)
+# pylint: disable-next=invalid-name
 _revision = 0
+# pylint: disable-next=invalid-name
 _active = 0
 
 
@@ -23,12 +27,12 @@ def eager(function):
     return start
 
 
-def operationCheckpoint():
+def operation_checkpoint():
     captured, idle = _revision, _active == 0
     return lambda: idle and _active == 0 and _revision == captured
 
 
-def setExecutionGuard(guard):
+def set_execution_guard(guard):
     global _guard
     _guard = guard
 

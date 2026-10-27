@@ -20,12 +20,17 @@ def select_background_route(options: RouteOptions) -> RouteOptions:
     for command, needs_foreground in options.preparation:
         primitive, key = command.primitive, route_key(command)
         failed = key in attempts.background_unavailable
-        if (
-            not needs_foreground
-            and not failed
-            and primitive.background_preparation != Knowledge.NO
-            and (key, False) not in attempts.prepared
-        ):
+        matches_needs_foreground = (
+            True
+            if (
+                not needs_foreground
+                and not failed
+                and primitive.background_preparation != Knowledge.NO
+                and (key, False) not in attempts.prepared
+            )
+            else False
+        )
+        if matches_needs_foreground:
             return replace(options, selected=replace(command, prepare=True))
     return options
 

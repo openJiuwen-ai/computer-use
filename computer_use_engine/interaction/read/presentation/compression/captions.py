@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.policy import content, protectedContent, sameBlocking
-from computer_use.interaction.read.presentation.tree import disclosure, isDialog, valuePreviewLimit
-from computer_use.protocol.primitives import utf16Length
+from computer_use.interaction.read.presentation.compression.policy import content, protected_content, same_blocking
+from computer_use.interaction.read.presentation.tree import VALUE_PREVIEW_LIMIT, disclosure, is_dialog
+from computer_use.protocol.primitives import utf16_length
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView, ViewNode
 
 
-def passiveLabel(
+def passive_label(
     state: ProjectionView,
     edit: ProjectionEditor,
     node: ViewNode,
@@ -19,7 +19,7 @@ def passiveLabel(
 ) -> bool:
     return (
         passive_caption(state, edit, node, target)
-        and ("capabilities" not in target or linked or state.memberOf(node, target))
+        and ("capabilities" not in target or linked or state.member_of(node, target))
         and (not node.get("labelTargets") or linked)
     )
 
@@ -47,12 +47,12 @@ def passive_caption(state: ProjectionView, edit: ProjectionEditor, node: ViewNod
         and not node.get("expandable")
         and not node.get("submenu")
         and not node.get("valueExpected")
-        and not protectedContent(node)
+        and not protected_content(node)
         and not node.get("incompleteLabelRelation")
         and "available" not in node.get("capabilities", {}).values()
         and not any(node.get(k) for k in ("preserveGroup", "subrole", "help", "url", "modal"))
         and "control" not in node
-        and not isDialog(node)
-        and utf16Length(node.get("value", "")) <= valuePreviewLimit
-        and sameBlocking(node, target)
+        and not is_dialog(node)
+        and utf16_length(node.get("value", "")) <= VALUE_PREVIEW_LIMIT
+        and same_blocking(node, target)
     )

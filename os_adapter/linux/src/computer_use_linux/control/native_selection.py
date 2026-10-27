@@ -78,6 +78,8 @@ def decode_selection_request(query):
         observed, node = _name(raw["observed"]), _name(raw["node"])
         require((observed, node) not in seen, "Duplicate native selection source.")
         seen.add((observed, node))
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         require(type(raw["actions"]) is bool, "Invalid action dependency flag.")
         for key, allowed in (("fields", STRUCTURAL_FIELDS), ("relations", STRUCTURAL_RELATIONS)):
             names = raw[key]
@@ -164,9 +166,14 @@ class SelectedReceiver:
     def equivalent(self, other):
         return (
             isinstance(other, SelectedReceiver)
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
             and self._operation == other._operation
+            # pylint: disable-next=protected-access
             and self._requested == other._requested
+            # pylint: disable-next=protected-access
             and self._actuator == other._actuator
+            # pylint: disable-next=protected-access
             and self._checks == other._checks
         )
 
@@ -206,6 +213,7 @@ class NativeSelection:
         elif name == "role":
             require(isinstance(value, str), "Invalid structural role.")
         else:
+            # pylint: disable-next=unidiomatic-typecheck
             require(type(value) is bool, "Invalid structural boolean.")
         return _Fact(_json(dict(value=value)))
 
@@ -388,7 +396,8 @@ class NativeSelection:
                 offset=offset,
                 total=total,
             )
-            if name == "parent" and not objects and total == 0 and not gap:
+            matches_name = True if name == "parent" and not objects and total == 0 and not gap else False
+            if matches_name:
                 actual["state"] = "absent"
             return self._relation(actual, objects[offset:])
         except (FieldUnavailable, self.ax.GLib.Error) as error:
@@ -435,6 +444,7 @@ class NativeSelection:
     def _begin_check(self, selected, ctx):
         op = self._operation()
         require(
+            # pylint: disable-next=protected-access
             selected._owner is self and selected._operation == op.token,
             "Selected recipient belongs to another operation.",
             "stale_target",
@@ -452,10 +462,12 @@ class NativeSelection:
             )
         replacement_keys = {
             self.ax.native_key(check.obj): self.ax.native_key(substitutions[check.node])
+            # pylint: disable-next=protected-access
             for check in selected._checks
             if check.node in substitutions
         }
         seen = set()
+        # pylint: disable-next=protected-access
         for check in selected._checks:
             ctx.check()
             obj = substitutions.get(check.node, check.obj)

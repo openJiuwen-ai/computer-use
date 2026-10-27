@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.compression.boundaries import anonymous_layout
-from computer_use.interaction.read.presentation.compression.policy import sameBlocking
+from computer_use.interaction.read.presentation.compression.policy import same_blocking
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.compression.model import Scope
@@ -26,13 +26,18 @@ def flatten_redundant_hierarchy(
         return [node]
     children = []
     for child in node["children"]:
-        if (
-            child["role"] == node["role"]
-            and anonymous_layout(child)
-            and sameBlocking(node, child)
-            and not state.keep(child)
-            and child["ref"] != state.context.get("focusedRef")
-        ):
+        matches_anonymous_layout = (
+            True
+            if (
+                child["role"] == node["role"]
+                and anonymous_layout(child)
+                and same_blocking(node, child)
+                and not state.keep(child)
+                and child["ref"] != state.context.get("focusedRef")
+            )
+            else False
+        )
+        if matches_anonymous_layout:
             edit.elide(child, "splice", child["children"], target=node)
             children.extend(child["children"])
         else:

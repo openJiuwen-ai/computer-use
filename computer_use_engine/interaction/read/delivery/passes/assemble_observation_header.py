@@ -27,6 +27,8 @@ def create(*, services: NativeAppReader) -> Callable[[RenderedObservation, Contr
             for ref, node in (rendered.snapshot.refs.items() if rendered else ())
         }
         windows = services.window_aliases(directory)
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         document = services._document(
             plan.selection,
             target,

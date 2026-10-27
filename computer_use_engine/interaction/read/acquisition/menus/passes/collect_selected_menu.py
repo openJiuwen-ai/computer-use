@@ -18,10 +18,14 @@ if TYPE_CHECKING:
 async def collect_selected_menu(matched: MatchedMenuItem, control: Control) -> MenuItemFacts:
     """Read the matched item's role and child-role evidence needed to resolve its submenu."""
     query = matched.level.request.query
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     role = await query._role(matched.selected)
     if role == "menu":
         return MenuItemFacts(matched, role)
+    # pylint: disable-next=protected-access
     children = await query._menu_children(matched.selected, matched.ancestors)
+    # pylint: disable-next=protected-access
     roles = tuple([(token, await query._role(token)) for token in children])
     return MenuItemFacts(matched, role, tuple(children), roles)
 

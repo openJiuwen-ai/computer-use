@@ -1,20 +1,21 @@
 import argparse
 import asyncio
+import logging
 import os
 import signal
 import sys
+
+from computer_use.diagnostics import SDK_VERSION
+from computer_use.native.preview import latest_preview_sink
+from computer_use.protocol.primitives import trim
+from computer_use.protocol.schema import obj, string
 
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
-from computer_use.diagnostics import sdkVersion
-from computer_use.native.preview import latestPreviewSink
-from computer_use.protocol.primitives import trim
-from computer_use.protocol.schema import obj, string
-
-from .history import historyKey, historyRequest
+from .history import HISTORY_KEY, history_request
 from .session import ExecutionSession
 
 "Stdio MCP host. Tool output retains its content blocks and history metadata."
@@ -45,13 +46,16 @@ RESET_DESCRIPTION = (
     "Reset this connection's Computer Use execution session and stop its window "
     "capture streams. Clears all Python variables, imports, tasks, "
     "App/Window/Element handles and observations. Works even if a script is "
-    "stuck. Does not close apps, undo actions or delete files or logs. Call when finished using the computer, or to start a clean "
+    "stuck. Does not close apps, undo actions or delete files or logs. "
+    "Call when finished using the computer, or to start a clean "
     "environment; afterwards recreate variables and read before acting. "
     "Idempotent; no "
     "parameters."
 )
 _input = obj(dict(title=string(min=1, max=200).optional(), code=string(min=1, max=65536)))
 _empty = obj({})
+
+_LOG = logging.getLogger(__name__)
 
 
 def capabilities():
@@ -62,19 +66,19 @@ def capabilities():
             "computer-use-host": dict(version=1, platform=platform),
             "computer-use-preview": dict(version=2),
             "computer-use-demo-foreground": dict(version=1),
-            historyKey: dict(version=1),
+            HISTORY_KEY: dict(version=1),
         },
     )
 
 
-def _supports(capabilities, key, version):
-    value = capabilities.get(key, {})
+def _supports(client_capabilities, key, version):
+    value = client_capabilities.get(key, {})
     return isinstance(value, dict) and type(value.get("version")) in (int, float) and value["version"] == version
 
 
 class ComputerUseServer:
     def __init__(self):
-        self.server = Server("computer-use", version=sdkVersion)
+        self.server = Server("computer-use", version=SDK_VERSION)
         self.session = None
 
         @self.server.list_tools()
@@ -164,7 +168,7 @@ class ComputerUseServer:
 
                 self.session = ExecutionSession(
                     45000,
-                    latestPreviewSink(preview) if _supports(experimental, "computer-use-preview", 2) else None,
+                    latest_preview_sink(preview) if _supports(experimental, "computer-use-preview", 2) else None,
                     _supports(experimental, "computer-use-demo-foreground", 1)
                     and experimental["computer-use-demo-foreground"].get("enabled") is True,
                 )
@@ -172,7 +176,7 @@ class ComputerUseServer:
             progress_token = metadata.get("progressToken")
             progress = 0
 
-            async def reportProgress():
+            async def report_progress():
                 nonlocal progress
                 progress += 1
                 try:
@@ -180,13 +184,13 @@ class ComputerUseServer:
                         progress_token, progress, related_request_id=context.request_id
                     )
                 except Exception:
-                    pass
+                    _LOG.debug("Progress notification could not be delivered.", exc_info=True)
 
             result = await self.session.execute(
                 args["code"],
-                history=historyRequest(metadata.get(historyKey)) if _supports(experimental, historyKey, 1) else None,
+                history=history_request(metadata.get(HISTORY_KEY)) if _supports(experimental, HISTORY_KEY, 1) else None,
                 title=args.get("title"),
-                on_progress=reportProgress if progress_token is not None else None,
+                on_progress=report_progress if progress_token is not None else None,
             )
             return types.CallToolResult.model_validate(result)
 
@@ -201,7 +205,7 @@ class ComputerUseServer:
                     read,
                     write,
                     InitializationOptions(
-                        server_name="computer-use", server_version=sdkVersion, capabilities=capabilities()
+                        server_name="computer-use", server_version=SDK_VERSION, capabilities=capabilities()
                     ),
                 )
         finally:
@@ -216,11 +220,11 @@ async def main():
         try:
             loop.add_signal_handler(sig, task.cancel)
         except RuntimeError:
-            pass
+            _LOG.debug("Progress notification could not be delivered.", exc_info=True)
     try:
         await host.run()
     except asyncio.CancelledError:
-        pass
+        _LOG.debug("Progress notification could not be delivered.", exc_info=True)
 
 
 def cli(argv=None):

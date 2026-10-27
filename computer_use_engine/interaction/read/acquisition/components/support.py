@@ -44,22 +44,27 @@ async def collect_component(
         port: Native I/O port; the stage declares when queries or dispatch may occur.
         collect: Bound dependency for collect; invoked only at its existing stage.
     """
-    generation = port.connection.sessionIdentity
+    generation = port.connection.session_identity
     try:
         return await collect(), None
     except ComputerUseError as error:
-        if (
-            port.connection.sessionIdentity != generation
-            or port.calls.retired
-            or error.effect != "none"
-            or error.code
-            not in (
-                "observation_incomplete",
-                "execution_failed",
-                "stale_target",
-                "snapshot_expired",
-                "mode_unsupported",
+        invalid_generation = (
+            True
+            if (
+                port.connection.session_identity != generation
+                or port.calls.retired
+                or error.effect != "none"
+                or error.code
+                not in (
+                    "observation_incomplete",
+                    "execution_failed",
+                    "stale_target",
+                    "snapshot_expired",
+                    "mode_unsupported",
+                )
             )
-        ):
+            else False
+        )
+        if invalid_generation:
             raise
         return None, observation_gap(name, error)

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import (
@@ -141,12 +142,17 @@ def validate_target(facts: Facts, policy: HostPolicy) -> None:
             "A modal dialog blocks the requested target.",
             "call app.read() to observe the dialog, then use the window or element references returned by that read",
         )
-    if (
-        not installation
-        and cast("Binding", facts.binding).instance is None
-        and cast("Binding", facts.binding).root_window is None
-        and policy.mode != "exclusive"
-    ):
+    matches_installation = (
+        True
+        if (
+            not installation
+            and cast("Binding", facts.binding).instance is None
+            and cast("Binding", facts.binding).root_window is None
+            and policy.mode != "exclusive"
+        )
+        else False
+    )
+    if matches_installation:
         refuse("mode_unsupported", facts, "Desktop-wide input requires exclusive mode.")
 
 
@@ -172,12 +178,16 @@ def has_ready_route(facts: Facts, intent: Intent) -> bool:
 
 def needs_pointer_member(facts: Facts, intent: Intent, attempts: RouteHistory) -> bool:
     """Check whether every remaining click route requires pointer geometry."""
-    candidates = [
-        p
-        for p in _candidates(facts, intent)
-        if route_key(UnitCommand(p, facts.binding, intent, facts.actuator)) not in attempts.unavailable
-        and "enabled" not in p.pending
-    ]
+
+    def _iter_p(_source_items: Iterator[Any]) -> Iterator[Any]:
+        for p in _source_items:
+            if (
+                route_key(UnitCommand(p, facts.binding, intent, facts.actuator)) not in attempts.unavailable
+                and "enabled" not in p.pending
+            ):
+                yield p
+
+    candidates = list(_iter_p(iter(_candidates(facts, intent))))
     return any(p.unit == "pointer_sequence" and "geometry" in p.pending for p in candidates) and not any(
         "geometry" not in p.pending for p in candidates
     )

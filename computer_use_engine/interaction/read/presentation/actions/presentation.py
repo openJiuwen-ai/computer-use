@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.protocol.primitives import trimEnd
+from computer_use.protocol.primitives import trim_end
 
 if TYPE_CHECKING:
     from computer_use.protocol.records import Record
@@ -28,7 +28,7 @@ class ActionPresentation:
             for statement in ("Original pointer restored.", "Foreground input used."):
                 if detail.endswith(" " + statement):
                     suffix.insert(0, statement)
-                    detail = trimEnd(detail[: -len(statement)])
+                    detail = trim_end(detail[: -len(statement)])
             if suffix:
                 facts = " ".join(suffix)
                 existing = self._desktop.get(facts)

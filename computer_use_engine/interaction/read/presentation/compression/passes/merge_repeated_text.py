@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.read.presentation.compression.captions import passive_caption
 from computer_use.interaction.read.presentation.compression.policy import CONTROLS, REGIONS, sources
 from computer_use.interaction.read.presentation.policy import editing
-from computer_use.interaction.read.presentation.tree import hasIncompleteChildren, valuePreviewLimit
-from computer_use.protocol.primitives import utf16Length
+from computer_use.interaction.read.presentation.tree import VALUE_PREVIEW_LIMIT, has_incomplete_children
+from computer_use.protocol.primitives import required_item, utf16_length
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.compression.model import Scope
@@ -27,7 +27,7 @@ def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: Vie
     if (
         node["role"] not in REGIONS | CONTROLS | {"heading", "staticText"}
         or node.get("preserveGroup")
-        or hasIncompleteChildren(node)
+        or has_incomplete_children(node)
     ):
         return [node]
 
@@ -42,29 +42,39 @@ def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: Vie
             continue
         value = node.get(field)
         parts = [part for part in node["textSources"] if part["field"] == field]
-        if (
-            isinstance(value, str)
-            and value
-            and utf16Length(value) <= valuePreviewLimit
-            and (not parts or all(part["text"] == value for part in parts))
-        ):
+        matches_value = (
+            True
+            if (
+                isinstance(value, str)
+                and value
+                and utf16_length(value) <= VALUE_PREVIEW_LIMIT
+                and (not parts or all(part["text"] == value for part in parts))
+            )
+            else False
+        )
+        if matches_value:
             destinations.setdefault(value, field)
 
     retained = []
     for child in node["children"]:
         parts = sources(child)
-        if (
-            child["role"] != "staticText"
-            or child["children"]
-            or not passive_caption(state, edit, child, node)
-            or any(child.get(key) for key in ("labelTargets", "titleRef", "valueIsNumber"))
-            or not parts
-            or any(part["text"] not in destinations for part in parts)
-        ):
+        matches_child = (
+            True
+            if (
+                child["role"] != "staticText"
+                or child["children"]
+                or not passive_caption(state, edit, child, node)
+                or any(child.get(key) for key in ("labelTargets", "titleRef", "valueIsNumber"))
+                or not parts
+                or any(part["text"] not in destinations for part in parts)
+            )
+            else False
+        )
+        if matches_child:
             retained.append(child)
             continue
         for part in parts:
-            field = destinations[part["text"]]
+            field = required_item(destinations, part["text"])
             if not any(p["field"] == field for p in node["textSources"]):
                 # Value was previously recorded on its own ref. Include it as
                 # well as the caption source, so neither field loses coverage.

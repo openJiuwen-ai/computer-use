@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.operation import HostOperation
 from computer_use.interaction.read.app_read.model import ReadRequest
 from computer_use.interaction.read.application.model import AppReadResult, AppReadState
@@ -25,7 +25,7 @@ from computer_use.interaction.read.publication.pipeline import ObservationPublic
 from computer_use.native.scopes import RunningApplication, WorkingWindow
 from computer_use.pipeline import Contract, Select, Sequence
 from computer_use.pipeline.core import Node
-from computer_use.session.events import pendingObservationsDiscarded
+from computer_use.session.events import pending_observations_discarded
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
@@ -66,13 +66,13 @@ class AcquireApplicationObservation(Node["AppReadState", "AppReadResult"]):
 
         try:
             if state.running is not None and state.running.session != controller.transport.session:
-                raise localFailure(
+                raise local_failure(
                     "application belongs to an expired driver session",
                     "obtain a new App from this Computer",
                     "stale_target",
                 )
             if state.query_target is not None:
-                controller.validateElement(state.query_target)
+                controller.validate_element(state.query_target)
             observed = await self.acquisition.arun(
                 ReadRequest(
                     state.selection or state.running or state.selector,
@@ -85,7 +85,7 @@ class AcquireApplicationObservation(Node["AppReadState", "AppReadResult"]):
             return AppReadResult(value, choices, True)
         except BaseException:
             state.observation = None
-            pendingObservationsDiscarded(controller)
+            pending_observations_discarded(controller)
             raise
         return AppReadResult(value, observed)
 

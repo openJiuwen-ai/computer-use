@@ -4,7 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from uuid import uuid4
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class TextCursors:
 
     def publish(self, target, value, position, source=None):
         if len(value) > self.max_characters:
-            raise localFailure(
+            raise local_failure(
                 "text exceeds the bounded public capture cache",
                 "read a smaller explicit text region",
                 "observation_incomplete",
@@ -39,14 +39,14 @@ class TextCursors:
 
     def resolve(self, key, target):
         if not key.startswith("text_"):
-            raise localFailure("this cursor is not a text continuation", "use the cursor returned by readText()")
+            raise local_failure("this cursor is not a text continuation", "use the cursor returned by readText()")
         entry = self._entries.get(key)
         if entry is None:
-            raise localFailure(
+            raise local_failure(
                 "text continuation expired", "readText() without a cursor to start a new snapshot", "snapshot_expired"
             )
         if entry.target != target:
-            raise localFailure(
+            raise local_failure(
                 "text cursor belongs to a different element or window", "use the cursor on its original element"
             )
         return entry

@@ -126,7 +126,7 @@ class NumberSnapshotsPipeline(Pipeline["NumberingRequest", "tuple[SemanticSnapsh
         )
 
 
-def numberSnapshots(
+def number_snapshots(
     snapshots: Iterable[SemanticSnapshot],
     references: ReferenceAllocator | None = None,
     *,

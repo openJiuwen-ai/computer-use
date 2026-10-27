@@ -28,7 +28,7 @@ class _CleanupError(RuntimeError):
     pass
 
 
-def stateDirectory(value=None):
+def state_directory(value=None):
     return Path(value) if value else Path.home() / ".computer-use" / "desktop-bridge"
 
 
@@ -80,7 +80,7 @@ async def _retire(child, job):
     try:
         await asyncio.wait_for(child.wait(), 8)
         if job is not None:
-            await asyncio.wait_for(job.waitEmpty(), 5)
+            await asyncio.wait_for(job.wait_empty(), 5)
     except TimeoutError:
         if child.returncode is None:
             try:
@@ -99,7 +99,7 @@ async def _retire(child, job):
 async def _relay(reader, writer):
     job = None
     if os.name == "nt":
-        from .windows_worker import WindowsJob, resumeSuspended
+        from .windows_worker import WindowsJob, resume_suspended
 
         job = WindowsJob()
     try:
@@ -121,20 +121,26 @@ async def _relay(reader, writer):
     try:
         if job is not None:
             job.assign(child.pid)
-            resumeSuspended(child.pid)
+            resume_suspended(child.pid)
         writer.write(b"OK\n")
         await writer.drain()
 
         async def upload():
             try:
-                while data := await reader.read(65536):
+                while True:
+                    data = await reader.read(65536)
+                    if not data:
+                        break
                     child.stdin.write(data)
                     await child.stdin.drain()
             finally:
                 child.stdin.close()
 
         async def download():
-            while data := await child.stdout.read(65536):
+            while True:
+                data = await child.stdout.read(65536)
+                if not data:
+                    break
                 writer.write(data)
                 await writer.drain()
 
@@ -155,7 +161,7 @@ async def _relay(reader, writer):
 
 async def serve(port=DEFAULT_PORT, folder=None):
     session = _interactive_session()
-    folder = stateDirectory(folder)
+    folder = state_directory(folder)
     token = secrets.token_hex(32)
     stopping, stopped = asyncio.Event(), asyncio.Event()
     peers, controls = set(), set()
@@ -189,7 +195,9 @@ async def serve(port=DEFAULT_PORT, folder=None):
         except Exception as error:
             if authenticated and isinstance(error, _CleanupError):
                 failures.append(str(error))
-            print(str(error), file=sys.stderr, flush=True)
+            # Console and transport output retain their documented stream format.
+            # pylint: disable-next=bad-builtin
+            print(str(error), file=sys.stderr, flush=True)  # noqa: T201
         finally:
             writer.close()
             try:
@@ -214,7 +222,8 @@ async def serve(port=DEFAULT_PORT, folder=None):
         finally:
             temporary.unlink(missing_ok=True)
         await server.start_serving()
-        print(
+        # pylint: disable-next=bad-builtin
+        print(  # noqa: T201
             f"Desktop bridge ready: 127.0.0.1:{port}; session={session}; pid={os.getpid()}", file=sys.stderr, flush=True
         )
         await stopping.wait()
@@ -236,7 +245,7 @@ async def serve(port=DEFAULT_PORT, folder=None):
 
 
 def _connect(port, folder, mode):
-    token_file = stateDirectory(folder) / "token"
+    token_file = state_directory(folder) / "token"
     try:
         token = token_file.read_text(encoding="ascii")
     except FileNotFoundError:
@@ -270,7 +279,10 @@ def connect(port=DEFAULT_PORT, folder=None):
 
     def upload():
         try:
-            while data := os.read(sys.stdin.fileno(), 65536):
+            while True:
+                data = os.read(sys.stdin.fileno(), 65536)
+                if not data:
+                    break
                 connection.sendall(data)
             connection.shutdown(socket.SHUT_WR)
         except OSError:
@@ -282,10 +294,13 @@ def connect(port=DEFAULT_PORT, folder=None):
     thread = threading.Thread(target=upload, daemon=True)
     thread.start()
     try:
-        while data := connection.recv(65536):
+        while True:
+            data = connection.recv(65536)
+            if not data:
+                break
             remaining = memoryview(data)
             while remaining:
-                remaining = remaining[os.write(sys.stdout.fileno(), remaining) :]
+                remaining = remaining[slice(os.write(sys.stdout.fileno(), remaining), None)]
     finally:
         connection.close()
 

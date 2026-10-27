@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from computer_use.native.contracts import Binding
-from computer_use.protocol.captures import captureMetadata
+from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.png import PNG
 from computer_use.protocol.primitives import frozen
 
@@ -49,6 +49,8 @@ class NativeImages:
         """
         if target.instance is None or target.surface is None:
             raise ValueError("Window capture requires an observed working-window binding")
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(max_dimension) is not int or not 1 <= max_dimension <= 4096:
             raise ValueError("Image dimension budget must be an integer in 1..4096")
         # A new observation creates its own image binding. It never updates an
@@ -65,14 +67,23 @@ class NativeImages:
             max_dimension: Maximum image edge length in pixels, preserving aspect ratio.
         """
         target = read.target
-        if target.instance is None or target.surface is None or target.node is not None or target.capture is not None:
+        invalid_target = (
+            True
+            if target.instance is None
+            or target.surface is None
+            or target.node is not None
+            or target.capture is not None
+            else False
+        )
+        if invalid_target:
             raise ValueError("Image collection requires an un-narrowed window read operation")
+        # pylint: disable-next=unidiomatic-typecheck
         if type(max_dimension) is not int or not 1 <= max_dimension <= 4096:
             raise ValueError("Image dimension budget must be an integer in 1..4096")
         result = await self.port.capture(read.token, target, max_dimension, read.remaining())
         image = result["image"]
         value = WindowImage(
-            replace(target, capture=captureMetadata(image)["id"]),
+            replace(target, capture=capture_metadata(image)["id"]),
             image,
             result["observed"],
             frozen(result["coordinates"]),

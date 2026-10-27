@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.captions import passiveLabel
+from computer_use.interaction.read.presentation.compression.captions import passive_label
 from computer_use.interaction.read.presentation.compression.policy import REGIONS, represented, sources
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ def merge_region_labels(state: ProjectionView, edit: ProjectionEditor, node: Vie
         edit.adopt(node, sources(headings[0]), "name")
     retained = []
     for child in node["children"]:
-        if passiveLabel(state, edit, child, node) and not child["children"] and represented(child, node):
+        if passive_label(state, edit, child, node) and not child["children"] and represented(child, node):
             edit.fold(child, node, "label")
         else:
             retained.append(child)

@@ -9,8 +9,8 @@ from dataclasses import replace
 
 from computer_use.errors import ComputerUseError
 from computer_use.native.query.graph import UNKNOWN, NativeGraph
-from computer_use.native.semantics import RELATIONS, followed_relations, roleName
-from computer_use.protocol.element_path import elementPath
+from computer_use.native.semantics import RELATIONS, followed_relations, role_name
+from computer_use.protocol.element_path import element_path
 
 
 async def resolve_path(port, operation, root, remaining, path, *, timeout_ms=0):
@@ -20,6 +20,8 @@ async def resolve_path(port, operation, root, remaining, path, *, timeout_ms=0):
     discards earlier matching facts; ambiguity, partial data and stale scopes
     are never made to look like an element that has merely not appeared yet.
     """
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if type(timeout_ms) is not int or not 0 <= timeout_ms <= 10000:
         raise ValueError("Path wait must be an integer in 0..10000 milliseconds")
     deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
@@ -107,7 +109,7 @@ class TargetQuery(NativeGraph):
                 unknown = True
                 continue
             if key == "role":
-                value = roleName(self.platform, value)
+                value = role_name(self.platform, value)
             if value != condition[key]:
                 return False
         return None if unknown else True
@@ -160,16 +162,16 @@ class TargetQuery(NativeGraph):
         # this already-bound native surface. ControlType.Window alone does
         # not establish an independent HWND. Unknown or real HWNDs retain
         # the window boundary; execution still checks live containment.
-        return (
-            self.platform == "windows"
-            and role == "window"
-            and await self._field(token, "modal") is True
-            and type(handle := await self._field(token, "nativeWindowHandle")) is int
-            and handle == 0
-        )
+        if self.platform != "windows" or role != "window":
+            return False
+        if await self._field(token, "modal") is not True:
+            return False
+        handle = await self._field(token, "nativeWindowHandle")
+        # pylint: disable-next=unidiomatic-typecheck
+        return type(handle) is int and handle == 0
 
     async def resolve(self, path):
-        path = elementPath(path)
+        path = element_path(path)
         if self.root.node is None or self.root.capture is not None:
             raise ValueError("A path query needs an observed accessible root")
         selected = self.root.node
@@ -189,7 +191,7 @@ class TargetQuery(NativeGraph):
                     self.fail("observation_incomplete", "Path containment exceeds its node budget.")
                 visited.add(token)
                 raw_role = await self._field(token, "role")
-                role = roleName(self.platform, raw_role) if raw_role is not UNKNOWN else "unknown"
+                role = role_name(self.platform, raw_role) if raw_role is not UNKNOWN else "unknown"
                 if token != self.root.node and role in ("window", "sheet"):
                     inline = await self._inline_window(token, role)
                     if inline is not True:

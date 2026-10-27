@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from typing import Any
 
 ROLES = frozenset(
     """application window dialog alert sheet popover group split_group scroll_area toolbar separator
@@ -175,6 +177,13 @@ TEXT_FIELDS = {
     },
     "linux": {"name": "name", "description": "description", "accessibleId": "identifier"},
 }
+
+
+def _iter_key(_source_items: Iterator[Any]) -> Iterator[Any]:
+    for key in _source_items:
+        yield (key, key)
+
+
 STATE_FIELDS = {
     "macos": {
         "AXEnabled": "enabled",
@@ -195,22 +204,25 @@ STATE_FIELDS = {
         "SelectionItem.IsSelected": "selected",
         "Window.IsModal": "modal",
     },
-    "linux": {
-        key: key
-        for key in (
-            "enabled",
-            "focused",
-            "focusable",
-            "selectable",
-            "selected",
-            "editable",
-            "busy",
-            "modal",
-            "active",
-            "visible",
-            "showing",
+    "linux": dict(
+        _iter_key(
+            iter(
+                (
+                    "enabled",
+                    "focused",
+                    "focusable",
+                    "selectable",
+                    "selected",
+                    "editable",
+                    "busy",
+                    "modal",
+                    "active",
+                    "visible",
+                    "showing",
+                )
+            )
         )
-    },
+    ),
 }
 STRUCTURE_FIELDS = {
     "macos": {

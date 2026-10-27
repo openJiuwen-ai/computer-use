@@ -1,40 +1,46 @@
 import asyncio
+import logging
 import os
 import socket
 import sys
 
-from computer_use.native.preview import isPreviewEvent
+from computer_use.native.preview import is_preview_event
 from computer_use.session.operations import eager
 
-from .history import HistoryGate, historyKey
+from .history import HISTORY_KEY, HistoryGate
 from .journal import Journal
-from .output import OutputBuffer, isOutput
+from .output import OutputBuffer, is_output
 from .worker_protocol import FRAMED_PROTOCOL, read_message, write_message
 
 "Supervise one persistent Python worker and its inherited native lifetimes."
 
 
-resetNotice = (
+RESET_NOTICE = (
     "Execution session cleared. Recreate App variables and read again. Actions "
     "may already have executed; do not replay them "
     "automatically."
 )
 
+_LOG = logging.getLogger(__name__)
 
-def executionError(message):
+
+def execution_error(message):
     return dict(content=[dict(type="text", text=message)], isError=True)
 
 
 class ExecutionSession:
-    def __init__(self, timeoutMs=45000, onPreview=None, demoForeground=False):
-        self.demoForeground = demoForeground
-        self.timeoutMs, self.onPreview = timeoutMs, onPreview
+    # API, protocol, and native binding names retain their established spelling.
+    # pylint: disable-next=invalid-name
+    def __init__(self, timeoutMs=45000, on_preview=None, demo_foreground=False):
+        self.demo_foreground = demo_foreground
+        # pylint: disable-next=invalid-name
+        self.timeoutMs, self.on_preview = timeoutMs, on_preview
         self._child = self._pending = self._retiring = self._resetting = self._exited = None
         self._writer = self._reader = None
         self._closed = self._starting = False
-        self._startTask = None
+        self._start_task = None
         self._generation = 0
-        self._nextId = 1
+        self._next_id = 1
         self._journal, self._history = Journal(), HistoryGate()
         self._tasks = set()
 
@@ -47,26 +53,26 @@ class ExecutionSession:
     @eager
     async def execute(self, code, signal=None, history=None, title=None, on_progress=None):
         if self._closed:
-            return executionError("Execution session is closed.")
+            return execution_error("Execution session is closed.")
         if self._resetting is not None:
             result = await asyncio.shield(self._resetting)
             return result if result.get("isError") else await self.execute(code, signal, history, title, on_progress)
         if self._retiring is not None:
-            return executionError(
+            return execution_error(
                 ("Native cleanup is still pending. Call computer_use_reset before continuing; no code was executed.")
             )
         if self._pending is not None or self._starting:
-            return executionError("Another call is running; await it before starting the next.")
+            return execution_error("Another call is running; await it before starting the next.")
         if signal is not None and signal.is_set():
-            return executionError("Call cancelled before execution.")
+            return execution_error("Call cancelled before execution.")
         self._starting = True
         generation = self._generation
         starting = self._track(self._start())
-        self._startTask = starting
+        self._start_task = starting
 
         def started(_):
-            if self._startTask is starting:
-                self._startTask = None
+            if self._start_task is starting:
+                self._start_task = None
                 self._starting = False
 
         starting.add_done_callback(started)
@@ -76,9 +82,9 @@ class ExecutionSession:
             await asyncio.shield(self.reset("Call cancelled."))
             raise
         except Exception as error:
-            return executionError(str(error))
+            return execution_error(str(error))
         if generation != self._generation or self._closed:
-            return executionError(
+            return execution_error(
                 (
                     "Execution was reset before code was sent. No code was executed; recreate "
                     "variables before "
@@ -86,9 +92,9 @@ class ExecutionSession:
                 )
             )
         if signal is not None and signal.is_set():
-            return executionError("Call cancelled before execution.")
-        id_ = self._nextId
-        self._nextId += 1
+            return execution_error("Call cancelled before execution.")
+        id_ = self._next_id
+        self._next_id += 1
         policy = self._history.begin(history)
         self._journal.record(
             dict(
@@ -118,7 +124,7 @@ class ExecutionSession:
                     if hasattr(result, "__await__"):
                         self._track(result)
             except Exception:
-                pass
+                _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
 
         def cleanup():
             if pending["timer"] is not None:
@@ -159,21 +165,21 @@ class ExecutionSession:
             return
         env = dict(
             os.environ,
-            COMPUTER_USE_REMOTE_PREVIEW="1" if self.onPreview is not None else "",
-            COMPUTER_USE_DEMO_FOREGROUND="1" if self.demoForeground else "0",
+            COMPUTER_USE_REMOTE_PREVIEW="1" if self.on_preview is not None else "",
+            COMPUTER_USE_DEMO_FOREGROUND="1" if self.demo_foreground else "0",
             COMPUTER_USE_LIFETIME_FD="4",
             COMPUTER_USE_WORKER_PROTOCOL=FRAMED_PROTOCOL,
         )
         if os.name == "nt":
-            from .windows_worker import startWindowsWorker
+            from .windows_worker import start_windows_worker
 
-            child, self._reader, self._writer, job, listener = await startWindowsWorker(env)
+            child, self._reader, self._writer, job, listener = await start_windows_worker(env)
             self._child = child
 
             async def exited():
                 try:
                     await child.wait()
-                    await job.waitEmpty()
+                    await job.wait_empty()
                 finally:
                     job.close()
                     await listener.wait_closed()
@@ -236,12 +242,12 @@ class ExecutionSession:
                 if not isinstance(message, dict):
                     raise ValueError("Execution process returned invalid output.")
                 if "preview" in message:
-                    if isPreviewEvent(message["preview"]):
+                    if is_preview_event(message["preview"]):
                         try:
-                            if self.onPreview is not None:
-                                self.onPreview(message["preview"])
+                            if self.on_preview is not None:
+                                self.on_preview(message["preview"])
                         except Exception:
-                            pass
+                            _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
                 elif "diagnostic" in message:
                     event = message["diagnostic"]
                     if isinstance(event, dict):
@@ -256,7 +262,7 @@ class ExecutionSession:
                     pending = self._pending
                     if pending is None or message.get("executionId") != pending["id"]:
                         continue
-                    if not isOutput(message["output"]):
+                    if not is_output(message["output"]):
                         raise ValueError("Execution process returned invalid output.")
                     block = message["output"]
                     self._journal.record(
@@ -271,7 +277,7 @@ class ExecutionSession:
                     pending["output"].append(block, message.get("mergeText") is True)
                 else:
                     if not isinstance(message.get("content"), list) or any(
-                        not isOutput(block) for block in message["content"]
+                        not is_output(block) for block in message["content"]
                     ):
                         raise ValueError("Execution process returned invalid output.")
                     self._finish(message)
@@ -308,7 +314,7 @@ class ExecutionSession:
                 "durationMs": duration,
                 **({"title": pending["title"]} if pending["title"] else {}),
             },
-            historyKey: self._history.complete(),
+            HISTORY_KEY: self._history.complete(),
         }
         pending["cleanup"]()
         if not pending["future"].done():
@@ -318,13 +324,13 @@ class ExecutionSession:
         if self._resetting is not None:
             return self._resetting
         self._generation += 1
-        starting = self._startTask
+        starting = self._start_task
         child, self._child = self._child, None
         if child is not None and child.returncode is None:
             try:
                 child.kill()
             except ProcessLookupError:
-                pass
+                _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
         earlier = self._retiring if self._retiring is not None else self._exited
         self._exited = None
         if self._writer is not None:
@@ -338,7 +344,7 @@ class ExecutionSession:
                 try:
                     await asyncio.shield(starting)
                 except Exception:
-                    pass
+                    _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
             # Process creation yields in Python. A reset during that yield must
             # retire the newly created worker before admitting any later call.
             late, self._child = self._child, None
@@ -346,7 +352,7 @@ class ExecutionSession:
                 try:
                     late.kill()
                 except ProcessLookupError:
-                    pass
+                    _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
             if self._writer is not None:
                 self._writer.close()
                 self._writer = None
@@ -382,7 +388,7 @@ class ExecutionSession:
                         self._retiring = None
 
                 retired.add_done_callback(clear)
-            result = executionError(reason + "\n" + (failure if failure is not None else resetNotice))
+            result = execution_error(reason + "\n" + (failure if failure is not None else RESET_NOTICE))
             result["content"] = (self._pending["output"].content.copy() if self._pending is not None else []) + result[
                 "content"
             ]
@@ -390,12 +396,12 @@ class ExecutionSession:
             self._finish(result)
             self._history = HistoryGate()
             if failure is not None:
-                return executionError(failure)
+                return execution_error(failure)
             try:
-                if self.onPreview is not None:
-                    self.onPreview(dict(kind="reset"))
+                if self.on_preview is not None:
+                    self.on_preview(dict(kind="reset"))
             except Exception:
-                pass
+                _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
             return dict(
                 content=[
                     dict(

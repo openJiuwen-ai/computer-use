@@ -18,7 +18,7 @@ from computer_use.native.semantics import (
     UNKNOWN,
     control_member_role,
     editing_evidence,
-    roleName,
+    role_name,
 )
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ class FocusMemberQuery(NativeGraph):
 
     async def _role(self, token: str) -> str | object:
         raw = await self._field(token, "role")
-        return UNKNOWN if raw is UNKNOWN or raw is None else roleName(self.platform, raw)
+        return UNKNOWN if raw is UNKNOWN or raw is None else role_name(self.platform, raw)
 
     async def resolve(self, focused: str | None) -> FocusMember | None:
         """Confirm that the reported focus is passive content or an item of the requested control.
@@ -77,7 +77,10 @@ class FocusMemberQuery(NativeGraph):
             # unlike independent controls embedded in document content.
             item = logical_items and member_role in ("row", "cell")
             kind = control_member_role(member_role)
-            if not item and (kind is None or kind == "layout" and member_role not in LAYOUT_ROLES):
+            matches_item = (
+                True if not item and (kind is None or kind == "layout" and member_role not in LAYOUT_ROLES) else False
+            )
+            if matches_item:
                 return None
             values = await self._control_values(current)
             if values["enabled"] is False or values["editable"] is True:

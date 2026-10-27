@@ -11,7 +11,8 @@ from .call.model import EngineRequest
 from .call.pipeline import EngineCallPipeline
 
 if TYPE_CHECKING:
-    from computer_use.interaction.records import ElementPath as LookupPath, Remaining
+    from computer_use.interaction.records import ElementPath as LookupPath
+    from computer_use.interaction.records import Remaining
     from computer_use.pipeline.core import Control
     from computer_use.protocol.records import Record
 

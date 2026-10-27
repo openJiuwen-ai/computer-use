@@ -11,7 +11,7 @@ from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.interaction.read.presentation.fallback import literal
 from computer_use.interaction.read.presentation.records import ReferenceAllocator
 from computer_use.protocol.observation import NativeNode, NativeObservation
-from computer_use.protocol.primitives import safeInteger
+from computer_use.protocol.primitives import required_item, safe_integer
 
 _ROLES = {
     "checkbox": "checkBox",
@@ -76,7 +76,7 @@ def _primary_value(source: dict[str, Any], node: NativeNode) -> str | None:
     return next((key for key in ("control_value.value", text_source, "numeric_value.value") if key in values), None)
 
 
-def normalizeFacts(
+def normalize_facts(
     value: NativeObservation,
     references: ReferenceAllocator,
     *,
@@ -147,7 +147,7 @@ def normalizeFacts(
                     "columnCount",
                     "index",
                     "selectedChildCount",
-                ) or safeInteger(item):
+                ) or safe_integer(item):
                     field = candidate
             elif key.startswith("states.") and key[7:] in _DISPLAY_STATES:
                 field = key[7:]
@@ -190,25 +190,35 @@ def normalizeFacts(
                     and bool(item["value"])
                 )
                 invalid_geometry = key.startswith("geometry.") and isinstance(item, dict) and item.get("valid") is False
-                if (
-                    provider_fact
-                    or meaningful_extra
-                    or invalid_geometry
-                    or key in ("states.editable", "text.read_only")
-                    and item is True
-                ):
+                matches_provider_fact = (
+                    True
+                    if (
+                        provider_fact
+                        or meaningful_extra
+                        or invalid_geometry
+                        or key in ("states.editable", "text.read_only")
+                        and item is True
+                    )
+                    else False
+                )
+                if matches_provider_fact:
                     node["preserveGroup"] = True
         for axis in ("row", "column"):
             index, span = raw.get("structure." + axis + "_index"), raw.get("structure." + axis + "_span")
             keys = ("structure." + axis + "_index", "structure." + axis + "_span")
-            if (
-                safeInteger(index)
-                and safeInteger(span)
-                and index >= 0
-                and span >= 0
-                and safeInteger(index + span)
-                and not any(key in source["fieldStatus"] for key in keys)
-            ):
+            matches_safe_integer = (
+                True
+                if (
+                    safe_integer(index)
+                    and safe_integer(span)
+                    and index >= 0
+                    and span >= 0
+                    and safe_integer(index + span)
+                    and not any(key in source["fieldStatus"] for key in keys)
+                )
+                else False
+            )
+            if matches_safe_integer:
                 field = axis + "Range"
                 node[field] = dict(location=index, length=span)
                 for key in ("structure." + axis + "_index", "structure." + axis + "_span"):
@@ -220,15 +230,20 @@ def normalizeFacts(
                         projections=[dict(field=field, normalized=node[field])],
                     )
                     annotation = (key, literal(raw[key]))
-                    grouped[annotation].remove(ref)
-                    if not grouped[annotation]:
+                    required_item(grouped, annotation).remove(ref)
+                    if not required_item(grouped, annotation):
                         del grouped[annotation]
-        if (
-            original.text
-            and original.text.unit in ("unicode_codepoint", "utf16_code_unit")
-            and original.text.selections
-            and len(original.text.selections) == 1
-        ):
+        matches_original = (
+            True
+            if (
+                original.text
+                and original.text.unit in ("unicode_codepoint", "utf16_code_unit")
+                and original.text.selections
+                and len(original.text.selections) == 1
+            )
+            else False
+        )
+        if matches_original:
             selection = original.text.selections[0]
             if selection.start is not None and selection.end is not None:
                 node["selectionRange"] = dict(location=selection.start, length=selection.end - selection.start)
@@ -261,8 +276,8 @@ def normalizeFacts(
                         status.get("unit"), status.get("unit") or "units"
                     )
                     caption += f"; {status['totalUnits']} {unit}"
-                grouped[(key, label)].remove(ref)
-                if not grouped[(key, label)]:
+                required_item(grouped, (key, label)).remove(ref)
+                if not required_item(grouped, (key, label)):
                     del grouped[(key, label)]
                 grouped.setdefault((key, label + caption), []).append(ref)
             incidental_range = (
@@ -293,7 +308,7 @@ def normalizeFacts(
             extra_edges.append(relation)
             continue
         if kind == "children" and confirmed:
-            if len(child_views[token]) > 1:
+            if len(required_item(child_views, token)) > 1:
                 source["preserveGroup"] = True
                 source["partialReason"] = "multiple observed child views; inspect relationship details"
                 extra_edges.append(relation)
@@ -309,20 +324,34 @@ def normalizeFacts(
                 source["partialReason"] = "observed children partly collected; see Relation details"
             if any(target in batch["unread"] for target in targets):
                 source["partialReason"] = "child facts have not been collected"
-        elif (
-            kind == "labelled_by" and confirmed and complete and len(targets) == 1 and targets[0] not in batch["unread"]
-        ):
-            source["titleRef"] = aliases[targets[0]]
-            extra_edges.append(relation)
-        elif kind == "labels" and confirmed:
-            source["labelTargets"] = [aliases[target] for target in targets]
-            source["incompleteLabelRelation"] = not complete or any(target in batch["unread"] for target in targets)
-            extra_edges.append(relation)
-        elif kind == "disclosed_by" and confirmed and complete and len(targets) == 1:
-            source["disclosedBy"] = aliases[targets[0]]
-            extra_edges.append(relation)
         else:
-            extra_edges.append(relation)
+            matches_confirmed_condition = (
+                True
+                if (
+                    kind == "labelled_by"
+                    and confirmed
+                    and complete
+                    and len(targets) == 1
+                    and targets[0] not in batch["unread"]
+                )
+                else False
+            )
+            if matches_confirmed_condition:
+                source["titleRef"] = aliases[targets[0]]
+                extra_edges.append(relation)
+            elif kind == "labels" and confirmed:
+                source["labelTargets"] = [aliases[target] for target in targets]
+                source["incompleteLabelRelation"] = not complete or any(target in batch["unread"] for target in targets)
+                extra_edges.append(relation)
+            else:
+                matches_confirmed = (
+                    True if kind == "disclosed_by" and confirmed and complete and len(targets) == 1 else False
+                )
+                if matches_confirmed:
+                    source["disclosedBy"] = aliases[targets[0]]
+                    extra_edges.append(relation)
+                else:
+                    extra_edges.append(relation)
         if not complete or not confirmed:
             source["preserveGroup"] = True
 

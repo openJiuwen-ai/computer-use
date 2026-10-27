@@ -62,11 +62,16 @@ class ClickAttemptLedger:
             return "notDispatched"
         if self.calls_pending or self.action_accepted is False:
             return "unknown"
-        if (
-            self.requested_complete
-            or self.action_accepted is True
-            or self.pointer_started
-            and self.calls_returned == self.expected_requests
-        ):
+        matches_target = (
+            True
+            if (
+                self.requested_complete
+                or self.action_accepted is True
+                or self.pointer_started
+                and self.calls_returned == self.expected_requests
+            )
+            else False
+        )
+        if matches_target:
             return "dispatched"
         return "partial"

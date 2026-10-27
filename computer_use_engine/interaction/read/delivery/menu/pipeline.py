@@ -195,7 +195,10 @@ class RecheckMenuDirectory(Pipeline["CollectedMenuObservation", "CollectedMenuOb
         directory = MenuDirectoryCollection(services.directory)
 
         async def bound(value: CollectedMenuObservation, control: Control) -> CollectedMenuObservation:
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
             discover = services._discover
+            # pylint: disable-next=protected-access
             if getattr(discover, "__func__", None) is NativeAppReader._discover:
                 _, current = await discover(
                     value.request.selection, cast("Callable[[], int]", control.remaining), _control=control

@@ -1,11 +1,11 @@
 import uuid
 
-from computer_use.protocol.primitives import utf16Length
+from computer_use.protocol.primitives import utf16_length
 
-historyKey = "computer-use-history"
+HISTORY_KEY = "computer-use-history"
 
 
-def historyRequest(value):
+def history_request(value):
     if (
         not isinstance(value, dict)
         or set(value) != {"previous", "version"}
@@ -15,7 +15,7 @@ def historyRequest(value):
     if value["version"] != 1:
         return None
     previous = value["previous"]
-    if previous is not None and (not isinstance(previous, str) or not 0 < utf16Length(previous) <= 128):
+    if previous is not None and (not isinstance(previous, str) or not 0 < utf16_length(previous) <= 128):
         return None
     return dict(version=1, previous=previous)
 

@@ -14,7 +14,8 @@ class ObservationDocument(Protocol):
     """The frozen presentation needed to produce this capture's complete text."""
 
     @property
-    def text(self) -> str: ...
+    def text(self) -> str:
+        pass
 
 
 class LazyObservation(FrozenRecord):
@@ -75,7 +76,7 @@ class LazyObservation(FrozenRecord):
         return self["text"]
 
 
-def lazyObservation(
+def lazy_observation(
     document: ObservationDocument,
     screenshot: Any = None,
     *,
@@ -86,6 +87,8 @@ def lazyObservation(
     return LazyObservation(document, screenshot, details_document=details_document, overview=overview)
 
 
-def peekObservationText(state: Mapping[str, Any]) -> str | None:
+def peek_observation_text(state: Mapping[str, Any]) -> str | None:
     """Return already available full text without materializing a lazy observation."""
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     return state._rendered_text if isinstance(state, LazyObservation) else state.get("text")

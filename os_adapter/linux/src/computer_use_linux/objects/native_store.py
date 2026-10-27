@@ -90,24 +90,24 @@ class NativeStore:
             raise Failure("The immutable text capture expired.", "snapshot_expired", ref)
         total = len(data) // 2
         if offset > total or (
-            0 < offset < total and 0xDC00 <= int.from_bytes(data[offset * 2 : offset * 2 + 2], "little") <= 0xDFFF
+            0 < offset < total and 0xDC00 <= int.from_bytes(data[slice(offset * 2, offset * 2 + 2)], "little") <= 0xDFFF
         ):
             raise Failure("Text offset is outside the capture or splits a surrogate pair.", "invalid_request", ref)
         end = min(total, offset + length)
-        if end < total and 0xD800 <= int.from_bytes(data[end * 2 - 2 : end * 2], "little") <= 0xDBFF:
+        if end < total and 0xD800 <= int.from_bytes(data[slice(end * 2 - 2, end * 2)], "little") <= 0xDBFF:
             end -= 1
         return dict(
-            text=data[offset * 2 : end * 2].decode("utf-16-le"),
+            text=data[slice(offset * 2, end * 2)].decode("utf-16-le"),
             offset=offset,
             total=total,
             next=end if end < total else None,
         )
 
-    def page(self, node, property, keys, total):
-        return self._page(RelationPage(node, property, total, len(keys), prefix=tuple(keys)))
+    def page(self, node, relation_property, keys, total):
+        return self._page(RelationPage(node, relation_property, total, len(keys), prefix=tuple(keys)))
 
-    def coordinate_page(self, node, property, basis, total, offset):
-        return self._page(RelationPage(node, property, total, offset, coordinate_basis=basis))
+    def coordinate_page(self, node, relation_property, basis, total, offset):
+        return self._page(RelationPage(node, relation_property, total, offset, coordinate_basis=basis))
 
     def _page(self, page):
         ref = token("page")

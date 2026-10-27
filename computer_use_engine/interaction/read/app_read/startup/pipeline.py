@@ -23,11 +23,11 @@ from computer_use.interaction.read.app_read.startup.passes.resolve_declared_star
 from computer_use.interaction.read.app_read.startup.passes.retain_started_identity import (
     stage as retain_started_identity,
 )
+from computer_use.interaction.read.app_read.startup.passes.startup_directory_gate import (
+    stage as startup_directory_gate,
+)
 from computer_use.interaction.read.app_read.startup.passes.startup_recipe_unresolved import (
     stage as startup_recipe_unresolved,
-)
-from computer_use.interaction.read.app_read.startup.passes.StartupDirectoryGate import (
-    stage as startup_directory_gate,
 )
 from computer_use.interaction.read.app_read.startup.passes.validate_startup_session import (
     stage as validate_startup_session,
@@ -44,7 +44,8 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.app import NativeAppReader
     from computer_use.interaction.read.app_read.startup.model import StartupDirectoryState
     from computer_use.pipeline.core import Control, Step
-    from computer_use.protocol.records import ApplicationInfo, NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import ApplicationInfo
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 class StartupDirectoryPipeline(Pipeline["StartupDirectoryState", "tuple[ApplicationInfo, DirectoryFacts]"]):

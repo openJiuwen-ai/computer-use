@@ -16,5 +16,5 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def prepareTree(root: SemanticNode, context: Record | None = None) -> ProjectionResult:
+def prepare_tree(root: SemanticNode, context: Record | None = None) -> ProjectionResult:
     return projectTree(root, context)["roots"]

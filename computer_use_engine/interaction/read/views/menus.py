@@ -40,14 +40,19 @@ def remember_menu(
     for part in menu.parts:
         (tree,) = controller.reader.number_snapshots((part.tree,))
         state = AppState(
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
             str(ui._instance.selector),
             running=controller.state(ui).running,
+            # pylint: disable-next=protected-access
             refs=ui._instance.refs,
             query_target=part.target,
             query_scope_kind=tree.scope_kind,
         )
         owner = SurfaceOwner(controller, state)
+        # pylint: disable-next=protected-access
         controller._remember(state, part.target, tree)
+        # pylint: disable-next=protected-access
         ui._instance.menu_contexts[part.target.surface] = context
         owners.append(owner)
         trees.append((part.target, tree))
@@ -81,6 +86,7 @@ class InterfaceMenuPipeline:
             path: Ordered semantic lookup/menu components within the declared target scope.
             observed: Capture provenance or original observation used by the current stage.
         """
+        # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
         state = controller.state(ui)
         lines: list[str | DisplayText | DisplayDocument]
@@ -107,11 +113,14 @@ class InterfaceMenuPipeline:
                 )
                 # Collection cannot turn a closed instance into an application
                 # menu for an unrelated document.
+                # pylint: disable-next=protected-access
                 await controller.reader._discover(instance.anchor, remaining)
             context = next(key for key, item in instance.members.items() if item["surface"] == target.surface)
             lines = directory_text(controller, ui, cast("DirectoryFacts", instance.directory))
         owners, trees = remember_menu(controller, ui, menu, context)
+        # pylint: disable-next=protected-access
         ui._lookup_scopes = owners
+        # pylint: disable-next=protected-access
         ui._menu_only = True
         lines.append("Tree: full; menuPath is read-only and does not open a menu.")
         for target, tree in trees:
@@ -126,6 +135,7 @@ class InterfaceMenuPipeline:
             DisplayDocument.join(lines),
             trees=trees,
             full=True,
+            # pylint: disable-next=protected-access
             scope="menu:" + state.application + ":" + str(ui._anchor) + ":" + repr(path),
             view="menu",
             directory=instance.directory,

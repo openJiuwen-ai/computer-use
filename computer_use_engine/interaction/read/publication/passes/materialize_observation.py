@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.read.publication.model import PublicationText, PublishedObservation
 from computer_use.pipeline import Contract, Effect, Pass
 from computer_use.protocol.primitives import frozen
-from computer_use.session.observation import lazyObservation
-from computer_use.session.observation_data import retainObservationData
+from computer_use.session.observation import lazy_observation
+from computer_use.session.observation_data import retain_observation_data
 
 if TYPE_CHECKING:
     from typing import Callable
@@ -33,12 +33,12 @@ def create(
         Build event metadata identifying the owner, scope, requested view, and source capture.
         """
         source, request = (value.source, value.source.request)
-        result = lazyObservation(
+        result = lazy_observation(
             value.document, request.image, details_document=value.details, overview=overview_image(request.overview)
         )
         trees = tuple((snapshot for _, snapshot in source.observations))
         refs = {ref: node for snapshot in trees for ref, node in snapshot.refs.items()}
-        retainObservationData(
+        retain_observation_data(
             result,
             [root for snapshot in trees for root in snapshot.roots],
             refs,

@@ -100,10 +100,16 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
             )
         return CandidateSet(request, tuple(p for p in matches if p.supported == Knowledge.YES))
     # Coordinate requests mean pointer events, even when a semantic action exists.
-    if any(key in intent.parameters for key in ("x", "fromX")) or (
-        intent.kind == "click"
-        and (intent.parameters.get("button", "left") != "left" or intent.parameters.get("count", 1) != 1)
-    ):
+    matches_key = (
+        True
+        if any(key in intent.parameters for key in ("x", "fromX"))
+        or (
+            intent.kind == "click"
+            and (intent.parameters.get("button", "left") != "left" or intent.parameters.get("count", 1) != 1)
+        )
+        else False
+    )
+    if matches_key:
         candidates = [p for p in candidates if p.channel == Channel.POINTER]
     elif intent.kind in ("click", "openMenu"):
         actions = [p for p in facts.primitives if p.unit == "native_action" and p.action is not None]

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from computer_use.diagnostics import sdkVersion
+from computer_use.diagnostics import SDK_VERSION
 
 from .diagnostic_json import dumps
 
@@ -25,7 +25,7 @@ class Journal:
             self.record(
                 dict(
                     kind="session",
-                    sdkVersion=sdkVersion,
+                    sdkVersion=SDK_VERSION,
                     platform=sys.platform,
                     python=sys.version.split()[0],
                     desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "shared"),

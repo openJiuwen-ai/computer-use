@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.acquisition.facts.model import RESOURCE, CollectedFacts
-from computer_use.interaction.read.facts.normalize import normalizeFacts
+from computer_use.interaction.read.facts.normalize import normalize_facts
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ def create(*, reader: NativeReader) -> Callable[[CollectedFacts, Control], Seman
         # order, including on a later normalization failure. This is a
         # RESOURCE stage, never falsely labelled as a pure transform.
         references = reader.display_references(target.session)
-        result = normalizeFacts(
+        result = normalize_facts(
             value.batch,
             references,
             driver_features=getattr(reader.port.connection, "capabilities", ()),

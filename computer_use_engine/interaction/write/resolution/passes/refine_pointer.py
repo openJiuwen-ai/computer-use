@@ -28,14 +28,19 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         """
         intent, target, operation, remaining = parts(frame)
         facts = cast("Facts", frame.facts)
-        if (
-            intent.kind == "click"
-            and "nativeControlParts" in getattr(native, "capabilities", ())
-            and (cast("Binding", target).node is not None)
-            and (cast("Binding", target).capture is None)
-            and (facts.input.pointer_hit not in (None, cast("Binding", target).node))
-            and needs_pointer_member(facts, intent, frame.request.history)
-        ):
+        matches_needs_pointer_member = (
+            True
+            if (
+                intent.kind == "click"
+                and "nativeControlParts" in getattr(native, "capabilities", ())
+                and (cast("Binding", target).node is not None)
+                and (cast("Binding", target).capture is None)
+                and (facts.input.pointer_hit not in (None, cast("Binding", target).node))
+                and needs_pointer_member(facts, intent, frame.request.history)
+            )
+            else False
+        )
+        if matches_needs_pointer_member:
             query = ControlPartQuery(native, operation, target, remaining, intent=intent)
             selected = await query.resolve(facts.input.pointer_hit)
             if selected is not None:

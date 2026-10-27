@@ -1,6 +1,6 @@
 """Bounded platform-neutral observation validation, before any projection."""
 
-from .primitives import safeInteger
+from .primitives import safe_integer
 from .schema import array, boolean, count, enum, number, obj, ref, role, string, union, unknown
 
 _strings = (
@@ -111,7 +111,7 @@ _observation = obj(
 )
 
 
-def decodeObservation(value):
+def decode_observation(value):
     observation = _observation.parse(value)
     seen = set()
     node_count = 0
@@ -126,7 +126,7 @@ def decodeObservation(value):
             raise ValueError("protocol: duplicate node reference")
         seen.add(parsed["ref"])
         selection = parsed.get("selectionRange")
-        if selection is not None and not safeInteger(selection["location"] + selection["length"]):
+        if selection is not None and not safe_integer(selection["location"] + selection["length"]):
             raise ValueError("protocol: invalid selection range")
         if "childCount" in parsed and "childrenRead" in parsed and parsed["childrenRead"] > parsed["childCount"]:
             raise ValueError("protocol: invalid child coverage")
@@ -163,11 +163,16 @@ def decodeObservation(value):
             if ref_value not in nodes or ref_value in owners or ref_value == node["ref"]:
                 raise ValueError("protocol: invalid control member")
             child = nodes[ref_value]
-            if (
-                (member["part"] == "label" and child["role"] not in ("staticText", "heading"))
-                or (member["part"] == "layout" and child["role"] not in ("group", "unknown", "cell"))
-                or (member["part"] == "editor" and node["control"]["kind"] != "textInput")
-            ):
+            invalid_member = (
+                True
+                if (
+                    (member["part"] == "label" and child["role"] not in ("staticText", "heading"))
+                    or (member["part"] == "layout" and child["role"] not in ("group", "unknown", "cell"))
+                    or (member["part"] == "editor" and node["control"]["kind"] != "textInput")
+                )
+                else False
+            )
+            if invalid_member:
                 raise ValueError("protocol: invalid control member semantics")
             parent = parents.get(ref_value)
             while parent is not None and parent != node["ref"]:

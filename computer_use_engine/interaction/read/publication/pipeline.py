@@ -84,9 +84,12 @@ class ObservationPublicationPipeline(Pipeline["PublicationRequest", "Observation
                     page_hints=lambda *args, **options: controller.pages.plan_hints(*args, **options),
                 ),
                 materialize_observation(
+                    # The pipeline shares retained bindings with their owning service.
+                    # pylint: disable-next=protected-access
                     overview_image=controller._overview_image,
+                    # pylint: disable-next=protected-access
                     window_ref=controller._window_ref,
                 ),
-                publish_observation_event(publish_observation=controller.publishObservation),
+                publish_observation_event(publish_observation=controller.publish_observation),
             ],
         )

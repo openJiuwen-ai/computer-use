@@ -32,9 +32,9 @@ dev = [{ include-group = "test" }, { include-group = "lint" }, { include-group =
 
 [project.scripts]
 computer-use-mcp = "computer_use_mcp.server:cli"
-computer-use-build = "computer_use_native_tools.native:buildCli"
-computer-use-permissions = "computer_use_native_tools.native:permissionsCli"
-computer-use-linux-session = "computer_use_native_tools.native:linuxLauncherCli"
+computer-use-build = "computer_use_native_tools.native:build_cli"
+computer-use-permissions = "computer_use_native_tools.native:permissions_cli"
+computer-use-linux-session = "computer_use_native_tools.native:linux_launcher_cli"
 
 [tool.setuptools]
 include-package-data = false
@@ -54,7 +54,11 @@ omit = ["tests/*"]
 
 [tool.pylint.MAIN]
 ignore-paths = ["^tests/.*"]
+load-plugins = ["pylint.extensions.bad_builtin"]
 py-version = "3.12"
+
+[tool.pylint."DEPRECATED BUILTINS"]
+bad-functions = ["print"]
 
 [tool.pylint.FORMAT]
 max-line-length = 120
@@ -62,6 +66,9 @@ max-line-length = 120
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+
+[tool.ruff.lint]
+extend-select = ["T201", "N807"]
 
 [tool.ruff.format]
 docstring-code-format = false

@@ -148,6 +148,8 @@ class AccessibilityDesktop:
                     if kind is None:
                         continue
                     count = relation.get_n_targets()
+                    # Exact types preserve scalar validation and identity contracts.
+                    # pylint: disable-next=unidiomatic-typecheck
                     if type(count) is not int or not 0 <= count <= 512:
                         raise Failure("Native window relation exceeds the target budget.", "observation_incomplete")
                     for index in range(count):
@@ -242,7 +244,8 @@ class AccessibilityDesktop:
     def clipboard_consumer(self, *_):
         self.unavailable("Clipboard paste")
 
-    def active(self):
+    @staticmethod
+    def active():
         return None
 
     def pump(self):

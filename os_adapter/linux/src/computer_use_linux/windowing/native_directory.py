@@ -52,9 +52,9 @@ class NativeDirectory:
         ctx.check()
         if not birth or process_birth(pid) != birth:
             raise Failure("The launched process is no longer alive.", "execution_unknown")
-        id = self.identity(("process", pid, birth))
+        application_id = self.identity(("process", pid, birth))
         application = dict(
-            id=id,
+            id=application_id,
             displayName=installation.label,
             isRunning=True,
             path=installation.path,
@@ -80,7 +80,8 @@ class NativeDirectory:
     def running_installation(self, installation, ctx):
         return [app for _, _, source, app in self.live_launches(ctx) if source.key == installation.key]
 
-    def accessibility_gap(self, error, ctx, notes, detail, *, allow_stale=False):
+    @staticmethod
+    def accessibility_gap(error, ctx, notes, detail, *, allow_stale=False):
         ctx.check()
         if (
             isinstance(error, Failure)
@@ -111,6 +112,8 @@ class NativeDirectory:
                 ax.live(obj)
                 pid = ax.call(ax.A.Accessible.get_process_id, obj)
                 name = ax.call(ax.A.Accessible.get_name, obj)
+                # Exact types preserve scalar validation and identity contracts.
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(pid) is not int or not 0 <= pid <= 2147483647:
                     raise Failure("Application process id is unavailable.", "observation_incomplete")
                 name = self.text(name, notes, "Application name", placeholder="Unnamed application")

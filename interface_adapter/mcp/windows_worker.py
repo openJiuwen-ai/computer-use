@@ -56,7 +56,7 @@ class _ThreadEntry(ctypes.Structure):
     ]
 
 
-def resumeSuspended(pid):
+def resume_suspended(pid):
     """Resume our newly created primary thread only after Job assignment.
 
     asyncio/Popen closes the CreateProcess thread handle. The documented
@@ -154,7 +154,7 @@ class WindowsJob:
         finally:
             self.kernel.CloseHandle(process)
 
-    async def waitEmpty(self):
+    async def wait_empty(self):
         while True:
             state = _Accounting()
             if not self.kernel.QueryInformationJobObject(
@@ -171,7 +171,7 @@ class WindowsJob:
             self.kernel.CloseHandle(handle)
 
 
-async def startWindowsWorker(env, *, module="computer_use_mcp.runtime", stderr=asyncio.subprocess.DEVNULL):
+async def start_windows_worker(env, *, module="computer_use_mcp.runtime", stderr=asyncio.subprocess.DEVNULL):
     loop = asyncio.get_running_loop()
     connected = loop.create_future()
     token = secrets.token_hex(32).encode("ascii")
@@ -185,13 +185,18 @@ async def startWindowsWorker(env, *, module="computer_use_mcp.runtime", stderr=a
         try:
             claimed = await asyncio.wait_for(reader.readline(), 5)
             credential_value, separator_value, pid_text = claimed.rstrip(b"\n").partition(b"\t")
-            if (
-                len(claimed) <= 80
-                and separator_value
-                and pid_text.isdigit()
-                and hmac.compare_digest(credential_value, token)
-                and not connected.done()
-            ):
+            matches_separator_value = (
+                True
+                if (
+                    len(claimed) <= 80
+                    and separator_value
+                    and pid_text.isdigit()
+                    and hmac.compare_digest(credential_value, token)
+                    and not connected.done()
+                )
+                else False
+            )
+            if matches_separator_value:
                 authenticated = True
                 pid = int(pid_text)
                 if not 0 < pid <= 0xFFFFFFFF:
@@ -241,7 +246,7 @@ async def startWindowsWorker(env, *, module="computer_use_mcp.runtime", stderr=a
         )
         job.assign(child.pid)
         if os.name == "nt":
-            resumeSuspended(child.pid)
+            resume_suspended(child.pid)
         reader, writer = await asyncio.wait_for(connected, 15)
         return child, reader, writer, job, server
     except BaseException:

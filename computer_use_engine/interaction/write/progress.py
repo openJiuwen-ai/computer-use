@@ -9,6 +9,7 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.write.model import AttemptOutcome, AttemptView, ResolutionMemory
 from computer_use.interaction.write.routes.policy import Attempts, route_key
 from computer_use.native.contracts import ClickSelectionDecision, Confirmation, Dispatch, StepResult
+from computer_use.protocol.primitives import required_item
 
 if TYPE_CHECKING:
     from typing import Iterable
@@ -47,7 +48,7 @@ def failure(
         else "none"
     )
     severity = {"none": 0, "possible": 1, "partial": 2}
-    if severity[minimum_effect] > severity[effect]:
+    if required_item(severity, minimum_effect) > required_item(severity, effect):
         effect = minimum_effect
     recovery = (
         next_step

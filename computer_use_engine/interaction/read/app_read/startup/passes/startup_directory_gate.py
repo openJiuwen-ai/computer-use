@@ -11,7 +11,8 @@ from computer_use.pipeline import Continue, Contract, Done, Pass
 if TYPE_CHECKING:
     from computer_use.interaction.read.app_read.startup.model import StartupDirectoryState
     from computer_use.pipeline.core import Control
-    from computer_use.protocol.records import ApplicationInfo, NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import ApplicationInfo
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 def startup_directory_gate(
@@ -26,8 +27,14 @@ def startup_directory_gate(
     if value.stale is not None:
         if state.attempt == 4:
             raise value.stale
-    elif not state.launched or directory["surfaces"] or directory["stopReasons"] or state.attempt == 4:
-        return Done((state.application, directory))
+    else:
+        matches_directory = (
+            True
+            if not state.launched or directory["surfaces"] or directory["stopReasons"] or state.attempt == 4
+            else False
+        )
+        if matches_directory:
+            return Done((state.application, directory))
     return Continue(replace(state, attempt=state.attempt + 1))
 
 

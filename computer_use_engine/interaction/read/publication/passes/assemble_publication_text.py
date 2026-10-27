@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.content import DisplayText, json_value as quoted, template
+from computer_use.interaction.read.presentation.content import DisplayText, template
+from computer_use.interaction.read.presentation.content import json_value as quoted
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.publication.model import PublicationSources, PublicationText
 from computer_use.pipeline import Contract, Effect, Pass

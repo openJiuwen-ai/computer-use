@@ -24,7 +24,7 @@ class Lease:
     initializing: bool = True
     sampled: bool = False
     epoch: int = 0
-    last_update: float = 0
+    last_update: float = 0.0
     parents_dirty: bool = False
     fault: str | None = None
     storage_dirty: bool = False
@@ -359,12 +359,17 @@ class X11WindowCaptures:
         finally:
             self._free_pixmap(pixmap)
         current = self.x.validate(instance)
-        if (
-            current.rect != window.rect
-            or not current.mapped
-            or lease.epoch != epoch
-            or self.entries.get(window.key) is not lease
-        ):
+        matches_epoch = (
+            True
+            if (
+                current.rect != window.rect
+                or not current.mapped
+                or lease.epoch != epoch
+                or self.entries.get(window.key) is not lease
+            )
+            else False
+        )
+        if matches_epoch:
             image.close()
             raise Failure("Window storage or geometry changed during capture.", "stale_target")
         return image, window, ([] if sampled else [self.WAIT_NOTE])

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from collections.abc import Iterator, Mapping
+from typing import TYPE_CHECKING, Any
 
 from computer_use.interaction.read.presentation.content import render_text
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
 from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedSection
-from computer_use.protocol.primitives import trimStart, utf16Length
+from computer_use.protocol.primitives import trim_start, utf16_length
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.delta import DeltaPlan, TreeDelta
@@ -44,7 +44,7 @@ def _section_delta(section: RenderedSection, delta: TreeDelta, missing: tuple[st
             lines.append(" " + (node.text if node.ref in delta.expanded else node.text.split("\n", 1)[0]))
         if node.ref not in delta.changes and node.ref not in delta.expanded:
             lines.extend(
-                f"Element {node.ref}: {trimStart(hint)}" if hint.lstrip("\t").startswith("Omitted: ") else hint
+                f"Element {node.ref}: {trim_start(hint)}" if hint.lstrip("\t").startswith("Omitted: ") else hint
                 for hint in node.hints
             )
     if section.suffix:
@@ -100,15 +100,28 @@ def format_document(
         full = rendered["details"] if part.details else rendered["text"]
         full_parts.append(_indent(full, part.indent))
         output = getattr(rendered, "document", None)
-        if not incremental or tree_index >= len(plan.trees) or part.details or not isinstance(output, RenderedDocument):
+        matches_incremental = (
+            True
+            if not incremental
+            or tree_index >= len(plan.trees)
+            or part.details
+            or not isinstance(output, RenderedDocument)
+            else False
+        )
+        if matches_incremental:
             incremental = False
             tree_index += 1
             continue
         for _ in range(part.indent):
             output = output.indented()
-        displayed = {
-            node.ref for section in output.parts if isinstance(section, RenderedSection) for node in section.nodes
-        }
+
+        def _iter_section(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for section in _source_items:
+                if isinstance(section, RenderedSection):
+                    for node in section.nodes:
+                        yield node.ref
+
+        displayed = set(_iter_section(iter(output.parts)))
         if displayed != {node.ref for node in part.nodes}:
             incremental = False
             tree_index += 1
@@ -119,4 +132,4 @@ def format_document(
     if not incremental or tree_index != len(plan.trees):
         return full_text
     diff_text = _header("".join(diff_parts), plan.mode, public_api)
-    return diff_text if utf16Length(diff_text) < utf16Length(full_text) else full_text
+    return diff_text if utf16_length(diff_text) < utf16_length(full_text) else full_text

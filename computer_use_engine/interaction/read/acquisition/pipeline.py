@@ -30,7 +30,7 @@ from computer_use.interaction.read.acquisition.passes.collect_window_overview im
 from computer_use.interaction.read.acquisition.passes.keep_components import (
     stage as keep_components,
 )
-from computer_use.interaction.read.acquisition.passes.ReadRefreshGate import (
+from computer_use.interaction.read.acquisition.passes.read_refresh_gate import (
     stage as read_refresh_gate,
 )
 from computer_use.interaction.read.acquisition.passes.retain_new_scope_for_recollection import (
@@ -151,6 +151,8 @@ class _AppMenuCollection(Node["CollectedAttempt", "CollectedAttempt"]):
         options: Record = dict(context=state.plan.selection.root, summary=True)
         if getattr(collect, "__func__", None) is NativeMenus.collect:
             options["_control"] = control
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         menus, gap = await services._component(
             "menus", lambda: collect(state.plan.selection.application, control.remaining, **options)
         )
@@ -240,6 +242,7 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
             except ComputerUseError as error:
                 if error.code not in ("ambiguous_target", "observation_incomplete"):
                     raise
+                # pylint: disable-next=protected-access
                 raise await services._window_choices(
                     error,
                     plan.selection.application,
@@ -278,6 +281,7 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 value: Read-attempt inputs paired with the components actually captured.
             """
             state, components = value.state, value.components
+            # pylint: disable-next=protected-access
             _, directory = await services._discover(
                 state.plan.selection,
                 cast("Callable[[], int]", control.remaining),
@@ -285,6 +289,7 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 and "nativeReadIsolation" not in services.port.connection.capabilities,
                 _control=control,
             )
+            # pylint: disable-next=protected-access
             confirmed, gaps = services._complete_scope(directory), state.gaps
             try:
                 current = select_surface(directory, state.plan.selection.root.root_window)
@@ -292,6 +297,7 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 if error.code not in ("ambiguous_target", "observation_incomplete"):
                     raise
                 confirmed, current = False, None
+                # pylint: disable-next=protected-access
                 gaps += (services._gap("scope", error),)
             target = state.target
             if components.tree is None and current is not None and window_binding(current) == window_binding(target):

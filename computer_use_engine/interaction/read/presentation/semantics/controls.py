@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.policy import independent_actions
-from computer_use.interaction.read.presentation.tree import hasIncompleteChildren, withInteractions
+from computer_use.interaction.read.presentation.tree import has_incomplete_children, with_interactions
 from computer_use.native.semantics import CONTROL_LABEL_ROLES, CONTROL_LAYOUT_ROLES
+from computer_use.protocol.primitives import required_item
 
 if TYPE_CHECKING:
     from typing import Sequence
@@ -40,7 +41,7 @@ def _transparent_control_layout(child: NodeView, fact_backed: bool) -> bool:
     )
 
 
-def composeControls(
+def compose_controls(
     root: SemanticNode, inherited: Sequence[str] | None = None, *, fact_backed: bool = False
 ) -> SemanticNode:
     """Annotate control owners with source-backed label and editor membership.
@@ -48,7 +49,7 @@ def composeControls(
     An observed editorRef supplies the owner/editor relationship. Label composition
     uses bounded descendants within the same interaction and table scope.
     """
-    scoped = withInteractions(root, inherited)
+    scoped = with_interactions(root, inherited)
 
     def visit(source: SemanticNode, in_table: bool = False) -> SemanticNode:
         """Compose each node's editor and label membership after processing its children."""
@@ -58,11 +59,11 @@ def composeControls(
             # Decoded older observations can already carry composition facts.
             # Never rewrite them or use the resulting display as input evidence.
             return node
-        if hasIncompleteChildren(node):
+        if has_incomplete_children(node):
             return node
 
         editor = node.get("editorRef")
-        if editor is not None and editor != node["ref"]:
+        if editor is not None and editor != required_item(node, "ref"):
             path = _editor_path(node, editor)
             if path is not None:
                 node["control"] = dict(
@@ -75,7 +76,7 @@ def composeControls(
                 return node
 
         clickable = node.get("capabilities", {}).get("click") == "available"
-        item = node["role"] == "row" and not in_table
+        item = required_item(node, "role") == "row" and not in_table
         if (not clickable and not (fact_backed and item)) or node.get("enabled") is False:
             return node
         if node.get("blockedBy"):
@@ -83,7 +84,7 @@ def composeControls(
         control_roles = (
             {"button", "checkBox", "radioButton", "switch", "link", "tab", "group"} if fact_backed else {"button"}
         )
-        if node["role"] not in control_roles and not item:
+        if required_item(node, "role") not in control_roles and not item:
             return node
 
         members, visited, cells, complete = [], 0, 0, True
@@ -96,12 +97,12 @@ def composeControls(
                 complete = False
                 return
             cells += child["role"] == "cell"
-            if hasIncompleteChildren(child) or child.get("incompleteLabelRelation") or child.get("modal"):
+            if has_incomplete_children(child) or child.get("incompleteLabelRelation") or child.get("modal"):
                 return
             if child.get("blockedBy", []) != node.get("blockedBy", []) or "toggleState" in child:
                 return
             if child["role"] in _LABEL and not child["children"]:
-                owners = {node["ref"], *(member["ref"] for member in members)}
+                owners = {required_item(node, "ref"), *(member["ref"] for member in members)}
                 if not set(child.get("labelTargets", [])).difference(owners):
                     members.append(dict(ref=child["ref"], part="label"))
             elif _transparent_control_layout(child, fact_backed):
@@ -111,8 +112,11 @@ def composeControls(
 
         for child in node["children"]:
             collect(child, 1)
-        if complete and members and (node["role"] != "row" or cells <= 1):
-            node["control"] = dict(kind="item" if node["role"] == "row" else "button", members=members)
+        matches_complete = (
+            True if complete and members and (required_item(node, "role") != "row" or cells <= 1) else False
+        )
+        if matches_complete:
+            node["control"] = dict(kind="item" if required_item(node, "role") == "row" else "button", members=members)
         return node
 
     return visit(scoped)
@@ -126,13 +130,13 @@ def _editor_path(owner: SemanticNode, editor: str) -> list[SemanticNode] | None:
         """Find the declared editor while preserving modal, interaction, and layout boundaries."""
         nonlocal visited
         visited += 1
-        if visited > 64 or depth > 8 or hasIncompleteChildren(node):
+        if visited > 64 or depth > 8 or has_incomplete_children(node):
             return None
         if node.get("modal") or node.get("blockedBy", []) != owner.get("blockedBy", []):
             return None
-        if node["ref"] == editor:
-            return [node] if node["role"] in _EDITORS else None
-        if node["role"] not in _LAYOUT or node.get("name") or node.get("description"):
+        if required_item(node, "ref") == editor:
+            return [node] if required_item(node, "role") in _EDITORS else None
+        if required_item(node, "role") not in _LAYOUT or node.get("name") or node.get("description"):
             return None
         if "control" in node:
             return None

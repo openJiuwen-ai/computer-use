@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.element.model import ElementReadPlan
 from computer_use.pipeline import Contract, Effect, Pass
 
@@ -33,7 +33,7 @@ def create(
         """
         request, selected = (plan.request, plan.selected)
         if selected is None:
-            raise localFailure(
+            raise local_failure(
                 "element continuation needs an observed first page",
                 "read this element before using a continuation offset",
                 "snapshot_expired",
@@ -42,7 +42,7 @@ def create(
         validate_element(target)
         if request.cursor is not None:
             if "nativeRelationPages" not in capabilities_of():
-                raise localFailure(
+                raise local_failure(
                     "this driver does not support content continuations",
                     "use supported element reads or update the driver",
                     "mode_unsupported",
@@ -51,7 +51,7 @@ def create(
         else:
             continuation = selected.get("children")
             if request.offset and (continuation is None or continuation.offset != request.offset):
-                raise localFailure(
+                raise local_failure(
                     "offset does not match this element's observed continuation",
                     "read the element again and use its reported continuation",
                     "snapshot_expired",

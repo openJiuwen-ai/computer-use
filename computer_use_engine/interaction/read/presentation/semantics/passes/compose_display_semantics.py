@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.model import PURE
-from computer_use.interaction.read.presentation.semantics.controls import composeControls
+from computer_use.interaction.read.presentation.semantics.controls import compose_controls
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 def compose_display_semantics(root: SemanticNode, control: Control) -> SemanticNode:
     """Derive source-backed control, label, and editor composition for the root."""
-    return composeControls(root, fact_backed=True)
+    return compose_controls(root, fact_backed=True)
 
 
 stage = Pass.define(

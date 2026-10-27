@@ -77,7 +77,9 @@ class NativeCurrentReceiver:
                 if requested not in path:
                     return publish("conflict", detail="The current receiver left the requested container.")
             index = path.index(requested)
-            ancestors = [self.store.keep(target["surface"], discovery.objects[key]) for key in path[1 : index + 1]]
+            ancestors = [
+                self.store.keep(target["surface"], discovery.objects[key]) for key in path[slice(1, index + 1)]
+            ]
             node = self.store.keep(target["surface"], focused)
             # Focus queries/registration can run provider callbacks. Check the
             # scoped candidate again; do not issue a second whole-tree census.

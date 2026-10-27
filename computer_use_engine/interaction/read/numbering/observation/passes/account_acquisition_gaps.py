@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 def create(*, services: NativeAppReader) -> Callable[[AcquiredObservation, Control], AcquiredObservation]:
     def add_read_gaps(acquired: AcquiredObservation, control: Control) -> AcquiredObservation:
         "Append directory-coverage and unexposed-content evidence to the acquisition's gaps."
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         gaps = acquired.gaps + tuple(services._coverage(acquired.directory))
         limits, tree = acquired.plan.limits, acquired.components.tree
         if limits["fields"] is None and limits["max_depth"] is None and window_content_unexposed(tree):
@@ -30,7 +32,8 @@ def create(*, services: NativeAppReader) -> Callable[[AcquiredObservation, Contr
                     "content",
                     "observation_incomplete",
                     "No identifiable content controls or text were exposed in this bounded window observation. "
-                    "This does not establish that the window is empty or ready; content may be loading, suspended or inaccessible.",
+                    "This does not establish that the window is empty or ready; "
+                    "content may be loading, suspended or inaccessible.",
                     ("inspect the window screenshot; read again after an explicit user-visible operation if needed"),
                 ),
             )

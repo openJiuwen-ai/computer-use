@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.rendering.layout.chains import compactTreeChains
+from computer_use.interaction.read.presentation.rendering.layout.chains import compact_tree_chains
 from computer_use.interaction.read.presentation.rendering.layout.packing import apply_layout
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 def join_container_chains(
     lines: list[str], roots: Sequence[NodeView], context: Record, format_field: FormatField
 ) -> list[str]:
-    return compactTreeChains(lines, roots)
+    return compact_tree_chains(lines, roots)
 
 
 def execute(frame: LayoutFrame, control: Control) -> LayoutFrame:

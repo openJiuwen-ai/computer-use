@@ -17,6 +17,8 @@ def resolve_native_step(params, session, current, finished, decode_binding):
     string(command["kind"])
     string(command["primitiveId"])
     decode_binding(command["target"], session)
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     require(type(command["foreground"]) is bool, "Invalid foreground flag.")
     operation = current if current and current.token == params["operation"] else finished.get(params["operation"])
     require(operation is not None and operation.writable, "Unknown writable native operation.", "stale_target")

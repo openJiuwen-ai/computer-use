@@ -53,19 +53,29 @@ def select_ready_route(eligible: EligibleRoutes) -> RouteOptions:
                 continue
             # Ready contextual setters retain the existing bounded preference
             # for a preparable keyboard route before any text mutation.
-            if (
-                intent.kind in ("insert", "replace")
-                and not request.needs_editing_evidence
-                and primitive.unit == "native_text_edit"
-                and primitive.channel == Channel.EDITOR
-            ):
+            matches_intent = (
+                True
+                if (
+                    intent.kind in ("insert", "replace")
+                    and not request.needs_editing_evidence
+                    and primitive.unit == "native_text_edit"
+                    and primitive.channel == Channel.EDITOR
+                )
+                else False
+            )
+            if matches_intent:
                 for keyboard in eligible.candidates:
-                    if (
-                        keyboard.unit != "key_sequence"
-                        or keyboard.channel != Channel.KEYBOARD
-                        or keyboard.pending != ("receiver",)
-                        or keyboard.background_preparation != Knowledge.YES
-                    ):
+                    matches_keyboard = (
+                        True
+                        if (
+                            keyboard.unit != "key_sequence"
+                            or keyboard.channel != Channel.KEYBOARD
+                            or keyboard.pending != ("receiver",)
+                            or keyboard.background_preparation != Knowledge.YES
+                        )
+                        else False
+                    )
+                    if matches_keyboard:
                         continue
                     prepared_command = UnitCommand(
                         keyboard, facts.binding, intent, facts.actuator, receiver=facts.receiver

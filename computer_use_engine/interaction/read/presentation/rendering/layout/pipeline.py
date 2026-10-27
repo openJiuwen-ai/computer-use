@@ -7,20 +7,27 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
 from computer_use.interaction.read.presentation.rendering.layout.passes.group_empty_values import (
     execute as apply_group_empty_values,
+)
+from computer_use.interaction.read.presentation.rendering.layout.passes.group_empty_values import (
     group_empty_values,
 )
 from computer_use.interaction.read.presentation.rendering.layout.passes.join_container_chains import (
     execute as apply_join_container_chains,
+)
+from computer_use.interaction.read.presentation.rendering.layout.passes.join_container_chains import (
     join_container_chains,
 )
 from computer_use.interaction.read.presentation.rendering.layout.passes.join_text_parts import (
     execute as apply_join_text_parts,
+)
+from computer_use.interaction.read.presentation.rendering.layout.passes.join_text_parts import (
     join_text_parts,
 )
 from computer_use.interaction.read.presentation.rendering.layout.passes.select_layout_scope import (
     stage as select_layout_scope,
 )
 from computer_use.pipeline import Contract, Pass, Pipeline, Select, Sequence
+from computer_use.protocol.primitives import required_item
 
 if TYPE_CHECKING:
     from collections.abc import Sequence as SequenceItems
@@ -49,7 +56,7 @@ def layout_pass(
     }
     return Pass(
         function.__name__,
-        handlers[function],
+        required_item(handlers, function),
         Contract(
             LayoutFrame,
             LayoutFrame,

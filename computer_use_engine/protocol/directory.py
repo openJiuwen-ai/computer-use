@@ -67,7 +67,7 @@ _schemas = {
 }
 
 
-def decodeDirectory(value):
+def decode_directory(value):
     result = deepcopy(_schemas[value["kind"]].parse(value))
     if result["observed"]["completedAt"] < result["observed"]["startedAt"]:
         raise ValueError("protocol: directory collection interval is reversed")

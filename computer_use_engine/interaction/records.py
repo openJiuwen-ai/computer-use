@@ -66,20 +66,27 @@ class WindowHandle(Protocol):
     """Link from a fixed Window view to its containing App handle."""
 
     @property
-    def _app(self) -> UIHandle: ...
+    def _app(self) -> UIHandle:
+        pass
 
 
 class NativeApplicationSummary(Protocol):
     """Application-directory row with the native provider's string ID."""
 
     @property
-    def id(self) -> str: ...
+    def id(self) -> str:
+        pass
 
     @property
-    def displayName(self) -> str: ...
+    # API, protocol, and native binding names retain their established spelling.
+    # pylint: disable-next=invalid-name
+    def displayName(self) -> str:
+        pass
 
     @property
-    def isRunning(self) -> bool: ...
+    # pylint: disable-next=invalid-name
+    def isRunning(self) -> bool:
+        pass
 
 
 class ObservedWindow(Protocol):
@@ -91,9 +98,12 @@ class ObservedWindow(Protocol):
     """
 
     @property
-    def target(self) -> Binding: ...
+    def target(self) -> Binding:
+        pass
+
     @property
-    def image(self) -> CapturedWindow | None: ...
+    def image(self) -> CapturedWindow | None:
+        pass
 
 
 WriteArguments: TypeAlias = (

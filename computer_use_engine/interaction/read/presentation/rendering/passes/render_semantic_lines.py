@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.model import PURE
-from computer_use.interaction.read.presentation.rendering.formatting import renderProjectionLines
+from computer_use.interaction.read.presentation.rendering.formatting import render_projection_lines
 from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
 from computer_use.pipeline import Contract, Pass
 
@@ -22,7 +22,7 @@ def create(*, branch: BranchFacts) -> Callable[[ProjectionResult, Control], Layo
         """Render the branch's compressed source projection into semantic lines and field-emission
         records.
         """
-        return renderProjectionLines(projection["nativeNodes"][branch.root["ref"]], branch.context, projection)
+        return render_projection_lines(projection["nativeNodes"][branch.root["ref"]], branch.context, projection)
 
     return render
 

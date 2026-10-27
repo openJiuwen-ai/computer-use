@@ -102,15 +102,20 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                     and self.ax.ctx.deadline < ctx.deadline
                     and time.monotonic() >= self.ax.ctx.deadline
                 )
-                if (
-                    self.obj is not None
-                    or self.candidate_seen
-                    or (
-                        isinstance(error, Failure)
-                        and not probe_budget
-                        and error.code not in ("observation_unavailable", "stale_target")
+                invalid_error = (
+                    True
+                    if (
+                        self.obj is not None
+                        or self.candidate_seen
+                        or (
+                            isinstance(error, Failure)
+                            and not probe_budget
+                            and error.code not in ("observation_unavailable", "stale_target")
+                        )
                     )
-                ):
+                    else False
+                )
+                if invalid_error:
                     raise Failure(
                         "Cannot establish one continuous keyboard recipient: " + str(error),
                         "stale_target"

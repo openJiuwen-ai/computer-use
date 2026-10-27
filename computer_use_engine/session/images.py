@@ -4,42 +4,48 @@ import hashlib
 import weakref
 
 from computer_use._identity import WeakIdentityMap
-from computer_use.protocol.captures import captureMetadata
+from computer_use.protocol.captures import capture_metadata
 
 _sources = WeakIdentityMap()
-_byteSources = {}
-_deliveryRequired = False
-_deliveryEpoch = 0
+_byte_sources = {}
+# Private variables hold mutable session state.
+# pylint: disable-next=invalid-name
+_delivery_required = False
+# pylint: disable-next=invalid-name
+_delivery_epoch = 0
 
 
 def _hash(png):
     return hashlib.sha256(png).hexdigest()
 
 
-def requireImageDelivery():
-    global _deliveryRequired
-    _deliveryRequired = True
+def require_image_delivery():
+    global _delivery_required
+    _delivery_required = True
 
 
-def imageDeliveryRequired():
-    return _deliveryRequired
+def image_delivery_required():
+    return _delivery_required
 
 
-def imageDeliveryEpoch():
-    return _deliveryEpoch
+def image_delivery_epoch():
+    return _delivery_epoch
 
 
-def resetImageDelivery():
-    global _deliveryEpoch
-    _deliveryEpoch += 1
+def reset_image_delivery():
+    global _delivery_epoch
+    _delivery_epoch += 1
 
 
-def registerImage(png, source, summarize):
+def register_image(png, source, summarize):
     previous = _sources.get(png)
     if previous is not None and "bytes" in previous:
-        _byteSources.pop(id(previous["bytes"]), None)
-    _sources.set(png, dict(source=source, hash=_hash(png), metadata=captureMetadata(png)))
+        _byte_sources.pop(id(previous["bytes"]), None)
+    _sources.set(png, dict(source=source, hash=_hash(png), metadata=capture_metadata(png)))
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     png._bytes_copied = _bytes_copied
+    # pylint: disable-next=protected-access
     png._displaySummary = summarize(png)
 
 
@@ -53,10 +59,10 @@ def _bytes_copied(original, value):
         key = id(value)
 
         def remove(reference):
-            if _byteSources.get(key) is reference:
-                _byteSources.pop(key, None)
+            if _byte_sources.get(key) is reference:
+                _byte_sources.pop(key, None)
 
-        _byteSources[key] = weakref.ref(original, remove)
+        _byte_sources[key] = weakref.ref(original, remove)
         known["bytes"] = value
     return known["bytes"]
 
@@ -64,7 +70,7 @@ def _bytes_copied(original, value):
 def _source(png):
     known = _sources.get(png)
     if known is None:
-        original = _byteSources.get(id(png))
+        original = _byte_sources.get(id(png))
         known = _sources.get(original()) if original is not None else None
         if known is None or known.get("bytes") is not png:
             return None
@@ -74,12 +80,12 @@ def _source(png):
     return known
 
 
-def imageMetadata(png):
+def image_metadata(png):
     known = _source(png)
     return known["metadata"] if known is not None else None
 
 
-def imageDelivered(png):
+def image_delivered(png):
     known = _source(png)
     if known is not None and known["source"].get("current", lambda: True)() is not False:
         known["source"].get("delivered", lambda: None)()

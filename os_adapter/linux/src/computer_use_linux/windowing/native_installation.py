@@ -11,8 +11,31 @@ import os
 import shutil
 import stat
 from dataclasses import dataclass, field
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.protocol import Failure
+
+
+class FileIdentity(NamedTuple):
+    device: Any
+    inode: Any
+    mode: Any
+    size: Any
+    modified_ns: Any
+    changed_ns: Any
+
+
+class InstallationKey(NamedTuple):
+    identifier: Any
+    filename: Any
+    desktop: Any
+    executable: Any
+    executable_path: Any
+    executable_identity: Any
+    dbus_activatable: Any
+    terminal: Any
+    startup_wm_class: Any
+
 
 MAX_DESKTOP_BYTES = 1024 * 1024
 
@@ -34,7 +57,7 @@ def _check(ctx):
 
 
 def _identity(info):
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    return FileIdentity(info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
 @dataclass(frozen=True)
@@ -52,7 +75,7 @@ def _desktop_file(filename, ctx):
         expected = os.stat(path)
         if not stat.S_ISREG(expected.st_mode):
             raise Failure("Installed desktop entry is not a regular file.", "observation_incomplete", filename)
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW, mode=0o600)
         try:
             before = os.fstat(fd)
             if _identity(before) != _identity(expected):
@@ -143,7 +166,7 @@ class NativeInstallation:
         # Two recipes for the same executable remain different installations.
         # A new executable resolution must never replace a retained record under
         # an old directory token, even when the desktop recipe is unchanged.
-        return (
+        return InstallationKey(
             self.identifier,
             self.filename,
             self.desktop,
@@ -160,6 +183,8 @@ class NativeInstallation:
         return self.key
 
     @classmethod
+    # API, protocol, and native binding names retain their established spelling.
+    # pylint: disable-next=invalid-name
     def capture(cls, app, Gio, ctx=None, *, GLib):
         _check(ctx)
         identifier = app.get_id()
@@ -220,6 +245,8 @@ class NativeInstallation:
         startup_class = native.get_startup_wm_class() if hasattr(native, "get_startup_wm_class") else None
         if not window_class_keys((startup_class,)):
             startup_class = None
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(dbus) is not bool or type(terminal) is not bool:
             raise Failure("Desktop launch declarations are unavailable.", "observation_incomplete", filename)
         resolved = _executable(executable) if parse_reason is None else None

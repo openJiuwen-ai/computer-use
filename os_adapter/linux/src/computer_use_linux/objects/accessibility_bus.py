@@ -5,6 +5,8 @@ import os
 from computer_use_linux.contracts.protocol import Failure
 
 
+# API, protocol, and native binding names retain their established spelling.
+# pylint: disable-next=invalid-name
 def connect_accessibility_bus(Gio, GLib):
     """Fail before libatspi's fatal initialization on a missing/stale session bus.
 

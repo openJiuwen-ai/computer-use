@@ -66,9 +66,11 @@ def render_text(value: DisplayText | str, *, snapshots: Mapping[int, RenderedTre
     """Render a structured field as part of the final output operation."""
     if isinstance(value, str):
         return value
-    from computer_use.interaction.read.presentation.formatting import jsonString, numberString
+    from computer_use.interaction.read.presentation.formatting import json_string, number_string
     from computer_use.interaction.read.presentation.rendering.formatting import (
         field as format_field,
+    )
+    from computer_use.interaction.read.presentation.rendering.formatting import (
         quoted as format_quoted,
     )
 
@@ -83,11 +85,11 @@ def render_text(value: DisplayText | str, *, snapshots: Mapping[int, RenderedTre
         return format_quoted(args[0])
     if kind == "json":
         value = render_text(args[0], snapshots=snapshots) if isinstance(args[0], DisplayText) else args[0]
-        return jsonString(value)
+        return json_string(value)
     if kind == "field":
         return format_field(args[0])
     if kind == "number":
-        return numberString(args[0])
+        return number_string(args[0])
     if kind == "join":
         return args[0].join(render_text(item, snapshots=snapshots) for item in args[1])
     if kind == "indent":

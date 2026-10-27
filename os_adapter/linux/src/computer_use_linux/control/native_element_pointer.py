@@ -7,9 +7,20 @@ cleanup and receipts; this unit supplies the element-bound gesture guard.
 """
 
 import math
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.protocol import Failure, require
 from computer_use_linux.control.native_pointer import NativePointer
+
+
+class ElementPointerTarget(NamedTuple):
+    obj: Any
+    states: Any
+    interfaces: Any
+    role: Any
+    enabled: Any
+    selected: Any
+    native: Any
 
 
 class NativeElementPointer(NativePointer):
@@ -22,7 +33,7 @@ class NativeElementPointer(NativePointer):
         obj, states, interfaces, role, enabled = self.target.read(target, within, ctx)
         selected = self.directory.surfaces[target["surface"]]
         native = self.desktop.validate(selected)
-        return obj, states, interfaces, role, enabled, selected, native
+        return ElementPointerTarget(obj, states, interfaces, role, enabled, selected, native)
 
     def _hit(self, root, point, ctx):
         # AT-SPI may return an immediate child or a deeper descendant. Descend
