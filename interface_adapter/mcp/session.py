@@ -45,12 +45,12 @@ class ExecutionSession:
         return task
 
     @eager
-    async def execute(self, code, signal=None, history=None, title=None, onProgress=None):
+    async def execute(self, code, signal=None, history=None, title=None, on_progress=None):
         if self._closed:
             return executionError("Execution session is closed.")
         if self._resetting is not None:
             result = await asyncio.shield(self._resetting)
-            return result if result.get("isError") else await self.execute(code, signal, history, title, onProgress)
+            return result if result.get("isError") else await self.execute(code, signal, history, title, on_progress)
         if self._retiring is not None:
             return executionError(
                 ("Native cleanup is still pending. Call computer_use_reset before continuing; no code was executed.")
@@ -113,8 +113,8 @@ class ExecutionSession:
                 pending["timer"].cancel()
             pending["timer"] = loop.call_later(self.timeoutMs / 1000, stalled)
             try:
-                if onProgress is not None:
-                    result = onProgress()
+                if on_progress is not None:
+                    result = on_progress()
                     if hasattr(result, "__await__"):
                         self._track(result)
             except Exception:

@@ -186,7 +186,7 @@ class ComputerUseServer:
                 args["code"],
                 history=historyRequest(metadata.get(historyKey)) if _supports(experimental, historyKey, 1) else None,
                 title=args.get("title"),
-                onProgress=reportProgress if progress_token is not None else None,
+                on_progress=reportProgress if progress_token is not None else None,
             )
             return types.CallToolResult.model_validate(result)
 
