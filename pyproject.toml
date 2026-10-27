@@ -13,6 +13,23 @@ dependencies = [
     "pillow>=12.3,<13",
 ]
 
+[dependency-groups]
+test = [
+    "pytest>=8.3.5",
+    "pytest-html>=4.1.1",
+    "pytest-cov>=7.0.0",
+]
+lint = [
+    "ruff>=0.11.2",
+    "pylint>=3.0.0",
+]
+build = [
+    "build>=1.2.2",
+    "setuptools>=68",
+    "wheel>=0.41.2",
+]
+dev = [{ include-group = "test" }, { include-group = "lint" }, { include-group = "build" }]
+
 [project.scripts]
 computer-use-mcp = "computer_use_mcp.server:cli"
 computer-use-build = "computer_use_native_tools.native:buildCli"
@@ -29,6 +46,18 @@ computer_use = ["*.pyi", "py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+addopts = ["-v", "--html=outputs/unit_test_report.html", "--self-contained-html", "--ignore=build"]
+
+[tool.coverage.run]
+source = ["computer_use", "computer_use_mcp"]
+omit = ["tests/*"]
+
+[tool.pylint.MAIN]
+ignore-paths = ["^tests/.*", "^os_adapter/.*/Tests/.*"]
+py-version = "3.12"
+
+[tool.pylint.FORMAT]
+max-line-length = 120
 
 [tool.ruff]
 target-version = "py312"

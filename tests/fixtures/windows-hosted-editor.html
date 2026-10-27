@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Hosted Editor Probe</title>
+<style>
+  body {
+    font: 20px sans-serif;
+    padding: 24px;
+    background: #f6f7f9;
+  }
+  [contenteditable],
+  input {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 90px;
+    border: 1px solid #888;
+    margin: 16px 0;
+    padding: 12px;
+    background: white;
+  }
+  #evidence {
+    width: 100%;
+    height: 100px;
+  }
+  pre {
+    white-space: pre-wrap;
+    font-size: 16px;
+  }
+</style>
+<div id="reply" contenteditable="true" role="textbox" aria-label="Demo reply" aria-multiline="true"></div>
+<input type="text" id="other" aria-label="Other field" value="untouched">
+<input type="text" id="combo" role="combobox" aria-expanded="false" aria-label="Search combo" value="">
+<textarea id="evidence" aria-label="Observed input" readonly></textarea>
+<button type="button" onclick="document.getElementById('confirmation').showModal()">Open local dialog</button>
+<dialog id="confirmation" aria-label="Local confirmation">
+  <p>Confirm this disposable local operation.</p>
+  <button
+    type="button"
+    onclick="
+      confirmed++;
+      this.closest('dialog').close();
+      publish();
+    "
+    >Confirm local dialog</button
+  >
+</dialog>
+<script>
+  const reply = document.getElementById("reply"),
+    other = document.getElementById("other"),
+    combo = document.getElementById("combo");
+  let confirmed = 0;
+  function publish() {
+    document.getElementById("evidence").value = JSON.stringify({
+      reply: reply.innerText,
+      other: other.value,
+      combo: combo.value,
+      confirmed,
+    });
+  }
+  document.addEventListener("input", publish);
+  publish();
+</script>

@@ -1,0 +1,13 @@
+{
+  "sourceCommit": "19f84e17b4f1c574a220e5ab537131cdad89075b",
+  "fixtures": {
+    "functions.json.gz": {
+      "sha256": "bedfe5f08397ef241b59191e085c0a36a6be0dbb828e1fb3688e95db87c62c3b",
+      "cases": 4844
+    },
+    "client.json.gz": {
+      "sha256": "41d53894c90729892063571d8bd418ed3b80045d70409dabeeb275ab4fb21667",
+      "cases": 55
+    }
+  }
+}
