@@ -1,13 +1,12 @@
-"""One explicit read/write/query branch per internal system request."""
+"""Route public handle requests and the two internal request kinds."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.agent.pipeline import AgentDispatch
-from computer_use.interaction.passes.select_route import AGENT_ROUTES, QUERY, READ, WRITE, stage as select_route
+from computer_use.interaction.passes.select_route import AGENT_ROUTES, QUERY, WRITE, stage as select_route
 from computer_use.interaction.query.pipeline import QueryPipeline
-from computer_use.interaction.read.pipeline import ReadPipeline
 from computer_use.interaction.write.request.pipeline import ControllerWritePipeline
 from computer_use.pipeline import Pipeline, Select
 
@@ -18,12 +17,14 @@ if TYPE_CHECKING:
 
 
 class SessionPipeline(Pipeline["InteractionRequest", "InteractionResult"]):
-    """Route session requests through the read, write, or query flow.
+    """Route session requests to the UI adapter or an internal execution flow.
 
     One selector names the branch from the request type. Public-handle
     requests share the UI adapter branch, keyed by their effect class so the
-    trace still records read/write/query; internal requests enter their core
-    pipeline directly.
+    trace still records read/write/query. The internal branches serve the
+    requests the adapter re-enters with: ExecuteAction (write) and
+    FindElement (query). Reads have no internal branch; they run through the
+    adapter's reader services.
 
     Attributes:
         controller: Session services shared by the branch pipelines and UI adapter.
@@ -41,7 +42,6 @@ class SessionPipeline(Pipeline["InteractionRequest", "InteractionResult"]):
             selector=select_route(),
             branches={
                 **{route: agent for route in AGENT_ROUTES},
-                READ: ReadPipeline(controller),
                 WRITE: ControllerWritePipeline(controller),
                 QUERY: QueryPipeline(controller),
             },

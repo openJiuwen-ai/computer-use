@@ -33,11 +33,9 @@ from computer_use.pipeline.core import Node
 if TYPE_CHECKING:
     from typing import AsyncIterator, NoReturn
 
-    from computer_use.interaction.controller import SessionController
     from computer_use.interaction.read.app import NativeAppReader
     from computer_use.interaction.read.app_read.model import ReadRequest
     from computer_use.interaction.read.model import AppObservation, MenuAppObservation
-    from computer_use.interaction.requests import InteractionRequest
     from computer_use.pipeline.core import Control, Step
 
 
@@ -185,28 +183,3 @@ class ApplicationObservationPipeline(Node["ReadRequest", "AppObservation | MenuA
 
     def _run(self, value: ReadRequest, control: Control) -> AppObservation | MenuAppObservation:
         raise TypeError("App reads require arun()")
-
-
-class ReadPipeline(Node["InteractionRequest", "ReadResult"]):
-    """Enter the session's observation flows.
-
-    Delegate the typed read request to application, desktop, element, or captured-text
-    handling. Return the result produced by the selected branch.
-    """
-
-    def __init__(self, controller: SessionController) -> None:
-        from computer_use.interaction.read.requests.pipeline import SessionReadPipeline
-
-        self.body = SessionReadPipeline(controller)
-        self.children = (self.body,)
-        super().__init__("ReadPipeline", self.body.contract)
-
-    async def _arun(self, value: InteractionRequest, control: Control) -> ReadResult:
-        return await self.body.arun(value, control)
-
-    def _run(self, value: InteractionRequest, control: Control) -> ReadResult:
-        raise TypeError("System reads require arun()")
-
-
-if TYPE_CHECKING:
-    from computer_use.interaction.records import ReadResult

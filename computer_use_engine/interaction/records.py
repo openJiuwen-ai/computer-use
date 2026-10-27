@@ -69,19 +69,6 @@ class WindowHandle(Protocol):
     def _app(self) -> UIHandle: ...
 
 
-class NativeApplicationSummary(Protocol):
-    """Application-directory row with the native provider's string ID."""
-
-    @property
-    def id(self) -> str: ...
-
-    @property
-    def displayName(self) -> str: ...
-
-    @property
-    def isRunning(self) -> bool: ...
-
-
 class ObservedWindow(Protocol):
     """Window identity and image evidence shared by observation and input.
 
@@ -104,6 +91,5 @@ WriteArguments: TypeAlias = (
 
 if TYPE_CHECKING:
     AgentResult: TypeAlias = Observation | ActionResult | TextPage | ElementSnapshot | list[AppInfo]
-    ReadResult: TypeAlias = Observation | TextPage | tuple[Observation, ElementSnapshot]
-    QueryResult: TypeAlias = ElementSnapshot | tuple[NativeApplicationSummary, ...]
-    InteractionResult: TypeAlias = AgentResult | ReadResult | QueryResult
+    QueryResult: TypeAlias = ElementSnapshot
+    InteractionResult: TypeAlias = AgentResult | ActionResult | QueryResult
