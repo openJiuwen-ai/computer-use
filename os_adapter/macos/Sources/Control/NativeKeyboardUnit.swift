@@ -45,7 +45,8 @@ import ApplicationServices
             // Incomplete current association grants no Element receiver. Keep
             // window preparation available; only a later fresh proof can admit
             // focus on this editor or requested input after that preparation.
-            focus: ownedEditor ? context.focus : nil, ancestors: ownedEditor ? context.ancestors : [], foreground: context.foreground,
+            focus: ownedEditor ? context.focus : nil, ancestors: ownedEditor ? context.ancestors : [],
+            foreground: context.foreground,
             relatedEditor: ownedEditor ? context.relatedEditor : nil, window: context.window, surface: context.surface,
             scopeRoute: context.scopeRoute, reportedFocus: context.reportedFocus,
             focusReportAbsent: ownedEditor && context.focusReportAbsent, focusedWindowRead: context.focusedWindowRead,
@@ -100,7 +101,8 @@ import ApplicationServices
         _ request: NativeKeyboardIntent, textPolicy: NativeKeyboardInterpreterEvidence.Policy
     ) throws -> Bool {
         if request.kind == .replace, try requiresCellEditorActivation(), let element,
-            try NativeCellEditorHandoff.activationNeedsForeground(element: element, application: application, window: window)
+            try NativeCellEditorHandoff.activationNeedsForeground(
+                element: element, application: application, window: window)
         { return true }
         let state = try sample()
         guard
@@ -225,7 +227,8 @@ import ApplicationServices
             }
             conditions.append(("selection", selection == nil ? "unknown" : "yes"))
             if try requiresCellEditorActivation(), let element,
-                try NativeCellEditorHandoff.activationNeedsForeground(element: element, application: application, window: window)
+                try NativeCellEditorHandoff.activationNeedsForeground(
+                    element: element, application: application, window: window)
             { conditions.append(("foreground", "unknown")) }
         }
         if includeDelivery,
@@ -368,7 +371,8 @@ import ApplicationServices
             ready: {
                 if activateCell {
                     return try NativeReceiverSnapshot.read(
-                        application: application, window: window, receiverRelation: receiverRelation).receiver(element) == "yes"
+                        application: application, window: window, receiverRelation: receiverRelation
+                    ).receiver(element) == "yes"
                 }
                 return try readiness(
                     kind: request.kind, key: request.key, text: request.value, replacement: replacement, prepared: true,

@@ -109,14 +109,14 @@ class NodeBuilder:
         self.paths: dict[str, tuple[str | int, ...]] = {}
         self.conflicts: set[tuple[str, ...]] = set()
         self.role: str | None = None
-        self.methods = {
-            f"{prop['key'][0]}::{prop['key'][1]}#{index}": (
-                tuple(prop["key"]),
-                tuple(owner.wire.value(item) for item in prop["arguments"]),
-            )
-            for index, prop in enumerate(owner.wire.nodes[identity]["properties"])
-            if prop.get("arguments")
-        }
+        self.methods = {}
+        for index, prop in enumerate(owner.wire.nodes[identity]["properties"]):
+            if prop.get("arguments"):
+                method = f"{prop['key'][0]}::{prop['key'][1]}#{index}"
+                self.methods[method] = (
+                    tuple(prop["key"]),
+                    tuple(owner.wire.value(item) for item in prop["arguments"]),
+                )
 
     @property
     def backend(self) -> str:

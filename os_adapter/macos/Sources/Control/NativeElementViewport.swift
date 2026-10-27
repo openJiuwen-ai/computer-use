@@ -51,7 +51,9 @@ import ApplicationServices
             // the outer region first. Every subsequent step resamples the same
             // element and the live ancestor chain.
             for (index, region) in regions.enumerated() {
-                let viewport = regions.dropFirst(index + 1).filter(\.clips).reduce(region.bounds.intersection(mapping.frame)) {
+                let viewport = regions.dropFirst(index + 1).filter(\.clips).reduce(
+                    region.bounds.intersection(mapping.frame)
+                ) {
                     $0.intersection($1.bounds)
                 }
                 guard !viewport.isNull, !viewport.isEmpty,

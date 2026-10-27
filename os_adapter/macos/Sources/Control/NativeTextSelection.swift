@@ -10,6 +10,8 @@ struct NativeTextSelection {
     let length: Int?
     var contiguous = true
 
+    // The count field is a scalar native character extent, not a collection.
+    // swiftlint:disable:next empty_count
     var full: Bool { count >= 0 && contiguous && location == 0 && length == count }
 
     /// Decode a live native sample. Keeping field acquisition explicit lets

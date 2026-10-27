@@ -116,26 +116,20 @@ def publish(
             windows = {str(ref): key for ref, key in state.windows.items() if key in permitted}
             alias = {key: ref for ref, key in windows.items()}
             current = getattr(owner, "_context", None)
-            identity = dict(
-                current=alias.get(current),
-                windows=[
-                    dict(
-                        ref=ref,
-                        title=permitted[key]["title"],
-                        **{
-                            name: permitted[key][name]
-                            for name in ("modal", "document")
-                            if permitted[key].get(name) is not None
-                        },
-                        **(
-                            dict(parent=alias[permitted[key]["parent"]])
-                            if permitted[key].get("parent") in alias
-                            else {}
-                        ),
-                    )
-                    for ref, key in windows.items()
-                ],
-            )
+            identity = dict(current=alias.get(current), windows=[])
+            for ref, key in windows.items():
+                window_data = dict(
+                    ref=ref,
+                    title=permitted[key]["title"],
+                    **{
+                        name: permitted[key][name]
+                        for name in ("modal", "document")
+                        if permitted[key].get(name) is not None
+                    },
+                )
+                if permitted[key].get("parent") in alias:
+                    window_data["parent"] = alias[permitted[key]["parent"]]
+                identity["windows"].append(window_data)
             focused = (directory or state.directory).get("focusedWindow")
             if focused in alias:
                 identity["focusedWindow"] = alias[focused]
@@ -211,22 +205,26 @@ def directory_text(controller: SessionController, ui: UIHandle, directory: Direc
     )
     lines = [template("App: {0}.", quoted(cast("WorkingWindow", instance.anchor).name)), template("View: {0}.", view)]
     if len(instance.members) > 1:
-        windows = [
-            template(
-                "{0} {1}{2}{3}{4}",
-                ref,
-                quoted(instance.members[key]["title"]),
-                " (main)" if key == selected else "",
-                " (modal)" if instance.members[key]["modal"] is True else "",
+        windows = []
+        for ref, key in instance.windows.items():
+            windows.append(
                 template(
-                    " (parent={0})",
-                    next((r for r, w in instance.windows.items() if w == instance.members[key]["parent"]), "unknown"),
+                    "{0} {1}{2}{3}{4}",
+                    ref,
+                    quoted(instance.members[key]["title"]),
+                    " (main)" if key == selected else "",
+                    " (modal)" if instance.members[key]["modal"] is True else "",
+                    template(
+                        " (parent={0})",
+                        next(
+                            (r for r, w in instance.windows.items() if w == instance.members[key]["parent"]),
+                            "unknown",
+                        ),
+                    )
+                    if instance.members[key]["parent"] is not None
+                    else "",
                 )
-                if instance.members[key]["parent"] is not None
-                else "",
             )
-            for ref, key in instance.windows.items()
-        ]
         lines.append(
             template(
                 "Windows: {0}; current={1}",

@@ -31,6 +31,8 @@ import ApplicationServices
             return nil
         }
         if let value = raw as? String, !value.isEmpty { return value }
+        // CFGetTypeID establishes the bridged native type before this conversion.
+        // swiftlint:disable:next force_cast
         if let raw, CFGetTypeID(raw) == CFURLGetTypeID() { return (raw as! URL).absoluteString }
         return nil
     }

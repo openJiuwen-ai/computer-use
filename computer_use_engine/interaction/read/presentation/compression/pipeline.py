@@ -58,7 +58,7 @@ from computer_use.pipeline import Contract, Effect, Pass, Pipeline, Sequence
 from computer_use.pipeline.core import Node
 
 if TYPE_CHECKING:
-    from typing import Any, Callable
+    from typing import Callable
 
     from computer_use.interaction.read.presentation.ir import (
         ProjectionEditor,

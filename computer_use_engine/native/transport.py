@@ -405,6 +405,8 @@ class ConnectionPort:
             unavailable_reason=value.get("unavailableReason"),
         )
 
+    # Match NativePort.nodes; the adapter collects these fields into NativeNodeQuery.
+    # pylint: disable-next=too-many-arguments
     async def nodes(
         self,
         operation,

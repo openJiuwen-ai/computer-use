@@ -47,7 +47,7 @@ from computer_use.protocol.primitives import trim, utf16_length
 
 
 if TYPE_CHECKING:
-    from typing import Any, Sequence
+    from typing import Sequence
 
     from computer_use.interaction.read.presentation.ir import ProjectionResult
     from computer_use.interaction.read.presentation.records import NodeView, RenderedTree, SemanticNode
@@ -391,10 +391,12 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                     operation.
                 attribute: Native/display field name recorded by the provenance ledger.
             """
-            if compact and (encoded := display_embedded(value, field, hint=detail_hint)) is not None:
-                # No full-value claim: accounting keeps the exact field under
-                # its source reference in details, including folded captions.
-                return encoded
+            if compact:
+                encoded = display_embedded(value, field, hint=detail_hint)
+                if encoded is not None:
+                    # No full-value claim: accounting keeps the exact field under
+                    # its source reference in details, including folded captions.
+                    return encoded
             part = shortened(value, limit)
             if part["omitted"]:
                 omissions.append(f"Omitted: {part['omitted']} characters ({name})")

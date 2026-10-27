@@ -93,8 +93,9 @@ class NativeGraph:
         if matches_edge:
             self.fail("observation_incomplete", "The control containment has conflicting native parent evidence.")
 
-    @staticmethod
-    def fail(code, detail):
+    # Subclasses override this instance policy to report their own lookup target.
+    # pylint: disable-next=no-self-use
+    def fail(self, code, detail):
         raise ComputerUseError(
             dict(
                 code=code,

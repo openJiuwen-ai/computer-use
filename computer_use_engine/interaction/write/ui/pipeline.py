@@ -96,6 +96,7 @@ class InterfacePointerPipeline:
                 image.expired = True
                 raise local_failure("a member window changed size", "read this UI image again", "snapshot_expired")
             shifts.append((new[0] - old[0], new[1] - old[1]))
-        if any(any(abs(a - b) > 1e-6 for a, b in zip(shifts[0], shift)) for shift in shifts[1:]):
-            image.expired = True
-            raise local_failure("relative window positions changed", "read this UI image again", "snapshot_expired")
+        for shift in shifts[1:]:
+            if any(abs(a - b) > 1e-6 for a, b in zip(shifts[0], shift)):
+                image.expired = True
+                raise local_failure("relative window positions changed", "read this UI image again", "snapshot_expired")

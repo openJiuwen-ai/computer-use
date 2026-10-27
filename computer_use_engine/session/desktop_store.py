@@ -18,6 +18,8 @@ class DesktopImageAccess:
 class DesktopStore:
     def __init__(self, images: DesktopImageAccess):
         self.images = images
+        self._view = None
+        self._delivered = None
         self.reset()
 
     def reset(self):

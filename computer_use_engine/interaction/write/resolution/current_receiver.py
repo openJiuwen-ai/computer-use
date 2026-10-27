@@ -103,7 +103,10 @@ class CurrentReceiverQuery(NativeGraph):
                 await visit(child, path + (token,))
 
         await visit(self.root.node, ())
-        leaves = [entry for entry in found if not any(entry[0] in other[1] for other in found)]
+        leaves = []
+        for entry in found:
+            if not any(entry[0] in other[1] for other in found):
+                leaves.append(entry)
         if len(leaves) != 1:
             self.fail(
                 "ambiguous_target" if len(leaves) > 1 else "input_unavailable",

@@ -382,7 +382,7 @@ class NativeSelection:
             try:
                 value = self.facts.field(check.obj, name, {})
                 return self._scalar(name, value, dict(state="absent") if value is None else None)
-            except (FieldUnavailable, self.ax.GLib.Error) as error:
+            except (FieldUnavailable, self.ax.glib.Error) as error:
                 return self._scalar(name, status=failure_status(error))
         if kind == "actions":
             return self._actions(self.facts.actions(check.obj, {}))
@@ -400,7 +400,7 @@ class NativeSelection:
             if matches_name:
                 actual["state"] = "absent"
             return self._relation(actual, objects[offset:])
-        except (FieldUnavailable, self.ax.GLib.Error) as error:
+        except (FieldUnavailable, self.ax.glib.Error) as error:
             status = failure_status(error)
             return self._relation(dict(state=status["state"], certainty="unknown"), [])
 

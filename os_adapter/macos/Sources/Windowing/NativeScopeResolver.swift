@@ -472,7 +472,8 @@ import ApplicationServices
         let window = try scope.requireWindow()
         let read = try node.map { try applications.readRoot($0) }
         let owned = try read.flatMap { original in
-            try original.cellEditorState?.resolve(element: original.element, application: scope.application, window: window)
+            try original.cellEditorState?.resolve(
+                element: original.element, application: scope.application, window: window)
         }
         return NativeKeyboardUnit(
             application: scope.application, window: window,
@@ -489,11 +490,13 @@ import ApplicationServices
         let node = try actuator?.node ?? string(binding["node"], label: "node")
         let window = try scope.requireWindow()
         let read = try applications.readRoot(node)
-        let owned = try read.cellEditorState?.resolve(element: read.element, application: scope.application, window: window)
+        let owned = try read.cellEditorState?.resolve(
+            element: read.element, application: scope.application, window: window)
         return NativeSelectedTextUnit(
             application: scope.application, window: window,
             element: owned?.element ?? read.element,
-            receiverRelation: try receiverRelation(binding, actuator: actuator, receiver: receiver), cellEditor: owned?.proof)
+            receiverRelation: try receiverRelation(binding, actuator: actuator, receiver: receiver),
+            cellEditor: owned?.proof)
     }
 
     func elementPointerUnit(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator? = nil) throws

@@ -3,7 +3,19 @@
 No candidate search, action semantics, projection, or route selection here.
 """
 
+from typing import Any, NamedTuple
+
 from computer_use_linux.contracts.protocol import Failure, require, token
+
+
+class TargetState(NamedTuple):
+    """Live object metadata sampled before the final scope verification."""
+
+    obj: Any
+    states: Any
+    interfaces: list[str] | tuple[str, ...]
+    role: str
+    enabled: bool
 
 
 class NativeTarget:
@@ -111,7 +123,7 @@ class NativeTarget:
         self.validate_scope(recipient, constraints, ctx)
         return recipient, constraints
 
-    def read(self, target, within, ctx):
+    def read(self, target, within, ctx) -> TargetState:
         ctx.check()
         self.b.ensure_unlocked()
         obj = self.store.get(target["node"], target["surface"]).obj
@@ -123,7 +135,7 @@ class NativeTarget:
         enabled = any(states.contains(getattr(self.ax.A.StateType, key)) for key in ("ENABLED", "SENSITIVE"))
         role = self.call("Accessible", "get_role_name", obj)
         self.validate_scope(target, within, ctx)
-        return obj, states, interfaces, role, enabled
+        return TargetState(obj, states, interfaces, role, enabled)
 
     @staticmethod
     def context(target, within, primitives, enabled, role, *, selection="unknown", actions_complete=False):

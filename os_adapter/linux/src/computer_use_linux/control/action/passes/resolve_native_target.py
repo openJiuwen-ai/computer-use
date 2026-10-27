@@ -3,10 +3,21 @@
 Effect and failure behavior remain the original native stage contract.
 """
 
+from typing import Any, NamedTuple
+
 from computer_use_linux.contracts.protocol import fields, require, string
 
 
-def resolve_native_target(operation, command):
+class ResolvedNativeTarget(NamedTuple):
+    """One native action's checked contract, identity, and target boundary."""
+
+    contract: dict[str, Any]
+    identity: Any
+    target: dict[str, Any]
+    within: Any
+
+
+def resolve_native_target(operation, command) -> ResolvedNativeTarget:
     fields(command, ("kind", "primitiveId", "target", "foreground"))
     require(
         command["kind"] == "native_action" and command["foreground"] is False,
@@ -32,7 +43,7 @@ def resolve_native_target(operation, command):
         )
     selected = contract["identity"]
     target, within = contract["target"], contract["within"]
-    return contract, selected, target, within
+    return ResolvedNativeTarget(contract, selected, target, within)
 
 
 CONTRACT = {

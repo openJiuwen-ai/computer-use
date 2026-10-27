@@ -171,6 +171,8 @@ class NativeAppReader:
             for item in directory["surfaces"]
         }
 
+    # Reader keywords retain their observation contract and are collected into ReadRequest below.
+    # pylint: disable-next=too-many-arguments
     async def read(
         self,
         selector: str | RunningApplication | WorkingWindow,
@@ -481,6 +483,8 @@ class NativeAppReader:
         return gaps
 
     @staticmethod
+    # Captured/current scope, projection, and image facts remain independent observation inputs.
+    # pylint: disable-next=too-many-arguments
     def _document(
         selection: WorkingWindow,
         target: Binding,
@@ -575,6 +579,8 @@ class NativeAppReader:
         return DisplayDocument.join(lines)
 
     @staticmethod
+    # This text adapter preserves the same observation fields as _document.
+    # pylint: disable-next=too-many-arguments
     def _text(
         selection: WorkingWindow,
         target: Binding,

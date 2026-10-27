@@ -107,10 +107,16 @@ enum NativeObservationEncoding {
         let roots = batch["roots"] as? [String] ?? (relations.first?["source"] as? String).map { [$0] } ?? []
         for root in roots { declare(root) }
         for record in records {
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let id = record["node"] as! String
             declare(id)
             let values = record["nativeValues"] as? [String: Record] ?? [:]
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let rawValues = record["values"] as! Record
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let statuses = record["fieldStatus"] as! [String: Record]
             let reads = record["nativeReads"] as? [String: Record] ?? [:]
             var properties = [Record]()
@@ -124,6 +130,8 @@ enum NativeObservationEncoding {
                 }
                 properties.append(entry)
             }
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let actions = record["actions"] as! Record
             let catalogue = scalar(actions["items"] ?? [Record]())
             var actionProperty = property("actions", value: catalogue, status: nil, namespace: "toolkit")
@@ -145,8 +153,12 @@ enum NativeObservationEncoding {
             nodes[id]!["read"] = nodeRead
         }
         for relation in relations {
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let source = relation["source"] as! String
             declare(source)
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let targets = relation["targets"] as! [String]
             for target in targets { declare(target) }
             var meta = relation
@@ -174,6 +186,8 @@ enum NativeObservationEncoding {
             } else {
                 payload = nil
             }
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             var entry = property(relation["property"] as! String, value: payload, status: hasPayload ? nil : relation)
             if hasPayload, payload == nil { entry["state"] = "not_read" }
             var read: Record = ["complete": ["complete", "absent"].contains(state), "details": details(meta)]
@@ -189,10 +203,14 @@ enum NativeObservationEncoding {
         }
         for id in batch["unread"] as? [String] ?? [] { declare(id) }
         for resource in batch["nativeResources"] as? [Record] ?? [] {
+            // The acquisition encoder constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let id = resource["id"] as! String
             declare(id)
             nodes[id] = resource
         }
+        // The acquisition encoder constructs this internal field with the asserted type.
+        // swiftlint:disable:next force_cast
         let observed = batch["observed"] as! Record
         var meta: Record = [
             "surface": batch["surface"]!, "observation_id": observed["id"]!,
@@ -203,7 +221,11 @@ enum NativeObservationEncoding {
         let read: Record = [
             "api": "ApplicationServices.AXUIElement", "producer": "computer-use-macos", "cached": false,
             "intervalNs": [
+                // The acquisition encoder constructs this internal field with the asserted type.
+                // swiftlint:disable:next force_cast
                 ((observed["startedAt"] as! NSNumber).int64Value * 1_000_000),
+                // The acquisition encoder constructs this internal field with the asserted type.
+                // swiftlint:disable:next force_cast
                 ((observed["completedAt"] as! NSNumber).int64Value * 1_000_000)
             ], "complete": reasons.isEmpty, "issues": reasons.map { ["reason": $0] }, "details": details(meta)
         ]

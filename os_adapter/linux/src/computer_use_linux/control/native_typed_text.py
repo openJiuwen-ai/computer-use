@@ -87,7 +87,7 @@ class NativeTypedText(NativeKeyboard):
                     try:
                         self.selection(r["obj"])
                         selection_known = "yes"
-                    except (Failure, self.ax.GLib.Error):
+                    except (Failure, self.ax.glib.Error):
                         ctx.check()
                         pending.append("selection")
         ready = r["route"] if shortcut_selection else r["ready"]

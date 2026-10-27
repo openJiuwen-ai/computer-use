@@ -18,9 +18,7 @@ class NativeAccessibility:
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi, Gio, GLib, GObject
 
-        # API, protocol, and native binding names retain their established spelling.
-        # pylint: disable-next=invalid-name
-        self._a, self.Gio, self.GLib = Atspi, Gio, GLib
+        self._a, self.gio, self.glib = Atspi, Gio, GLib
         self.native_key = GObject.Object.__hash__
         self.ctx, self.dead = None, {}
         self._state, self._failure = "new", None
@@ -64,7 +62,7 @@ class NativeAccessibility:
         try:
             # This selected-bus helper and libatspi.init are synchronous. Checks
             # bound admission/completion, not their internal blocking duration.
-            connect_accessibility_bus(self.Gio, self.GLib)
+            connect_accessibility_bus(self.gio, self.glib)
             self._check()
             self._a.set_timeout(250, 250)
             status = self._a.init()
@@ -94,7 +92,7 @@ class NativeAccessibility:
             # provider diagnosis. Do not retry a genuine provider failure in
             # this driver session or select another accessibility bus.
             self._check()
-            if isinstance(error, self.GLib.Error) or (
+            if isinstance(error, self.glib.Error) or (
                 isinstance(error, Failure) and error.code == "observation_unavailable"
             ):
                 self._state, self._failure = "unavailable", str(error)
@@ -105,7 +103,7 @@ class NativeAccessibility:
         for event in self._registered:
             try:
                 self.listener.deregister(event)
-            except self.GLib.Error:
+            except self.glib.Error:
                 pass
         self._registered.clear()
         self.listener = None
@@ -160,7 +158,7 @@ class NativeAccessibility:
             self._clear_cache(obj)
 
     def pump(self):
-        loop = self.GLib.MainContext.default()
+        loop = self.glib.MainContext.default()
         for _ in range(32):
             if not loop.pending():
                 break
@@ -193,7 +191,7 @@ class NativeAccessibility:
             if self.call(self.A.Accessible.get_role, obj) == self.A.Role.INVALID:
                 raise Failure("Native accessible no longer exists.", "stale_target")
             return states
-        except self.GLib.Error as error:
+        except self.glib.Error as error:
             raise Failure("Cannot confirm native target: " + str(error), "stale_target") from error
 
     def children(self, obj, limit, notes):
@@ -206,7 +204,7 @@ class NativeAccessibility:
         for index in range(min(total, limit)):
             try:
                 child = self.call(self.A.Accessible.get_child_at_index, obj, index)
-            except self.GLib.Error as error:
+            except self.glib.Error as error:
                 gap(notes, "Native directory child unavailable: " + str(error))
                 break
             if child is None:
@@ -231,7 +229,7 @@ class NativeAccessibility:
                 pid = self.call(self.A.Accessible.get_process_id, app)
                 name = self.call(self.A.Accessible.get_name, app)
                 result.extend((obj, pid, name) for obj in self.children(app, 128, notes))
-            except (Failure, self.GLib.Error) as error:
+            except (Failure, self.glib.Error) as error:
                 if self.ctx:
                     self.ctx.check()
                 if isinstance(error, Failure) and error.code not in (
@@ -258,13 +256,12 @@ class NativeAccessibility:
                 rect = self.rect(obj)
                 title = self.call(self.A.Accessible.get_name, obj)
                 bounds = (window.rect, window.frame_rect)
-                if (
-                    rect
-                    and title == window.title
-                    and any(b and all(abs(a - c) <= 3 for a, c in zip(rect, b)) for b in bounds)
-                ):
-                    matches.append(obj)
-            except self.GLib.Error:
+                if rect and title == window.title:
+                    for bound in bounds:
+                        if bound and all(abs(a - c) <= 3 for a, c in zip(rect, bound)):
+                            matches.append(obj)
+                            break
+            except self.glib.Error:
                 continue
         return matches[0] if len(matches) == 1 else None
 

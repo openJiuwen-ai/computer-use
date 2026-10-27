@@ -48,11 +48,15 @@ import ApplicationServices
         }
         if type == CFNullGetTypeID() { return NativeObservationEncoding.value("CFNull", NSNull()) }
         if type == CFBooleanGetTypeID() {
+            // CFGetTypeID establishes the bridged native type before this conversion.
+            // swiftlint:disable:next force_cast
             return NativeObservationEncoding.value("CFBoolean", (raw as! NSNumber).boolValue)
         }
         if type == CFNumberGetTypeID() {
             let number = unsafeDowncast(raw, to: CFNumber.self)
             let name = "CFNumber." + String(CFNumberGetType(number).rawValue)
+            // CFGetTypeID establishes the bridged native type before this conversion.
+            // swiftlint:disable:next force_cast
             let scalar = raw as! NSNumber
             return NativeObservationEncoding.value(
                 name,
@@ -61,6 +65,8 @@ import ApplicationServices
         }
         if type == CFStringGetTypeID() { return string(unsafeDowncast(raw, to: CFString.self)) }
         if type == CFDataGetTypeID() {
+            // CFGetTypeID establishes the bridged native type before this conversion.
+            // swiftlint:disable:next force_cast
             let data = raw as! Data
             return NativeObservationEncoding.value("CFData", ["bytes": data.base64EncodedString()])
         }
@@ -83,6 +89,8 @@ import ApplicationServices
         }
         if type == AXValueGetTypeID() { return axValue(unsafeDowncast(raw, to: AXValue.self)) }
         if type == CFArrayGetTypeID() {
+            // CFGetTypeID establishes the bridged native type before this conversion.
+            // swiftlint:disable:next force_cast
             let array = raw as! [Any]
             return NativeObservationEncoding.value(
                 "CFArray", ["items": try array.map { try encode($0 as CFTypeRef, reference: reference) }])

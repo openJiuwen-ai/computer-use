@@ -53,7 +53,7 @@ class NativeLaunch:
         # DO_NOT_REAP_CHILD keeps an exited child's PID reserved until the
         # native watch collects it; the first birth sample cannot see reuse.
         birth = process_birth(pid)
-        g_lib = self.b.ax.GLib
+        g_lib = self.b.ax.glib
 
         def exited(child_pid, status, *_):
             self.children.pop(child_pid, None)
@@ -63,7 +63,7 @@ class NativeLaunch:
         return birth
 
     def close(self):
-        g_lib_local = self.b.ax.GLib
+        g_lib_local = self.b.ax.glib
         for pid, watch in list(self.children.items()):
             g_lib_local.source_remove(watch)
             try:
@@ -150,7 +150,7 @@ class NativeLaunch:
                 application, confirmation = running[0], "confirmed"
                 detail = "The confirmed instance is already running; no launch or activation was sent."
             else:
-                gio, glib = self.b.ax.Gio, self.b.ax.GLib
+                gio, glib = self.b.ax.gio, self.b.ax.glib
                 context = gio.AppLaunchContext.new()
                 self.b.desktop.configure_launch(context)
                 # Do not inherit the driver's lifetime/protocol resources or a
@@ -213,7 +213,7 @@ class NativeLaunch:
                 dispatch, confirmation = "dispatched", "confirmed"
                 detail = "The direct application process was launched; window discovery is a separate observation."
             ctx.check()
-        except (Failure, self.b.ax.GLib.Error, OSError) as error:
+        except (Failure, self.b.ax.glib.Error, OSError) as error:
             detail = str(error)
             error_code = (
                 error.code

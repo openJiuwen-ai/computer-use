@@ -22,7 +22,8 @@ import AppKit
                 if !entered {
                     entered = true
                     receipt.recordPreparation(detail)
-                    evidence.record(.init(kind: .viewport, phase: .willSend, detail: detail, window: exposure.mapping.id))
+                    evidence.record(
+                        .init(kind: .viewport, phase: .willSend, detail: detail, window: exposure.mapping.id))
                 }
             }, onPosted: {}, onCleanupUnknown: receipt.recordCleanupUnknown, delivery: delivery)
         evidence.record(.init(kind: .viewport, phase: .returned, detail: detail, window: exposure.mapping.id))
@@ -43,6 +44,7 @@ import AppKit
             if progressed && now - changedAt >= 0.06 { return }
             try await Task.sleep(for: .milliseconds(20))
         } while ProcessInfo.processInfo.systemUptime < waitUntil
-        throw DriverError("the original element's scroll region did not move toward the target", code: .inputUnavailable)
+        throw DriverError(
+            "the original element's scroll region did not move toward the target", code: .inputUnavailable)
     }
 }

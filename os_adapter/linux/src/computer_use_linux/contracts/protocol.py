@@ -154,7 +154,8 @@ def desktop_lease(ctx, identity):
     import stat
 
     # Do not trust another user's runtime directory or follow a pre-created symlink.
-    root = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/computer-use-{os.getuid()}"
+    # The per-user fallback is shared by processes; ownership and symlink checks below guard it.
+    root = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/computer-use-{os.getuid()}"  # noqa: S108
     os.makedirs(root, mode=0o700, exist_ok=True)
     info = os.stat(root, follow_symlinks=False)
     require(

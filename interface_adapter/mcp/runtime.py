@@ -232,7 +232,7 @@ class Runtime:
         run["phase"] = "draining"
         if run["pending"]:
             if error is None:
-                error = RuntimeError(
+                error: BaseException | None = RuntimeError(
                     (
                         "Computer operations were not awaited. Pending operations "
                         "finished before "
@@ -320,7 +320,9 @@ class Runtime:
                     dont_inherit=True,
                 )
                 run["evaluationStarted"] = True
-                evaluated = eval(compiled, namespace, namespace)
+                # The MCP operation explicitly runs agent-supplied Python; eval
+                # retains the coroutine produced by top-level await in exec code.
+                evaluated = eval(compiled, namespace, namespace)  # noqa: S307
                 if inspect.isawaitable(evaluated):
                     await evaluated
             except BaseException as error:

@@ -29,12 +29,9 @@ def execution_error(message):
 
 
 class ExecutionSession:
-    # API, protocol, and native binding names retain their established spelling.
-    # pylint: disable-next=invalid-name
-    def __init__(self, timeoutMs=45000, on_preview=None, demo_foreground=False):
+    def __init__(self, timeout_ms=45000, on_preview=None, demo_foreground=False):
         self.demo_foreground = demo_foreground
-        # pylint: disable-next=invalid-name
-        self.timeoutMs, self.on_preview = timeoutMs, on_preview
+        self.timeout_ms, self.on_preview = timeout_ms, on_preview
         self._child = self._pending = self._retiring = self._resetting = self._exited = None
         self._writer = self._reader = None
         self._closed = self._starting = False
@@ -112,12 +109,12 @@ class ExecutionSession:
         )
 
         def stalled():
-            self.reset(f"Execution exceeded {self.timeoutMs} ms without native command progress.")
+            self.reset(f"Execution exceeded {self.timeout_ms} ms without native command progress.")
 
         def progress():
             if pending["timer"] is not None:
                 pending["timer"].cancel()
-            pending["timer"] = loop.call_later(self.timeoutMs / 1000, stalled)
+            pending["timer"] = loop.call_later(self.timeout_ms / 1000, stalled)
             try:
                 if on_progress is not None:
                     result = on_progress()
@@ -133,7 +130,7 @@ class ExecutionSession:
                 pending["cancel"].cancel()
 
         pending.update(progress=progress, cleanup=cleanup)
-        pending["timer"] = loop.call_later(self.timeoutMs / 1000, stalled)
+        pending["timer"] = loop.call_later(self.timeout_ms / 1000, stalled)
         self._pending = pending
         if signal is not None:
 

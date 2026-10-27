@@ -86,6 +86,8 @@ import ApplicationServices
             guard let before = selection.snapshot() else {
                 throw DriverError("target text extent is unavailable", code: .inputUnavailable)
             }
+            // The count field is a scalar native character extent, not a collection.
+            // swiftlint:disable:next empty_count
             if before.count == 0 && text.isEmpty { return true }
             if !before.full {
                 try selection.selectRange(count: before.count, check: ready, onDispatch: onDispatch, onPosted: onPosted)

@@ -66,6 +66,8 @@ import ApplicationServices
         }
         var empty: Bool {
             switch self {
+            // The count field is a scalar native character extent, not a collection.
+            // swiftlint:disable:next empty_count
             case .numeric(let value): value.count == 0
             case .markers(let value): value.empty
             }

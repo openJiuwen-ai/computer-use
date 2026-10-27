@@ -66,11 +66,10 @@ def associate_labels(state: ProjectionView, edit: ProjectionEditor) -> None:
             node = state.nodes[label]
             if utf16_length(node.get("value", "")) > VALUE_PREVIEW_LIMIT:
                 continue
-            parts = [
-                part
-                for part in sources(node)
-                if not any(existing["text"] == part["text"] for existing in target["textSources"])
-            ]
+            parts = []
+            for part in sources(node):
+                if not any(existing["text"] == part["text"] for existing in target["textSources"]):
+                    parts.append(part)
             if parts:
                 edit.adopt(target, parts, "description", " ")
         edit.annotate(target, "linkedLabel", True)

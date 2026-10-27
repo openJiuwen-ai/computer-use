@@ -19,7 +19,7 @@ class NativeBackend:
             raise
 
     def installed(self):
-        return [app for app in self.ax.Gio.AppInfo.get_all() if app.get_id() and app.should_show()]
+        return [app for app in self.ax.gio.AppInfo.get_all() if app.get_id() and app.should_show()]
 
     def ensure_unlocked(self):
         ensure_unlocked(self.ax)

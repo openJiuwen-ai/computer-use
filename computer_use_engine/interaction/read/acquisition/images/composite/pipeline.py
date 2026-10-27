@@ -57,11 +57,11 @@ class InterfaceImagePipeline:
         from computer_use.interaction.query.instances.scope import allowed
 
         members = allowed(ui)
-        images = [
-            (next(key for key, item in members.items() if item["surface"] == part.target.surface), part.image)
-            for part in parts
-            if part.image is not None
-        ]
+        images = []
+        for part in parts:
+            if part.image is not None:
+                key = next(key for key, item in members.items() if item["surface"] == part.target.surface)
+                images.append((key, part.image))
         if not images:
             return None, [
                 text(

@@ -17,6 +17,8 @@ from .passes.validate_element_scope import validate_element_scope
 
 
 class NativeQueryPipeline:
+    # Each injected port has one query responsibility; this constructor performs no collection.
+    # pylint: disable-next=too-many-arguments
     def __init__(
         self,
         *,

@@ -35,7 +35,7 @@ class NativeActionPipeline:
                 dispatch = "dispatched"
                 detail = "Native action " + selected["name"] + " accepted; read to verify its effect."
                 ctx.check()
-        except (Failure, self.ax.GLib.Error) as error:
+        except (Failure, self.ax.glib.Error) as error:
             detail = str(error)
             error_code = (
                 error.code

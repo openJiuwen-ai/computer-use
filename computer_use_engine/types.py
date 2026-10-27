@@ -42,13 +42,11 @@ class AppInfo(Protocol):
 
     @property
     # API, protocol, and native binding names retain their established spelling.
-    # pylint: disable-next=invalid-name
-    def displayName(self) -> str:
+    def displayName(self) -> str:  # pylint: disable=invalid-name
         pass
 
     @property
-    # pylint: disable-next=invalid-name
-    def isRunning(self) -> bool:
+    def isRunning(self) -> bool:  # pylint: disable=invalid-name
         pass
 
 

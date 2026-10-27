@@ -45,7 +45,7 @@ class NativeCurrentReceiver:
             # search; the public resolver checks the candidate's own semantics.
             try:
                 role = self.ax.call(self.ax.A.Accessible.get_role_name, candidate)
-            except self.ax.GLib.Error:
+            except self.ax.glib.Error:
                 ctx.check()
                 return True
             return not isinstance(role, str) or role not in self._FOCUS_CONTAINERS
@@ -89,7 +89,7 @@ class NativeCurrentReceiver:
         except NativeFocusConflict as error:
             ctx.check()
             return publish("conflict", detail=str(error))
-        except (Failure, self.ax.GLib.Error) as error:
+        except (Failure, self.ax.glib.Error) as error:
             ctx.check()  # Cancellation/deadline are never downgraded.
             if isinstance(error, Failure) and (
                 error.effect != "none"

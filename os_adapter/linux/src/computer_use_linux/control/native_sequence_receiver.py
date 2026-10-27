@@ -93,7 +93,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                                 self.source = "specified"
                     else:
                         self.obj, self.parent_keys = self.discover()
-            except (Failure, self.ax.GLib.Error) as error:
+            except (Failure, self.ax.glib.Error) as error:
                 recipients.hint = None
                 ctx.check()  # The request deadline/cancellation is never optional.
                 probe_budget = isinstance(error, _InitialProbeBudget) or (
@@ -149,7 +149,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
             if not self.is_focused(previous):
                 return False
             path = self.focus_path(previous)
-        except (Failure, self.ax.GLib.Error):
+        except (Failure, self.ax.glib.Error):
             self.ctx.check()
             return False
         if path is None or not (self._key(obj) in path or self._key(previous) in self.parent_keys):
@@ -201,7 +201,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                     continue
                 try:
                     path = self.focus_path(event) if self.is_focused(event) else None
-                except (Failure, self.ax.GLib.Error):
+                except (Failure, self.ax.glib.Error):
                     self.ctx.check()
                     path = None
                 require(
@@ -220,7 +220,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                     continue
                 try:
                     event_path = self.focus_path(event) if self.is_focused(event) else None
-                except (Failure, self.ax.GLib.Error):
+                except (Failure, self.ax.glib.Error):
                     self.ctx.check()
                     event_path = None
                 require(

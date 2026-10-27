@@ -191,8 +191,9 @@ class InstanceState:
 
         def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
             for item in _source_items:
+                known = self.evidence.get(WindowIdentity.of(item))
                 if (
-                    (known := self.evidence.get(WindowIdentity.of(item))) is not None
+                    known is not None
                     and known.lifetime is WindowLifetime.RETAINED
                     and known.membership is Knowledge.YES
                 ):

@@ -13,6 +13,7 @@ import os
 import secrets
 import subprocess
 import sys
+from typing import NamedTuple
 
 
 class _BasicLimits(ctypes.Structure):
@@ -49,6 +50,8 @@ class _Accounting(ctypes.Structure):
 
 
 class _ThreadEntry(ctypes.Structure):
+    size: int
+
     _fields_ = [(name, ctypes.c_uint32) for name in ("size", "usage", "threadId", "processId")] + [
         ("basePriority", ctypes.c_int32),
         ("deltaPriority", ctypes.c_int32),
@@ -171,7 +174,19 @@ class WindowsJob:
             self.kernel.CloseHandle(handle)
 
 
-async def start_windows_worker(env, *, module="computer_use_mcp.runtime", stderr=asyncio.subprocess.DEVNULL):
+class WorkerResources(NamedTuple):
+    """Worker process and the IPC/job resources transferred to its supervisor."""
+
+    child: asyncio.subprocess.Process
+    reader: asyncio.StreamReader
+    writer: asyncio.StreamWriter
+    job: WindowsJob
+    server: asyncio.Server
+
+
+async def start_windows_worker(
+    env, *, module="computer_use_mcp.runtime", stderr=asyncio.subprocess.DEVNULL
+) -> WorkerResources:
     loop = asyncio.get_running_loop()
     connected = loop.create_future()
     token = secrets.token_hex(32).encode("ascii")
@@ -248,7 +263,7 @@ async def start_windows_worker(env, *, module="computer_use_mcp.runtime", stderr
         if os.name == "nt":
             resume_suspended(child.pid)
         reader, writer = await asyncio.wait_for(connected, 15)
-        return child, reader, writer, job, server
+        return WorkerResources(child, reader, writer, job, server)
     except BaseException:
         if job is not None:
             job.close()

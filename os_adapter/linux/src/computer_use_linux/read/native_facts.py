@@ -6,6 +6,7 @@ import json
 import math
 import time
 from collections import deque
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.native_observation import diagnostic_result
 from computer_use_linux.contracts.observation import stamp
@@ -66,6 +67,15 @@ WIRE_BUDGET = 2 * 1024 * 1024
 _NO_RAW_RESULT = object()
 
 
+class TableCellRead(NamedTuple):
+    """Bounded row-major table prefix and its collection evidence."""
+
+    objects: list[Any]
+    total: int
+    gap: str
+    shape: tuple[int, int]
+
+
 class FieldUnavailable(Exception):
     def __init__(self, state, detail="", *, raw_result=_NO_RAW_RESULT):
         self.state, self.detail, self.raw_result = state, detail, raw_result
@@ -109,7 +119,7 @@ class NativeFacts:
         if name not in cache:
             try:
                 cache[name] = read()
-            except (FieldUnavailable, self.ax.GLib.Error) as error:
+            except (FieldUnavailable, self.ax.glib.Error) as error:
                 cache[name] = error
         value = cache[name]
         if isinstance(value, Exception):
@@ -308,7 +318,7 @@ class NativeFacts:
             states = self.ax.live(reference.obj)
             if states is not None:
                 cache["states"] = states
-        except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+        except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
             status = failure_status(error)
             return dict(
                 node=reference.ref,
@@ -345,7 +355,7 @@ class NativeFacts:
                         detail=f"Native string exceeds {STRING_LIMIT} characters; no complete capture.",
                     )
                 values[name] = value
-            except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+            except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
                 statuses[name] = failure_status(error)
         # libatspi has already obtained this StateSet while validating the
         # object or answering individual state fields. Preserve the entire
@@ -364,7 +374,7 @@ class NativeFacts:
                     values["Accessible.stateSet"] = [int(state) for state in raw_states]
                 except (TypeError, ValueError) as error:
                     raise FieldUnavailable("error", "Invalid native StateSet member.", raw_result=raw_states) from error
-            except (FieldUnavailable, Failure, self.ax.GLib.Error, TypeError, ValueError) as error:
+            except (FieldUnavailable, Failure, self.ax.glib.Error, TypeError, ValueError) as error:
                 statuses["Accessible.stateSet"] = failure_status(error)
         return dict(
             node=reference.ref,
@@ -416,11 +426,11 @@ class NativeFacts:
                     else:
                         item["description"] = description
                     description_budget -= len(item.get("description", ""))
-                except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+                except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
                     item["descriptionStatus"] = failure_status(error)
                 items.append(item)
             return dict(state="complete" if len(items) == total else "partial", items=items, total=total)
-        except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+        except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
             status = failure_status(error)
             return dict(
                 state="partial" if items or total is not None else "unavailable",
@@ -440,7 +450,7 @@ class NativeFacts:
         for index in range(min(total, limit)):
             try:
                 child = self.call(interface, item_method, obj, index)
-            except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+            except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
                 status = failure_status(error)
                 if failures is not None:
                     failures.append(status)
@@ -451,7 +461,7 @@ class NativeFacts:
             objects.append(child)
         try:
             after = self.call(interface, count_method, obj)
-        except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+        except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
             status = failure_status(error)
             if failures is not None:
                 failures.append(status)
@@ -525,7 +535,7 @@ class NativeFacts:
                 self.check()
                 try:
                     obj = self.ax.call(relation.get_target, index)
-                except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+                except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
                     status = failure_status(error)
                     if failures is not None:
                         failures.append(status)
@@ -543,7 +553,7 @@ class NativeFacts:
             raise FieldUnavailable("error", "Invalid native table dimensions.", raw_result=shape)
         return shape
 
-    def table_cells(self, obj, limit, offset=0, *, failures=None):
+    def table_cells(self, obj, limit, offset=0, *, failures=None) -> TableCellRead:
         """A bounded row-major Table query, independent of native Children.
 
         Positions, including repeated references for merged cells, are retained.
@@ -566,12 +576,12 @@ class NativeFacts:
             if current_shape != shape:
                 gap = "Native table dimensions changed during collection."
                 record_gap(failures, gap, dict(dimensionsBefore=shape, dimensionsAfter=current_shape))
-        except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+        except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
             status = failure_status(error)
             if failures is not None:
                 failures.append(status)
             gap = "Table coordinate prefix incomplete: " + status.get("detail", status["state"])
-        return objects, total, gap, shape
+        return TableCellRead(objects, total, gap, shape)
 
     def relation(self, node, relation_property, *, limit=128, cursor=None, retain=None):
         base = dict(source=node.ref, property=relation_property, targets=[], certainty="confirmed")
@@ -643,7 +653,7 @@ class NativeFacts:
                 elif len(keys) < 8192:
                     base["cursor"] = self.store.page(node.ref, relation_property, keys, total)
             return base
-        except (FieldUnavailable, self.ax.GLib.Error) as error:
+        except (FieldUnavailable, self.ax.glib.Error) as error:
             status = failure_status(error)
             return dict(
                 base,

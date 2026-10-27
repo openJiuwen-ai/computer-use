@@ -241,7 +241,8 @@ enum NativePointerReadiness {
         guard WindowGeometry.inputDiagnosticsEnabled else { return }
         diagnose([
             "kind": "pointer_preparation_readiness", "phase": phase, "targetPID": application.processIdentifier,
-            "window": window.id, "windowFrame": [window.frame.minX, window.frame.minY, window.frame.width, window.frame.height],
+            "window": window.id,
+            "windowFrame": [window.frame.minX, window.frame.minY, window.frame.width, window.frame.height],
             "point": [point.x, point.y], "ready": value.ready, "foreground": value.foreground,
             "foregroundPID": value.foregroundPID as Any? ?? NSNull(),
             "windowKind": String(describing: value.windowKind), "windowFocus": String(describing: value.focus),

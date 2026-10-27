@@ -31,7 +31,7 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         if "nativeScroll" in capabilities and (
             not any((route.unit == "native_scroll" for route in frame.request.history.unavailable))
         ):
-            query = ScrollQuery(native, operation, target, remaining)
+            query: ScrollQuery | ScrollPointerQuery = ScrollQuery(native, operation, target, remaining)
             try:
                 selected = await query.resolve(intent.parameters)
             except PageRouteUnavailable:

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from computer_use.interaction.read.presentation.fallback import literal
 
 if TYPE_CHECKING:
-    from typing import Any, Iterable, Mapping
+    from typing import Iterable, Mapping
 
     from computer_use.interaction.read.presentation.ir import FactKey, ProjectionInput, ProjectionResult
     from computer_use.interaction.read.presentation.records import NodeView, RenderedTree

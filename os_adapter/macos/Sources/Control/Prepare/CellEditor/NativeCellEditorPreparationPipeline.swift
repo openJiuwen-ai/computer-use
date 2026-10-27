@@ -32,8 +32,9 @@ import ApplicationServices
             // Once the activation gesture may have entered, the Gate cannot
             // replay it through another preparation or text mechanism.
             if entered {
-                throw DriverError("cell editor preparation may have changed UI state; requested text was not sent: \(error)",
-                                  code: .inputUnavailable, effect: .possible)
+                throw DriverError(
+                    "cell editor preparation may have changed UI state; requested text was not sent: \(error)",
+                    code: .inputUnavailable, effect: .possible)
             }
             throw error
         }

@@ -14,6 +14,8 @@ enum AXIdentity {
             if !position, CFGetTypeID(raw) == CFStringGetTypeID() {
                 facts.values[key] = value as? String
             } else if !position, CFGetTypeID(raw) == CFURLGetTypeID() {
+                // CFGetTypeID establishes the bridged native type before this conversion.
+                // swiftlint:disable:next force_cast
                 facts.values[key] = (value as! URL).absoluteString
             } else if CFGetTypeID(raw) == AXValueGetTypeID() {
                 let ax = unsafeDowncast(raw, to: AXValue.self)

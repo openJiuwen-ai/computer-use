@@ -42,6 +42,8 @@ import ApplicationServices
                 guard AXUIElementCopyAttributeValue(element, attribute.rawValue as CFString, &value) == .success,
                     let value, CFGetTypeID(value) == CFBooleanGetTypeID()
                 else { return nil }
+                // CFGetTypeID establishes the bridged native type before this conversion.
+                // swiftlint:disable:next force_cast
                 return CFBooleanGetValue((value as! CFBoolean))
             },
             writeEnabled: { attribute in

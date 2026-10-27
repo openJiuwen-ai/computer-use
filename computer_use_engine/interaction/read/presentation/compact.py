@@ -216,4 +216,4 @@ def observation_warnings(snapshot: SnapshotFacts, *, hint: str = "see details") 
 
 
 if TYPE_CHECKING:
-    from typing import Any, Mapping
+    from typing import Mapping

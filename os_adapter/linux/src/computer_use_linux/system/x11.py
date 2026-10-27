@@ -752,6 +752,8 @@ class X11:
             else:
                 self.release(event_progress=event_progress)
 
+    # The legacy pointer adapter forwards the same atomic gesture and validation contract.
+    # pylint: disable-next=too-many-arguments
     def pointer(
         self,
         kind,

@@ -9,7 +9,9 @@ import ApplicationServices
         let before = try NativeReceiverSnapshot.read(application: application, window: window)
         guard let handoff = try NativeCellEditorHandoff.capture(
             element: element, window: window, focus: before.focus, pid: application.processIdentifier)
-        else { throw NativePreparationUnavailable(description: "the original cell has no confirmed editing preparation") }
+        else {
+            throw NativePreparationUnavailable(description: "the original cell has no confirmed editing preparation")
+        }
         return NativeCellEditorPreparationPlan(
             application: application, window: window, handoff: handoff,
             pointer: NativeElementPointerUnit(application: application, window: window, element: element),

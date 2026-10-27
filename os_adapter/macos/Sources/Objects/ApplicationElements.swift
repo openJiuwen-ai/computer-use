@@ -83,8 +83,9 @@ import ApplicationServices
     /// Reconcile evidence for the same native key, never search for a substitute
     /// object. Missing attributes retain historical constraints, not a claim of
     /// current input readiness; each native unit still rechecks live evidence.
-    nonisolated private static func reconcile(_ previous: Evidence, _ previousTarget: Target, _ next: Evidence, _ newTarget: Target)
-        -> (Evidence, Target)?
+    nonisolated private static func reconcile(
+        _ previous: Evidence, _ previousTarget: Target, _ next: Evidence, _ newTarget: Target
+    ) -> (Evidence, Target)?
     {
         guard let identity = previous.identity.refining(with: next.identity),
             previous.context.count == next.context.count

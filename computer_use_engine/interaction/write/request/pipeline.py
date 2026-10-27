@@ -126,8 +126,8 @@ class ControllerWritePipeline(HostOperation):
 
         super().__init__(self.build(controller, claim))
 
+    @staticmethod
     def build(
-        self,
         controller: SessionController,
         claim: Callable[[ActionPlan, Control], AbstractAsyncContextManager[ActionPlan]],
     ) -> Step[ExecuteAction, ActionResult]:

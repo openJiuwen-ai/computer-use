@@ -18,7 +18,8 @@ class WeakIdentityMap:
         identity = id(key)
 
         def remove(reference):
-            if (entry := self._items.get(identity)) is not None and entry[0] is reference:
+            entry = self._items.get(identity)
+            if entry is not None and entry[0] is reference:
                 self._items.pop(identity, None)
 
         self._items[identity] = (weakref.ref(key, remove), value)

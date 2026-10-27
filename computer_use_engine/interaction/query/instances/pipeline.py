@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from computer_use._identity import FrozenRecord
 from computer_use.diagnostics import local_failure
+from computer_use.errors import ComputerUseError
 from computer_use.native.query.directory import surfaces_query
 from computer_use.session.interfaces import ApplicationEntry
 
@@ -50,10 +51,8 @@ class ApplicationDiscoveryPipeline:
                         ),
                         30000,
                     )
-                except Exception as error:
-                    from computer_use.errors import ComputerUseError
-
-                    if not isinstance(error, ComputerUseError) or error.effect != "none":
+                except ComputerUseError as error:
+                    if error.effect != "none":
                         raise
                     surfaces = None
                 if "nativeReadIsolation" in self.directory.port.connection.capabilities and (
@@ -64,10 +63,8 @@ class ApplicationDiscoveryPipeline:
                     # still a directory query, never recursive tree capture.
                     try:
                         surfaces = await self.directory.surfaces(application["id"])
-                    except Exception as error:
-                        from computer_use.errors import ComputerUseError
-
-                        if not isinstance(error, ComputerUseError) or error.effect != "none":
+                    except ComputerUseError as error:
+                        if error.effect != "none":
                             raise
                         surfaces = None
                 if surfaces is not None and roots(surfaces):

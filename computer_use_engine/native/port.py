@@ -74,6 +74,8 @@ class NativePort(Protocol):
     ) -> Facts:
         pass
 
+    # The port keeps fact budgets and continuation scopes explicit in the observation contract.
+    # pylint: disable-next=too-many-arguments
     async def nodes(
         self,
         operation: str,

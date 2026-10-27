@@ -23,7 +23,10 @@ import ApplicationServices
             application: application, window: window, receiverRelation: receiverRelation)
         let receiver = current.receiver(element)
         if receiver == "yes", let cellEditor,
-            try cellEditor.association(window: window).map({ proof in element.map { CFEqual($0, proof.editor) } == true }) != true {
+            try cellEditor.association(window: window).map({ proof in
+                element.map { CFEqual($0, proof.editor) } == true
+            }) != true
+        {
             return NativeReadiness([("receiver", "unknown")])
         }
         return NativeReadiness([("receiver", receiver)])

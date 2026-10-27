@@ -138,17 +138,19 @@ class DisplayDocument:
 
     def summary_data(self) -> dict[str, object]:
         """Describe captured sections and source identities for pre-render diagnostics."""
+        trees = []
+        for part in self.parts:
+            if isinstance(part, DisplayTree):
+                trees.append(
+                    dict(
+                        scope=list(part.scope),
+                        nodes=len(part.nodes),
+                        refs=[node.ref for node in part.nodes],
+                        observed=_data(part.prepared.snapshot.facts.get("observed")),
+                    )
+                )
         return dict(
             version=1,
             sections=len(self.parts),
-            trees=[
-                dict(
-                    scope=list(part.scope),
-                    nodes=len(part.nodes),
-                    refs=[node.ref for node in part.nodes],
-                    observed=_data(part.prepared.snapshot.facts.get("observed")),
-                )
-                for part in self.parts
-                if isinstance(part, DisplayTree)
-            ],
+            trees=trees,
         )

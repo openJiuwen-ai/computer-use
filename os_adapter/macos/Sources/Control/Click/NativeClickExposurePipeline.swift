@@ -13,7 +13,9 @@ import AppKit
         while let exposure = try unit.exposure() {
             try boundary.checkConditions()
             guard steps < 8, ProcessInfo.processInfo.systemUptime < deadline else {
-                throw DriverError("the original element could not be scrolled into view within the click budget", code: .inputUnavailable)
+                throw DriverError(
+                    "the original element could not be scrolled into view within the click budget",
+                    code: .inputUnavailable)
             }
             try await ScrollNativeClickTargetPass.run(
                 exposure, unit: unit, delivery: plan.offer.delivery, deadline: deadline,

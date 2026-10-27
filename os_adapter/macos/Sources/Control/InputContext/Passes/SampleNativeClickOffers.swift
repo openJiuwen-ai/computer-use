@@ -129,7 +129,8 @@ import ApplicationServices
                                 application: unit.application, window: exposure.mapping, nativeWindow: unit.window),
                             at: exposure.point, exposure: true)
                         return NativeSampledInput(
-                            plan: plan, declarations: declarations, enabled: enabled, foreground: foreground, input: input,
+                            plan: plan, declarations: declarations, enabled: enabled,
+                            foreground: foreground, input: input,
                             nativeRole: role, actionsComplete: complete, applicationMenu: menu)
                     }
                     let sampled = try unit.observedGeometry(allowWindowPreparation: true)

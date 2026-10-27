@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import math
-from typing import Any, Mapping
+from typing import Any, Mapping, NamedTuple
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 _SOURCES = {"macos": "macos.ax", "windows": "windows.uia", "linux": "linux.atspi"}
@@ -34,6 +34,16 @@ def array(value: Any) -> list[Any]:
     if type(value) is not list:
         raise ValueError("driver observation: expected an array")
     return value
+
+
+class DecodedProperty(NamedTuple):
+    """Decoded field identity, payload, status, arguments, and read evidence."""
+
+    key: tuple[str, str | int]
+    value: Any
+    state: str
+    arguments: list[Any]
+    read: dict[str, Any]
 
 
 class DriverWire:
@@ -239,7 +249,7 @@ class DriverWire:
             "issues": [self.issue(item) for item in array(v.get("issues", []))],
         }
 
-    def property(self, raw: Any) -> tuple[tuple[str, str | int], Any, str, list[Any], dict[str, Any]]:
+    def property(self, raw: Any) -> DecodedProperty:
         """Validate a field result and decode its query-local components."""
         prop = record(raw, {"key", "value"}, {"state", "arguments", "read"})
         key = array(prop["key"])
@@ -248,7 +258,7 @@ class DriverWire:
         state = prop.get("state", "value")
         if state not in _STATES or (state == "value") != (prop["value"] is not None):
             raise ValueError("driver observation: invalid property state or payload")
-        return (
+        return DecodedProperty(
             (text(key[0]), key[1]),
             self.value(prop["value"]) if prop["value"] is not None else None,
             state,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from computer_use.errors import ComputerUseError
 
@@ -12,10 +12,19 @@ if TYPE_CHECKING:
     from computer_use.native.contracts import Facts, Intent, OperationTarget
 
 
-def parts(frame: ResolutionFrame) -> tuple[Intent, OperationTarget, str, Remaining]:
+class ResolutionParts(NamedTuple):
+    """Original write intent, target, operation token, and shared call budget."""
+
+    intent: Intent
+    target: OperationTarget
+    operation: str
+    remaining: Remaining
+
+
+def parts(frame: ResolutionFrame) -> ResolutionParts:
     """Extract the fixed intent, identity, native operation token, and remaining budget."""
     bound = frame.request.bound
-    return (bound.spec.intent, bound.spec.target, bound.operation, bound.remaining)
+    return ResolutionParts(bound.spec.intent, bound.spec.target, bound.operation, bound.remaining)
 
 
 def require_actuators(capabilities: Iterable[str], facts: Facts) -> None:

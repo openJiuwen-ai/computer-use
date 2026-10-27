@@ -20,7 +20,7 @@ def coordination_identity(desktop):
 
 def ensure_unlocked(ax):
     "Consult the selected session's lock service, without starting one."
-    gio, g_lib = ax.Gio, ax.GLib
+    gio, g_lib = ax.gio, ax.glib
     for name, path in (
         ("org.gnome.ScreenSaver", "/org/gnome/ScreenSaver"),
         ("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver"),
@@ -101,7 +101,7 @@ class AccessibilityDesktop:
                 window = self.info(obj, name)
                 # Hidden windows are still included: SHOWING is not identity.
                 windows.append(window)
-            except (Failure, ax.GLib.Error) as error:
+            except (Failure, ax.glib.Error) as error:
                 gap(notes, "AT-SPI window query failed: " + str(error))
                 if ax.ctx:
                     ax.ctx.check()
@@ -162,7 +162,7 @@ class AccessibilityDesktop:
                             continue
                         child, parent = (other, window) if kind == "PARENT_WINDOW_OF" else (window, other)
                         parents[child.key].add(parent.key)
-            except (Failure, ax.GLib.Error) as error:
+            except (Failure, ax.glib.Error) as error:
                 if ax.ctx:
                     ax.ctx.check()
                 unknown.add(window.key)
@@ -185,7 +185,7 @@ class AccessibilityDesktop:
             raise Failure("Working window was closed.", "stale_target")
         try:
             current = self.info(instance.window.accessible)
-        except (Failure, self.ax.GLib.Error) as error:
+        except (Failure, self.ax.glib.Error) as error:
             self.retire(instance.window.key)
             raise Failure("The bound accessible window no longer exists.", "stale_target") from error
         if (current.key, current.pid, current.process_start) != (

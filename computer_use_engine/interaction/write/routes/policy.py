@@ -158,17 +158,17 @@ def validate_target(facts: Facts, policy: HostPolicy) -> None:
 
 def has_independent_text_route(facts: Facts, intent: Intent, attempts: RouteHistory | None = None) -> bool:
     """Check for an object-editing route ready independently of the input receiver."""
-    return any(
-        p.unit == "native_text_edit"
-        and p.channel == Channel.OBJECT
-        and not any(condition in p.pending for condition in ("receiver", "selection", "geometry"))
-        and (
-            attempts is None
-            or route_key(UnitCommand(p, facts.binding, intent, facts.actuator, receiver=facts.receiver))
-            not in attempts.unavailable
-        )
-        for p in _candidates(facts, intent)
-    )
+    for primitive in _candidates(facts, intent):
+        if primitive.unit != "native_text_edit" or primitive.channel != Channel.OBJECT:
+            continue
+        if any(condition in primitive.pending for condition in ("receiver", "selection", "geometry")):
+            continue
+        if attempts is not None:
+            command = UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver)
+            if route_key(command) in attempts.unavailable:
+                continue
+        return True
+    return False
 
 
 def has_ready_route(facts: Facts, intent: Intent) -> bool:

@@ -309,7 +309,10 @@ import ApplicationServices
             diagnose([
                 "kind": "element_pointer_preparation_geometry", "phase": "beforePreparation",
                 "window": selected.mapping.id,
-                "windowFrame": [selected.mapping.frame.minX, selected.mapping.frame.minY, selected.mapping.frame.width, selected.mapping.frame.height],
+                "windowFrame": [
+                    selected.mapping.frame.minX, selected.mapping.frame.minY,
+                    selected.mapping.frame.width, selected.mapping.frame.height
+                ],
                 "elementFrame": [selected.frame.minX, selected.frame.minY, selected.frame.width, selected.frame.height],
                 "point": [selected.point.x, selected.point.y]
             ])
@@ -333,7 +336,8 @@ import ApplicationServices
         let pointer = NativePointerUnit(application: application, window: selected.mapping, nativeWindow: window)
         do {
             let outcome = try await pointer.prepareWindowContext(
-                foreground: foreground, atNative: selected.point, kind: kind, check: check, onPreparation: onPreparation,
+                foreground: foreground, atNative: selected.point, kind: kind, check: check,
+                onPreparation: onPreparation,
                 onCleanupUnknown: onCleanupUnknown)
             // Preparation may move the same original window or element. No
             // requested mouse event has been sent, so refresh before admitting
@@ -341,13 +345,17 @@ import ApplicationServices
             try check()
             let current = try geometry()
             guard current.mapping.id == selected.mapping.id, current.mapping.pid == selected.mapping.pid else {
-                throw DriverError("the original element's pointer window changed during preparation", code: .staleTarget)
+                throw DriverError(
+                    "the original element's pointer window changed during preparation", code: .staleTarget)
             }
             if WindowGeometry.inputDiagnosticsEnabled {
                 diagnose([
                     "kind": "element_pointer_preparation_geometry", "phase": "afterRefresh",
                     "window": current.mapping.id,
-                    "windowFrame": [current.mapping.frame.minX, current.mapping.frame.minY, current.mapping.frame.width, current.mapping.frame.height],
+                    "windowFrame": [
+                        current.mapping.frame.minX, current.mapping.frame.minY,
+                        current.mapping.frame.width, current.mapping.frame.height
+                    ],
                     "elementFrame": [current.frame.minX, current.frame.minY, current.frame.width, current.frame.height],
                     "point": [current.point.x, current.point.y]
                 ])
@@ -355,7 +363,8 @@ import ApplicationServices
             if outcome == .contextPrepared || !current.same(as: selected) {
                 // The public AX fallback also binds its retained frame, so a
                 // new point must use the refreshed mapping of this exact window.
-                let refreshed = NativePointerUnit(application: application, window: current.mapping, nativeWindow: window)
+                let refreshed = NativePointerUnit(
+                    application: application, window: current.mapping, nativeWindow: window)
                 try refreshed.requirePointReadiness(atNative: current.point, kind: kind)
             }
         } catch {
