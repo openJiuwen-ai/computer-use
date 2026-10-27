@@ -10,8 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from repository import ROOT
-from windows_sources import native_source as REPO_ROOT
+from repository import ROOT as REPO_ROOT
+from windows_sources import native_source
 
 from computer_use_native_tools.pointer import generatePointerAssets
 
