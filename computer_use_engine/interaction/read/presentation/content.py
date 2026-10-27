@@ -93,9 +93,9 @@ def render_text(value: DisplayText | str, *, snapshots: Mapping[int, RenderedTre
     if kind == "indent":
         return "\n".join("\t" + line for line in render_text(args[0], snapshots=snapshots).splitlines())
     if kind == "desktop":
-        from computer_use.interaction.read.presentation.rendering.desktop import renderDesktop
+        from computer_use.interaction.read.presentation.rendering.desktop import render_desktop
 
-        return renderDesktop(*args)
+        return render_desktop(*args)
     if kind == "details_hint":
         if snapshots is None or id(args[0]) not in snapshots:
             raise ValueError("A details hint requires its already-rendered snapshot source")

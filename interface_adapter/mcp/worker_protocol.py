@@ -24,7 +24,7 @@ FRAMED_PROTOCOL = "framed-v1"
 LEGACY_PROTOCOL = "jsonl-v1"
 
 
-def workerProtocol():
+def consume_protocol():
     """Consume the parent's version before opening the private channel.
 
     Absence means an old, already imported parent using JSONL. Consuming the
@@ -37,7 +37,7 @@ def workerProtocol():
     return protocol
 
 
-def _encodeMessage(message, protocol):
+def _encode_message(message, protocol):
     payload = dumps(message).encode("utf-8", "backslashreplace")
     if not 0 < len(payload) <= MAX_MESSAGE_BYTES:
         raise ValueError("Internal worker message exceeds the 128 MiB admission limit.")
@@ -48,9 +48,9 @@ def _encodeMessage(message, protocol):
     raise RuntimeError("Unsupported internal worker protocol: " + protocol)
 
 
-def writeMessage(writer, message, *, protocol=FRAMED_PROTOCOL):
+def write_message(writer, message, *, protocol=FRAMED_PROTOCOL):
     """Enqueue one complete message in one stream write."""
-    writer.write(_encodeMessage(message, protocol))
+    writer.write(_encode_message(message, protocol))
 
 
 class WorkerMessageWriter:
@@ -70,7 +70,7 @@ class WorkerMessageWriter:
         self.scheduled = None
 
     def send(self, message):
-        frame = _encodeMessage(message, self.protocol)
+        frame = _encode_message(message, self.protocol)
         event = message.get("diagnostic")
         if isinstance(event, dict) and event.get("kind") == "pipeline" and len(frame) <= DIAGNOSTIC_BATCH_BYTES:
             if len(self.pending) + len(frame) > DIAGNOSTIC_BATCH_BYTES:
@@ -92,7 +92,7 @@ class WorkerMessageWriter:
             self.writer.write(payload)
 
 
-async def readMessage(reader, *, protocol=FRAMED_PROTOCOL):
+async def read_message(reader, *, protocol=FRAMED_PROTOCOL):
     """Read one admitted message; only an EOF between messages is a clean close."""
     if protocol == LEGACY_PROTOCOL:
         line = await reader.readline()

@@ -4,7 +4,7 @@ from legacy_protocol import decodeResult as decodeWireResult
 
 from computer_use.interaction.read.delivery.formatting import renderObservation
 from computer_use.interaction.read.presentation.formatting import jsonString
-from computer_use.interaction.read.presentation.rendering.desktop import renderDesktop
+from computer_use.interaction.read.presentation.rendering.desktop import render_desktop
 from computer_use.interaction.read.presentation.semantics.controls import composeControls
 from computer_use.protocol.captures import captureMetadata
 from computer_use.protocol.primitives import frozen
@@ -13,7 +13,7 @@ from computer_use.protocol.primitives import frozen
 def decodeResult(method, value):
     decoded = decodeWireResult(method, value)
     if method == "readDesktop":
-        text = renderDesktop(decoded["observation"])
+        text = render_desktop(decoded["observation"])
         if decoded["screenshot"] is not None:
             text += "".join(
                 "\nImage note: " + jsonString(reason)

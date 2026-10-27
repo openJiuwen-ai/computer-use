@@ -13,15 +13,20 @@ import json
 from computer_use._json import dumps as legacyDumps
 
 
+def _is_native_observation(event):
+    if not isinstance(event, dict):
+        return False
+    result = event.get("result")
+    if not isinstance(result, dict):
+        return False
+    return (
+        event.get("kind") == "command_end" and event.get("method") == "inspect" and result.get("kind") == "observation"
+    )
+
+
 def dumps(value):
     event = value.get("diagnostic", value) if isinstance(value, dict) else None
-    if (
-        isinstance(event, dict)
-        and event.get("kind") == "command_end"
-        and event.get("method") == "inspect"
-        and isinstance(event.get("result"), dict)
-        and event["result"].get("kind") == "observation"
-    ):
+    if _is_native_observation(event):
         try:
             return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError):

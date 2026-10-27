@@ -183,7 +183,8 @@ class AgentInterfacePipeline:
             applications = {}
             desktop = observed["observation"]
             for item in [desktop["frontmost"], *desktop["windows"]]:
-                if item is not None and (selector := item.get("selector")):
+                selector = item.get("selector") if item is not None else None
+                if selector:
                     name = item.get("app", item.get("name"))
                     applications[selector] = self.references.publish(
                         ApplicationEntry(self.controller.transport.session, selector, name, True)

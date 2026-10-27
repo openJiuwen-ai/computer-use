@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def renderDesktop(value: Record, applications: Mapping[str, int] | None = None) -> str:
+def render_desktop(value: Record, applications: Mapping[str, int] | None = None) -> str:
     "Format desktop displays, capture geometry, and observation provenance."
 
     def box(rect: Record) -> str:
@@ -33,11 +33,7 @@ def renderDesktop(value: Record, applications: Mapping[str, int] | None = None) 
     lines = [
         f"Desktop: {value['mode']}; View: full",
         "Foreground: "
-        + (
-            jsonString(front["name"]) + application(front.get("selector"), "; ")
-            if front is not None
-            else "unknown"
-        ),
+        + (jsonString(front["name"]) + application(front.get("selector"), "; ") if front is not None else "unknown"),
         (
             f"Screenshot: desktop "
             f"{numberString(value['canvas']['width'])}"

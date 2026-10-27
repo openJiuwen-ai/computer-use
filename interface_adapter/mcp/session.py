@@ -9,7 +9,7 @@ from computer_use.session.operations import eager
 from .history import HistoryGate, historyKey
 from .journal import Journal
 from .output import OutputBuffer, isOutput
-from .worker_protocol import FRAMED_PROTOCOL, readMessage, writeMessage
+from .worker_protocol import FRAMED_PROTOCOL, read_message, write_message
 
 "Supervise one persistent Python worker and its inherited native lifetimes."
 
@@ -45,18 +45,12 @@ class ExecutionSession:
         return task
 
     @eager
-    async def execute(
-        self, code, signal=None, history=None, title=None, onProgress=None
-    ):
+    async def execute(self, code, signal=None, history=None, title=None, onProgress=None):
         if self._closed:
             return executionError("Execution session is closed.")
         if self._resetting is not None:
             result = await asyncio.shield(self._resetting)
-            return (
-                result
-                if result.get("isError")
-                else await self.execute(code, signal, history, title, onProgress)
-            )
+            return result if result.get("isError") else await self.execute(code, signal, history, title, onProgress)
         if self._retiring is not None:
             return executionError(
                 ("Native cleanup is still pending. Call computer_use_reset before continuing; no code was executed.")
@@ -143,7 +137,7 @@ class ExecutionSession:
 
             pending["cancel"] = self._track(cancel())
         try:
-            writeMessage(
+            write_message(
                 self._writer,
                 dict(
                     code=code,
@@ -233,7 +227,10 @@ class ExecutionSession:
 
     async def _receive(self, child, reader):
         try:
-            while (message := await readMessage(reader)) is not None:
+            while True:
+                message = await read_message(reader)
+                if message is None:
+                    break
                 if self._child is not child:
                     continue
                 if not isinstance(message, dict):

@@ -37,7 +37,7 @@ from computer_use.session.observation import peekObservationText
 
 from .output import OutputBuffer
 from .presentation import ObservationOutput, ObservationPresenter
-from .worker_protocol import WorkerMessageWriter, readMessage, workerProtocol
+from .worker_protocol import WorkerMessageWriter, consume_protocol, read_message
 
 "Persistent Python worker. User code never shares the MCP server's stdout."
 
@@ -75,10 +75,12 @@ class Runtime:
             )
         pending = asyncio.get_running_loop().create_future()
         run["pending"].add(pending)
+
         def done():
             run["pending"].discard(pending)
             if not pending.done():
                 pending.set_result(None)
+
         return done
 
     def diagnostic(self, event):
@@ -115,8 +117,6 @@ class Runtime:
 
         run["observations"].flush(emit, emitImage)
         self.logObservations(run)
-
-
 
     def action(self, receipt):
         run = _runs.get()
@@ -177,8 +177,6 @@ class Runtime:
                 data["observed"] = observation["observed"]
             self.send(dict(diagnostic=dict(**data, elementRefs=list(observation["refs"])), executionId=run["id"]))
             run["observationLogs"].popleft()
-
-
 
     def print(self, *values, sep=" ", end="\n", file=None, flush=False):
         run = _runs.get()
@@ -361,7 +359,7 @@ class ConsoleWriter(io.TextIOBase):
 async def main():
     from .worker_connection import workerConnection
 
-    protocol = workerProtocol()
+    protocol = consume_protocol()
     reader, writer = await workerConnection()
 
     messages = WorkerMessageWriter(writer, protocol=protocol)
@@ -381,7 +379,10 @@ async def main():
         pass
     current = None
     try:
-        while (message := await readMessage(reader, protocol=protocol)) is not None:
+        while True:
+            message = await read_message(reader, protocol=protocol)
+            if message is None:
+                break
             if current is not None and not current.done():
                 raise RuntimeError("Worker received concurrent executions")
             current = asyncio.create_task(runtime.execute(message))

@@ -166,10 +166,13 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
     order = {Channel.OBJECT: 0, Channel.EDITOR: 2, Channel.KEYBOARD: 3, Channel.POINTER: 4}
 
     def priority(primitive: Primitive) -> tuple[int, int, int, str]:
+        channel_order = order.get(primitive.channel)
+        if channel_order is None:
+            raise KeyError(primitive.channel)
         if primitive.click is not None:
             offer = primitive.click
             return (
-                order[primitive.channel],
+                channel_order,
                 1 if primitive.unit == "native_selection" else 0,
                 0 if offer.admission == "ready" and offer.delivery == "desktop_pointer" else 1,
                 offer.route_family,
@@ -181,7 +184,7 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
             and primitive.readiness == Knowledge.YES
         )
         return (
-            1 if ready_text_keys else order[primitive.channel],
+            1 if ready_text_keys else channel_order,
             1 if primitive.unit == "native_value_replace" else 0,
             0,
             primitive.id,

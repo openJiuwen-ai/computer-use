@@ -178,7 +178,14 @@ class ObservationParity(unittest.TestCase):
                     args = action_contract(request["args"])
                     if request["module"] == "snapshot":
                         args = [with_document(value) if index < 2 else value for index, value in enumerate(args)]
-                    result = dict(ok=True, value=normalize(getattr(module, request["method"])(*args)))
+                    result = dict(
+                        ok=True,
+                        value=normalize(
+                            getattr(
+                                module, "render_desktop" if request["method"] == "renderDesktop" else request["method"]
+                            )(*args)
+                        ),
+                    )
                 except Exception as error:
                     result = dict(ok=False, error=normalize(error))
                 expected_result = action_contract(pythonHints(oracle))
