@@ -1,6 +1,0 @@
-{
-  "include": ["typing_examples.py"],
-  "extraPaths": ["../../../.artifacts/ide-python"],
-  "pythonVersion": "3.12",
-  "typeCheckingMode": "strict"
-}

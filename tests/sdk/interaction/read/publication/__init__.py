@@ -1,1 +1,0 @@
-"""Structured observation publication tests."""
