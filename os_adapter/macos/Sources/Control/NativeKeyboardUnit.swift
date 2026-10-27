@@ -9,6 +9,8 @@ import ApplicationServices
     let window: AXUIElement
     let element: AXUIElement?
     var receiverRelation: NativeReceiverRelation? = nil
+    var cellEditorState: NativeCellEditorState? = nil
+    var cellEditor: NativeCellEditorHandoff? = nil
     /// Original App/Window scope, independent of a current-forward actuator.
     var windowCommandScope = false
     /// Only the qualified dispatch copy compares this immutable original ID.
@@ -28,6 +30,9 @@ import ApplicationServices
         let context = try NativeReceiverSnapshot.read(
             application: application, window: window, receiverRelation: receiverRelation,
             includeAncestors: includeAncestors)
+        let ownedEditor = try cellEditor.map { proof in
+            try proof.association(context).map { owned in element.map { CFEqual($0, owned.editor) } == true } == true
+        } ?? true
         let deliveryReady = try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
             let mapping = try NativeWindowUnit(application: application, window: context.window ?? window).mapping()
             if let expected = dispatchExpectedNativeID, mapping.id != expected {
@@ -37,10 +42,13 @@ import ApplicationServices
         }
         return State(
             windowRoute: context.windowRoute == "yes" && !deliveryReady ? "no" : context.windowRoute,
-            focus: context.focus, ancestors: context.ancestors, foreground: context.foreground,
-            relatedEditor: context.relatedEditor, window: context.window, surface: context.surface,
+            // Incomplete current association grants no Element receiver. Keep
+            // window preparation available; only a later fresh proof can admit
+            // focus on this editor or requested input after that preparation.
+            focus: ownedEditor ? context.focus : nil, ancestors: ownedEditor ? context.ancestors : [], foreground: context.foreground,
+            relatedEditor: ownedEditor ? context.relatedEditor : nil, window: context.window, surface: context.surface,
             scopeRoute: context.scopeRoute, reportedFocus: context.reportedFocus,
-            focusReportAbsent: context.focusReportAbsent, focusedWindowRead: context.focusedWindowRead,
+            focusReportAbsent: ownedEditor && context.focusReportAbsent, focusedWindowRead: context.focusedWindowRead,
             focusedWindowStatus: context.focusedWindowStatus, rawFocus: context.rawFocus,
             rawFocusOwner: context.rawFocusOwner, rawLocalFocus: context.rawLocalFocus)
     }
@@ -91,12 +99,21 @@ import ApplicationServices
     func backgroundTextTransportUnavailable(
         _ request: NativeKeyboardIntent, textPolicy: NativeKeyboardInterpreterEvidence.Policy
     ) throws -> Bool {
+        if request.kind == .replace, try requiresCellEditorActivation(), let element,
+            try NativeCellEditorHandoff.activationNeedsForeground(element: element, application: application, window: window)
+        { return true }
         let state = try sample()
         guard
             let proposal = try textProposal(
                 kind: request.kind, text: request.value, state: state, textPolicy: textPolicy)
         else { return false }
         return requiresForegroundSelection(proposal, state: state)
+    }
+
+    func requiresCellEditorActivation() throws -> Bool {
+        guard cellEditorState != nil, cellEditor == nil, let element else { return false }
+        return try NativeCellEditorHandoff.requiresActivation(
+            element: element, window: window, pid: application.processIdentifier)
     }
 
     /// Bounded queries shared by this captured plan within one native execute.
@@ -207,6 +224,9 @@ import ApplicationServices
                 replacement.flatMap { NativeReplacementUnit(element: node).snapshot($0) }
             }
             conditions.append(("selection", selection == nil ? "unknown" : "yes"))
+            if try requiresCellEditorActivation(), let element,
+                try NativeCellEditorHandoff.activationNeedsForeground(element: element, application: application, window: window)
+            { conditions.append(("foreground", "unknown")) }
         }
         if includeDelivery,
             let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
@@ -224,6 +244,7 @@ import ApplicationServices
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
         try boundary()
+        let activateCell = try request.kind == .replace && requiresCellEditorActivation()
         let originalKeyboardWindow = try WindowGeometry.keyboardWindow(window, pid: application.processIdentifier)
         // Window input preserves an already confirmed attached text-root
         // receiver. Preparing the parent document would end that editing UI.
@@ -336,7 +357,8 @@ import ApplicationServices
             }
         }
         let receiver = NativeReceiverPreparation(
-            application: application, window: window, element: element, receiverRelation: receiverRelation)
+            application: application, window: window, element: element, receiverRelation: receiverRelation,
+            cellEditor: cellEditor)
         try await receiver.prepare(
             foreground: false,
             check: {
@@ -344,11 +366,20 @@ import ApplicationServices
                 try checkEnabled()
             },
             ready: {
-                try readiness(
+                if activateCell {
+                    return try NativeReceiverSnapshot.read(
+                        application: application, window: window, receiverRelation: receiverRelation).receiver(element) == "yes"
+                }
+                return try readiness(
                     kind: request.kind, key: request.key, text: request.value, replacement: replacement, prepared: true,
                     textPolicy: textPolicy
                 ).ready
             }, onPreparation: onPreparation)
+        if activateCell, let element, let cellEditorState {
+            try await NativeCellEditorPreparationPipeline.run(
+                element: element, application: application, window: window, state: cellEditorState,
+                foreground: foreground, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
+        }
     }
 
     func deliver(
@@ -393,6 +424,7 @@ import ApplicationServices
                     "the surface's keyboard window changed; remaining input was not sent", code: .staleTarget)
             }
             let ownedEditor = try cellEditor?.prove(current)
+            if ownedEditor != nil, let cellEditor { cellEditorState?.retain(cellEditor) }
             // This copy belongs only to this final validation. The explicit
             // proof, not an observation hint, authorizes the retained owner.
             if let ownedEditor { current.relatedEditor = ownedEditor.owner }

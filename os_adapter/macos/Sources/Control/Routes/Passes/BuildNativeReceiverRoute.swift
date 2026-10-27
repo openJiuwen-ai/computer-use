@@ -29,7 +29,7 @@ import ApplicationServices
             bound, actuator: contract.actuator, receiver: contract.receiver)
         let unit = NativeReceiverPreparation(
             application: selected.application, window: selected.window, element: selected.element,
-            receiverRelation: selected.receiverRelation)
+            receiverRelation: selected.receiverRelation, cellEditor: selected.cellEditor)
         return .prepare {
             if foreground {
                 try op.requireForegroundPreparation(

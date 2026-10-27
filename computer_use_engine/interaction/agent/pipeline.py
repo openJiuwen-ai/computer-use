@@ -11,8 +11,9 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor, ancestry, in_scope
 from computer_use.interaction.query.instances.pipeline import ApplicationDiscoveryPipeline
 from computer_use.interaction.query.instances.scope import allowed, refresh, retain_fixed_failure, validate_session
-from computer_use.interaction.read.presentation.content import template
+from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
+from computer_use.interaction.read.presentation.ir import freeze
 from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, member_target
 from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Intent, Knowledge
@@ -22,7 +23,7 @@ from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.protocol.element_path import elementPath
 from computer_use.session.cursors import TextCursors
-from computer_use.session.interfaces import ApplicationReferences, WindowLifetime
+from computer_use.session.interfaces import ApplicationEntry, ApplicationReferences, WindowLifetime
 
 from .requests import (
     ActOnElement,
@@ -84,10 +85,12 @@ class AgentInterfacePipeline:
 
         entry = self.references.resolve(ref, self.controller.transport.session)
         name = entry.application_name or entry.display_name
-        state = AppState(
-            entry.selector, running=RunningApplication(entry.selector, name, entry.session) if entry.running else None
-        )
+        # A desktop selector may identify a particular window, rather than its
+        # process. Resolve unanchored selectors through the ordinary directory
+        # path; only a retained directory already proves the canonical owner.
+        state = AppState(entry.selector)
         if entry.window is not None:
+            state.running = RunningApplication(entry.selector, name, entry.session)
             state.selection = WorkingWindow(
                 entry.selector, name, window_binding(select_surface(entry.directory, entry.window, follow_modal=False))
             )
@@ -175,7 +178,28 @@ class AgentInterfacePipeline:
                 pendingObservationsDiscarded(self.controller)
                 raise
             screenshot = observed["screenshot"]
-            lines.append(observed["document"])
+            # Publish the same public reference namespace as listApps, without
+            # another directory scan or an accessibility-tree prerequisite.
+            applications = {}
+            desktop = observed["observation"]
+            for item in [desktop["frontmost"], *desktop["windows"]]:
+                if item is not None and (selector := item.get("selector")):
+                    name = item.get("app", item.get("name"))
+                    applications[selector] = self.references.publish(
+                        ApplicationEntry(self.controller.transport.session, selector, name, True)
+                    )
+            document = observed["document"]
+            lines.append(
+                replace(
+                    document,
+                    parts=tuple(
+                        replace(part, values=(*part.values, freeze(applications)))
+                        if isinstance(part, DisplayText) and part.kind == "desktop"
+                        else part
+                        for part in document.parts
+                    ),
+                )
+            )
         if view == "tree":
             apps = await self.list_applications()
             lines.append("Desktop application/window directory (not a recursive system tree):")

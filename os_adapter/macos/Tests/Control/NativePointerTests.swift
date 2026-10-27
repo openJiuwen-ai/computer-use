@@ -5,6 +5,48 @@ import ApplicationServices
 @main struct NativePointerTests {
     enum Changed: Error { case geometry }
     @MainActor static func main() async throws {
+        // A point-ready receipt belongs to one sampled geometry. In the real
+        // activation-move failure the exact window32784 moved2080pt before any
+        // mouse event; element preparation must refresh both mapping and point.
+        func preparedGeometry(origin: CGFloat, targetOffset: CGFloat = 30, windowID: CGWindowID = 32784)
+            -> NativeElementPointerUnit.Geometry {
+            let window = CGRect(x: origin, y: 938, width: 380, height: 252)
+            let target = CGRect(x: origin + targetOffset, y: 1052, width: 120, height: 48)
+            return .init(
+                mapping: .init(id: windowID, pid: 41, frame: window, title: nil, width: 380, height: 252),
+                frame: target, visible: target,
+                candidate: .init(point: CGPoint(x: target.midX, y: target.midY), source: .center))
+        }
+        let initialGeometry = preparedGeometry(origin: 80)
+        let movedWindowGeometry = preparedGeometry(origin: 2160)
+        precondition(initialGeometry.same(as: preparedGeometry(origin: 80)),
+                     "unchanged already-ready geometry must not add a second admission query")
+        precondition(!initialGeometry.same(as: movedWindowGeometry))
+        precondition(!initialGeometry.same(as: preparedGeometry(origin: 80, targetOffset: 300)))
+        precondition(!initialGeometry.same(as: preparedGeometry(origin: 80, windowID: 32785)))
+        let actualMovedWindow = NativeInputWindowHit.PublicWindow(
+            id: movedWindowGeometry.mapping.id, pid: 41, frame: movedWindowGeometry.mapping.frame)
+        let staleWindow = NativeInputWindowHit.PublicWindow(
+            id: initialGeometry.mapping.id, pid: 41, frame: initialGeometry.mapping.frame)
+        precondition(!NativeInputWindowHit.confirmsRetainedWindow(
+            expected: staleWindow, current: actualMovedWindow, at: movedWindowGeometry.point),
+            "a refreshed element point alone cannot repair the stale AX fallback mapping")
+        precondition(NativeInputWindowHit.confirmsRetainedWindow(
+            expected: actualMovedWindow, current: actualMovedWindow, at: movedWindowGeometry.point))
+        precondition(!NativeInputWindowHit.confirmsRetainedWindow(
+            expected: actualMovedWindow, current: actualMovedWindow, at: initialGeometry.point),
+            "fixed coordinate input must not acquire the element route's moved point")
+        let exposureViewport = CGRect(x: -100, y: 200, width: 120, height: 180)
+        precondition(NativeElementViewport.movement(frame: exposureViewport.insetBy(dx: 10, dy: 10), viewport: exposureViewport) == nil)
+        for (frame, direction) in [
+            (CGRect(x: -90, y: 2000, width: 80, height: 25), "down"),
+            (CGRect(x: -90, y: 0, width: 80, height: 25), "up"),
+            (CGRect(x: 1000, y: 220, width: 80, height: 25), "right"),
+            (CGRect(x: -2000, y: 220, width: 80, height: 25), "left"),
+        ] {
+            let movement = NativeElementViewport.movement(frame: frame, viewport: exposureViewport)!
+            precondition(movement.direction == direction && movement.pages > 0 && movement.pages <= 3)
+        }
         if CommandLine.arguments.dropFirst().first == "--pointer-stdio" {
             while let line = readLine() {
                 do {

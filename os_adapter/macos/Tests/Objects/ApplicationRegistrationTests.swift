@@ -262,13 +262,18 @@ import ApplicationServices
         let logical = ["AXRole": "AXTextField", "AXRowIndexRange": "1:1", "AXColumnIndexRange": "7:1"]
         let cellLife = observe(make(logical))
         let cellAlias = registry.bind(cellLife, text: "old cell value")!
+        let cellState = registry.target(cellAlias)!.cellEditorState
         let pin = registry.retain(cellAlias)!
         precondition(observe(make(["AXRole": "AXTextField"])) == cellLife)
         precondition(registry.target(cellAlias)!.identity.attributes == logical)
+        precondition(registry.target(cellAlias)!.cellEditorState === cellState,
+                     "observation refinement keeps the original cell's sole editor-state owner")
         let recycled = observe(make(logical.merging(["AXRowIndexRange": "21:1"]) { _, new in new }))
         precondition(
             recycled != cellLife && registry.target(cellAlias) == nil,
             "retaining the native object cannot retain its old logical item after recycling")
+        precondition(registry.target(recycled)!.cellEditorState !== cellState,
+                     "a recycled logical cell cannot inherit the previous cell's editor proof")
         precondition(registry.text(cellAlias)?.value == "old cell value")
         pin()
         precondition(

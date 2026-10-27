@@ -155,6 +155,30 @@ import ApplicationServices
         let blocked = try NativeWindowBoundary.blocked(
             root: appModal ? window : root, target: window, windows: graph,
             focused: applications.focusedWindow(entry.owner, windows: windows))
+        // AXChildren can expose a menu's list in the document while AXWindow
+        // correctly names a separate popup. Keep the document/root binding and
+        // the exact element; resolve only its physical input surface from a
+        // fresh forward path. An unrelated document can never use this path.
+        if let observed,
+            let popup = WindowGeometry.owningWindow(
+                observed.element, pid: entry.owner.processIdentifier, in: nativeWindow),
+            !CFEqual(popup, nativeWindow), windows.contains(where: { CFEqual($0.element, popup) }),
+            AXAccess.read(popup, kAXSubroleAttribute).value as? String != kAXStandardWindowSubrole,
+            AXAccess.read(popup, kAXModalAttribute).value as? Bool != true,
+            try LocalMenuAttachment.confirms(
+                leaf: observed.element, ancestors: observed.ancestors, window: nativeWindow,
+                same: { CFEqual($0, $1) }, role: { AXAccess.read($0, kAXRoleAttribute).value as? String },
+                children: {
+                    try RequestDiagnostics.checkCancellation()
+                    guard let children = AXAccess.elements($0, kAXChildrenAttribute, limit: 2048) else {
+                        throw DriverError("popup attachment cannot be confirmed", code: .inputUnavailable)
+                    }
+                    return children
+                })
+        {
+            return NativeInputScope(
+                wire: value.wire, application: entry.owner, window: popup, menuRoot: nil, blocked: blocked)
+        }
         return NativeInputScope(
             wire: value.wire, application: entry.owner, window: nativeWindow, menuRoot: nil, blocked: blocked)
     }
@@ -445,10 +469,16 @@ import ApplicationServices
     ) throws -> NativeKeyboardUnit {
         let scope = try inputScope(binding)
         let node = actuator?.node ?? (binding["node"] as? String)
+        let window = try scope.requireWindow()
+        let read = try node.map { try applications.readRoot($0) }
+        let owned = try read.flatMap { original in
+            try original.cellEditorState?.resolve(element: original.element, application: scope.application, window: window)
+        }
         return NativeKeyboardUnit(
-            application: scope.application, window: try scope.requireWindow(),
-            element: try node.map { try applications.readRoot($0).element },
+            application: scope.application, window: window,
+            element: owned?.element ?? read?.element,
             receiverRelation: try receiverRelation(binding, actuator: actuator, receiver: receiver),
+            cellEditorState: read?.cellEditorState, cellEditor: owned?.proof,
             windowCommandScope: binding["node"] is NSNull)
     }
 
@@ -457,10 +487,13 @@ import ApplicationServices
     ) throws -> NativeSelectedTextUnit {
         let scope = try inputScope(binding)
         let node = try actuator?.node ?? string(binding["node"], label: "node")
+        let window = try scope.requireWindow()
+        let read = try applications.readRoot(node)
+        let owned = try read.cellEditorState?.resolve(element: read.element, application: scope.application, window: window)
         return NativeSelectedTextUnit(
-            application: scope.application, window: try scope.requireWindow(),
-            element: try applications.readRoot(node).element,
-            receiverRelation: try receiverRelation(binding, actuator: actuator, receiver: receiver))
+            application: scope.application, window: window,
+            element: owned?.element ?? read.element,
+            receiverRelation: try receiverRelation(binding, actuator: actuator, receiver: receiver), cellEditor: owned?.proof)
     }
 
     func elementPointerUnit(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator? = nil) throws
@@ -473,7 +506,8 @@ import ApplicationServices
         return NativeElementPointerUnit(
             application: scope.application, window: try scope.requireWindow(),
             element: try applications.readRoot(geometry).element,
-            member: try actuator.map { try applications.readRoot($0.node).element }, kind: scrolling ? .scroll : .click)
+            member: try actuator.map { try applications.readRoot($0.node).element }, kind: scrolling ? .scroll : .click,
+            logicalWindow: try applications.readRoot(geometry).observedInteractionSurface)
     }
 
     func menuUnit(_ binding: [String: Any], within: [String] = []) throws -> NativeMenuUnit {

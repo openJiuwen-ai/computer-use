@@ -180,9 +180,20 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
             and primitive.channel == Channel.KEYBOARD
             and primitive.readiness == Knowledge.YES
         )
-        return (1 if ready_text_keys else order[primitive.channel], 0, 0, primitive.id)
+        return (
+            1 if ready_text_keys else order[primitive.channel],
+            1 if primitive.unit == "native_value_replace" else 0,
+            0,
+            primitive.id,
+        )
 
-    return CandidateSet(request, tuple(sorted((p for p in candidates if p.supported == Knowledge.YES), key=priority)))
+    # Click admission carries the reason even when a native route is unavailable.
+    # The click selector owns eligibility; dropping these offers here erases that
+    # evidence before it can explain the failure.
+    return CandidateSet(
+        request,
+        tuple(sorted((p for p in candidates if p.supported == Knowledge.YES or p.click is not None), key=priority)),
+    )
 
 
 CANDIDATE_PHASES = (

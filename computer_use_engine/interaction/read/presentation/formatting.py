@@ -21,6 +21,8 @@ def jsonString(value: Any) -> str:
 
 def numberString(value: Any) -> str:
     """Format numeric values consistently for model-facing observation text."""
+    if type(value) is int:
+        return str(value)
     if value == 0:
         return "0"
     if not math.isfinite(value):

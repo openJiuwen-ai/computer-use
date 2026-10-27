@@ -60,6 +60,7 @@ import ApplicationServices
             case .objectAction, .objectSelection: break
             }
         }
+        try await NativeClickExposurePipeline.run(plan, boundary: boundary, receipt: receipt, evidence: evidence)
         try ConfirmNativeClickPreparationPass.run(boundary)
         if let current = try SampleNativeClickPreparationPass.run(plan, boundary: boundary, afterPreparation: true),
             current.needed

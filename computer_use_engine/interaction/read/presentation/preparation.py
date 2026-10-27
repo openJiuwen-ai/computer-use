@@ -41,26 +41,40 @@ class _MaterializedSnapshot:
 def _copy_collections(value: Any, *, immutable: bool) -> Any:
     """Copy nested fact collections without consuming Python recursion depth."""
     containers = (Mapping, tuple, list, set, frozenset)
+    concrete_containers = (dict, MappingProxyType, tuple, list, set, frozenset)
+    atomic = (str, int, float, bool, type(None), bytes)
+
+    def is_container(item: Any) -> bool:
+        # Native fact batches contain many scalar property/status values.
+        # Avoid an ABC Mapping lookup for every scalar on every frozen copy;
+        # retain the generic check for custom mappings/container subclasses.
+        kind = type(item)
+        return kind in concrete_containers or kind not in atomic and isinstance(item, containers)
+
+    def is_mapping(item: Any) -> bool:
+        kind = type(item)
+        return kind in (dict, MappingProxyType) or kind not in concrete_containers and isinstance(item, Mapping)
+
     completed: dict[int, Any] = {}
     active: set[int] = set()
     pending = [(value, False)]
     while pending:
         current, finish = pending.pop()
-        if not isinstance(current, containers) or id(current) in completed:
+        if not is_container(current) or id(current) in completed:
             continue
         if not finish:
             if id(current) in active:
                 raise ValueError("Captured presentation facts contain a collection cycle")
             active.add(id(current))
             pending.append((current, True))
-            children = current.values() if isinstance(current, Mapping) else current
+            children = current.values() if is_mapping(current) else current
             pending.extend((child, False) for child in reversed(tuple(children)))
             continue
 
         def copied(item: Any) -> Any:
-            return completed[id(item)] if isinstance(item, containers) else item
+            return completed[id(item)] if is_container(item) else item
 
-        if isinstance(current, Mapping):
+        if is_mapping(current):
             result = {key: copied(item) for key, item in current.items()}
             completed[id(current)] = MappingProxyType(result) if immutable else result
         elif isinstance(current, (set, frozenset)):

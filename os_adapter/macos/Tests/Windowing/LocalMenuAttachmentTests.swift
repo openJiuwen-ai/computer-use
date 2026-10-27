@@ -19,6 +19,15 @@
         precondition(!check(["other", "menu"]))
         roles["item"] = "AXButton"
         precondition(!check())
+        roles["wrapper"] = "AXMenuButton"
+        roles["menu"] = "AXList"
+        roles["item"] = "AXStaticText"
+        precondition(check(), "combobox choices retain the original logical owner")
+        edges["wrapper"] = []
+        precondition(!check(), "a detached popup must not follow a cached path")
+        edges["wrapper"] = ["menu"]
+        roles["wrapper"] = "AXGroup"
+        precondition(!check(), "an arbitrary cross-window list does not establish a control attachment")
         print("PASS: local menu attachment, detached/reparented menus and unrelated window boundaries")
     }
 }

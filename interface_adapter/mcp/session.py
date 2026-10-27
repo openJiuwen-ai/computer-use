@@ -3,13 +3,13 @@ import os
 import socket
 import sys
 
-from computer_use._json import dumps, loads as jsonLoads
 from computer_use.native.preview import isPreviewEvent
 from computer_use.session.operations import eager
 
 from .history import HistoryGate, historyKey
 from .journal import Journal
 from .output import OutputBuffer, isOutput
+from .worker_protocol import FRAMED_PROTOCOL, readMessage, writeMessage
 
 "Supervise one persistent Python worker and its inherited native lifetimes."
 
@@ -143,17 +143,13 @@ class ExecutionSession:
 
             pending["cancel"] = self._track(cancel())
         try:
-            self._writer.write(
-                (
-                    dumps(
-                        dict(
-                            code=code,
-                            executionId=id_,
-                            history=policy,
-                        )
-                    )
-                    + "\n"
-                ).encode("utf-8")
+            writeMessage(
+                self._writer,
+                dict(
+                    code=code,
+                    executionId=id_,
+                    history=policy,
+                ),
             )
             await self._writer.drain()
         except Exception as error:
@@ -172,6 +168,7 @@ class ExecutionSession:
             COMPUTER_USE_REMOTE_PREVIEW="1" if self.onPreview is not None else "",
             COMPUTER_USE_DEMO_FOREGROUND="1" if self.demoForeground else "0",
             COMPUTER_USE_LIFETIME_FD="4",
+            COMPUTER_USE_WORKER_PROTOCOL=FRAMED_PROTOCOL,
         )
         if os.name == "nt":
             from .windows_worker import startWindowsWorker
@@ -236,10 +233,9 @@ class ExecutionSession:
 
     async def _receive(self, child, reader):
         try:
-            while line := await reader.readline():
+            while (message := await readMessage(reader)) is not None:
                 if self._child is not child:
                     continue
-                message = jsonLoads(line)
                 if not isinstance(message, dict):
                     raise ValueError("Execution process returned invalid output.")
                 if "preview" in message:

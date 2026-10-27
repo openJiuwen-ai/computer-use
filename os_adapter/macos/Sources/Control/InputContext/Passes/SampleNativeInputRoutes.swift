@@ -117,6 +117,7 @@ import ApplicationServices
         } else if let kind = NativeKeyboardIntent.Kind(rawValue: op.intent) {
             let unit = try access.units.keyboardUnit(binding.wire, actuator: actuator, receiver: receiver)
             let facts = try unit.sample(includeAncestors: true)
+            let cellActivation = try kind == .replace && unit.requiresCellEditorActivation()
             enabled = unit.element.flatMap { AXAccess.read($0, kAXEnabledAttribute).value as? Bool }
             foreground = facts.foreground
             nativeRole = unit.element.flatMap { AXAccess.read($0, kAXRoleAttribute).value as? String }
@@ -148,12 +149,12 @@ import ApplicationServices
                 input["editor"] = actuator.node
                 input["editorOwner"] = binding.node!
             }
-            if [.focus, .insert, .replace, .paste].contains(kind), let element = unit.element,
+            if !cellActivation, [.focus, .insert, .replace, .paste].contains(kind), let element = unit.element,
                 [kAXTextFieldRole, kAXTextAreaRole, "AXWebArea"].contains(nativeRole ?? "")
             {
                 let pointer = NativePointerFocusUnit(
                     application: unit.application, window: unit.window, element: element,
-                    receiverRelation: unit.receiverRelation)
+                    receiverRelation: unit.receiverRelation, cellEditor: unit.cellEditor)
                 let readiness = try pointer.readiness()
                 // An already focused editor needs no pointer preparation.
                 // Re-offering a no-op cannot establish missing editing
@@ -162,16 +163,16 @@ import ApplicationServices
                     declare(.pointerFocus, supported: true, readiness: { _ in readiness })
                 }
             }
-            if [.insert, .replace, .paste].contains(kind), let element = unit.element {
+            if !cellActivation, [.insert, .replace, .paste].contains(kind), let element = unit.element {
                 let edit = NativeSelectedTextUnit(
                     application: unit.application, window: unit.window, element: element,
-                    receiverRelation: unit.receiverRelation)
+                    receiverRelation: unit.receiverRelation, cellEditor: unit.cellEditor)
                 if kind != .paste, let contract = edit.contract(replace: kind == .replace) {
                     try declare(.selectedText(contract), supported: true) { _ in try edit.readiness(contract) }
                 } else {
                     let receiver = NativeReceiverPreparation(
                         application: unit.application, window: unit.window, element: element,
-                        receiverRelation: unit.receiverRelation)
+                        receiverRelation: unit.receiverRelation, cellEditor: unit.cellEditor)
                     if let contract = receiver.contract(), try !receiver.readiness().ready {
                         // This declares only AX preparation. The public
                         // resolver selected this exact candidate;

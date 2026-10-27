@@ -95,7 +95,7 @@ def render_text(value: DisplayText | str, *, snapshots: Mapping[int, RenderedTre
     if kind == "desktop":
         from computer_use.interaction.read.presentation.rendering.desktop import renderDesktop
 
-        return renderDesktop(args[0])
+        return renderDesktop(*args)
     if kind == "details_hint":
         if snapshots is None or id(args[0]) not in snapshots:
             raise ValueError("A details hint requires its already-rendered snapshot source")

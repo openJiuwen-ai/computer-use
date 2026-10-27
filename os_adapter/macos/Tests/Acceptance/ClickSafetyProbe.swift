@@ -61,6 +61,13 @@ import ApplicationServices
     }
 }
 
+@MainActor final class ClickSafetyScrollView: NSScrollView {
+    var stalled = false
+    override func scrollWheel(with event: NSEvent) {
+        if !stalled { super.scrollWheel(with: event) }
+    }
+}
+
 @MainActor final class ClickSafetyDelegate: NSObject, NSApplicationDelegate {
     let folder = Bundle.main.bundleURL.deletingLastPathComponent()
     var window: ClickSafetyWindow!
@@ -200,12 +207,16 @@ import ApplicationServices
             ])
         }
         if mode == "activation" { target.activationOffset = NSPoint(x: 34, y: 110) }
-        if mode == "clipped" {
-            let area = NSScrollView(frame: NSRect(x: 290, y: 155, width: 300, height: 175))
+        if mode == "clipped" || mode.hasPrefix("offscreen") {
+            let area = ClickSafetyScrollView(frame: NSRect(x: 290, y: 155, width: 300, height: 175))
             area.borderType = .lineBorder
             area.hasVerticalScroller = false
-            let document = NSView(frame: NSRect(x: 0, y: 0, width: 296, height: 500))
-            target.frame = NSRect(x: 20, y: 105, width: 260, height: 180)
+            area.stalled = mode == "offscreen-stalled"
+            let horizontal = mode == "offscreen-horizontal"
+            let document = NSView(frame: NSRect(x: 0, y: 0, width: horizontal ? 2200 : 296, height: mode == "clipped" ? 500 : 2200))
+            target.frame = mode == "clipped"
+                ? NSRect(x: 20, y: 105, width: 260, height: 180)
+                : NSRect(x: horizontal ? 1600 : 20, y: horizontal ? 40 : 1600, width: 260, height: 80)
             document.addSubview(target)
             area.documentView = document
             content.addSubview(area)

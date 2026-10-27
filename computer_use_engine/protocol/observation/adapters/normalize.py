@@ -937,9 +937,23 @@ class Adapter:
             node.put(name, ("text", field), value, expected)
             return True
         if name in ("AXSelectedTextRange", "AXSelectedTextRanges", "Text.selections", "AXVisibleCharacterRange"):
-            info = node.text_info()
             field = "visible_ranges" if name == "AXVisibleCharacterRange" else "selections"
             items = value if isinstance(value, list) else [value]
+            if node.backend == "macos" and name.startswith("AX"):
+                # Cocoa's 64-bit NSNotFound is not a character offset. Keep
+                # the native range as evidence without manufacturing a text
+                # space or a caret on controls whose getter returns it.
+                unlocated = [item for item in items if isinstance(item, dict) and item.get("location") == 2**63 - 1]
+                if unlocated:
+                    items = [item for item in items if item not in unlocated]
+                    node.supplement(name, value, semantic_key="text.unlocated_range")
+                    state = "partial"
+                    if not items:
+                        state = "absent" if all(item.get("length") == 0 for item in unlocated) else "error"
+                    node.issue(("text", field), state, "AX reports NSNotFound; no character position is available.")
+                    if not items:
+                        return True
+            node.text_info()
             node.put(name, ("text", field), tuple(node.span(item, ("text", field, i)) for i, item in enumerate(items)))
             return True
         if name == "Text.caretOffset":

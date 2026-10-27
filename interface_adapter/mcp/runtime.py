@@ -14,7 +14,6 @@ from contextvars import ContextVar
 
 from computer_use import Computer
 from computer_use._identity import Record, WeakIdentityMap
-from computer_use._json import dumps, loads as jsonLoads
 from computer_use.client.host import (
     setActionHandler,
     setDiagnosticHandler,
@@ -38,6 +37,7 @@ from computer_use.session.observation import peekObservationText
 
 from .output import OutputBuffer
 from .presentation import ObservationOutput, ObservationPresenter
+from .worker_protocol import WorkerMessageWriter, readMessage, workerProtocol
 
 "Persistent Python worker. User code never shares the MCP server's stdout."
 
@@ -361,17 +361,17 @@ class ConsoleWriter(io.TextIOBase):
 async def main():
     from .worker_connection import workerConnection
 
+    protocol = workerProtocol()
     reader, writer = await workerConnection()
 
-    def send(message):
-        writer.write((dumps(message) + "\n").encode("utf-8"))
-
-    runtime = Runtime(send)
+    messages = WorkerMessageWriter(writer, protocol=protocol)
+    runtime = Runtime(messages.send)
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
 
     async def stop():
         await runtime.close()
+        messages.flush()
         writer.close()
 
     loop = asyncio.get_running_loop()
@@ -381,14 +381,15 @@ async def main():
         pass
     current = None
     try:
-        while line := await reader.readline():
+        while (message := await readMessage(reader, protocol=protocol)) is not None:
             if current is not None and not current.done():
                 raise RuntimeError("Worker received concurrent executions")
-            current = asyncio.create_task(runtime.execute(jsonLoads(line)))
+            current = asyncio.create_task(runtime.execute(message))
         if current is not None and not current.done():
             current.cancel()
     finally:
         await runtime.close()
+        messages.flush()
         writer.close()
         await writer.wait_closed()
 

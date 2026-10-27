@@ -36,7 +36,7 @@ from computer_use.client.host import setDiagnosticHandler
 from computer_use.paths import nativeDriver
 
 ROOT = Path(__file__).resolve().parents[4]
-CASES = ("plain-element", "plain-capture", "activation", "covered", "clipped")
+CASES = ("plain-element", "plain-capture", "activation", "covered", "clipped", "offscreen", "offscreen-horizontal", "offscreen-stalled")
 
 
 def sha(path: Path) -> str:
@@ -320,6 +320,13 @@ async def main(options) -> None:
                 if event.get("kind") == "command_end" and event.get("method") == "execute"
             ]
             item["checks"]["singleExecute"] = len(item["executeResults"]) == 1
+            if case == "offscreen-stalled":
+                item["checks"]["targetCallbackOnce"] = after["counts"]["target"] == 0
+                item["checks"]["exactlyOneMousePair"] = after["applicationDowns"] == after["applicationUps"] == 0
+                item["checks"]["targetReceivedPair"] = after["targetDowns"] == after["targetUps"] == 0
+                item["checks"]["noSdkError"] = "did not move toward the target" in item["outcome"].get("error", "")
+            elif case.startswith("offscreen"):
+                item["checks"]["viewportMoved"] = after["scrollVisibleRect"] != before["scrollVisibleRect"]
             item["passed"] = all(item["checks"].values())
             if case == "activation":
                 item["checks"]["activationCoordinateBridged"] = (

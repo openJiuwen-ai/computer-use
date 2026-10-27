@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.formatting import jsonString, numberString
@@ -9,7 +10,7 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def renderDesktop(value: Record) -> str:
+def renderDesktop(value: Record, applications: Mapping[str, int] | None = None) -> str:
     "Format desktop displays, capture geometry, and observation provenance."
 
     def box(rect: Record) -> str:
@@ -19,13 +20,21 @@ def renderDesktop(value: Record) -> str:
             + ")"
         )
 
+    def application(selector: str | None, separator: str) -> str:
+        if not selector:
+            return ""
+        if applications is None:
+            return separator + "app=" + jsonString(selector)
+        ref = applications.get(selector)
+        return separator + f"computer.app({ref})" if ref is not None else ""
+
     captured = sum(bool(d["captured"]) for d in value["displays"])
     front = value["frontmost"]
     lines = [
         f"Desktop: {value['mode']}; View: full",
         "Foreground: "
         + (
-            jsonString(front["name"]) + ("; app=" + jsonString(front["selector"]) if front.get("selector") else "")
+            jsonString(front["name"]) + application(front.get("selector"), "; ")
             if front is not None
             else "unknown"
         ),
@@ -56,7 +65,7 @@ def renderDesktop(value: Record) -> str:
             + (jsonString(window["title"]) if window["title"] else "<untitled>")
             + " "
             + box(window["rect"])
-            + (" app=" + jsonString(window["selector"]) if window.get("selector") else "")
+            + application(window.get("selector"), " ")
         )
     if not value["windows"]:
         lines.append("  Unknown" if value.get("catalogError") else "  None reported")

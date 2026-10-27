@@ -15,10 +15,16 @@ import ApplicationServices
             pointer = unit
             point = try unit.point(plan.pointer!.start!)
         case .element(let unit):
-            let geometry = try afterPreparation ? unit.geometry() : unit.preparationGeometry()
-            pointer = NativePointerUnit(
-                application: unit.application, window: geometry.mapping, nativeWindow: unit.window)
-            point = geometry.point
+            if !afterPreparation, let exposure = try unit.exposure() {
+                pointer = NativePointerUnit(
+                    application: unit.application, window: exposure.mapping, nativeWindow: unit.window)
+                point = exposure.point
+            } else {
+                let geometry = try afterPreparation ? unit.geometry() : unit.preparationGeometry()
+                pointer = NativePointerUnit(
+                    application: unit.application, window: geometry.mapping, nativeWindow: unit.window)
+                point = geometry.point
+            }
         default: return nil
         }
         try pointer.validateWindowIdentity()

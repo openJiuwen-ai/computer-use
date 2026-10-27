@@ -196,6 +196,8 @@ enum NativePointerReadiness {
         let foreground: Bool
         let focus: NativePointerReadiness.WindowFocus
         let windowKind: NativePointerReadiness.WindowKind
+        var foregroundPID: pid_t? = nil
+        var hit: NativeInputWindowHit? = nil
     }
 
     private func contentReadiness(
@@ -220,30 +222,58 @@ enum NativePointerReadiness {
     private func sampleReadiness(
         at point: CGPoint? = nil, kind: NativePointerIntent.Kind, delivery: NativeClickDelivery? = nil
     ) -> Readiness {
-        let foreground = foregroundWindow(at: point)
+        let foregroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let hit = foregroundPID == application.processIdentifier ? inputWindowHit(at: point) : nil
+        let foreground = foregroundPID == application.processIdentifier && hit?.windowID == window.id
+        var result: Readiness
         if (delivery == .systemPointer && !foreground) || (delivery == .windowDirected && BackgroundTarget.isExclusive)
         {
-            return Readiness(ready: false, foreground: foreground, focus: .notRequired, windowKind: .visualOnly)
+            result = Readiness(ready: false, foreground: foreground, focus: .notRequired, windowKind: .visualOnly)
+        } else {
+            result = contentReadiness(foreground: foreground, kind: kind)
         }
-        return contentReadiness(foreground: foreground, kind: kind)
+        result.foregroundPID = foregroundPID
+        result.hit = hit
+        return result
+    }
+
+    private func diagnoseReadiness(_ value: Readiness, at point: CGPoint, phase: String) {
+        guard WindowGeometry.inputDiagnosticsEnabled else { return }
+        diagnose([
+            "kind": "pointer_preparation_readiness", "phase": phase, "targetPID": application.processIdentifier,
+            "window": window.id, "windowFrame": [window.frame.minX, window.frame.minY, window.frame.width, window.frame.height],
+            "point": [point.x, point.y], "ready": value.ready, "foreground": value.foreground,
+            "foregroundPID": value.foregroundPID as Any? ?? NSNull(),
+            "windowKind": String(describing: value.windowKind), "windowFocus": String(describing: value.focus),
+            "hitQueried": value.hit != nil, "hitWindow": value.hit?.windowID as Any? ?? NSNull(),
+            "hitSource": value.hit?.source?.rawValue as Any? ?? NSNull(),
+            "windowServerHit": value.hit.map { String(describing: $0.windowServer) } as Any? ?? NSNull(),
+            "accessibilityHit": value.hit?.accessibility.map { String(describing: $0) } as Any? ?? NSNull()
+        ])
     }
 
     func ready(at point: CGPoint? = nil, kind: NativePointerIntent.Kind = .click, delivery: NativeClickDelivery? = nil)
         -> Bool
     { sampleReadiness(at: point, kind: kind, delivery: delivery).ready }
 
-    func prepare(
+    enum WindowPreparationOutcome: Equatable { case alreadyReady, contextPrepared }
+
+    /// Prepare only the retained window context. An element caller must refresh
+    /// its geometry before testing a point after this potentially moving phase.
+    /// A context receipt never authorizes pointer delivery on its own.
+    func prepareWindowContext(
         foreground: Bool, atNative point: CGPoint, kind: NativePointerIntent.Kind = .click,
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void
-    ) async throws {
+    ) async throws -> WindowPreparationOutcome {
         try check()
         try target.validate(input: true)
         try BackgroundTarget.validateReleasedInput()
         try validateWindowIdentity()
-        let currentReady = ready(at: point, kind: kind)
+        let initial = sampleReadiness(at: point, kind: kind)
+        diagnoseReadiness(initial, at: point, phase: "beforePreparation")
         try check()
-        if currentReady { return }
+        if initial.ready { return .alreadyReady }
         if foreground {
             let assist = ForegroundAssist()
             // The point alone cannot prepare a different standard document:
@@ -266,9 +296,29 @@ enum NativePointerReadiness {
             }
         }
         try check()
-        guard ready(at: point, kind: kind) else {
+        return .contextPrepared
+    }
+
+    /// QUERY: validate the caller's current point, without another activation,
+    /// input event or preparation attempt.
+    func requirePointReadiness(atNative point: CGPoint, kind: NativePointerIntent.Kind = .click) throws {
+        let prepared = sampleReadiness(at: point, kind: kind)
+        diagnoseReadiness(prepared, at: point, phase: "afterPreparation")
+        guard prepared.ready else {
             throw NativePreparationUnavailable(description: "pointer route is not ready; no pointer event sent")
         }
+    }
+
+    /// Coordinate input keeps its original point and preparation/query order.
+    func prepare(
+        foreground: Bool, atNative point: CGPoint, kind: NativePointerIntent.Kind = .click,
+        check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
+        onCleanupUnknown: @escaping @MainActor () -> Void
+    ) async throws {
+        let outcome = try await prepareWindowContext(
+            foreground: foreground, atNative: point, kind: kind, check: check, onPreparation: onPreparation,
+            onCleanupUnknown: onCleanupUnknown)
+        if outcome == .contextPrepared { try requirePointReadiness(atNative: point, kind: kind) }
     }
 
     func point(_ pixel: CGPoint) throws -> CGPoint {

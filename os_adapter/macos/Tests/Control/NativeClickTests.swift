@@ -161,6 +161,7 @@ import Foundation
         for (kind, returned, cleanup, expected): (NativePreparationEffect.Kind, Bool, Bool, String) in [
             (.focusNotification, true, true, "reselectWithinScope"), (.focusNotification, false, true, "observe"),
             (.menuContext, true, true, "observe"), (.menuContext, false, true, "observe"),
+            (.viewport, true, true, "observe"), (.viewport, false, true, "observe"),
             (.windowSelection, true, false, "stop")
         ] {
             let op = try operation()
