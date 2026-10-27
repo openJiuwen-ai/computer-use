@@ -70,25 +70,6 @@ class WindowHandle(Protocol):
         pass
 
 
-class NativeApplicationSummary(Protocol):
-    """Application-directory row with the native provider's string ID."""
-
-    @property
-    def id(self) -> str:
-        pass
-
-    @property
-    # API, protocol, and native binding names retain their established spelling.
-    # pylint: disable-next=invalid-name
-    def displayName(self) -> str:
-        pass
-
-    @property
-    # pylint: disable-next=invalid-name
-    def isRunning(self) -> bool:
-        pass
-
-
 class ObservedWindow(Protocol):
     """Window identity and image evidence shared by observation and input.
 
@@ -114,6 +95,5 @@ WriteArguments: TypeAlias = (
 
 if TYPE_CHECKING:
     AgentResult: TypeAlias = Observation | ActionResult | TextPage | ElementSnapshot | list[AppInfo]
-    ReadResult: TypeAlias = Observation | TextPage | tuple[Observation, ElementSnapshot]
-    QueryResult: TypeAlias = ElementSnapshot | tuple[NativeApplicationSummary, ...]
-    InteractionResult: TypeAlias = AgentResult | ReadResult | QueryResult
+    QueryResult: TypeAlias = ElementSnapshot
+    InteractionResult: TypeAlias = AgentResult | ActionResult | QueryResult

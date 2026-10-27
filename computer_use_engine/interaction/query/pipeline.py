@@ -6,38 +6,29 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
-from computer_use.interaction.operation import HostOperation
 from computer_use.interaction.query.model import FindLease
 from computer_use.interaction.query.passes.build_lookup_snapshot import (
     stage as build_lookup_snapshot,
 )
 from computer_use.interaction.query.passes.find_element import stage as find_element
-from computer_use.interaction.query.passes.format_application_directory import (
-    stage as format_application_directory,
-)
 from computer_use.interaction.query.passes.prepare_element_lookup import (
     stage as prepare_element_lookup,
 )
-from computer_use.interaction.query.passes.select_query_kind import stage as select_query_kind
 from computer_use.interaction.query.scope import app_context
-from computer_use.interaction.read.acquisition.directory.model import DirectoryRequest
-from computer_use.interaction.read.acquisition.directory.pipeline import DirectoryReadPipeline
 from computer_use.interaction.read.acquisition.facts.pipeline import FactCollectionPipeline
 from computer_use.interaction.read.acquisition.scope.pipeline import WorkingScopeDiscoveryPipeline
-from computer_use.interaction.requests import ListApplications
 from computer_use.native.scopes import window_binding
-from computer_use.pipeline import Contract, Pipeline, Scope, Select, Sequence
+from computer_use.pipeline import Contract, Pipeline, Scope, Sequence
 from computer_use.pipeline.core import Node
 
 if TYPE_CHECKING:
-    from typing import Any, AsyncIterator, Callable, NoReturn
+    from typing import AsyncIterator, Callable
 
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.query.model import FindPlan
     from computer_use.interaction.records import ElementSnapshot
     from computer_use.interaction.requests import FindElement, InteractionRequest
     from computer_use.pipeline.core import Control, Step
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 class AppScopeReconciliation(Node["FindPlan", "FindPlan"]):
@@ -171,55 +162,13 @@ class FindElementPipeline(Pipeline["FindElement", "ElementSnapshot"]):
         )
 
 
-class ListApplicationsPipeline(HostOperation["ListApplications", "tuple[NativeApplicationSummary, ...]"]):
-    """Read and format the native application directory.
-
-    The host guard brackets the directory query. Formatting reduces each
-    application entry to its native ID, display name, and running state.
-    """
-
-    def __init__(self, controller: SessionController) -> None:
-
-        class DirectoryObservation(Node):
-            """Read the application catalogue for a list-applications request.
-
-            The directory child receives an applications query and returns its raw
-            catalogue for the summary formatter.
-
-            Attributes:
-                directory: Native directory flow used to query the application catalogue.
-            """
-
-            def __init__(self) -> None:
-                self.directory = DirectoryReadPipeline(controller.port)
-                self.children = (self.directory,)
-                super().__init__(
-                    "ReadApplicationDirectory",
-                    Contract(ListApplications, dict, self.directory.contract.effects),
-                )
-
-            async def _arun(self, request: ListApplications, control: Control) -> DirectoryFacts:
-                return await self.directory.arun(DirectoryRequest(dict(kind="applications")), control)
-
-            def _run(self, value: Any, control: Control) -> NoReturn:
-                raise TypeError("Directory reads require arun()")
-
-        super().__init__(
-            Sequence(
-                name="ListApplicationsPipeline",
-                steps=[DirectoryObservation(), format_application_directory()],
-            )
-        )
-
-
 class QueryPipeline(Pipeline["InteractionRequest", "QueryResult"]):
-    """Select the execution flow for a session query.
+    """Enter the session's element lookup flow.
 
     Element queries resolve a path and return the matched snapshot.
-    Application-list queries return native application summaries.
 
     Attributes:
-        controller: Session services passed to both query branches.
+        controller: Session services passed to the lookup pipeline.
     """
 
     def __init__(self, controller: SessionController) -> None:
@@ -228,14 +177,7 @@ class QueryPipeline(Pipeline["InteractionRequest", "QueryResult"]):
 
     def build(self) -> Step[InteractionRequest, QueryResult]:
         controller = self.controller
-        return Select(
-            name="QueryPipeline",
-            selector=select_query_kind(),
-            branches={
-                "find": FindElementPipeline(controller),
-                "applications": ListApplicationsPipeline(controller),
-            },
-        )
+        return FindElementPipeline(controller)
 
 
 if TYPE_CHECKING:
