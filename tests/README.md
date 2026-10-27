@@ -11,6 +11,7 @@ HTML 测试报告生成到 `outputs/unit_test_report.html`。
 - `integrations/mcp/`：真实 stdio MCP、持久执行、观察交付和取消。
 - `integration/`：原生端口集成与发行包资源。
 - `backends/`：平台机制、构建支持及进程辅助。
+- `native/`：macOS、Windows、Linux 驱动的机制测试和桌面验收。
 - `checks/`：文档和架构约束检查。
 - `fixtures/`、`baselines/`：核心用例及历史行为数据。
 

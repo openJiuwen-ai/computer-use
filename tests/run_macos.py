@@ -94,6 +94,7 @@ def main():
     output = ROOT / ".artifacts/native-tests"
     output.mkdir(parents=True, exist_ok=True)
     native = ROOT / "os_adapter/macos"
+    native_tests = ROOT / "tests/native/macos"
     sources = sorted((native / "Sources").rglob("*.swift"))
     full_sources = [file for file in sources if file.name != "main.swift"]
     env = dict(os.environ)
@@ -109,14 +110,14 @@ def main():
 
     def run_architecture():
         for name in ("test_source_architecture.py", "test_keyboard_boundary_projection.py"):
-            architecture = native / "Tests/Runtime" / name
+            architecture = native_tests / "Runtime" / name
             if architecture.exists():
                 run(sys.executable, str(architecture))
 
     def compile_test(name, inputs):
         print(f"Building {name}Tests", flush=True)
         binary = output / (name + "Tests")
-        test_sources = list((native / "Tests").rglob(name + "Tests.swift"))
+        test_sources = list(native_tests.rglob(name + "Tests.swift"))
         if len(test_sources) != 1:
             raise ValueError(f"Expected one Swift test source for {name}; found {len(test_sources)}")
         run("swiftc", "-swift-version", "6", "-parse-as-library", *inputs, test_sources[0], "-o", binary)

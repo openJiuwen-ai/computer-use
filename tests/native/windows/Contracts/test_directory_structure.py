@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parents[2]
+BASE = Path(__file__).resolve().parents[4] / "os_adapter/windows"
 spec = importlib.util.spec_from_file_location("windows_portable_sources", BASE / "Build/portable_sources.py")
 source_sets = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(source_sets)
@@ -17,7 +17,7 @@ spec.loader.exec_module(source_sets)
 
 class NativeSourceStructureTests(unittest.TestCase):
     def test_native_test_sources_mirror_existing_source_responsibilities(self):
-        tests = BASE / "Tests"
+        tests = Path(__file__).resolve().parents[1]
         self.assertFalse(list(tests.glob("*.cs")))
         self.assertFalse(list(tests.glob("test*.py")))
         for path in tests.rglob("*.cs"):
@@ -70,7 +70,7 @@ class NativeSourceStructureTests(unittest.TestCase):
         )
         sources = [next((BASE / "Sources").rglob(name)) for name in names]
         sources += [
-            BASE / "Tests" / name
+            Path(__file__).resolve().parents[1] / name
             for name in (
                 "Runtime/NativePipelineStagesTests.cs",
                 "Control/Object/NativeObjectExecutionTests.cs",

@@ -6,7 +6,7 @@ These are static wiring checks, not native AX/runtime performance evidence.
 import unittest
 from pathlib import Path
 
-SOURCES = Path(__file__).resolve().parents[2] / "Sources"
+SOURCES = Path(__file__).resolve().parents[4] / "os_adapter/macos/Sources"
 
 
 def read(relative):

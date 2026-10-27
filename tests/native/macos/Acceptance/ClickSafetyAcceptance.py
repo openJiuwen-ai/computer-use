@@ -2,7 +2,7 @@
 
 Default invocation only builds the fixture. To operate its disposable UI:
   COMPUTER_USE_DIAGNOSE_INPUT=1 COMPUTER_USE_FOREGROUND_ASSIST=0 uv run python \
-    os_adapter/macos/Tests/Acceptance/ClickSafetyAcceptance.py --run
+    tests/native/macos/Acceptance/ClickSafetyAcceptance.py --run
 
 Use --driver /absolute/path to compare a frozen historical driver and --cases
 plain-element,plain-capture for the extra-preparation-click counterexample.

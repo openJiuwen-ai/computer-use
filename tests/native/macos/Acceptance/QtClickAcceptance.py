@@ -2,7 +2,7 @@
 
 Run with ``COMPUTER_USE_DIAGNOSE_INPUT=1 COMPUTER_USE_FOREGROUND_ASSIST=0
 uv run --with PySide6-Essentials python
-os_adapter/macos/Tests/Acceptance/QtClickAcceptance.py``. Inspect each saved
+tests/native/macos/Acceptance/QtClickAcceptance.py``. Inspect each saved
 image before sending a JSON command on stdin. Commands are ``click`` (with
 ``at``), ``activateTarget``, and ``finish``. The two click calls are independent
 operations; this runner never automatically retries an unconfirmed click.

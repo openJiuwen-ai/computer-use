@@ -1,7 +1,7 @@
 """Portable pipeline boundary probes using the existing native OS substitutes.
 
 Install the Linux driver editable in the test environment, then run
-python -m unittest discover -s os_adapter/linux/tests -p test_native_pipelines.py.
+python -m unittest discover -s tests/native/linux -p test_native_pipelines.py.
 No Linux GUI is claimed.
 """
 

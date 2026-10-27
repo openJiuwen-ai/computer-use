@@ -10,7 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from repository import ROOT as REPO_ROOT
+from repository import ROOT
+from windows_sources import native_source as REPO_ROOT
 
 from computer_use_native_tools.pointer import generatePointerAssets
 
@@ -66,7 +67,7 @@ class WindowsPointerDrawingTests(unittest.TestCase):
                     f"/out:{executable}",
                     "/reference:System.Drawing.dll",
                     *(
-                        str(source / name)
+                        str(native_source(name))
                         for name in (
                             "Sources/Preview/AgentPointerArtwork.cs",
                             "Sources/Preview/AgentPointerAssets.cs",

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from repository import ROOT as REPO_ROOT
-from windows_sources import portableSources
+from windows_sources import native_source, portableSources
 
 from computer_use.client.factory import nativeComputer
 from computer_use.errors import ComputerUseError
@@ -51,7 +51,7 @@ def compile_probe(test, out, main):
     ]
     command += ["/reference:" + str(p) for p in sorted(refs[-1].glob("*.dll"))]
     command += [
-        str(ROOT / "os_adapter/windows" / p)
+        str(native_source(p))
         for p in (
             "Sources/Contracts/Wire.cs",
             "Sources/Runtime/NativeRuntime.cs",

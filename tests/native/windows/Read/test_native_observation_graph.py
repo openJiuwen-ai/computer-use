@@ -7,7 +7,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parents[2]
+from windows_sources import native_source
+
+BASE = Path(__file__).resolve().parents[4] / "os_adapter/windows"
 
 
 @unittest.skipUnless(os.environ.get("COMPUTER_USE_WINDOWS_TEST_DOTNET"), "standalone .NET SDK not configured")
@@ -41,7 +43,7 @@ class NativeObservationGraphTests(unittest.TestCase):
             ]
             command += ["/reference:" + str(path) for path in sorted(refs.glob("*.dll"))]
             command += [
-                str(BASE / path)
+                str(native_source(path))
                 for path in (
                     "Sources/Contracts/Wire.cs",
                     "Sources/Read/NativeObservationGraph.cs",

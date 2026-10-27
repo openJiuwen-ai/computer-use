@@ -48,7 +48,7 @@ class LoggedProcessTests(unittest.TestCase):
         self.assertTrue(opened[0].closed)
 
     def test_click_runner_reaps_fixture_when_x11_setup_fails(self):
-        runner = runpy.run_path(str(ROOT / "os_adapter/linux/tests/control/click/fixtures/click_acceptance.py"))[
+        runner = runpy.run_path(str(ROOT / "tests/native/linux/control/click/fixtures/click_acceptance.py"))[
             "run"
         ]
         fixture = Mock(returncode=0)

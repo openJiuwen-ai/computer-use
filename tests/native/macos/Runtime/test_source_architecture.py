@@ -1,13 +1,13 @@
 """Static boundaries for the native directory contract; no UI or native input.
 
-Run: uv run python os_adapter/macos/Tests/test_source_architecture.py
+Run: uv run python tests/native/macos/test_source_architecture.py
 """
 
 import re
 import unittest
 from pathlib import Path
 
-SOURCES = Path(__file__).resolve().parents[2] / "Sources"
+SOURCES = Path(__file__).resolve().parents[4] / "os_adapter/macos/Sources"
 
 
 class NativeDirectoryArchitectureTests(unittest.TestCase):

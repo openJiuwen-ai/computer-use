@@ -27,7 +27,7 @@ class WindowsKeyboardRouteTests(unittest.TestCase):
                     "/warnaserror+",
                     f"/out:{exe}",
                     str(native / "Sources/Control/NativeKeyboardRoute.cs"),
-                    str(native / "Tests/Control/NativeKeyboardRouteTests.cs"),
+                    str(REPO_ROOT / "tests/native/windows/Control/NativeKeyboardRouteTests.cs"),
                 ],
                 capture_output=True,
                 text=True,

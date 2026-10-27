@@ -100,7 +100,7 @@ class NativeReadEventTests(unittest.TestCase):
                     *("/reference:" + str(framework / name) for name in refs),
                     "/reference:" + str(output / "Interop.NativeUIA.dll"),
                     *sorted((native / "Sources").rglob("*.cs")),
-                    next((native / "Tests").rglob(main + ".cs")),
+                    next((ROOT / "tests/native/windows").rglob(main + ".cs")),
                 ]
             )
             result = json.loads(run([output / "probe.exe"]))

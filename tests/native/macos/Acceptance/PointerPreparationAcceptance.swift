@@ -33,7 +33,7 @@ import ApplicationServices
         // #filePath is absolute in the documented compile command; this binds
         // the tool to this repo's disposable fixture, not arbitrary bundle IDs.
         var repo = URL(fileURLWithPath: #filePath)
-        for _ in 0..<6 { repo.deleteLastPathComponent() }
+        for _ in 0..<5 { repo.deleteLastPathComponent() }
         let fixture = repo.appendingPathComponent(".artifacts/first-direct-action-fixes-20261026/PointerPreparationMotionProbe.app")
             .resolvingSymlinksInPath().standardizedFileURL
         guard let app = NSRunningApplication(processIdentifier: pid),

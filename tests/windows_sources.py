@@ -11,6 +11,12 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+def native_source(relative):
+    if relative.startswith("Tests/"):
+        return ROOT / "tests/native/windows" / relative.removeprefix("Tests/")
+    return BASE / relative
+
+
 def portableSources(command):
     sources, options = [], []
     for argument in command:

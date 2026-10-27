@@ -46,7 +46,7 @@ The preserved order is important:
 Run the source-boundary checks without UI access:
 
 ```sh
-uv run python os_adapter/macos/Tests/Runtime/test_source_architecture.py
+uv run python tests/native/macos/Runtime/test_source_architecture.py
 ```
 
 Build and run all native mechanism contracts without desktop input:

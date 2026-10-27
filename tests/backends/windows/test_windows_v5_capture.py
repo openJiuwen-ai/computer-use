@@ -46,7 +46,7 @@ class WindowsCaptureGeometryTests(unittest.TestCase):
             ]
             command += ["/reference:" + str(p) for p in sorted(refs[-1].glob("*.dll"))]
             command += [
-                str(ROOT / "os_adapter/windows" / p)
+                str(native_source(p))
                 for p in (
                     "Sources/Contracts/Wire.cs",
                     "Sources/Capture/NativeCaptureGeometry.cs",

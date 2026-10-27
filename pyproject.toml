@@ -53,7 +53,7 @@ source = ["computer_use", "computer_use_mcp"]
 omit = ["tests/*"]
 
 [tool.pylint.MAIN]
-ignore-paths = ["^tests/.*", "^os_adapter/.*/Tests/.*"]
+ignore-paths = ["^tests/.*"]
 py-version = "3.12"
 
 [tool.pylint.FORMAT]

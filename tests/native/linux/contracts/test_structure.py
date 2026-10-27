@@ -11,7 +11,7 @@ from computer_use_linux.control.model import NativeInputStep
 from computer_use_linux.read.model import NativeQueryScope
 from computer_use_linux.read.passes.check_query_boundary import check_query_boundary
 
-ROOT = Path(__file__).resolve().parents[2] / "computer_use_engine/computer_use_linux"
+ROOT = Path(__file__).resolve().parents[4] / "os_adapter/linux/src/computer_use_linux"
 
 
 class NativeDirectoryStructureTests(unittest.TestCase):

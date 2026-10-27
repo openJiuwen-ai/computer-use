@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 from repository import ROOT as REPO_ROOT
-from windows_sources import portableSources
+from windows_sources import native_source, portableSources
 
 ROOT = REPO_ROOT
 
@@ -54,7 +54,7 @@ class WindowsDriverTests(unittest.IsolatedAsyncioTestCase):
         ]
         command += ["/reference:" + str(p) for p in sorted(refs.glob("*.dll"))]
         command += [
-            str(ROOT / "os_adapter/windows" / name)
+            str(native_source(name))
             for name in (
                 "Sources/Contracts/Wire.cs",
                 "Sources/Runtime/Driver.cs",

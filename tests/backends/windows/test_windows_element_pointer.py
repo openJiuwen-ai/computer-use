@@ -11,7 +11,7 @@ from pathlib import Path
 
 from repository import ROOT as REPO_ROOT
 from sdk.native.query.test_target_query import ROOT
-from windows_sources import portableSources
+from windows_sources import native_source, portableSources
 
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.write.routes.policy import Attempts, choose, route_key
@@ -131,7 +131,7 @@ class WindowsElementRuntimeTests(unittest.TestCase):
                 for name in ("System.dll", "System.Core.dll", "System.Web.Extensions.dll")
             ]
             command += [
-                str(native / name)
+                str(native_source(name))
                 for name in (
                     "Sources/Contracts/Wire.cs",
                     "Sources/Runtime/NativeRuntime.cs",
