@@ -86,8 +86,8 @@ class Observation:
 
 class AppInfo:
     id: int
-    displayName: str
-    isRunning: bool
+    display_name: str
+    is_running: bool
 
 class ActionResult:
     status: Literal["dispatched", "verified"]

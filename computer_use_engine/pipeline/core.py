@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from enum import Enum
-from inspect import isawaitable, signature
+from inspect import isawaitable, signature as inspect_signature
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -373,6 +373,7 @@ class PassDefinition(Generic[P, T, U]):
     """Reusable Pass declaration retaining its dependency factory's signature.
 
     Calling the definition binds the supplied dependencies and creates a Pass.
+    The signature property describes those dependencies for explicit inspection.
 
     Attributes:
         name: Stage name included in diagnostic paths.
@@ -385,9 +386,9 @@ class PassDefinition(Generic[P, T, U]):
     contract: Contract
 
     @property
-    # inspect.signature reads this descriptor when exposing factory arguments.
-    def __signature__(self) -> Signature:  # noqa: N807
-        return signature(self.factory)
+    def signature(self) -> Signature:
+        """Describe dependency parameters without binding or executing the factory."""
+        return inspect_signature(self.factory)
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Pass[T, U]:
         return Pass(self.name, self.factory(*args, **kwargs), self.contract)

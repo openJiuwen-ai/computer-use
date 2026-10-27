@@ -83,6 +83,7 @@ class Computer:
     # API, protocol, and native binding names retain their established spelling.
     # pylint: disable-next=invalid-name
     async def listApps(self):
+        """Return application choices with id, display_name, and is_running fields."""
         return await operation(lambda: self._controller.run(DiscoverApps()))
 
     async def read(self, *, view="both", full=False):

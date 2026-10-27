@@ -36,17 +36,18 @@ class Observation(Protocol):
 
 
 class AppInfo(Protocol):
+    """Discovered application with a public ID, display name, and running state."""
+
     @property
     def id(self) -> int:
         pass
 
     @property
-    # API, protocol, and native binding names retain their established spelling.
-    def displayName(self) -> str:  # pylint: disable=invalid-name
+    def display_name(self) -> str:
         pass
 
     @property
-    def isRunning(self) -> bool:  # pylint: disable=invalid-name
+    def is_running(self) -> bool:
         pass
 
 

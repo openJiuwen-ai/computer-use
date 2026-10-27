@@ -249,7 +249,7 @@ def directory_text(controller: SessionController, ui: UIHandle, directory: Direc
         def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
             for item in _source_items:
                 if controller.interfaces.references.window(item.id, directory["session"]) not in instance.members:
-                    yield template("{0} {1!r}; computer.app({0})", item.id, item.displayName)
+                    yield template("{0} {1!r}; computer.app({0})", item.id, item.display_name)
 
         lines.append(
             template(

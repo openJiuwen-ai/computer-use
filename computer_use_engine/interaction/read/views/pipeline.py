@@ -150,7 +150,7 @@ class InterfaceReadPipeline:
                 "Select an application instance with computer.app(id).",
                 "Tree: unavailable; no working instance has been selected.",
             ]
-            lines += [template("{0} {1!r}; computer.app({0})", item.id, item.displayName) for item in choices]
+            lines += [template("{0} {1!r}; computer.app({0})", item.id, item.display_name) for item in choices]
             if not choices:
                 lines.append("No observable working window. Installed/running does not imply an input context.")
             if isinstance(first, dict) and "detail" in first:

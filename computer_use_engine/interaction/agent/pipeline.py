@@ -213,8 +213,8 @@ class AgentInterfacePipeline:
                 template(
                     "{0} {1!r} ({2}); computer.app({0})",
                     app.id,
-                    app.displayName,
-                    "running" if app.isRunning else "installed",
+                    app.display_name,
+                    "running" if app.is_running else "installed",
                 )
                 for app in apps
             )

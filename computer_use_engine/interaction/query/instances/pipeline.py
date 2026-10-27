@@ -75,7 +75,7 @@ class ApplicationDiscoveryPipeline:
             )
             result.append(
                 FrozenRecord(
-                    dict(id=self.references.publish(entry), displayName=entry.display_name, isRunning=entry.running)
+                    dict(id=self.references.publish(entry), display_name=entry.display_name, is_running=entry.running)
                 )
             )
         if not result and directory["stopReasons"]:
@@ -104,5 +104,5 @@ class ApplicationDiscoveryPipeline:
             entry = ApplicationEntry(
                 directory["session"], directory["application"], title, True, directory, item["window"], name
             )
-            choices.append(FrozenRecord(dict(id=self.references.publish(entry), displayName=title, isRunning=True)))
+            choices.append(FrozenRecord(dict(id=self.references.publish(entry), display_name=title, is_running=True)))
         return choices
