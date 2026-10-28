@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from computer_use.diagnostics import local_failure
-from computer_use.interaction.query.instances.membership import ancestor, membership_evidence, roots
+from computer_use.interaction.query.instances.membership import ancestor, automatic_root, membership_evidence
 from computer_use.interaction.read.model import WindowSelectionRequired
 from computer_use.native.contracts import Knowledge
 from computer_use.native.query.directory import select_application, selected_window, surfaces_query
@@ -259,10 +259,9 @@ async def resolve(
         30000,
     )
     instance.directory = directory
-    candidates = roots(directory)
     chosen = selected_window(application, instance.selector) if application.get("windows") else None
-    if chosen is None and len(candidates) == 1 and not directory["stopReasons"]:
-        chosen = candidates[0]["window"]
+    if chosen is None and (candidate := automatic_root(directory)) is not None:
+        chosen = candidate["window"]
     state.running = RunningApplication(application["id"], application["displayName"], directory["session"])
     if chosen is None:
         return directory, None
