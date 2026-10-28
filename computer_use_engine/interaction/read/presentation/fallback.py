@@ -9,6 +9,8 @@ It does not acquire new facts, infer containment, or create operation targets.
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -17,8 +19,6 @@ if TYPE_CHECKING:
 
     from computer_use.interaction.read.presentation.records import NodeView, RenderedTree
     from computer_use.protocol.records import FactCollection, FactNode
-import json
-import re
 
 
 def display_node_facts(node: FactNode) -> FactNode:

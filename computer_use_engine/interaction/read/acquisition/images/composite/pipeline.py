@@ -1,25 +1,17 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Compose only proved window layouts; retain independent native capture maps."""
+"Compose only proved window layouts; retain independent native capture maps."
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast
-
-if TYPE_CHECKING:
-    from typing import Any, Sequence
-
-    from computer_use.interaction.controller import SessionController
-    from computer_use.interaction.read.acquisition.images.capture import WindowImage
-    from computer_use.interaction.read.views.pipeline import WindowPart
-    from computer_use.interaction.records import UIHandle
 import base64
 import hashlib
 import math
 import weakref
 from dataclasses import asdict, replace
 from io import BytesIO
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import uuid4
 
 from computer_use.interaction.query.instances.membership import ancestor
@@ -34,6 +26,17 @@ from computer_use.session.interface_images import (
     signature,
 )
 from PIL import Image
+
+if TYPE_CHECKING:
+    from typing import Any, Sequence
+    from computer_use.session.image_coordinates import ImageCoordinates
+
+    from computer_use.interaction.controller import SessionController
+    from computer_use.interaction.read.acquisition.images.capture import WindowImage
+    from computer_use.interaction.read.views.pipeline import WindowPart
+    from computer_use.interaction.records import UIHandle
+    from computer_use.native.scopes import WorkingWindow
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 class InterfaceImagePipeline:
@@ -62,11 +65,11 @@ class InterfaceImagePipeline:
         from computer_use.interaction.query.instances.scope import allowed
 
         members = allowed(ui)
-        images = [
-            (next(key for key, item in members.items() if item["surface"] == part.target.surface), part.image)
-            for part in parts
-            if part.image is not None
-        ]
+        images = []
+        for part in parts:
+            if part.image is not None:
+                key = next(key for key, item in members.items() if item["surface"] == part.target.surface)
+                images.append((key, part.image))
         if not images:
             return None, [
                 text(
@@ -84,9 +87,12 @@ class InterfaceImagePipeline:
                 raise ValueError("The window captures use different native coordinate spaces.")
             frames = {key: frame(image) for key, image in images} if len(images) > 1 else {}
             for index, (key, image) in enumerate(images):
-                for other, _ in images[index + 1 :]:
+                for other, _ in images[slice(index + 1, None)]:
                     if overlaps(frames[key], frames[other]) and not (
+                        # The pipeline shares retained bindings with their owning service.
+                        # pylint: disable-next=protected-access
                         ancestor(cast("DirectoryFacts", ui._instance.directory), key, other)
+                        # pylint: disable-next=protected-access
                         or ancestor(cast("DirectoryFacts", ui._instance.directory), other, key)
                     ):
                         raise ValueError(
@@ -94,6 +100,7 @@ class InterfaceImagePipeline:
                         )
 
             def depth(key: str) -> int:
+                # pylint: disable-next=protected-access
                 return sum(ancestor(ui._instance.directory, key, other) for other in members if key != other)
 
             images.sort(key=lambda item: depth(item[0]))
@@ -126,6 +133,7 @@ class InterfaceImagePipeline:
                     buffer = BytesIO()
                     pixels.save(buffer, format="PNG")
                 stamps = [capture_metadata(image.image) for _, image in images]
+                # pylint: disable-next=protected-access
                 scope = "ui:" + cast("WorkingWindow", ui._instance.anchor).root.surface + ":" + str(ui._anchor)
                 png = decode_capture(
                     dict(
@@ -148,6 +156,7 @@ class InterfaceImagePipeline:
         except (ValueError, OSError) as error:
             key, image = images[0]
             canvas = InterfaceImage(image.image, (), signature(members), unavailable_mapping=True)
+            # pylint: disable-next=protected-access
             ref = next(ref for ref, window in ui._instance.windows.items() if window == key)
             displayed, kind = (key,), "partial"
             notes = [
@@ -155,7 +164,11 @@ class InterfaceImagePipeline:
                     "Screenshot: partial; shows only window {}, not the complete instance layout. {}", ref, str(error)
                 ),
                 template(
-                    'Coordinates unavailable on this partial canvas; use app.window({}).read(view="image") or Computer.read(view="image").',
+                    (
+                        "Coordinates unavailable on this partial canvas; use "
+                        'app.window({}).read(view="image") or '
+                        'Computer.read(view="image").'
+                    ),
                     ref,
                 ),
             ]
@@ -211,24 +224,32 @@ class InterfaceImagePipeline:
         """
         adapters = self.controller.adapters
         canvas.digest = hashlib.sha256(canvas.png).digest()
+        # pylint: disable-next=protected-access
         previous = ui._image
 
         def sources(value: Any) -> tuple[Any, ...]:
             return tuple((piece.window, replace(piece.image.target, capture=None), piece.box) for piece in value.pieces)
 
-        if (
-            previous is not None
-            and not previous.expired
-            and not previous.unavailable_mapping
-            and previous.delivered == adapters.image_delivery_epoch()
-            and previous.digest == canvas.digest
-            and previous.membership == canvas.membership
-            and sources(previous) == sources(canvas)
-        ):
+        matches_previous = (
+            True
+            if (
+                previous is not None
+                and not previous.expired
+                and not previous.unavailable_mapping
+                and previous.delivered == adapters.image_delivery_epoch()
+                and previous.digest == canvas.digest
+                and previous.membership == canvas.membership
+                and sources(previous) == sources(canvas)
+            )
+            else False
+        )
+        if matches_previous:
             # Knowledge of identical pixels can survive a fresh capture. The
             # command still dispatches through its new native token and map.
             canvas.delivered = previous.delivered
+            canvas.delivered_coordinates = previous.delivered_coordinates
         owner, value = weakref.ref(ui), weakref.ref(canvas)
+        # pylint: disable-next=protected-access
         session = cast("WorkingWindow", ui._instance.anchor).root.session
         controller = weakref.ref(self.controller)
 
@@ -238,32 +259,32 @@ class InterfaceImagePipeline:
                 target is not None
                 and image is not None
                 and native is not None
+                # pylint: disable-next=protected-access
                 and target._image is image
                 and not image.expired
                 and native.transport.session == session
                 and hashlib.sha256(image.png).digest() == image.digest
             )
 
-        def delivered() -> None:
+        def delivered(coordinates: ImageCoordinates | None = None) -> None:
             if current():
                 value().delivered = adapters.image_delivery_epoch()
+                value().delivered_coordinates = coordinates
 
         adapters.register_image(
             canvas.png,
             dict(
                 kind="window",
+                # pylint: disable-next=protected-access
                 selector=str(ui._instance.selector),
                 context=template(
                     "App instance {}; {}",
+                    # pylint: disable-next=protected-access
                     cast("WorkingWindow", ui._instance.anchor).name,
+                    # pylint: disable-next=protected-access
                     "overall view" if ui._anchor is None else "fixed Window",
                 ),
                 current=current,
                 delivered=delivered,
             ),
         )
-
-
-if TYPE_CHECKING:
-    from computer_use.native.scopes import WorkingWindow
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts

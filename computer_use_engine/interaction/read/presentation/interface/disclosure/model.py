@@ -74,7 +74,13 @@ class CapturedTextField:
 
 @dataclass(frozen=True)
 class TextFragment:
-    """An exact half-open Python-character range of a captured string."""
+    """An exact half-open Python-character range of a captured string.
+
+    Attributes:
+        start: Inclusive Python Unicode-code-point offset in the original string.
+        end: Exclusive Python Unicode-code-point offset in the original string.
+        text: Exact captured substring for this span.
+    """
 
     start: int
     end: int
@@ -87,6 +93,11 @@ class TextExcerpt:
 
     The original value is retained separately from the fragments. Consumers render
     an explicit excerpt notice and use ref for read_details(element=...).
+
+    Attributes:
+        source: Complete captured scalar and its same-observation recovery identity.
+        fragments: Retained exact source spans in source order.
+        estimated_saved_units: Estimated token-cost reduction after presentation and recovery allowances.
     """
 
     source: CapturedTextField
@@ -111,7 +122,13 @@ class TextExcerpt:
 
 @dataclass(frozen=True)
 class DisclosureRequest:
-    """Verified fields and the local policy for one pure disclosure decision."""
+    """Verified fields and the local policy for one pure disclosure decision.
+
+    Attributes:
+        fields: Complete captured scalar fields eligible for excerpt assessment.
+        enabled: Whether this request enables the optional presentation transformation.
+        policy: Thresholds and recovery allowances used to choose candidates.
+    """
 
     fields: tuple[CapturedTextField, ...]
     enabled: bool = False
@@ -120,7 +137,12 @@ class DisclosureRequest:
 
 @dataclass(frozen=True)
 class ClassifiedDisclosure:
-    """Candidates permitted by field protection, before benefit estimation."""
+    """Candidates permitted by field protection, before benefit estimation.
+
+    Attributes:
+        request: Immutable inputs and policy for this local planning stage.
+        candidates: Complete fields satisfying local source-protection rules.
+    """
 
     request: DisclosureRequest
     candidates: tuple[CapturedTextField, ...]
@@ -128,7 +150,11 @@ class ClassifiedDisclosure:
 
 @dataclass(frozen=True)
 class SelectedDisclosure:
-    """Chosen excerpts awaiting exact range and source-route validation."""
+    """Chosen excerpts awaiting exact range and source-route validation.
+
+    Attributes:
+        excerpts: Chosen source fragments awaiting final source and range validation.
+    """
 
     excerpts: tuple[TextExcerpt, ...]
 

@@ -54,7 +54,16 @@ class InterfaceTextRequest:
 
 @dataclass(frozen=True)
 class FormattedInterface:
-    """Serialized blocks and their independent nodes for contextual diff delivery."""
+    """Serialized blocks and their independent nodes for contextual diff delivery.
+
+    Attributes:
+        request: Immutable inputs and policy for this local planning stage.
+        lines: Final formatted interface lines in planned reading order.
+        nodes: Rendered source nodes with original references and provenance.
+        suffix: Trailing declarations retained after the interface body.
+        prefix: Delta marker prefix used when serializing selected nodes.
+        background_content: Complete captured content catalogues keyed by their recovery section.
+    """
 
     request: InterfaceTextRequest
     lines: tuple[str, ...]

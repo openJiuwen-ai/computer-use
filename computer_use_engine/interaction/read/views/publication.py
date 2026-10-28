@@ -5,22 +5,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import asdict
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from computer_use.interaction.controller import SessionController
-    from computer_use.interaction.read.acquisition.components.support import ObservationGap
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
-    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
-    from computer_use.interaction.read.views.pipeline import WindowPart
-    from computer_use.interaction.records import UIHandle
-    from computer_use.native.contracts import Binding
-    from computer_use.protocol.png import PNG
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
-    from computer_use.types import Observation
 from computer_use.interaction.query.instances.scope import allowed
 from computer_use.interaction.read.presentation.content import DisplayText, join, template
 from computer_use.interaction.read.presentation.content import json_value as quoted
@@ -34,6 +22,21 @@ from computer_use.session.events import observation_completed
 from computer_use.session.interfaces import ApplicationEntry
 from computer_use.session.observation import lazy_observation
 from computer_use.session.observation_data import retain_observation_data
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from computer_use.interaction.controller import SessionController
+    from computer_use.interaction.read.acquisition.components.support import ObservationGap
+    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
+    from computer_use.interaction.read.views.pipeline import WindowPart
+    from computer_use.interaction.records import UIHandle
+    from computer_use.native.contracts import Binding
+    from computer_use.native.scopes import WorkingWindow
+    from computer_use.protocol.png import PNG
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
+    from computer_use.types import Observation
 
 
 def tree_text(
@@ -125,32 +128,28 @@ def publish(
     refs = {ref: node for _, snapshot in trees for ref, node in snapshot.refs.items()}
     windows, instance, identity = {}, None, None
     if owner is not None:
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         state = owner._instance
         if state.anchor is not None:
             permitted = allowed(owner)
             windows = {str(ref): key for ref, key in state.windows.items() if key in permitted}
             alias = {key: ref for ref, key in windows.items()}
             current = getattr(owner, "_context", None)
-            identity = dict(
-                current=alias.get(current),
-                windows=[
-                    dict(
-                        ref=ref,
-                        title=permitted[key]["title"],
-                        **{
-                            name: permitted[key][name]
-                            for name in ("modal", "document")
-                            if permitted[key].get(name) is not None
-                        },
-                        **(
-                            dict(parent=alias[permitted[key]["parent"]])
-                            if permitted[key].get("parent") in alias
-                            else {}
-                        ),
-                    )
-                    for ref, key in windows.items()
-                ],
-            )
+            identity = dict(current=alias.get(current), windows=[])
+            for ref, key in windows.items():
+                window_data = dict(
+                    ref=ref,
+                    title=permitted[key]["title"],
+                    **{
+                        name: permitted[key][name]
+                        for name in ("modal", "document")
+                        if permitted[key].get(name) is not None
+                    },
+                )
+                if permitted[key].get("parent") in alias:
+                    window_data["parent"] = alias[permitted[key]["parent"]]
+                identity["windows"].append(window_data)
             focused = (directory or state.directory).get("focusedWindow")
             if focused in alias:
                 identity["focusedWindow"] = alias[focused]
@@ -304,31 +303,38 @@ def directory_text(
             this header, paired with their original directory objects. Only identical source
             objects can cover a repeated directory reason.
     """
+    # pylint: disable-next=protected-access
     instance = ui._instance
     selected = cast("WorkingWindow", instance.anchor).root.root_window
     view = (
         "instance"
+        # pylint: disable-next=protected-access
         if ui._anchor is None
+        # pylint: disable-next=protected-access
         else template("Window {0}", next(ref for ref, key in instance.windows.items() if key == ui._anchor))
     )
     lines = [template("App: {0} ({1}).", quoted(cast("WorkingWindow", instance.anchor).name), view)]
     if len(instance.members) > 1:
-        windows = [
-            template(
-                "{0} {1}{2}{3}{4}",
-                ref,
-                quoted(instance.members[key]["title"]),
-                " (main)" if key == selected else "",
-                " (modal)" if instance.members[key]["modal"] is True else "",
+        windows = []
+        for ref, key in instance.windows.items():
+            windows.append(
                 template(
-                    " (parent={0})",
-                    next((r for r, w in instance.windows.items() if w == instance.members[key]["parent"]), "unknown"),
+                    "{0} {1}{2}{3}{4}",
+                    ref,
+                    quoted(instance.members[key]["title"]),
+                    " (main)" if key == selected else "",
+                    " (modal)" if instance.members[key]["modal"] is True else "",
+                    template(
+                        " (parent={0})",
+                        next(
+                            (r for r, w in instance.windows.items() if w == instance.members[key]["parent"]),
+                            "unknown",
+                        ),
+                    )
+                    if instance.members[key]["parent"] is not None
+                    else "",
                 )
-                if instance.members[key]["parent"] is not None
-                else "",
             )
-            for ref, key in instance.windows.items()
-        ]
         lines.append(
             template(
                 "Windows: {0}; current={1}",
@@ -349,16 +355,17 @@ def directory_text(
         choices = controller.interfaces.discovery.publish_choices(
             cast("WorkingWindow", instance.anchor).name, directory
         )
+
+        def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for item in _source_items:
+                if controller.interfaces.references.window(item.id, directory["session"]) not in instance.members:
+                    yield template("{0} {1!r}", item.id, item.display_name)
+
         lines.append(
             template(
                 "Other independent or unconfirmed windows: {0}; select with computer.app(id).",
                 join(
-                    (
-                        template("{0} {1!r}", item.id, item.display_name)
-                        for item in choices
-                        if controller.interfaces.references.window(item.id, directory["session"])
-                        not in instance.members
-                    ),
+                    _iter_item(iter(choices)),
                     "; ",
                 ),
             )
@@ -391,7 +398,3 @@ def window_heading(ui: UIHandle, ref: int, title: str) -> DisplayText:
     instance = ui._instance
     listed = len(instance.members) > 1 and instance.members.get(instance.windows.get(ref), {}).get("title") == title
     return template("Window {0}:", ref) if listed else template("Window {0}: {1}", ref, quoted(title))
-
-
-if TYPE_CHECKING:
-    from computer_use.native.scopes import WorkingWindow

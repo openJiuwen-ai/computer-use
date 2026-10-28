@@ -7,15 +7,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.compression.model import Scope
-    from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView, ViewNode
 from computer_use.interaction.read.presentation.compression.captions import passive_caption
 from computer_use.interaction.read.presentation.compression.evidence import complete_destination
 from computer_use.interaction.read.presentation.compression.policy import CONTROLS, REGIONS, sources
 from computer_use.interaction.read.presentation.policy import editing
 from computer_use.interaction.read.presentation.tree import VALUE_PREVIEW_LIMIT, has_incomplete_children
-from computer_use.protocol.primitives import utf16_length
+from computer_use.protocol.primitives import required_item, utf16_length
+
+if TYPE_CHECKING:
+    from computer_use.interaction.read.presentation.compression.model import Scope
+    from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView, ViewNode
 
 
 def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: ViewNode, scope: Scope) -> list[ViewNode]:
@@ -25,11 +26,10 @@ def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: Vie
     against the parent's whole textual fields. Adopt the child's source evidence into those
     fields and record its folded destination.
     """
+    if not node.get("_factBacked") or scope.in_table or editing(node):
+        return [node]
     if (
-        not node.get("_factBacked")
-        or scope.in_table
-        or editing(node)
-        or node["role"] not in REGIONS | CONTROLS | {"heading", "staticText"}
+        node["role"] not in REGIONS | CONTROLS | {"heading", "staticText"}
         or node.get("preserveGroup")
         and not state.context.get("compact")
         or has_incomplete_children(node)
@@ -51,29 +51,39 @@ def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: Vie
             continue
         value = node.get(field)
         parts = [part for part in node["textSources"] if part["field"] == field]
-        if (
-            isinstance(value, str)
-            and value
-            and utf16_length(value) <= VALUE_PREVIEW_LIMIT
-            and (not parts or all(part["text"] == value for part in parts))
-        ):
+        matches_value = (
+            True
+            if (
+                isinstance(value, str)
+                and value
+                and utf16_length(value) <= VALUE_PREVIEW_LIMIT
+                and (not parts or all(part["text"] == value for part in parts))
+            )
+            else False
+        )
+        if matches_value:
             destinations.setdefault(value, field)
 
     retained = []
     for child in node["children"]:
         parts = sources(child)
-        if (
-            child["role"] != "staticText"
-            or child["children"]
-            or not passive_caption(state, edit, child, node)
-            or any(child.get(key) for key in ("labelTargets", "titleRef", "valueIsNumber"))
-            or not parts
-            or any(part["text"] not in destinations for part in parts)
-        ):
+        matches_child = (
+            True
+            if (
+                child["role"] != "staticText"
+                or child["children"]
+                or not passive_caption(state, edit, child, node)
+                or any(child.get(key) for key in ("labelTargets", "titleRef", "valueIsNumber"))
+                or not parts
+                or any(part["text"] not in destinations for part in parts)
+            )
+            else False
+        )
+        if matches_child:
             retained.append(child)
             continue
         for part in parts:
-            field = destinations[part["text"]]
+            field = required_item(destinations, part["text"])
             if not any(p["field"] == field for p in node["textSources"]):
                 # Value was previously recorded on its own ref. Include it as
                 # well as the caption source, so neither field loses coverage.

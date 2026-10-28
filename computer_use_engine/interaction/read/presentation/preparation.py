@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, fields
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -326,14 +326,23 @@ class PreparedSnapshot:
         if not self.request.compact:
             return ()
         refs = []
-        native_nodes = {
-            ref: node
-            for root in self.roots
-            if root.projection is not None
-            for ref, node in root.projection["nativeNodes"].items()
-        }
+
+        def _iter_root(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for root in _source_items:
+                if root.projection is not None:
+                    for ref, node in root.projection["nativeNodes"].items():
+                        yield (ref, node)
+
+        native_nodes = dict(_iter_root(iter(self.roots)))
         projected_nodes = {}
-        pending = [node for root in self.roots if root.projection is not None for node in root.projection["roots"]]
+
+        def _iter_root_items(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for root in _source_items:
+                if root.projection is not None:
+                    for node in root.projection["roots"]:
+                        yield node
+
+        pending = list(_iter_root_items(iter(self.roots)))
         while pending:
             projected = pending.pop()
             projected_nodes[projected["ref"]] = projected
@@ -347,9 +356,13 @@ class PreparedSnapshot:
                 "childCount", 0
             )
             projected = projected_nodes.get(node.ref)
-            if (projected is not None and unexpanded_menu(projected)) or (
-                partial and "childrenStart" in facts and "nextChildOffset" in facts
-            ):
+            matches_partial = (
+                True
+                if (projected is not None and unexpanded_menu(projected))
+                or (partial and "childrenStart" in facts and "nextChildOffset" in facts)
+                else False
+            )
+            if matches_partial:
                 refs.append(node.ref)
         return tuple(sorted(refs))
 

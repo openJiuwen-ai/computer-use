@@ -32,7 +32,12 @@ class SharedCoverage:
 
 @dataclass(frozen=True)
 class CoverageRequest:
-    """Validated block organization and immutable per-source coverage facts."""
+    """Validated block organization and immutable per-source coverage facts.
+
+    Attributes:
+        interface: Structured block forest selected for this captured view.
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+    """
 
     interface: InterfaceDocument
     atoms: AtomDocument
@@ -40,7 +45,12 @@ class CoverageRequest:
 
 @dataclass(frozen=True)
 class CoveragePlan:
-    """Whole-view declarations; original atom hints remain available for diff reads."""
+    """Whole-view declarations; original atom hints remain available for diff reads.
+
+    Attributes:
+        by_block: Shared child-coverage declarations keyed by internal block identity.
+        omitted_refs: Original atom references whose coverage is expressed by those declarations.
+    """
 
     by_block: Mapping[str, tuple[SharedCoverage, ...]] = field(default_factory=lambda: MappingProxyType({}))
     omitted_refs: frozenset[str] = frozenset()

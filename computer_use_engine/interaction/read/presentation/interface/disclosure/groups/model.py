@@ -24,6 +24,17 @@ class GroupDisclosurePolicy:
 
     Recovery weight is a conservative local cost allowance, not a measured task
     probability. The raw recovery cost is retained separately for acceptance.
+
+    Attributes:
+        minimum_objects: Minimum number of original objects required for an overview.
+        minimum_characters: Minimum captured Python-character count before overview assessment.
+        head_characters: Python characters retained at the beginning of an overview.
+        tail_characters: Python characters retained at the end of an overview.
+        minimum_saved_units: Minimum estimated token-cost saving after recovery allowance.
+        minimum_saved_fraction: Minimum saving as a fraction of the original display estimate.
+        recovery_weight: Local weighting applied to estimated recovery cost.
+        recovery_page_characters: Python characters assumed per detail-recovery page.
+        recovery_call_units: Estimated token-cost allowance for each recovery call.
     """
 
     minimum_objects: int = 3
@@ -68,6 +79,14 @@ class WindowDisclosureContext:
     cannot establish them. A current modal window always remains expanded.
     ``scope_confirmed`` checks the collected root against its fixed native binding;
     ``directory_complete`` separately records whether other windows may be missing.
+
+    Attributes:
+        window_ref: Published window-directory reference for this capture.
+        current: Whether this is the currently observed member window.
+        modal: Reported native modal state, or None when unknown.
+        confirmed_blockers: Confirmed modal descendant-window references blocking this window.
+        directory_complete: Whether the source window directory was completely collected.
+        scope_confirmed: Whether the collected root matches its original fixed window binding.
     """
 
     window_ref: int
@@ -80,7 +99,18 @@ class WindowDisclosureContext:
 
 @dataclass(frozen=True)
 class GroupDisclosureRequest:
-    """Frozen structured content and capture facts for one root's overview selection."""
+    """Frozen structured content and capture facts for one root's overview selection.
+
+    Attributes:
+        interface: Structured block forest selected for this captured view.
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        snapshot: Frozen capture and native binding metadata used to verify recovery routes.
+        enabled: Whether this request enables the optional presentation transformation.
+        policy: Thresholds and recovery allowances used to choose candidates.
+        window_context: Independent directory and modal-chain evidence for this member.
+        field_disclosure: Already selected field excerpts retained during group planning.
+        recovery_prefix_units: Estimated recovery units preceding this root in the detail document.
+    """
 
     interface: InterfaceDocument
     atoms: AtomDocument
@@ -98,7 +128,15 @@ class GroupDisclosureRequest:
 
 @dataclass(frozen=True)
 class CapturedGroupField:
-    """A native field occurrence before normalization, including its original scalar type."""
+    """A native field occurrence before normalization, including its original scalar type.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        native_field: Original provider selector retained in captured details.
+        value: Complete captured value with its original scalar type.
+        normalized: Normalized scalar corresponding to the original provider value.
+        attribute: Projected scalar-slot name associated with the provider field.
+    """
 
     ref: str
     native_field: str
@@ -109,7 +147,14 @@ class CapturedGroupField:
 
 @dataclass(frozen=True)
 class GroupField:
-    """One hidden presentation field with its full value and exact original fact provenance."""
+    """One hidden presentation field with its full value and exact original fact provenance.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        slot_key: Stable local scalar-slot key on the original atom.
+        slot: Complete source-bound atom slot retained for this field.
+        sources: Complete original native occurrences supporting this presentation field.
+    """
 
     ref: str
     slot_key: str
@@ -119,7 +164,16 @@ class GroupField:
 
 @dataclass(frozen=True)
 class GroupFragment:
-    """Original characters from a source field; offsets are Python-character half-open ranges."""
+    """Original characters from a source field; offsets are Python-character half-open ranges.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        slot_key: Stable local scalar-slot key on the original atom.
+        start: Inclusive Python Unicode-code-point offset in the original string.
+        end: Exclusive Python Unicode-code-point offset in the original string.
+        text: Exact captured substring for this span.
+        source: Exact provider occurrence supporting this substring, when available.
+    """
 
     ref: str
     slot_key: str
@@ -131,7 +185,14 @@ class GroupFragment:
 
 @dataclass(frozen=True)
 class GroupEntry:
-    """One catalogue object with unchanged identity, hierarchy, role and full source-bound fields."""
+    """One catalogue object with unchanged identity, hierarchy, role and full source-bound fields.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        parent: Original projected parent reference, when present.
+        role: Source-backed role selected for this reading unit.
+        fields: Complete original field slots retained in this catalogue entry.
+    """
 
     ref: str
     parent: str | None
@@ -180,6 +241,15 @@ class BackgroundOverview(GroupOverview):
     The fixed window binding and known modal-parent chain establish blocking.
     Global directory completeness is independent: missing windows and collection
     gaps remain visible. Every child keeps its original atom and detail target.
+
+    Attributes:
+        window_ref: Published window-directory reference for this capture.
+        blockers: Confirmed modal descendant windows explaining this overview.
+        directory_complete: Whether the source window directory was completely collected.
+        important_refs: Original references with state that must remain visible in the overview.
+        uncertain_refs: Original references whose state or collection remains uncertain.
+        nested_windows: Original nested-window references retained within this captured subtree.
+        state_facts: Exact original reference, state-field name, and captured-value triples.
     """
 
     window_ref: int
@@ -193,7 +263,14 @@ class BackgroundOverview(GroupOverview):
 
 @dataclass(frozen=True)
 class GroupAssessment:
-    """A deterministic acceptance or rejection with its local source scope."""
+    """A deterministic acceptance or rejection with its local source scope.
+
+    Attributes:
+        parent_key: Internal parent block identity for this candidate run.
+        child_keys: Ordered consecutive child block identities in the assessed run.
+        reason: Source-specific explanation for the selected decision or coverage gap.
+        accepted: Whether the candidate satisfies this stage's evidence and benefit requirements.
+    """
 
     parent_key: str
     child_keys: tuple[str, ...]
@@ -203,7 +280,15 @@ class GroupAssessment:
 
 @dataclass(frozen=True)
 class ClassifiedGroups:
-    """Protected native sources and subtree membership before candidate selection."""
+    """Protected native sources and subtree membership before candidate selection.
+
+    Attributes:
+        request: Immutable inputs and policy for this local planning stage.
+        protections: Original source references mapped to reasons requiring expanded disclosure.
+        block_refs: Each internal block mapped to its complete original-source membership.
+        assessments: Recorded acceptance and rejection decisions with their local scope.
+        native_fields: Original reference/slot pairs mapped to their complete provider field occurrences.
+    """
 
     request: GroupDisclosureRequest
     protections: Mapping[str, tuple[str, ...]]
@@ -216,7 +301,13 @@ class ClassifiedGroups:
 
 @dataclass(frozen=True)
 class SelectedGroups:
-    """Nonoverlapping passive overviews awaiting exact capture and range validation."""
+    """Nonoverlapping passive overviews awaiting exact capture and range validation.
+
+    Attributes:
+        classified: Candidate membership and protection evidence retained from classification.
+        groups: Selected nonoverlapping overviews with exact same-capture recovery routes.
+        assessments: Recorded acceptance and rejection decisions with their local scope.
+    """
 
     classified: ClassifiedGroups
     groups: tuple[GroupOverview, ...]
@@ -230,6 +321,12 @@ class GroupDisclosurePlan:
     Full text replaces child runs. Individual atomic text and native bindings stay
     unchanged. Whole-observation read_details, with its real pagination, restores
     these catalogues; an individual element detail is not a subtree read.
+
+    Attributes:
+        groups: Selected nonoverlapping overviews with exact same-capture recovery routes.
+        omitted_slots: Original reference-to-slot keys represented by a shared or recovered destination.
+        protected_refs: Original references and the evidence requiring their independent disclosure.
+        assessments: Recorded acceptance and rejection decisions with their local scope.
     """
 
     groups: tuple[GroupOverview, ...] = ()

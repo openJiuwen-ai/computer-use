@@ -9,24 +9,24 @@ native action catalogues. Unknown controls and meaningful state stay visible.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import Iterable, Sequence
-
-    from computer_use.interaction.read.presentation.actions.control_raises import ControlRaise
-    from computer_use.interaction.read.presentation.actions.menu_mechanisms import MenuMechanism
-    from computer_use.interaction.read.presentation.containment import PublishedTableColumn
-    from computer_use.interaction.read.presentation.records import FormatField, NodeView, SnapshotFacts
-    from computer_use.protocol.records import Record
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.facts.groups import reference_set
 from computer_use.interaction.read.presentation.containment import containment_notes
 from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.interaction.read.presentation.menu_diagnostics import incidental_menu_label_error
 from computer_use.interaction.read.presentation.policy import SUPPORTING_ACTIONS, editing
+
+if TYPE_CHECKING:
+    from typing import Any, Iterable, Mapping, Sequence
+
+    from computer_use.interaction.read.presentation.actions.control_raises import ControlRaise
+    from computer_use.interaction.read.presentation.actions.menu_mechanisms import MenuMechanism
+    from computer_use.interaction.read.presentation.containment import PublishedTableColumn
+    from computer_use.interaction.read.presentation.records import FormatField, NodeView, SnapshotFacts
+    from computer_use.protocol.records import Record
 
 
 def display_actions(
@@ -36,7 +36,7 @@ def display_actions(
     menu_mechanisms: tuple[MenuMechanism, ...] = (),
     control_raises: tuple[ControlRaise, ...] = (),
 ) -> list[Record]:
-    # Keep context-menu actions executable.
+    # Supporting actions remain executable through captured details.
     from computer_use.interaction.read.presentation.actions.control_raises import control_raise_selected
     from computer_use.interaction.read.presentation.actions.menu_mechanisms import menu_action_selected
 
@@ -70,8 +70,8 @@ def unexpanded_menu(node: NodeView) -> bool:
 def display_url(value: str, format_field: FormatField, limit: int = 160, *, hint: str = "see details") -> str:
     """Bound incidental URLs without destroying paths, queries or data bytes.
 
-    The complete URL remains available in details from the same capture.
-    Preserve its query, fragment and destination when producing the display.
+    The exact URL is in details from this same capture. Do
+    not silently drop a query/fragment or rewrite a destination.
 
     Args:
         format_field: Pure formatter for one text field.
@@ -418,7 +418,3 @@ def observation_warnings(
             for path, state in collection
         )
     return ["Read notes:\n" + "\n".join("\t" + line for line in warnings)] if warnings else []
-
-
-if TYPE_CHECKING:
-    from typing import Any, Mapping

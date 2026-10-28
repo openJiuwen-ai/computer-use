@@ -8,11 +8,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.compression.descriptions import shared_description
-
-if TYPE_CHECKING:
-    from typing import Any
-
-    from computer_use.interaction.read.presentation.records import NodeView
 from computer_use.interaction.read.presentation.policy import independent_actions
 from computer_use.interaction.read.presentation.tree import (
     carries_value,
@@ -23,6 +18,12 @@ from computer_use.interaction.read.presentation.tree import (
     unique,
 )
 from computer_use.native.semantics import TABLE_FIELDS
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from computer_use.interaction.read.presentation.records import NodeView
+
 
 WRAPPERS = {"group", "cell", "column"}
 REGIONS = {
@@ -204,26 +205,36 @@ def secondary_actions(node: NodeView) -> list[Any]:
             )
         ):
             continue
-        if (
-            kind == "select"
-            and not node.get("selectable")
-            and caps is None
-            and node["role"] in ("menuItem", "menuBarItem")
-        ):
+        matches_kind = (
+            True
+            if (
+                kind == "select"
+                and not node.get("selectable")
+                and caps is None
+                and node["role"] in ("menuItem", "menuBarItem")
+            )
+            else False
+        )
+        if matches_kind:
             continue
-        if (
-            kind == "show_menu"
-            and not node.get("selectable")
-            and node.get("pressable")
-            and node["role"] in ("popUpButton", "menuButton", "comboBox")
-            and (
-                caps is None
-                or (
-                    caps.get("click") == "available"
-                    and not any(a.get("kind", a["name"]) == "invoke" for a in node.get("actions", []))
+        matches_kind_condition = (
+            True
+            if (
+                kind == "show_menu"
+                and not node.get("selectable")
+                and node.get("pressable")
+                and node["role"] in ("popUpButton", "menuButton", "comboBox")
+                and (
+                    caps is None
+                    or (
+                        caps.get("click") == "available"
+                        and not any(a.get("kind", a["name"]) == "invoke" for a in node.get("actions", []))
+                    )
                 )
             )
-        ):
+            else False
+        )
+        if matches_kind_condition:
             continue
         if kind in ("expand", "collapse") and node.get("expandable") and caps is None:
             continue

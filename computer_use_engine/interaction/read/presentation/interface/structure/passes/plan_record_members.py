@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from computer_use.interaction.read.presentation.interface.structure.algorithms.plan_record_members import apply
-from computer_use.interaction.read.presentation.interface.model import InterfaceDraft, InterfaceDraft
+from computer_use.interaction.read.presentation.interface.model import InterfaceDraft
 from computer_use.pipeline import Contract, Effect, Pass
 from computer_use.pipeline.core import Control
 

@@ -7,13 +7,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence as SequenceItems
-    from typing import Callable
-
-    from computer_use.interaction.read.presentation.records import FormatField, NodeView
-    from computer_use.pipeline.core import Step
-    from computer_use.protocol.records import Record
 from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
 from computer_use.interaction.read.presentation.rendering.layout.passes.group_child_coverage import (
     stage as group_child_coverage,
@@ -21,9 +14,7 @@ from computer_use.interaction.read.presentation.rendering.layout.passes.group_ch
 from computer_use.interaction.read.presentation.rendering.layout.passes.group_empty_values import (
     execute as apply_group_empty_values,
 )
-from computer_use.interaction.read.presentation.rendering.layout.passes.group_empty_values import (
-    group_empty_values,
-)
+from computer_use.interaction.read.presentation.rendering.layout.passes.group_empty_values import group_empty_values
 from computer_use.interaction.read.presentation.rendering.layout.passes.group_field_descriptions import (
     stage as group_field_descriptions,
 )
@@ -63,15 +54,11 @@ from computer_use.interaction.read.presentation.rendering.layout.passes.join_con
 from computer_use.interaction.read.presentation.rendering.layout.passes.join_text_parts import (
     execute as apply_join_text_parts,
 )
-from computer_use.interaction.read.presentation.rendering.layout.passes.join_text_parts import (
-    join_text_parts,
-)
+from computer_use.interaction.read.presentation.rendering.layout.passes.join_text_parts import join_text_parts
 from computer_use.interaction.read.presentation.rendering.layout.passes.join_visual_chains import (
     execute as apply_join_visual_chains,
 )
-from computer_use.interaction.read.presentation.rendering.layout.passes.join_visual_chains import (
-    join_visual_chains,
-)
+from computer_use.interaction.read.presentation.rendering.layout.passes.join_visual_chains import join_visual_chains
 from computer_use.interaction.read.presentation.rendering.layout.passes.publish_table_containment import (
     stage as publish_table_containment,
 )
@@ -88,6 +75,15 @@ from computer_use.interaction.read.presentation.rendering.layout.passes.share_ta
     stage as share_table_entries,
 )
 from computer_use.pipeline import Contract, Pass, Pipeline, Select, Sequence
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence as SequenceItems
+    from typing import Callable
+
+    from computer_use.interaction.read.presentation.records import FormatField, NodeView
+    from computer_use.pipeline.core import Step
+    from computer_use.protocol.records import Record
+
 
 STAGES = (group_empty_values, join_container_chains, join_text_parts)
 

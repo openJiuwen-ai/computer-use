@@ -195,6 +195,8 @@ class SessionController:
             parameter = "desktopRef"
         else:
             target, parameter = params["appRef"], "appRef"
+        if owner is None and method in ("click", "scroll", "drag"):
+            params = self.desktop.map_parameters(method, params)
         intent = dict(type_text="insert", press_key="key").get(method, method)
         return await self._execute(
             owner,

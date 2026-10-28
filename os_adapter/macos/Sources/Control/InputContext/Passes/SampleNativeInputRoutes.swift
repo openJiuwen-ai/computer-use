@@ -227,8 +227,9 @@ import ApplicationServices
                     declare(
                         .menuAction(action.name, action.description), supported: true, readiness: { _ in readiness })
                 } else {
-                    try declare(.action(action.name, action.description), supported: !facts.applicationMenuContext
-                        && facts.allowsAction(action.name))
+                    try declare(
+                        .action(action.name, action.description),
+                        supported: !facts.applicationMenuContext && facts.allowsAction(action.name))
                 }
             }
             if op.intent == "click", access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") == nil,

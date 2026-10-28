@@ -60,6 +60,16 @@ class FieldPresentation:
     ``heading_ref`` selects an uncomposed original label to precede the controls.
     It remains independently addressable and keeps every field and action. A
     missing heading means the caption has already been composed into target slots.
+
+    Attributes:
+        block_key: Internal layout identity of the affected block.
+        target_ref: Original element receiving this field composition.
+        target_slots: Complete input slots after source-accounted caption composition.
+        members: Per-source presentation records retaining each independent member.
+        contributions: Each original member field and the target slot representing it.
+        dispositions: Original fact occurrences mapped to their selected display destinations.
+        field_claims: Exact normalized fields and the display destinations accounting for them.
+        heading_ref: Original independently addressable label preceding the composed field, when needed.
     """
 
     block_key: str
@@ -74,14 +84,24 @@ class FieldPresentation:
 
 @dataclass(frozen=True)
 class FieldContentPlan:
-    """Frozen selected form presentations indexed by their synthetic block identity."""
+    """Frozen selected form presentations indexed by their synthetic block identity.
+
+    Attributes:
+        fields: Selected form presentations keyed by synthetic block identity.
+    """
 
     fields: Mapping[str, FieldPresentation]
 
 
 @dataclass(frozen=True)
 class FieldContentRequest:
-    """Source-organized blocks and atoms with an explicit captured-details promise."""
+    """Source-organized blocks and atoms with an explicit captured-details promise.
+
+    Attributes:
+        interface: Structured block forest selected for this captured view.
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        captured_details: Whether the caller guarantees complete same-observation detail recovery.
+    """
 
     interface: InterfaceDocument
     atoms: AtomDocument

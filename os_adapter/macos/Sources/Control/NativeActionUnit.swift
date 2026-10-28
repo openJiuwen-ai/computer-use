@@ -17,8 +17,9 @@ extension NativeElementControl {
         var document: NativeDocumentContext? = nil
 
         @MainActor func allowsAction(_ action: String) -> Bool {
-            NativeActionAdmission.allows(action: action, role: role, focusWritable: focusWritable,
-                foreground: foreground, exclusive: BackgroundTarget.isExclusive)
+            NativeActionAdmission.allows(
+                action: action, role: role, focusWritable: focusWritable, foreground: foreground,
+                exclusive: BackgroundTarget.isExclusive)
         }
     }
 

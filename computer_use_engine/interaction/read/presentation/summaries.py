@@ -1,8 +1,6 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Cross-platform summaries of independent text and collection facts."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -14,6 +12,7 @@ from computer_use.interaction.read.presentation.text_context import (
     embedded_summaries,
     line_summaries,
     relation_summaries,
+    supplements,
     unit_label,
 )
 
@@ -51,7 +50,10 @@ def read_summaries(
         mode = values.get("structure.collection_mode")
         if mode in ("virtualized", "provider_managed"):
             output.append(
-                f"Collection {ref}: {mode}; exposed children do not establish the logical total. Scroll or continue reading to explore more."
+                (
+                    f"Collection {ref}: {mode}; exposed children do not establish the logical total. Scroll "
+                    f"or continue reading to explore more."
+                )
             )
         if values.get("states.virtualized") is True:
             output.append(f"Item {ref}: virtualized; some properties may be unavailable in this observation.")
@@ -130,7 +132,7 @@ def _unspecified_document_text(node: Mapping[str, Any], facts: Mapping[str, Any]
 
 
 def geometry_summaries(facts: Mapping[str, Any], aliases: Mapping[str, str]) -> list[str]:
-    """Locate fully observed unnamed action leaves in their original coordinate space."""
+    "Locate fully observed unnamed action leaves in their original coordinate space."
     groups = {}
     relations = {}
     for edge in facts["relations"]:

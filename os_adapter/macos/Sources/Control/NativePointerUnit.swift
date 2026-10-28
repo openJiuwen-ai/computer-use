@@ -174,6 +174,13 @@ enum NativePointerReadiness {
         }
     }
 
+    /// Cell-editor activation checks whether the established foreground route
+    /// can receive its preparation gesture. Ordinary background pointer
+    /// readiness is determined independently by its dispatch pipeline.
+    func canPrepareWindowDirected(kind: NativePointerIntent.Kind = .click) -> Bool {
+        kind == .scroll || target.isForeground
+    }
+
     /// The caller supplies an already-checked physical foreground/window hit.
     /// Reuse this for offer sampling, preparation and final event validation.
     private struct Readiness {
@@ -194,11 +201,14 @@ enum NativePointerReadiness {
         // object/process/window and physical hit remain checked for every event.
         let declared = declaredWindow ?? (foreground && kind != .scroll ? windowKind : .visualOnly)
         let focus = foreground && declared == .keyRequiring ? windowFocus() : .notRequired
-        let prepared = !foreground && !BackgroundTarget.isExclusive
+        let prepared =
+            !foreground && !BackgroundTarget.isExclusive
             && BackgroundEvents.pointerPreparationIsCurrent(target, window: window, needsKeyWindow: kind != .scroll)
-        return Readiness(ready: NativePointerReadiness.ready(kind: kind, foreground: foreground, windowKind: declared,
-            focus: focus, initialFocus: initialFocus, backgroundPrepared: prepared, exclusive: BackgroundTarget.isExclusive),
-            foreground: foreground, focus: focus, windowKind: declared)
+        return Readiness(
+            ready: NativePointerReadiness.ready(
+                kind: kind, foreground: foreground, windowKind: declared, focus: focus, initialFocus: initialFocus,
+                backgroundPrepared: prepared, exclusive: BackgroundTarget.isExclusive), foreground: foreground,
+            focus: focus, windowKind: declared)
     }
 
     private func sampleReadiness(

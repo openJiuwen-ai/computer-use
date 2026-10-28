@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,9 +33,6 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.rendering.layout.text_slices import TextSliceSources
     from computer_use.interaction.read.presentation.rendering.output import RenderedNode
     from computer_use.protocol.records import Record
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from types import MappingProxyType
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,15 @@ class NativeIdentifier:
 
 @dataclass(frozen=True)
 class TableLayoutEvidence:
-    """A generated table introduction with its original object scope and rows."""
+    """A generated table introduction with its original object scope and rows.
+
+    Attributes:
+        table: Original table reference whose layout this introduction describes.
+        layout: Ordered column field keys and their displayed headings.
+        introduction: Exact generated table-reading grammar retained for coverage checks.
+        heading: Exact generated column-heading line.
+        rows: Ordered original row references covered by the table layout.
+    """
 
     table: str
     layout: tuple[tuple[str, str], ...]

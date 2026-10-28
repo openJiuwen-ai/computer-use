@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from computer_use.interaction.read.presentation.content import render_text
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
+from computer_use.interaction.read.presentation.rendering.document.details import detail_footer, separate_details
+from computer_use.interaction.read.presentation.rendering.document.headers import full_header_text
 from computer_use.interaction.read.presentation.rendering.output import (
     RenderedDocument,
     RenderedLiteral,
     RenderedSection,
 )
-from computer_use.interaction.read.presentation.rendering.document.details import detail_footer, separate_details
-from computer_use.interaction.read.presentation.rendering.document.headers import full_header_text
 from computer_use.protocol.primitives import trim_start, utf16_length
 
 if TYPE_CHECKING:

@@ -5,21 +5,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.presentation.semantics.passes.build_projection_input import (
+    stage as build_projection_input,
+)
+from computer_use.interaction.read.presentation.semantics.passes.collect_geometry import stage as collect_geometry
+from computer_use.interaction.read.presentation.semantics.passes.compose_display_semantics import (
+    stage as compose_display_semantics,
+)
+from computer_use.pipeline import Pipeline, Sequence
+
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.ir import ProjectionInput
     from computer_use.interaction.read.presentation.model import BranchFacts
     from computer_use.interaction.read.presentation.records import SemanticNode
     from computer_use.pipeline.core import Step
-from computer_use.interaction.read.presentation.semantics.passes.build_projection_input import (
-    stage as build_projection_input,
-)
-from computer_use.interaction.read.presentation.semantics.passes.collect_geometry import (
-    stage as collect_geometry,
-)
-from computer_use.interaction.read.presentation.semantics.passes.compose_display_semantics import (
-    stage as compose_display_semantics,
-)
-from computer_use.pipeline import Pipeline, Sequence
 
 
 class SemanticPipeline(Pipeline["SemanticNode", "ProjectionInput"]):

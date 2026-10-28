@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.read.acquisition.model import ReadPlan
 from computer_use.interaction.read.app_read.model import ApplicationSelection
-from computer_use.interaction.read.model import PURE
 from computer_use.interaction.read.limits import DEFAULT_WINDOW_MAX_NODES
+from computer_use.interaction.read.model import PURE
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:

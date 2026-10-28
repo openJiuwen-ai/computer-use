@@ -1,31 +1,14 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Full text rendering, with separate source-aware projection and line layout."""
+"Full text rendering, with separate source-aware projection and line layout."
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from typing import Any, Iterable, Sequence
-
-    from computer_use.interaction.read.presentation.actions.control_raises import ControlRaise
-    from computer_use.interaction.read.presentation.actions.menu_mechanisms import MenuMechanism
-    from computer_use.interaction.read.presentation.interface.disclosure.model import DisclosurePlan
-    from computer_use.interaction.read.presentation.ir import ProjectionResult
-    from computer_use.interaction.read.presentation.records import NodeView, RenderedTree, SemanticNode
-    from computer_use.interaction.read.presentation.rendering.native_descriptions import (
-        NativeDescriptionField,
-        NativeRoleAlias,
-    )
-    from computer_use.interaction.read.presentation.rendering.native_urls import NativeUrlSource
-    from computer_use.interaction.read.presentation.selection_summary import SelectionSummaryPlan
-    from computer_use.protocol.records import Record
 import math
 import re
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
 
 import regex
 from computer_use.interaction.read.facts.groups import reference_set
@@ -55,6 +38,9 @@ from computer_use.interaction.read.presentation.interface.atoms.semantics import
 )
 from computer_use.interaction.read.presentation.ir import FactKey
 from computer_use.interaction.read.presentation.rendering.layout.child_coverage import capture_child_hint
+from computer_use.interaction.read.presentation.rendering.layout.empty_values import (
+    compact_empty_values,
+)
 from computer_use.interaction.read.presentation.rendering.layout.model import (
     ChildCoverageHint,
     LayoutFrame,
@@ -70,7 +56,6 @@ from computer_use.interaction.read.presentation.rendering.native_urls import (
 )
 from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedNode, RenderedSection
 from computer_use.interaction.read.presentation.tree import (
-    VALUE_PREVIEW_LIMIT,
     carries_value,
     has_display_value,
     has_text_selection,
@@ -80,8 +65,46 @@ from computer_use.interaction.read.presentation.tree import (
     selected_text_descendants,
     unique,
     value_label,
+    VALUE_PREVIEW_LIMIT,
 )
 from computer_use.protocol.primitives import trim, utf16_length
+
+# Compatibility for historical callers.
+__all__ = [
+    "CONVENTIONAL",
+    "STANDARD_CLICK",
+    "bounded",
+    "compact_empty_values",
+    "field",
+    "partial",
+    "preview",
+    "quoted",
+    "render_projection",
+    "render_projection_lines",
+    "render_tree",
+    "rendered_actions",
+    "role",
+    "shortened",
+]
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from typing import Any, Iterable, Sequence
+
+    from computer_use.interaction.read.presentation.actions.control_raises import ControlRaise
+    from computer_use.interaction.read.presentation.actions.menu_mechanisms import MenuMechanism
+    from computer_use.interaction.read.presentation.interface.disclosure.model import DisclosurePlan
+    from computer_use.interaction.read.presentation.ir import ProjectionResult
+    from computer_use.interaction.read.presentation.records import NodeView, RenderedTree, SemanticNode
+    from computer_use.interaction.read.presentation.rendering.native_descriptions import (
+        NativeDescriptionField,
+        NativeRoleAlias,
+    )
+    from computer_use.interaction.read.presentation.rendering.native_urls import NativeUrlSource
+    from computer_use.interaction.read.presentation.selection_summary import SelectionSummaryPlan
+    from computer_use.protocol.records import Record
+
+# Compatibility for historical callers.
 
 
 @dataclass(frozen=True)
@@ -110,30 +133,34 @@ def shortened(value: str, limit: float) -> Record:
     """
     if utf16_length(value) <= limit:
         return dict(head=value, tail="", omitted=0)
-    headLimit, tailLimit = math.floor(limit / 4), limit - math.floor(limit / 4)
-    head, tail, count, tailIndex = [], [], 0, 0
-    if re.search(r"[\ud800-\udfff]", value):
+    head_limit, tail_limit = math.floor(limit / 4), limit - math.floor(limit / 4)
+    head_value, tail_value, count_value, tail_index = [], [], 0, 0
+    if re.search("[\\ud800-\\udfff]", value):
         value = value.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "surrogatepass")
-    for match in regex.finditer(r"\X", value):
+    for match in regex.finditer("\\X", value):
         segment = match[0]
-        if count < headLimit:
-            head.append(segment)
+        if count_value < head_limit:
+            head_value.append(segment)
         else:
-            if tailIndex < len(tail):
-                tail[tailIndex] = segment
+            if tail_index < len(tail_value):
+                tail_value[tail_index] = segment
             else:
-                tail.append(segment)
-            tailIndex = (tailIndex + 1) % tailLimit
-        count += 1
-    if count <= limit:
+                tail_value.append(segment)
+            tail_index = (tail_index + 1) % tail_limit
+        count_value += 1
+    if count_value <= limit:
         return dict(head=value, tail="", omitted=0)
-    return dict(head="".join(head), tail="".join(tail[tailIndex:] + tail[:tailIndex]), omitted=count - limit)
+    return dict(
+        head="".join(head_value),
+        tail="".join(tail_value[tail_index:] + tail_value[:tail_index]),
+        omitted=count_value - limit,
+    )
 
 
 def quoted(text: str) -> str:
     if text is None:
         return "null"
-    return re.sub(r"[\x7f-\x9f\u2028\u2029]", lambda m: f"\\u{ord(m[0]):04x}", json_string(text))
+    return re.sub("[\\x7f-\\x9f\\u2028\\u2029]", lambda m: f"\\u{ord(m[0]):04x}", json_string(text))
 
 
 def field(text: str) -> str:
@@ -142,9 +169,9 @@ def field(text: str) -> str:
         if (
             not text
             or text != trim(text)
-            or re.search(r'[,">\\\x00-\x1f\x7f-\x9f\u2028\u2029]', text)
-            or re.match(r"[<+~|]", text)
-            or re.search(r"\(partial:|\(showing ", text)
+            or re.search('[,">\\\\\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]', text)
+            or re.match("[<+~|]", text)
+            or re.search("\\(partial:|\\(showing ", text)
         )
         else text
     )
@@ -163,7 +190,7 @@ def bounded(text: str, limit: int) -> str:
 def preview(text: str, name: str, limit: float) -> str:
     part = shortened(text, limit)
     return (
-        f"{name} preview: {field(part['head'])} … [{part['omitted']} characters omitted] … {field(part['tail'])}"
+        (f"{name} preview: {field(part['head'])} … [{part['omitted']} characters omitted] … {field(part['tail'])}")
         if part["omitted"]
         else f"{name}: {field(text)}"
     )
@@ -176,7 +203,7 @@ def role(node: NodeView) -> str:
 
 
 def partial(node: NodeView) -> None | str:
-    """Describe incomplete child collection using its observed counts and stop reason."""
+    "Describe incomplete child collection using its observed counts and stop reason."
     read = node.get("childrenRead", len(node.get("native", node)["children"]))
     reason = node.get("partialReason")
     if reason is None and node["role"] != "application" and "childCount" in node and read < node["childCount"]:
@@ -184,7 +211,14 @@ def partial(node: NodeView) -> None | str:
     if reason is None:
         return None
     if "childrenRead" in node and "childCount" in node:
-        return f"showing {number_string(node['childrenRead'])} of {number_string(node['childCount'])} items; partial: {field(reason)}"
+        return (
+            f"showing "
+            f"{number_string(node['childrenRead'])}"
+            f" of "
+            f"{number_string(node['childCount'])}"
+            f" items; partial: "
+            f"{field(reason)}"
+        )
     if "childCount" in node:
         return f"showing {number_string(read)} of {number_string(node['childCount'])} items; partial: {field(reason)}"
     return f"partial: {field(reason)}; total unknown"
@@ -312,16 +346,16 @@ def render_projection_lines(
     # Keep the convention with this section so full and diff remain self-contained.
     index_count = len(index_values)
     share_index_basis = index_count >= 3 and index_count * len(" (0-based)") > len(index_basis) + 1
-    partActions = {}
+    part_actions = {}
     if context.get("nativeFacts"):
         # Folding a caption changes presentation, never its action target.
         # Keep that source next to the action instead of requiring the model
         # to reconstruct the native graph. Build once for the entire tree.
         for ref, owner in projection["foldedInto"].items():
             source = projection["nativeNodes"][ref]
-            partActions.setdefault(owner, []).append(source)
-    lines, refs, labels, focusLabels, summaryLabels, reportedFocus = [], [], {}, {}, {}, []
-    selected, selectedMenus, contextRefs, selectedDescendants = [], [], {}, []
+            part_actions.setdefault(owner, []).append(source)
+    lines_value, refs_value, labels_value, focus_labels, summary_labels, reported_focus = [], [], {}, {}, {}, []
+    selected_value, selected_menus, context_refs, selected_descendants = [], [], {}, []
     collapsed_menus = {}
     inline_children = set()
     display_nodes: list[RenderedNode] = []
@@ -350,7 +384,7 @@ def render_projection_lines(
             node: Source/projected node in this exact view; its native identity is unchanged.
             depth: Current relation/traversal depth within the existing bound.
         """
-        nonlocal selectedDescendants
+        nonlocal selected_descendants
         visible_nodes[node["ref"]], visible_parents[node["ref"]] = node, parent_ref
         caption_emission_start = len(coverage.source_emissions) if coverage is not None else 0
         parent_blocked = [] if parent_blocked is None else parent_blocked
@@ -370,7 +404,7 @@ def render_projection_lines(
         if aliased and alias is not None:
             role_label = alias.label
         line = f"{node['ref']} {role_label}"
-        showValue = (
+        show_value = (
             carries_value(node["native"])
             or (node["ref"] == focused_ref and "value" in node)
             or (
@@ -401,7 +435,7 @@ def render_projection_lines(
         else:
             record(node, "role")
         caps = node.get("capabilities")
-        deferredClick = (
+        deferred_click = (
             node.get("enabled") is False
             and caps is not None
             and caps.get("click") == "unknown"
@@ -436,7 +470,7 @@ def render_projection_lines(
             and not has_text_selection(node)
             and node["role"] not in ("application", "window")
         ):
-            selectedDescendants = selected_text_descendants(node)
+            selected_descendants = selected_text_descendants(node)
         state_flags = " (" + ", ".join(states) + ")" if states else ""
         node_prefixes[node["ref"]] = role_label + state_flags
         line += state_flags
@@ -517,7 +551,7 @@ def render_projection_lines(
         if "index" in node:
             fields.append(("Index: " if share_index_basis else "Index (0-based): ") + str(node["index"]))
             record(node, "index")
-        if deferredClick:
+        if deferred_click:
             fields.append("Click: unknown (rechecked on click)")
         if node.get("editorOwnerRef"):
             fields.append("Editor for: " + node["editorOwnerRef"])
@@ -571,27 +605,29 @@ def render_projection_lines(
             fields.append(
                 "Landmark: " + display(node["localizedLandmarkType"], "Landmark", attribute="localizedLandmarkType")
             )
-        valueParts = shortened(node.get("value", ""), VALUE_PREVIEW_LIMIT)
+        value_parts = shortened(node.get("value", ""), VALUE_PREVIEW_LIMIT)
         value_excerpt = disclosure_plan.get(node["ref"], "value") if disclosure_plan is not None else None
         if value_excerpt is not None and value_excerpt.source.value != value:
             value_excerpt = None
-        embeddedValue = display_embedded(value, field, hint=detail_hint) if compact and isinstance(value, str) else None
-        blockValue = (
-            showValue
+        embedded_value = (
+            display_embedded(value, field, hint=detail_hint) if compact and isinstance(value, str) else None
+        )
+        block_value = (
+            show_value
             and "value" in node
             and value_excerpt is None
-            and embeddedValue is None
-            and (any(c in node["value"] for c in "\r\n") or valueParts["omitted"] > 0)
+            and embedded_value is None
+            and (any(c in node["value"] for c in "\r\n") or value_parts["omitted"] > 0)
         )
         compact_value = None
         if (
-            blockValue
+            block_value
             and compact_multiline_values
             and compact
             and context.get("publicApi")
             and context.get("shareDescriptions")
             and not context.get("subtreeRef")
-            and not valueParts["omitted"]
+            and not value_parts["omitted"]
         ):
             source = projection.provenance.get((node["ref"], "value"))
             evidence = projection.source.context.get("compressionEvidence")
@@ -617,8 +653,8 @@ def render_projection_lines(
                     quote=quoted,
                     format_field=field,
                 )
-                blockValue = compact_value is None
-        if showValue and not blockValue:
+                block_value = compact_value is None
+        if show_value and not block_value:
             natural_text = (
                 compact
                 and node["role"] == "staticText"
@@ -631,25 +667,25 @@ def render_projection_lines(
                 if value is None
                 else display(value, "Value", attribute="value")
                 if value_excerpt is not None
-                else compact_value or embeddedValue or field(value)
+                else compact_value or embedded_value or field(value)
             )
             fields.append(("" if natural_text else value_label(node) + ": ") + value_text)
-            if embeddedValue is None and value_excerpt is None:
+            if embedded_value is None and value_excerpt is None:
                 record(node, "value")
             caption("value", value_text)
         if node.get("labelTargets"):
             fields.append("Labels for: " + ", ".join(node["labelTargets"]))
         if node.get("incompleteLabelRelation"):
             fields.append("Label relation: partly outside this observation or unavailable")
-        selectionRange = display_selection(node) if compact else node.get("selectionRange")
+        selection_range = display_selection(node) if compact else node.get("selectionRange")
         summarized = False
-        if selectionRange is not None:
+        if selection_range is not None:
             summarized = (
-                compact and selection_summaries is not None and selection_summaries.covers(node["ref"], selectionRange)
+                compact and selection_summaries is not None and selection_summaries.covers(node["ref"], selection_range)
             )
             if not summarized:
                 fields.append(
-                    f"Selection: {number_string(selectionRange['location'])}:{number_string(selectionRange['length'])}"
+                    f"Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}"
                 )
             record(node, "selectionRange", kind="text-selection-summary" if summarized else "display")
         if "shortcut" in node:
@@ -659,16 +695,16 @@ def render_projection_lines(
         # The public readText continuation reads Value, not SelectedText. An
         # acquired selection cannot be shortened without another valid entry.
         selectedText = node.get("selectedText")
-        selectedParts = shortened(
+        selected_parts = shortened(
             selectedText if selectedText is not None else "", math.inf if coverage is not None else 200
         )
-        if selectedText is not None and not selectedParts["omitted"]:
+        if selectedText is not None and not selected_parts["omitted"]:
             fields.append("Selected text: " + field(selectedText))
             record(node, "selectedText")
         action_start = len(fields)
         own_action_fields = action_fields(
             node,
-            partActions.get(node["ref"], []),
+            part_actions.get(node["ref"], []),
             lambda source: rendered_actions(
                 source, compact, menu_mechanisms=menu_mechanisms, control_raises=control_raises
             ),
@@ -683,16 +719,16 @@ def render_projection_lines(
             node.get("value"),
         ):
             fields.append("Help: " + display(node["help"], "Help", attribute="help"))
-        childHelp = (
+        child_help = (
             node["children"][0].get("help")
             if len(node["children"]) >= 3
             and node["children"][0].get("help")
             and all(child.get("help") == node["children"][0]["help"] for child in node["children"])
             else None
         )
-        if childHelp:
-            fields.append("Children Help: " + display(childHelp, "Children Help"))
-            if not compact or display_embedded(childHelp, field, hint=detail_hint) is None:
+        if child_help:
+            fields.append("Children Help: " + display(child_help, "Children Help"))
+            if not compact or display_embedded(child_help, field, hint=detail_hint) is None:
                 for child in node["children"]:
                     record(child, "help", kind="equivalent", target=node["ref"])
         url_slot = None
@@ -727,13 +763,13 @@ def render_projection_lines(
         field_separator = ", " if node.get("name") else " "
         if fields:
             line += field_separator + ", ".join(fields)
-        if len(own_action_fields) == 1 and not partActions.get(node["ref"]):
+        if len(own_action_fields) == 1 and not part_actions.get(node["ref"]):
             without = fields[:action_start] + fields[action_start + 1 :]
             node_action_lines[node["ref"]] = (
                 line,
                 field_base + (field_separator + ", ".join(without) if without else ""),
             )
-        line_start = len(lines)
+        line_start = len(lines_value)
         if compact and native_url_sources is not None and coverage is not None and url_slot is not None:
             url_slots[node["ref"]] = _NativeUrlSlot(
                 line_start,
@@ -747,11 +783,11 @@ def render_projection_lines(
         hints: list[str] = []
 
         def hint(text: str) -> None:
-            lines.append(text)
+            lines_value.append(text)
             hints.append(text)
 
-        lines.append(indent + line)
-        refs.append(node["ref"])
+        lines_value.append(indent + line)
+        refs_value.append(node["ref"])
         for group in node.get("sharedDescriptions", ()):
             if defer_fields(group.facts):
                 continue
@@ -773,11 +809,11 @@ def render_projection_lines(
             )
             for fact in group.facts:
                 record(projection["nativeNodes"][fact.source], fact.attribute, kind="shared", target=group.scope)
-        partialInfo = partial(node)
+        partial_info = partial(node)
         deferred_menu = compact and unexpanded_menu(node)
         if deferred_menu:
             collapsed_menus.setdefault(node["childCount"], []).append(node["ref"])
-        if partialInfo and not deferred_menu:
+        if partial_info and not deferred_menu:
             if compact and "childrenStart" in node:
                 start = node.get("childrenStart", 0)
                 end = node.get("childrenEnd", start)
@@ -786,7 +822,7 @@ def render_projection_lines(
                     child_coverage += "; partial; " + (
                         "cursor below"
                         if context.get("publicApi")
-                        else f'app.element({quoted(node["ref"])}).read({{"offset": {node["nextChildOffset"]}}})'
+                        else (f'app.element({quoted(node["ref"])}).read({{"offset": {node["nextChildOffset"]}}})')
                     )
                     inline_children.add(node["ref"])
                 elif end == node["childCount"]:
@@ -795,20 +831,22 @@ def render_projection_lines(
                     child_coverage += "; partial; read()" if context.get("publicApi") else "; partial"
                 hint(f"{indent}\tChildren: {child_coverage}")
                 if context.get("publicApi"):
-                    coverage_hint = capture_child_hint(node, projection.source, len(lines) - 1, hints[-1])
+                    coverage_hint = capture_child_hint(node, projection.source, len(lines_value) - 1, hints[-1])
                     if coverage_hint is not None:
                         child_hints.append(coverage_hint)
             else:
-                hint(indent + "\tChildren: " + partialInfo)
+                hint(indent + "\tChildren: " + partial_info)
         if (
             compact
-            and not partialInfo
+            and not partial_info
             and not deferred_menu
             and "childrenStart" in node
             and "childrenEnd" in node
             and node["childrenEnd"] == node.get("childCount")
         ):
-            hint(f"{indent}\tChildren: offsets {node['childrenStart']}–{node['childrenEnd']}; end of direct children.")
+            hint(
+                (f"{indent}\tChildren: offsets {node['childrenStart']}–{node['childrenEnd']}; end of direct children.")
+            )
         if "childrenStart" in node and not deferred_menu and not compact:
             end = (
                 ""
@@ -823,7 +861,14 @@ def render_projection_lines(
                 else ""
             )
             hint(
-                f"{indent}\tChildren: native children offset {number_string(node['childrenStart'])}{end}{complete}; live native order, not a frozen list."
+                (
+                    f"{indent}"
+                    f"\tChildren: native children offset "
+                    f"{number_string(node['childrenStart'])}"
+                    f"{end}"
+                    f"{complete}"
+                    f"; live native order, not a frozen list."
+                )
             )
         for omission in node.get("childOmissions", []):
             hint(indent + "\tOmitted: " + omission)
@@ -831,9 +876,16 @@ def render_projection_lines(
             hint(
                 f"{indent}\tContinue: use the returned cursor"
                 if context.get("publicApi")
-                else f'{indent}\tContinue: element({quoted(node["ref"])}).read({{"offset": {number_string(node["nextChildOffset"])}}})'
+                else (
+                    f"{indent}"
+                    f"\tContinue: element("
+                    f"{quoted(node['ref'])}"
+                    f').read({{"offset": '
+                    f"{number_string(node['nextChildOffset'])}"
+                    f"}})"
+                )
             )
-        elif partialInfo and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
+        elif partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
             hint(
                 f"{indent}\tInspect subtree: (await app.element({node['ref']})).read()"
                 if context.get("publicApi")
@@ -843,33 +895,33 @@ def render_projection_lines(
             hint(indent + "\t" + omission)
 
         def text_block(name: str, part: Record, continuation: str = "") -> None:
-            """Text Block."""
-            lines.append(indent + "\t" + name + ":")
+            "Text Block."
+            lines_value.append(indent + "\t" + name + ":")
 
             def body(value: str) -> None:
                 # Display provider paragraph separators without changing the
                 # captured source, UTF-16 offsets or readText pagination.
-                lines.extend(indent + "\t| " + field(p) for p in re.split(r"\r\n|\r|\n", value))
+                lines_value.extend(indent + "\t| " + field(p) for p in re.split("\\r\\n|\\r|\\n", value))
 
             body(part["head"])
             if part["omitted"]:
                 hint(f"{indent}\tOmitted: {part['omitted']} characters ({name}){continuation}")
                 body(part["tail"])
 
-        if blockValue:
+        if block_value:
             continuation = (
                 (
-                    f"; use (await app.element({node['ref']})).readText()"
+                    f"; use (await app.element({node['ref']})).read_text()"
                     if context.get("publicApi")
-                    else f"; use element({quoted(node['ref'])}).readText()"
+                    else f"; use element({quoted(node['ref'])}).read_text()"
                 )
                 if "readableTextRefs" not in context or node["ref"] in context["readableTextRefs"]
                 else "; full captured value unavailable"
             )
-            value_start = len(lines)
-            text_block(value_label(node), valueParts, continuation)
-            record(node, "value", kind="continuation" if valueParts["omitted"] else "display")
-            caption("value", "\n".join(text[len(indent) + 1 :] for text in lines[value_start:]))
+            value_start = len(lines_value)
+            text_block(value_label(node), value_parts, continuation)
+            record(node, "value", kind="continuation" if value_parts["omitted"] else "display")
+            caption("value", "\n".join(text[len(indent) + 1 :] for text in lines_value[value_start:]))
         for attribute, label in (
             ("documentText", "Document text"),
             ("controlValue", "Control value"),
@@ -880,9 +932,9 @@ def render_projection_lines(
             if (
                 attribute in node.get("_numericValueAliases", ())
                 and node[attribute] == node.get("value")
-                and showValue
-                and not valueParts["omitted"]
-                and embeddedValue is None
+                and show_value
+                and not value_parts["omitted"]
+                and embedded_value is None
             ):
                 record(node, attribute, kind="equivalent")
                 continue
@@ -896,44 +948,44 @@ def render_projection_lines(
             if any(c in node[attribute] for c in "\r\n") or part["omitted"]:
                 text_block(label, part)
             else:
-                lines.append(indent + "\t" + label + ": " + field(node[attribute]))
+                lines_value.append(indent + "\t" + label + ": " + field(node[attribute]))
             record(node, attribute, kind="continuation" if part["omitted"] else "display")
-        if selectedParts["omitted"]:
-            text_block("Selected text", selectedParts)
+        if selected_parts["omitted"]:
+            text_block("Selected text", selected_parts)
         if coverage is not None:
             for attribute in ("description", "help", "url"):
                 coverage.equivalent_text(node, attribute)
         label = node.get("name") or node.get("description") or ""
-        focusName = shortened(label, 120)
+        focus_name = shortened(label, 120)
         focus = (
             node["ref"]
             + " "
             + role_label
-            + ((", " + preview(label, "Name", 120) if focusName["omitted"] else " " + field(label)) if label else "")
+            + ((", " + preview(label, "Name", 120) if focus_name["omitted"] else " " + field(label)) if label else "")
         )
-        if showValue:
+        if show_value:
             focus += ", " + preview(value, value_label(node), 200) if value is not None else ", Value: <unavailable>"
-        if selectionRange is not None and not summarized:
+        if selection_range is not None and not summarized:
             focus += (
-                f", Selection: {number_string(selectionRange['location'])}:{number_string(selectionRange['length'])}"
+                f", Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}"
             )
         if selectedText is not None:
             focus += ", " + preview(selectedText, "Selected text", 200)
-        focusLabels[node["ref"]] = focus
-        summaryName = label or node.get("value") or node.get("identifier") or ""
-        short = shortened(summaryName, 80)
-        summaryLabels[node["ref"]] = (
+        focus_labels[node["ref"]] = focus
+        summary_name = label or node.get("value") or node.get("identifier") or ""
+        short = shortened(summary_name, 80)
+        summary_labels[node["ref"]] = (
             node["ref"]
             + " "
             + role_label
-            + (" " + field(short["head"] + ("…" if short["omitted"] else "") + short["tail"]) if summaryName else "")
+            + (" " + field(short["head"] + ("…" if short["omitted"] else "") + short["tail"]) if summary_name else "")
             + (" (preview; see tree)" if short["omitted"] else "")
         )
         if node.get("selected"):
-            (selectedMenus if in_menu else selected).append(node)
+            (selected_menus if in_menu else selected_value).append(node)
         if node.get("focused"):
-            reportedFocus.append(node["ref"])
-        labels[node["ref"]] = node.get("name") or node.get("description") or node.get("value") or node["role"]
+            reported_focus.append(node["ref"])
+        labels_value[node["ref"]] = node.get("name") or node.get("description") or node.get("value") or node["role"]
         if (
             node["role"] in ("group", "cell")
             and not node.get("name")
@@ -941,25 +993,25 @@ def render_projection_lines(
             and len(node["children"]) > 1
             and any(child["role"] in ("staticText", "heading") for child in node["children"])
         ):
-            contextRefs[node["ref"]] = unique(
-                contextRefs.get(node["ref"], []) + [child["ref"] for child in node["children"]]
+            context_refs[node["ref"]] = unique(
+                context_refs.get(node["ref"], []) + [child["ref"] for child in node["children"]]
             )
         for target in node.get("labelTargets", []):
-            contextRefs.setdefault(target, []).append(node["ref"])
+            context_refs.setdefault(target, []).append(node["ref"])
         state_at = len(f"{node['ref']} {role_label}")
         display_nodes.append(
             RenderedNode(
                 node["ref"],
                 parent_ref,
                 depth,
-                "\n".join(lines[line_start:]),
+                "\n".join(lines_value[line_start:]),
                 indent + line[:state_at] + line[state_at + len(state_flags) :],
                 tuple(hints),
-                partial=bool(partialInfo and not deferred_menu),
+                partial=bool(partial_info and not deferred_menu),
                 layout=layout,
             )
         )
-        node_line_ranges[node["ref"]] = (line_start, len(lines))
+        node_line_ranges[node["ref"]] = (line_start, len(lines_value))
         groups = {ref: group for group in node.get("layoutGroups", ()) for ref in group["members"]}
         for child in node["children"]:
             child_layout = layout
@@ -969,21 +1021,21 @@ def render_projection_lines(
                 key = node["ref"] + ":row:" + group["members"][0]
                 child_layout = (*layout, (key, heading))
                 if child["ref"] == group["members"][0]:
-                    lines.append(heading)
-            visit(child, depth + 1, node.get("blockedBy"), childHelp, in_menu, node["ref"], child_layout)
+                    lines_value.append(heading)
+            visit(child, depth + 1, node.get("blockedBy"), child_help, in_menu, node["ref"], child_layout)
 
     if "app" in context:
         windows = [node for node in roots if is_window(node)]
-        header, titleOmission = f"App: {field(context['app'])}.", None
+        header_value, title_omission = f"App: {field(context['app'])}.", None
         if len(windows) == 1 and windows[0].get("name"):
             part = shortened(windows[0]["name"], 500)
-            header = f"Window: {quoted(part['head'] + part['tail'])}, {header}"
+            header_value = f"Window: {quoted(part['head'] + part['tail'])}, {header_value}"
             if part["omitted"]:
-                titleOmission = f"Window title omitted: {part['omitted']} characters"
-        lines.extend(
+                title_omission = f"Window title omitted: {part['omitted']} characters"
+        lines_value.extend(
             [
-                header,
-                f"Tree: full (subtree {context['subtreeRef']} only; ancestors and other window contents not expanded)"
+                header_value,
+                (f"Tree: full (subtree {context['subtreeRef']} only; ancestors and other window contents not expanded)")
                 if context.get("subtreeRef")
                 else "Tree: full (native menu query)"
                 if context.get("menuQuery")
@@ -1010,12 +1062,12 @@ def render_projection_lines(
         for node in roots:
             contexts(node)
         if interactions:
-            lines.append("Interaction: " + "; ".join(interactions))
-        if titleOmission:
-            lines.append(titleOmission)
+            lines_value.append("Interaction: " + "; ".join(interactions))
+        if title_omission:
+            lines_value.append(title_omission)
     if share_index_basis:
-        lines.append(index_basis)
-    tree_start = len(lines)
+        lines_value.append(index_basis)
+    tree_start = len(lines_value)
     for node in roots:
         visit(node, 0)
     url_plan = (
@@ -1041,18 +1093,18 @@ def render_projection_lines(
             retained = item.fields[: item.slot] + item.fields[item.slot + 1 :]
             line = item.base + (item.separator + ", ".join(retained) if retained else "")
             old = display_nodes[record_indexes[ref]]
-            indent = lines[item.line][: len(lines[item.line]) - len(lines[item.line].lstrip("\t"))]
-            lines[item.line] = indent + line
+            indent = lines_value[item.line][: len(lines_value[item.line]) - len(lines_value[item.line].lstrip("\t"))]
+            lines_value[item.line] = indent + line
             display_nodes[record_indexes[ref]] = replace(
                 old,
-                text="\n".join((lines[item.line], *old.text.split("\n")[1:])),
+                text="\n".join((lines_value[item.line], *old.text.split("\n")[1:])),
                 content=indent + line[: item.state_at] + line[item.state_at + len(item.state_flags) :],
             )
-    tree_end = len(lines)
+    tree_end = len(lines_value)
     unexpanded_menus: tuple[UnexpandedMenuSummary, ...] = ()
     if collapsed_menus:
         short_summary = short_unexpanded_menu_summary(collapsed_menus) if concise_menu_summary else None
-        lines.append(
+        lines_value.append(
             short_summary
             if short_summary is not None
             else "Menus unexpanded: "
@@ -1063,12 +1115,12 @@ def render_projection_lines(
         )
         unexpanded_menus = (
             UnexpandedMenuSummary(
-                tuple((ref, count) for count, items in collapsed_menus.items() for ref in items), lines[-1]
+                tuple((ref, count) for count, items in collapsed_menus.items() for ref in items), lines_value[-1]
             ),
         )
         inline_children.update(ref for items in collapsed_menus.values() for ref in items)
     if "app" in context:
-        if selected:
+        if selected_value:
 
             def summary(node: NodeView) -> str:
                 """Summary.
@@ -1077,7 +1129,7 @@ def render_projection_lines(
                     node: Source/projected node in this exact view; its native identity is
                         unchanged.
                 """
-                parts = [summaryLabels[node["ref"]]]
+                parts = [summary_labels[node["ref"]]]
 
                 def has_label(child: NodeView) -> bool:
                     return bool(
@@ -1096,7 +1148,7 @@ def render_projection_lines(
                 while not has_label(tail) and len(label_children(tail)) == 1:
                     tail = label_children(tail)[0]
                 if tail is not node and has_label(tail):
-                    parts.append("label: " + summaryLabels[tail["ref"]])
+                    parts.append("label: " + summary_labels[tail["ref"]])
                 if not has_label(tail) and len(label_children(tail)) > 1:
                     labelled = []
 
@@ -1118,26 +1170,30 @@ def render_projection_lines(
                     if labelled:
                         parts.append(
                             "contents: "
-                            + "; ".join(summaryLabels[c["ref"]] for c in labelled[:3])
+                            + "; ".join(summary_labels[c["ref"]] for c in labelled[:3])
                             + (f"; {len(labelled) - 3} more labelled contents (in tree)" if len(labelled) > 3 else "")
                         )
                 return "; ".join(parts)
 
-            lines.append(
+            lines_value.append(
                 "Selected: "
-                + "; ".join(summary(n) for n in selected[:8])
-                + (f"; {len(selected) - 8} more selected items (marked in tree)" if len(selected) > 8 else "")
+                + "; ".join(summary(n) for n in selected_value[:8])
+                + (
+                    f"; {len(selected_value) - 8} more selected items (marked in tree)"
+                    if len(selected_value) > 8
+                    else ""
+                )
             )
-        if selectedMenus:
-            lines.append(
+        if selected_menus:
+            lines_value.append(
                 "Selected menus: "
-                + "; ".join(summaryLabels[n["ref"]] for n in selectedMenus[:8])
-                + (f"; {len(selectedMenus) - 8} more (marked in tree)" if len(selectedMenus) > 8 else "")
+                + "; ".join(summary_labels[n["ref"]] for n in selected_menus[:8])
+                + (f"; {len(selected_menus) - 8} more (marked in tree)" if len(selected_menus) > 8 else "")
             )
         if root["role"] == "application" and partial(root):
-            lines.append("Tree partial: " + partial(root))
-        if focused_ref is not None and focused_ref in focusLabels:
-            summary = "\nReported focus: " + summaryLabels[focused_ref]
+            lines_value.append("Tree partial: " + partial(root))
+        if focused_ref is not None and focused_ref in focus_labels:
+            summary = "\nReported focus: " + summary_labels[focused_ref]
             range_ = projection["nativeNodes"].get(focused_ref, {}).get("selectionRange")
             summarized_focus = (
                 compact
@@ -1149,35 +1205,40 @@ def render_projection_lines(
                 summary += (
                     f"; text selection: empty at UTF-16 offset {number_string(range_['location'])}"
                     if range_["length"] == 0
-                    else f"; text selection: {number_string(range_['length'])} UTF-16 units at offset {number_string(range_['location'])}"
+                    else (
+                        f"; text selection: "
+                        f"{number_string(range_['length'])}"
+                        f" UTF-16 units at offset "
+                        f"{number_string(range_['location'])}"
+                    )
                 )
-            selections = [focusLabels[node["ref"]] for node in selectedDescendants if node["ref"] in focusLabels]
+            selections = [focus_labels[node["ref"]] for node in selected_descendants if node["ref"] in focus_labels]
             if selections:
                 summary += ". Text selection in descendants (not exact focus): " + "; ".join(selections[:3])
                 if len(selections) > 3:
                     summary += f"; {len(selections) - 3} more selected text controls"
-            lines.append(summary)
-        elif focused_ref is not None and projection["foldedInto"].get(focused_ref, "") in focusLabels:
-            lines.append("\nReported focus: inside " + projection["foldedInto"][focused_ref])
+            lines_value.append(summary)
+        elif focused_ref is not None and projection["foldedInto"].get(focused_ref, "") in focus_labels:
+            lines_value.append("\nReported focus: inside " + projection["foldedInto"][focused_ref])
         elif focused_ref is not None:
-            ancestor = next((id for id in context.get("focusAncestorRefs", []) if id in focusLabels), None)
-            lines.append(
-                f"\nReported focus: inside {focusLabels[ancestor]} (native child is not in the expanded tree)."
+            ancestor = next((id for id in context.get("focusAncestorRefs", []) if id in focus_labels), None)
+            lines_value.append(
+                (f"\nReported focus: inside {focus_labels[ancestor]} (native child is not in the expanded tree).")
                 if ancestor
                 else "\nReported focus: outside the expanded tree."
             )
-        elif reportedFocus:
-            lines.append("\nReported focus: unavailable.")
+        elif reported_focus:
+            lines_value.append("\nReported focus: unavailable.")
         internal = [
             "inside " + owner
             for source, owner in projection["foldedInto"].items()
             if source != focused_ref
             and projection["nativeNodes"].get(source, {}).get("focused")
-            and owner in focusLabels
+            and owner in focus_labels
         ]
-        others = unique([ref for ref in reportedFocus if ref != focused_ref] + internal)
+        others = unique([ref for ref in reported_focus if ref != focused_ref] + internal)
         if others:
-            lines.append(
+            lines_value.append(
                 "Focus flags: "
                 + ", ".join(others[:8])
                 + (f"; {len(others) - 8} more" if len(others) > 8 else "")
@@ -1192,13 +1253,20 @@ def render_projection_lines(
             (
                 RenderedSection(
                     text,
-                    tuple(replace(node, related=tuple(contextRefs.get(node.ref, ()))) for node in display_nodes),
-                    "\n".join(lines[:tree_start]),
-                    "\n".join(lines[tree_end:]),
+                    tuple(replace(node, related=tuple(context_refs.get(node.ref, ()))) for node in display_nodes),
+                    "\n".join(lines_value[:tree_start]),
+                    "\n".join(lines_value[tree_end:]),
                 ),
             )
         )
-        result = dict(text=text, refs=refs, labels=labels, roots=roots, contextRefs=contextRefs, projection=projection)
+        result = dict(
+            text=text,
+            refs=refs_value,
+            labels=labels_value,
+            roots=roots,
+            contextRefs=context_refs,
+            projection=projection,
+        )
         if compact:
             result["inlineChildRefs"] = sorted(inline_children)
             result["childCoverageRefs"] = tuple(hint.ref for hint in child_hints)
@@ -1224,7 +1292,7 @@ def render_projection_lines(
         )
 
     return LayoutFrame(
-        lines,
+        lines_value,
         roots,
         context,
         field,

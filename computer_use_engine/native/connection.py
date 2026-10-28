@@ -37,6 +37,7 @@ from computer_use.protocol.session import (
     failure_error,
 )
 
+
 requestCleanupGraceMs, driverTerminationGraceMs = 750, 1000
 
 _LOG = logging.getLogger(__name__)

@@ -5,21 +5,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from typing import Sequence
-
-    from computer_use.interaction.controller import SessionController
-    from computer_use.interaction.read.acquisition.components.support import ObservationGap
-    from computer_use.interaction.read.acquisition.images.capture import WindowImage
-    from computer_use.interaction.read.acquisition.menus.query import MenuRead
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
-    from computer_use.interaction.records import UIHandle
-    from computer_use.protocol.records import SurfaceInfo
-    from computer_use.session.interfaces import InstanceState
-    from computer_use.types import Observation
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
@@ -43,6 +30,20 @@ from computer_use.session.interfaces import WindowIdentity
 
 from .menus import InterfaceMenuPipeline, remember_menu
 from .publication import capture_header, publish, tree_document
+
+if TYPE_CHECKING:
+    from typing import Sequence
+
+    from computer_use.interaction.controller import SessionController
+    from computer_use.interaction.read.acquisition.components.support import ObservationGap
+    from computer_use.interaction.read.acquisition.images.capture import WindowImage
+    from computer_use.interaction.read.acquisition.menus.query import MenuRead
+    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.records import UIHandle
+    from computer_use.native.scopes import WorkingWindow
+    from computer_use.protocol.records import SurfaceInfo
+    from computer_use.session.interfaces import InstanceState
+    from computer_use.types import Observation
 
 
 @dataclass
@@ -91,6 +92,8 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
             route.
         ui: App or Window handle whose instance and observation bounds constrain the operation.
     """
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     instance = ui._instance
     window = next(key for key, item in instance.members.items() if item["surface"] == part.target.surface)
     owner = instance.owners[window]
@@ -101,6 +104,7 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     # observation must not retarget a fixed member during a semantic lookup.
     state.selection, state.observation = None, None
     if part.tree is not None:
+        # pylint: disable-next=protected-access
         controller._remember(state, part.target, part.tree)
         identity = WindowIdentity.of(instance.members[window])
         for ref in part.tree.refs:
@@ -137,17 +141,23 @@ class InterfaceReadPipeline:
             full: Whether delivery requests a complete tree instead of an eligible diff.
             menu_path: Requested menu path; None keeps the ordinary window read.
         """
+        # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
         directory, first = await resolve(controller, ui, view)
         if instance.anchor is None:
             state = controller.state(ui)
-            if (
-                not directory["surfaces"]
-                and not directory["stopReasons"]
-                and state.running is not None
-                and view != "image"
-                and "nativeApplicationRoots" in controller.transport.capabilities
-            ):
+            matches_view = (
+                True
+                if (
+                    not directory["surfaces"]
+                    and not directory["stopReasons"]
+                    and state.running is not None
+                    and view != "image"
+                    and "nativeApplicationRoots" in controller.transport.capabilities
+                )
+                else False
+            )
+            if matches_view:
                 return await InterfaceMenuPipeline(controller).run(
                     ui, menu_path or (), observed=first if isinstance(first, MenuAppObservation) else None
                 )
@@ -174,6 +184,7 @@ class InterfaceReadPipeline:
         if menu_path is not None:
             return await InterfaceMenuPipeline(controller).run(ui, menu_path)
         permitted = allowed(ui)
+        # pylint: disable-next=protected-access
         anchor = ui._anchor or instance.anchor.root.root_window
         principal_error = None
         try:
@@ -183,19 +194,24 @@ class InterfaceReadPipeline:
             principal, principal_error = anchor, error
         ordered = [principal, *[key for key in permitted if key != principal]]
         parts, notes = [], []
+        # pylint: disable-next=protected-access
         ui._lookup_scopes = ()
+        # pylint: disable-next=protected-access
         ui._menu_only = False
         for index, key in enumerate(ordered[:6]):
             if key not in permitted or any(part.target.surface == permitted[key]["surface"] for part in parts):
                 continue
             item = permitted[key]
+            # pylint: disable-next=protected-access
             if index == 0 and principal_error is None and ui._anchor is None:
+                # pylint: disable-next=protected-access
                 selected = controller.reader._selection(
                     instance.anchor.application, instance.anchor.name, directory, anchor
                 )
                 try:
                     observed = (
                         first
+                        # pylint: disable-next=protected-access
                         if isinstance(first, AppObservation) and ui._anchor is None
                         else await controller.reader.read(selected, view=view, overview=False)
                     )
@@ -223,6 +239,7 @@ class InterfaceReadPipeline:
                     )
                     parts.append(part)
                     remember(controller, ui, part)
+                    # pylint: disable-next=protected-access
                     ui._context = item["window"] if cast("AppObservation", observed).scope_confirmed else None
                     continue
                 if observed is not None:
@@ -246,11 +263,14 @@ class InterfaceReadPipeline:
                 remember(controller, ui, part)
                 captured.add(item["surface"])
         if principal_error is not None:
+            # pylint: disable-next=protected-access
             ui._context = None
             notes.append(
                 "Current input window is not uniquely confirmed; explicit elements remain scoped to their windows."
             )
+        # pylint: disable-next=protected-access
         elif parts and ui._anchor is not None:
+            # pylint: disable-next=protected-access
             ui._context = principal
         for key in (key for key, item in permitted.items() if item["surface"] not in captured):
             ref = next(ref for ref, window in instance.windows.items() if window == key)
@@ -364,6 +384,7 @@ class InterfaceReadPipeline:
                     for note in capture_metadata(part.image.image).get("stopReasons", ())
                 ]
         lines += notes
+        # pylint: disable-next=protected-access
         scope = instance.anchor.root.surface + (":app" if ui._anchor is None else ":window:" + ui._anchor) + ":" + view
         return publish(
             controller,
@@ -386,6 +407,7 @@ class InterfaceReadPipeline:
             max_nodes: Maximum number of native objects this collection may read.
         """
         controller = self.controller
+        # pylint: disable-next=protected-access
         target = member_target(ui._instance, item)
         tree = image = None
         gaps = []
@@ -406,7 +428,3 @@ class InterfaceReadPipeline:
             if gap:
                 gaps.append(gap)
         return WindowPart(target, tree, image, gaps=tuple(gaps))
-
-
-if TYPE_CHECKING:
-    from computer_use.native.scopes import WorkingWindow

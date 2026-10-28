@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.ir import ProjectionEditor
-    from computer_use.interaction.read.presentation.records import NodeView
 from computer_use.interaction.read.presentation.compression.descriptions import folded_source_roles
 from computer_use.interaction.read.presentation.compression.policy import secondary_actions
+
+if TYPE_CHECKING:
+    from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView
+    from computer_use.interaction.read.presentation.records import NodeView
 
 
 def finalize_sources(view: ProjectionView, edit: ProjectionEditor) -> None:
@@ -40,7 +41,3 @@ def finalize_sources(view: ProjectionView, edit: ProjectionEditor) -> None:
     edit.finalize_folds()
     for group in folded_source_roles(view):
         edit.declare_source_roles(group)
-
-
-if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.ir import ProjectionView

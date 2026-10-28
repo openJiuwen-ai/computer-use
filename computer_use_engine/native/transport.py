@@ -45,6 +45,7 @@ from computer_use.protocol.primitives import utf16_length
 if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
+
 _BINDING = dict(
     session="session", instance="instance", root_window="rootWindow", surface="surface", node="node", capture="capture"
 )

@@ -8,6 +8,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.presentation.model import PURE
+from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
+from computer_use.pipeline import Contract, Pass
+
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.records import RenderedTree
 
@@ -27,10 +31,6 @@ def execute(frame: LayoutFrame, _: object) -> RenderedTree:
         result["sharedDescriptionReplacements"] = [asdict(item) for item in frame.shared_description_replacements]
     return result
 
-
-from computer_use.interaction.read.presentation.model import PURE
-from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
-from computer_use.pipeline import Contract, Pass
 
 stage = Pass.define(
     name="assemble_rendered_lines",

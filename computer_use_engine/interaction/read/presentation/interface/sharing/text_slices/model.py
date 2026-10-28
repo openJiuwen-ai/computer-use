@@ -18,7 +18,17 @@ from computer_use.protocol.observation import NativeObservation
 
 @dataclass(frozen=True)
 class TextSliceRequest:
-    """Final public slots and exact source bindings available for full-text reuse."""
+    """Final public slots and exact source bindings available for full-text reuse.
+
+    Attributes:
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        native: Immutable normalized native observation.
+        refs: Published references mapped to original native object tokens.
+        value_fields: Original per-reference primary value selectors used to establish field identity.
+        disclosure: Previously selected field excerpts and their recovery destinations.
+        excluded_sources: Original references that must retain their independent scalar presentation.
+        excluded_slots: Original reference/slot pairs excluded from text reuse.
+    """
 
     atoms: AtomDocument
     native: NativeObservation
@@ -31,7 +41,17 @@ class TextSliceRequest:
 
 @dataclass(frozen=True)
 class TextSliceField:
-    """An independently numbered scalar with one complete original native field."""
+    """An independently numbered scalar with one complete original native field.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        slot: Local scalar-slot key on the original atom.
+        native_token: Driver-owned object identity associated with the original reference.
+        native_path: Exact normalized field path on that original native object.
+        scope: Original session, observation, and native window/root identities.
+        value: Complete captured value with its original scalar type.
+        atom_slot: Complete immutable scalar slot and its source provenance.
+    """
 
     ref: str
     slot: str
@@ -44,7 +64,13 @@ class TextSliceField:
 
 @dataclass(frozen=True)
 class TextSliceEvidence:
-    """Complete fields and original parent-chain evidence, without rendered text."""
+    """Complete fields and original parent-chain evidence, without rendered text.
+
+    Attributes:
+        request: Immutable inputs and policy for this local planning stage.
+        native: Original parent-chain and source-range evidence for text reuse.
+        fields: Complete candidate scalar fields keyed by original reference and slot.
+    """
 
     request: TextSliceRequest
     native: TextSliceSources
@@ -60,6 +86,15 @@ class TextSlicePlan:
     and individual diff records remain owned by their original elements. UTF-16
     spans prove source equality internally. Excerpt fragments use Python string
     offsets into the source, and are selected before final text serialization.
+
+    Attributes:
+        source: Independent source field represented by the selected reuse rule.
+        anchor: Complete ancestor field retaining the literal reference text.
+        start_utf16: Inclusive UTF-16 code-unit offset within the anchor field.
+        end_utf16: Exclusive UTF-16 code-unit offset within the anchor field.
+        estimated_saved_bytes: Estimated encoded-output bytes saved by this substitution.
+        mode: Exact whole-value reuse or a readable original-source excerpt.
+        fragments: Retained exact source spans in source order.
     """
 
     source: TextSliceField
@@ -73,7 +108,12 @@ class TextSlicePlan:
 
 @dataclass(frozen=True)
 class TextSliceDocument:
-    """Frozen full-view scalar choices and the anchors that must remain literal."""
+    """Frozen full-view scalar choices and the anchors that must remain literal.
+
+    Attributes:
+        plans: Selected source substitutions keyed by original reference and slot.
+        anchors: Reference/slot pairs that must retain their complete literal anchor values.
+    """
 
     plans: Mapping[tuple[str, str], TextSlicePlan] = field(default_factory=lambda: MappingProxyType({}))
     anchors: frozenset[tuple[str, str]] = frozenset()
@@ -85,7 +125,12 @@ class TextSliceDocument:
 
 @dataclass(frozen=True)
 class SelectedTextSlices:
-    """Chosen immutable substitutions awaiting source and range verification."""
+    """Chosen immutable substitutions awaiting source and range verification.
+
+    Attributes:
+        evidence: Source-backed facts used to constrain presentation choices.
+        document: Frozen selected text-reuse decisions.
+    """
 
     evidence: TextSliceEvidence
     document: TextSliceDocument

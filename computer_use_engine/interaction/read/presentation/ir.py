@@ -10,23 +10,23 @@ contract once after all rules have completed.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import TYPE_CHECKING, NewType
+
+from computer_use.interaction.read.presentation.policy import display_copy
+from computer_use.interaction.read.presentation.spatial.geometry import GeometryIndex
+from computer_use.interaction.read.presentation.tree import interaction_view, unique, with_interactions
 
 if TYPE_CHECKING:
-    from typing import Any, Callable, Iterable, Iterator, Literal
+    from typing import Any, Callable, Iterable, Iterator, Literal, Sequence
 
     from computer_use.interaction.read.presentation.compression.caption_equivalence import CaptionEquivalence
     from computer_use.interaction.read.presentation.records import NodeView, SemanticNode
     from computer_use.pipeline.core import T
     from computer_use.protocol.records import Record
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import NewType
 
-from computer_use.interaction.read.presentation.policy import display_copy
-from computer_use.interaction.read.presentation.spatial.geometry import GeometryIndex
-from computer_use.interaction.read.presentation.tree import interaction_view, unique, with_interactions
 
 SourceKey = NewType("SourceKey", str)
 
@@ -199,7 +199,7 @@ class ProjectionInput:
             The immutable source graph retaining the existing source identities.
         """
         context = {} if context is None else dict(context)
-        native, nodes, parents, scopes, order = {}, {}, {}, {}, []
+        native, nodes, parents, scopes, traversal_order = {}, {}, {}, {}, []
 
         def source(node: NodeView) -> None:
             native[node["ref"]] = node
@@ -223,7 +223,7 @@ class ProjectionInput:
             projected = display_copy(node) if context.get("nativeFacts") else node
             nodes[ref] = freeze({key: value for key, value in projected.items() if key != "children"})
             scopes[ref] = scope
-            order.append(ref)
+            traversal_order.append(ref)
             for child in node["children"]:
                 parents[child["ref"]] = ref
                 display(child, scope)
@@ -239,7 +239,7 @@ class ProjectionInput:
             MappingProxyType(nodes),
             MappingProxyType(parents),
             MappingProxyType(scopes),
-            tuple(order),
+            tuple(traversal_order),
             SourceKey(root["ref"]),
             freeze(context),
         )
@@ -704,7 +704,10 @@ class ProjectionEditor:
             raise ValueError("Unknown presentation elision kind")
         ref = self._ref(source)
         destination_refs = tuple(SourceKey(self._ref(item)) for item in destinations)
-        if (kind == "fold" and len(destination_refs) != 1) or (kind == "empty" and destination_refs):
+        invalid_destination_refs = (
+            True if (kind == "fold" and len(destination_refs) != 1) or (kind == "empty" and destination_refs) else False
+        )
+        if invalid_destination_refs:
             raise ValueError("Invalid presentation elision destinations")
         self._ir.elisions[ref] = Elision(
             kind, destination_refs, self._ir.active_rule, (FactKey(SourceKey(ref), "children"),)
@@ -1052,7 +1055,3 @@ def export_projection(ir: PresentationIR) -> ProjectionResult:
             for fact in group.facts:
                 provenance[fact.source, fact.attribute] = PresentedValue((ValuePart(group.value, (fact,)),))
     return ProjectionResult(result, ir.source, provenance)
-
-
-if TYPE_CHECKING:
-    from typing import Sequence

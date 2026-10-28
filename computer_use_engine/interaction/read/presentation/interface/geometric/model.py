@@ -44,6 +44,9 @@ class RegionLayoutEvidence:
     Scope keys describe display units at the moment partitioning was selected.
     Membership uses real source references, so grouping those units into rows or
     records later preserves the same regional constraints.
+
+    Attributes:
+        scopes: Region-partition evidence indexed by original layout scope.
     """
 
     scopes: Mapping[str, RegionScopeEvidence]

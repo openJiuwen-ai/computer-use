@@ -94,7 +94,15 @@ class InterfaceBlock:
 
 @dataclass(frozen=True)
 class NodeEvidence:
-    """Local facts constraining interface organization for one projected source."""
+    """Local facts constraining interface organization for one projected source.
+
+    Attributes:
+        scope: Original window or containment scope for this projected source.
+        independent: Whether independent content, state, or actions require a retained reading unit.
+        boundary: Whether this source separates layout or semantic scopes.
+        incomplete: Whether missing collection facts limit transformations for this source.
+        hidden: Whether the captured projection explicitly reports the source as hidden.
+    """
 
     scope: str
     independent: bool
@@ -130,6 +138,13 @@ class InterfaceRequest:
 
     Captured facts provide original parent relationships and folded source fields.
     Their query scope can exceed the members permitted in this projection's layout.
+
+    Attributes:
+        projection: Immutable compression result supplying this presentation scope.
+        enabled: Whether this request enables the optional presentation transformation.
+        relations: Captured ordered relationships and their completeness evidence.
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        captured: Frozen snapshot providing exact native facts and detail recovery.
     """
 
     projection: ProjectionResult
@@ -145,6 +160,27 @@ class InterfaceDraft:
 
     The source and projected fields are immutable. Stages replace only their block
     organization or evidence map; no native service or session state enters this IR.
+
+    Attributes:
+        source: Immutable source facts and compression policy for this projection.
+        projected_nodes: Immutable projected fields indexed by original element reference.
+        projected_parents: Original projected child-to-parent containment mapping.
+        order: Original projected references in captured traversal order.
+        root_refs: Original projected root references in captured order.
+        provenance: Per-reference field composition records retaining their exact sources.
+        folded_refs: Folded source references mapped to the projected objects representing them.
+        enabled: Whether this request enables the optional presentation transformation.
+        evidence: Source-backed facts used to constrain presentation choices.
+        roots: Ordered roots of the selected block or atomic forest.
+        blocks: Structured reading blocks indexed by their internal layout keys.
+        decisions: Ordered explanations of local organization decisions.
+        relations: Captured ordered relationships and their completeness evidence.
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        geometric_sources: Prepared geometry and original relation evidence available to layout.
+        geometric_alignment: Chosen local row and column alignment plan.
+        geometric_regions: Evidence supporting the selected region partition.
+        geometric_relations: Local geometry-backed relationships between reading units.
+        geometric_patterns: Selected field, record, and grid patterns for the final block forest.
     """
 
     source: ProjectionInput

@@ -5,23 +5,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import Callable
-
-    from computer_use.interaction.read.presentation.interface.disclosure.model import DisclosurePlan
-    from computer_use.interaction.read.presentation.interface.model import InterfaceDocument
-    from computer_use.interaction.read.presentation.ir import ProjectionResult
-    from computer_use.interaction.read.presentation.model import BranchFacts
-    from computer_use.pipeline.core import Control
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.actions.catalogue import capture_catalogues
 from computer_use.interaction.read.presentation.actions.control_raises import capture_control_raises
 from computer_use.interaction.read.presentation.actions.menu_mechanisms import capture_menu_mechanisms
 from computer_use.interaction.read.presentation.model import PURE
-from computer_use.interaction.read.presentation.rendering.formatting import render_projection_lines, rendered_actions
+from computer_use.interaction.read.presentation.rendering.formatting import rendered_actions, render_projection_lines
 from computer_use.interaction.read.presentation.rendering.layout.field_prefixes import capture_field_prefix_sources
 from computer_use.interaction.read.presentation.rendering.layout.identifier_prefixes import capture_identifiers
 from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
@@ -36,6 +27,15 @@ from computer_use.interaction.read.presentation.rendering.native_descriptions im
 from computer_use.interaction.read.presentation.rendering.native_urls import capture_native_url_sources
 from computer_use.interaction.read.presentation.selection_summary import selection_summary_plan
 from computer_use.pipeline import Contract, Pass
+
+if TYPE_CHECKING:
+    from typing import Callable
+
+    from computer_use.interaction.read.presentation.interface.disclosure.model import DisclosurePlan
+    from computer_use.interaction.read.presentation.interface.model import InterfaceDocument
+    from computer_use.interaction.read.presentation.ir import ProjectionResult
+    from computer_use.interaction.read.presentation.model import BranchFacts
+    from computer_use.pipeline.core import Control
 
 
 def create(

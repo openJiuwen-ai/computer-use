@@ -7,16 +7,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.presentation.ir import ProjectionInput
+from computer_use.interaction.read.presentation.compression.evidence import capture_evidence
+from computer_use.interaction.read.presentation.model import PURE
+from computer_use.pipeline import Contract, Pass
+
 if TYPE_CHECKING:
     from typing import Callable
 
     from computer_use.interaction.read.presentation.model import BranchFacts
     from computer_use.interaction.read.presentation.records import SemanticNode
     from computer_use.pipeline.core import Control
-from computer_use.interaction.read.presentation.compression.evidence import capture_evidence
-from computer_use.interaction.read.presentation.ir import ProjectionInput
-from computer_use.interaction.read.presentation.model import PURE
-from computer_use.pipeline import Contract, Pass
 
 
 def create(*, branch: BranchFacts) -> Callable[[SemanticNode, Control], ProjectionInput]:

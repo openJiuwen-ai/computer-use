@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import weakref
 
-from computer_use.identity import FrozenRecord
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.agent.requests import (
     ActOnElement,

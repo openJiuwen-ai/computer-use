@@ -5,10 +5,13 @@ import ApplicationServices
 
 /// Query-only view of the original session registry and its native facts.
 @MainActor protocol NativeQueryObjectAccess: AnyObject {
-    func nativeFacts(_ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
-                     childrenPage: NativeInspectQuery.ChildrenPage?, relationPage: NativeInspectQuery.RelationPage?,
-                     advertisedFields: [String], followRelations: [String], textContent: Bool) throws -> [String: Any]
-    func nativeRelation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws -> [String: Any]
+    func nativeFacts(
+        _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
+        childrenPage: NativeInspectQuery.ChildrenPage?, relationPage: NativeInspectQuery.RelationPage?,
+        advertisedFields: [String], followRelations: [String], textContent: Bool
+    ) throws -> [String: Any]
+    func nativeRelation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws
+        -> [String: Any]
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any]
     func registerNativeRoot(_ element: AXUIElement, app: NSRunningApplication, scope: String) throws -> String
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts

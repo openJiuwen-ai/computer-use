@@ -6,7 +6,7 @@
 import json
 import math
 
-from computer_use.protocol.primitives import required_item
+from .primitives import required_item
 
 from .action_context import decode_action_context
 from .captures import capture_metadata, decode_capture, decode_stamp

@@ -40,8 +40,10 @@ class DesktopStore:
                 dict(
                     kind="desktop",
                     current=lambda: desktop() is not None and image() is not None and desktop().current(image()),
-                    delivered=lambda: (
-                        desktop().delivered(image()) if desktop() is not None and image() is not None else None
+                    delivered=lambda coordinates=None: (
+                        desktop().delivered(image(), coordinates)
+                        if desktop() is not None and image() is not None
+                        else None
                     ),
                 ),
             )
@@ -54,9 +56,14 @@ class DesktopStore:
             raise local_failure("desktop observation changed", "read the desktop again", "stale_target", "Desktop")
         return self._view
 
-    def delivered(self, png):
+    def delivered(self, png, coordinates=None):
         if self.current(png):
-            self._delivered = dict(state=self._view, epoch=self.images.image_delivery_epoch())
+            self._delivered = dict(state=self._view, epoch=self.images.image_delivery_epoch(), coordinates=coordinates)
+
+    def map_parameters(self, operation, parameters):
+        self.target(True)
+        coordinates = self._delivered.get("coordinates") if self._delivered is not None else None
+        return coordinates.source_parameters(operation, parameters) if coordinates is not None else parameters
 
     def target(self, coordinates=False):
         state = self._view
@@ -103,6 +110,9 @@ class DesktopStore:
 
     def check_coordinates(self, x, y):
         self.target(True)
+        coordinates = self._delivered.get("coordinates") if self._delivered is not None else None
+        if coordinates is not None:
+            x, y = coordinates.source_point((x, y))
         invalid_x = True if not finite(x) or not finite(y) or x < 0 or y < 0 else False
         if invalid_x:
             raise local_failure(

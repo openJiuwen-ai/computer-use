@@ -1,15 +1,12 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Assemble rendered part."""
+"Assemble rendered part."
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.records import RenderedTree
-    from computer_use.pipeline.core import Control
 from computer_use.interaction.read.facts.groups import reference_set
 from computer_use.interaction.read.facts.table import selection_summaries
 from computer_use.interaction.read.presentation.accounting.fields import RenderedResult
@@ -37,6 +34,10 @@ from computer_use.interaction.read.presentation.rendering.output import Rendered
 from computer_use.interaction.read.presentation.selection_summary import selection_summary_plan
 from computer_use.interaction.read.presentation.summaries import read_summaries
 from computer_use.pipeline import Contract, Pass
+
+if TYPE_CHECKING:
+    from computer_use.interaction.read.presentation.records import RenderedTree
+    from computer_use.pipeline.core import Control
 
 
 def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> RenderedTree:
@@ -84,7 +85,11 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
         )
     if relation_supplements:
         parts.append(
-            'Native relations (source -> ordered targets; total="target-count" means the length of that target array):\n'
+            (
+                'Native relations (source -> ordered targets; total="target-count" means the '
+                "length of that target "
+                "array):\n"
+            )
             + "\n".join("\t" + line for line in render_relations(relation_supplements))
         )
     parts.extend(selection_summaries(snapshot.facts, snapshot.refs))

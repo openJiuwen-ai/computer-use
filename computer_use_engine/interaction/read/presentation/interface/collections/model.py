@@ -54,7 +54,16 @@ class TableCellPlan:
 
 @dataclass(frozen=True)
 class TableRowPlan:
-    """One original row with its independent index, outline level and cells."""
+    """One original row with its independent index, outline level and cells.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        index: Reported zero-based logical position, when available.
+        outline_level: Reported native outline depth, when available.
+        cells: Ordered plans for the original captured cells.
+        action_refs: Original executable action owners retained in this collection.
+        partial: Whether the source or represented members have unresolved collection gaps.
+    """
 
     ref: str
     index: int | None
@@ -66,7 +75,14 @@ class TableRowPlan:
 
 @dataclass(frozen=True)
 class TableColumnPlan:
-    """An independently referenced column and its proven ordered cell membership."""
+    """An independently referenced column and its proven ordered cell membership.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        index: Reported zero-based logical position, when available.
+        cell_refs: Ordered original cells belonging to this reported column.
+        action_refs: Original executable action owners retained in this collection.
+    """
 
     ref: str
     index: int
@@ -80,6 +96,11 @@ class CollectionMemberPrefix:
 
     State indices refer to the unchanged member AtomPlan. Every other state stays
     on that member, including selection and focus differences within a column.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        state_indices: Zero-based positions of member states represented in the common header.
+        slot_keys: Original member slot keys represented by the shared prefix.
     """
 
     ref: str
@@ -94,6 +115,13 @@ class CollectionPrefixPlan:
     Header fields carry all participating source facts. Members describe exactly
     which original fields the header represents; their complete atoms remain
     available for independent reading, accounting and incremental delivery.
+
+    Attributes:
+        member_refs: Ordered original collection members represented by the prefix.
+        role: Source-backed role selected for this reading unit.
+        states: Ordered state declarations with their original source evidence.
+        slots: Ordered scalar fields retained for terminal formatting.
+        members: Per-source presentation records retaining each independent member.
     """
 
     member_refs: tuple[str, ...]
@@ -105,7 +133,12 @@ class CollectionPrefixPlan:
 
 @dataclass(frozen=True)
 class CollectionDetailField:
-    """An exact structural atom slot retained in same-capture element details."""
+    """An exact structural atom slot retained in same-capture element details.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        slot: Exact structural field slot retained in captured details.
+    """
 
     ref: str
     slot: AtomSlot
@@ -162,7 +195,12 @@ class TablePlan:
 
 @dataclass(frozen=True)
 class CollectionRejection:
-    """A collection kept as its existing tree because local evidence is insufficient."""
+    """A collection kept as its existing tree because local evidence is insufficient.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        reason: Source-specific explanation for the selected decision or coverage gap.
+    """
 
     ref: str
     reason: str
@@ -170,7 +208,14 @@ class CollectionRejection:
 
 @dataclass(frozen=True)
 class CollectionRequest:
-    """Structured interface and atoms with the exact native snapshot behind them."""
+    """Structured interface and atoms with the exact native snapshot behind them.
+
+    Attributes:
+        interface: Structured block forest selected for this captured view.
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        native: Immutable normalized native observation.
+        refs: Published element references mapped to original native object tokens.
+    """
 
     interface: InterfaceDocument
     atoms: AtomDocument
@@ -180,7 +225,13 @@ class CollectionRequest:
 
 @dataclass(frozen=True)
 class CollectionEvidence:
-    """Existing pure collection proofs retained for structural layout planning."""
+    """Existing pure collection proofs retained for structural layout planning.
+
+    Attributes:
+        request: Immutable inputs and policy for this local planning stage.
+        outlines: Complete native row-membership proofs indexed by collection reference.
+        grids: Original logical table coordinates and cell containment evidence.
+    """
 
     request: CollectionRequest
     outlines: Mapping[str, RowCollection]
@@ -189,7 +240,12 @@ class CollectionEvidence:
 
 @dataclass(frozen=True)
 class CollectionDocument:
-    """Frozen plans and local fallback reasons, separate from execution bindings."""
+    """Frozen plans and local fallback reasons, separate from execution bindings.
+
+    Attributes:
+        tables: Selected collection plans keyed by original table or outline reference.
+        rejected: Collection candidates retained with their explicit rejection reasons.
+    """
 
     tables: Mapping[str, TablePlan]
     rejected: tuple[CollectionRejection, ...] = ()

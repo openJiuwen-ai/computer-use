@@ -9,30 +9,11 @@ editor, never the input graph or execution ports as mutable shared state.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from typing import Any, Callable
-
-    from computer_use.interaction.read.presentation.ir import (
-        ProjectionEditor,
-        ProjectionResult,
-        ProjectionView,
-        ViewNode,
-    )
-    from computer_use.interaction.read.presentation.records import SemanticNode
-    from computer_use.pipeline.core import Control, Step
-    from computer_use.protocol.records import Record
-from dataclasses import dataclass
-
-from computer_use.interaction.read.presentation.compression.model import (
-    CompressionRun,
-    RuleInvocation,
-    Scope,
-)
-from computer_use.interaction.read.presentation.compression.passes.associate_labels import (
-    associate_labels,
-)
+from computer_use.interaction.read.presentation.compression.model import CompressionRun, RuleInvocation, Scope
+from computer_use.interaction.read.presentation.compression.passes.associate_labels import associate_labels
 from computer_use.interaction.read.presentation.compression.passes.build_presentation_ir import (
     stage as build_presentation_ir,
 )
@@ -48,40 +29,24 @@ from computer_use.interaction.read.presentation.compression.passes.deduplicate_d
 from computer_use.interaction.read.presentation.compression.passes.deduplicate_row_captions import (
     deduplicate_row_captions,
 )
-from computer_use.interaction.read.presentation.compression.passes.finalize_sources import (
-    finalize_sources,
-)
+from computer_use.interaction.read.presentation.compression.passes.finalize_sources import finalize_sources
 from computer_use.interaction.read.presentation.compression.passes.flatten_redundant_hierarchy import (
     flatten_redundant_hierarchy,
 )
 from computer_use.interaction.read.presentation.compression.passes.fold_native_caption_components import (
     fold_native_caption_components,
 )
-from computer_use.interaction.read.presentation.compression.passes.merge_control_labels import (
-    merge_control_labels,
-)
-from computer_use.interaction.read.presentation.compression.passes.merge_editors import (
-    merge_editors,
-)
+from computer_use.interaction.read.presentation.compression.passes.merge_control_labels import merge_control_labels
+from computer_use.interaction.read.presentation.compression.passes.merge_editors import merge_editors
 from computer_use.interaction.read.presentation.compression.passes.merge_owned_passive_content import (
     merge_owned_passive_content,
 )
-from computer_use.interaction.read.presentation.compression.passes.merge_region_labels import (
-    merge_region_labels,
-)
-from computer_use.interaction.read.presentation.compression.passes.merge_repeated_text import (
-    merge_repeated_text,
-)
-from computer_use.interaction.read.presentation.compression.passes.promote_description import (
-    promote_description,
-)
-from computer_use.interaction.read.presentation.compression.passes.prune_empty_rows import (
-    prune_empty_rows,
-)
+from computer_use.interaction.read.presentation.compression.passes.merge_region_labels import merge_region_labels
+from computer_use.interaction.read.presentation.compression.passes.merge_repeated_text import merge_repeated_text
+from computer_use.interaction.read.presentation.compression.passes.promote_description import promote_description
+from computer_use.interaction.read.presentation.compression.passes.prune_empty_rows import prune_empty_rows
 from computer_use.interaction.read.presentation.compression.passes.prune_layout import prune_layout
-from computer_use.interaction.read.presentation.compression.passes.reconstruct_outlines import (
-    reconstruct_outlines,
-)
+from computer_use.interaction.read.presentation.compression.passes.reconstruct_outlines import reconstruct_outlines
 from computer_use.interaction.read.presentation.compression.passes.share_empty_descriptions import (
     share_empty_descriptions,
 )
@@ -94,6 +59,20 @@ from computer_use.interaction.read.presentation.spatial.pipeline import SpatialO
 from computer_use.interaction.read.presentation.tree import is_window
 from computer_use.pipeline import Contract, Effect, Pass, Pipeline, Sequence
 from computer_use.pipeline.core import Node
+
+if TYPE_CHECKING:
+    from typing import Any, Callable
+
+    from computer_use.interaction.read.presentation.ir import (
+        ProjectionEditor,
+        ProjectionResult,
+        ProjectionView,
+        ViewNode,
+    )
+    from computer_use.interaction.read.presentation.records import SemanticNode
+    from computer_use.pipeline.core import Control, Step
+    from computer_use.protocol.records import Record
+
 
 BEFORE_CHILDREN = (promote_description, merge_editors, merge_control_labels)
 AFTER_CHILDREN = (
@@ -135,8 +114,8 @@ class Rule:
         )
 
 
-RULES = {
-    step: Rule(step, reads, writes)
+def _rule_map() -> dict[Callable[..., Any], Rule]:
+    rules = {}
     for step, reads, writes in (
         (share_empty_descriptions, ("complete empty descriptions", "source scopes"), ("shared field destinations",)),
         (
@@ -198,8 +177,12 @@ RULES = {
             ("source routes", "elisions"),
             ("final source destinations", "folded source role declarations"),
         ),
-    )
-}
+    ):
+        rules[step] = Rule(step, reads, writes)
+    return rules
+
+
+RULES = _rule_map()
 
 
 def apply_rule(step: Callable[..., Any], view: ProjectionView, edit: ProjectionEditor, *arguments: object) -> Any:

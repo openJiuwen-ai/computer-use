@@ -127,9 +127,11 @@ import ApplicationServices
         ["id": UUID().uuidString, "startedAt": began, "completedAt": Int64(Date().timeIntervalSince1970 * 1000)]
     }
 
-    func collect(_ ref: String, session: String, fields requested: [String], maxNodes: Int, maxDepth: Int,
-                 childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil, advertisedFields: [String] = [],
-                 followRelations: [String] = [], textContent: Bool = false) throws -> [String: Any] {
+    func collect(
+        _ ref: String, session: String, fields requested: [String], maxNodes: Int, maxDepth: Int,
+        childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
+        advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false
+    ) throws -> [String: Any] {
         let root = try readTarget(ref)
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 5)
@@ -204,7 +206,8 @@ import ApplicationServices
             if !advertisedFields.isEmpty || !followRelations.isEmpty || textContent {
                 var attributes: CFArray?
                 let status = AXUIElementCopyAttributeNames(target.element, &attributes)
-                textCountDeclared = status == .success && (attributes as? [String])?.contains("AXNumberOfCharacters") == true
+                textCountDeclared =
+                    status == .success && (attributes as? [String])?.contains("AXNumberOfCharacters") == true
                 // Preserve the actual catalogue already obtained for profile
                 // validation. It is a method result, not a fabricated AX field.
                 var catalogue: [String: Any] = ["key": ["toolkit", "attribute_names"], "value": NSNull()]
@@ -312,8 +315,8 @@ import ApplicationServices
                 }
             }
             if textContent && textCountDeclared {
-                nativeProperties += try AXTextContentReader.read(target.element, values: values,
-                    failures: missing, withinBudget: reading)
+                nativeProperties += try AXTextContentReader.read(
+                    target.element, values: values, failures: missing, withinBudget: reading)
             }
             for (name, value) in values {
                 guard let text = value as? String else { continue }

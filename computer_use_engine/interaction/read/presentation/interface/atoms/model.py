@@ -23,7 +23,12 @@ SlotFormat = Literal["text", "literal", "number", "span", "selection", "refs", "
 
 @dataclass(frozen=True)
 class AtomFact:
-    """An exact captured field occurrence, including its original value and type."""
+    """An exact captured field occurrence, including its original value and type.
+
+    Attributes:
+        key: Exact source node, field path, and occurrence identity.
+        value: Complete captured value with its original scalar type.
+    """
 
     key: FactKey
     value: object
@@ -31,7 +36,13 @@ class AtomFact:
 
 @dataclass(frozen=True)
 class AtomRole:
-    """Role spelling and the source fields supporting that spelling."""
+    """Role spelling and the source fields supporting that spelling.
+
+    Attributes:
+        label: Display spelling selected for this source-backed declaration.
+        facts: Exact captured occurrences supporting this declaration.
+        source_description: Whether the selected spelling comes from the provider role description.
+    """
 
     label: str
     facts: tuple[AtomFact, ...] = ()
@@ -40,7 +51,12 @@ class AtomRole:
 
 @dataclass(frozen=True)
 class AtomState:
-    """One independently meaningful state or operation capability."""
+    """One independently meaningful state or operation capability.
+
+    Attributes:
+        label: Display spelling selected for this source-backed declaration.
+        facts: Exact captured occurrences supporting this declaration.
+    """
 
     label: str
     facts: tuple[AtomFact, ...] = ()
@@ -52,6 +68,11 @@ class AtomPreview:
 
     The slot value retains the original capture. This record specifies only what
     the terminal formatter emits; source accounting routes the full field to details.
+
+    Attributes:
+        kind: Selected embedded-carrier or URL preview format.
+        head: Exact retained prefix for terminal display.
+        encoded_characters: Original encoded-character count when the preview describes a carrier.
     """
 
     kind: Literal["embedded", "embedded-url", "url"]
@@ -88,7 +109,16 @@ class AtomSlot:
 
 @dataclass(frozen=True)
 class AtomAction:
-    """One native action with its executable owner retained after display folding."""
+    """One native action with its executable owner retained after display folding.
+
+    Attributes:
+        source_ref: Original element owning this action or field occurrence.
+        name: Exact native action name accepted by the execution interface.
+        label: Display spelling selected for this source-backed declaration.
+        ambiguous: Whether the display label also needs its exact native name to distinguish the action.
+        catalogue_index: Zero-based position in the original owner action catalogue.
+        source: Original action record used to check source-preserving delivery.
+    """
 
     source_ref: str
     name: str
@@ -100,7 +130,18 @@ class AtomAction:
 
 @dataclass(frozen=True)
 class AtomCoverage:
-    """Collected child coverage and precise continuation evidence for an atom."""
+    """Collected child coverage and precise continuation evidence for an atom.
+
+    Attributes:
+        reason: Source-specific explanation for the selected decision or coverage gap.
+        read: Number of direct child facts collected, when known.
+        total: Reported total direct-child count, when known.
+        start: Inclusive collected child-index boundary, when known.
+        end: Exclusive collected child-index boundary, when known.
+        next_offset: Reported continuation offset requiring further collection.
+        omissions: Retained explanations of omitted child facts.
+        unexpanded_menu: Whether this coverage describes a deliberately unexpanded menu.
+    """
 
     reason: str | None = None
     read: int | None = None
@@ -126,7 +167,13 @@ class AtomCoverage:
 
 @dataclass(frozen=True)
 class AtomDeclaration:
-    """A shared source-field value with an explicit, ordered set of real owners."""
+    """A shared source-field value with an explicit, ordered set of real owners.
+
+    Attributes:
+        attribute: Projected field name used for source accounting.
+        value: Complete captured value with its original scalar type.
+        facts: Exact captured occurrences supporting this declaration.
+    """
 
     attribute: str
     value: object
@@ -135,7 +182,14 @@ class AtomDeclaration:
 
 @dataclass(frozen=True)
 class AtomDisposition:
-    """An exact field occurrence's destination within this captured presentation."""
+    """An exact field occurrence's destination within this captured presentation.
+
+    Attributes:
+        fact: Original captured field occurrence whose destination is recorded.
+        target_ref: Original element receiving this field composition.
+        slot: Destination scalar-slot key.
+        kind: Inline, equivalent, or same-observation-details coverage for this occurrence.
+    """
 
     fact: AtomFact
     target_ref: str
@@ -149,6 +203,13 @@ class AtomFieldClaim:
 
     Values use the same normalized-field contract as the existing native-field
     accounting. They remain separate from exact native ``AtomFact`` values.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        field: Exact normalized field path accounted for by this claim.
+        value: Normalized value expressed at the selected destination.
+        target: Named display or recovery destination for this field.
+        kind: Coverage mechanism expressing this field, including selection summaries.
     """
 
     ref: str
@@ -165,6 +226,21 @@ class AtomPlan:
     The original fields remain frozen alongside the selected slots. Layout may
     share or compose slots while their exact source occurrences stay identifiable.
     Actions retain the original source even when their caption was folded here.
+
+    Attributes:
+        ref: Original element reference within this captured observation.
+        parent: Original projected parent reference, when present.
+        role: Source-backed role selected for this reading unit.
+        states: Ordered state declarations with their original source evidence.
+        slots: Ordered scalar fields retained for terminal formatting.
+        actions: Native action declarations retaining their executable owners.
+        actions_unavailable: Whether the native action catalogue could not be collected.
+        coverage: Complete child coverage and continuation information.
+        children: Ordered direct projected child references.
+        source_fields: Original normalized fields kept independently of selected display slots.
+        dispositions: Original fact occurrences mapped to their selected display destinations.
+        declarations: Shared exact field values and their ordered source facts.
+        field_claims: Exact normalized fields and the display destinations accounting for them.
     """
 
     ref: str
@@ -188,7 +264,24 @@ class AtomPlan:
 
 @dataclass(frozen=True)
 class AtomDocument:
-    """Frozen per-element content used by block planning and terminal rendering."""
+    """Frozen per-element content used by block planning and terminal rendering.
+
+    Attributes:
+        source: Immutable projection input from which these atoms were prepared.
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        roots: Ordered roots of the selected block or atomic forest.
+        order: Original projected references in captured traversal order.
+        focused_ref: Original reference reporting focus in this projection, when known.
+        selected_refs: Original references reporting selection in captured order.
+        dispositions: Original fact occurrences mapped to their selected display destinations.
+        field_claims: Exact normalized fields and the display destinations accounting for them.
+        deferred_native_fields: Exact native fields accounted for by same-observation details.
+        deferred_menu_actions: Menu mechanisms whose exact native actions remain in details.
+        deferred_control_raises: Control-focus actions whose exact native names remain in details.
+        deferred_native_urls: Source-specific native URL fields with verified detail destinations.
+        deferred_native_url_peers: Peer-caption evidence supporting exact URL detail choices.
+        shared_index_basis: Whether this document explicitly shares the captured index interpretation.
+    """
 
     source: ProjectionInput
     atoms: Mapping[str, AtomPlan]
@@ -208,7 +301,12 @@ class AtomDocument:
 
 @dataclass(frozen=True)
 class AtomRequest:
-    """Final projection and captured formatting policy for atomic field planning."""
+    """Final projection and captured formatting policy for atomic field planning.
+
+    Attributes:
+        projection: Immutable compression result supplying this presentation scope.
+        branch: Captured formatting policy and source scope for this branch.
+    """
 
     projection: ProjectionResult
     branch: BranchFacts
@@ -216,7 +314,15 @@ class AtomRequest:
 
 @dataclass(frozen=True)
 class AtomFinalizeRequest:
-    """Prepared content, layout context and captured detail routes for final display choices."""
+    """Prepared content, layout context and captured detail routes for final display choices.
+
+    Attributes:
+        atoms: Source-bound atomic fields, states, actions, and coverage.
+        projection: Immutable compression result supplying this presentation scope.
+        branch: Captured formatting policy and source scope for this branch.
+        disclosure: Previously selected field excerpts and their recovery destinations.
+        interface: Structured block forest selected for this captured view.
+    """
 
     atoms: AtomDocument
     projection: ProjectionResult
