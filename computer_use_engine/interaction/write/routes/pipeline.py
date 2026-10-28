@@ -55,12 +55,17 @@ class RouteSelectionPipeline(Sequence["Any", "Any"]):
         try:
             command = super()._run(request, control)
         except ComputerUseError as unavailable:
-            if (
-                unavailable.code == "input_unavailable"
-                and view.last_route_failure is not None
-                and not target.needs_editing_evidence
-                and target.facts.enabled != Knowledge.NO
-            ):
+            matches_unavailable = (
+                True
+                if (
+                    unavailable.code == "input_unavailable"
+                    and view.last_route_failure is not None
+                    and not target.needs_editing_evidence
+                    and target.facts.enabled != Knowledge.NO
+                )
+                else False
+            )
+            if matches_unavailable:
                 last = view.last_route_failure
                 raise failure(
                     last.error_code, target.facts.target_label, last.detail, view.dispatched, view.preparation

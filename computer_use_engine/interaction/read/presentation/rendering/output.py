@@ -84,30 +84,25 @@ class RenderedDocument:
         def indent(text: str) -> str:
             return "\n".join("\t" + line for line in text.splitlines()) if text else ""
 
-        return replace(
-            self,
-            parts=tuple(
-                indent(part)
-                if isinstance(part, str)
-                else replace(
-                    part,
-                    text=indent(part.text),
-                    prefix=indent(part.prefix),
-                    suffix=indent(part.suffix),
-                    nodes=tuple(
-                        replace(
-                            node,
-                            depth=node.depth + 1,
-                            text=indent(node.text),
-                            content=indent(node.content),
-                            hints=tuple(indent(hint) for hint in node.hints),
-                        )
-                        for node in part.nodes
-                    ),
+        parts = []
+        for part in self.parts:
+            if isinstance(part, str):
+                parts.append(indent(part))
+                continue
+            text, prefix, suffix = indent(part.text), indent(part.prefix), indent(part.suffix)
+            nodes = []
+            for node in part.nodes:
+                nodes.append(
+                    replace(
+                        node,
+                        depth=node.depth + 1,
+                        text=indent(node.text),
+                        content=indent(node.content),
+                        hints=tuple(indent(hint) for hint in node.hints),
+                    )
                 )
-                for part in self.parts
-            ),
-        )
+            parts.append(replace(part, text=text, prefix=prefix, suffix=suffix, nodes=tuple(nodes)))
+        return replace(self, parts=tuple(parts))
 
     def scoped(self, scope: tuple[Hashable, ...]) -> RenderedDocument:
         """Attach the native scope used for comparison; execution bindings stay separate."""

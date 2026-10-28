@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from computer_use.interaction.records import ElementPath as LookupPath, Remaining
+    from computer_use.interaction.records import ElementPath as LookupPath
+    from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import Intent, OperationTarget
 
 

@@ -5,7 +5,7 @@ import Foundation
 struct NativePreparationEffect {
     enum Kind {
         case focusNotification, windowSelection
-        case foregroundActivation, menuContext
+        case foregroundActivation, menuContext, viewport
     }
     enum Phase { case willSend, returned }
     let kind: Kind

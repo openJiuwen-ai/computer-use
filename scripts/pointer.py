@@ -3,11 +3,13 @@ import hashlib
 import math
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
-from computer_use._json import loads as jsonLoads
-from computer_use.interaction.read.presentation.formatting import numberString
-from computer_use.paths import repositoryRoot
+from computer_use.json import loads as jsonLoads
+from computer_use.interaction.read.presentation.formatting import number_string
+from computer_use.paths import repository_root
 
 "Strict compiler for the shared cursor SVG profile and motion keyframes."
 
@@ -20,7 +22,7 @@ def require(condition, message):
         raise ValueError("Agent pointer asset: " + message)
 
 
-def parseXML(source):
+def parse_xml(source):
     source = re.sub("<(title|desc)>[^<]*</\\1>", "", re.sub("<!--[\\s\\S]*?-->", "", source)).strip()
     roots, stack, at = [], [], 0
     while at < len(source):
@@ -35,12 +37,12 @@ def parseXML(source):
         require(start is not None, "unsupported XML declaration")
         node = dict(tag=start[1], attrs={}, children=[])
         self_closing = content.endswith("/")
-        rest = content[start.end() :].removesuffix("/")
+        rest = content[slice(start.end(), None)].removesuffix("/")
         while rest.strip():
             attr = re.match('\\s+([A-Za-z][\\w:-]*)\\s*=\\s*"([^"&<>]*)"', rest, re.ASCII)
             require(attr is not None and attr[1] not in node["attrs"], "unsupported/duplicate SVG attribute")
             node["attrs"][attr[1]] = attr[2]
-            rest = rest[attr.end() :]
+            rest = rest[slice(attr.end(), None)]
         (stack[-1]["children"] if stack else roots).append(node)
         if not self_closing:
             stack.append(node)
@@ -73,7 +75,7 @@ def color(value):
     return value
 
 
-def parsePath(d, closed=True):
+def parse_path(d, closed=True):
     tokens = re.findall("[MLCZ]|" + NUMBER, d, re.ASCII)
     require(
         re.sub("[MLCZ]|" + NUMBER + "|[\\s,]+", "", d, flags=re.ASCII) == "",
@@ -88,7 +90,7 @@ def parsePath(d, closed=True):
             count is not None and i + count <= len(tokens),
             "incomplete path command (repeat command letters explicitly)",
         )
-        commands.append(dict(op=op, values=[number(value) for value in tokens[i : i + count]]))
+        commands.append(dict(op=op, values=[number(value) for value in tokens[slice(i, i + count)]]))
         i += count
     require(
         commands and commands[0]["op"] == "M" and (not closed or commands[-1]["op"] == "Z"),
@@ -97,7 +99,7 @@ def parsePath(d, closed=True):
     return commands
 
 
-def motionSchema(m):
+def motion_schema(m):
     def keys(value, expected):
         require(isinstance(value, dict) and set(value) == set(expected.split()), "unsupported/missing motion keys")
 
@@ -147,17 +149,16 @@ def motionSchema(m):
         "Invalid animation ranges or keyframes",
     )
     # Zod object output follows schema order, regardless of the source key order.
-    return {
+    result = {
         "version": m["version"],
         "hotspot": list(m["hotspot"]),
         "move": {key: copy.deepcopy(m["move"][key]) for key in groups["move"].split()},
         "appearMs": m["appearMs"],
-        **{
-            group: {key: copy.deepcopy(m[group][key]) for key in fields.split()}
-            for group, fields in groups.items()
-            if group != "move"
-        },
     }
+    for group, fields in groups.items():
+        if group != "move":
+            result[group] = {key: copy.deepcopy(m[group][key]) for key in fields.split()}
+    return result
 
 
 def allowed(node, required, optional=""):
@@ -168,8 +169,8 @@ def allowed(node, required, optional=""):
     return node["attrs"]
 
 
-def compileAssets(svg, data):
-    root = parseXML(svg)
+def compile_assets(svg, data):
+    root = parse_xml(svg)
     require(root["tag"] == "svg", "expected svg root")
     a = allowed(root, "xmlns width height viewBox fill")
     require(a["xmlns"] == "http://www.w3.org/2000/svg" and a["fill"] == "none", "expected SVG namespace and fill=none")
@@ -204,7 +205,7 @@ def compileAssets(svg, data):
             v = attributes(node, "path", "id d")
             require(not node["children"], "unexpected path children")
             definitions[key] = dict(kind="path", index=len(paths))
-            paths.append(parsePath(v["d"]))
+            paths.append(parse_path(v["d"]))
         elif node["tag"] in ("linearGradient", "radialGradient"):
             radial = node["tag"] == "radialGradient"
             v = attributes(node, node["tag"], "id gradientUnits " + ("cx cy r" if radial else "x1 y1 x2 y2"))
@@ -243,12 +244,21 @@ def compileAssets(svg, data):
             definitions[key] = dict(kind="clip", path=reference(v["href"], "path")["index"])
         elif node["tag"] == "filter":
             f = attributes(node, "filter", "id x y width height color-interpolation-filters")
+
+            def _iter_k(_source_items: Iterator[Any], filter_attributes: Any) -> Iterator[Any]:
+                for k, v in _source_items:
+                    yield filter_attributes[k] == v
+
             require(
                 all(
-                    f[k] == v
-                    for k, v in zip(
-                        ("x", "y", "width", "height", "color-interpolation-filters"),
-                        ("-40%", "-30%", "180%", "175%", "sRGB"),
+                    _iter_k(
+                        iter(
+                            zip(
+                                ("x", "y", "width", "height", "color-interpolation-filters"),
+                                ("-40%", "-30%", "180%", "175%", "sRGB"),
+                            )
+                        ),
+                        f,
                     )
                 )
                 and len(node["children"]) == 1,
@@ -289,7 +299,7 @@ def compileAssets(svg, data):
             path = reference(v["href"], "path")["index"]
         else:
             path = len(paths)
-            paths.append(parsePath(v["d"], False))
+            paths.append(parse_path(v["d"], False))
         fill, stroke = paint(v.get("fill")), paint(v.get("stroke"))
         require(fill or stroke, "drawing must have a fill or stroke")
         require(not v.get("stroke-linejoin") or v["stroke-linejoin"] == "round", "unsupported line join")
@@ -306,7 +316,7 @@ def compileAssets(svg, data):
         )
 
     drawing = [render(node) for node in nodes]
-    motion = motionSchema(jsonLoads(data) if isinstance(data, str) else data)
+    motion = motion_schema(jsonLoads(data) if isinstance(data, str) else data)
     require(all(0 <= v <= size[i] for i, v in enumerate(motion["hotspot"])), "hotspot outside viewBox")
     shape = reference("#shape", "path")["index"]
     require("body" in ids, "missing #body")
@@ -340,8 +350,8 @@ def _swift_lines(source):
     return "\n".join(result) + "\n"
 
 
-def swiftSource(asset, digest):
-    n = numberString
+def swift_source(asset, digest):
+    n = number_string
     m = asset["motion"]
 
     def point(x, y):
@@ -360,14 +370,13 @@ def swiftSource(asset, digest):
             f")"
         )
 
+    outline_strokes = [
+        node["width"] for node in asset["drawing"] if node.get("path") == asset["shape"] and node.get("stroke")
+    ]
     values = dict(
         size=f"CGSize(width: {n(asset['size'][0])}, height: {n(asset['size'][1])})",
         hotspot=point(*m["hotspot"]),
-        outlineWidth=(
-            f"CGFloat("
-            f"{n(max([0] + [node['width'] for node in asset['drawing'] if node.get('path') == asset['shape'] and node.get('stroke')]))}"
-            f")"
-        ),
+        outlineWidth=f"CGFloat({n(max([0] + outline_strokes))})",
     )
     values.update(easing="[" + ", ".join(map(n, m["move"]["easing"])) + "] as [Float]", appear=n(m["appearMs"] / 1000))
     for group, entries in m.items():
@@ -385,7 +394,7 @@ def swiftSource(asset, digest):
                 else f"Double({n(value / 1000 if key.endswith('Ms') else value)})"
             )
 
-    def pathCommands(commands):
+    def path_commands(commands):
         result = []
         for command in commands:
             op, v = command["op"], command["values"]
@@ -411,7 +420,7 @@ def swiftSource(asset, digest):
     def emit(line):
         drawing.append("        " + line)
 
-    def drawPaint(paint):
+    def draw_paint(paint):
         if "color" in paint:
             emit(f"context.setFillColor({rgb(paint['color'])})")
             emit("context.fill(CGRect(x: 0, y: 0, width: size.width, height: size.height))")
@@ -461,7 +470,7 @@ def swiftSource(asset, digest):
                 emit("context.beginTransparencyLayer(auxiliaryInfo: nil)")
             if node["fill"]:
                 emit(f"context.saveGState(); context.addPath(path{node['path']}()); context.clip()")
-                drawPaint(node["fill"])
+                draw_paint(node["fill"])
                 emit("context.restoreGState()")
             if node["stroke"]:
                 emit(f"context.saveGState(); context.addPath(path{node['path']}())")
@@ -477,7 +486,7 @@ def swiftSource(asset, digest):
                     )
                 )
                 emit((f"context.replacePathWithStrokedPath(); context.clip(); context.setAlpha({n(node['opacity'])})"))
-                drawPaint(node["stroke"])
+                draw_paint(node["stroke"])
                 emit("context.restoreGState()")
             if node["shadow"]:
                 emit("context.endTransparencyLayer()")
@@ -485,69 +494,75 @@ def swiftSource(asset, digest):
 
     for node in asset["drawing"]:
         draw(node)
-    paths = "\n\n".join(
-        (f"    private static func path{i}() -> CGPath {{\n        let path = CGMutablePath()\n")
-        + "\n".join("        " + s for s in pathCommands(commands))
-        + "\n        return path\n    }"
-        for i, commands in enumerate(asset["paths"])
-    )
-    gradients = "\n\n".join(
+    path_sources = []
+    for i, commands in enumerate(asset["paths"]):
+        path_sources.append(
+            (f"    private static func path{i}() -> CGPath {{\n        let path = CGMutablePath()\n")
+            + "\n".join("        " + s for s in path_commands(commands))
+            + "\n        return path\n    }"
+        )
+    paths = "\n\n".join(path_sources)
+    gradient_sources = []
+    for i, gradient in enumerate(asset["gradients"]):
+        gradient_sources.append(
+            (
+                f"    private static func gradient"
+                f"{i}"
+                f"() -> CGGradient {{\n        CGGradient(colorsSpace: "
+                f"CGColorSpace(name: CGColorSpace.sRGB)!,\n            colors: ["
+            )
+            + ", ".join(rgb(s["color"], s["opacity"]) for s in gradient["stops"])
+            + "] as CFArray,\n            locations: ["
+            + ", ".join(n(s["offset"]) for s in gradient["stops"])
+            + "])!\n    }"
+        )
+    gradients = "\n\n".join(gradient_sources)
+    source = "".join(
         (
-            f"    private static func gradient"
-            f"{i}"
-            f"() -> CGGradient {{\n        CGGradient(colorsSpace: "
-            f"CGColorSpace(name: CGColorSpace.sRGB)!,\n            colors: ["
+            "// Generated by computer_use_native_tools.pointer. DO NOT EDIT.\n",
+            (
+                f"// Source: os_adapter/assets/agent-pointer/{{cursor.svg,motion.json}}\n"
+                f"// sha256 "
+                f"{digest}"
+                f"\nimport CoreGraphics\n\nenum AgentPointerAssets {{\n"
+            ),
+            "\n".join(f"    static let {k} = {v}" for k, v in values.items()),
+            (
+                "\n\n    /// SVG uses y-down; the feedback path is relative to the "
+                "native "
+                "hotspot.\n    static func path() -> CGPath {\n        var transform = "
+                "CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: -hotspot.x, ty: "
+                "hotspot.y)\n"
+            ),
+            f"        return path{asset['shape']}().copy(using: &transform)!\n",
+            (
+                "    }\n\n    /// Draw the complete SVG into a size-matched y-up layer, "
+                "including alpha.\n    static func draw(in context: CGContext) {\n  "
+                "      "
+                "context.saveGState()\n        context.clip(to: CGRect(origin: "
+                ".zero, size: "
+                "size))\n        context.translateBy(x: 0, y: size.height); "
+                "context.scaleBy(x: 1, y: "
+                "-1)\n"
+            ),
+            "\n".join(drawing),
+            "\n        context.restoreGState()\n    }\n\n",
+            paths,
+            "\n\n",
+            gradients,
+            "\n}\n",
         )
-        + ", ".join(rgb(s["color"], s["opacity"]) for s in g["stops"])
-        + "] as CFArray,\n            locations: ["
-        + ", ".join(n(s["offset"]) for s in g["stops"])
-        + "])!\n    }"
-        for i, g in enumerate(asset["gradients"])
-    )
-    source = (
-        "// Generated by computer_use_native_tools.pointer. DO NOT EDIT.\n"
-        + (
-            f"// Source: os_adapter/assets/agent-pointer/{{cursor.svg,motion.json}}\n"
-            f"// sha256 "
-            f"{digest}"
-            f"\nimport CoreGraphics\n\nenum AgentPointerAssets {{\n"
-        )
-        + "\n".join(f"    static let {k} = {v}" for k, v in values.items())
-        + (
-            "\n\n    /// SVG uses y-down; the feedback path is relative to the "
-            "native "
-            "hotspot.\n    static func path() -> CGPath {\n        var transform = "
-            "CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: -hotspot.x, ty: "
-            "hotspot.y)\n"
-        )
-        + f"        return path{asset['shape']}().copy(using: &transform)!\n"
-        + (
-            "    }\n\n    /// Draw the complete SVG into a size-matched y-up layer, "
-            "including alpha.\n    static func draw(in context: CGContext) {\n  "
-            "      "
-            "context.saveGState()\n        context.clip(to: CGRect(origin: "
-            ".zero, size: "
-            "size))\n        context.translateBy(x: 0, y: size.height); "
-            "context.scaleBy(x: 1, y: "
-            "-1)\n"
-        )
-        + "\n".join(drawing)
-        + "\n        context.restoreGState()\n    }\n\n"
-        + paths
-        + "\n\n"
-        + gradients
-        + "\n}\n"
     )
     return _swift_lines(source)
 
 
-def csharpSource(asset, digest):
-    n = numberString
+def csharp_source(asset, digest):
+    n = number_string
 
     def point(x, y):
         return f"new PointF({n(x)}f, {n(y)}f)"
 
-    def color(value, alpha=1):
+    def paint_color(value, alpha=1):
         return (
             f"Color.FromArgb({round(alpha * 255)}, {int(value[1:3], 16)}, {int(value[3:5], 16)}, {int(value[5:], 16)})"
         )
@@ -564,7 +579,7 @@ def csharpSource(asset, digest):
         for key, value in entries.items():
             name = group[0].upper() + group[1:] + key[0].upper() + key[1:].removesuffix("Ms")
             if isinstance(value, str):
-                declaration = f"readonly Color {name} = {color(value)}"
+                declaration = f"readonly Color {name} = {paint_color(value)}"
             elif isinstance(value, list):
                 declaration = f"readonly double[] {name} = new double[] {{ {', '.join(map(n, value))} }}"
             else:
@@ -610,7 +625,7 @@ def csharpSource(asset, digest):
             + " }, new double[] { "
             + ", ".join(n(s["offset"]) for s in gradient["stops"])
             + " }, new Color[] { "
-            + ", ".join(color(s["color"], s["opacity"]) for s in gradient["stops"])
+            + ", ".join(paint_color(s["color"], s["opacity"]) for s in gradient["stops"])
             + " });"
         )
     drawing = []
@@ -621,7 +636,10 @@ def csharpSource(asset, digest):
     def paint(value):
         if "color" in value:
             emit(
-                (f"using (var brush = new SolidBrush({color(value['color'])})) graphics.FillRectangle(brush, bounds);")
+                (
+                    f"using (var brush = new SolidBrush({paint_color(value['color'])})) "
+                    "graphics.FillRectangle(brush, bounds);"
+                )
             )
         else:
             emit(f"graphics.DrawImage(Gradient{value['gradient']}, bounds);")
@@ -650,7 +668,7 @@ def csharpSource(asset, digest):
                         f"f, "
                         f"{n(s['radius'])}"
                         f"f, "
-                        f"{color(s['color'], s['opacity'])}"
+                        f"{paint_color(s['color'], s['opacity'])}"
                         f");"
                     )
                 )
@@ -681,7 +699,7 @@ def csharpSource(asset, digest):
                     emit(
                         (
                             f"using (var brush = new SolidBrush("
-                            f"{color(node['stroke']['color'], node['opacity'])}"
+                            f"{paint_color(node['stroke']['color'], node['opacity'])}"
                             f")) graphics.FillRectangle(brush, bounds);"
                         )
                     )
@@ -693,45 +711,47 @@ def csharpSource(asset, digest):
 
     for node in asset["drawing"]:
         draw(node)
-    return (
-        "// Generated by computer_use_native_tools.pointer. DO NOT EDIT.\n"
-        + f"// Source: os_adapter/assets/agent-pointer/{{cursor.svg,motion.json}}; sha256 {digest}\n"
-        + (
-            "using System.Drawing;\nusing System.Drawing.Drawing2D;\n\nnamespace "
-            "ComputerUse.Windows {\n    internal static class AgentPointerAssets "
-            "{\n"
+    return "".join(
+        (
+            "// Generated by computer_use_native_tools.pointer. DO NOT EDIT.\n",
+            f"// Source: os_adapter/assets/agent-pointer/{{cursor.svg,motion.json}}; sha256 {digest}\n",
+            (
+                "using System.Drawing;\nusing System.Drawing.Drawing2D;\n\nnamespace "
+                "ComputerUse.Windows {\n    internal static class AgentPointerAssets "
+                "{\n"
+            ),
+            "\n".join("        " + s for s in values),
+            "\n\n",
+            (f"        internal static GraphicsPath Path() {{ return Path{asset['shape']}(); }}\n"),
+            (
+                "        internal static void Draw(Graphics graphics) {\n          "
+                "  var "
+                "bounds = new RectangleF(PointF.Empty, "
+                "Size);\n"
+            ),
+            "\n".join(drawing),
+            "\n        }\n\n",
+            "\n\n".join("        " + s for s in paths),
+            "\n\n",
+            "\n".join("        " + s for s in gradients),
+            "\n    }\n}\n",
         )
-        + "\n".join("        " + s for s in values)
-        + "\n\n"
-        + (f"        internal static GraphicsPath Path() {{ return Path{asset['shape']}(); }}\n")
-        + (
-            "        internal static void Draw(Graphics graphics) {\n          "
-            "  var "
-            "bounds = new RectangleF(PointF.Empty, "
-            "Size);\n"
-        )
-        + "\n".join(drawing)
-        + "\n        }\n\n"
-        + "\n\n".join("        " + s for s in paths)
-        + "\n\n"
-        + "\n".join("        " + s for s in gradients)
-        + "\n    }\n}\n"
     )
 
 
-def generatePointerAssets(check=False, root=None):
-    root = Path(root) if root else repositoryRoot()
+def generate_pointer_assets(check=False, root=None):
+    root = Path(root) if root else repository_root()
     assets = root / "os_adapter/assets/agent-pointer"
     svg, motion = (
         (assets / "cursor.svg").read_text(encoding="utf-8"),
         (assets / "motion.json").read_text(encoding="utf-8"),
     )
     digest = hashlib.sha256((svg + "\x00" + motion).encode()).hexdigest()
-    asset = compileAssets(svg, motion)
+    asset = compile_assets(svg, motion)
     output = root / "os_adapter/macos/Sources/Preview/AgentPointerAssets.swift"
     for path, source in (
-        (output, swiftSource(asset, digest)),
-        (root / "os_adapter/windows/Sources/Preview/AgentPointerAssets.cs", csharpSource(asset, digest)),
+        (output, swift_source(asset, digest)),
+        (root / "os_adapter/windows/Sources/Preview/AgentPointerAssets.cs", csharp_source(asset, digest)),
     ):
         old = path.read_text(encoding="utf-8") if path.exists() else None
         if check:
@@ -742,7 +762,9 @@ def generatePointerAssets(check=False, root=None):
 
 
 def cli():
-    print(generatePointerAssets(check="--check" in sys.argv[1:]))
+    # Console and transport output retain their documented stream format.
+    # pylint: disable-next=bad-builtin
+    print(generate_pointer_assets(check="--check" in sys.argv[1:]))  # noqa: T201
 
 
 if __name__ == "__main__":

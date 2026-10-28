@@ -12,15 +12,19 @@ if TYPE_CHECKING:
     from typing import Any
 
 
-def jsonString(value: Any) -> str:
+def json_string(value: Any) -> str:
     if re.search(r"[\ud800-\udfff]", value):
         value = value.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "surrogatepass")
     encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return re.sub(r"[\ud800-\udfff]", lambda m: f"\\u{ord(m[0]):04x}", encoded)
 
 
-def numberString(value: Any) -> str:
+def number_string(value: Any) -> str:
     """Format numeric values consistently for model-facing observation text."""
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
+    if type(value) is int:
+        return str(value)
     if value == 0:
         return "0"
     if not math.isfinite(value):

@@ -31,15 +31,20 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         intent, target, operation, remaining = parts(frame)
         facts, scope = (frame.facts, dict(frame.scope))
         capabilities = getattr(native, "capabilities", ())
-        if (
-            intent.kind in ("focus", "key", "insert", "replace", "paste")
-            and {"nativeVirtualFocus", "nativeFocusMembers", "nativeFocusScopes"} & set(capabilities)
-            and (cast("Binding", target).node is not None)
-            and (not (intent.kind in ("insert", "paste") and intent.parameters.get("text") == ""))
-            and (facts.input.focused_node is not None)
-            and (not has_ready_route(facts, intent))
-            and (not has_independent_text_route(facts, intent, frame.request.history))
-        ):
+        matches_intent = (
+            True
+            if (
+                intent.kind in ("focus", "key", "insert", "replace", "paste")
+                and {"nativeVirtualFocus", "nativeFocusMembers", "nativeFocusScopes"} & set(capabilities)
+                and (cast("Binding", target).node is not None)
+                and (not (intent.kind in ("insert", "paste") and intent.parameters.get("text") == ""))
+                and (facts.input.focused_node is not None)
+                and (not has_ready_route(facts, intent))
+                and (not has_independent_text_route(facts, intent, frame.request.history))
+            )
+            else False
+        )
+        if matches_intent:
             editor = replace(target, node=facts.actuator.node) if facts.actuator else target
             for capability, query_type in (
                 ("nativeFocusMembers", FocusMemberQuery),

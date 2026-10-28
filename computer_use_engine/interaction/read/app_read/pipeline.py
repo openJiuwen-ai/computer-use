@@ -207,6 +207,8 @@ class LaunchCoordinator(Pipeline["ApplicationSelection", "ApplicationSelection"]
         services = self.services
 
         async def startup(value: Any, control: Control) -> Any:
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
             application, directory = await services._startup_directory(
                 value.application,
                 value.applications["session"],
@@ -255,6 +257,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
         services = self.services
 
         async def bound(call: ReadCall, control: Control) -> ApplicationSelection:
+            # pylint: disable-next=protected-access
             selection, directory = await services._discover(
                 call.request.selector,
                 call.remaining,
@@ -270,6 +273,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
 
         async def starting(call: ReadCall, control: Control) -> ApplicationSelection:
             selector = cast("StartingApplication", call.request.selector)
+            # pylint: disable-next=protected-access
             application, directory = await services._startup_directory(
                 selector.launch["application"],
                 selector.session,
@@ -288,6 +292,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
             selection = None
             if directory["surfaces"] or "nativeApplicationRoots" not in services.port.connection.capabilities:
                 try:
+                    # pylint: disable-next=protected-access
                     selection = services._selection(application["id"], application["displayName"], directory, window)
                 except ComputerUseError as error:
                     if (
@@ -295,6 +300,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                         and directory["surfaces"]
                         and (error.code in ("ambiguous_target", "observation_incomplete"))
                     ):
+                        # pylint: disable-next=protected-access
                         raise await services._window_choices(
                             error,
                             application["id"],

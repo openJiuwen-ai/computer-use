@@ -78,7 +78,7 @@ class NativeTextPipeline:
                 + " accepted; read the control to verify the result."
             )
             ctx.check()
-        except (Failure, self.ax.GLib.Error) as error:
+        except (Failure, self.ax.glib.Error) as error:
             if isinstance(error, Changed) and dispatch == "notDispatched":
                 retry = "preconditionChanged"
             detail = str(error)

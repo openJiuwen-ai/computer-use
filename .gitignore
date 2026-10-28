@@ -13,6 +13,10 @@ __pycache__/
 os_adapter/linux/.venv/
 
 /uv.lock
-/tests/
 /docs/
 /AGENTS.md
+/outputs/
+/report/
+.coverage
+.coverage.*
+/coverage.xml

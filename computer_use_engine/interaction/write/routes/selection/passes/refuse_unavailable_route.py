@@ -41,14 +41,19 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
             facts.unavailable_reason,
             "read the intended control and its current window image; choose a reachable control or image point",
         )
-    if (
-        facts.platform == "windows"
-        and policy.mode == "exclusive"
-        and intent.kind == "scroll"
-        and isinstance(facts.binding, Binding)
-        and facts.binding.node is not None
-        and not any(p.unit == "native_scroll" and p.supported == Knowledge.YES for p in facts.primitives)
-    ):
+    matches_binding = (
+        True
+        if (
+            facts.platform == "windows"
+            and policy.mode == "exclusive"
+            and intent.kind == "scroll"
+            and isinstance(facts.binding, Binding)
+            and facts.binding.node is not None
+            and not any(p.unit == "native_scroll" and p.supported == Knowledge.YES for p in facts.primitives)
+        )
+        else False
+    )
+    if matches_binding:
         refuse(
             "input_unavailable",
             facts,

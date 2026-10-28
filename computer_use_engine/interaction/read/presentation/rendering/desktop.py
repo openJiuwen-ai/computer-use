@@ -1,39 +1,44 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.formatting import jsonString, numberString
+from computer_use.interaction.read.presentation.formatting import json_string, number_string
 
 if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def renderDesktop(value: Record) -> str:
+def render_desktop(value: Record, applications: Mapping[str, int] | None = None) -> str:
     "Format desktop displays, capture geometry, and observation provenance."
 
     def box(rect: Record) -> str:
         return (
             "("
-            + ", ".join(numberString(math.floor(rect[k] * 100 + 0.5) / 100) for k in ("x", "y", "width", "height"))
+            + ", ".join(number_string(math.floor(rect[k] * 100 + 0.5) / 100) for k in ("x", "y", "width", "height"))
             + ")"
         )
+
+    def application(selector: str | None, separator: str) -> str:
+        if not selector:
+            return ""
+        if applications is None:
+            return separator + "app=" + json_string(selector)
+        ref = applications.get(selector)
+        return separator + f"computer.app({ref})" if ref is not None else ""
 
     captured = sum(bool(d["captured"]) for d in value["displays"])
     front = value["frontmost"]
     lines = [
         f"Desktop: {value['mode']}; View: full",
         "Foreground: "
-        + (
-            jsonString(front["name"]) + ("; app=" + jsonString(front["selector"]) if front.get("selector") else "")
-            if front is not None
-            else "unknown"
-        ),
+        + (json_string(front["name"]) + application(front.get("selector"), "; ") if front is not None else "unknown"),
         (
             f"Screenshot: desktop "
-            f"{numberString(value['canvas']['width'])}"
+            f"{number_string(value['canvas']['width'])}"
             f"x"
-            f"{numberString(value['canvas']['height'])}"
+            f"{number_string(value['canvas']['height'])}"
             f" px; origin=top-left"
         )
         if captured
@@ -42,8 +47,8 @@ def renderDesktop(value: Record) -> str:
     ]
     for d in value["displays"]:
         lines.append(
-            f"  {jsonString(d['name'])} {box(d['rect'])} "
-            + ("captured" if d["captured"] else "unavailable: " + jsonString(d["error"]))
+            f"  {json_string(d['name'])} {box(d['rect'])} "
+            + ("captured" if d["captured"] else "unavailable: " + json_string(d["error"]))
         )
     if captured:
         lines.append("Display gaps and uncaptured regions are blank canvas, not interactive desktop.")
@@ -51,12 +56,12 @@ def renderDesktop(value: Record) -> str:
     for window in value["windows"]:
         lines.append(
             "  "
-            + jsonString(window["app"])
+            + json_string(window["app"])
             + " — "
-            + (jsonString(window["title"]) if window["title"] else "<untitled>")
+            + (json_string(window["title"]) if window["title"] else "<untitled>")
             + " "
             + box(window["rect"])
-            + (" app=" + jsonString(window["selector"]) if window.get("selector") else "")
+            + application(window.get("selector"), " ")
         )
     if not value["windows"]:
         lines.append("  Unknown" if value.get("catalogError") else "  None reported")
@@ -64,12 +69,12 @@ def renderDesktop(value: Record) -> str:
         lines.append(
             (
                 f"Window catalogue truncated: "
-                f"{numberString(value['omittedWindows'])}"
+                f"{number_string(value['omittedWindows'])}"
                 f" more windows; use the screenshot to inspect visible content."
             )
         )
     if value.get("catalogError"):
-        lines.append("Catalogue: " + jsonString(value["catalogError"]))
+        lines.append("Catalogue: " + json_string(value["catalogError"]))
     lines.append(
         (
             "Desktop pixels are not App.click coordinates. Window catalogue "

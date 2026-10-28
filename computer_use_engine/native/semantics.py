@@ -452,10 +452,13 @@ def followed_relations(platform, capabilities, *, content_only=False):
         "Text.Children": "nativeUiaReadV2",
         **{name: "nativeUiaTextContext" for name in ("DescribedBy", "FlowsTo", "FlowsFrom")},
     }
-    return tuple(name for name in relations[platform] if name not in gates or gates[name] in capabilities)
+    platform_relations = relations.get(platform)
+    if platform_relations is None:
+        raise KeyError(platform)
+    return tuple(name for name in platform_relations if name not in gates or gates.get(name) in capabilities)
 
 
-def roleName(platform, value):
+def role_name(platform, value):
     if not isinstance(value, str):
         return "unknown"
     if platform == "linux":
@@ -476,7 +479,7 @@ def action_for_intent(
         # may instead open the item. Other actions remain explicitly callable.
         if not complete:
             return None
-        normalized = roleName(platform, role)
+        normalized = role_name(platform, role)
         if intent == "openMenu":
             names = ("ExpandCollapse.Expand",) if normalized in ("comboBox", "menuButton", "menuItem") else ()
         elif intent == "click":
@@ -514,7 +517,7 @@ def action_for_intent(
                     return matches[0] if len(matches) == 1 else None
             return None
 
-        normalized = roleName(platform, role)
+        normalized = role_name(platform, role)
         if intent == "openMenu":
             return unique("showmenu", "show menu")
         if intent != "click":
@@ -566,8 +569,11 @@ def field_value(platform, node, semantic):
         return UNKNOWN
     value = node["values"][key]
     if semantic in BOOLEAN_FIELDS:
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         return value if type(value) is bool else UNKNOWN
     if semantic == "nativeWindowHandle":
+        # pylint: disable-next=unidiomatic-typecheck
         return value if type(value) is int else UNKNOWN
     if semantic == "interfaces":
         return (
@@ -706,7 +712,7 @@ def input_container(platform: str, node: Mapping[str, Any]) -> bool:
     role = field_value(platform, node, "role")
     return (
         isinstance(role, str)
-        and roleName(platform, role) in LAYOUT_ROLES | {"window"}
+        and role_name(platform, role) in LAYOUT_ROLES | {"window"}
         and not any(field_value(platform, node, key) is True for key in ("editable", "valueWritable", "textWritable"))
     )
 
@@ -724,7 +730,7 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
     if values["enabled"] is False:
         return {key: "unavailable" for key in caps}
     raw_role = field_value(platform, node, "role")
-    role = UNKNOWN if raw_role is UNKNOWN else roleName(platform, raw_role)
+    role = UNKNOWN if raw_role is UNKNOWN else role_name(platform, raw_role)
     if (
         values["readOnly"] is True
         or values["editable"] is False
@@ -764,21 +770,32 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
                 caps["typeText"] = "available"
             if "nativeTextReplacement" in driver_features and "EditableText" in interfaces:
                 caps["replaceText"] = "available"
-            elif (
-                "nativeTextReplacement" in driver_features
-                and "nativeElementPointer" in driver_features
-                and keyboard_insert
-                and opaque_spin
-            ):
-                caps["replaceText"] = "available"
+            else:
+                matches_keyboard_insert = (
+                    True
+                    if (
+                        "nativeTextReplacement" in driver_features
+                        and "nativeElementPointer" in driver_features
+                        and keyboard_insert
+                        and opaque_spin
+                    )
+                    else False
+                )
+                if matches_keyboard_insert:
+                    caps["replaceText"] = "available"
         if values["readOnly"] is True:
             caps["typeText"] = caps["replaceText"] = "unavailable"
-        if (
-            "nativeKeyboardIntents" in driver_features
-            and isinstance(interfaces, tuple)
-            and "Component" in interfaces
-            and values["focusWritable"] is True
-        ):
+        matches_driver_features = (
+            True
+            if (
+                "nativeKeyboardIntents" in driver_features
+                and isinstance(interfaces, tuple)
+                and "Component" in interfaces
+                and values["focusWritable"] is True
+            )
+            else False
+        )
+        if matches_driver_features:
             caps["focus"] = "available"
         return caps
     if platform == "windows":
@@ -810,31 +827,42 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
             caps["typeText"] = "unavailable"
         if values["readOnly"] is True:
             caps["typeText"] = caps["replaceText"] = "unavailable"
-        elif (
-            "nativeTextReplacement" in driver_features
-            and values["readOnly"] is False
-            and isinstance(patterns, tuple)
-            and "ValuePatternIdentifiers.Pattern" in patterns
-        ):
-            # SetValue replaces a whole string, including on custom controls.
-            # It neither inserts at a caret nor proves a keyboard/focus route.
-            caps["replaceText"] = "available"
+        else:
+            supports_value_replacement = (
+                True
+                if (
+                    "nativeTextReplacement" in driver_features
+                    and values["readOnly"] is False
+                    and isinstance(patterns, tuple)
+                    and "ValuePatternIdentifiers.Pattern" in patterns
+                )
+                else False
+            )
+            if supports_value_replacement:
+                # SetValue replaces a whole string, including on custom controls.
+                # It neither inserts at a caret nor proves a keyboard/focus route.
+                caps["replaceText"] = "available"
         return caps
     if platform != "macos":
         return caps
     actions = node["actions"]
-    if (
-        "nativeActionIntents" in driver_features
-        and (
-            raw_role not in ("AXMenuBar", "AXMenuBarItem", "AXMenuItem", "AXMenu")
-            or scope_kind == "applicationMenu"
-            and "nativeMenuActions" in driver_features
+    supports_native_click = (
+        True
+        if (
+            "nativeActionIntents" in driver_features
+            and (
+                raw_role not in ("AXMenuBar", "AXMenuBarItem", "AXMenuItem", "AXMenu")
+                or scope_kind == "applicationMenu"
+                and "nativeMenuActions" in driver_features
+            )
+            and action_for_intent(
+                platform, raw_role, [a["name"] for a in actions["items"]], actions["state"] == "complete", "click"
+            )
+            is not None
         )
-        and action_for_intent(
-            platform, raw_role, [a["name"] for a in actions["items"]], actions["state"] == "complete", "click"
-        )
-        is not None
-    ):
+        else False
+    )
+    if supports_native_click:
         caps["click"] = "available"
     if "nativeKeyboardIntents" in driver_features and values["focusWritable"] is True:
         caps["focus"] = "available"

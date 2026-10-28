@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.app import window_summary_content
 from computer_use.interaction.read.delivery.menu.model import PURE, MenuTextDraft
-from computer_use.interaction.read.presentation.content import join, json_value as quoted, template
+from computer_use.interaction.read.presentation.content import join, template
+from computer_use.interaction.read.presentation.content import json_value as quoted
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:

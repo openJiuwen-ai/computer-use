@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from computer_use.protocol.primitives import safeInteger
+from computer_use.protocol.primitives import safe_integer
 
 "Pack empty table values without merging cell identities or coordinates."
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def compactEmptyValues(lines: list[str], roots: Sequence[NodeView], focusedRef: str | None = None) -> list[str]:
+def compact_empty_values(lines: list[str], roots: Sequence[NodeView], focused_ref: str | None = None) -> list[str]:
     """Group eligible empty-value entries while retaining their individual references.
 
     Args:
@@ -25,7 +25,7 @@ def compactEmptyValues(lines: list[str], roots: Sequence[NodeView], focusedRef: 
     """
     parents = {}
 
-    def collect(node: NodeView, parent: NodeView | None = None, inTable: bool = False) -> None:
+    def collect(node: NodeView, parent: NodeView | None = None, in_table: bool = False) -> None:
         """Collect.
 
         Args:
@@ -33,13 +33,13 @@ def compactEmptyValues(lines: list[str], roots: Sequence[NodeView], focusedRef: 
             inTable: Whether the current source path is inside a table.
         """
 
-        def eligible_empty_cell(node: NodeView, parent: NodeView | None, inTable: bool) -> bool:
+        def eligible_empty_cell(node: NodeView, parent: NodeView | None, in_table: bool) -> bool:
             """Require each original projection condition in its original order."""
-            if not (inTable and parent is not None and parent["role"] in ("table", "row", "column")):
+            if not (in_table and parent is not None and parent["role"] in ("table", "row", "column")):
                 return False
             if not (node["role"] in ("cell", "textField") and node.get("value") == "" and not node["children"]):
                 return False
-            if not (node["ref"] != focusedRef and not node.get("focused") and not node.get("selected")):
+            if not (node["ref"] != focused_ref and not node.get("focused") and not node.get("selected")):
                 return False
             if not ("selectionRange" not in node and not node.get("selectedText") and "partialReason" not in node):
                 return False
@@ -49,11 +49,11 @@ def compactEmptyValues(lines: list[str], roots: Sequence[NodeView], focusedRef: 
                 return False
             return True
 
-        inTable = inTable or node["role"] == "table"
-        if eligible_empty_cell(node, parent, inTable):
+        in_table = in_table or node["role"] == "table"
+        if eligible_empty_cell(node, parent, in_table):
             parents[node["ref"]] = parent["ref"]
         for child in node["children"]:
-            collect(child, node, inTable)
+            collect(child, node, in_table)
 
     for root in roots:
         collect(root)
@@ -74,7 +74,7 @@ def compactEmptyValues(lines: list[str], roots: Sequence[NodeView], focusedRef: 
         for char in letters_value:
             column = column * 26 + ord(char) - 64
         row = int(row_text)
-        if not safeInteger(column) or not safeInteger(row):
+        if not safe_integer(column) or not safe_integer(row):
             return None
         return dict(
             ref=ref_value,

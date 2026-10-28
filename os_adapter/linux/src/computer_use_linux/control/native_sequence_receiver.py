@@ -93,7 +93,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                                 self.source = "specified"
                     else:
                         self.obj, self.parent_keys = self.discover()
-            except (Failure, self.ax.GLib.Error) as error:
+            except (Failure, self.ax.glib.Error) as error:
                 recipients.hint = None
                 ctx.check()  # The request deadline/cancellation is never optional.
                 probe_budget = isinstance(error, _InitialProbeBudget) or (
@@ -102,15 +102,20 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                     and self.ax.ctx.deadline < ctx.deadline
                     and time.monotonic() >= self.ax.ctx.deadline
                 )
-                if (
-                    self.obj is not None
-                    or self.candidate_seen
-                    or (
-                        isinstance(error, Failure)
-                        and not probe_budget
-                        and error.code not in ("observation_unavailable", "stale_target")
+                invalid_error = (
+                    True
+                    if (
+                        self.obj is not None
+                        or self.candidate_seen
+                        or (
+                            isinstance(error, Failure)
+                            and not probe_budget
+                            and error.code not in ("observation_unavailable", "stale_target")
+                        )
                     )
-                ):
+                    else False
+                )
+                if invalid_error:
                     raise Failure(
                         "Cannot establish one continuous keyboard recipient: " + str(error),
                         "stale_target"
@@ -144,7 +149,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
             if not self.is_focused(previous):
                 return False
             path = self.focus_path(previous)
-        except (Failure, self.ax.GLib.Error):
+        except (Failure, self.ax.glib.Error):
             self.ctx.check()
             return False
         if path is None or not (self._key(obj) in path or self._key(previous) in self.parent_keys):
@@ -196,7 +201,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                     continue
                 try:
                     path = self.focus_path(event) if self.is_focused(event) else None
-                except (Failure, self.ax.GLib.Error):
+                except (Failure, self.ax.glib.Error):
                     self.ctx.check()
                     path = None
                 require(
@@ -215,7 +220,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                     continue
                 try:
                     event_path = self.focus_path(event) if self.is_focused(event) else None
-                except (Failure, self.ax.GLib.Error):
+                except (Failure, self.ax.glib.Error):
                     self.ctx.check()
                     event_path = None
                 require(

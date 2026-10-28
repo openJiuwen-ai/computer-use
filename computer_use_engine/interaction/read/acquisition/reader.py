@@ -24,7 +24,8 @@ if TYPE_CHECKING:
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
     from computer_use.native.port import NativePort
-    from computer_use.protocol.records import FactNode, Record, RelationPage, TextPage as NativeTextPage
+    from computer_use.protocol.records import FactNode, Record, RelationPage
+    from computer_use.protocol.records import TextPage as NativeTextPage
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ class ChildContinuation:
     total: int
 
 
-def capturedChildren(
+def captured_children(
     snapshot: SemanticSnapshot,
     reference: str,
     *,
@@ -86,7 +87,7 @@ def capturedChildren(
     )
 
 
-def capturedField(
+def captured_field(
     snapshot: SemanticSnapshot,
     reference: str,
     field: str | None,
@@ -156,12 +157,17 @@ class NativeReader:
         started = time.monotonic()
         metadata = snapshot.collection if snapshot is not None else None
         token = metadata.change_token if metadata is not None else None
-        if (
-            "nativeReadEvents" in self.port.connection.capabilities
-            and token is not None
-            and snapshot.native.session == target.session
-            and metadata.surface == target.surface
-        ):
+        matches_token = (
+            True
+            if (
+                "nativeReadEvents" in self.port.connection.capabilities
+                and token is not None
+                and snapshot.native.session == target.session
+                and metadata.surface == target.surface
+            )
+            else False
+        )
+        if matches_token:
             async with self.port.calls.operation(target, remaining) as read:
                 result = await self.port.wait_for_change(read.token, read.target, token, delay_ms, read.remaining())
             if result["reason"] != "unavailable":
@@ -236,7 +242,7 @@ class NativeReader:
     async def read_relation(
         self,
         target: Binding,
-        property: str,
+        relation_property: str,
         *,
         cursor: str | None = None,
         limit: int = 128,
@@ -255,7 +261,7 @@ class NativeReader:
             Native relationship targets and continuation metadata.
         """
         return await RelationCollectionPipeline(self.port).arun(
-            RelationReadRequest(target, property, cursor, limit, timeout_ms)
+            RelationReadRequest(target, relation_property, cursor, limit, timeout_ms)
         )
 
     async def read_text(
@@ -268,7 +274,7 @@ class NativeReader:
         length: int = 4096,
         timeout_ms: int = 30000,
     ) -> NativeTextPage:
-        source = capturedField(snapshot, reference, field)
+        source = captured_field(snapshot, reference, field)
         if source is None:
             raise ValueError("This observed field has no immutable full-text capture")
         return await self.read_captured_text(source, offset=offset, length=length, timeout_ms=timeout_ms)

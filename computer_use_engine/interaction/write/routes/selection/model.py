@@ -16,19 +16,24 @@ class RouteHistory(Protocol):
     """
 
     @property
-    def unavailable(self) -> Set[RouteKey]: ...
+    def unavailable(self) -> Set[RouteKey]:
+        pass
 
     @property
-    def background_unavailable(self) -> Set[RouteKey]: ...
+    def background_unavailable(self) -> Set[RouteKey]:
+        pass
 
     @property
-    def prepared(self) -> Set[tuple[RouteKey, bool]]: ...
+    def prepared(self) -> Set[tuple[RouteKey, bool]]:
+        pass
 
     @property
-    def click_refresh(self) -> RouteKey | None: ...
+    def click_refresh(self) -> RouteKey | None:
+        pass
 
     @property
-    def failed_steps(self) -> Mapping[RouteKey, int]: ...
+    def failed_steps(self) -> Mapping[RouteKey, int]:
+        pass
 
 
 @dataclass(frozen=True)

@@ -5,6 +5,7 @@ image geometry and the actual hit route, then owns one continuous event sequence
 """
 
 from copy import deepcopy
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.protocol import Failure, fields, finite, integer, require
 from computer_use_linux.control.native_target import NativeTarget
@@ -31,6 +32,15 @@ def pointer_intent(value, *, element=False):
     for key in keys:
         finite(p[key])
     return deepcopy(value)
+
+
+class PointerRouteState(NamedTuple):
+    """Mapped gesture points and the window's current pointer admission."""
+
+    points: tuple[tuple[float, float], ...]
+    selected: Any
+    native: Any
+    ready: bool
 
 
 class NativePointer:
@@ -85,7 +95,7 @@ class NativePointer:
         self.desktop.pointer_preflight(operation.intent["kind"], points, **self.options(operation.intent))
         return points, selected, native
 
-    def route(self, operation, target, ctx):
+    def route(self, operation, target, ctx) -> PointerRouteState:
         points, selected, native = self.geometry(operation, target, ctx)
         available = True
         if selected is not None:
@@ -97,7 +107,7 @@ class NativePointer:
                 if error.code not in ("stale_target", "input_unavailable"):
                     raise
                 available = False
-        return points, selected, native, available
+        return PointerRouteState(points, selected, native, available)
 
     def inspect(self, operation, target, within, ctx):
         require(not within and target["node"] is None, "Image input cannot select an accessibility ancestor.")
@@ -134,10 +144,10 @@ class NativePointer:
             self.desktop.require_hit(selected, points[0])
         return points, selected, native
 
-    def click_state(self, operation, contract, ctx):
+    def click_state(self, operation, contract, ctx) -> PointerRouteState:
         points, selected, native, ready = self.route(operation, contract["target"], ctx)
         require(points == contract["points"], "The original image coordinates changed.", "stale_target")
-        return points, selected, native, ready
+        return PointerRouteState(points, selected, native, ready)
 
     def prepare(self, operation, contract, foreground, ctx, preparation):
         points, selected, native, ready = self.route(operation, contract["target"], ctx)

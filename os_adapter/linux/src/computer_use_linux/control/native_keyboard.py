@@ -97,7 +97,8 @@ class NativeKeyboard:
         recipient = None if selection is None else selection.signature
         return tuple(sorted(target.items())), tuple(within), role, recipient, "keyboard"
 
-    def unit(self, operation):
+    @staticmethod
+    def unit(operation):
         return "prepare_receiver" if operation.intent["kind"] == "focus" else "key_sequence"
 
     @staticmethod

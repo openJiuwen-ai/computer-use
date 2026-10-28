@@ -41,12 +41,18 @@ def _freeze(value: Any, active: set[int] | None = None) -> Any:
 
 def _equal(left: Any, right: Any) -> bool:
     """Compare observation values with stable equality for reported NaN values."""
-    if type(left) is float and type(right) is float and math.isnan(left) and math.isnan(right):
+    matches_left = (
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
+        True if type(left) is float and type(right) is float and math.isnan(left) and math.isnan(right) else False
+    )
+    if matches_left:
         return True
     if isinstance(left, Mapping) and isinstance(right, Mapping):
         return left.keys() == right.keys() and all(_equal(left[key], right[key]) for key in left)
     if isinstance(left, tuple) and isinstance(right, tuple):
         return len(left) == len(right) and all(_equal(a, b) for a, b in zip(left, right))
+    # pylint: disable-next=unidiomatic-typecheck
     if type(left) is bool or type(right) is bool:
         return type(left) is type(right) and left == right
     return left == right

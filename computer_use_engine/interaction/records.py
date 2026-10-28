@@ -66,7 +66,8 @@ class WindowHandle(Protocol):
     """Link from a fixed Window view to its containing App handle."""
 
     @property
-    def _app(self) -> UIHandle: ...
+    def _app(self) -> UIHandle:
+        pass
 
 
 class ObservedWindow(Protocol):
@@ -78,9 +79,12 @@ class ObservedWindow(Protocol):
     """
 
     @property
-    def target(self) -> Binding: ...
+    def target(self) -> Binding:
+        pass
+
     @property
-    def image(self) -> CapturedWindow | None: ...
+    def image(self) -> CapturedWindow | None:
+        pass
 
 
 WriteArguments: TypeAlias = (

@@ -54,11 +54,17 @@ class Registry:
 
     def window(self, native):
         previous = self.by_key.get(native.key)
-        if previous and (
-            not previous.alive
-            or previous.window.pid != native.pid
-            or previous.window.process_start != native.process_start
-        ):
+        matches_previous = (
+            True
+            if previous
+            and (
+                not previous.alive
+                or previous.window.pid != native.pid
+                or previous.window.process_start != native.process_start
+            )
+            else False
+        )
+        if matches_previous:
             previous.alive = False
             previous = None
         if previous is None:

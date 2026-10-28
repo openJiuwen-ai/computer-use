@@ -347,8 +347,12 @@ import ApplicationServices
             if actionStatus == .success, let actionNames {
                 nativeProperties.append(["key": ["toolkit", "action_names"], "value": try encodeNative(actionNames)])
             }
+            // The collector constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             var actions = actionFacts["items"] as! [[String: Any]]
             for index in actions.indices {
+                // The collector constructs this internal field with the asserted type.
+                // swiftlint:disable:next force_cast
                 let name = actions[index]["name"] as! String
                 if try reading() {
                     var description: CFString?
@@ -531,7 +535,11 @@ import ApplicationServices
         }
         for item in pendingValues {
             let encoded = try encodeField(item.value)
+            // The collector constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             var values = nodes[item.index]["values"] as! [String: Any]
+            // The collector constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             var missing = nodes[item.index]["fieldStatus"] as! [String: Any]
             if let value = encoded.value { values[item.property] = value }
             if let failure = encoded.failure { missing[item.property] = failure }
@@ -541,7 +549,11 @@ import ApplicationServices
         for item in pendingNativeValues {
             // Immutable text previews remain bounded; their read issue carries
             // the captured full text token and native UTF-16 count.
+            // The collector constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let statuses = nodes[item.index]["fieldStatus"] as! [String: [String: Any]]
+            // The collector constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             let values = nodes[item.index]["values"] as! [String: Any]
             let raw =
                 statuses[item.property]?["state"] as? String == "truncated"
@@ -549,6 +561,8 @@ import ApplicationServices
             do {
                 let encoded = try encodeNative(raw)
                 var native = nodes[item.index]["nativeValues"] as? [String: [String: Any]] ?? [:]
+                // The collector constructs this internal field with the asserted type.
+                // swiftlint:disable:next force_cast
                 var missing = nodes[item.index]["fieldStatus"] as! [String: [String: Any]]
                 if encoded["nativeType"] as? String == "AXValue.AXError", var status = missing[item.property] {
                     // AX batch success can contain an AXError value for one
@@ -569,12 +583,16 @@ import ApplicationServices
                 if error is CancellationError { throw error }
                 // The raw field's own value/error remains in its local record;
                 // losing a nested object registration is an explicit gap.
+                // The collector constructs this internal field with the asserted type.
+                // swiftlint:disable:next force_cast
                 var missing = nodes[item.index]["fieldStatus"] as! [String: Any]
                 missing[item.property] = ["state": "error", "detail": String(describing: error)]
                 nodes[item.index]["fieldStatus"] = missing
             }
         }
         for item in pendingDeclarations {
+            // The collector constructs this internal field with the asserted type.
+            // swiftlint:disable:next force_cast
             var missing = nodes[item.index]["fieldStatus"] as! [String: [String: Any]]
             if missing[item.property] == nil {
                 missing[item.property] = item.issue

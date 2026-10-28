@@ -1,8 +1,8 @@
-from .primitives import frozen, trim, utf16Length
+from .primitives import frozen, trim, utf16_length
 from .schema import role
 
 
-def elementPath(value):
+def element_path(value):
     if not isinstance(value, list) or not 1 <= len(value) <= 16:
         raise ValueError("find expects a path of 1–16 name strings or { role?, name?, identifier? } segments")
     result = []
@@ -12,7 +12,7 @@ def elementPath(value):
             not isinstance(item, dict)
             or not item
             or any(k not in ("role", "name", "identifier") for k in item)
-            or any(not isinstance(text, str) or not trim(text) or utf16Length(text) > 256 for text in item.values())
+            or any(not isinstance(text, str) or not trim(text) or utf16_length(text) > 256 for text in item.values())
         )
         if not invalid and "role" in item:
             try:

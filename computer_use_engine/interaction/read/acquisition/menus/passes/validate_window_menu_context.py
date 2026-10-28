@@ -17,14 +17,19 @@ def validate_window(request: MenuCollectionRequest, control: Control) -> MenuCol
     identities.
     """
     context = request.context
-    if (
-        context is None
-        or context.node is None
-        or context.capture is not None
-        or context.instance is None
-        or context.root_window is None
-        or context.surface is None
-    ):
+    invalid_context = (
+        True
+        if (
+            context is None
+            or context.node is None
+            or context.capture is not None
+            or context.instance is None
+            or context.root_window is None
+            or context.surface is None
+        )
+        else False
+    )
+    if invalid_context:
         raise menu_failure("observation_incomplete", "Window-menu discovery needs an accessible, fixed working window.")
     return request
 

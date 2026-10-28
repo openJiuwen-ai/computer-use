@@ -120,7 +120,7 @@ class UIKeyboard:
 
     Attributes:
         owner: App/Window handle constraining the receiving window.
-        method: Public keyboard operation, such as typeText or pressKey.
+        method: Public keyboard operation, such as type_text or press_key.
         parameters: Text, key, or paste options for the operation.
     """
 

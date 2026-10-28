@@ -19,6 +19,7 @@ import ApplicationServices
         let ancestors: [AXUIElement]
         let observedInteractionSurface: AXUIElement?
         let validate: () throws -> Void
+        var cellEditorState: NativeCellEditorState? = nil
     }
 
     func readRoot(_ ref: String) throws -> ReadRoot {
@@ -34,7 +35,8 @@ import ApplicationServices
         try validate()
         return ReadRoot(
             element: target.element, application: target.application, scope: target.scope, ancestors: target.ancestors,
-            observedInteractionSurface: target.observedInteractionSurface, validate: validate)
+            observedInteractionSurface: target.observedInteractionSurface, validate: validate,
+            cellEditorState: target.cellEditorState)
     }
 
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any] {

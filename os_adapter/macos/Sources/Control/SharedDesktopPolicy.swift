@@ -26,7 +26,7 @@ enum SharedDesktopPolicy {
                 foreground or shared desktop; no input sent
                 """, code: .modeUnsupported, effect: FailureEffect.none,
                 next: """
-                    use computer.listApps() and read the intended App directly; do not use system launcher \
+                    use computer.list_apps() and read the intended App directly; do not use system launcher \
                     items to activate it in shared mode
                     """)
         }

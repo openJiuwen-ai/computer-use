@@ -9,7 +9,7 @@ from computer_use.interaction.read.acquisition.menus.model import (
     MatchedMenuItem,
     MenuLevelFacts,
 )
-from computer_use.interaction.read.presentation.formatting import jsonString
+from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.native.semantics import UNKNOWN
 from computer_use.pipeline import Contract, Pass
 
@@ -30,12 +30,12 @@ def match_menu_title(value: MenuLevelFacts, control: Control) -> MatchedMenuItem
         query.fail("observation_incomplete", f"Menu level {index + 1} has unread item names; uniqueness is unknown.")
     if len(matched) != 1:
         titles = [name for _, name in names if isinstance(name, str) and name]
-        candidates = ", ".join(jsonString(name) for name in titles[:30]) or "<none>"
+        candidates = ", ".join(json_string(name) for name in titles[:30]) or "<none>"
         if len(titles) > 30:
             candidates += f"; {len(titles) - 30} more (read the parent menu)"
         query.fail(
             "ambiguous_target" if matched else "element_not_found",
-            f"Menu level {index + 1}, title {jsonString(title)} has {len(matched)} matches. Candidates: {candidates}",
+            f"Menu level {index + 1}, title {json_string(title)} has {len(matched)} matches. Candidates: {candidates}",
         )
     selected = matched[0]
     return MatchedMenuItem(level, selected, (*level.ancestors, selected))

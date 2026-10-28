@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.pipeline import Contract, Effect, Pass
-from computer_use.session.events import actionCompleted
+from computer_use.session.events import action_completed
 
 if TYPE_CHECKING:
     from computer_use.pipeline.core import Control
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 def publish(receipt: Record, control: Control) -> Record:
     """Publish the completed action receipt to session observers."""
-    actionCompleted(receipt)
+    action_completed(receipt)
     return receipt
 
 

@@ -9,7 +9,11 @@ def acquire_native_resources(operation, ctx, coordinate):
     if operation.writable:
         lease = coordinate(ctx)
         lease.__enter__()
-        operation.release = lambda: lease.__exit__(None, None, None)
+
+        def release():
+            return lease.__exit__(None, None, None)
+
+        operation.release = release
 
 
 CONTRACT = {

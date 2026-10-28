@@ -44,9 +44,17 @@ enum AXFactEncoding {
     static func scalar(_ value: CFTypeRef?, elementReference: String? = nil) -> (value: Any?, failure: [String: Any]?) {
         guard let value else { return (nil, ["state": "absent"]) }
         let type = CFGetTypeID(value)
+        // CFGetTypeID establishes the bridged native type before this conversion.
+        // swiftlint:disable:next force_cast
         if type == CFStringGetTypeID() { return (value as! String, nil) }
+        // CFGetTypeID establishes the bridged native type before this conversion.
+        // swiftlint:disable:next force_cast
         if type == CFBooleanGetTypeID() { return ((value as! NSNumber).boolValue, nil) }
+        // CFGetTypeID establishes the bridged native type before this conversion.
+        // swiftlint:disable:next force_cast
         if type == CFNumberGetTypeID(), (value as! NSNumber).doubleValue.isFinite { return (value, nil) }
+        // CFGetTypeID establishes the bridged native type before this conversion.
+        // swiftlint:disable:next force_cast
         if type == CFURLGetTypeID() { return ((value as! URL).absoluteString, nil) }
         // AXValue is not necessarily text/a number. Preserve CFDate's native
         // epoch and precision; localization belongs to the Python presentation.
@@ -129,6 +137,8 @@ enum AXFactEncoding {
                 "descriptionStatus": ["state": "error", "detail": "provider returned a non-string action description"]
             ]
         }
+        // CFGetTypeID establishes the bridged native type before this conversion.
+        // swiftlint:disable:next force_cast
         let text = value as! String
         if text.utf16.count > 16_384 {
             return [

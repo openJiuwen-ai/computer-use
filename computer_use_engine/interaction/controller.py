@@ -6,10 +6,10 @@ import os
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast, overload
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.pipeline import SessionPipeline
 from computer_use.interaction.read.acquisition.images.desktop.service import NativeDesktopReader
-from computer_use.interaction.read.acquisition.reader import capturedChildren, capturedField
+from computer_use.interaction.read.acquisition.reader import captured_children, captured_field
 from computer_use.interaction.read.app import NativeAppReader
 from computer_use.interaction.read.pages import ContentPages
 from computer_use.interaction.requests import ExecuteAction, FindElement
@@ -18,10 +18,10 @@ from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
 from computer_use.native.transport import ConnectionPort
 from computer_use.protocol.observation import NativeNode
-from computer_use.protocol.session import desktopMode, nativeProtocolVersion
+from computer_use.protocol.session import desktop_mode, NATIVE_PROTOCOL_VERSION
 from computer_use.session.bindings import SessionBindings
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
-from computer_use.session.events import observationsInvalidated
+from computer_use.session.events import observations_invalidated
 
 if TYPE_CHECKING:
     from computer_use.interaction.model import ControllerAdapters
@@ -59,10 +59,12 @@ class SessionController:
             DesktopImageAccess(adapters.register_image, adapters.image_delivery_epoch, adapters.image_delivery_required)
         )
         self.transport = (
-            port.connection if port is not None else Connection(self.invalidate, protocol_version=nativeProtocolVersion)
+            port.connection
+            if port is not None
+            else Connection(self.invalidate, protocol_version=NATIVE_PROTOCOL_VERSION)
         )
         self.port = port or ConnectionPort(
-            self.transport, HostPolicy(desktopMode(), os.environ.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1")
+            self.transport, HostPolicy(desktop_mode(), os.environ.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1")
         )
         self.reader, self.desktop_reader = NativeAppReader(self.port), NativeDesktopReader(self.port)
         self.engine, self.pages = Engine(self.port), ContentPages()
@@ -72,19 +74,24 @@ class SessionController:
         self.interfaces = AgentInterfacePipeline(self)
 
     @overload
-    async def run(self, request: ObserveUI | ObserveDesktop | ObserveElement) -> Observation: ...
+    async def run(self, request: ObserveUI | ObserveDesktop | ObserveElement) -> Observation:
+        pass
 
     @overload
-    async def run(self, request: ObserveText) -> TextPage: ...
+    async def run(self, request: ObserveText) -> TextPage:
+        pass
 
     @overload
-    async def run(self, request: FindElement | ResolveElement) -> ElementSnapshot: ...
+    async def run(self, request: FindElement | ResolveElement) -> ElementSnapshot:
+        pass
 
     @overload
-    async def run(self, request: DiscoverApps) -> list[AppInfo]: ...
+    async def run(self, request: DiscoverApps) -> list[AppInfo]:
+        pass
 
     @overload
-    async def run(self, request: ExecuteAction | ActOnElement | UIKeyboard | UIPointer) -> ActionResult: ...
+    async def run(self, request: ExecuteAction | ActOnElement | UIKeyboard | UIPointer) -> ActionResult:
+        pass
 
     async def run(self, request: InteractionRequest) -> InteractionResult:
         return await self.pipeline.arun(request)
@@ -101,12 +108,12 @@ class SessionController:
     def invalidate(self) -> None:
         self.desktop.reset()
         self.bindings.invalidate()
-        observationsInvalidated(self)
+        observations_invalidated(self)
         # Handles retain their prior session identity so subsequent validation
         # detects expiration.
 
-    def validateElement(self, target: Binding) -> None:
-        self.bindings.validateElement(target, self.transport.session)
+    def validate_element(self, target: Binding) -> None:
+        self.bindings.validate_element(target, self.transport.session)
 
     def _remember(self, state: AppState, target: Binding, tree: SemanticSnapshot) -> None:
         if {"nativeRelationPages", "nativeNodePages"} & set(self.transport.capabilities):
@@ -151,8 +158,8 @@ class SessionController:
                     binding=replace(target, node=node, capture=None),
                     scope_kind=tree.scope_kind,
                     source=dict(ref=ref, observed=tree.facts["observed"]),
-                    text=capturedField(tree, ref, tree.value_fields.get(ref), nodes=native_nodes),
-                    children=capturedChildren(tree, ref, relations=child_relations),
+                    text=captured_field(tree, ref, tree.value_fields.get(ref), nodes=native_nodes),
+                    children=captured_children(tree, ref, relations=child_relations),
                 )
                 for ref, node in tree.refs.items()
             },
@@ -172,21 +179,21 @@ class SessionController:
         if owner is None:
             ref = self.desktop.target(coordinates=method in ("click", "scroll", "drag"))
             if params.get("desktopRef") != ref:
-                raise localFailure("desktop observation changed", "read the desktop again", "stale_target", "Desktop")
+                raise local_failure("desktop observation changed", "read the desktop again", "stale_target", "Desktop")
             observed = self.desktop.observed(ref)
             target = Binding(observed["binding"]["session"], None, None, None, capture=ref)
             parameter = "desktopRef"
         else:
             target, parameter = params["appRef"], "appRef"
-        intent = dict(typeText="insert", pressKey="key").get(method, method)
+        intent = dict(type_text="insert", press_key="key").get(method, method)
         return await self._execute(
             owner,
             Intent(intent, {k: v for k, v in params.items() if k != parameter}),
             target,
-            app_keyboard=owner is not None and method in ("typeText", "paste", "pressKey"),
+            app_keyboard=owner is not None and method in ("type_text", "paste", "press_key"),
         )
 
-    async def actElement(
+    async def act_element(
         self,
         owner: object,
         snapshot: ElementSnapshot,
@@ -237,16 +244,18 @@ class SessionController:
         """Return the handle's live, observed accessibility root for path lookup."""
         target = self.state(owner).query_target
         if target is None:
-            raise localFailure("this App has no observed query root", "call App.read first", "stale_target")
-        self.validateElement(target)
+            raise local_failure("this App has no observed query root", "call App.read first", "stale_target")
+        self.validate_element(target)
         if target.node is None:
-            raise localFailure(
+            raise local_failure(
                 "this window has no accessible query root", "use its observed window image", "observation_incomplete"
             )
         return target
 
+    # pylint: disable-next=invalid-name
     async def find(self, owner: object, path: LookupPath, timeoutMs: int, enabled: bool) -> ElementSnapshot:
         return await self.run(FindElement(owner, path, timeoutMs, enabled))
+
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import InteractionResult

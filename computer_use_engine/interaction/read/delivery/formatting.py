@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 
-from computer_use.interaction.read.delivery.coverage import observationCoverage
-from computer_use.interaction.read.presentation.rendering.formatting import bounded, field, quoted, renderTree
+from computer_use.interaction.read.delivery.coverage import observation_coverage
+from computer_use.interaction.read.presentation.rendering.formatting import bounded, field, quoted, render_tree
 from computer_use.interaction.read.presentation.tree import unique
 
 if TYPE_CHECKING:
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def windowContext(windows: Sequence[Record], current: str | None) -> list[str]:
+def window_context(windows: Sequence[Record], current: str | None) -> list[str]:
     """Format the selected window and its relationship to the working root.
 
     Args:
@@ -29,12 +30,15 @@ def windowContext(windows: Sequence[Record], current: str | None) -> list[str]:
             + (current if current is not None else "unknown")
         )
     if any("document" in w for w in windows):
-        relevant = [
-            w
-            for w in windows
-            if "document" in w
-            or any(other is not w and other["title"] == w["title"] and "document" in other for other in windows)
-        ]
+
+        def _iter_w(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for w in _source_items:
+                if "document" in w or any(
+                    other is not w and other["title"] == w["title"] and "document" in other for other in windows
+                ):
+                    yield w
+
+        relevant = list(_iter_w(iter(windows)))
         lines.append(
             "Window documents: "
             + "; ".join(
@@ -64,13 +68,13 @@ def windowContext(windows: Sequence[Record], current: str | None) -> list[str]:
     return lines
 
 
-def renderObservation(observation: Record, observed: Record | None = None) -> RenderedTree:
+def render_observation(observation: Record, observed: Record | None = None) -> RenderedTree:
     """Format an application observation's scope, content, image, and collection gaps.
 
     Args:
         observed: Capture provenance or original observation used by the current stage.
     """
-    rendered = renderTree(observation["root"], observation["context"]) if observation["root"] is not None else None
+    rendered = render_tree(observation["root"], observation["context"]) if observation["root"] is not None else None
     lines = (
         rendered["text"].split("\n")
         if rendered is not None
@@ -150,15 +154,15 @@ def renderObservation(observation: Record, observed: Record | None = None) -> Re
         )
     tree_at = next((i_value for i_value, line_value in enumerate(lines) if line_value.startswith("Tree:")), -1)
     screenshot = observation.get("screenshot")
-    from computer_use.interaction.read.presentation.formatting import numberString
+    from computer_use.interaction.read.presentation.formatting import number_string
 
     caption = (
         (
             f"Screenshot: captured "
-            f"{numberString(screenshot['width'])}"
+            f"{number_string(screenshot['width'])}"
             f"x"
-            f"{numberString(screenshot['height'])}"
-            f" px; printImage to view."
+            f"{number_string(screenshot['height'])}"
+            f" px; print_image to view."
         )
         if screenshot is not None
         else (f"Screenshot: unavailable ({field(observation.get('screenshotError', 'no captured window'))})")
@@ -166,10 +170,10 @@ def renderObservation(observation: Record, observed: Record | None = None) -> Re
     lines.insert(1 if tree_at < 0 else tree_at + 1, caption)
     if observation.get("overviewText"):
         at = 0 if tree_at < 0 else tree_at
-        lines[at:at] = compactOverview(observation["overviewText"]).split("\n")
+        lines[at:at] = compact_overview(observation["overviewText"]).split("\n")
     if observed is not None:
         lines.insert(1, "Observation: " + quoted(observed["id"]))
-    lines[:0] = windowContext(observation["windows"], observation["current"])
+    lines[:0] = window_context(observation["windows"], observation["current"])
     refs = rendered["refs"] if rendered is not None else []
     visible = set(refs)
     if "sharedFocus" in observation:
@@ -183,7 +187,7 @@ def renderObservation(observation: Record, observed: Record | None = None) -> Re
                     related.append("inside " + owner)
         outside = observation["sharedFocus"]["outside"] + len(observation["sharedFocus"]["refs"]) - len(related)
         if outside:
-            related.append(numberString(outside) + " outside the expanded tree")
+            related.append(number_string(outside) + " outside the expanded tree")
         if related:
             lines.append("Shared focus: " + ", ".join(related) + " (app-declared keyboard relation; input unverified).")
     if "menuPath" in observation:
@@ -205,13 +209,13 @@ def renderObservation(observation: Record, observed: Record | None = None) -> Re
         text="\n".join(lines),
         refs=refs,
         roots=roots,
-        coverage=observationCoverage(observation, roots),
+        coverage=observation_coverage(observation, roots),
         contextRefs=rendered["contextRefs"] if rendered is not None else {},
         imageContext=image_context,
     )
 
 
-def compactOverview(text: str) -> str:
+def compact_overview(text: str) -> str:
     text = re.sub(
         (
             "^Overview: app layout ([0-9]+x[0-9]+) px; context only; use "

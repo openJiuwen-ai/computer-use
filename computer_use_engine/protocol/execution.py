@@ -3,13 +3,15 @@
 import json
 import math
 
-from .action_context import decodeActionContext
-from .captures import captureMetadata, decodeCapture, decodeStamp
-from .desktop import decodeDesktopObservation
-from .directory import _application, decodeDirectory
+from computer_use.protocol.primitives import required_item
+
+from .action_context import decode_action_context
+from .captures import capture_metadata, decode_capture, decode_stamp
+from .desktop import decode_desktop_observation
+from .directory import _application, decode_directory
 from .observation.adapters import validate_driver_payload
 from .schema import array, boolean, enum, identity, number, obj, string, union, unknown
-from .text import decodeTextPage
+from .text import decode_text_page
 
 knowledge = enum("yes", "no", "unknown")
 nullable_id = identity.nullable()
@@ -27,7 +29,7 @@ actuator = union(
 )
 
 
-def validateActuatorPath(selected):
+def validate_actuator_path(selected):
     path = selected.get("contentPath") if selected is not None else None
     if path is not None and (path[0] != selected["node"] or len(set(path)) != len(path)):
         raise ValueError("protocol: a scroll content path must start at its hit and contain distinct nodes")
@@ -185,7 +187,7 @@ _capture_request = obj(
 )
 
 
-def decodeCaptureRequest(value):
+def decode_capture_request(value):
     result = _capture_request.parse(value)
     target = result["target"]
     if target["node"] is not None or target["capture"] is not None:
@@ -196,7 +198,7 @@ def decodeCaptureRequest(value):
     return result
 
 
-def decodeBegin(value):
+def decode_begin(value):
     """Bind the original payload once, before observing or preparing a route."""
     result = _begin.parse(value)
     intent, mode = result["intent"], result["mode"]
@@ -217,7 +219,7 @@ def decodeBegin(value):
     return result
 
 
-def decodeUnitCommand(value):
+def decode_unit_command(value):
     """Only the selected contract crosses the write boundary.
 
     InputContext is an observation, never client-supplied dispatch authority.
@@ -253,7 +255,7 @@ selection_basis = array(
 )
 
 
-def decodeSelectionBasis(value):
+def decode_selection_basis(value):
     result = selection_basis.parse(value)
     seen = set()
     for entry in result:
@@ -312,7 +314,7 @@ _inspect_queries = {
 }
 
 
-def decodeInspectQuery(value):
+def decode_inspect_query(value):
     if not isinstance(value, dict) or not isinstance(value.get("kind"), str) or value["kind"] not in _inspect_queries:
         raise ValueError("protocol: unknown native inspection query")
     result = _inspect_queries[value["kind"]].parse(value)
@@ -335,14 +337,18 @@ def decodeInspectQuery(value):
     if page is not None and (result["maxDepth"] < 1 or page["limit"] >= result["maxNodes"]):
         raise ValueError("protocol: a relation page needs depth and space for its root and targets")
     if "basis" in result:
-        decodeSelectionBasis(result["basis"])
+        decode_selection_basis(result["basis"])
         if "actuator" not in result and "receiver" not in result:
             raise ValueError("protocol: selection dependencies require a selected actuator or receiver")
     selected = result.get("actuator")
-    validateActuatorPath(selected)
-    if "receiver" in result and (
-        "basis" not in result or selected is not None and selected["relation"] != "containedEditor"
-    ):
+    validate_actuator_path(selected)
+    invalid_result = (
+        True
+        if "receiver" in result
+        and ("basis" not in result or selected is not None and selected["relation"] != "containedEditor")
+        else False
+    )
+    if invalid_result:
         raise ValueError("protocol: a related receiver requires selection dependencies")
     if selected is not None and selected["relation"] == "scrollPointer" and not result.get("basis"):
         raise ValueError("protocol: an element scroll pointer requires selection dependencies")
@@ -358,7 +364,7 @@ def decodeInspectQuery(value):
     return result
 
 
-def validatePrimitiveContract(unit, channel, supported, readiness, pending, action):
+def validate_primitive_contract(unit, channel, supported, readiness, pending, action):
     channels, _ = unit_contracts[unit]
     if supported not in ("yes", "no", "unknown") or readiness not in ("yes", "no", "unknown"):
         raise ValueError("protocol: invalid native support or readiness evidence")
@@ -366,7 +372,10 @@ def validatePrimitiveContract(unit, channel, supported, readiness, pending, acti
         raise ValueError("protocol: native unit cannot implement the declared channel")
     if len(set(pending)) != len(pending) or not set(pending) <= set(pending_conditions):
         raise ValueError("protocol: invalid or duplicate native readiness condition")
-    if readiness == "yes" and pending or supported == "yes" and readiness != "yes" and not pending:
+    invalid_pending = (
+        True if readiness == "yes" and pending or supported == "yes" and readiness != "yes" and not pending else False
+    )
+    if invalid_pending:
         raise ValueError("protocol: native readiness and pending conditions disagree")
     if (unit == "native_action") != (action is not None):
         raise ValueError("protocol: inconsistent native action declaration")
@@ -375,14 +384,14 @@ def validatePrimitiveContract(unit, channel, supported, readiness, pending, acti
 
 
 def _validate_primitive(p):
-    validatePrimitiveContract(p["unit"], p["channel"], p["supported"], p["readiness"], p["pending"], p.get("action"))
+    validate_primitive_contract(p["unit"], p["channel"], p["supported"], p["readiness"], p["pending"], p.get("action"))
     if p["unit"] == "native_selection" and "click" not in p:
         raise ValueError("protocol: native selection requires an integrated click offer")
     if "click" in p:
-        validateClickOffer(p["click"], p["unit"])
+        validate_click_offer(p["click"], p["unit"])
 
 
-def validateClickOffer(value, unit):
+def validate_click_offer(value, unit):
     click_offer.parse(value)
     semantic = value["interaction"] == "semantic"
     expected = {
@@ -391,14 +400,16 @@ def validateClickOffer(value, unit):
         "surface_pointer": "pointer_sequence",
         "desktop_pointer": "pointer_sequence",
     }
-    if semantic != (value["delivery"] in ("object_action", "object_selection")) or unit != expected[value["delivery"]]:
+    if semantic != (value["delivery"] in ("object_action", "object_selection")) or unit != required_item(
+        expected, value["delivery"]
+    ):
         raise ValueError("protocol: click delivery and native unit disagree")
     options = value["preparationOptions"]
     if len(set(options)) != len(options) or value["admission"] == "preparationRequired" and not options:
         raise ValueError("protocol: invalid click preparation options")
 
 
-def validateClickReceipt(value, target, dispatch, cleanup):
+def validate_click_receipt(value, target, dispatch, cleanup_result):
     click_receipt.parse(value)
     continuation, transport = value["continuation"], value["transportEvidence"]
     if continuation["target"] != target or any(p["scope"] != target for p in value["preparationEvidence"]):
@@ -417,12 +428,18 @@ def validateClickReceipt(value, target, dispatch, cleanup):
         raise ValueError(
             "protocol: an entered input call requires explicit zero-insertion evidence to remain notDispatched"
         )
-    if transport["kind"] == "none" and (
-        transport["callEntered"]
-        or transport["callReturned"]
-        or transport["submitted"] is not None
-        or transport["expected"] is not None
-    ):
+    invalid_transport = (
+        True
+        if transport["kind"] == "none"
+        and (
+            transport["callEntered"]
+            or transport["callReturned"]
+            or transport["submitted"] is not None
+            or transport["expected"] is not None
+        )
+        else False
+    )
+    if invalid_transport:
         raise ValueError("protocol: absent transport cannot report submission")
     if (
         transport["submitted"] is not None
@@ -431,7 +448,7 @@ def validateClickReceipt(value, target, dispatch, cleanup):
     ):
         raise ValueError("protocol: click submissions exceed the frozen gesture")
     if continuation["kind"] in ("sameCandidateRefresh", "reselectWithinScope"):
-        if dispatch != "notDispatched" or cleanup != "complete":
+        if dispatch != "notDispatched" or cleanup_result != "complete":
             raise ValueError("protocol: uncertain click cannot continue")
     if dispatch == "notDispatched" and (transport["submitted"] or 0) > 0:
         raise ValueError("protocol: submitted request input cannot be notDispatched")
@@ -536,7 +553,7 @@ _desktop_capture = obj(
 )
 
 
-def decodeExecutionResult(method, value):
+def decode_execution_result(method, value):
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "readChange":
         result = _read_change.parse(value)
         if len(set(result["events"])) != len(result["events"]) or (result["reason"] == "event") != bool(
@@ -548,15 +565,15 @@ def decodeExecutionResult(method, value):
         result = _desktop_capture.parse(value)
         if any(result["binding"][key] is not None for key in ("instance", "rootWindow", "surface", "node", "capture")):
             raise ValueError("protocol: desktop capture requires a session read scope")
-        decoded = decodeDesktopObservation(
+        decoded = decode_desktop_observation(
             {key: result[key] for key in ("desktopRef", "scope", "observed", "observation", "screenshot")}
         )
-        if decoded["screenshot"] is not None and captureMetadata(decoded["screenshot"])["id"] != decoded["desktopRef"]:
+        if decoded["screenshot"] is not None and capture_metadata(decoded["screenshot"])["id"] != decoded["desktopRef"]:
             raise ValueError("protocol: desktop image and coordinate mapping have different identities")
         return {**result, **decoded}
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "capturedText":
         result = _captured_text.parse(value)
-        result["page"] = decodeTextPage(result["page"])
+        result["page"] = decode_text_page(result["page"])
         return result
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "launch":
         result = _launch_facts.parse(value)
@@ -566,18 +583,23 @@ def decodeExecutionResult(method, value):
             raise ValueError("protocol: inconsistent application launch contract")
         return result
     if method == "inspect" and isinstance(value, dict) and value.get("kind") in ("applications", "surfaces", "roots"):
-        return decodeDirectory(value)
+        return decode_directory(value)
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "observation":
         validate_driver_payload(value)
         return value
     result = _schemas[method].parse(value)
     bound = result.get("target") or result.get("binding")
-    if (
-        bound is not None
-        and "application" not in bound
-        and bound["surface"] is None
-        and any(bound[key] is not None for key in ("instance", "rootWindow", "node"))
-    ):
+    invalid_bound = (
+        True
+        if (
+            bound is not None
+            and "application" not in bound
+            and bound["surface"] is None
+            and any(bound[key] is not None for key in ("instance", "rootWindow", "node"))
+        )
+        else False
+    )
+    if invalid_bound:
         raise ValueError("protocol: unbound discovery cannot contain window or element identities")
     if method == "execute" and "application" in result:
         if "application" not in bound or not result["application"]["isRunning"]:
@@ -587,8 +609,8 @@ def decodeExecutionResult(method, value):
             bound[key] is not None for key in ("node", "capture")
         ):
             raise ValueError("protocol: window capture requires a window binding, not an element or old image")
-        result["observed"] = decodeStamp(result["observed"])
-        result["image"] = decodeCapture(result["image"], "window", bound["surface"], result["observed"])
+        result["observed"] = decode_stamp(result["observed"])
+        result["image"] = decode_capture(result["image"], "window", bound["surface"], result["observed"])
         a, b, c, d, _, _ = result["coordinates"]["toNative"]
         determinant = a * d - b * c
         if not math.isfinite(determinant) or determinant == 0:
@@ -612,24 +634,29 @@ def decodeExecutionResult(method, value):
             if result["primitives"]:
                 raise ValueError("protocol: current receiver discovery cannot declare input primitives")
         if "basis" in result:
-            decodeSelectionBasis(result["basis"])
+            decode_selection_basis(result["basis"])
             if result.get("actuator") is None and result.get("receiver") is None:
                 raise ValueError("protocol: selection dependencies require an actuator or receiver")
         within = result.get("within", [])
         if len(set(within)) != len(within) or result["binding"]["node"] in within:
             raise ValueError("protocol: target ancestry must have distinct proper ancestors")
         selected = result.get("actuator")
-        validateActuatorPath(selected)
+        validate_actuator_path(selected)
         if "receiver" in result:
             editor = selected["node"] if selected is not None else bound["node"]
-            if (
-                editor is None
-                or bound["capture"] is not None
-                or not result.get("basis")
-                or (result["receiver"].get("popup") or result["receiver"].get("node")) == editor
-                or selected is not None
-                and selected["relation"] != "containedEditor"
-            ):
+            invalid_editor = (
+                True
+                if (
+                    editor is None
+                    or bound["capture"] is not None
+                    or not result.get("basis")
+                    or (result["receiver"].get("popup") or result["receiver"].get("node")) == editor
+                    or selected is not None
+                    and selected["relation"] != "containedEditor"
+                )
+                else False
+            )
+            if invalid_editor:
                 raise ValueError("protocol: invalid receiver relation selection")
         if selected is not None:
             if result["binding"]["node"] is None or result["binding"]["capture"] is not None:
@@ -662,9 +689,9 @@ def decodeExecutionResult(method, value):
             _validate_primitive(p)
     if method == "execute":
         if "click" in result:
-            validateClickReceipt(result["click"], result["target"], result["dispatch"], result["cleanup"])
+            validate_click_receipt(result["click"], result["target"], result["dispatch"], result["cleanup"])
         if result["context"] is not None:
-            result["context"] = decodeActionContext(result["context"])
+            result["context"] = decode_action_context(result["context"])
         if result["retryReason"] is not None and (
             result["dispatch"] != "notDispatched" or result["cleanup"] != "complete"
         ):

@@ -5,17 +5,20 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.native.query.directory import (
-    select_application as select_application,
-    select_surface as select_surface,
-    selected_window as selected_window,
+    select_application,
+    select_surface,
+    selected_window,
 )
+
+__all__ = ["NativeDirectory", "select_application", "select_surface", "selected_window"]
 
 if TYPE_CHECKING:
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
     from computer_use.native.port import NativePort
     from computer_use.pipeline.core import Control
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts, Record
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import Record
 
 
 class NativeDirectory:

@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from computer_use._json import dumps
-from computer_use.diagnostics import sdkVersion
+from computer_use.diagnostics import SDK_VERSION
+
+from .diagnostic_json import dumps
 
 
 def now():
@@ -24,7 +25,7 @@ class Journal:
             self.record(
                 dict(
                     kind="session",
-                    sdkVersion=sdkVersion,
+                    sdkVersion=SDK_VERSION,
                     platform=sys.platform,
                     python=sys.version.split()[0],
                     desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "shared"),
@@ -37,7 +38,7 @@ class Journal:
         if self._error is not None:
             return
         try:
-            with self.path.open("a", encoding="utf-8") as file:
+            with self.path.open("a", encoding="utf-8", errors="backslashreplace") as file:
                 file.write(dumps({"timestamp": now(), **event}) + "\n")
         except Exception as error:
             self._error = str(error)

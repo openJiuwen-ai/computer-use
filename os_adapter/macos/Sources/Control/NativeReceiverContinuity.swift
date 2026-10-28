@@ -1,9 +1,9 @@
 import ApplicationServices
 
 /// Retain the original keyboard owner for one native primitive. Exact focus
-/// can be supplemented by a call-local typed cell-editor proof or that owner's
-/// explicitly related popup active item. No new semantic owner crosses calls;
-/// ordinary Element relations remain independently bound.
+/// can be supplemented by a typed cell-editor proof or that owner's explicitly
+/// related popup active item. The registry owns cross-call editor association;
+/// this primitive's continuity never transfers the semantic owner.
 @MainActor struct NativeReceiverContinuity {
     struct Lost: ClassifiedFailure, CustomStringConvertible {
         let description: String

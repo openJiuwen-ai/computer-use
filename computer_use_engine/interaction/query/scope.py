@@ -66,6 +66,8 @@ async def app_context(
     previous_window = window_binding(target)
     if previous_window == selection.root:
         return target
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     _, current = await reader._discover(selection, remaining, _control=_control)
     active = select_surface(current, selection.root.root_window)
     if window_binding(active) == previous_window:

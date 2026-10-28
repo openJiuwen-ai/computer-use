@@ -7,9 +7,29 @@ cleanup and receipts; this unit supplies the element-bound gesture guard.
 """
 
 import math
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.protocol import Failure, require
-from computer_use_linux.control.native_pointer import NativePointer
+from computer_use_linux.control.native_pointer import NativePointer, PointerRouteState
+
+
+class ElementPointerTarget(NamedTuple):
+    obj: Any
+    states: Any
+    interfaces: Any
+    role: Any
+    enabled: Any
+    selected: Any
+    native: Any
+
+
+class ElementPointerSample(NamedTuple):
+    """Element gesture geometry and the exact window sampled for its hit check."""
+
+    points: tuple[tuple[float, float], ...]
+    frame: Any
+    selected: Any
+    native: Any
 
 
 class NativeElementPointer(NativePointer):
@@ -22,7 +42,7 @@ class NativeElementPointer(NativePointer):
         obj, states, interfaces, role, enabled = self.target.read(target, within, ctx)
         selected = self.directory.surfaces[target["surface"]]
         native = self.desktop.validate(selected)
-        return obj, states, interfaces, role, enabled, selected, native
+        return ElementPointerTarget(obj, states, interfaces, role, enabled, selected, native)
 
     def _hit(self, root, point, ctx):
         # AT-SPI may return an immediate child or a deeper descendant. Descend
@@ -177,7 +197,7 @@ class NativeElementPointer(NativePointer):
             "input_unavailable",
         )
 
-    def _sample(self, operation, contract, ctx):
+    def _sample(self, operation, contract, ctx) -> ElementPointerSample:
         read = self.read_target(contract["target"], contract["within"], ctx)
         obj, _, _, role, _, selected, native = read
         require(
@@ -199,7 +219,7 @@ class NativeElementPointer(NativePointer):
             operation, contract["target"], contract["within"], selection, ctx, continuing_hit=continuing
         )
         self.require_member_hit(hit, member)
-        return points, frame, selected, native
+        return ElementPointerSample(points, frame, selected, native)
 
     def _route(self, selected, point):
         try:
@@ -220,7 +240,7 @@ class NativeElementPointer(NativePointer):
             points, _, hit = self.query_geometry(
                 geometry, ctx, kind=operation.intent["kind"], options=self.options(operation.intent)
             )
-        except (Failure, self.ax.GLib.Error) as error:
+        except (Failure, self.ax.glib.Error) as error:
             if isinstance(error, Failure) and error.code not in (
                 "input_unavailable",
                 "mode_unsupported",
@@ -291,9 +311,9 @@ class NativeElementPointer(NativePointer):
         )
         return points, selected, native
 
-    def click_state(self, operation, contract, ctx):
+    def click_state(self, operation, contract, ctx) -> PointerRouteState:
         points, _, selected, native = self._sample(operation, contract, ctx)
-        return points, selected, native, self._route(selected, points[0])
+        return PointerRouteState(points, selected, native, self._route(selected, points[0]))
 
     def prepare(self, operation, contract, foreground, ctx, preparation):
         points, _, selected, native = self._sample(operation, contract, ctx)

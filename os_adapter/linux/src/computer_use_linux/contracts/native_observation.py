@@ -25,11 +25,15 @@ def value(data: Any, native_type: str | None = None, *, metadata: list[list[Any]
     """
     if data is None:
         encoded, inferred = None, "python.NoneType"
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     elif type(data) is bool:
         encoded, inferred = data, "python.bool"
+    # pylint: disable-next=unidiomatic-typecheck
     elif type(data) is int:
         encoded = data if abs(data) <= 9007199254740991 else {"integer": str(data)}
         inferred = "python.int"
+    # pylint: disable-next=unidiomatic-typecheck
     elif type(data) is float:
         if math.isnan(data):
             encoded = {"float": "nan"}

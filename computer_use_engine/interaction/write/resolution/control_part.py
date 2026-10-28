@@ -17,7 +17,7 @@ from computer_use.native.semantics import (
     UNKNOWN,
     action_for_intent,
     control_member_role,
-    roleName,
+    role_name,
 )
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ class ControlPartQuery(NativeGraph):
         role = await self._field(owner, "role")
         if role is UNKNOWN:
             return None
-        owner_role = roleName(self.platform, role)
+        owner_role = role_name(self.platform, role)
         if owner_role in {"textField", "textArea", "webArea"} and not any(
             [
                 await self._field(owner, "editable") is True,
@@ -98,9 +98,17 @@ class ControlPartQuery(NativeGraph):
         # Right click remains a pointer event. Context-menu/scroll support on
         # internal layout nodes is not an independent primary control action.
         support_actions = set()
-        if self.platform == "macos" and (
-            owner_role in {"row", "cell"} or self.intent is not None and self.intent.parameters.get("button") == "right"
-        ):
+        matches_owner_role = (
+            True
+            if self.platform == "macos"
+            and (
+                owner_role in {"row", "cell"}
+                or self.intent is not None
+                and self.intent.parameters.get("button") == "right"
+            )
+            else False
+        )
+        if matches_owner_role:
             owner_actions = owner_actions or await self._actions(owner)
             if owner_actions["state"] == "complete":
                 support_actions = {"AXScrollToVisible"}
@@ -114,21 +122,31 @@ class ControlPartQuery(NativeGraph):
             raw_role = await self._field(token, "role")
             if raw_role is UNKNOWN:
                 return False
-            role = roleName(self.platform, raw_role)
-            if self.platform == "macos" and owner_role in {"row", "cell"} and token == hit and role == "textField":
+            role = role_name(self.platform, raw_role)
+            matches_owner_role_condition = (
+                True
+                if self.platform == "macos" and owner_role in {"row", "cell"} and token == hit and role == "textField"
+                else False
+            )
+            if matches_owner_role_condition:
                 # Outline/table captions can be renameable text fields. A
                 # single click at their confirmed native hit selects that item;
                 # it does not confirm/open it or authorize typing. Do not
                 # apply this to embedded editors or independent buttons.
                 actions = await self._actions(token)
                 names = {a["name"] for a in actions["items"]}
-                if (
-                    actions["state"] == "complete"
-                    and "AXConfirm" in names
-                    and names <= support_actions | {"AXConfirm", "AXCancel"}
-                    and await self._field(token, "textWritable") is False
-                    and not await self._relation(token, "children")
-                ):
+                matches_names = (
+                    True
+                    if (
+                        actions["state"] == "complete"
+                        and "AXConfirm" in names
+                        and names <= support_actions | {"AXConfirm", "AXCancel"}
+                        and await self._field(token, "textWritable") is False
+                        and not await self._relation(token, "children")
+                    )
+                    else False
+                )
+                if matches_names:
                     self._check_parent(token, ancestors)
                     return True
             kind = control_member_role(role)

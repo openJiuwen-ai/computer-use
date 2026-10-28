@@ -29,7 +29,8 @@ def paste_intent(value):
 class NativePaste(NativeKeyboard):
     requires_editable = True
 
-    def unit(self, operation):
+    @staticmethod
+    def unit(operation):
         return "clipboard_paste"
 
     def preflight(self, operation):

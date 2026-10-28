@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.rendering.layout.packing import apply_layout
-from computer_use.interaction.read.presentation.rendering.layout.text_parts import compactTextParts
+from computer_use.interaction.read.presentation.rendering.layout.text_parts import compact_text_parts
 
 if TYPE_CHECKING:
     from typing import Sequence
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 def join_text_parts(
     lines: list[str], roots: Sequence[NodeView], context: Record, format_field: FormatField
 ) -> list[str]:
-    return compactTextParts(lines, roots, context.get("focusedRef"), format_field)
+    return compact_text_parts(lines, roots, context.get("focusedRef"), format_field)
 
 
 def execute(frame: LayoutFrame, control: Control) -> LayoutFrame:

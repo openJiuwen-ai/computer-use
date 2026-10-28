@@ -1,20 +1,42 @@
 """Computer Use SDK: public Python API and cross-platform desktop semantics."""
 
-from .client.computer import UI as UI, App as App, Computer as Computer, Element as Element, Window as Window
-from .errors import ComputerUseError as ComputerUseError
+from .client.computer import UI, App, Computer, Element, Window
+from .errors import ComputerUseError
 from .types import (
-    ActionResult as ActionResult,
-    AppInfo as AppInfo,
-    Button as Button,
-    ClickOption as ClickOption,
-    Direction as Direction,
-    ElementMatch as ElementMatch,
-    ElementPath as ElementPath,
-    ElementSelector as ElementSelector,
-    Observation as Observation,
-    Point as Point,
-    TextPage as TextPage,
-    View as View,
+    ActionResult,
+    AppInfo,
+    Button,
+    ClickOption,
+    Direction,
+    ElementMatch,
+    ElementPath,
+    ElementSelector,
+    Observation,
+    Point,
+    TextPage,
+    View,
 )
+
+__all__ = [
+    "UI",
+    "ActionResult",
+    "App",
+    "AppInfo",
+    "Button",
+    "ClickOption",
+    "Computer",
+    "ComputerUseError",
+    "Direction",
+    "Element",
+    "ElementMatch",
+    "ElementPath",
+    "ElementSelector",
+    "Observation",
+    "Point",
+    "TextPage",
+    "View",
+    "Window",
+    "__version__",
+]
 
 __version__ = "0.0.1"

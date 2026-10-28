@@ -18,7 +18,7 @@ class NativeAccessibility:
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi, Gio, GLib, GObject
 
-        self._A, self.Gio, self.GLib = Atspi, Gio, GLib
+        self._a, self.gio, self.glib = Atspi, Gio, GLib
         self.native_key = GObject.Object.__hash__
         self.ctx, self.dead = None, {}
         self._state, self._failure = "new", None
@@ -37,11 +37,12 @@ class NativeAccessibility:
         )
 
     @property
+    # pylint: disable-next=invalid-name
     def A(self):
         # Existing callers also obtain native interface methods through A.
         # Guard this boundary so retained objects cannot bypass initialization.
         self._ensure_started()
-        return self._A
+        return self._a
 
     def _check(self):
         if self.ctx:
@@ -61,10 +62,10 @@ class NativeAccessibility:
         try:
             # This selected-bus helper and libatspi.init are synchronous. Checks
             # bound admission/completion, not their internal blocking duration.
-            connect_accessibility_bus(self.Gio, self.GLib)
+            connect_accessibility_bus(self.gio, self.glib)
             self._check()
-            self._A.set_timeout(250, 250)
-            status = self._A.init()
+            self._a.set_timeout(250, 250)
+            status = self._a.init()
             self._initialized = status == 0
             self._check()
             if status != 0:
@@ -72,7 +73,7 @@ class NativeAccessibility:
                     "AT-SPI initialization did not acquire a new provider (status " + str(status) + ").",
                     "observation_unavailable",
                 )
-            self.listener = self._A.EventListener.new(self.event)
+            self.listener = self._a.EventListener.new(self.event)
             self._check()
             if self.listener is None:
                 raise Failure("AT-SPI event listener is unavailable.", "observation_unavailable")
@@ -91,7 +92,7 @@ class NativeAccessibility:
             # provider diagnosis. Do not retry a genuine provider failure in
             # this driver session or select another accessibility bus.
             self._check()
-            if isinstance(error, self.GLib.Error) or (
+            if isinstance(error, self.glib.Error) or (
                 isinstance(error, Failure) and error.code == "observation_unavailable"
             ):
                 self._state, self._failure = "unavailable", str(error)
@@ -102,26 +103,26 @@ class NativeAccessibility:
         for event in self._registered:
             try:
                 self.listener.deregister(event)
-            except self.GLib.Error:
+            except self.glib.Error:
                 pass
         self._registered.clear()
         self.listener = None
         if self._initialized:
             self._initialized = False
-            self._A.exit()
+            self._a.exit()
 
     def refresh(self, obj):
         self._ensure_started()
         self._clear_cache(obj)
 
     def _clear_cache(self, obj):
-        clear = getattr(self._A.Accessible, "clear_cache_single", None)
+        clear = getattr(self._a.Accessible, "clear_cache_single", None)
         if clear is not None:
             clear(obj)
         else:
             # Older libraries have only recursive clear_cache, which can
             # invalidate descendants. Disable caching for this object instead.
-            self._A.Accessible.set_cache_mask(obj, self._A.Cache.NONE)
+            self._a.Accessible.set_cache_mask(obj, self._a.Cache.NONE)
 
     def event(self, event, *_):
         if self._state != "ready":
@@ -157,7 +158,7 @@ class NativeAccessibility:
             self._clear_cache(obj)
 
     def pump(self):
-        loop = self.GLib.MainContext.default()
+        loop = self.glib.MainContext.default()
         for _ in range(32):
             if not loop.pending():
                 break
@@ -190,18 +191,20 @@ class NativeAccessibility:
             if self.call(self.A.Accessible.get_role, obj) == self.A.Role.INVALID:
                 raise Failure("Native accessible no longer exists.", "stale_target")
             return states
-        except self.GLib.Error as error:
+        except self.glib.Error as error:
             raise Failure("Cannot confirm native target: " + str(error), "stale_target") from error
 
     def children(self, obj, limit, notes):
         total = self.call(self.A.Accessible.get_child_count, obj)
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(total) is not int or total < 0:
             raise Failure("Native directory child count is unavailable.", "observation_incomplete")
         result = []
         for index in range(min(total, limit)):
             try:
                 child = self.call(self.A.Accessible.get_child_at_index, obj, index)
-            except self.GLib.Error as error:
+            except self.glib.Error as error:
                 gap(notes, "Native directory child unavailable: " + str(error))
                 break
             if child is None:
@@ -226,7 +229,7 @@ class NativeAccessibility:
                 pid = self.call(self.A.Accessible.get_process_id, app)
                 name = self.call(self.A.Accessible.get_name, app)
                 result.extend((obj, pid, name) for obj in self.children(app, 128, notes))
-            except (Failure, self.GLib.Error) as error:
+            except (Failure, self.glib.Error) as error:
                 if self.ctx:
                     self.ctx.check()
                 if isinstance(error, Failure) and error.code not in (
@@ -253,13 +256,12 @@ class NativeAccessibility:
                 rect = self.rect(obj)
                 title = self.call(self.A.Accessible.get_name, obj)
                 bounds = (window.rect, window.frame_rect)
-                if (
-                    rect
-                    and title == window.title
-                    and any(b and all(abs(a - c) <= 3 for a, c in zip(rect, b)) for b in bounds)
-                ):
-                    matches.append(obj)
-            except self.GLib.Error:
+                if rect and title == window.title:
+                    for bound in bounds:
+                        if bound and all(abs(a - c) <= 3 for a, c in zip(rect, bound)):
+                            matches.append(obj)
+                            break
+            except self.glib.Error:
                 continue
         return matches[0] if len(matches) == 1 else None
 

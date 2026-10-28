@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.native.contracts import FocusScope
 from computer_use.native.query.graph import NativeGraph
-from computer_use.native.semantics import EDITING_FIELDS, UNKNOWN, editing_evidence, roleName
+from computer_use.native.semantics import EDITING_FIELDS, UNKNOWN, editing_evidence, role_name
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
@@ -28,7 +28,7 @@ class FocusScopeQuery(NativeGraph):
 
     async def _role(self, token: str) -> str | object:
         value = await self._field(token, "role")
-        return UNKNOWN if value is UNKNOWN or value is None else roleName(self.platform, value)
+        return UNKNOWN if value is UNKNOWN or value is None else role_name(self.platform, value)
 
     async def resolve(self, focused: str | None) -> FocusScope | None:
         """Confirm that a coarse macOS focus report names a layout ancestor of the editor."""

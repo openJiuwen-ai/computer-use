@@ -43,28 +43,38 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
             "read again before acting on the current view",
         )
         return ClassifiedAttempt(replace(attempt, scope_confirmed=False, gaps=attempt.gaps + (gap,)), Refresh.KEEP)
-    if (
-        state.attempt == 0
-        and attempt.scope_confirmed
-        and components.image is None
-        and any(gap.component == "image" and gap.code == "stale_target" for gap in components.gaps)
-        and cast("Callable[[], int]", control.remaining)() >= 400
-    ):
+    matches_attempt = (
+        True
+        if (
+            state.attempt == 0
+            and attempt.scope_confirmed
+            and components.image is None
+            and any(gap.component == "image" and gap.code == "stale_target" for gap in components.gaps)
+            and cast("Callable[[], int]", control.remaining)() >= 400
+        )
+        else False
+    )
+    if matches_attempt:
         return ClassifiedAttempt(attempt, Refresh.IMAGE)
     limits = state.plan.limits
-    if (
-        state.attempt == 0
-        and target.node is not None
-        and refreshable(components.tree)
-        and (
-            state.initializing
-            or busy_nodes(components.tree)
-            or limits["fields"] is None
-            and limits["max_depth"] is None
-            and window_content_unexposed(components.tree)
+    matches_refreshable = (
+        True
+        if (
+            state.attempt == 0
+            and target.node is not None
+            and refreshable(components.tree)
+            and (
+                state.initializing
+                or busy_nodes(components.tree)
+                or limits["fields"] is None
+                and limits["max_depth"] is None
+                and window_content_unexposed(components.tree)
+            )
+            and cast("Callable[[], int]", control.remaining)() >= 400
         )
-        and cast("Callable[[], int]", control.remaining)() >= 400
-    ):
+        else False
+    )
+    if matches_refreshable:
         return ClassifiedAttempt(attempt, Refresh.TREE)
     return ClassifiedAttempt(attempt, Refresh.KEEP)
 

@@ -13,11 +13,28 @@ dependencies = [
     "pillow>=12.3,<13",
 ]
 
+[dependency-groups]
+test = [
+    "pytest>=8.3.5",
+    "pytest-html>=4.1.1",
+    "pytest-cov>=7.0.0",
+]
+lint = [
+    "ruff>=0.11.2",
+    "pylint>=3.0.0",
+]
+build = [
+    "build>=1.2.2",
+    "setuptools>=68",
+    "wheel>=0.41.2",
+]
+dev = [{ include-group = "test" }, { include-group = "lint" }, { include-group = "build" }]
+
 [project.scripts]
 computer-use-mcp = "computer_use_mcp.server:cli"
-computer-use-build = "computer_use_native_tools.native:buildCli"
-computer-use-permissions = "computer_use_native_tools.native:permissionsCli"
-computer-use-linux-session = "computer_use_native_tools.native:linuxLauncherCli"
+computer-use-build = "computer_use_native_tools.native:build_cli"
+computer-use-permissions = "computer_use_native_tools.native:permissions_cli"
+computer-use-linux-session = "computer_use_native_tools.native:linux_launcher_cli"
 
 [tool.setuptools]
 include-package-data = false
@@ -29,15 +46,29 @@ computer_use = ["*.pyi", "py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+addopts = ["-v", "--html=outputs/unit_test_report.html", "--self-contained-html", "--ignore=build"]
+
+[tool.coverage.run]
+source = ["computer_use", "computer_use_mcp"]
+omit = ["tests/*"]
+
+[tool.pylint.MAIN]
+ignore-paths = ["^tests/.*"]
+load-plugins = ["pylint.extensions.bad_builtin"]
+py-version = "3.12"
+
+[tool.pylint."DEPRECATED BUILTINS"]
+bad-functions = ["print"]
+
+[tool.pylint.FORMAT]
+max-line-length = 120
 
 [tool.ruff]
 target-version = "py312"
 line-length = 120
 
+[tool.ruff.lint]
+extend-select = ["T201", "N807"]
+
 [tool.ruff.format]
 docstring-code-format = false
-
-[[tool.uv.index]]
-name = "pypi"
-url = "https://pypi.org/simple"
-default = true

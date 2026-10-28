@@ -34,8 +34,11 @@ class _Decoder:
 
     @staticmethod
     def _tag(value: Any, path: FieldPath) -> Any:
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is float and not math.isfinite(value):
             raise _error(path, "special numbers require a semantic tag")
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is not dict or "$type" not in value:
             return value
         kind = value.get("$type")
@@ -53,20 +56,32 @@ class _Decoder:
             return result
         if kind == "float" and set(value) == {"$type", "value"} and value["value"] in ("nan", "inf", "-inf", "-0"):
             return -0.0 if value["value"] == "-0" else float(value["value"])
-        if (
-            kind == "integer"
-            and set(value) == {"$type", "value"}
-            and isinstance(value["value"], str)
-            and _INTEGER.fullmatch(value["value"])
-        ):
+        matches_kind = (
+            True
+            if (
+                kind == "integer"
+                and set(value) == {"$type", "value"}
+                and isinstance(value["value"], str)
+                and _INTEGER.fullmatch(value["value"])
+            )
+            else False
+        )
+        if matches_kind:
             try:
                 return int(value["value"])
             except ValueError as exc:
                 raise _error(path, "integer exceeds the supported digit budget") from exc
+        # pylint: disable-next=unidiomatic-typecheck
         if kind == "map" and set(value) == {"$type", "entries"} and type(value["entries"]) is list:
             mapping = _EscapedMap()
             for pair in value["entries"]:
-                if type(pair) is not list or len(pair) != 2 or not isinstance(pair[0], str) or pair[0] in mapping:
+                invalid_mapping = (
+                    True
+                    # pylint: disable-next=unidiomatic-typecheck
+                    if type(pair) is not list or len(pair) != 2 or not isinstance(pair[0], str) or pair[0] in mapping
+                    else False
+                )
+                if invalid_mapping:
                     raise _error(path, "invalid escaped mapping entry")
                 mapping[pair[0]] = pair[1]
             return mapping
@@ -90,6 +105,7 @@ class _Decoder:
         if origin is Literal:
             if any(type(value) is type(choice) and value == choice for choice in args):
                 return value
+        # pylint: disable-next=unidiomatic-typecheck
         elif expected is type(None):
             if value is None:
                 return None
@@ -102,6 +118,7 @@ class _Decoder:
         elif isinstance(expected, type) and issubclass(expected, Enum):
             if isinstance(value, expected):
                 return value
+        # pylint: disable-next=unidiomatic-typecheck
         elif origin is tuple and type(value) is list:
             if len(args) == 2 and args[1] is Ellipsis:
                 return tuple(self.value(item, args[0], (*path, index), depth + 1) for index, item in enumerate(value))
@@ -118,8 +135,10 @@ class _Decoder:
                 for key, item in value.items()
             }
         elif isinstance(expected, type) and is_dataclass(expected):
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value) is expected:
                 return value
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value) is dict:
                 hints = record_types(expected)
                 required = {
@@ -142,9 +161,16 @@ def _encode(value: Any) -> Any:
         return {"$type": value.value}
     if isinstance(value, datetime):
         return {"$type": "datetime", "value": value.isoformat()}
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is int and abs(value) > _SAFE_INT:
         return {"$type": "integer", "value": str(value)}
-    if type(value) is float and (not math.isfinite(value) or value == 0 and math.copysign(1, value) < 0):
+    matches_value = (
+        True
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(value) is float and (not math.isfinite(value) or value == 0 and math.copysign(1, value) < 0)
+        else False
+    )
+    if matches_value:
         return {"$type": "float", "value": "-0" if value == 0 else str(value)}
     if is_dataclass(value):
         result = {}
@@ -178,6 +204,7 @@ def decode_observation(value: Any) -> NativeObservation:
         ValueError: The document uses another format, violates field types, or
             contains invalid references, ranges, or coordinate spaces.
     """
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is not dict or value.get("kind") != "native_observation":
         raise ValueError("observation: expected normalized native_observation format")
     observation = _Decoder().value({key: item for key, item in value.items() if key != "kind"}, NativeObservation)

@@ -3,7 +3,9 @@
 import hashlib
 import json
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from setuptools import find_packages, setup
 from setuptools.command.build_py import build_py
@@ -24,11 +26,20 @@ def discover_packages():
     packages = []
     for package, directory in PACKAGE_ROOTS.items():
         packages.append(package)
+
+        def _iter_child(_source_items: Iterator[Any], package_name: Any) -> Iterator[Any]:
+            for child in _source_items:
+                yield f"{package_name}.{child}"
+
         packages.extend(
-            f"{package}.{child}"
-            for child in find_packages(
-                where=str(ROOT / directory),
-                exclude=("backends", "backends.*", "_resources", "_resources.*"),
+            _iter_child(
+                iter(
+                    find_packages(
+                        where=str(ROOT / directory),
+                        exclude=("backends", "backends.*", "_resources", "_resources.*"),
+                    )
+                ),
+                package,
             )
         )
     return sorted(packages)
@@ -71,13 +82,20 @@ class BuildWithResources(build_py):
         resources = [ROOT / name for name in FILES]
         for directory in DIRECTORIES:
             base = ROOT / directory
-            resources.extend(
-                path
-                for path in base.rglob("*")
-                if path.is_file()
-                and not any(part.startswith(".") or part == "__pycache__" for part in path.relative_to(base).parts)
-                and path.suffix in RESOURCE_SUFFIXES
-            )
+
+            def _iter_path(_source_items: Iterator[Any], resource_root: Any) -> Iterator[Any]:
+                for path in _source_items:
+                    if (
+                        path.is_file()
+                        and not any(
+                            part.startswith(".") or part == "__pycache__"
+                            for part in path.relative_to(resource_root).parts
+                        )
+                        and path.suffix in RESOURCE_SUFFIXES
+                    ):
+                        yield path
+
+            resources.extend(_iter_path(iter(base.rglob("*")), base))
         manifest = {}
         for source in sorted(set(resources)):
             relative = source.relative_to(ROOT)

@@ -27,6 +27,8 @@ class Failure(Exception):
         code="execution_failed",
         target="desktop",
         effect="none",
+        # The error contract exposes a next field and accepts the matching keyword.
+        # pylint: disable-next=redefined-builtin
         next="Read the target again before continuing.",
     ):
         super().__init__(detail)
@@ -50,6 +52,8 @@ def fields(value, required, optional=()):
 
 
 def integer(value, minimum=0, maximum=9007199254740991):
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     require(type(value) is int and minimum <= value <= maximum, "Invalid integer.")
     return value
 
@@ -150,7 +154,8 @@ def desktop_lease(ctx, identity):
     import stat
 
     # Do not trust another user's runtime directory or follow a pre-created symlink.
-    root = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/computer-use-{os.getuid()}"
+    # The per-user fallback is shared by processes; ownership and symlink checks below guard it.
+    root = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/computer-use-{os.getuid()}"  # noqa: S108
     os.makedirs(root, mode=0o700, exist_ok=True)
     info = os.stat(root, follow_symlinks=False)
     require(

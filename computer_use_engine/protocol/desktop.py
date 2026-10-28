@@ -1,5 +1,5 @@
-from .captures import captureMetadata, decodeCapture, decodeStamp
-from .png import pngSize
+from .captures import capture_metadata, decode_capture, decode_stamp
+from .png import png_size
 from .primitives import nonempty, record
 from .schema import array, boolean, enum, number, obj, string
 
@@ -25,7 +25,7 @@ _schema = obj(
 )
 
 
-def decodeDesktop(value):
+def decode_desktop(value):
     result = _schema.parse(value)
     if len({d["name"] for d in result["displays"]}) != len(result["displays"]):
         raise ValueError("protocol: duplicate desktop display name")
@@ -41,21 +41,27 @@ def decodeDesktop(value):
     return result
 
 
-def decodeDesktopObservation(value):
+def decode_desktop_observation(value):
     """Common pixel/catalogue contract; independent of transport version."""
     result = record(value, ["desktopRef", "observed", "scope", "observation", "screenshot"])
     nonempty(result["desktopRef"], "protocol desktopRef")
     nonempty(result["scope"], "protocol desktop scope")
-    observed, observation = decodeStamp(result["observed"]), decodeDesktop(result["observation"])
+    observed, observation = decode_stamp(result["observed"]), decode_desktop(result["observation"])
     screenshot = (
         None
         if result["screenshot"] is None
-        else decodeCapture(result["screenshot"], "desktop", result["scope"], observed)
+        else decode_capture(result["screenshot"], "desktop", result["scope"], observed)
     )
-    if (screenshot is not None) != any(d["captured"] for d in observation["displays"]) or (
-        screenshot is not None
-        and (pngSize(screenshot) != observation["canvas"] or captureMetadata(screenshot)["id"] == observed["id"])
-    ):
+    invalid_screenshot = (
+        True
+        if (screenshot is not None) != any(d["captured"] for d in observation["displays"])
+        or (
+            screenshot is not None
+            and (png_size(screenshot) != observation["canvas"] or capture_metadata(screenshot)["id"] == observed["id"])
+        )
+        else False
+    )
+    if invalid_screenshot:
         raise ValueError("protocol: inconsistent desktop screenshot")
     return dict(
         desktopRef=result["desktopRef"],

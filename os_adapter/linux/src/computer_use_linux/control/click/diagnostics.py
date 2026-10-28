@@ -93,6 +93,8 @@ class ClickDiagnostics:
                         for key in ("dispatch", "confirmation", "cleanup", "errorCode", "retryReason", "click")
                     }
                 )
+            # Console and transport output retain their documented stream format.
+            # pylint: disable-next=bad-builtin
             sys.stderr.write(
                 json.dumps(dict(message=value), ensure_ascii=True, allow_nan=False, separators=(",", ":")) + "\n"
             )

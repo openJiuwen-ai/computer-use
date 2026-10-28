@@ -30,12 +30,17 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         intent, target, operation, remaining = parts(frame)
         facts, memory = (frame.facts, frame.request.memory)
         scope = frame.scope
-        if (
-            "nativeMenuActions" in getattr(native, "capabilities", ())
-            and facts.platform == "macos"
-            and (facts.native_role in ("AXMenuBarItem", "AXMenuItem", "AXMenu"))
-            and any((p.unit == "native_action" and p.supported == Knowledge.YES for p in facts.primitives))
-        ):
+        matches_getattr = (
+            True
+            if (
+                "nativeMenuActions" in getattr(native, "capabilities", ())
+                and facts.platform == "macos"
+                and (facts.native_role in ("AXMenuBarItem", "AXMenuItem", "AXMenu"))
+                and any((p.unit == "native_action" and p.supported == Knowledge.YES for p in facts.primitives))
+            )
+            else False
+        )
+        if matches_getattr:
             if memory.menu_context is None:
                 query = MenuContextQuery(native, operation, target, remaining)
                 if facts.application_menu is False:

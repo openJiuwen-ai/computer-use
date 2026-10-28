@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.members import compactLabel, labelParts
-from computer_use.interaction.read.presentation.compression.policy import ordinaryControl, sources
-from computer_use.interaction.read.presentation.tree import valuePreviewLimit
-from computer_use.protocol.primitives import utf16Length
+from computer_use.interaction.read.presentation.compression.members import compact_label, label_parts
+from computer_use.interaction.read.presentation.compression.policy import ordinary_control, sources
+from computer_use.interaction.read.presentation.tree import VALUE_PREVIEW_LIMIT
+from computer_use.protocol.primitives import utf16_length
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.compression.model import Scope
@@ -20,7 +20,7 @@ def merge_control_labels(state: ProjectionView, edit: ProjectionEditor, node: Vi
     Outside tables, derive a missing name from eligible label members or passive descendants.
     Compact the represented label/layout children using the owner relationship and provenance.
     """
-    if scope.in_table or not ordinaryControl(node):
+    if scope.in_table or not ordinary_control(node):
         return
     if not node.get("name"):
         if "control" in node:
@@ -30,11 +30,11 @@ def merge_control_labels(state: ProjectionView, edit: ProjectionEditor, node: Vi
                 if (
                     member["part"] == "label"
                     and source is not None
-                    and utf16Length(source.get("value", "")) <= valuePreviewLimit
+                    and utf16_length(source.get("value", "")) <= VALUE_PREVIEW_LIMIT
                 ):
                     parts.extend(sources(source))
         else:
-            parts = [part for child in node["children"] for part in (labelParts(state, edit, child, node) or [])]
+            parts = [part for child in node["children"] for part in (label_parts(state, edit, child, node) or [])]
         if parts:
             edit.adopt(node, parts, "name")
-    edit.children(node, [c for child in node["children"] for c in compactLabel(state, edit, child, node)])
+    edit.children(node, [c for child in node["children"] for c in compact_label(state, edit, child, node)])

@@ -100,10 +100,16 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
             )
         return CandidateSet(request, tuple(p for p in matches if p.supported == Knowledge.YES))
     # Coordinate requests mean pointer events, even when a semantic action exists.
-    if any(key in intent.parameters for key in ("x", "fromX")) or (
-        intent.kind == "click"
-        and (intent.parameters.get("button", "left") != "left" or intent.parameters.get("count", 1) != 1)
-    ):
+    matches_key = (
+        True
+        if any(key in intent.parameters for key in ("x", "fromX"))
+        or (
+            intent.kind == "click"
+            and (intent.parameters.get("button", "left") != "left" or intent.parameters.get("count", 1) != 1)
+        )
+        else False
+    )
+    if matches_key:
         candidates = [p for p in candidates if p.channel == Channel.POINTER]
     elif intent.kind in ("click", "openMenu"):
         actions = [p for p in facts.primitives if p.unit == "native_action" and p.action is not None]
@@ -137,7 +143,7 @@ def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     ):
         # An exclusive element click means the visible physical interaction,
         # including application click callbacks. UIA Select/Toggle can mutate
-        # state without those callbacks. Explicit performAction stays native;
+        # state without those callbacks. Explicit perform_action stays native;
         # shared keeps usable background actions ahead of foreground assistance.
         candidates = [p for p in candidates if p.channel == Channel.POINTER]
     if intent.kind == "paste":
@@ -166,10 +172,13 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
     order = {Channel.OBJECT: 0, Channel.EDITOR: 2, Channel.KEYBOARD: 3, Channel.POINTER: 4}
 
     def priority(primitive: Primitive) -> tuple[int, int, int, str]:
+        channel_order = order.get(primitive.channel)
+        if channel_order is None:
+            raise KeyError(primitive.channel)
         if primitive.click is not None:
             offer = primitive.click
             return (
-                order[primitive.channel],
+                channel_order,
                 1 if primitive.unit == "native_selection" else 0,
                 0 if offer.admission == "ready" and offer.delivery == "desktop_pointer" else 1,
                 offer.route_family,
@@ -180,9 +189,20 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
             and primitive.channel == Channel.KEYBOARD
             and primitive.readiness == Knowledge.YES
         )
-        return (1 if ready_text_keys else order[primitive.channel], 0, 0, primitive.id)
+        return (
+            1 if ready_text_keys else channel_order,
+            1 if primitive.unit == "native_value_replace" else 0,
+            0,
+            primitive.id,
+        )
 
-    return CandidateSet(request, tuple(sorted((p for p in candidates if p.supported == Knowledge.YES), key=priority)))
+    # Click admission carries the reason even when a native route is unavailable.
+    # The click selector owns eligibility; dropping these offers here erases that
+    # evidence before it can explain the failure.
+    return CandidateSet(
+        request,
+        tuple(sorted((p for p in candidates if p.supported == Knowledge.YES or p.click is not None), key=priority)),
+    )
 
 
 CANDIDATE_PHASES = (

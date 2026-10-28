@@ -40,6 +40,8 @@ class OperationLease(Generic[LeaseTarget]):
         Returns:
             A lease with the same target/token and a narrower budget callback.
         """
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(timeout_ms) is not int or timeout_ms < 1:
             raise ValueError("Invalid observation component budget")
         deadline = time.monotonic() + timeout_ms / 1000
@@ -79,6 +81,7 @@ class CallLifecycle:
 
     @contextmanager
     def claim(self, timeout_ms: int) -> Iterator[Callable[[], int]]:
+        # pylint: disable-next=unidiomatic-typecheck
         if type(timeout_ms) is not int or not 1 <= timeout_ms <= 120000:
             raise ValueError("Invalid native call time budget")
         if self.retired:
@@ -113,13 +116,18 @@ class CallLifecycle:
             self.busy = False
 
     def validate_claim(self, remaining: Callable[[], int]) -> None:
-        if (
-            self.retired
-            or self._active
-            or remaining is not self._remaining
-            or not self.busy
-            or self._owner is not asyncio.current_task()
-        ):
+        invalid_remaining = (
+            True
+            if (
+                self.retired
+                or self._active
+                or remaining is not self._remaining
+                or not self.busy
+                or self._owner is not asyncio.current_task()
+            )
+            else False
+        )
+        if invalid_remaining:
             raise RuntimeError("Native stage requires its active, idle call claim and owning task")
 
     def check_begin(self, intent: str, mode: str, target: OperationTarget) -> None:

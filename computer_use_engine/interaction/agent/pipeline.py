@@ -6,13 +6,14 @@ from dataclasses import replace
 from time import monotonic
 from typing import TYPE_CHECKING, cast
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor, ancestry, in_scope
 from computer_use.interaction.query.instances.pipeline import ApplicationDiscoveryPipeline
 from computer_use.interaction.query.instances.scope import allowed, refresh, retain_fixed_failure, validate_session
-from computer_use.interaction.read.presentation.content import template
+from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
+from computer_use.interaction.read.presentation.ir import freeze
 from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, member_target
 from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Intent, Knowledge
@@ -20,9 +21,9 @@ from computer_use.native.query.directory import select_surface
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
-from computer_use.protocol.element_path import elementPath
+from computer_use.protocol.element_path import element_path
 from computer_use.session.cursors import TextCursors
-from computer_use.session.interfaces import ApplicationReferences, WindowLifetime
+from computer_use.session.interfaces import ApplicationEntry, ApplicationReferences, WindowLifetime
 
 from .requests import (
     ActOnElement,
@@ -84,10 +85,12 @@ class AgentInterfacePipeline:
 
         entry = self.references.resolve(ref, self.controller.transport.session)
         name = entry.application_name or entry.display_name
-        state = AppState(
-            entry.selector, running=RunningApplication(entry.selector, name, entry.session) if entry.running else None
-        )
+        # A desktop selector may identify a particular window, rather than its
+        # process. Resolve unanchored selectors through the ordinary directory
+        # path; only a retained directory already proves the canonical owner.
+        state = AppState(entry.selector)
         if entry.window is not None:
+            state.running = RunningApplication(entry.selector, name, entry.session)
             state.selection = WorkingWindow(
                 entry.selector, name, window_binding(select_surface(entry.directory, entry.window, follow_modal=False))
             )
@@ -111,9 +114,11 @@ class AgentInterfacePipeline:
         from computer_use.session.state import AppState
 
         validate_session(self.controller, app)
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         instance = app._instance
         if instance.anchor is None or ref not in instance.windows:
-            raise localFailure(
+            raise local_failure(
                 "window is not in this instance member directory",
                 "read the App and use an integer from Windows",
                 "stale_target",
@@ -123,6 +128,7 @@ class AgentInterfacePipeline:
         identity = (key, item["surface"], item["instance"])
         value = instance.views.get(identity)
         if value is None:
+            # pylint: disable-next=protected-access
             selection = self.controller.reader._selection(
                 instance.anchor.application, instance.anchor.name, cast("DirectoryFacts", instance.directory), key
             )
@@ -148,8 +154,10 @@ class AgentInterfacePipeline:
         except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
             # A principal read performs its own later directory collection;
             # consume its exact root evidence just like the initial refresh.
+            # pylint: disable-next=protected-access
             selection = ui._instance.anchor or self.controller.state(ui).selection
             if selection is not None:
+                # pylint: disable-next=protected-access
                 retain_fixed_failure(ui._instance, selection, error)
             raise
 
@@ -169,13 +177,35 @@ class AgentInterfacePipeline:
                 observed = await self.controller.desktop_reader.read()
                 self.controller.desktop.record(observed)
             except BaseException:
-                from computer_use.session.events import pendingObservationsDiscarded
+                from computer_use.session.events import pending_observations_discarded
 
                 self.controller.desktop.reset()
-                pendingObservationsDiscarded(self.controller)
+                pending_observations_discarded(self.controller)
                 raise
             screenshot = observed["screenshot"]
-            lines.append(observed["document"])
+            # Publish the same public reference namespace as list_apps, without
+            # another directory scan or an accessibility-tree prerequisite.
+            applications = {}
+            desktop = observed["observation"]
+            for item in [desktop["frontmost"], *desktop["windows"]]:
+                selector = item.get("selector") if item is not None else None
+                if selector:
+                    name = item.get("app", item.get("name"))
+                    applications[selector] = self.references.publish(
+                        ApplicationEntry(self.controller.transport.session, selector, name, True)
+                    )
+            document = observed["document"]
+            lines.append(
+                replace(
+                    document,
+                    parts=tuple(
+                        replace(part, values=(*part.values, freeze(applications)))
+                        if isinstance(part, DisplayText) and part.kind == "desktop"
+                        else part
+                        for part in document.parts
+                    ),
+                )
+            )
         if view == "tree":
             apps = await self.list_applications()
             lines.append("Desktop application/window directory (not a recursive system tree):")
@@ -183,8 +213,8 @@ class AgentInterfacePipeline:
                 template(
                     "{0} {1!r} ({2}); computer.app({0})",
                     app.id,
-                    app.displayName,
-                    "running" if app.isRunning else "installed",
+                    app.display_name,
+                    "running" if app.is_running else "installed",
                 )
                 for app in apps
             )
@@ -203,13 +233,18 @@ class AgentInterfacePipeline:
         """
         validate_session(self.controller, ui)
         target = snapshot["binding"]
-        self.controller.validateElement(target)
+        self.controller.validate_element(target)
         identity = snapshot.get("window_identity")
+        # pylint: disable-next=protected-access
         evidence = ui._instance.surface_evidence(target.surface, identity)
-        if (identity is not None and evidence is None) or (
-            evidence is not None and evidence.lifetime is WindowLifetime.RETIRED
-        ):
-            raise localFailure(
+        invalid_identity = (
+            True
+            if (identity is not None and evidence is None)
+            or (evidence is not None and evidence.lifetime is WindowLifetime.RETIRED)
+            else False
+        )
+        if invalid_identity:
+            raise local_failure(
                 "the observed element window identity was retired",
                 "read the intended App/Window and choose a current element",
                 "stale_target",
@@ -218,31 +253,42 @@ class AgentInterfacePipeline:
             if evidence is not None and identity is None:
                 snapshot["window_identity"] = evidence.identity
             return
+        # pylint: disable-next=protected-access
         context = ui._instance.menu_contexts.get(target.surface)
-        if (
-            snapshot.get("scope_kind") == "applicationMenu"
-            and target.surface in ui._instance.menu_contexts
-            and (
-                ui._anchor is None
-                or (
-                    context is not None
-                    and ancestor(cast("DirectoryFacts", ui._instance.directory), context, ui._anchor)
+        matches_target = (
+            True
+            if (
+                snapshot.get("scope_kind") == "applicationMenu"
+                # pylint: disable-next=protected-access
+                and target.surface in ui._instance.menu_contexts
+                and (
+                    # pylint: disable-next=protected-access
+                    ui._anchor is None
+                    or (
+                        context is not None
+                        # pylint: disable-next=protected-access
+                        and ancestor(cast("DirectoryFacts", ui._instance.directory), context, ui._anchor)
+                    )
                 )
             )
-        ):
+            else False
+        )
+        if matches_target:
             return
         membership = evidence.membership if evidence is not None else Knowledge.NO
+        # pylint: disable-next=protected-access
         if membership is Knowledge.YES and ui._anchor is not None:
+            # pylint: disable-next=protected-access
             membership = ancestry(cast("DirectoryFacts", ui._instance.directory), evidence.identity.window, ui._anchor)
         if membership is Knowledge.UNKNOWN:
             if allow_unknown:
                 return
-            raise localFailure(
+            raise local_failure(
                 "the retained element window membership is temporarily unconfirmed",
                 "read this App/Window again to refresh its evidence; no input was dispatched",
                 "observation_incomplete",
             )
-        raise localFailure(
+        raise local_failure(
             "this element is outside the allowed App/Window scope",
             "read the intended instance or Window and choose its element",
             "stale_target",
@@ -263,12 +309,15 @@ class AgentInterfacePipeline:
             ComputerUseError: The reference is stale, lookup is ambiguous, or an
                 incomplete scope prevents confirming a unique result.
         """
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(target) is int:
             ref = str(target)
             try:
+                # pylint: disable-next=protected-access
                 snapshot = cast("ElementSnapshot", ui._instance.refs[ref])
             except KeyError:
-                raise localFailure(
+                raise local_failure(
                     "element reference was not observed in this instance",
                     "read this App/Window and use an integer element number",
                     "stale_target",
@@ -276,26 +325,30 @@ class AgentInterfacePipeline:
             self.validate_snapshot(ui, snapshot, allow_unknown=True)
             return snapshot
         if not isinstance(target, (str, list)):
-            raise localFailure(
+            raise local_failure(
                 "element expects an integer, exact name, or path",
                 "use await ui.element(target); bool and floating references are invalid",
             )
         try:
-            path = elementPath([target] if isinstance(target, str) else target)
+            path = element_path([target] if isinstance(target, str) else target)
         except Exception as error:
-            raise localFailure(
+            raise local_failure(
                 str(error), "use an exact name or a list of names/role/name/identifier conditions"
             ) from error
         validate_session(self.controller, ui)
+        # pylint: disable-next=protected-access
         instance = ui._instance
+        # pylint: disable-next=protected-access
         if instance.anchor is None and not ui._lookup_scopes:
-            raise localFailure(
+            raise local_failure(
                 "this UI has no observed lookup scope",
                 "read the App and select an instance before locating controls",
                 "stale_target",
             )
+        # pylint: disable-next=protected-access
         choices = {} if ui._menu_only else allowed(ui)
         matched, incomplete = {}, []
+        # pylint: disable-next=protected-access
         owners = list(ui._lookup_scopes)
         for key, item in choices.items():
             if key not in instance.observed or item["node"] is None:
@@ -313,19 +366,19 @@ class AgentInterfacePipeline:
             binding = snapshot["binding"]
             matched[(binding.session, binding.surface, binding.node)] = snapshot
         if len(matched) > 1:
-            raise localFailure(
+            raise local_failure(
                 "the name/path matches controls in several member windows",
                 "choose app.window(ref) to narrow the lookup",
                 "ambiguous_target",
             )
         if incomplete:
-            raise localFailure(
+            raise local_failure(
                 "some member lookup scopes have not been observed or have no AX root",
                 "read a specific Window or use an observed image; uniqueness is not confirmed",
                 "observation_incomplete",
             )
         if not matched:
-            raise localFailure(
+            raise local_failure(
                 "no matching element in the completed observed scope",
                 "read this UI and check the exact name/path",
                 "element_not_found",
@@ -334,7 +387,8 @@ class AgentInterfacePipeline:
         self.validate_snapshot(ui, snapshot)
         return snapshot
 
-    def keyboard_context(self, ui: UIHandle, *, require_observed: bool = True) -> Binding:
+    @staticmethod
+    def keyboard_context(ui: UIHandle, *, require_observed: bool = True) -> Binding:
         """Choose the current member window for unqualified keyboard input.
 
         The focused member takes precedence; otherwise the fixed anchor or a
@@ -347,11 +401,13 @@ class AgentInterfacePipeline:
         Returns:
             Window-level binding used for native keyboard preparation.
         """
+        # pylint: disable-next=protected-access
         instance = ui._instance
         if instance.anchor is None:
-            raise localFailure("this UI has no observed input scope", "read the App/Window first", "stale_target")
+            raise local_failure("this UI has no observed input scope", "read the App/Window first", "stale_target")
         choices = allowed(ui)
         focused = cast("DirectoryFacts", instance.directory).get("focusedWindow")
+        # pylint: disable-next=protected-access
         anchor = ui._anchor or instance.anchor.root.root_window
         # A declared focus window wins only inside the selected scope. Native
         # validation still confirms the keyboard recipient immediately on send.
@@ -359,7 +415,7 @@ class AgentInterfacePipeline:
         target = select_surface(instance.directory, start)
         key = next((key for key, item in choices.items() if item["surface"] == target.surface), None)
         if key is None:
-            raise localFailure(
+            raise local_failure(
                 "the current receiver is outside this UI scope",
                 "read this Window or specify an Element",
                 "input_unavailable",
@@ -368,8 +424,9 @@ class AgentInterfacePipeline:
             previous = getattr(ui, "_context", None)
             if previous in choices:
                 key = previous
+            # pylint: disable-next=protected-access
             elif ui._anchor is None:
-                raise localFailure(
+                raise local_failure(
                     "the member input context is not uniquely confirmed",
                     "read the intended Window or specify an Element",
                     "ambiguous_target",
@@ -378,7 +435,7 @@ class AgentInterfacePipeline:
             # its observed anchor; native preparation resolves an attached
             # editor without selecting an unobserved member here.
         if require_observed and key not in instance.observed:
-            raise localFailure(
+            raise local_failure(
                 "the current member window has not been observed",
                 "read this App/Window before input to the new context",
                 "stale_target",
@@ -388,7 +445,8 @@ class AgentInterfacePipeline:
     async def keyboard(self, ui: UIHandle, method: str, parameters: Record) -> ActionResult:
         await refresh(self.controller, ui)
         target = self.keyboard_context(ui)
-        intent = Intent(dict(typeText="insert", pressKey="key").get(method, method), parameters)
+        intent = Intent(dict(type_text="insert", press_key="key").get(method, method), parameters)
+        # pylint: disable-next=protected-access
         return await self.controller._execute(ui, intent, target)
 
     async def act_element(
@@ -406,11 +464,12 @@ class AgentInterfacePipeline:
             Execution outcome reported by the session's write branch.
         """
         self.validate_snapshot(ui, snapshot, allow_unknown=True)
+        # pylint: disable-next=protected-access
         if ui._instance.anchor is not None:
             await refresh(self.controller, ui)
         self.validate_snapshot(ui, snapshot)
         if snapshot.get("container") and intent == "replace":
-            raise localFailure(
+            raise local_failure(
                 "full replacement requires a concrete input control, not a container",
                 "select the intended input Element",
             )
@@ -420,10 +479,11 @@ class AgentInterfacePipeline:
             and not (intent in ("insert", "paste") and parameters.get("text") == "")
         )
         if forward:
+            # pylint: disable-next=protected-access
             return await self.controller._execute(
                 ui, Intent(intent, parameters), snapshot["binding"], forward_current=True
             )
-        return await self.controller.actElement(ui, snapshot, None, intent, parameters)
+        return await self.controller.act_element(ui, snapshot, None, intent, parameters)
 
     async def pointer(self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record) -> ActionResult:
         from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
@@ -449,9 +509,11 @@ class AgentInterfacePipeline:
     @staticmethod
     def _snapshot_needs_refresh(ui: UIHandle, snapshot: ElementSnapshot) -> bool:
         """Use the saved lifetime's evidence, not another window's surface slot."""
+        # pylint: disable-next=protected-access
         if ui._instance.anchor is None:
             return False
         surface = snapshot["binding"].surface
+        # pylint: disable-next=protected-access
         evidence = ui._instance.surface_evidence(surface, snapshot.get("window_identity"))
         return evidence is not None and evidence.membership is Knowledge.UNKNOWN or not in_scope(ui, surface)
 

@@ -5,11 +5,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
-from computer_use._json import loads as jsonLoads
-from computer_use.paths import nativeDriver, repositoryRoot
-from computer_use.protocol.session import nativeProtocolVersion
+from computer_use.json import loads as jsonLoads
+from computer_use.paths import native_driver, repository_root
+from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
 
 
 def run(command, args, cwd=None, capture=False):
@@ -21,13 +23,13 @@ def run(command, args, cwd=None, capture=False):
     return result.stdout.strip() if capture else result
 
 
-def buildMacOS(root=None):
+def build_mac_os(root=None):
     if sys.platform != "darwin":
         raise RuntimeError("Only the macOS backend is implemented.")
-    from .pointer import generatePointerAssets
+    from .pointer import generate_pointer_assets
 
-    root = Path(root) if root else repositoryRoot()
-    generatePointerAssets(root=root)
+    root = Path(root) if root else repository_root()
+    generate_pointer_assets(root=root)
     native = root / "os_adapter/macos"
     run("swift", ["build", "-c", "debug"], native)
     binary = Path(run("swift", ["build", "-c", "debug", "--show-bin-path"], native, True))
@@ -52,21 +54,25 @@ def buildMacOS(root=None):
         encoding="utf-8",
     )
     run("codesign", ["--force", "--sign", "-", "--identifier", "local.computer-use.driver", bundle], native)
-    print(executable)
+    # Console and transport output retain their documented stream format.
+    # pylint: disable-next=bad-builtin
+    print(executable)  # noqa: T201
     return executable
 
 
 def _protocol_version(version):
-    if type(version) is not int or version != nativeProtocolVersion:
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
+    if type(version) is not int or version != NATIVE_PROTOCOL_VERSION:
         raise ValueError("This backend requires protocol 6; upgrade the client.")
     return version
 
 
-def buildLinux(root=None, *, protocol_version=nativeProtocolVersion):
+def build_linux(root=None, *, protocol_version=NATIVE_PROTOCOL_VERSION):
     _protocol_version(protocol_version)
     if sys.platform != "linux":
         raise RuntimeError("Build the Linux backend on Linux (PyGObject is a system dependency).")
-    native = (Path(root) if root else repositoryRoot()) / "os_adapter/linux"
+    native = (Path(root) if root else repository_root()) / "os_adapter/linux"
     python = os.environ.get("COMPUTER_USE_PYTHON") or "/usr/bin/python3"
     check = (
         f"from computer_use_linux.runtime.resources import check_installation; check_installation({protocol_version}"
@@ -124,29 +130,29 @@ def buildLinux(root=None, *, protocol_version=nativeProtocolVersion):
     return executable
 
 
-def buildNative(root=None, *, protocol_version=nativeProtocolVersion):
+def build_native(root=None, *, protocol_version=NATIVE_PROTOCOL_VERSION):
     _protocol_version(protocol_version)
     if sys.platform == "darwin":
-        return buildMacOS(root)
+        return build_mac_os(root)
     if sys.platform == "linux":
-        return buildLinux(root, protocol_version=protocol_version)
+        return build_linux(root, protocol_version=protocol_version)
     if sys.platform == "win32":
-        return buildWindows(root)
+        return build_windows(root)
     raise RuntimeError(f"platform {sys.platform} is not implemented")
 
 
-def buildWindows(root=None):
+def build_windows(root=None):
     "Use the system Framework compiler; no Node, NuGet or shell command."
     if sys.platform != "win32":
         raise RuntimeError("Build the Windows backend on Windows x64 with .NET Framework 4.8.")
-    native = (Path(root) if root else repositoryRoot()) / "os_adapter/windows"
-    from .pointer import generatePointerAssets
+    native = (Path(root) if root else repository_root()) / "os_adapter/windows"
+    from .pointer import generate_pointer_assets
 
     framework = Path(os.environ.get("WINDIR", "C:\\Windows")) / "Microsoft.NET/Framework64/v4.0.30319"
     compiler = framework / "csc.exe"
     if not compiler.is_file():
         raise RuntimeError("Windows x64 with .NET Framework 4.8 and its C# compiler is required.")
-    generatePointerAssets(root=native.parents[1])
+    generate_pointer_assets(root=native.parents[1])
     output = native / ".build/computer-use-driver.exe"
     output.parent.mkdir(parents=True, exist_ok=True)
     # Import the installed Windows UIA COM type library at build time. Live
@@ -224,13 +230,14 @@ def buildWindows(root=None):
         ],
         native,
     )
-    print(output)
+    # pylint: disable-next=bad-builtin
+    print(output)  # noqa: T201
     return output
 
 
-def readPermissions(request=False, root=None, timeout=None, *, protocol_version=nativeProtocolVersion):
+def read_permissions(request=False, root=None, timeout=None, *, protocol_version=NATIVE_PROTOCOL_VERSION):
     _protocol_version(protocol_version)
-    native = nativeDriver(root=root)
+    native = native_driver(root=root)
     version_args = ["--protocol-version", str(protocol_version)] if sys.platform == "linux" else []
     try:
         result = subprocess.run(
@@ -256,7 +263,7 @@ def readPermissions(request=False, root=None, timeout=None, *, protocol_version=
     return status
 
 
-def permissionState(status, platform=None):
+def permission_state(status, platform=None):
     platform = platform or sys.platform
     missing = [name for name in ("accessibility", "screenCapture", "input") if status.get(name) is not True]
     ready = status["ready"] is True if platform == "linux" and "ready" in status else not missing
@@ -272,7 +279,7 @@ def permissions(argv=None):
         "--protocol-version",
         type=int,
         choices=(6,),
-        default=nativeProtocolVersion,
+        default=NATIVE_PROTOCOL_VERSION,
         help=(
             "Inspect native protocol 6 resources by default; Linux ready means "
             "observation resources, not all input "
@@ -280,9 +287,10 @@ def permissions(argv=None):
         ),
     )
     args = parser.parse_args(argv)
-    status = readPermissions(args.request, protocol_version=args.protocol_version)
-    print(json.dumps(status, ensure_ascii=False, separators=(",", ":")))
-    ready, missing = permissionState(status)
+    status = read_permissions(args.request, protocol_version=args.protocol_version)
+    # pylint: disable-next=bad-builtin
+    print(json.dumps(status, ensure_ascii=False, separators=(",", ":")))  # noqa: T201
+    ready, missing = permission_state(status)
     if not ready:
         if sys.platform == "linux":
             raise RuntimeError(
@@ -300,7 +308,8 @@ def permissions(argv=None):
             if args.request
             else "可运行 computer-use-permissions --request 发起系统授权提示。"
         )
-        print(
+        # pylint: disable-next=bad-builtin
+        print(  # noqa: T201
             (
                 f"未就绪："
                 f"{', '.join(missing)}"
@@ -315,7 +324,7 @@ def permissions(argv=None):
     return 0
 
 
-def linuxSessionLauncher(*, directory=None, env=None):
+def linux_session_launcher(*, directory=None, env=None):
     if sys.platform != "linux":
         raise RuntimeError("Run this command in the target Linux desktop terminal.")
     env = os.environ if env is None else env
@@ -329,19 +338,27 @@ def linuxSessionLauncher(*, directory=None, env=None):
         raise ValueError("COMPUTER_USE_DESKTOP must be shared or exclusive.")
     directory = Path(directory) if directory else Path.home() / ".local/bin"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def _iter_key(_source_items: Iterator[Any]) -> Iterator[Any]:
+        for key in _source_items:
+            if env.get(key):
+                yield (key, env[key])
+
     # Quote values as shell data, including embedded apostrophes and line breaks.
-    values = {
-        key: env[key]
-        for key in (
-            "DISPLAY",
-            "WAYLAND_DISPLAY",
-            "XAUTHORITY",
-            "DBUS_SESSION_BUS_ADDRESS",
-            "XDG_RUNTIME_DIR",
-            "XDG_SESSION_ID",
+    values = dict(
+        _iter_key(
+            iter(
+                (
+                    "DISPLAY",
+                    "WAYLAND_DISPLAY",
+                    "XAUTHORITY",
+                    "DBUS_SESSION_BUS_ADDRESS",
+                    "XDG_RUNTIME_DIR",
+                    "XDG_SESSION_ID",
+                )
+            )
         )
-        if env.get(key)
-    }
+    )
     values.update(
         XDG_SESSION_TYPE="wayland" if wayland else "x11",
         COMPUTER_USE_DESKTOP=mode,
@@ -361,7 +378,8 @@ def linuxSessionLauncher(*, directory=None, env=None):
         encoding="utf-8",
     )
     output.chmod(0o700)
-    print(
+    # pylint: disable-next=bad-builtin
+    print(  # noqa: T201
         (
             f"Saved "
             f"{output}"
@@ -377,13 +395,15 @@ def linuxSessionLauncher(*, directory=None, env=None):
 
 def _cli(action):
     try:
-        return action()
+        result = action()
     except Exception as error:
-        print(str(error), file=sys.stderr)
-        raise SystemExit(1) from None
+        # pylint: disable-next=bad-builtin
+        print(str(error), file=sys.stderr)  # noqa: T201
+        return 1
+    return result if isinstance(result, int) else 0
 
 
-def buildCli(argv=None):
+def build_cli(argv=None):
     parser = argparse.ArgumentParser(
         description="Install/build native driver dependencies; this does not verify desktop access."
     )
@@ -391,16 +411,16 @@ def buildCli(argv=None):
         "--protocol-version",
         type=int,
         choices=(6,),
-        default=nativeProtocolVersion,
+        default=NATIVE_PROTOCOL_VERSION,
         help=("Prepare native protocol 6 resources by default; This does not change the SDK protocol."),
     )
     args = parser.parse_args(argv)
-    _cli(lambda: buildNative(protocol_version=args.protocol_version))
+    return _cli(lambda: build_native(protocol_version=args.protocol_version)) or None
 
 
-def permissionsCli():
-    raise SystemExit(_cli(permissions))
+def permissions_cli():
+    return _cli(permissions)
 
 
-def linuxLauncherCli():
-    _cli(linuxSessionLauncher)
+def linux_launcher_cli():
+    return _cli(linux_session_launcher) or None

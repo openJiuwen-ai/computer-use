@@ -2,23 +2,25 @@
 
 import os
 
-from ..errors import ComputerUseError, publicErrorCode
-from .action_context import decodeActionContext
-from .primitives import finite, nonempty, record, safeInteger
+from ..errors import ComputerUseError, public_error_code
+from .action_context import decode_action_context
+from .primitives import finite, nonempty, record, safe_integer
 
-nativeProtocolVersion = 6  # Public Computer and host setup use the same protocol.
+NATIVE_PROTOCOL_VERSION = 6  # Public Computer and host setup use the same protocol.
 
 
-def rememberFailureContext(error, context=None):
+def remember_failure_context(error, context=None):
     if context is not None:
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         error._failure_context = context
 
 
-def failureContext(error):
+def failure_context(error):
     return getattr(error, "_failure_context", None) if isinstance(error, BaseException) else None
 
 
-def desktopMode():
+def desktop_mode():
     mode = os.environ.get("COMPUTER_USE_DESKTOP", "shared")
     if mode not in ("shared", "exclusive"):
         raise ComputerUseError(
@@ -33,7 +35,7 @@ def desktopMode():
     return mode
 
 
-def decodeFailure(value):
+def decode_failure(value):
     has_context = isinstance(value, dict) and "context" in value
     error = record(value, ["code", "target", "effect", "detail", "next", *(["context"] if has_context else [])])
     for key in ("code", "target", "detail", "next"):
@@ -41,31 +43,36 @@ def decodeFailure(value):
     if error["effect"] not in ("none", "possible", "partial"):
         raise ValueError("protocol: invalid error effect")
     if has_context:
-        error["context"] = decodeActionContext(error["context"])
+        error["context"] = decode_action_context(error["context"])
     return error
 
 
-def failureError(method, failure):
-    error = ComputerUseError({**failure, "code": publicErrorCode(failure["code"])}, method=method)
-    rememberFailureContext(error, failure.get("context"))
+def failure_error(method, failure):
+    error = ComputerUseError({**failure, "code": public_error_code(failure["code"])}, method=method)
+    remember_failure_context(error, failure.get("context"))
     return error
 
 
-def decodeHello(value, mode, version=nativeProtocolVersion):
-    if version != nativeProtocolVersion:
+def decode_hello(value, mode, version=NATIVE_PROTOCOL_VERSION):
+    if version != NATIVE_PROTOCOL_VERSION:
         raise ValueError("Unsupported native protocol version")
     error_reply = isinstance(value, dict) and "error" in value
     reply = record(value, ["version", "session", "id", "error" if error_reply else "result"])
-    if not finite(reply["version"]) or reply["version"] != version or not finite(reply["id"]) or reply["id"] != 0:
+    invalid_version = (
+        True
+        if not finite(reply["version"]) or reply["version"] != version or not finite(reply["id"]) or reply["id"] != 0
+        else False
+    )
+    if invalid_version:
         raise ValueError("protocol: incompatible hello version or id")
     nonempty(reply["session"], "protocol session")
     if error_reply:
-        raise failureError("hello", decodeFailure(reply["error"]))
+        raise failure_error("hello", decode_failure(reply["error"]))
     result = record(reply["result"], ["platform", "desktopMode", "maxTimeoutMs", "capabilities"])
     nonempty(result["platform"], "protocol platform")
     if result["desktopMode"] != mode:
         raise ValueError("protocol: backend desktop mode does not match the requested mode")
-    if not safeInteger(result["maxTimeoutMs"]) or not 1 <= result["maxTimeoutMs"] <= 120_000:
+    if not safe_integer(result["maxTimeoutMs"]) or not 1 <= result["maxTimeoutMs"] <= 120_000:
         raise ValueError("protocol: invalid maximum request timeout")
     capabilities = result["capabilities"]
     if (

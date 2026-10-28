@@ -24,14 +24,23 @@ from computer_use.interaction.read.presentation.preparation import (
     PreparationFailure,
     PreparedRoot,
     PreparedSnapshot,
+    prepare_snapshot,
     prepared_nodes,
-    prepareSnapshot as prepareSnapshot,
-    renderPreparedSnapshot as renderPreparedSnapshot,
+    render_prepared_snapshot,
 )
 from computer_use.interaction.read.presentation.rendering.pipeline import RenderPipeline
 from computer_use.interaction.read.presentation.semantics.pipeline import SemanticPipeline
 from computer_use.pipeline import Contract, Pipeline, Sequence
 from computer_use.pipeline.core import Node
+
+__all__ = [
+    "PrepareSnapshotPipeline",
+    "PresentationPipeline",
+    "RenderPreparedSnapshotPipeline",
+    "SnapshotPresentationPipeline",
+    "prepare_snapshot",
+    "render_prepared_snapshot",
+]
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.ir import ProjectionResult
@@ -70,16 +79,16 @@ def _branch_facts(snapshot: SnapshotFacts, request: SnapshotRenderRequest, root:
     native_nodes = {node["node"]: node for node in snapshot.facts["nodes"]}
     relations = RelationPresentation(snapshot.facts, snapshot.refs)
     members = branch_references(root, snapshot.refs)
-    readable_text = {
-        ref
-        for ref in members
-        if (key := snapshot.value_fields.get(ref)) is not None
-        and isinstance(native_nodes[snapshot.refs[ref]]["values"].get(key), str)
-        and (
-            key not in native_nodes[snapshot.refs[ref]]["fieldStatus"]
-            or "textRef" in native_nodes[snapshot.refs[ref]]["fieldStatus"][key]
-        )
-    }
+    readable_text = set()
+    for ref in members:
+        key = snapshot.value_fields.get(ref)
+        if key is None:
+            continue
+        source = native_nodes[snapshot.refs[ref]]
+        if not isinstance(source["values"].get(key), str):
+            continue
+        if key not in source["fieldStatus"] or "textRef" in source["fieldStatus"][key]:
+            readable_text.add(ref)
     return BranchFacts(request, root, members, native_nodes, relations, readable_text)
 
 

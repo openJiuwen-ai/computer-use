@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.policy import secondaryActions
+from computer_use.interaction.read.presentation.compression.policy import secondary_actions
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.ir import ProjectionEditor
@@ -24,7 +24,7 @@ def finalize_sources(view: ProjectionView, edit: ProjectionEditor) -> None:
         Args:
             node: Source/projected node in this exact view; its native identity is unchanged.
         """
-        secondary = {id(action) for action in secondaryActions(node)}
+        secondary = {id(action) for action in secondary_actions(node)}
         omitted = [action["name"] for action in node.get("actions", ()) if id(action) not in secondary]
         if omitted:
             edit.event(sourceRef=node["ref"], kind="actions", actions=omitted)

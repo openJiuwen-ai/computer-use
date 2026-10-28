@@ -105,6 +105,8 @@ def _check_type(value: Any, expected: Any, path: FieldPath = (), depth: int = 0)
     if origin is Literal:
         if not any(type(value) is type(choice) and value == choice for choice in args):
             raise _type_error(path, "unknown enum value")
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     elif expected is type(None):
         if value is not None:
             raise _type_error(path, "expected None")
@@ -119,6 +121,7 @@ def _check_type(value: Any, expected: Any, path: FieldPath = (), depth: int = 0)
         if not isinstance(value, expected):
             raise _type_error(path, "unknown semantic value")
     elif origin is tuple:
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is not tuple:
             raise _type_error(path, "expected tuple")
         if len(args) == 2 and args[1] is Ellipsis:
@@ -136,6 +139,7 @@ def _check_type(value: Any, expected: Any, path: FieldPath = (), depth: int = 0)
             _check_type(key, args[0], (*path, "<key>"), depth + 1)
             _check_type(item, args[1], (*path, key), depth + 1)
     elif isinstance(expected, type) and is_dataclass(expected):
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is not expected:
             raise _type_error(path, f"expected {expected.__name__}")
         for name, item_type in _record_fields(expected):
@@ -155,6 +159,7 @@ def _nonnegative(value: int | float | None, path: FieldPath) -> None:
 
 
 def _field_path(path: tuple[str | int, ...], location: FieldPath) -> None:
+    # pylint: disable-next=unidiomatic-typecheck
     if any(type(part) not in (str, int) or part == "" or type(part) is int and part < 0 for part in path):
         raise _type_error(location, "invalid field path")
 
@@ -182,6 +187,7 @@ def _node_path(node: NativeNode, path: tuple[str | int, ...]) -> Any:
             value = getattr(value, part)
         elif isinstance(value, Mapping) and part in value:
             value = value[part]
+        # pylint: disable-next=unidiomatic-typecheck
         elif isinstance(value, tuple) and type(part) is int and 0 <= part < len(value):
             value = value[part]
         else:
@@ -270,12 +276,17 @@ def validate_query_observation(observation: NativeObservation) -> None:
                     and value.positions != tuple(range(value.offset, value.offset + len(value.positions)))
                 ):
                     raise _type_error(path, "enumerated relationship positions disagree with its page start")
-            if (
-                value.enumeration == "enumerated"
-                and value.offset is not None
-                and value.total is not None
-                and value.offset + len(value.targets) > value.total
-            ):
+            invalid_value = (
+                True
+                if (
+                    value.enumeration == "enumerated"
+                    and value.offset is not None
+                    and value.total is not None
+                    and value.offset + len(value.targets) > value.total
+                )
+                else False
+            )
+            if invalid_value:
                 raise _type_error(path, "relationship page extends beyond its total")
             if value.total is not None and len(value.targets) > value.total:
                 raise _type_error(path, "relationship contains more slots than its total")
@@ -284,7 +295,10 @@ def validate_query_observation(observation: NativeObservation) -> None:
             _nonnegative(value.total, (*path, "total"))
             if value.delivered is not None:
                 start, end = value.delivered
-                if start < 0 or end < start or value.total is not None and end > value.total:
+                invalid_start = (
+                    True if start < 0 or end < start or value.total is not None and end > value.total else False
+                )
+                if invalid_start:
                     raise _type_error(path, "continuation range is outside its content")
         elif isinstance(value, ReadIssue):
             _field_path(value.path, (*path, "path"))

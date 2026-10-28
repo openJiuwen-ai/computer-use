@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.observation import stamp
 from computer_use_linux.contracts.protocol import Failure, gap, now, token
 from computer_use_linux.windowing.desktop import process_start
 from computer_use_linux.windowing.native_installation import NativeInstallation, window_class_keys
 from computer_use_linux.windowing.process_identity import process_birth
+
+
+class DirectoryRead(NamedTuple):
+    """Application catalogue, window membership, and discovery limitations."""
+
+    applications: dict[str, Any]
+    members: Any
+    windows: list[Any]
+    notes: list[str]
 
 
 class NativeDirectory:
@@ -52,9 +62,9 @@ class NativeDirectory:
         ctx.check()
         if not birth or process_birth(pid) != birth:
             raise Failure("The launched process is no longer alive.", "execution_unknown")
-        id = self.identity(("process", pid, birth))
+        application_id = self.identity(("process", pid, birth))
         application = dict(
-            id=id,
+            id=application_id,
             displayName=installation.label,
             isRunning=True,
             path=installation.path,
@@ -80,7 +90,8 @@ class NativeDirectory:
     def running_installation(self, installation, ctx):
         return [app for _, _, source, app in self.live_launches(ctx) if source.key == installation.key]
 
-    def accessibility_gap(self, error, ctx, notes, detail, *, allow_stale=False):
+    @staticmethod
+    def accessibility_gap(error, ctx, notes, detail, *, allow_stale=False):
         ctx.check()
         if (
             isinstance(error, Failure)
@@ -96,11 +107,11 @@ class NativeDirectory:
             result = fn(notes=notes)
             ctx.check()
             return result, True
-        except (Failure, self.b.ax.GLib.Error) as error:
+        except (Failure, self.b.ax.glib.Error) as error:
             self.accessibility_gap(error, ctx, notes, detail)
             return [], False
 
-    def discover(self, ctx, *, include_installations=True):
+    def discover(self, ctx, *, include_installations=True) -> DirectoryRead:
         ax, notes = self.b.ax, []
         windows = self.windows(ctx, notes)
         applications, process_ids = {}, {}
@@ -111,6 +122,8 @@ class NativeDirectory:
                 ax.live(obj)
                 pid = ax.call(ax.A.Accessible.get_process_id, obj)
                 name = ax.call(ax.A.Accessible.get_name, obj)
+                # Exact types preserve scalar validation and identity contracts.
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(pid) is not int or not 0 <= pid <= 2147483647:
                     raise Failure("Application process id is unavailable.", "observation_incomplete")
                 name = self.text(name, notes, "Application name", placeholder="Unnamed application")
@@ -126,7 +139,7 @@ class NativeDirectory:
                 )
                 if pid and birth:
                     process_ids[pid, birth] = identifier_local
-            except (Failure, ax.GLib.Error) as error:
+            except (Failure, ax.glib.Error) as error:
                 self.accessibility_gap(error, ctx, notes, "Application metadata unavailable: ", allow_stale=True)
         for pid, birth, _, app in self.live_launches(ctx):
             applications[app["id"]] = app
@@ -165,7 +178,7 @@ class NativeDirectory:
         # resolve exact declared window-class hints without merging identities.
         try:
             installed = self.b.installed() if include_installations else []
-        except self.b.ax.GLib.Error as error:
+        except self.b.ax.glib.Error as error:
             gap(notes, "Installed application directory unavailable: " + str(error))
             installed = []
         for app in installed:
@@ -174,7 +187,7 @@ class NativeDirectory:
                 gap(notes, "Application directory limited to 4096 entries.")
                 break
             try:
-                record = NativeInstallation.capture(app, self.b.ax.Gio, ctx, GLib=self.b.ax.GLib)
+                record = NativeInstallation.capture(app, self.b.ax.gio, ctx, GLib=self.b.ax.glib)
                 identifier_local = self.identity(("installation", record.key))
                 # A retained target remains immutable across catalogue refreshes.
                 self.installations.setdefault(identifier_local, record)
@@ -193,10 +206,10 @@ class NativeDirectory:
                 keys = window_class_keys((record.startup_wm_class,))
                 if keys:
                     applications[identifier_local]["matchKeys"] = list(keys)
-            except (Failure, self.b.ax.GLib.Error) as error:
+            except (Failure, self.b.ax.glib.Error) as error:
                 ctx.check()
                 gap(notes, "Installed application metadata unavailable: " + str(error))
-        return applications, members, windows, list(dict.fromkeys(notes))[:128]
+        return DirectoryRead(applications, members, windows, list(dict.fromkeys(notes))[:128])
 
     def applications(self, ctx):
         start = int(now())
@@ -253,7 +266,7 @@ class NativeDirectory:
                     root = self.b.ax.matching_window(native, candidates)
                 if root is not None:
                     self.b.ax.live(root)
-            except (Failure, self.b.ax.GLib.Error) as error:
+            except (Failure, self.b.ax.glib.Error) as error:
                 self.accessibility_gap(
                     error, ctx, notes, "Window accessibility unavailable for " + item.ref + ": ", allow_stale=True
                 )

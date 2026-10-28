@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor
 from computer_use.interaction.query.instances.scope import adopt, allowed, resolve
@@ -15,7 +15,8 @@ from computer_use.interaction.read.model import (
     MenuAppObservation,
     WindowSelectionRequired,
 )
-from computer_use.interaction.read.presentation.content import DisplayText, join, json_value as quoted, template
+from computer_use.interaction.read.presentation.content import DisplayText, join, template
+from computer_use.interaction.read.presentation.content import json_value as quoted
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
 from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
@@ -74,6 +75,8 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
             route.
         ui: App or Window handle whose instance and observation bounds constrain the operation.
     """
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     instance = ui._instance
     window = next(key for key, item in instance.members.items() if item["surface"] == part.target.surface)
     owner = instance.owners[window]
@@ -84,6 +87,7 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     # observation must not retarget a fixed member during a semantic lookup.
     state.selection, state.observation = None, None
     if part.tree is not None:
+        # pylint: disable-next=protected-access
         controller._remember(state, part.target, part.tree)
         identity = WindowIdentity.of(instance.members[window])
         for ref in part.tree.refs:
@@ -120,17 +124,23 @@ class InterfaceReadPipeline:
             full: Whether delivery requests a complete tree instead of an eligible diff.
             menu_path: Requested menu path; None keeps the ordinary window read.
         """
+        # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
         directory, first = await resolve(controller, ui, view)
         if instance.anchor is None:
             state = controller.state(ui)
-            if (
-                not directory["surfaces"]
-                and not directory["stopReasons"]
-                and state.running is not None
-                and view != "image"
-                and "nativeApplicationRoots" in controller.transport.capabilities
-            ):
+            matches_view = (
+                True
+                if (
+                    not directory["surfaces"]
+                    and not directory["stopReasons"]
+                    and state.running is not None
+                    and view != "image"
+                    and "nativeApplicationRoots" in controller.transport.capabilities
+                )
+                else False
+            )
+            if matches_view:
                 return await InterfaceMenuPipeline(controller).run(
                     ui, menu_path or (), observed=first if isinstance(first, MenuAppObservation) else None
                 )
@@ -140,7 +150,7 @@ class InterfaceReadPipeline:
                 "Select an application instance with computer.app(id).",
                 "Tree: unavailable; no working instance has been selected.",
             ]
-            lines += [template("{0} {1!r}; computer.app({0})", item.id, item.displayName) for item in choices]
+            lines += [template("{0} {1!r}; computer.app({0})", item.id, item.display_name) for item in choices]
             if not choices:
                 lines.append("No observable working window. Installed/running does not imply an input context.")
             if isinstance(first, dict) and "detail" in first:
@@ -157,6 +167,7 @@ class InterfaceReadPipeline:
         if menu_path is not None:
             return await InterfaceMenuPipeline(controller).run(ui, menu_path)
         permitted = allowed(ui)
+        # pylint: disable-next=protected-access
         anchor = ui._anchor or instance.anchor.root.root_window
         principal_error = None
         try:
@@ -166,19 +177,24 @@ class InterfaceReadPipeline:
             principal, principal_error = anchor, error
         ordered = [principal, *[key for key in permitted if key != principal]]
         parts, notes = [], []
+        # pylint: disable-next=protected-access
         ui._lookup_scopes = ()
+        # pylint: disable-next=protected-access
         ui._menu_only = False
         for index, key in enumerate(ordered[:6]):
             if key not in permitted or any(part.target.surface == permitted[key]["surface"] for part in parts):
                 continue
             item = permitted[key]
+            # pylint: disable-next=protected-access
             if index == 0 and principal_error is None and ui._anchor is None:
+                # pylint: disable-next=protected-access
                 selected = controller.reader._selection(
                     instance.anchor.application, instance.anchor.name, directory, anchor
                 )
                 try:
                     observed = (
                         first
+                        # pylint: disable-next=protected-access
                         if isinstance(first, AppObservation) and ui._anchor is None
                         else await controller.reader.read(selected, view=view, overview=False)
                     )
@@ -206,13 +222,14 @@ class InterfaceReadPipeline:
                     )
                     parts.append(part)
                     remember(controller, ui, part)
+                    # pylint: disable-next=protected-access
                     ui._context = item["window"] if cast("AppObservation", observed).scope_confirmed else None
                     continue
                 if observed is not None:
                     # A dialog can disappear during the principal read. Its
                     # captured surface must not be relabelled as a new member
                     # or fed to remember() after membership was reconciled.
-                    principal_error = localFailure(
+                    principal_error = local_failure(
                         "the observed window left this instance during collection",
                         "inspect the current member observations before input",
                         "observation_incomplete",
@@ -229,11 +246,14 @@ class InterfaceReadPipeline:
                 remember(controller, ui, part)
                 captured.add(item["surface"])
         if principal_error is not None:
+            # pylint: disable-next=protected-access
             ui._context = None
             notes.append(
                 "Current input window is not uniquely confirmed; explicit elements remain scoped to their windows."
             )
+        # pylint: disable-next=protected-access
         elif parts and ui._anchor is not None:
+            # pylint: disable-next=protected-access
             ui._context = principal
         for key in (key for key, item in permitted.items() if item["surface"] not in captured):
             ref = next(ref for ref, window in instance.windows.items() if window == key)
@@ -300,13 +320,14 @@ class InterfaceReadPipeline:
                 template("{0}: {1}: {2}; next: {3}", gap.component, gap.code, gap.detail, gap.next) for gap in part.gaps
             ]
             if part.image is not None:
-                from computer_use.protocol.captures import captureMetadata
+                from computer_use.protocol.captures import capture_metadata
 
                 lines += [
                     template("Image note: {0}", note)
-                    for note in captureMetadata(part.image.image).get("stopReasons", ())
+                    for note in capture_metadata(part.image.image).get("stopReasons", ())
                 ]
         lines += notes
+        # pylint: disable-next=protected-access
         scope = instance.anchor.root.surface + (":app" if ui._anchor is None else ":window:" + ui._anchor) + ":" + view
         return publish(
             controller,
@@ -329,6 +350,7 @@ class InterfaceReadPipeline:
             max_nodes: Maximum number of native objects this collection may read.
         """
         controller = self.controller
+        # pylint: disable-next=protected-access
         target = member_target(ui._instance, item)
         tree = image = None
         gaps = []

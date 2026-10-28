@@ -12,6 +12,7 @@ import ApplicationServices
     let window: AXUIElement
     let element: AXUIElement
     var receiverRelation: NativeReceiverRelation? = nil
+    var cellEditor: NativeCellEditorHandoff? = nil
 
     func contract(replace: Bool) -> Contract? {
         guard let role = AXAccess.read(element, kAXRoleAttribute).value as? String, !role.isEmpty,
@@ -27,9 +28,14 @@ import ApplicationServices
     }
 
     func readiness(_ expected: Contract) throws -> NativeReadiness {
-        let receiver = try NativeReceiverSnapshot.read(
-            application: application, window: window, receiverRelation: receiverRelation
-        ).receiver(element)
+        let current = try NativeReceiverSnapshot.read(
+            application: application, window: window, receiverRelation: receiverRelation)
+        if let cellEditor {
+            guard let owned = try cellEditor.association(current), CFEqual(owned.editor, element) else {
+                return NativeReadiness([("receiver", "no")])
+            }
+        }
+        let receiver = current.receiver(element)
         // Insertion uses the editor's current selection; it does not need the
         // whole value or a readable extent. Full replacement does.
         if !expected.replace { return NativeReadiness([("receiver", receiver)]) }
@@ -52,7 +58,8 @@ import ApplicationServices
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void = {}
     ) async throws {
         let receiver = NativeReceiverPreparation(
-            application: application, window: window, element: element, receiverRelation: receiverRelation)
+            application: application, window: window, element: element, receiverRelation: receiverRelation,
+            cellEditor: cellEditor)
         try await receiver.prepare(
             foreground: foreground, check: { try validate(expected, check: check) },
             ready: { try readiness(expected).ready }, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
@@ -79,6 +86,8 @@ import ApplicationServices
             guard let before = selection.snapshot() else {
                 throw DriverError("target text extent is unavailable", code: .inputUnavailable)
             }
+            // The count field is a scalar native character extent, not a collection.
+            // swiftlint:disable:next empty_count
             if before.count == 0 && text.isEmpty { return true }
             if !before.full {
                 try selection.selectRange(count: before.count, check: ready, onDispatch: onDispatch, onPosted: onPosted)

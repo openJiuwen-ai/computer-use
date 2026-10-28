@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import ScrollActuator, ScrollPointerActuator
 from computer_use.native.query.graph import UNKNOWN, NativeGraph
-from computer_use.native.semantics import roleName
+from computer_use.native.semantics import role_name
 
 if TYPE_CHECKING:
     from typing import Any, Mapping
@@ -71,7 +71,7 @@ class _ScrollRegionQuery(NativeGraph):
             role = await self._field(current, "role")
             if role is UNKNOWN or role is None:
                 self.fail("observation_incomplete", "The nearest scrolling region cannot be identified.")
-            role = roleName(self.platform, role)
+            role = role_name(self.platform, role)
             if role in ("scrollArea", "scrollBar"):
                 region = current
                 break
@@ -179,13 +179,18 @@ class ScrollQuery(_ScrollRegionQuery):
         if await self._field(bar, "role") != "AXScrollBar":
             self.fail("observation_incomplete", "The declared scroll-bar relationship does not identify a scroll bar.")
         axis = await self._field(bar, "orientation")
-        if (
-            axis is UNKNOWN
-            or region == bar
-            and axis is None
-            or axis is not None
-            and axis != ("AXVerticalOrientation" if vertical else "AXHorizontalOrientation")
-        ):
+        matches_axis = (
+            True
+            if (
+                axis is UNKNOWN
+                or region == bar
+                and axis is None
+                or axis is not None
+                and axis != ("AXVerticalOrientation" if vertical else "AXHorizontalOrientation")
+            )
+            else False
+        )
+        if matches_axis:
             self.fail(
                 "observation_incomplete", "The scroll-bar orientation is unavailable or conflicts with the request."
             )
@@ -285,7 +290,8 @@ class ScrollPointerQuery(_ScrollRegionQuery):
         addressed_container = (
             region is None
             and self.platform == "linux"
-            and roleName(self.platform, await self._field(self.root.node, "role")) in self._COLLECTION_ROLES | {"group"}
+            and role_name(self.platform, await self._field(self.root.node, "role"))
+            in self._COLLECTION_ROLES | {"group"}
         )
         if addressed_container:
             region = self.root.node
@@ -294,7 +300,7 @@ class ScrollPointerQuery(_ScrollRegionQuery):
         if (
             region is None
             or not addressed_container
-            and roleName(self.platform, await self._field(region, "role")) != "scrollArea"
+            and role_name(self.platform, await self._field(region, "role")) != "scrollArea"
         ):
             return None
         await self._enabled(region)
@@ -305,7 +311,7 @@ class ScrollPointerQuery(_ScrollRegionQuery):
             if current in visited or len(visited) >= self.max_depth:
                 self.fail("observation_incomplete", "The wheel hit path is cyclic or exceeds the query budget.")
             visited.add(current)
-            role = roleName(self.platform, await self._field(current, "role"))
+            role = role_name(self.platform, await self._field(current, "role"))
             path.append((current, role))
             if role not in self._CONTENT_ROLES and role not in self._LAYOUT_ROLES:
                 return None
@@ -327,7 +333,7 @@ class ScrollPointerQuery(_ScrollRegionQuery):
             current = await self._one(current, "parent")
             if current is None:
                 return None
-        path.append((region, roleName(self.platform, await self._field(region, "role"))))
+        path.append((region, role_name(self.platform, await self._field(region, "role"))))
         # Only a proven item path may change identities while its collection
         # remains fixed. Drivers compare new objects with these exact raw facts;
         # they do not classify rows, editors or independent controls themselves.

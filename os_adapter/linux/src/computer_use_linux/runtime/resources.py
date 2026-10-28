@@ -14,6 +14,8 @@ from computer_use_linux.contracts.protocol import Failure, Request
 
 
 def protocol_version(value):
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is not int or value != 6:
         raise ValueError("This Linux driver requires protocol 6; upgrade the client.")
     return value

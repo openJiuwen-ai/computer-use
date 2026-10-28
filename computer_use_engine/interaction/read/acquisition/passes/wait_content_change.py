@@ -19,6 +19,8 @@ def create(*, services: NativeAppReader) -> Callable[[ClassifiedAttempt, Control
     async def content_wait(value: ClassifiedAttempt, control: Control) -> ClassifiedAttempt:
         """Wait for content-change evidence and attach a supported wait failure to the decision."""
         attempt = value.rechecked
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         _, gap = await services._component(
             "wait",
             lambda: services.reader.wait_for_change(

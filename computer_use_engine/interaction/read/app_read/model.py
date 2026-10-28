@@ -13,7 +13,8 @@ if TYPE_CHECKING:
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
     from computer_use.native.scopes import RunningApplication
-    from computer_use.protocol.records import ApplicationInfo, NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import ApplicationInfo
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 PURE, QUERY, RESOURCE = {Effect.PURE}, {Effect.QUERY}, {Effect.RESOURCE}

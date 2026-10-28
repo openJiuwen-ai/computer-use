@@ -8,8 +8,10 @@ from typing import Any, Mapping
 Record = Mapping[str, Any]
 
 
-def safeInteger(value: Any) -> bool:
+def safe_integer(value: Any) -> bool:
     """Accept exactly represented transport integers."""
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     return type(value) is int and abs(value) <= 9007199254740991
 
 
@@ -18,9 +20,10 @@ def _position(value: Any, units: int) -> bool:
     return (
         isinstance(value, dict)
         and set(value) == {"start", "end", "degenerate"}
-        and safeInteger(value["start"])
-        and safeInteger(value["end"])
+        and safe_integer(value["start"])
+        and safe_integer(value["end"])
         and 0 <= value["start"] <= value["end"] <= units
+        # pylint: disable-next=unidiomatic-typecheck
         and type(value["degenerate"]) is bool
         and (not value["degenerate"] or value["start"] == value["end"])
     )
@@ -33,8 +36,9 @@ def _anchor(value: Any) -> bool:
         and set(value) == {"source", "unit", "units", "complete", "sha256"}
         and value["source"] == "Text.DocumentRange"
         and value["unit"] == "utf16"
-        and safeInteger(value["units"])
+        and safe_integer(value["units"])
         and 0 <= value["units"] <= 65536
+        # pylint: disable-next=unidiomatic-typecheck
         and type(value["complete"]) is bool
         and isinstance(value["sha256"], str)
         and len(value["sha256"]) == 64
@@ -68,7 +72,7 @@ def object_ranges(value: Any) -> bool:
         or value.get("order") not in ("nativeEndpoints", "unconfirmed", "overlapping")
     ):
         return False
-    if not safeInteger(value.get("total")) or value["total"] < 0 or not isinstance(value.get("objects"), list):
+    if not safe_integer(value.get("total")) or value["total"] < 0 or not isinstance(value.get("objects"), list):
         return False
     if len(value["objects"]) > min(32, value["total"]):
         return False
@@ -114,6 +118,7 @@ def caret_range(value: Any) -> bool:
         or set(value["values"]) - {"isActive", "anchor", "range"}
     ):
         return False
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value["values"].get("isActive")) is not bool:
         return False
     values = value["values"]
@@ -161,6 +166,7 @@ def line_ranges(value: Any) -> bool:
     ):
         return False
     if (
+        # pylint: disable-next=unidiomatic-typecheck
         type(value.get("documentEndReached")) is not bool
         or not isinstance(value.get("detail"), str)
         or not isinstance(value.get("ranges"), list)
@@ -168,9 +174,13 @@ def line_ranges(value: Any) -> bool:
         return False
     if len(value["ranges"]) > 32 or "anchorStatus" in value and not _statuses({"anchor": value["anchorStatus"]}):
         return False
-    if value["state"] == "complete" and (
-        not value["documentEndReached"] or not value["anchor"]["complete"] or "anchorStatus" in value
-    ):
+    matches_value = (
+        True
+        if value["state"] == "complete"
+        and (not value["documentEndReached"] or not value["anchor"]["complete"] or "anchorStatus" in value)
+        else False
+    )
+    if matches_value:
         return False
     cursor, preview_units, covered = 0, 0, True
     for item in value["ranges"]:
@@ -251,7 +261,7 @@ def valid_text_boundaries(position: Record, raw: Record) -> bool:
     except UnicodeError:
         return False
     return all(
-        not 0xDC00 <= int.from_bytes(encoded[offset * 2 : offset * 2 + 2], "little") <= 0xDFFF
+        not 0xDC00 <= int.from_bytes(encoded[slice(offset * 2, offset * 2 + 2)], "little") <= 0xDFFF
         for offset in (position["start"], position["end"])
         if offset * 2 < len(encoded)
     )
@@ -272,4 +282,4 @@ def line_text_conflict(fields: Record, raw: Record) -> bool:
         return True
     start = fields["start"] * 2
     known = max(0, min(len(preview), len(original) - start))
-    return original[start : start + known] != preview[:known]
+    return original[slice(start, start + known)] != preview[:known]

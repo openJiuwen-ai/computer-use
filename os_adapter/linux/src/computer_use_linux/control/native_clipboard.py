@@ -27,6 +27,8 @@ class NativeClipboard:
         from Xlib import X, Xatom, display, protocol
         from Xlib.ext import xfixes
 
+        # API, protocol, and native binding names retain their established spelling.
+        # pylint: disable-next=invalid-name
         self.X, self.atoms, self.event, self.request = X, Xatom, protocol.event, protocol.request
         self.d = display.Display()
         self.max_property = min(self.MAX_BYTES, (min(self.d.display.info.max_request_length, 65535) - 6) * 4)
@@ -157,12 +159,17 @@ class NativeClipboard:
     def notify(self, window, selection, target, stamp, ctx, timeout):
         def ready():
             for event in tuple(self.notifies):
-                if (
-                    self.xid(event.requestor) == window.id
-                    and event.selection == selection
-                    and event.target == target
-                    and event.time == stamp
-                ):
+                matches_selection = (
+                    True
+                    if (
+                        self.xid(event.requestor) == window.id
+                        and event.selection == selection
+                        and event.target == target
+                        and event.time == stamp
+                    )
+                    else False
+                )
+                if matches_selection:
                     self.notifies.remove(event)
                     return event
             return None

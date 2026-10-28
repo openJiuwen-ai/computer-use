@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import math
 import re
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 
 import regex
-
 from computer_use.interaction.read.facts.groups import reference_set
 from computer_use.interaction.read.presentation.accounting.fields import RenderedFields, RenderedResult
 from computer_use.interaction.read.presentation.actions.layout import action_fields
@@ -16,38 +16,55 @@ from computer_use.interaction.read.presentation.compact import (
     display_url,
     unexpanded_menu,
 )
-from computer_use.interaction.read.presentation.compression.policy import secondaryActions
+from computer_use.interaction.read.presentation.compression.policy import secondary_actions
 from computer_use.interaction.read.presentation.compression.projection import projectTree
-from computer_use.interaction.read.presentation.formatting import jsonString, numberString
+from computer_use.interaction.read.presentation.formatting import json_string, number_string
 
 # Compatibility for historical callers.
 from computer_use.interaction.read.presentation.rendering.layout.empty_values import (
-    compactEmptyValues as compactEmptyValues,
+    compact_empty_values,
 )
 from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
 from computer_use.interaction.read.presentation.rendering.layout.pipeline import LayoutPipeline
 from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedNode, RenderedSection
 from computer_use.interaction.read.presentation.tree import (
-    carriesValue,
+    VALUE_PREVIEW_LIMIT,
+    carries_value,
     disclosure,
-    hasDisplayValue,
-    hasTextSelection,
-    isActiveModal,
-    isDialog,
-    isHidden,
-    isWindow,
-    selectedTextDescendants,
+    has_display_value,
+    has_text_selection,
+    is_active_modal,
+    is_dialog,
+    is_hidden,
+    is_window,
+    selected_text_descendants,
     unique,
-    valueLabel,
-    valuePreviewLimit,
+    value_label,
 )
-from computer_use.protocol.primitives import trim, utf16Length
+from computer_use.protocol.primitives import trim, utf16_length
+
+__all__ = [
+    "CONVENTIONAL",
+    "STANDARD_CLICK",
+    "bounded",
+    "compact_empty_values",
+    "field",
+    "partial",
+    "preview",
+    "quoted",
+    "render_projection",
+    "render_projection_lines",
+    "render_tree",
+    "rendered_actions",
+    "role",
+    "shortened",
+]
 
 "Full text rendering, with separate source-aware projection and line layout."
 
 
 if TYPE_CHECKING:
-    from typing import Any, Sequence
+    from typing import Sequence
 
     from computer_use.interaction.read.presentation.ir import ProjectionResult
     from computer_use.interaction.read.presentation.records import NodeView, RenderedTree, SemanticNode
@@ -83,7 +100,7 @@ def shortened(value: str, limit: float) -> Record:
     Returns:
         Head text, tail text, and the count omitted between them.
     """
-    if utf16Length(value) <= limit:
+    if utf16_length(value) <= limit:
         return dict(head=value, tail="", omitted=0)
     head_limit, tail_limit = math.floor(limit / 4), limit - math.floor(limit / 4)
     head_value, tail_value, count_value, tail_index = [], [], 0, 0
@@ -112,7 +129,7 @@ def shortened(value: str, limit: float) -> Record:
 def quoted(text: str) -> str:
     if text is None:
         return "null"
-    return re.sub("[\\x7f-\\x9f\\u2028\\u2029]", lambda m: f"\\u{ord(m[0]):04x}", jsonString(text))
+    return re.sub("[\\x7f-\\x9f\\u2028\\u2029]", lambda m: f"\\u{ord(m[0]):04x}", json_string(text))
 
 
 def field(text: str) -> str:
@@ -145,7 +162,7 @@ def preview(text: str, name: str, limit: float) -> str:
 
 def role(node: NodeView) -> str:
     "Format the observed role description with dialog, popover, row, and container labels."
-    if isDialog(node) and node["role"] != "sheet":
+    if is_dialog(node) and node["role"] != "sheet":
         return "dialog"
     if node.get("subrole") == "popover":
         return "popover"
@@ -161,28 +178,33 @@ def partial(node: NodeView) -> None | str:
     "Describe incomplete child collection using its observed counts and stop reason."
     read = node.get("childrenRead", len(node.get("native", node)["children"]))
     reason = node.get("partialReason")
-    if reason is None and node["role"] != "application" and "childCount" in node and read < node["childCount"]:
+    matches_reason = (
+        True
+        if reason is None and node["role"] != "application" and "childCount" in node and read < node["childCount"]
+        else False
+    )
+    if matches_reason:
         reason = "children not fully read"
     if reason is None:
         return None
     if "childrenRead" in node and "childCount" in node:
         return (
             f"showing "
-            f"{numberString(node['childrenRead'])}"
+            f"{number_string(node['childrenRead'])}"
             f" of "
-            f"{numberString(node['childCount'])}"
+            f"{number_string(node['childCount'])}"
             f" items; partial: "
             f"{field(reason)}"
         )
     if "childCount" in node:
-        return f"showing {numberString(read)} of {numberString(node['childCount'])} items; partial: {field(reason)}"
+        return f"showing {number_string(read)} of {number_string(node['childCount'])} items; partial: {field(reason)}"
     return f"partial: {field(reason)}; total unknown"
 
 
-def renderedActions(node: NodeView, compact: bool = False) -> list[Any]:
+def rendered_actions(node: NodeView, compact: bool = False) -> list[Any]:
     "Format secondary-action labels and include native names when labels are ambiguous."
     result = []
-    actions = secondaryActions(node)
+    actions = secondary_actions(node)
     for action in display_actions(node, actions) if compact else actions:
         label = action.get("description") or action["name"]
         ambiguous = any(
@@ -193,16 +215,16 @@ def renderedActions(node: NodeView, compact: bool = False) -> list[Any]:
     return unique(result)
 
 
-def renderTree(root: SemanticNode, context: Record | None = None) -> RenderedTree:
-    return renderProjection(root, context, projectTree(root, context))
+def render_tree(root: SemanticNode, context: Record | None = None) -> RenderedTree:
+    return render_projection(root, context, projectTree(root, context))
 
 
-def renderProjection(root: SemanticNode, context: Record | None, projection: ProjectionResult) -> RenderedTree:
-    draft = LayoutPipeline().run(renderProjectionLines(root, context, projection))
+def render_projection(root: SemanticNode, context: Record | None, projection: ProjectionResult) -> RenderedTree:
+    draft = LayoutPipeline().run(render_projection_lines(root, context, projection))
     return draft.finalize(draft.lines, list(draft.records))
 
 
-def renderProjectionLines(root: SemanticNode, context: Record, projection: ProjectionResult) -> LayoutFrame:
+def render_projection_lines(root: SemanticNode, context: Record, projection: ProjectionResult) -> LayoutFrame:
     """Render an already-compressed forest without recapturing or recompressing.
 
     Args:
@@ -238,9 +260,9 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
     def visit(
         node: NodeView,
         depth: int,
-        parentBlocked: Sequence[str] | None = None,
-        sharedHelp: str | None = None,
-        inMenu: bool = False,
+        parent_blocked: Sequence[str] | None = None,
+        shared_help: str | None = None,
+        in_menu: bool = False,
         parent_ref: str | None = None,
     ) -> None:
         """Visit.
@@ -250,11 +272,11 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
             depth: Current relation/traversal depth within the existing bound.
         """
         nonlocal selected_descendants
-        parentBlocked = [] if parentBlocked is None else parentBlocked
-        inMenu = inMenu or node["role"] in ("menu", "menuBar", "menuItem", "menuBarItem")
+        parent_blocked = [] if parent_blocked is None else parent_blocked
+        in_menu = in_menu or node["role"] in ("menu", "menuBar", "menuItem", "menuBarItem")
         indent, states, omissions = "\t" * depth, [], []
         line = f"{node['ref']} {role(node)}"
-        if isDialog(node) and node["role"] != "sheet" or node.get("subrole") == "popover":
+        if is_dialog(node) and node["role"] != "sheet" or node.get("subrole") == "popover":
             record(node, "subrole")
         elif node.get("roleDescription"):
             record(node, "roleDescription")
@@ -286,18 +308,28 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
             states.append(node["landmarkType"] + " landmark")
             record(node, "landmarkType")
         if caps is not None:
-            if (
-                caps["click"] == "available"
-                and not node.get("selectable")
-                and (not compact or node["role"] not in STANDARD_CLICK)
-            ):
+            matches_caps = (
+                True
+                if (
+                    caps["click"] == "available"
+                    and not node.get("selectable")
+                    and (not compact or node["role"] not in STANDARD_CLICK)
+                )
+                else False
+            )
+            if matches_caps:
                 states.append("clickable")
-            if (
-                node.get("selectable")
-                and node.get("enabled") is not False
-                and not node.get("selected")
-                and caps["click"] != "unavailable"
-            ):
+            matches_node = (
+                True
+                if (
+                    node.get("selectable")
+                    and node.get("enabled") is not False
+                    and not node.get("selected")
+                    and caps["click"] != "unavailable"
+                )
+                else False
+            )
+            if matches_node:
                 states.append("selectable")
             if caps["typeText"] == "available":
                 states.append("text-input")
@@ -305,13 +337,18 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 states.append("replace-only")
             if caps["replaceText"] != caps["typeText"] and caps["replaceText"] != "available":
                 states.append("replace " + caps["replaceText"])
-            if (
-                caps["focus"] == "available"
-                and caps["typeText"] != "available"
-                and node["role"] not in CONVENTIONAL
-                and not node.get("selectable")
-                and (not compact or node["role"] not in ("group", "webArea"))
-            ):
+            matches_conventional = (
+                True
+                if (
+                    caps["focus"] == "available"
+                    and caps["typeText"] != "available"
+                    and node["role"] not in CONVENTIONAL
+                    and not node.get("selectable")
+                    and (not compact or node["role"] not in ("group", "webArea"))
+                )
+                else False
+            )
+            if matches_conventional:
                 states.append("focusable")
         else:
             if node.get("selectable"):
@@ -319,12 +356,17 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                     states.append("selectable")
             elif node.get("pressable") and node["role"] not in CONVENTIONAL:
                 states.append("clickable")
-            if (
-                node.get("focusable")
-                and node["role"] not in CONVENTIONAL
-                and not node.get("selectable")
-                and (not compact or node["role"] not in ("group", "webArea"))
-            ):
+            matches_conventional_condition = (
+                True
+                if (
+                    node.get("focusable")
+                    and node["role"] not in CONVENTIONAL
+                    and not node.get("selectable")
+                    and (not compact or node["role"] not in ("group", "webArea"))
+                )
+                else False
+            )
+            if matches_conventional_condition:
                 states.append("focusable")
         if node.get("submenu"):
             states.append("submenu")
@@ -340,15 +382,19 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
         if node.get("modal"):
             states.append("modal")
             record(node, "modal")
-        elif node.get("modal") is False and isDialog(node):
+        elif node.get("modal") is False and is_dialog(node):
             states.append("non-modal")
             record(node, "modal")
-        if isHidden(node):
+        if is_hidden(node):
             states.append("hidden")
             record(node, "visible")
             record(node, "showing")
-        if node["ref"] == focused_ref and not hasTextSelection(node) and node["role"] not in ("application", "window"):
-            selected_descendants = selectedTextDescendants(node)
+        if (
+            node["ref"] == focused_ref
+            and not has_text_selection(node)
+            and node["role"] not in ("application", "window")
+        ):
+            selected_descendants = selected_text_descendants(node)
             if selected_descendants:
                 states.append("contains selected text")
         state_flags = " (" + ", ".join(states) + ")" if states else ""
@@ -362,10 +408,12 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                     operation.
                 attribute: Native/display field name recorded by the provenance ledger.
             """
-            if compact and (encoded := display_embedded(value, field, hint=detail_hint)) is not None:
-                # No full-value claim: accounting keeps the exact field under
-                # its source reference in details, including folded captions.
-                return encoded
+            if compact:
+                encoded = display_embedded(value, field, hint=detail_hint)
+                if encoded is not None:
+                    # No full-value claim: accounting keeps the exact field under
+                    # its source reference in details, including folded captions.
+                    return encoded
             part = shortened(value, limit)
             if part["omitted"]:
                 omissions.append(f"Omitted: {part['omitted']} characters ({name})")
@@ -410,7 +458,7 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
         if node.get("editorOwnerRef"):
             fields.append("Editor for: " + node["editorOwnerRef"])
         if "disclosureLevel" in node and node["disclosureLevel"] != node.get("outlineDepth"):
-            fields.append("Outline level: " + numberString(node["disclosureLevel"]))
+            fields.append("Outline level: " + number_string(node["disclosureLevel"]))
             record(node, "disclosureLevel")
         if node.get("disclosedBy"):
             fields.append("Parent row: " + node["disclosedBy"])
@@ -450,10 +498,10 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 "Landmark: " + display(node["localizedLandmarkType"], "Landmark", attribute="localizedLandmarkType")
             )
         show_value = (
-            carriesValue(node["native"])
+            carries_value(node["native"])
             or (node["ref"] == focused_ref and "value" in node)
             or (
-                hasDisplayValue(node["native"])
+                has_display_value(node["native"])
                 and node.get("value") != node.get("name")
                 and node.get("value") != node.get("description")
             )
@@ -462,7 +510,7 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
         value = node.get("value")
         if binary and (node.get("valueIsNumber") or value in ("true", "false")):
             value = {"0": "off", "1": "on", "true": "on", "false": "off"}.get(value, value)
-        value_parts = shortened(node.get("value", ""), valuePreviewLimit)
+        value_parts = shortened(node.get("value", ""), VALUE_PREVIEW_LIMIT)
         embedded_value = (
             display_embedded(value, field, hint=detail_hint) if compact and isinstance(value, str) else None
         )
@@ -481,7 +529,7 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 and value is not None
             )
             fields.append(
-                ("" if natural_text else valueLabel(node) + ": ")
+                ("" if natural_text else value_label(node) + ": ")
                 + ("<unavailable>" if value is None else embedded_value or field(value))
             )
             if embedded_value is None:
@@ -493,26 +541,26 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
         selection_range = display_selection(node) if compact else node.get("selectionRange")
         if selection_range is not None:
             fields.append(
-                (f"Selection: {numberString(selection_range['location'])}:{numberString(selection_range['length'])}")
+                (f"Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}")
             )
             record(node, "selectionRange")
         if "shortcut" in node:
             fields.append("Shortcut: " + display(node["shortcut"], "Shortcut"))
         if "menuMark" in node:
             fields.append("Mark: " + (display(node["menuMark"], "Mark") if node["menuMark"] else "<none>"))
-        # The public readText continuation reads Value, not SelectedText. An
+        # The public read_text continuation reads Value, not SelectedText. An
         # acquired selection cannot be shortened without another valid entry.
         selected_parts = shortened(node.get("selectedText", ""), math.inf if coverage is not None else 200)
         if node.get("selectedText") and not selected_parts["omitted"]:
             fields.append("Selected text: " + field(node["selectedText"]))
             record(node, "selectedText")
         fields.extend(
-            action_fields(node, part_actions.get(node["ref"], []), lambda source: renderedActions(source, compact))
+            action_fields(node, part_actions.get(node["ref"], []), lambda source: rendered_actions(source, compact))
         )
         if node.get("actionsUnavailable"):
             fields.append("Secondary Actions: <unavailable>")
         if node.get("help") and node["help"] not in (
-            sharedHelp,
+            shared_help,
             node.get("name"),
             node.get("description"),
             node.get("value"),
@@ -544,14 +592,19 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                     else display(node["url"], "URL", attribute="url")
                 )
             )
-        if (
-            node.get("identifier")
-            and not node.get("name")
-            and not node.get("description")
-            and not (node["role"] == "staticText" and node.get("value"))
-        ):
+        matches_node_condition = (
+            True
+            if (
+                node.get("identifier")
+                and not node.get("name")
+                and not node.get("description")
+                and not (node["role"] == "staticText" and node.get("value"))
+            )
+            else False
+        )
+        if matches_node_condition:
             identifier = node["identifier"]
-            if compact and utf16Length(identifier) > 120:
+            if compact and utf16_length(identifier) > 120:
                 # The full identifier stays unaccounted here, so native fact
                 # accounting retains it verbatim in this capture's details.
                 fields.append(
@@ -559,7 +612,7 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 )
             else:
                 fields.append("ID: " + display(identifier, "ID", attribute="identifier"))
-        if node.get("blockedBy") and ",".join(node["blockedBy"]) != ",".join(parentBlocked):
+        if node.get("blockedBy") and ",".join(node["blockedBy"]) != ",".join(parent_blocked):
             fields.append("Blocked by: " + ", ".join(node["blockedBy"]))
         if fields:
             line += (", " if node.get("name") else " ") + ", ".join(fields)
@@ -595,14 +648,19 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 hint(f"{indent}\tChildren: {child_coverage}")
             else:
                 hint(indent + "\tChildren: " + partial_info)
-        if (
-            compact
-            and not partial_info
-            and not deferred_menu
-            and "childrenStart" in node
-            and "childrenEnd" in node
-            and node["childrenEnd"] == node.get("childCount")
-        ):
+        matches_compact = (
+            True
+            if (
+                compact
+                and not partial_info
+                and not deferred_menu
+                and "childrenStart" in node
+                and "childrenEnd" in node
+                and node["childrenEnd"] == node.get("childCount")
+            )
+            else False
+        )
+        if matches_compact:
             hint(
                 (f"{indent}\tChildren: offsets {node['childrenStart']}–{node['childrenEnd']}; end of direct children.")
             )
@@ -610,7 +668,7 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
             end = (
                 ""
                 if "childrenEnd" not in node
-                else "; inspected through offset " + numberString(node["childrenEnd"] - 1)
+                else "; inspected through offset " + number_string(node["childrenEnd"] - 1)
                 if node["childrenEnd"] > node["childrenStart"]
                 else "; no direct children inspected"
             )
@@ -623,7 +681,7 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 (
                     f"{indent}"
                     f"\tChildren: native children offset "
-                    f"{numberString(node['childrenStart'])}"
+                    f"{number_string(node['childrenStart'])}"
                     f"{end}"
                     f"{complete}"
                     f"; live native order, not a frozen list."
@@ -640,26 +698,32 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                     f"\tContinue: element("
                     f"{quoted(node['ref'])}"
                     f').read({{"offset": '
-                    f"{numberString(node['nextChildOffset'])}"
+                    f"{number_string(node['nextChildOffset'])}"
                     f"}})"
                 )
             )
-        elif partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
-            hint(
-                f"{indent}\tInspect subtree: (await app.element({node['ref']})).read()"
-                if context.get("publicApi")
-                else f"{indent}\tInspect subtree: element({quoted(node['ref'])}).read()"
+        else:
+            matches_partial_info = (
+                True
+                if partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu
+                else False
             )
+            if matches_partial_info:
+                hint(
+                    f"{indent}\tInspect subtree: (await app.element({node['ref']})).read()"
+                    if context.get("publicApi")
+                    else f"{indent}\tInspect subtree: element({quoted(node['ref'])}).read()"
+                )
         for omission in omissions:
             hint(indent + "\t" + omission)
 
-        def textBlock(name: str, part: Record, continuation: str = "") -> None:
+        def text_block(name: str, part: Record, continuation: str = "") -> None:
             "Text Block."
             lines_value.append(indent + "\t" + name + ":")
 
             def body(value: str) -> None:
                 # Display provider paragraph separators without changing the
-                # captured source, UTF-16 offsets or readText pagination.
+                # captured source, UTF-16 offsets or read_text pagination.
                 lines_value.extend(indent + "\t| " + field(p) for p in re.split("\\r\\n|\\r|\\n", value))
 
             body(part["head"])
@@ -670,14 +734,14 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
         if block_value:
             continuation = (
                 (
-                    f"; use (await app.element({node['ref']})).readText()"
+                    f"; use (await app.element({node['ref']})).read_text()"
                     if context.get("publicApi")
-                    else f"; use element({quoted(node['ref'])}).readText()"
+                    else f"; use element({quoted(node['ref'])}).read_text()"
                 )
                 if "readableTextRefs" not in context or node["ref"] in context["readableTextRefs"]
                 else "; full captured value unavailable"
             )
-            textBlock(valueLabel(node), value_parts, continuation)
+            text_block(value_label(node), value_parts, continuation)
             record(node, "value", kind="continuation" if value_parts["omitted"] else "display")
         for attribute, label in (
             ("documentText", "Document text"),
@@ -692,14 +756,14 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 if coverage is not None:
                     coverage.equivalent_text(node, attribute)
                 continue
-            part = shortened(node[attribute], valuePreviewLimit)
+            part = shortened(node[attribute], VALUE_PREVIEW_LIMIT)
             if any(c in node[attribute] for c in "\r\n") or part["omitted"]:
-                textBlock(label, part, "; " + detail_hint)
+                text_block(label, part, "; " + detail_hint)
             else:
                 lines_value.append(indent + "\t" + label + ": " + field(node[attribute]))
             record(node, attribute, kind="continuation" if part["omitted"] else "display")
         if selected_parts["omitted"]:
-            textBlock("Selected text", selected_parts)
+            text_block("Selected text", selected_parts)
         if coverage is not None:
             for attribute in ("description", "help", "url"):
                 coverage.equivalent_text(node, attribute)
@@ -712,10 +776,10 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
             + ((", " + preview(label, "Name", 120) if focus_name["omitted"] else " " + field(label)) if label else "")
         )
         if show_value:
-            focus += ", " + preview(value, valueLabel(node), 200) if value is not None else ", Value: <unavailable>"
+            focus += ", " + preview(value, value_label(node), 200) if value is not None else ", Value: <unavailable>"
         if selection_range is not None:
             focus += (
-                f", Selection: {numberString(selection_range['location'])}:{numberString(selection_range['length'])}"
+                f", Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}"
             )
         if node.get("selectedText"):
             focus += ", " + preview(node["selectedText"], "Selected text", 200)
@@ -730,17 +794,22 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
             + (" (preview; see tree)" if short["omitted"] else "")
         )
         if node.get("selected"):
-            (selected_menus if inMenu else selected_value).append(node)
+            (selected_menus if in_menu else selected_value).append(node)
         if node.get("focused"):
             reported_focus.append(node["ref"])
         labels_value[node["ref"]] = node.get("name") or node.get("description") or node.get("value") or node["role"]
-        if (
-            node["role"] in ("group", "cell")
-            and not node.get("name")
-            and not node.get("description")
-            and len(node["children"]) > 1
-            and any(child["role"] in ("staticText", "heading") for child in node["children"])
-        ):
+        has_caption_context = (
+            True
+            if (
+                node["role"] in ("group", "cell")
+                and not node.get("name")
+                and not node.get("description")
+                and len(node["children"]) > 1
+                and any(child["role"] in ("staticText", "heading") for child in node["children"])
+            )
+            else False
+        )
+        if has_caption_context:
             context_refs[node["ref"]] = unique(
                 context_refs.get(node["ref"], []) + [child["ref"] for child in node["children"]]
             )
@@ -753,16 +822,16 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 parent_ref,
                 depth,
                 "\n".join(lines_value[line_start:]),
-                indent + line[:state_at] + line[state_at + len(state_flags) :],
+                indent + line[:state_at] + line[slice(state_at + len(state_flags), None)],
                 tuple(hints),
                 partial=bool(partial_info and not deferred_menu),
             )
         )
         for child in node["children"]:
-            visit(child, depth + 1, node.get("blockedBy"), child_help, inMenu, node["ref"])
+            visit(child, depth + 1, node.get("blockedBy"), child_help, in_menu, node["ref"])
 
     if "app" in context:
-        windows = [node for node in roots if isWindow(node)]
+        windows = [node for node in roots if is_window(node)]
         header_value, title_omission = f"App: {field(context['app'])}.", None
         if len(windows) == 1 and windows[0].get("name"):
             part = shortened(windows[0]["name"], 500)
@@ -788,8 +857,8 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 node: Source/projected node in this exact view; its native identity is
                     unchanged.
             """
-            owner = node["ref"] if isWindow(node) else window
-            if isActiveModal(node):
+            owner = node["ref"] if is_window(node) else window
+            if is_active_modal(node):
                 interactions.append(
                     node["ref"] + " modal" + (f" in window {window}" if window else " (owner in window relations)")
                 )
@@ -827,7 +896,7 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                 """
                 parts = [summary_labels[node["ref"]]]
 
-                def hasLabel(child: NodeView) -> bool:
+                def has_label(child: NodeView) -> bool:
                     return bool(
                         child.get("name")
                         or child.get("description")
@@ -837,15 +906,15 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                         )
                     )
 
-                def labelChildren(child: NodeView) -> list[NodeView]:
+                def label_children(child: NodeView) -> list[NodeView]:
                     return [member for member in child["children"] if member["role"] != "row"]
 
                 tail = node
-                while not hasLabel(tail) and len(labelChildren(tail)) == 1:
-                    tail = labelChildren(tail)[0]
-                if tail is not node and hasLabel(tail):
+                while not has_label(tail) and len(label_children(tail)) == 1:
+                    tail = label_children(tail)[0]
+                if tail is not node and has_label(tail):
                     parts.append("label: " + summary_labels[tail["ref"]])
-                if not hasLabel(tail) and len(labelChildren(tail)) > 1:
+                if not has_label(tail) and len(label_children(tail)) > 1:
                     labelled = []
 
                     def collect(child: NodeView) -> None:
@@ -855,13 +924,13 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
                             child: Source/projected node in this exact view; its native identity
                                 is unchanged.
                         """
-                        if hasLabel(child):
+                        if has_label(child):
                             labelled.append(child)
                         else:
-                            for member in labelChildren(child):
+                            for member in label_children(child):
                                 collect(member)
 
-                    for child in labelChildren(tail):
+                    for child in label_children(tail):
                         collect(child)
                     if labelled:
                         parts.append(
@@ -893,13 +962,13 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
             range_ = projection["nativeNodes"].get(focused_ref, {}).get("selectionRange")
             if range_ is not None:
                 summary += (
-                    f"; text selection: empty at UTF-16 offset {numberString(range_['location'])}"
+                    f"; text selection: empty at UTF-16 offset {number_string(range_['location'])}"
                     if range_["length"] == 0
                     else (
                         f"; text selection: "
-                        f"{numberString(range_['length'])}"
+                        f"{number_string(range_['length'])}"
                         f" UTF-16 units at offset "
-                        f"{numberString(range_['location'])}"
+                        f"{number_string(range_['location'])}"
                     )
                 )
             selections = [focus_labels[node["ref"]] for node in selected_descendants if node["ref"] in focus_labels]
@@ -919,13 +988,17 @@ def renderProjectionLines(root: SemanticNode, context: Record, projection: Proje
             )
         elif reported_focus:
             lines_value.append("\nReported focus: unavailable.")
-        internal = [
-            "inside " + owner
-            for source, owner in projection["foldedInto"].items()
-            if source != focused_ref
-            and projection["nativeNodes"].get(source, {}).get("focused")
-            and owner in focus_labels
-        ]
+
+        def _iter_source(_source_items: Iterator[Any]) -> Iterator[Any]:
+            for source, owner in _source_items:
+                if (
+                    source != focused_ref
+                    and projection["nativeNodes"].get(source, {}).get("focused")
+                    and owner in focus_labels
+                ):
+                    yield "inside " + owner
+
+        internal = list(_iter_source(iter(projection["foldedInto"].items())))
         others = unique([ref for ref in reported_focus if ref != focused_ref] + internal)
         if others:
             lines_value.append(

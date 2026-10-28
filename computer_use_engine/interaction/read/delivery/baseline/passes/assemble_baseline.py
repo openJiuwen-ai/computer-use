@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use._json import dumps, utf8
+from computer_use.json import dumps, utf8
 from computer_use.interaction.read.delivery.baseline.model import PURE, BaselineDraft, BaselineInput
 from computer_use.pipeline import Contract, Pass
 

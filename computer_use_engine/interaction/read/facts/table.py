@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 
-from computer_use.protocol.primitives import safeInteger
+from computer_use.protocol.primitives import safe_integer
 
 if TYPE_CHECKING:
     from typing import Mapping
@@ -44,24 +45,33 @@ def selection_summaries(native: FactCollection, refs: Mapping[str, str]) -> list
         if unread:
             details.append("not expanded: " + ", ".join(unread))
         selected = "states.selected"
-        conflicts = [
-            aliases[token]
-            for token in relation["targets"]
-            if token in nodes
-            and nodes[token]["values"].get(selected) is False
-            and selected not in nodes[token]["fieldStatus"]
-        ]
+
+        def _iter_token(_source_items: Iterator[Any], selection: Any) -> Iterator[Any]:
+            for token in _source_items:
+                if (
+                    token in nodes
+                    and nodes[token]["values"].get(selection) is False
+                    and selection not in nodes[token]["fieldStatus"]
+                ):
+                    yield aliases[token]
+
+        conflicts = list(_iter_token(iter(relation["targets"]), selected))
         if conflicts:
             details.append("node reports selected=false: " + ", ".join(conflicts))
         source = nodes[relation["source"]]
         count = source["values"].get("structure.selected_count")
-        if (
-            safeInteger(count)
-            and count >= 0
-            and "structure.selected_count" not in source["fieldStatus"]
-            and "total" in relation
-            and count != relation["total"]
-        ):
+        matches_safe_integer = (
+            True
+            if (
+                safe_integer(count)
+                and count >= 0
+                and "structure.selected_count" not in source["fieldStatus"]
+                and "total" in relation
+                and count != relation["total"]
+            )
+            else False
+        )
+        if matches_safe_integer:
             details.append("separate count reports " + str(count))
         targets = ", ".join(aliases[token] for token in relation["targets"])
         if not targets:

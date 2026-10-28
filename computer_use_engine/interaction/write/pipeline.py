@@ -29,7 +29,8 @@ from computer_use.pipeline import Repeat, Scope, Select, Sequence
 if TYPE_CHECKING:
     from typing import AsyncIterator
 
-    from computer_use.interaction.records import ElementPath as LookupPath, Remaining
+    from computer_use.interaction.records import ElementPath as LookupPath
+    from computer_use.interaction.records import Remaining
     from computer_use.interaction.write.model import AttemptOutcome, BoundWrite, WriteRequest
     from computer_use.native.contracts import Intent, OperationTarget
     from computer_use.native.port import NativePort

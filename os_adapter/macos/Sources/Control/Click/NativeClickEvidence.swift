@@ -43,6 +43,9 @@ import Foundation
         case .menuContext:
             kind = "activation"
             effect = "contentPossible"
+        case .viewport:
+            kind = "pointerPreparation"
+            effect = "contentPossible"
         }
         if event.phase == .willSend {
             preparation.append(.init(kind: kind, effect: effect, dispatch: "unknown", observations: [event.detail]))

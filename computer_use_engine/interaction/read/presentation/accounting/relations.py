@@ -123,6 +123,8 @@ def render_relations(groups: Mapping[tuple[str, str], list[str]]) -> list[str]:
     for property_name, encoded_value in groups:
         record = json.loads(encoded_value)
         targets, total = record.pop("targets"), record.pop("total", None)
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(total) is int and total == len(targets):
             totals.setdefault((property_name, literal(record)), set()).add(total)
     by_metadata = {}
@@ -131,6 +133,7 @@ def render_relations(groups: Mapping[tuple[str, str], list[str]]) -> list[str]:
         targets = record.pop("targets")
         common = {key: value for key, value in record.items() if key != "total"}
         if (
+            # pylint: disable-next=unidiomatic-typecheck
             type(record.get("total")) is int
             and record["total"] == len(targets)
             and len(totals.get((property_name, literal(common)), ())) > 1

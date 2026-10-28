@@ -12,8 +12,23 @@ import ctypes as C
 import ctypes.util
 import hashlib
 from dataclasses import dataclass, replace
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.protocol import Failure, require
+
+
+class KeyboardMapFacts(NamedTuple):
+    min_key_code: Any
+    max_key_code: Any
+    types: Any
+    symbols: Any
+    key_symbols: Any
+    modifier_map: Any
+    actions: Any
+    behaviors: Any
+    key_actions: Any
+    virtual_modifiers: Any
+    virtual_modifier_map: Any
 
 
 @dataclass(frozen=True)
@@ -66,7 +81,7 @@ def plan_text(text, snapshot):
             "Text is not directly representable by the current XKB layout; use native text editing or explicit paste.",
             "input_unavailable",
         )
-        keys.append(choices[value])
+        keys.append(choices.get(value))
     return TextPlan(snapshot, tuple(keys))
 
 
@@ -243,7 +258,7 @@ class XkbKeyboard:
             )
         count = description.max_key_code + 1
         symbols = tuple((tuple(m.kt_index), m.group_info, m.width, m.offset) for m in client.key_sym_map[:count])
-        return (
+        return KeyboardMapFacts(
             description.min_key_code,
             description.max_key_code,
             types,
@@ -282,9 +297,9 @@ class XkbKeyboard:
             for code in range(description.min_key_code, description.max_key_code + 1):
                 entry = client.key_sym_map[code]
                 count = entry.width * (entry.group_info & 15)
-                keysyms = client.syms[entry.offset : entry.offset + count]
+                keysyms = client.syms[slice(entry.offset, entry.offset + count)]
                 actions = (
-                    tuple(bytes(a) for a in server.acts[server.key_acts[code] : server.key_acts[code] + count])
+                    tuple(bytes(a) for a in server.acts[slice(server.key_acts[code], server.key_acts[code] + count)])
                     if server.key_acts[code]
                     else ()
                 )

@@ -13,7 +13,7 @@ def collect_keyboard_contracts(scope, options, result, ctx, typed_text):
     # common policy owns preference, preparation and fallback.
     try:
         keyboard = typed_text.inspect(operation, target, request["within"], ctx, **options)
-    except (Failure, typed_text.ax.GLib.Error) as error:
+    except (Failure, typed_text.ax.glib.Error) as error:
         ctx.check()
         # Optional receiver/desktop observations cannot erase
         # an independently established object edit. Cancellation,

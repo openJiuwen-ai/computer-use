@@ -85,6 +85,8 @@ def read_summaries(facts: Mapping[str, Any], refs: Mapping[str, str], *, compact
             if coverage.get("conflicting"):
                 state = "conflict"
             total = coverage.get("total")
+            # Exact types preserve scalar validation and identity contracts.
+            # pylint: disable-next=unidiomatic-typecheck
             count = f"{len(selections)}/{total}" if type(total) is int else str(len(selections))
             suffix = (
                 f" ({state}; {count} ranges): "
@@ -156,12 +158,17 @@ def geometry_summaries(facts: Mapping[str, Any], aliases: Mapping[str, str]) -> 
             continue
         bounds = values.get("geometry.bounds", {})
         rectangle = [bounds.get(name) for name in ("x", "y", "width", "height")]
-        if (
-            not all(type(number) in (float, int) for number in rectangle)
-            or rectangle[2] <= 0
-            or rectangle[3] <= 0
-            or bounds.get("valid") is False
-        ):
+        matches_rectangle = (
+            True
+            if (
+                not all(type(number) in (float, int) for number in rectangle)
+                or rectangle[2] <= 0
+                or rectangle[3] <= 0
+                or bounds.get("valid") is False
+            )
+            else False
+        )
+        if matches_rectangle:
             continue
         space = bounds.get("space")
         metadata = facts.get("coordinateSpaces", {}).get(space)

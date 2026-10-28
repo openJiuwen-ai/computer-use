@@ -8,36 +8,35 @@ import os
 import pprint
 import signal
 import sys
-import time
 from collections import deque
 from contextvars import ContextVar
 
 from computer_use import Computer
-from computer_use._identity import Record, WeakIdentityMap
-from computer_use._json import dumps, loads as jsonLoads
+from computer_use.identity import Record, WeakIdentityMap
 from computer_use.client.host import (
-    setActionHandler,
-    setDiagnosticHandler,
-    setExecutionGuard,
-    setObservationHandler,
-    setPreviewHandler,
-    setTextPageHandler,
+    set_action_handler,
+    set_diagnostic_handler,
+    set_execution_guard,
+    set_observation_handler,
+    set_preview_handler,
+    set_text_page_handler,
 )
 from computer_use.client.images import (
-    imageDelivered,
-    imageLabel,
-    imageMetadata,
-    requireImageDelivery,
-    resetImageDelivery,
+    image_delivered,
+    image_label,
+    image_metadata,
+    require_image_delivery,
+    reset_image_delivery,
 )
-from computer_use.client.result_presentation import resultReceipt, textSourceLabel
+from computer_use.client.result_presentation import result_receipt, text_source_label
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
-from computer_use.native.preview import latestPreviewSink
-from computer_use.protocol.png import decodePNG
-from computer_use.session.observation import peekObservationText
+from computer_use.native.preview import latest_preview_sink
+from computer_use.protocol.png import decode_png
+from computer_use.session.observation import peek_observation_text
 
 from .output import OutputBuffer
 from .presentation import ObservationOutput, ObservationPresenter
+from .worker_protocol import WorkerMessageWriter, consume_protocol, read_message
 
 "Persistent Python worker. User code never shares the MCP server's stdout."
 
@@ -46,26 +45,27 @@ _runs = ContextVar("computer_use_execution", default=None)
 
 
 class Runtime:
-    def __init__(self, send, computerFactory=Computer):
-        self.send, self.computerFactory = send, computerFactory
+    def __init__(self, send, computer_factory=Computer):
+        self.send, self.computer_factory = send, computer_factory
         self.presenter = ObservationPresenter()
-        self.commandRuns = {}
+        self.command_runs = {}
         self.computers = []
-        requireImageDelivery()
-        setExecutionGuard(self.guard)
-        setDiagnosticHandler(self.diagnostic)
-        setActionHandler(self.action)
-        setTextPageHandler(self.textPage)
-        setObservationHandler(self.observation)
+        require_image_delivery()
+        set_execution_guard(self.guard)
+        set_diagnostic_handler(self.diagnostic)
+        set_action_handler(self.action)
+        set_text_page_handler(self.text_page)
+        set_observation_handler(self.observation)
         if os.environ.get("COMPUTER_USE_REMOTE_PREVIEW") == "1":
 
             async def preview(event):
                 self.send(dict(preview=event))
 
-            setPreviewHandler(latestPreviewSink(preview))
-        self.taskNamespace = self.namespace()
+            set_preview_handler(latest_preview_sink(preview))
+        self.task_namespace = self.namespace()
 
-    def guard(self):
+    @staticmethod
+    def guard():
         run = _runs.get()
         if run is None or not run["active"] or run["phase"] != "code":
             raise RuntimeError(
@@ -75,10 +75,12 @@ class Runtime:
             )
         pending = asyncio.get_running_loop().create_future()
         run["pending"].add(pending)
+
         def done():
             run["pending"].discard(pending)
             if not pending.done():
                 pending.set_result(None)
+
         return done
 
     def diagnostic(self, event):
@@ -87,50 +89,48 @@ class Runtime:
         trace = event.get("traceId")
         if isinstance(trace, str):
             if event["kind"] == "command_start":
-                self.commandRuns[trace] = execution_id
-                if len(self.commandRuns) > 1024:
-                    self.commandRuns.pop(next(iter(self.commandRuns)))
+                self.command_runs[trace] = execution_id
+                if len(self.command_runs) > 1024:
+                    self.command_runs.pop(next(iter(self.command_runs)))
             else:
-                execution_id = self.commandRuns.get(trace)
+                execution_id = self.command_runs.get(trace)
         elif event["kind"] == "backend_diagnostic":
             execution_id = None
         self.send(dict(diagnostic=event, **({"executionId": execution_id} if execution_id is not None else {})))
 
-    def emit(self, block, mergeText=False):
+    def emit(self, block, merge_text=False):
         run = _runs.get()
         if run is None or not run["active"]:
             return
-        run["output"].append(block, mergeText)
-        self.send(dict(output=block, mergeText=mergeText, executionId=run["id"]))
+        run["output"].append(block, merge_text)
+        self.send(dict(output=block, mergeText=merge_text, executionId=run["id"]))
 
-    def flushObservations(self, run):
+    def flush_observations(self, run):
         def emit(text, observation):
             self.emit(dict(type="text", text=text))
             if observation["state"].get("screenshot") is not None:
                 run["imageContexts"].set(observation["state"]["screenshot"], True)
 
-        def emitImage(png):
+        def emit_image(png):
             if not any(image is png for image in run["images"]):
-                self.printImage(png)
+                self.print_image(png)
 
-        run["observations"].flush(emit, emitImage)
-        self.logObservations(run)
-
-
+        run["observations"].flush(emit, emit_image)
+        self.log_observations(run)
 
     def action(self, receipt):
         run = _runs.get()
         if run is None or not run["active"]:
             return
-        self.flushObservations(run)
+        self.flush_observations(run)
         self.emit(dict(type="text", text=run["actions"].render(receipt)))
 
-    def textPage(self, source, page):
+    def text_page(self, source, page):
         run = _runs.get()
         if run is None or not run["active"]:
             return
-        self.flushObservations(run)
-        self.emit(dict(type="text", text=textSourceLabel(source)), True)
+        self.flush_observations(run)
+        self.emit(dict(type="text", text=text_source_label(source)), True)
         run["textPages"].set(page, True)
 
     def observation(self, event):
@@ -142,7 +142,7 @@ class Runtime:
                 if event["kind"] == "invalidate":
                     run["observations"].invalidate(event["source"])
                 else:
-                    run["observations"].discardPending(event["source"])
+                    run["observations"].discard_pending(event["source"])
             return
         if run is None or not run["active"]:
             return
@@ -156,7 +156,7 @@ class Runtime:
             data["observed"] = observation["observed"]
         self.send(dict(diagnostic=dict(**data, elementRefs=list(observation["refs"])), executionId=run["id"]))
 
-    def logObservations(self, run, *, materializedOnly=False):
+    def log_observations(self, run, *, materializedOnly=False):
         """Record captured evidence in acquisition order at the text output boundary.
 
         The retained observation supplies the original immutable snapshot. Logging does
@@ -165,7 +165,7 @@ class Runtime:
         """
         while run["observationLogs"]:
             observation = run["observationLogs"][0]
-            if materializedOnly and peekObservationText(observation["state"]) is None:
+            if materializedOnly and peek_observation_text(observation["state"]) is None:
                 break
             data = dict(
                 kind="observation",
@@ -178,8 +178,6 @@ class Runtime:
             self.send(dict(diagnostic=dict(**data, elementRefs=list(observation["refs"])), executionId=run["id"]))
             run["observationLogs"].popleft()
 
-
-
     def print(self, *values, sep=" ", end="\n", file=None, flush=False):
         run = _runs.get()
         if run is None or not run["active"]:
@@ -188,7 +186,7 @@ class Runtime:
             _originalPrint(*values, sep=sep, end=end, file=file, flush=flush)
             return
         if len(values) == 1:
-            receipt = resultReceipt(values[0])
+            receipt = result_receipt(values[0])
             if receipt is not None and run["actions"].has(receipt):
                 return
             if receipt is not None:
@@ -209,21 +207,21 @@ class Runtime:
         self.emit(dict(type="text", text=text), True)
         observed = run["observations"].printed(text)
         if observed is not None:
-            self.logObservations(run, materializedOnly=True)
+            self.log_observations(run, materializedOnly=True)
         if observed is not None and observed["state"].get("screenshot") is not None:
             run["imageContexts"].set(observed["state"]["screenshot"], True)
 
-    def printImage(self, png):
+    def print_image(self, png):
         if not isinstance(png, (bytes, bytearray, memoryview)):
-            raise TypeError("printImage() expects PNG bytes, such as state.screenshot.")
+            raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
         data = base64.b64encode(png).decode("ascii")
-        decodePNG(data)
+        decode_png(data)
         run = _runs.get()
-        self.emit(dict(type="text", text=imageLabel(png, run is not None and run["imageContexts"].has(png))))
+        self.emit(dict(type="text", text=image_label(png, run is not None and run["imageContexts"].has(png))))
         self.emit(dict(type="image", mimeType="image/png", data=data))
         if run is not None and run["active"]:
             run["images"].append(png)
-            self.send(dict(diagnostic=dict(kind="image_output", capture=imageMetadata(png)), executionId=run["id"]))
+            self.send(dict(diagnostic=dict(kind="image_output", capture=image_metadata(png)), executionId=run["id"]))
 
     async def finish(self, error: BaseException | None = None):
         run = _runs.get()
@@ -232,7 +230,7 @@ class Runtime:
         run["phase"] = "draining"
         if run["pending"]:
             if error is None:
-                error = RuntimeError(
+                error: BaseException | None = RuntimeError(
                     (
                         "Computer operations were not awaited. Pending operations "
                         "finished before "
@@ -242,17 +240,17 @@ class Runtime:
                 )
             await asyncio.gather(*list(run["pending"]), return_exceptions=True)
         try:
-            self.flushObservations(run)
+            self.flush_observations(run)
         except Exception as failure:
             if error is None:
                 error = failure
         try:
-            self.logObservations(run)
+            self.log_observations(run)
         except Exception as failure:
             if error is None:
                 error = failure
         for png in run["images"]:
-            imageDelivered(png)
+            image_delivered(png)
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())
@@ -279,14 +277,14 @@ class Runtime:
         return result
 
     def namespace(self):
-        computer = self.computerFactory()
+        computer = self.computer_factory()
         self.computers.append(computer)
         return dict(
             __name__="__computer_use__",
             __builtins__=builtins,
             computer=computer,
             print=self.print,
-            printImage=self.printImage,
+            print_image=self.print_image,
         )
 
     async def execute(self, message):
@@ -294,7 +292,7 @@ class Runtime:
         if history["resetText"]:
             self.presenter.invalidate()
         if history["resetImages"]:
-            resetImageDelivery()
+            reset_image_delivery()
         run = Record(
             id=id_,
             active=True,
@@ -311,7 +309,7 @@ class Runtime:
         token = _runs.set(run)
         try:
             try:
-                namespace = self.taskNamespace
+                namespace = self.task_namespace
                 compiled = compile(
                     code + "\n",
                     "computer-use-agent.py",
@@ -320,7 +318,9 @@ class Runtime:
                     dont_inherit=True,
                 )
                 run["evaluationStarted"] = True
-                evaluated = eval(compiled, namespace, namespace)
+                # The MCP operation explicitly runs agent-supplied Python; eval
+                # retains the coroutine produced by top-level await in exec code.
+                evaluated = eval(compiled, namespace, namespace)  # noqa: S307
                 if inspect.isawaitable(evaluated):
                     await evaluated
             except BaseException as error:
@@ -331,13 +331,16 @@ class Runtime:
 
     async def close(self):
         for computer in self.computers:
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
             transport = computer._controller.transport
             if hasattr(transport, "close"):
                 transport.close()
         for computer in self.computers:
+            # pylint: disable-next=protected-access
             transport = computer._controller.transport
             if hasattr(transport, "waitClosed"):
-                await transport.waitClosed()
+                await transport.wait_closed()
 
 
 _originalPrint = builtins.print
@@ -359,19 +362,19 @@ class ConsoleWriter(io.TextIOBase):
 
 
 async def main():
-    from .worker_connection import workerConnection
+    from .worker_connection import worker_connection
 
-    reader, writer = await workerConnection()
+    protocol = consume_protocol()
+    reader, writer = await worker_connection()
 
-    def send(message):
-        writer.write((dumps(message) + "\n").encode("utf-8"))
-
-    runtime = Runtime(send)
+    messages = WorkerMessageWriter(writer, protocol=protocol)
+    runtime = Runtime(messages.send)
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
 
     async def stop():
         await runtime.close()
+        messages.flush()
         writer.close()
 
     loop = asyncio.get_running_loop()
@@ -381,14 +384,18 @@ async def main():
         pass
     current = None
     try:
-        while line := await reader.readline():
+        while True:
+            message = await read_message(reader, protocol=protocol)
+            if message is None:
+                break
             if current is not None and not current.done():
                 raise RuntimeError("Worker received concurrent executions")
-            current = asyncio.create_task(runtime.execute(jsonLoads(line)))
+            current = asyncio.create_task(runtime.execute(message))
         if current is not None and not current.done():
             current.cancel()
     finally:
         await runtime.close()
+        messages.flush()
         writer.close()
         await writer.wait_closed()
 

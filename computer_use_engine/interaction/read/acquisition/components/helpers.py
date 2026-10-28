@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.read.acquisition.components.model import ComponentLease
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
-from computer_use.protocol.captures import captureMetadata
+from computer_use.protocol.captures import capture_metadata
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -33,7 +33,7 @@ def image_notes(image: WindowImage | None) -> tuple[ObservationGap, ...]:
             reason,
             "use clearly visible content; read again if required content is missing",
         )
-        for reason in captureMetadata(image.image).get("stopReasons", ())
+        for reason in capture_metadata(image.image).get("stopReasons", ())
     )
 
 

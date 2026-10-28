@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.captions import passiveLabel
+from computer_use.interaction.read.presentation.compression.captions import passive_label
 from computer_use.interaction.read.presentation.compression.policy import represented, sources
-from computer_use.interaction.read.presentation.tree import valuePreviewLimit
-from computer_use.protocol.primitives import utf16Length
+from computer_use.interaction.read.presentation.tree import VALUE_PREVIEW_LIMIT
+from computer_use.protocol.primitives import utf16_length
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView, ViewNode
@@ -40,12 +40,17 @@ def associate_labels(state: ProjectionView, edit: ProjectionEditor) -> None:
     for label, ids in targets.items():
         for identifier in ids:
             target = state.nodes.get(identifier)
-            if (
-                identifier != label
-                and target is not None
-                and state.scopes.get(identifier) == state.scopes.get(label)
-                and target["role"] not in ("staticText", "application", "window", "sheet", "menuBar")
-            ):
+            matches_identifier = (
+                True
+                if (
+                    identifier != label
+                    and target is not None
+                    and state.scopes.get(identifier) == state.scopes.get(label)
+                    and target["role"] not in ("staticText", "application", "window", "sheet", "menuBar")
+                )
+                else False
+            )
+            if matches_identifier:
                 labels.setdefault(identifier, []).append(label)
     edit.targets(targets)
     consumed, additions = set(), {}
@@ -55,38 +60,42 @@ def associate_labels(state: ProjectionView, edit: ProjectionEditor) -> None:
         if not linked:
             continue
         primary = target["titleRef"] if target.get("titleRef") in linked else linked[0]
-        if not target.get("name") and utf16Length(state.nodes[primary].get("value", "")) <= valuePreviewLimit:
+        if not target.get("name") and utf16_length(state.nodes[primary].get("value", "")) <= VALUE_PREVIEW_LIMIT:
             edit.adopt(target, sources(state.nodes[primary]), "name", " ")
         for label in linked:
             node = state.nodes[label]
-            if utf16Length(node.get("value", "")) > valuePreviewLimit:
+            if utf16_length(node.get("value", "")) > VALUE_PREVIEW_LIMIT:
                 continue
-            parts = [
-                part
-                for part in sources(node)
-                if not any(existing["text"] == part["text"] for existing in target["textSources"])
-            ]
+            parts = []
+            for part in sources(node):
+                if not any(existing["text"] == part["text"] for existing in target["textSources"]):
+                    parts.append(part)
             if parts:
                 edit.adopt(target, parts, "description", " ")
         edit.annotate(target, "linkedLabel", True)
         for label in linked:
             node = state.nodes[label]
-            if (
-                len(state.targets.get(label, {})) == 1
-                and not state.ancestorOf(label, identifier)
-                and passiveLabel(state, edit, node, target, True)
-                and represented(node, target)
-                and all(child["role"] == "link" and child["ref"] != identifier for child in node["children"])
-            ):
+            matches_passive_label = (
+                True
+                if (
+                    len(state.targets.get(label, {})) == 1
+                    and not state.ancestor_of(label, identifier)
+                    and passive_label(state, edit, node, target, True)
+                    and represented(node, target)
+                    and all(child["role"] == "link" and child["ref"] != identifier for child in node["children"])
+                )
+                else False
+            )
+            if matches_passive_label:
                 consumed.add(label)
                 edit.fold(node, target, "label")
                 additions.setdefault(identifier, []).extend(node["children"])
 
-    def removeConsumed(node: NodeView) -> None:
+    def remove_consumed(node: NodeView) -> None:
         edit.children(
             node, [child for child in node["children"] if child["ref"] not in consumed] + additions.get(node["ref"], [])
         )
         for child in node["children"]:
-            removeConsumed(child)
+            remove_consumed(child)
 
-    removeConsumed(state.view)
+    remove_consumed(state.view)

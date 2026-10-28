@@ -10,7 +10,7 @@ from computer_use.interaction.read.presentation.content import DisplayText, json
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.ir import freeze
 from computer_use.pipeline import Contract, Effect, Pass
-from computer_use.protocol.captures import captureMetadata
+from computer_use.protocol.captures import capture_metadata
 
 if TYPE_CHECKING:
     from computer_use.pipeline.core import Control
@@ -23,7 +23,7 @@ def format_desktop_observation(value: DesktopLease, control: Control) -> Desktop
     if result["screenshot"] is not None:
         parts.extend(
             template("\nImage note: {0}", json_value(reason))
-            for reason in captureMetadata(result["screenshot"]).get("stopReasons", ())
+            for reason in capture_metadata(result["screenshot"]).get("stopReasons", ())
         )
     return replace(value, result={**result, "document": DisplayDocument.join(parts, separator="")})
 

@@ -40,6 +40,8 @@ struct NativeKeyboardSelection {
             return unsafeDowncast(value, to: AXTextMarkerRange.self)
         }
         guard let before = numeric(), before.contiguous, before.location == 0, let length = before.length,
+            // The count field is a scalar native character extent, not a collection.
+            // swiftlint:disable:next empty_count
             before.count == 0 || length > 0, let selection = range(), owns(AXTextMarkerRangeCopyStartMarker(selection)),
             owns(AXTextMarkerRangeCopyEndMarker(selection)), let after = numeric(), after.contiguous,
             after.count == before.count, after.location == before.location, after.length == before.length,

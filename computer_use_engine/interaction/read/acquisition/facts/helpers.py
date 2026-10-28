@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.read.acquisition.facts.model import FactProfile, FactScope
@@ -45,12 +46,19 @@ def validate_fact_scope(target: Binding, max_nodes: int, max_depth: int | None) 
                 next="use a supported window capture route; do not infer that the window has no content",
             )
         )
-    if (
-        type(max_nodes) is not int
-        or not 1 <= max_nodes <= 2000
-        or max_depth is not None
-        and (type(max_depth) is not int or not 0 <= max_depth <= 2000)
-    ):
+    invalid_max_nodes = (
+        True
+        # Exact types preserve scalar validation and identity contracts.
+        if (
+            type(max_nodes) is not int  # pylint: disable=unidiomatic-typecheck
+            or not 1 <= max_nodes <= 2000
+            or max_depth is not None
+            # pylint: disable-next=unidiomatic-typecheck
+            and (type(max_depth) is not int or not 0 <= max_depth <= 2000)
+        )
+        else False
+    )
+    if invalid_max_nodes:
         raise ValueError("Invalid native read budget")
 
 
@@ -97,9 +105,10 @@ def plan_fact_profile(scope: FactScope, capabilities: NativeReadCapabilities) ->
     # A root's children page and its independent content relationships
     # are separate read dimensions. Keep the same bounded content profile
     # for App.read and Element.read, including continued children pages.
-    if fields is None and (relations := followed_relations(platform, features)):
-        options["follow_relations"] = list(relations)
     if fields is None:
+        relations = followed_relations(platform, features)
+        if relations:
+            options["follow_relations"] = list(relations)
         # Popup ownership is operation-specific receiver evidence. Query
         # it for a selected editor, not every node of a display read (or
         # older drivers which do not implement nativeVirtualFocus).
@@ -128,12 +137,19 @@ def plan_fact_profile(scope: FactScope, capabilities: NativeReadCapabilities) ->
         else:
             options["advertised_fields"] = [key for key in fields if FIELDS[platform].get(key) == "busy"]
         if platform == "macos" and "nativeActuators" not in features:
-            fields = [
-                key
-                for key in fields
-                if FIELDS[platform].get(key)
-                not in ("editable", "readOnly", "focusWritable", "valueWritable", "textWritable")
-            ]
+
+            def _iter_key(_source_items: Iterator[Any]) -> Iterator[Any]:
+                for key in _source_items:
+                    if FIELDS[platform].get(key) not in (
+                        "editable",
+                        "readOnly",
+                        "focusWritable",
+                        "valueWritable",
+                        "textWritable",
+                    ):
+                        yield key
+
+            fields = list(_iter_key(iter(fields)))
         if "nativeScroll" not in features:
             fields = [key for key in fields if FIELDS[platform].get(key) != "orientation"]
         if not {"nativeTableFacts", "nativeAdvertisedFields"} <= set(features):

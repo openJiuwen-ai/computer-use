@@ -6,8 +6,9 @@ editor, never the input graph or execution ports as mutable shared state.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from computer_use.interaction.read.presentation.compression.model import (
     CompressionRun,
@@ -52,12 +53,12 @@ from computer_use.interaction.read.presentation.compression.passes.validate_proj
     stage as validate_projection,
 )
 from computer_use.interaction.read.presentation.ir import ProjectionInput
-from computer_use.interaction.read.presentation.tree import isWindow
+from computer_use.interaction.read.presentation.tree import is_window
 from computer_use.pipeline import Contract, Effect, Pass, Pipeline, Sequence
 from computer_use.pipeline.core import Node
 
 if TYPE_CHECKING:
-    from typing import Any, Callable
+    from typing import Callable
 
     from computer_use.interaction.read.presentation.ir import (
         ProjectionEditor,
@@ -103,41 +104,53 @@ class Rule:
         )
 
 
-RULES = {
-    step: Rule(step, reads, writes)
-    for step, reads, writes in (
-        (
-            associate_labels,
-            ("label relations", "source scopes"),
-            ("caption fields", "label elisions", "ordered children"),
-        ),
-        (promote_description, ("description", "control semantics"), ("caption fields",)),
-        (
-            merge_editors,
-            ("control members", "values", "selection"),
-            ("selection fields", "editor elisions", "ordered children"),
-        ),
-        (
-            merge_control_labels,
-            ("control members", "label facts"),
-            ("caption fields", "label elisions", "ordered children"),
-        ),
-        (merge_repeated_text, ("whole caption fields",), ("caption sources", "label elisions", "ordered children")),
-        (merge_region_labels, ("heading children",), ("caption fields", "label elisions", "ordered children")),
-        (flatten_redundant_hierarchy, ("layout boundaries",), ("splice elisions", "ordered children")),
-        (prune_layout, ("layout boundaries",), ("splice elisions",)),
-        (
-            prune_empty_rows,
+def _iter_step(_source_items: Iterator[Any]) -> Iterator[Any]:
+    for step, reads, writes in _source_items:
+        yield (step, Rule(step, reads, writes))
+
+
+RULES = dict(
+    _iter_step(
+        iter(
             (
-                "row state",
-                "focus",
-            ),
-            ("empty elisions",),
-        ),
-        (reconstruct_outlines, ("disclosure relations",), ("ordered children", "outline depth")),
-        (finalize_sources, ("source routes", "elisions"), ("final source destinations",)),
+                (
+                    associate_labels,
+                    ("label relations", "source scopes"),
+                    ("caption fields", "label elisions", "ordered children"),
+                ),
+                (promote_description, ("description", "control semantics"), ("caption fields",)),
+                (
+                    merge_editors,
+                    ("control members", "values", "selection"),
+                    ("selection fields", "editor elisions", "ordered children"),
+                ),
+                (
+                    merge_control_labels,
+                    ("control members", "label facts"),
+                    ("caption fields", "label elisions", "ordered children"),
+                ),
+                (
+                    merge_repeated_text,
+                    ("whole caption fields",),
+                    ("caption sources", "label elisions", "ordered children"),
+                ),
+                (merge_region_labels, ("heading children",), ("caption fields", "label elisions", "ordered children")),
+                (flatten_redundant_hierarchy, ("layout boundaries",), ("splice elisions", "ordered children")),
+                (prune_layout, ("layout boundaries",), ("splice elisions",)),
+                (
+                    prune_empty_rows,
+                    (
+                        "row state",
+                        "focus",
+                    ),
+                    ("empty elisions",),
+                ),
+                (reconstruct_outlines, ("disclosure relations",), ("ordered children", "outline depth")),
+                (finalize_sources, ("source routes", "elisions"), ("final source destinations",)),
+            )
+        )
     )
-}
+)
 
 
 def apply_rule(step: Callable[..., Any], view: ProjectionView, edit: ProjectionEditor, *arguments: object) -> Any:
@@ -215,8 +228,8 @@ class CompressionTraversal(Node["CompressionRun", "CompressionRun"]):
             edit.roots(visit(view.view))
         if "app" in view.context:
             edit.roots(
-                [node for node in view.roots if isWindow(node)]
-                + [node for node in view.roots if not isWindow(node) and node["role"] != "menuBar"]
+                [node for node in view.roots if is_window(node)]
+                + [node for node in view.roots if not is_window(node) and node["role"] != "menuBar"]
                 + [node for node in view.roots if node["role"] == "menuBar"]
             )
         return run

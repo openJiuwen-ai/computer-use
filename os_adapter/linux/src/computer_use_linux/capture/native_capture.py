@@ -242,7 +242,12 @@ class NativeCapture:
         until = min(ctx.deadline - 0.02, time.monotonic() + 0.2)
         while True:
             current = self.keyboard_snapshot(ctx)
-            if current is not None and current in image.windows and (not pointer or current == expected):
+            matches_current = (
+                True
+                if current is not None and current in image.windows and (not pointer or current == expected)
+                else False
+            )
+            if matches_current:
                 destination = current
                 break
             if not pointer or expected is None or time.monotonic() >= until:

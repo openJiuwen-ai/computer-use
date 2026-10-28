@@ -41,6 +41,8 @@ def known_metadata(field: str | None, value: Any) -> bool:
         # lacks a currently available input route.
         return False
     if field in _BOOLEAN_METADATA:
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         return type(value) is bool
     if field == "orientation":
         return value in ("horizontal", "vertical")
@@ -64,19 +66,29 @@ def display_copy(node: NodeView) -> Record:
         node: Source/projected node in this exact view; its native identity is unchanged.
     """
     result = {**node, "_factBacked": True}
-    if (
-        not editing(node)
-        and not node.get("focused")
-        and not node.get("selectedText")
-        and node.get("selectionRange") == dict(location=0, length=0)
-    ):
+    matches_editing = (
+        True
+        if (
+            not editing(node)
+            and not node.get("focused")
+            and not node.get("selectedText")
+            and node.get("selectionRange") == dict(location=0, length=0)
+        )
+        else False
+    )
+    if matches_editing:
         result.pop("selectionRange")
-    if (
-        node.get("disclosureLevel") == 0
-        and node["role"] not in ("outline", "row", "disclosureTriangle")
-        and not node.get("disclosedBy")
-        and not node.get("expanded")
-        and not node.get("disclosing")
-    ):
+    matches_node = (
+        True
+        if (
+            node.get("disclosureLevel") == 0
+            and node["role"] not in ("outline", "row", "disclosureTriangle")
+            and not node.get("disclosedBy")
+            and not node.get("expanded")
+            and not node.get("disclosing")
+        )
+        else False
+    )
+    if matches_node:
         result.pop("disclosureLevel")
     return result

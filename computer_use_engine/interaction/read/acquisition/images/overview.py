@@ -14,23 +14,23 @@ from functools import cached_property
 from io import BytesIO
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
-
 from computer_use.interaction.read.acquisition.components.support import collect_component
 from computer_use.interaction.read.acquisition.directory.service import select_surface
 from computer_use.interaction.read.acquisition.images.capture import NativeImages, WindowImage
 from computer_use.interaction.read.presentation.content import DisplayText, join, json_value, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.protocol.captures import captureMetadata, decodeCapture
+from computer_use.protocol.captures import capture_metadata, decode_capture
 from computer_use.protocol.png import PNG
 from computer_use.protocol.primitives import frozen
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 if TYPE_CHECKING:
     from typing import Any, Mapping, Sequence
 
     from computer_use.interaction.records import Remaining
     from computer_use.native.port import NativePort
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts, Record
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import Record
 
 
 @dataclass(frozen=True)
@@ -107,6 +107,8 @@ def compose_overview(
         scope: Current traversal or execution scope; independent windows remain boundaries.
         max_dimension: Maximum image edge length in pixels, preserving aspect ratio.
     """
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if not 1 <= len(previews) <= 6 or type(max_dimension) is not int or not 320 <= max_dimension <= 1600:
         raise ValueError("Invalid overview layout budget")
     columns = min(3, len(previews))
@@ -131,13 +133,18 @@ def compose_overview(
             error=preview.error,
         )
         if preview.image is not None:
-            metadata = captureMetadata(preview.image.image)
-            if (
-                metadata is None
-                or metadata["kind"] != "window"
-                or metadata["id"] != preview.image.target.capture
-                or metadata["scope"] != preview.image.target.surface
-            ):
+            metadata = capture_metadata(preview.image.image)
+            invalid_metadata = (
+                True
+                if (
+                    metadata is None
+                    or metadata["kind"] != "window"
+                    or metadata["id"] != preview.image.target.capture
+                    or metadata["scope"] != preview.image.target.surface
+                )
+                else False
+            )
+            if invalid_metadata:
                 raise ValueError("Overview input is not an independently observed window capture")
             # The native protocol already validated PNG dimensions and framing.
             # Decode one image at a time and retain only source metadata below.
@@ -196,7 +203,7 @@ def compose_overview(
             if limited
             else {}
         )
-        image = decodeCapture(
+        image = decode_capture(
             dict(
                 id="overview:" + uuid.uuid4().hex,
                 kind="overview",

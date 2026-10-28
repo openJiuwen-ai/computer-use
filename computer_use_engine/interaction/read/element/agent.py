@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from computer_use.diagnostics import localFailure
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.presentation.content import template
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
@@ -58,13 +58,15 @@ class AgentElementReadPipeline:
         target = snapshot["binding"]
         if cursor is not None:
             if not re.fullmatch(r"p[1-9][0-9]*", cursor):
-                raise localFailure("this cursor is not a tree continuation", "use the cursor printed by Element.read()")
+                raise local_failure(
+                    "this cursor is not a tree continuation", "use the cursor printed by Element.read()"
+                )
             page = controller.pages.resolve(cursor, target)
             if "nativeRelationPages" in controller.transport.capabilities:
                 options: Record = dict(relation_page=page)
             else:
                 if page["property"] not in ("AXChildren", "Children", "children"):
-                    raise localFailure(
+                    raise local_failure(
                         "this provider cannot page that native relation",
                         "read its explicit source subtree",
                         "mode_unsupported",
@@ -81,8 +83,11 @@ class AgentElementReadPipeline:
         )
         (tree,) = controller.reader.number_snapshots((tree,))
         state = controller.state(ui)
+        # The pipeline shares retained bindings with their owning service.
+        # pylint: disable-next=protected-access
         controller._remember(state, target, tree)
-        if (identity := snapshot.get("window_identity")) is not None:
+        identity = snapshot.get("window_identity")
+        if identity is not None:
             for ref in tree.refs:
                 state.refs[ref]["window_identity"] = identity
         ref = next(ref for ref, node in tree.refs.items() if node == target.node)

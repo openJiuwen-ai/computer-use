@@ -83,6 +83,8 @@ class _ReadCallBody(Node["ReadCall", "AppObservation | MenuAppObservation"]):
 
         async def menu(value: ApplicationSelection, control: Control) -> MenuAppObservation:
             request = value.request
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
             return await services._menu_observation(
                 value.application,
                 value.selection,
@@ -176,6 +178,7 @@ class ApplicationObservationPipeline(Node["ReadRequest", "AppObservation | MenuA
             return await self.body.arun(ReadInvocation(request, receipt), control)
         except BaseException as error:
             if receipt.launch is not None:
+                # pylint: disable-next=protected-access
                 annotated = self.services._after_launch(error, receipt.launch)
                 if annotated is not error:
                     raise annotated from error

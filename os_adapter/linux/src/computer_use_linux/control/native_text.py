@@ -7,6 +7,7 @@ window immediately before each mutation and journals partial/unknown effects.
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.protocol import Failure, fields, integer, require, string
 from computer_use_linux.control.native_target import NativeTarget
@@ -30,6 +31,16 @@ def text_intent(value):
     return deepcopy(value)
 
 
+class TextTargetState(NamedTuple):
+    """Checked recipient and the capabilities used for text dispatch."""
+
+    obj: Any
+    enabled: bool
+    editable: bool
+    interfaces: list[str] | tuple[str, ...]
+    role: str
+
+
 class NativeText:
     # Replacement, deletion and insertion use the same local mutation pipeline;
     # deletion is journalled partial before a second guarded insertion.
@@ -46,7 +57,7 @@ class NativeText:
             operation, command, ctx
         )
 
-    def guard(self, target, within, ctx, selection=None, *, check=False):
+    def guard(self, target, within, ctx, selection=None, *, check=False) -> TextTargetState:
         target, within = self.target.selected(target, within, selection, ctx, check=check, require_editable=True)
         obj, states, interfaces, role, enabled = self.target.read(target, within, ctx)
         editable = (
@@ -55,12 +66,14 @@ class NativeText:
             and not self.target.read_only(states)
             and role != "password text"
         )
-        return obj, enabled, editable, interfaces, role
+        return TextTargetState(obj, enabled, editable, interfaces, role)
 
     def selection(self, obj):
         count = self.call("Text", "get_character_count", obj)
         integer(count, 0, 2147483647)
         selected = self.call("Text", "get_n_selections", obj)
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(selected) is not int or selected not in (0, 1):
             raise Failure("The control does not expose one unambiguous insertion point.", "input_unavailable")
         if selected:
@@ -86,14 +99,14 @@ class NativeText:
             try:
                 codec = text_codec(self.ax, obj)
                 codec.insertion_length(operation.intent["parameters"]["text"])
-            except (Failure, self.ax.GLib.Error):
+            except (Failure, self.ax.glib.Error):
                 ctx.check()
                 supported = False
         if supported and kind == "insert":
             try:
                 self.selection(obj)
                 selection_known = "yes"
-            except (Failure, self.ax.GLib.Error):
+            except (Failure, self.ax.glib.Error):
                 ctx.check()
                 ready = False
                 pending.append("selection")

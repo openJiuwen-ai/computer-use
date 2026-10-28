@@ -7,10 +7,11 @@ native action catalogues. Unknown controls and meaningful state stay visible.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 
 from computer_use.interaction.read.facts.groups import reference_set
-from computer_use.interaction.read.presentation.formatting import jsonString
+from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.interaction.read.presentation.policy import SUPPORTING_ACTIONS, editing
 
 if TYPE_CHECKING:
@@ -115,10 +116,10 @@ def observation_warnings(snapshot: SnapshotFacts, *, hint: str = "see details") 
     covered_properties = set()
 
     def label(value: str) -> str:
-        return value if re.fullmatch(r"[\w.:-]+", value) else jsonString(value)
+        return value if re.fullmatch(r"[\w.:-]+", value) else json_string(value)
 
     def detail(value: Mapping[str, Any]) -> str:
-        return ": " + jsonString(value["detail"]) if value.get("detail") else ""
+        return ": " + json_string(value["detail"]) if value.get("detail") else ""
 
     for node in snapshot.facts["nodes"]:
         for key, value in node["fieldStatus"].items():
@@ -144,12 +145,18 @@ def observation_warnings(snapshot: SnapshotFacts, *, hint: str = "see details") 
         )
         if covered:
             covered_properties.add(relation["property"])
-        if (
-            relation["state"] in ("error", "timeout", "truncated")
-            or relation["certainty"] == "conflicting"
-            or relation["state"] not in ("absent", "unsupported")
-            and (relation.get("detail") or relation["certainty"] == "unknown")
-        ) and not covered:
+        matches_covered = (
+            True
+            if (
+                relation["state"] in ("error", "timeout", "truncated")
+                or relation["certainty"] == "conflicting"
+                or relation["state"] not in ("absent", "unsupported")
+                and (relation.get("detail") or relation["certainty"] == "unknown")
+            )
+            and not covered
+            else False
+        )
+        if matches_covered:
             groups.setdefault(
                 label(relation["property"])
                 + " ("
@@ -184,17 +191,29 @@ def observation_warnings(snapshot: SnapshotFacts, *, hint: str = "see details") 
     for (members, suffix), properties in shared.items():
         message = "; ".join(properties) + suffix if properties[0] is not None else suffix
         warnings.append(members + ": " + message)
+
+    def _iter_line(_source_items: Iterator[Any]) -> Iterator[Any]:
+        for line in _source_items:
+            is_uncovered_gap = (
+                True
+                if (
+                    " contains " in line
+                    or " has no expanded containment path " in line
+                    or line.startswith("Collection:")
+                )
+                and line
+                not in {"Collection: " + json_string("partial native relation: " + prop) for prop in covered_properties}
+                else False
+            )
+            if is_uncovered_gap:
+                yield line
+
     # Shared/cyclic containment and disconnected roots are actionable gaps.
     # Uncollected ancestor/window endpoints alone do not mean missing content;
     # incomplete child branches already carry a local coverage annotation.
-    warnings.extend(
-        line
-        for line in snapshot.annotations
-        if (" contains " in line or " has no expanded containment path " in line or line.startswith("Collection:"))
-        and line not in {"Collection: " + jsonString("partial native relation: " + prop) for prop in covered_properties}
-    )
+    warnings.extend(_iter_line(iter(snapshot.annotations)))
     return ["Observation notes (" + hint + "):\n" + "\n".join("\t" + line for line in warnings)] if warnings else []
 
 
 if TYPE_CHECKING:
-    from typing import Any, Mapping
+    from typing import Mapping

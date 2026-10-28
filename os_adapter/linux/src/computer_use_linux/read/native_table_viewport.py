@@ -7,6 +7,17 @@ complete visibility, ownership, keyboard focus, or hit-test authorization.
 """
 
 import math
+from typing import Any, NamedTuple
+
+
+class TableViewportRead(NamedTuple):
+    """Sampled viewport cells with coverage limits and geometry provenance."""
+
+    objects: list[Any]
+    total: int
+    gap: str
+    geometry: tuple[Any, Any, Any]
+    detail: str
 
 
 class TableViewport:
@@ -58,6 +69,8 @@ class TableViewport:
         ):
             return None
         span = self.call("TableCell", "get_row_column_span", cell)
+        # Exact types preserve scalar validation and identity contracts.
+        # pylint: disable-next=unidiomatic-typecheck
         if not isinstance(span, (list, tuple)) or len(span) != 4 or any(type(v) is not int for v in span):
             return None
         if not 0 <= span[0] < shape[0] or not 0 <= span[1] < shape[1] or not 1 <= span[2] <= shape[0] - span[0]:
@@ -130,7 +143,7 @@ class TableViewport:
         self.notes.append("Viewport boundary sampling reached its 64-cell budget.")
         return row, column
 
-    def read(self, table, limit, offset=0):
+    def read(self, table, limit, offset=0) -> TableViewportRead:
         from computer_use_linux.contracts.protocol import Failure
         from computer_use_linux.read.native_facts import FieldUnavailable, failure_status
 
@@ -141,7 +154,7 @@ class TableViewport:
         if frame is None:
             raise FieldUnavailable("absent", "Native table viewport geometry is unavailable.")
         if not all(shape):
-            return [], 0, "", (shape, frame, None), "Native table has no coordinate slots."
+            return TableViewportRead([], 0, "", (shape, frame, None), "Native table has no coordinate slots.")
 
         xs = sorted(set((math.ceil(frame[0]), math.floor(frame[0] + frame[2] / 2), math.ceil(frame[0] + frame[2]) - 1)))
         ys = sorted(set((math.ceil(frame[1]), math.floor(frame[1] + frame[3] / 2), math.ceil(frame[1] + frame[3]) - 1)))
@@ -187,7 +200,7 @@ class TableViewport:
                 objects.append(cell)
             if self.facts.table_dimensions(table) != shape or self.rect(table) != frame:
                 gap = "Native table geometry or dimensions changed during sampling."
-        except (FieldUnavailable, Failure, self.ax.GLib.Error) as error:
+        except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
             status = failure_status(error)
             gap = "Viewport candidate prefix incomplete: " + status.get("detail", status["state"])
-        return objects, total, gap, (shape, frame, region), detail
+        return TableViewportRead(objects, total, gap, (shape, frame, region), detail)

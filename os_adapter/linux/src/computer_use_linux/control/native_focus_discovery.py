@@ -121,6 +121,8 @@ class NativeFocusDiscovery:
             yield obj
             count = self._call("get_child_count", obj)
             require(
+                # Exact types preserve scalar validation and identity contracts.
+                # pylint: disable-next=unidiomatic-typecheck
                 type(count) is int and 0 <= count <= 2147483647,
                 "The native focused-object search is incomplete.",
                 "input_unavailable",
@@ -144,7 +146,7 @@ class NativeFocusDiscovery:
                     if path is not None and self.is_focused(event):
                         candidates[self._key(event)] = event, path
                         self.candidate_seen = True
-            except (Failure, self.ax.GLib.Error):
+            except (Failure, self.ax.glib.Error):
                 self.ax.ctx.check()
         if candidates and not probe:
             self.source = "event"
@@ -153,7 +155,7 @@ class NativeFocusDiscovery:
             self._unique(candidates)  # Known independent focus is already a conflict.
         try:
             sources = None if subtree is not None else self._collection()
-        except self.ax.GLib.Error:
+        except self.ax.glib.Error:
             self.ax.ctx.check()
             sources = None
         self.source = "tree" if sources is None else "collection"
@@ -169,7 +171,7 @@ class NativeFocusDiscovery:
                     if key not in candidates:
                         try:
                             path = self.focus_path(obj)
-                        except (Failure, self.ax.GLib.Error) as error:
+                        except (Failure, self.ax.glib.Error) as error:
                             raise Failure(
                                 "The focused candidate has no confirmed working-window path: " + str(error),
                                 "stale_target"
@@ -206,7 +208,7 @@ class NativeFocusDiscovery:
                     break
         except NativeFocusConflict:
             raise
-        except (Failure, self.ax.GLib.Error) as error:
+        except (Failure, self.ax.glib.Error) as error:
             if candidates:
                 raise Failure(
                     "The initial focused-object evidence became incomplete: " + str(error), "input_unavailable"

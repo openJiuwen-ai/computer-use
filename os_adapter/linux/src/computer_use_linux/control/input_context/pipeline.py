@@ -30,12 +30,17 @@ class NativeInputContextPipeline:
         if unit is self.units.text and getattr(self.desktop, "can_input", False):
             options = {} if selected is None else dict(selection=selected)
             result = collect_keyboard_contracts(scope, options, result, ctx, self.units.typed_text)
-        if (
-            selected is None
-            and scope.target["capture"] is None
-            and scope.operation.intent["kind"] == "click"
-            and "nativeElementPointer" in self.capabilities
-        ):
+        matches_selected = (
+            True
+            if (
+                selected is None
+                and scope.target["capture"] is None
+                and scope.operation.intent["kind"] == "click"
+                and "nativeElementPointer" in self.capabilities
+            )
+            else False
+        )
+        if matches_selected:
             result = collect_pointer_contracts(scope, result, ctx, self.units.element_pointer)
         result = attach_selected_context(scope.target, selected, result)
         if scope.operation.click_contract == "v1":

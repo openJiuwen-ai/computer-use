@@ -14,11 +14,15 @@ if TYPE_CHECKING:
 async def collect_menu_level(level: MenuLevel, control: Control) -> MenuLevelFacts:
     """Read the current parent's child menu identities and names within the menu scope."""
     query = level.request.query
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     siblings = await query._menu_children(level.current, level.ancestors)
     names = []
     for token in siblings:
+        # pylint: disable-next=protected-access
         if await query._role(token) in ("window", "sheet"):
             query.fail("observation_incomplete", "A menu level crosses an independent window boundary.")
+        # pylint: disable-next=protected-access
         names.append((token, await query._name(token)))
     return MenuLevelFacts(level, tuple(names))
 

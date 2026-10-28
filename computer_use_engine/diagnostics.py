@@ -2,22 +2,25 @@ from datetime import datetime, timezone
 
 from computer_use.errors import ComputerUseError
 
-sdkVersion = "0.0.1"
+SDK_VERSION = "0.0.1"
+# Private variables hold mutable session state.
+# pylint: disable-next=invalid-name
 _handler = None
+# pylint: disable-next=invalid-name
 _structured = False
 
 
-def setDiagnosticHandler(handler):
+def set_diagnostic_handler(handler):
     global _handler
     _handler = handler
 
 
-def recordStructuredObservations(enabled):
+def record_structured_observations(enabled):
     global _structured
     _structured = enabled
 
 
-def wantsStructuredObservations():
+def wants_structured_observations():
     return _structured
 
 
@@ -34,7 +37,7 @@ def diagnostic(event):
         pass  # Diagnostic failure must not change or replay desktop actions.
 
 
-def pipelineDiagnostic(event):
+def pipeline_diagnostic(event):
     """Serialize only the runner's small control fields, never IR/body/pixels."""
     diagnostic(
         dict(
@@ -52,7 +55,9 @@ def pipelineDiagnostic(event):
     )
 
 
-def localFailure(message, next, code="invalid_request", target="request"):
+# The error contract exposes a next field and accepts the matching keyword.
+# pylint: disable-next=redefined-builtin
+def local_failure(message, next, code="invalid_request", target="request"):
     failure = dict(code=code, target=target, effect="none", detail=message, next=next)
     error = ComputerUseError(failure)
     diagnostic(dict(kind="local_error", stage="validation", error=str(error), failure=failure))

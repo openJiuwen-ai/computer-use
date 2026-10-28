@@ -29,7 +29,7 @@ _DEPTHS = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6: (8, 
 _CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
 
 
-def decodePNG(value) -> PNG:
+def decode_png(value) -> PNG:
     def fail():
         raise ValueError("protocol: invalid PNG Base64 or corrupt PNG data")
 
@@ -53,11 +53,11 @@ def decodePNG(value) -> PNG:
         if end > len(data) or ended_value:
             fail()
         # Buffer.toString('ascii') masks the high bit in the existing decoder.
-        kind = bytes(v & 127 for v in data[offset + 4 : offset + 8]).decode("ascii")
-        payload = data[offset + 8 : end - 4]
+        kind = bytes(v & 127 for v in data[slice(offset + 4, offset + 8)]).decode("ascii")
+        payload = data[slice(offset + 8, end - 4)]
         if (
             re.fullmatch(r"[A-Za-z]{4}", kind) is None
-            or zlib.crc32(data[offset + 4 : end - 4]) != struct.unpack_from(">I", data, end - 4)[0]
+            or zlib.crc32(data[slice(offset + 4, end - 4)]) != struct.unpack_from(">I", data, end - 4)[0]
         ):
             fail()
         if offset == 8 and kind != "IHDR":
@@ -67,19 +67,29 @@ def decodePNG(value) -> PNG:
                 fail()
             width, height = struct.unpack_from(">II", payload)
             depth, color, interlace = payload[8], payload[9], payload[12]
-            if (
-                not width
-                or not height
-                or width > 32768
-                or height > 32768
-                or depth not in _DEPTHS.get(color, ())
-                or payload[10]
-                or payload[11]
-                or interlace > 1
-            ):
+            matches_width = (
+                True
+                if (
+                    not width
+                    or not height
+                    or width > 32768
+                    or height > 32768
+                    or depth not in _DEPTHS.get(color, ())
+                    or payload[10]
+                    or payload[11]
+                    or interlace > 1
+                )
+                else False
+            )
+            if matches_width:
                 fail()
         elif kind == "PLTE":
-            if palette_value or chunks or not length or length % 3 or length > 768 or color in (0, 4):
+            matches_palette_value = (
+                True
+                if palette_value or chunks or not length or length % 3 or length > 768 or color in (0, 4)
+                else False
+            )
+            if matches_palette_value:
                 fail()
             palette_value = True
         elif kind == "IDAT":
@@ -128,7 +138,7 @@ def decodePNG(value) -> PNG:
     return PNG(data)
 
 
-def pngSize(png) -> dict[str, int]:
+def png_size(png) -> dict[str, int]:
     if len(png) < 24 or bytes(png[:8]) != _SIGNATURE:
         raise ValueError("protocol: invalid PNG header")
     width, height = struct.unpack_from(">II", png, 16)

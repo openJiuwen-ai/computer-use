@@ -28,13 +28,18 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         """
         intent, target, operation, remaining = parts(frame)
         facts = cast("Facts", frame.facts)
-        if (
-            intent.kind == "scroll"
-            and facts.actuator is not None
-            and (facts.actuator.relation == "scrollPointer")
-            and (facts.input.pointer_hit not in (None, facts.actuator.node))
-            and needs_pointer_member(facts, intent, frame.request.history)
-        ):
+        matches_needs_pointer_member = (
+            True
+            if (
+                intent.kind == "scroll"
+                and facts.actuator is not None
+                and (facts.actuator.relation == "scrollPointer")
+                and (facts.input.pointer_hit not in (None, facts.actuator.node))
+                and needs_pointer_member(facts, intent, frame.request.history)
+            )
+            else False
+        )
+        if matches_needs_pointer_member:
             query = ScrollPointerQuery(native, operation, target, remaining)
             selected = await query.resolve(facts.input.pointer_hit)
             if selected is not None:

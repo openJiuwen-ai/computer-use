@@ -3,6 +3,8 @@
 
 def process_birth(pid):
     """A live process generation; an exited zombie is not a running instance."""
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if type(pid) is not int or not 0 < pid <= 2147483647:
         return ""
     try:

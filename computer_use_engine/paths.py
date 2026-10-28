@@ -7,14 +7,15 @@ from functools import lru_cache
 from pathlib import Path
 
 
-def checkoutRoot():
+def checkout_root():
     root = Path(__file__).resolve().parents[1]
     return root if (root / "pyproject.toml").is_file() and (root / "os_adapter").is_dir() else None
 
 
 @lru_cache(maxsize=1)
-def repositoryRoot():
-    if (root := checkoutRoot()) is not None:
+def repository_root():
+    root = checkout_root()
+    if root is not None:
         return root
     # Wheels carry build inputs. Materialize an atomic, versioned user-owned
     # working tree so native builds never write into system site-packages.
@@ -40,8 +41,8 @@ def repositoryRoot():
             shutil.rmtree(temporary)
 
 
-def nativeDriver(platform=None, root=None):
-    platform, root = platform or sys.platform, Path(root) if root is not None else repositoryRoot()
+def native_driver(platform=None, root=None):
+    platform, root = platform or sys.platform, Path(root) if root is not None else repository_root()
     if platform == "darwin":
         return dict(
             command=str(root / "os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver"),

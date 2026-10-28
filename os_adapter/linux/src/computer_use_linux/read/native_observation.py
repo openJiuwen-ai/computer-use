@@ -76,18 +76,12 @@ def _field(name: str, node: dict[str, Any]) -> dict[str, Any]:
 def _actions(catalogue: dict[str, Any]) -> dict[str, Any]:
     qualifiers = {key: catalogue[key] for key in ("state", "total", "detail") if key in catalogue}
     complete = catalogue["state"] == "complete"
-    items = [
-        dict(
-            nativeType="toolkit.action",
-            data=dict(
-                fields=[
-                    [key, _status_value(item) if key == "descriptionStatus" else value(item)]
-                    for key, item in action.items()
-                ]
-            ),
-        )
-        for action in catalogue["items"]
-    ]
+    items = []
+    for action in catalogue["items"]:
+        fields = [
+            [key, _status_value(item) if key == "descriptionStatus" else value(item)] for key, item in action.items()
+        ]
+        items.append(dict(nativeType="toolkit.action", data=dict(fields=fields)))
     read = dict(complete=complete, details=details(**qualifiers))
     if not complete:
         status = catalogue.get("failure", {key: catalogue[key] for key in ("state", "detail") if key in catalogue})

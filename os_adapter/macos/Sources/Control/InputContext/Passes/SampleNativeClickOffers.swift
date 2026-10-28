@@ -17,7 +17,7 @@ import ApplicationServices
             "windowRoute": "unknown", "pointerRoute": "unknown"
         ]
         var enabled: Bool?, foreground = false, role: String?, complete = false, menu = false
-        func pointerOffers(_ pointer: NativePointerUnit, at point: CGPoint) throws {
+        func pointerOffers(_ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false) throws {
             try pointer.validateWindowIdentity()
             foreground = pointer.foregroundWindow(at: point)
             input["geometryCurrent"] = "yes"
@@ -30,7 +30,7 @@ import ApplicationServices
             let directed = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
                 admission: directedAvailable
-                    ? (pointer.ready(at: point, delivery: .windowDirected) ? .ready : .preparationRequired)
+                    ? (!exposure && pointer.ready(at: point, delivery: .windowDirected) ? .ready : .preparationRequired)
                     : .unavailable,
                 reason: BackgroundTarget.isExclusive
                     ? "Exclusive mode uses desktop mouse input."
@@ -42,9 +42,11 @@ import ApplicationServices
             try RequestDiagnostics.checkCancellation()
             let system = NativeClickContract(
                 routeFamily: "macos.hid.v1", delivery: .systemPointer,
-                admission: systemReady ? .ready : .preparationRequired,
-                reason: systemReady ? nil : "The exact target window needs authorized foreground preparation.",
-                preparationOptions: systemReady ? [] : ["foreground"], backgroundFamily: "macos.windowDirected.v1",
+                admission: systemReady && !exposure ? .ready : .preparationRequired,
+                reason: exposure ? "The original element needs to be scrolled into view."
+                    : systemReady ? nil : "The exact target window needs authorized foreground preparation.",
+                preparationOptions: systemReady ? (exposure ? ["background"] : []) : ["foreground"],
+                backgroundFamily: "macos.windowDirected.v1",
                 backgroundUnavailable: !transport || !directedAvailable)
             for offer in foreground ? [system, directed] : [directed, system] {
                 declarations.declareClick(.pointer(.click), offer: offer)
@@ -121,6 +123,16 @@ import ApplicationServices
                 }
                 do {
                     let unit = try access.units.elementPointerUnit(binding.wire, actuator: plan.actuator)
+                    if let exposure = try unit.exposure() {
+                        try pointerOffers(
+                            NativePointerUnit(
+                                application: unit.application, window: exposure.mapping, nativeWindow: unit.window),
+                            at: exposure.point, exposure: true)
+                        return NativeSampledInput(
+                            plan: plan, declarations: declarations, enabled: enabled,
+                            foreground: foreground, input: input,
+                            nativeRole: role, actionsComplete: complete, applicationMenu: menu)
+                    }
                     let sampled = try unit.observedGeometry(allowWindowPreparation: true)
                     if let hit = sampled.hit {
                         if CFEqual(hit, unit.element) {

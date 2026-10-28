@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.native.contracts import VirtualReceiver
 from computer_use.native.query.graph import UNKNOWN, NativeGraph
-from computer_use.native.semantics import EDITING_FIELDS, EDITOR_BOUNDARIES, editing_evidence, roleName
+from computer_use.native.semantics import EDITING_FIELDS, EDITOR_BOUNDARIES, editing_evidence, role_name
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
@@ -34,7 +34,7 @@ class VirtualFocusQuery(NativeGraph):
 
     async def _role(self, node: str) -> str | object:
         value = await self._field(node, "role")
-        return UNKNOWN if value is UNKNOWN or value is None else roleName(self.platform, value)
+        return UNKNOWN if value is UNKNOWN or value is None else role_name(self.platform, value)
 
     async def resolve(self, focused: str | None) -> VirtualReceiver | None:
         """Find one explicitly owned or linked popup whose active item matches reported focus."""

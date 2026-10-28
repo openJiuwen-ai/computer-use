@@ -7,13 +7,14 @@ module never resolves an execution target or acquires new native facts.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from computer_use.interaction.read.presentation.fallback import literal
 
 if TYPE_CHECKING:
-    from typing import Any, Iterable, Mapping
+    from typing import Iterable, Mapping
 
     from computer_use.interaction.read.presentation.ir import FactKey, ProjectionInput, ProjectionResult
     from computer_use.interaction.read.presentation.records import NodeView, RenderedTree
@@ -184,14 +185,18 @@ def account_fields(
             elif source["representation"] == "projection":
                 projected = []
                 for part in source["projections"]:
+
+                    def _iter_claim(_source_items: Iterator[Any], projection_part: Any) -> Iterator[Any]:
+                        for claim in _source_items:
+                            if (
+                                claim["kind"] != "continuation"
+                                and type(claim["value"]) is type(projection_part["normalized"])
+                                and claim["value"] == projection_part["normalized"]
+                            ):
+                                yield claim
+
                     claim = next(
-                        (
-                            claim
-                            for claim in claims.get((ref, part["field"]), ())
-                            if claim["kind"] != "continuation"
-                            and type(claim["value"]) is type(part["normalized"])
-                            and claim["value"] == part["normalized"]
-                        ),
+                        _iter_claim(iter(claims.get((ref, part["field"]), ())), part),
                         None,
                     )
                     if claim is None:
@@ -248,13 +253,18 @@ def validate_source_emissions(rendered: RenderedResult, members: Iterable[str]) 
     for emission in rendered.source_emissions:
         fact = emission.fact
         native = source.native_nodes.get(fact.source)
-        if (
-            fact.source not in members
-            or native is None
-            or fact.attribute not in native
-            or native[fact.attribute] != emission.value
-            or type(native[fact.attribute]) is not type(emission.value)
-        ):
+        invalid_members = (
+            True
+            if (
+                fact.source not in members
+                or native is None
+                or fact.attribute not in native
+                or native[fact.attribute] != emission.value
+                or type(native[fact.attribute]) is not type(emission.value)
+            )
+            else False
+        )
+        if invalid_members:
             raise ValueError("Rendered field provenance has no matching source fact")
         if emission.target not in members:
             raise ValueError("Rendered field provenance crosses the native branch")

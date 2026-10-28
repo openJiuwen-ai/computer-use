@@ -73,11 +73,10 @@ def select_application(directory, selector):
     matches = [item for item in entries if selector in (item["identifier"], item["path"])]
     if not matches:
         name = selector.strip().casefold()
-        matches = [
-            item
-            for item in entries
-            if any(value.casefold() == name for value in [item["displayName"], *item.get("aliases", [])])
-        ]
+        matches = []
+        for item in entries:
+            if any(value.casefold() == name for value in [item["displayName"], *item.get("aliases", [])]):
+                matches.append(item)
     active = [item for item in matches if item["isRunning"]]
     matches = active or matches
     if directory["stopReasons"]:
@@ -93,7 +92,7 @@ def select_application(directory, selector):
                 "No observed running window matches "
                 + selector
                 + ". This driver does not discover or launch installed applications; "
-                "read the desktop or listApps() and select a running application/window.",
+                "read the desktop or list_apps() and select a running application/window.",
                 "application",
             )
         _refuse(

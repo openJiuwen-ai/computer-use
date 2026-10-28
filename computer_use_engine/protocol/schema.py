@@ -10,7 +10,7 @@ import json
 import re
 from typing import Any
 
-from .primitives import MAX_SAFE_INTEGER, finite, trim, utf16Length
+from .primitives import MAX_SAFE_INTEGER, finite, trim, utf16_length
 
 MISSING = object()
 
@@ -41,10 +41,10 @@ def _type(value: Any) -> str:
     return "object"
 
 
-def _invalid(expected, value, path, *, format=None):
+def _invalid(expected, value, path, *, value_format=None):
     result = {"expected": expected}
-    if format:
-        result["format"] = format
+    if value_format:
+        result["format"] = value_format
     result["code"] = "invalid_type"
     received = _type(value)
     if received in ("NaN", "Infinity"):
@@ -71,19 +71,22 @@ class Schema:
         return result
 
     def _parse(self, value, path, issues):
-        kind, o = self.kind, self.options
+        kind, options = self.kind, self.options
         if kind == "optional" and value is MISSING:
             return MISSING
         if kind == "nullable" and value is None:
             return None
         if kind in ("optional", "nullable"):
-            return o["inner"]._parse(value, path, issues)
+            # The pipeline shares retained bindings with their owning service.
+            # pylint: disable-next=protected-access
+            return options["inner"]._parse(value, path, issues)
         if kind == "unknown":
             return value
         if kind == "union":
             errors = []
-            for schema in o["schemas"]:
+            for schema in options["schemas"]:
                 errors_for_branch = []
+                # pylint: disable-next=protected-access
                 result = schema._parse(value, [], errors_for_branch)
                 if not errors_for_branch:
                     return result
@@ -91,8 +94,8 @@ class Schema:
             issues.append(dict(code="invalid_union", errors=errors, path=path, message="Invalid input"))
             return value
         if kind == "enum":
-            if not any(type(value) is type(v) and value == v for v in o["values"]):
-                values = o["values"]
+            if not any(type(value) is type(v) and value == v for v in options["values"]):
+                values = options["values"]
                 encoded = "|".join(json.dumps(v, ensure_ascii=False) for v in values)
                 message = (
                     "Invalid input: expected " if len(values) == 1 else "Invalid option: expected one of "
@@ -102,6 +105,8 @@ class Schema:
         expected = {"strictObject": "object"}.get(kind, kind)
         matches = {
             "string": isinstance(value, str),
+            # Exact types preserve scalar validation and identity contracts.
+            # pylint: disable-next=unidiomatic-typecheck
             "boolean": type(value) is bool,
             "number": finite(value),
             "array": isinstance(value, list),
@@ -110,13 +115,13 @@ class Schema:
         if not matches.get(kind):
             issues.append(_invalid(expected, value, path))
             if kind == "array" and isinstance(value, str):
-                self._bounds(utf16Length(value), "string", path, issues)
+                self._bounds(utf16_length(value), "string", path, issues)
             if kind == "string" and isinstance(value, list):
                 self._bounds(len(value), "array", path, issues)
             return value
         if kind == "strictObject":
             result = {}
-            for key, schema in o["fields"].items():
+            for key, schema in options["fields"].items():
                 if key not in value and schema.kind == "unknown":
                     issues.append(
                         dict(
@@ -127,10 +132,11 @@ class Schema:
                         )
                     )
                     continue
+                # pylint: disable-next=protected-access
                 parsed = schema._parse(value.get(key, MISSING), path + [key], issues)
                 if parsed is not MISSING:
                     result[key] = parsed
-            unknown_value = [k_value for k_value in value if k_value not in o["fields"]]
+            unknown_value = [k_value for k_value in value if k_value not in options["fields"]]
             if unknown_value:
                 message = (
                     "Unrecognized "
@@ -140,14 +146,15 @@ class Schema:
                 issues.append(dict(code="unrecognized_keys", keys=unknown_value, path=path, message=message))
             return result
         if kind == "array":
-            result = [o["item"]._parse(v, path + [i], issues) for i, v in enumerate(value)]
+            # pylint: disable-next=protected-access
+            result = [options["item"]._parse(v, path + [i], issues) for i, v in enumerate(value)]
             self._bounds(len(value), "array", path, issues)
             return result
         if kind == "string":
-            self._bounds(utf16Length(value), "string", path, issues)
-            if "pattern" in o:
-                if re.search(o["pattern"], value, re.ASCII) is None:
-                    pattern = o["patternLabel"]
+            self._bounds(utf16_length(value), "string", path, issues)
+            if "pattern" in options:
+                if re.search(options["pattern"], value, re.ASCII) is None:
+                    pattern = options["patternLabel"]
                     issues.append(
                         dict(
                             origin="string",
@@ -158,12 +165,12 @@ class Schema:
                             message=f"Invalid string: must match pattern {pattern}",
                         )
                     )
-            if o.get("nonblank") and not trim(value):
+            if options.get("nonblank") and not trim(value):
                 issues.append(dict(code="custom", path=path, message="Invalid input"))
         if kind == "number":
-            if o.get("integer"):
+            if options.get("integer"):
                 if int(value) != value:
-                    issues.append(_invalid("int", value, path, format="safeint"))
+                    issues.append(_invalid("int", value, path, value_format="safeint"))
                     return value
                 if abs(value) > MAX_SAFE_INTEGER:
                     big = value > 0

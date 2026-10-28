@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.projection import prepareTree
+from computer_use.interaction.read.presentation.compression.projection import prepare_tree
 from computer_use.protocol.primitives import frozen
 
 if TYPE_CHECKING:
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def observationCoverage(observation: Record, roots: Sequence[NodeView] | None = None) -> Mapping[str, Any]:
+def observation_coverage(observation: Record, roots: Sequence[NodeView] | None = None) -> Mapping[str, Any]:
     """Build structural coverage evidence for comparing observation baselines.
 
     Args:
@@ -26,7 +26,7 @@ def observationCoverage(observation: Record, roots: Sequence[NodeView] | None = 
             remember(child)
 
     if observation["root"] is not None:
-        for root in prepareTree(observation["root"], observation["context"]) if roots is None else roots:
+        for root in prepare_tree(observation["root"], observation["context"]) if roots is None else roots:
             remember(root)
 
     def visit(node: NodeView, parent: str | None) -> None:
@@ -37,14 +37,19 @@ def observationCoverage(observation: Record, roots: Sequence[NodeView] | None = 
         """
         parents[node["ref"]] = parent
         view = displayed.get(node["ref"])
-        if (
-            "childCount" in node
-            and node.get("childrenRead") == node["childCount"]
-            and "partialReason" not in node
-            and not node.get("childOmissions")
-            and node.get("childrenStart", 0) == 0
-            and (view is None or "partialReason" not in view)
-        ):
+        matches_node = (
+            True
+            if (
+                "childCount" in node
+                and node.get("childrenRead") == node["childCount"]
+                and "partialReason" not in node
+                and not node.get("childOmissions")
+                and node.get("childrenStart", 0) == 0
+                and (view is None or "partialReason" not in view)
+            )
+            else False
+        )
+        if matches_node:
             complete.append(node["ref"])
         for child in node["children"]:
             visit(child, node["ref"])
@@ -54,7 +59,7 @@ def observationCoverage(observation: Record, roots: Sequence[NodeView] | None = 
     return frozen(dict(parents=frozen(parents), complete=tuple(complete)))
 
 
-def confirmsRemoval(previous: Record | None, current: Record | None, ref: str) -> bool:
+def confirms_removal(previous: Record | None, current: Record | None, ref: str) -> bool:
     """Check whether current coverage proves a previously observed node was removed.
 
     Args:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
@@ -20,10 +20,17 @@ def data(value: Any) -> Any:
         return {"datetime": value.isoformat()}
     if isinstance(value, Enum):
         return value.value
+    # Exact types preserve scalar validation and identity contracts.
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is float and not math.isfinite(value):
         return {"number": "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"}
     if is_dataclass(value):
-        return {item.name: data(result) for item in fields(value) if (result := getattr(value, item.name)) is not None}
+        result = {}
+        for item in fields(value):
+            content = getattr(value, item.name)
+            if content is not None:
+                result[item.name] = data(content)
+        return result
     if isinstance(value, Mapping):
         return {str(key): data(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
@@ -65,7 +72,8 @@ def node_fields(node: NativeNode) -> dict[str, tuple[tuple[str | int, ...], Any]
                 add((name, key), geometry)
         elif is_dataclass(value):
             for part in fields(value):
-                if (content := getattr(value, part.name)) is not None:
+                content = getattr(value, part.name)
+                if content is not None:
                     add((name, part.name), content)
         elif not isinstance(value, (Mapping, tuple)) or value:
             add((name,), value)
@@ -121,14 +129,18 @@ def status_record(issues: list[ReadIssue]) -> dict[str, Any] | None:
     result = {"state": primary.state, "issues": [data(issue) for issue in issues]}
     if primary.detail:
         result["detail"] = primary.detail
+
+    def _iter_issue(_source_items: Iterator[Any]) -> Iterator[Any]:
+        for issue in _source_items:
+            if (
+                issue.continuation is not None
+                and issue.continuation.kind == "text"
+                and issue.continuation.consistency == "captured"
+            ):
+                yield issue.continuation
+
     captured = next(
-        (
-            issue.continuation
-            for issue in reversed(issues)
-            if issue.continuation is not None
-            and issue.continuation.kind == "text"
-            and issue.continuation.consistency == "captured"
-        ),
+        _iter_issue(iter(reversed(issues))),
         None,
     )
     if captured is not None:
@@ -154,7 +166,8 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
         statuses = {}
         for name, path in paths.items():
             matching = issue_index.applicable((*base, *path))
-            if (status := status_record(matching)) is not None:
+            status = status_record(matching)
+            if status is not None:
                 statuses[name] = status
         for issue in issue_index.nodes.get(token, ()):
             if len(issue.path) > 2 and issue.path[2] == "relations":

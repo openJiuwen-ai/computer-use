@@ -27,12 +27,17 @@ def filter_route_history_policy(value: Any) -> EligibleRoutes:
             "native_value_replace",
         ):
             continue  # Readiness alone does not prove editing capability.
-        if (
-            intent.kind == "paste"
-            and not request.needs_editing_evidence
-            and primitive.unit == "prepare_receiver"
-            and primitive.channel != Channel.POINTER
-        ):
+        matches_intent = (
+            True
+            if (
+                intent.kind == "paste"
+                and not request.needs_editing_evidence
+                and primitive.unit == "prepare_receiver"
+                and primitive.channel != Channel.POINTER
+            )
+            else False
+        )
+        if matches_intent:
             continue
         command = UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver)
         if route_key(command) in attempts.unavailable:

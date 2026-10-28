@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.policy import independent_actions
 from computer_use.interaction.read.presentation.tree import (
-    carriesValue,
+    carries_value,
     disclosure,
-    hasDisplayValue,
-    hasIncompleteChildren,
-    isDialog,
+    has_display_value,
+    has_incomplete_children,
+    is_dialog,
     unique,
 )
 from computer_use.native.semantics import TABLE_FIELDS
@@ -77,7 +77,7 @@ def represented(source: NodeView, target: NodeView) -> bool:
     return all(text in texts for text in content(source))
 
 
-def protectedContent(node: NodeView) -> bool:
+def protected_content(node: NodeView) -> bool:
     """Protected Content.
 
     Args:
@@ -94,7 +94,7 @@ def protectedContent(node: NodeView) -> bool:
         )
         or (independent_actions(node) if node.get("_factBacked") else node.get("actions"))
         or node.get("busy") is True
-        or hasIncompleteChildren(node)
+        or has_incomplete_children(node)
         or "shortcut" in node
         or "menuMark" in node
         or "toggleState" in node
@@ -126,7 +126,7 @@ def independent(node: NodeView) -> bool:
         or (node.get("subrole") and node["subrole"] != "hostingView")
         or "control" in node
         or node.get("titleRef")
-        or carriesValue(node)
+        or carries_value(node)
         or node.get("help")
         or node.get("url")
         or (
@@ -136,35 +136,35 @@ def independent(node: NodeView) -> bool:
             and not node.get("value")
             and not node["children"]
         )
-        or protectedContent(node)
-        or isDialog(node)
+        or protected_content(node)
+        or is_dialog(node)
         or node.get("modal")
     )
 
 
-def sameBlocking(a: NodeView, b: NodeView) -> bool:
+def same_blocking(a: NodeView, b: NodeView) -> bool:
     return ",".join(a.get("blockedBy", [])) == ",".join(b.get("blockedBy", []))
 
 
-def layout(node: NodeView, ignoreFocus: bool = False, ignoreSelected: bool = False) -> bool:
+def layout(node: NodeView, ignore_focus: bool = False, ignore_selected: bool = False) -> bool:
     return (
         node["role"] in WRAPPERS
         and not node.get("name")
         and not node.get("description")
-        and not hasDisplayValue(node)
+        and not has_display_value(node)
         and not independent(node)
         and not node.get("pressable")
         and not node.get("selectable")
         and node.get("enabled") is not False
-        and (ignoreSelected or not node.get("selected"))
-        and (ignoreFocus or not node.get("focused"))
+        and (ignore_selected or not node.get("selected"))
+        and (ignore_focus or not node.get("focused"))
         and not node.get("expandable")
         and not node.get("submenu")
         and disclosure(node) is None
     )
 
 
-def ordinaryControl(node: NodeView) -> bool:
+def ordinary_control(node: NodeView) -> bool:
     return (
         node["role"] in CONTROLS
         or bool(node.get("pressable"))
@@ -172,7 +172,7 @@ def ordinaryControl(node: NodeView) -> bool:
     )
 
 
-def secondaryActions(node: NodeView) -> list[Any]:
+def secondary_actions(node: NodeView) -> list[Any]:
     """Secondary Actions.
 
     Args:
@@ -187,30 +187,40 @@ def secondaryActions(node: NodeView) -> list[Any]:
             and (
                 caps.get("click") == "available"
                 if caps is not None
-                else ordinaryControl(node) or node["role"] in ("menuItem", "menuBarItem")
+                else ordinary_control(node) or node["role"] in ("menuItem", "menuBarItem")
             )
         ):
             continue
-        if (
-            kind == "select"
-            and not node.get("selectable")
-            and caps is None
-            and node["role"] in ("menuItem", "menuBarItem")
-        ):
+        matches_kind = (
+            True
+            if (
+                kind == "select"
+                and not node.get("selectable")
+                and caps is None
+                and node["role"] in ("menuItem", "menuBarItem")
+            )
+            else False
+        )
+        if matches_kind:
             continue
-        if (
-            kind == "show_menu"
-            and not node.get("selectable")
-            and node.get("pressable")
-            and node["role"] in ("popUpButton", "menuButton", "comboBox")
-            and (
-                caps is None
-                or (
-                    caps.get("click") == "available"
-                    and not any(a.get("kind", a["name"]) == "invoke" for a in node.get("actions", []))
+        matches_kind_condition = (
+            True
+            if (
+                kind == "show_menu"
+                and not node.get("selectable")
+                and node.get("pressable")
+                and node["role"] in ("popUpButton", "menuButton", "comboBox")
+                and (
+                    caps is None
+                    or (
+                        caps.get("click") == "available"
+                        and not any(a.get("kind", a["name"]) == "invoke" for a in node.get("actions", []))
+                    )
                 )
             )
-        ):
+            else False
+        )
+        if matches_kind_condition:
             continue
         if kind in ("expand", "collapse") and node.get("expandable") and caps is None:
             continue

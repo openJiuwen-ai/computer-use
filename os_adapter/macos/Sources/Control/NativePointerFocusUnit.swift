@@ -8,6 +8,7 @@ import ApplicationServices
     let window: AXUIElement
     let element: AXUIElement
     var receiverRelation: NativeReceiverRelation? = nil
+    var cellEditor: NativeCellEditorHandoff? = nil
 
     private var pointer: NativeElementPointerUnit {
         NativeElementPointerUnit(application: application, window: window, element: element)
@@ -17,6 +18,10 @@ import ApplicationServices
         if try NativeReceiverSnapshot.read(application: application, window: window, receiverRelation: receiverRelation)
             .receives(element)
         {
+            if let cellEditor,
+                try cellEditor.association(window: window).map({ CFEqual($0.editor, element) }) != true {
+                return NativeReadiness([("receiver", "unknown")])
+            }
             return NativeReadiness()
         }
         let facts = try pointer.conditions()
@@ -37,14 +42,19 @@ import ApplicationServices
     ) async throws {
         try check()
         if try readiness().ready { return }
+        let checkEffect: @MainActor () throws -> Void = {
+            try check()
+            try cellEditor?.requireAssociation(element: element, window: window)
+        }
         let range = selection()
         try await pointer.prepare(
             foreground: foreground, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
+        try checkEffect()
         let click = try NativePointerIntent(
             unit: "pointer_sequence", kind: "click", parameters: ["button": "left", "count": 1], foreground: false,
             element: true)
         try await pointer.deliver(
-            click, check: check, onDispatch: { onPreparation("verified editor pointer focus") }, onPosted: {},
+            click, check: checkEffect, onDispatch: { onPreparation("verified editor pointer focus") }, onPosted: {},
             onCleanupUnknown: onCleanupUnknown)
         for attempt in 0..<12 {
             try check()
@@ -61,7 +71,7 @@ import ApplicationServices
                     guard let value = AXValueCreate(.cfRange, &original) else {
                         throw DriverError("cannot encode the editor selection", code: .inputUnavailable)
                     }
-                    try check()
+                    try checkEffect()
                     onPreparation("native editor selection restoration")
                     guard
                         AXMessaging.setAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value)

@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.facts.groups import reference_set
-from computer_use.interaction.read.presentation.compression.policy import secondaryActions
+from computer_use.interaction.read.presentation.compression.policy import secondary_actions
 
 if TYPE_CHECKING:
     from typing import Callable, Sequence
@@ -29,11 +29,11 @@ def action_fields(
         return ["Secondary Actions: " + "; ".join(actions)] if actions else []
     groups = {}
     for source in (owner, *parts):
-        actions = secondaryActions(source)
+        actions = secondary_actions(source)
         if not actions or not render_actions(source):
             continue
         # Names as well as descriptions must agree. Equal display labels alone
-        # do not mean that performAction accepts the same native action name.
+        # do not mean that perform_action accepts the same native action name.
         key = json.dumps([actions, render_actions(source)], ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         groups.setdefault(key, []).append(source)
     fields, ordinary = [], []

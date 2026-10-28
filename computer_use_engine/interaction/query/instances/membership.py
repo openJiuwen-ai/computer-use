@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, cast
 
 from computer_use.native.contracts import Knowledge
 from computer_use.session.interfaces import DirectoryMembership, WindowIdentity, WindowMembership
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import UIHandle
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts, SurfaceInfo
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
+    from computer_use.protocol.records import SurfaceInfo
 
 
 def ancestry(directory: DirectoryFacts, window: str, root: str) -> Knowledge:
@@ -55,21 +57,25 @@ def ancestor(directory: DirectoryFacts, window: str, root: str) -> bool:
 
 def roots(directory: DirectoryFacts) -> list[SurfaceInfo]:
     """List non-menu windows whose parent is outside the confirmed catalogue."""
-    return [
-        item
-        for item in directory["surfaces"]
-        if item["kind"] != "menu"
-        and (
-            item["parentState"] != "known"
-            or not any(other["window"] == item["parent"] for other in directory["surfaces"])
-        )
-    ]
+
+    def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
+        for item in _source_items:
+            if item["kind"] != "menu" and (
+                item["parentState"] != "known"
+                or not any(other["window"] == item["parent"] for other in directory["surfaces"])
+            ):
+                yield item
+
+    return list(_iter_item(iter(directory["surfaces"])))
 
 
 def in_scope(ui: UIHandle, surface: str | None) -> bool:
     """Check whether a native surface belongs to the App/Window view."""
+    # The pipeline shares retained bindings with their owning service.
+    # pylint: disable-next=protected-access
     instance = ui._instance
     item = next((item for item in instance.members.values() if item["surface"] == surface), None)
     return item is not None and (
+        # pylint: disable-next=protected-access
         ui._anchor is None or ancestor(cast("DirectoryFacts", instance.directory), item["window"], ui._anchor)
     )

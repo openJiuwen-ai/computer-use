@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use._identity import FrozenRecord
-from computer_use.diagnostics import localFailure
+from computer_use.identity import FrozenRecord
+from computer_use.diagnostics import local_failure
+from computer_use.errors import ComputerUseError
 from computer_use.native.query.directory import surfaces_query
 from computer_use.session.interfaces import ApplicationEntry
 
@@ -40,6 +41,8 @@ class ApplicationDiscoveryPipeline:
         for application in directory["applications"]:
             if application["isRunning"]:
                 try:
+                    # The pipeline shares retained bindings with their owning service.
+                    # pylint: disable-next=protected-access
                     surfaces = await self.directory._query(
                         surfaces_query(
                             application["id"],
@@ -48,10 +51,8 @@ class ApplicationDiscoveryPipeline:
                         ),
                         30000,
                     )
-                except Exception as error:
-                    from computer_use.errors import ComputerUseError
-
-                    if not isinstance(error, ComputerUseError) or error.effect != "none":
+                except ComputerUseError as error:
+                    if error.effect != "none":
                         raise
                     surfaces = None
                 if "nativeReadIsolation" in self.directory.port.connection.capabilities and (
@@ -62,10 +63,8 @@ class ApplicationDiscoveryPipeline:
                     # still a directory query, never recursive tree capture.
                     try:
                         surfaces = await self.directory.surfaces(application["id"])
-                    except Exception as error:
-                        from computer_use.errors import ComputerUseError
-
-                        if not isinstance(error, ComputerUseError) or error.effect != "none":
+                    except ComputerUseError as error:
+                        if error.effect != "none":
                             raise
                         surfaces = None
                 if surfaces is not None and roots(surfaces):
@@ -76,11 +75,11 @@ class ApplicationDiscoveryPipeline:
             )
             result.append(
                 FrozenRecord(
-                    dict(id=self.references.publish(entry), displayName=entry.display_name, isRunning=entry.running)
+                    dict(id=self.references.publish(entry), display_name=entry.display_name, is_running=entry.running)
                 )
             )
         if not result and directory["stopReasons"]:
-            raise localFailure(
+            raise local_failure(
                 "application discovery is incomplete: " + "; ".join(directory["stopReasons"]),
                 "retry discovery when the desktop is available",
                 "observation_incomplete",
@@ -105,5 +104,5 @@ class ApplicationDiscoveryPipeline:
             entry = ApplicationEntry(
                 directory["session"], directory["application"], title, True, directory, item["window"], name
             )
-            choices.append(FrozenRecord(dict(id=self.references.publish(entry), displayName=title, isRunning=True)))
+            choices.append(FrozenRecord(dict(id=self.references.publish(entry), display_name=title, is_running=True)))
         return choices

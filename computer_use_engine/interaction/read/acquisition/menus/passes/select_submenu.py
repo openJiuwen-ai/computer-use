@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.acquisition.menus.model import PURE, MenuItemFacts
-from computer_use.interaction.read.presentation.formatting import jsonString
+from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.pipeline import Contract, Pass
 
 "Select submenu."
@@ -32,12 +32,12 @@ def select_submenu(value: MenuItemFacts, control: Control) -> tuple[str, tuple[s
     elif level.index != len(level.request.path) - 1:
         if not value.children:
             level.request.query.fail(
-                "element_not_found", f"{jsonString(level.title)} has no submenu; a command must end the path."
+                "element_not_found", f"{json_string(level.title)} has no submenu; a command must end the path."
             )
         level.request.query.fail(
             "ambiguous_target" if len(wrappers) > 1 else "observation_incomplete",
             (
-                f"{jsonString(level.title)} does not expose one unambiguous native submenu container; read "
+                f"{json_string(level.title)} does not expose one unambiguous native submenu container; read "
                 f"this item first."
             ),
         )

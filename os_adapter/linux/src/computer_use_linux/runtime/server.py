@@ -30,10 +30,10 @@ class Server:
         self.native = None
         self.fatal = None
 
-    def reply(self, id, **value):
+    def reply(self, request_id, **value):
         self.output.write(
             json.dumps(
-                dict(version=self.version or 6, session=self.session, id=id, **value),
+                dict(version=self.version or 6, session=self.session, id=request_id, **value),
                 ensure_ascii=True,
                 allow_nan=False,
                 separators=(",", ":"),
@@ -69,6 +69,8 @@ class Server:
                 if "cancel" in raw:
                     fields(raw, ("version", "session", "cancel"))
                     require(
+                        # Exact types preserve scalar validation and identity contracts.
+                        # pylint: disable-next=unidiomatic-typecheck
                         type(raw["version"]) is int
                         and raw["version"] == self.version
                         and raw["session"] == self.session,
@@ -122,7 +124,9 @@ class Server:
                 if self.backend:
                     self.backend.close()
         if self.fatal:
-            print(self.fatal, file=sys.stderr)
+            # Console and transport output retain their documented stream format.
+            # pylint: disable-next=bad-builtin
+            print(self.fatal, file=sys.stderr)  # noqa: T201
             return 1
         return 0
 
@@ -132,6 +136,7 @@ class Server:
         accepted = False
         try:
             require(
+                # pylint: disable-next=unidiomatic-typecheck
                 type(raw.get("version")) is int
                 and raw["version"] == 6
                 and (self.version is None or raw["version"] == self.version),
@@ -182,7 +187,8 @@ class Server:
                 failure["context"] = ctx.context
             reply = dict(error=failure)
         except Exception as error:
-            print(f"request {identifier}: {type(error).__name__}: {error}", file=sys.stderr)
+            # pylint: disable-next=bad-builtin
+            print(f"request {identifier}: {type(error).__name__}: {error}", file=sys.stderr)  # noqa: T201
             failure = Failure(str(error) or type(error).__name__, target=ctx.target, effect=ctx.effect).wire()
             if ctx.context:
                 failure["context"] = ctx.context

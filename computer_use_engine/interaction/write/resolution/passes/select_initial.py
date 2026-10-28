@@ -22,25 +22,35 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], str]:
         capabilities = getattr(native, "capabilities", ())
         if intent.kind == "click" and frame.request.memory.pointer_member is not None:
             return "pointer"
-        if (
-            intent.kind == "scroll"
-            and {"nativeScroll", "nativeElementScroll"} & set(capabilities)
-            and (cast("Binding", target).node is not None)
-            and (cast("Binding", target).capture is None)
-            and (not any((k in intent.parameters for k in ("x", "y"))))
-        ):
+        matches_intent = (
+            True
+            if (
+                intent.kind == "scroll"
+                and {"nativeScroll", "nativeElementScroll"} & set(capabilities)
+                and (cast("Binding", target).node is not None)
+                and (cast("Binding", target).capture is None)
+                and (not any((k in intent.parameters for k in ("x", "y"))))
+            )
+            else False
+        )
+        if matches_intent:
             return "scroll"
         if intent.kind == "replace" and "nativeTextReplacement" in capabilities:
             return "replace"
-        if (
-            intent.kind in ("focus", "key", "insert", "paste")
-            and (
-                "nativeActuators" in capabilities
-                or (intent.kind in ("insert", "paste") and "nativeTextInput" in capabilities)
+        matches_intent_condition = (
+            True
+            if (
+                intent.kind in ("focus", "key", "insert", "paste")
+                and (
+                    "nativeActuators" in capabilities
+                    or (intent.kind in ("insert", "paste") and "nativeTextInput" in capabilities)
+                )
+                and (cast("Binding", target).node is not None)
+                and (not (intent.kind in ("insert", "paste") and intent.parameters.get("text") == ""))
             )
-            and (cast("Binding", target).node is not None)
-            and (not (intent.kind in ("insert", "paste") and intent.parameters.get("text") == ""))
-        ):
+            else False
+        )
+        if matches_intent_condition:
             return "text"
         return "direct"
 

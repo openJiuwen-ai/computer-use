@@ -10,6 +10,7 @@ import ApplicationServices
     let element: AXUIElement
     var member: AXUIElement? = nil
     var kind: NativePointerIntent.Kind = .click
+    var logicalWindow: AXUIElement? = nil
 
     struct Geometry {
         let mapping: WindowGeometry.WindowMapping
@@ -44,24 +45,20 @@ import ApplicationServices
         return AXValueGetValue(unsafeDowncast(raw, to: AXValue.self), .cgPoint, &point) ? point : nil
     }
 
-    private func clippedBounds(_ frame: CGRect, windowFrame: CGRect, until deadline: TimeInterval) throws -> CGRect {
-        var bounds = frame.intersection(windowFrame), current = AXAccess.element(element, kAXParentAttribute)
-        var seen = [AXUIElement]()
-        while let node = current, seen.count < 12, !CFEqual(node, window), !seen.contains(where: { CFEqual($0, node) }),
-            ProcessInfo.processInfo.systemUptime < deadline
-        {
-            try RequestDiagnostics.checkCancellation()
-            seen.append(node)
-            if AXAccess.read(node, kAXRoleAttribute).value as? String == kAXScrollAreaRole,
-                let clip = WindowGeometry.hint(node)?.frame
-            {
-                bounds = bounds.intersection(clip)
-            }
-            current = AXAccess.element(node, kAXParentAttribute)
+    func viewport() throws -> NativeElementViewport {
+        try validatePhysicalWindow()
+        let mapping = try NativeWindowUnit(application: application, window: window).mapping()
+        return try NativeElementViewport.sample(element: element, window: window, mapping: mapping)
+    }
+
+    func exposure() throws -> NativeElementViewport.Exposure? { try viewport().exposure }
+
+    private func validatePhysicalWindow() throws {
+        if let logicalWindow, !CFEqual(logicalWindow, window) {
+            guard let current = WindowGeometry.owningWindow(
+                element, pid: application.processIdentifier, in: window), CFEqual(current, window)
+            else { throw DriverError("the original popup element changed its physical window", code: .staleTarget) }
         }
-        // Incomplete ancestry is not a new input prerequisite. Only known
-        // scrolling boundaries clip; arbitrary container frames need not clip.
-        return bounds
     }
 
     private func hasCurrentParentPathToWindow(until deadline: TimeInterval) throws -> Bool {
@@ -80,13 +77,10 @@ import ApplicationServices
 
     private func sample(frozen: Geometry? = nil) throws -> Sample {
         try RequestDiagnostics.checkCancellation()
-        if AXAccess.read(element, kAXEnabledAttribute).value as? Bool == false {
-            throw DriverError("the selected pointer element is disabled", code: .inputUnavailable)
-        }
+        try validatePhysicalWindow()
         let mapping = try NativeWindowUnit(application: application, window: window).mapping()
-        guard let frame = WindowGeometry.hint(element)?.frame, frame.minX.isFinite, frame.minY.isFinite,
-            frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0
-        else { throw DriverError("the selected element has no usable pointer geometry", code: .inputUnavailable) }
+        let viewport = try NativeElementViewport.sample(element: element, window: window, mapping: mapping)
+        let frame = viewport.frame
         let deadline = ProcessInfo.processInfo.systemUptime + 0.15
         // Scroll's element is the selected wheel region, not the requested
         // click control. Preserve its center and viewport for the public hit
@@ -94,7 +88,7 @@ import ApplicationServices
         let expand = kind == .click
         let visible =
             expand
-            ? try clippedBounds(frame, windowFrame: mapping.frame, until: deadline) : frame.intersection(mapping.frame)
+            ? viewport.clipped : frame.intersection(mapping.frame)
         guard !visible.isNull, visible.width > 0, visible.height > 0 else {
             throw DriverError(
                 "the selected element is outside its window or known scrolling bounds", code: .inputUnavailable)
@@ -311,6 +305,18 @@ import ApplicationServices
         try check()
         let sampled = try sample()
         let selected = sampled.geometry
+        if WindowGeometry.inputDiagnosticsEnabled {
+            diagnose([
+                "kind": "element_pointer_preparation_geometry", "phase": "beforePreparation",
+                "window": selected.mapping.id,
+                "windowFrame": [
+                    selected.mapping.frame.minX, selected.mapping.frame.minY,
+                    selected.mapping.frame.width, selected.mapping.frame.height
+                ],
+                "elementFrame": [selected.frame.minX, selected.frame.minY, selected.frame.width, selected.frame.height],
+                "point": [selected.point.x, selected.point.y]
+            ])
+        }
         if !sampled.accepted {
             guard sampled.covered else {
                 throw DriverError(
@@ -328,14 +334,55 @@ import ApplicationServices
         // Occlusion and ordinary preparation use the same exact-window
         // contract, including explicit key preparation for standard documents.
         let pointer = NativePointerUnit(application: application, window: selected.mapping, nativeWindow: window)
-        try await pointer.prepare(
-            foreground: foreground, atNative: selected.point, kind: kind, check: check, onPreparation: onPreparation,
-            onCleanupUnknown: onCleanupUnknown)
-        // Preparation may move the same element or window. No requested mouse
-        // event has been sent; the following inspect/delivery samples its new
-        // geometry. Only an actual gesture freezes its own native coordinates.
-        try check()
-        _ = try geometry()
+        do {
+            let outcome = try await pointer.prepareWindowContext(
+                foreground: foreground, atNative: selected.point, kind: kind, check: check,
+                onPreparation: onPreparation,
+                onCleanupUnknown: onCleanupUnknown)
+            // Preparation may move the same original window or element. No
+            // requested mouse event has been sent, so refresh before admitting
+            // a point; only actual delivery freezes its gesture coordinates.
+            try check()
+            let current = try geometry()
+            guard current.mapping.id == selected.mapping.id, current.mapping.pid == selected.mapping.pid else {
+                throw DriverError(
+                    "the original element's pointer window changed during preparation", code: .staleTarget)
+            }
+            if WindowGeometry.inputDiagnosticsEnabled {
+                diagnose([
+                    "kind": "element_pointer_preparation_geometry", "phase": "afterRefresh",
+                    "window": current.mapping.id,
+                    "windowFrame": [
+                        current.mapping.frame.minX, current.mapping.frame.minY,
+                        current.mapping.frame.width, current.mapping.frame.height
+                    ],
+                    "elementFrame": [current.frame.minX, current.frame.minY, current.frame.width, current.frame.height],
+                    "point": [current.point.x, current.point.y]
+                ])
+            }
+            if outcome == .contextPrepared || !current.same(as: selected) {
+                // The public AX fallback also binds its retained frame, so a
+                // new point must use the refreshed mapping of this exact window.
+                let refreshed = NativePointerUnit(
+                    application: application, window: current.mapping, nativeWindow: window)
+                try refreshed.requirePointReadiness(atNative: current.point, kind: kind)
+            }
+        } catch {
+            if WindowGeometry.inputDiagnosticsEnabled {
+                // A diagnostic after the failed decision, never a new input
+                // admission or retry. Do not relabel this later geometry as
+                // the evidence used by NativePointerUnit's earlier decision.
+                let current = WindowGeometry.hint(element)?.frame
+                let row = WindowServerInfo.window(selected.mapping.id)
+                diagnose([
+                    "kind": "element_pointer_preparation_geometry", "phase": "postFailure",
+                    "window": selected.mapping.id,
+                    "elementFrame": current.map { [$0.minX, $0.minY, $0.width, $0.height] } as Any? ?? NSNull(),
+                    "windowBounds": row?[kCGWindowBounds as String] as Any? ?? NSNull()
+                ])
+            }
+            throw error
+        }
     }
 
     func deliver(

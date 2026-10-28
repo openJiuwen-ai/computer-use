@@ -26,7 +26,7 @@ def reference_set(values: Any) -> str:
         if end - index >= 2:
             parts.append(f"{values[index]}–{values[end]}")
         else:
-            parts.extend(str(value) for value in values[index : end + 1])
+            parts.extend(str(value) for value in values[slice(index, end + 1)])
         index = end + 1
     return ", ".join(parts)
 

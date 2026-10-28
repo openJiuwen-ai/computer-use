@@ -16,14 +16,14 @@ def _unicode(value):
         return False
 
 
-def validateText(value):
+def validate_text(value):
     if not isinstance(value, str) or re.search("[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]", value):
         raise ValueError("typeText expects one line of text; use pressKey for control keys")
     if not _unicode(value):
         raise ValueError("typeText expects valid Unicode")
 
 
-def validatePasteText(value):
+def validate_paste_text(value):
     if not isinstance(value, str) or re.search("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f]", value):
         raise ValueError("paste expects plain text; only tabs and line breaks are allowed control characters")
     if not _unicode(value):
@@ -50,7 +50,7 @@ _ORDINARY = [
 _PUNCTUATION = "-=[]\\;',./`"
 
 
-def validateKey(value):
+def validate_key(value):
     nonempty(value, "key")
     *parts, key = value.split("+")
     if (

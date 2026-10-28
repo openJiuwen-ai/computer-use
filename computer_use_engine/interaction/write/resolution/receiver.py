@@ -22,7 +22,7 @@ from computer_use.native.semantics import (
     direct_editor,
     editing_evidence,
     preparable_editor,
-    roleName,
+    role_name,
 )
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ class ReceiverQuery(NativeGraph):
 
     async def _role(self, token: str) -> str | object:
         raw = await self._field(token, "role")
-        return UNKNOWN if raw is UNKNOWN or raw is None else roleName(self.platform, raw)
+        return UNKNOWN if raw is UNKNOWN or raw is None else role_name(self.platform, raw)
 
     async def resolve(
         self,
@@ -120,9 +120,18 @@ class ReceiverQuery(NativeGraph):
         values = await self._control_values(owner)
         direct = editing_evidence(role, values, platform=self.platform)
         owns_editor = composite_editor_owner(role, values, platform=self.platform)
-        if require_editable and (
-            values["enabled"] is False or values["readOnly"] is True or values["editable"] is False and not owns_editor
-        ):
+        matches_require_editable = (
+            True
+            if require_editable
+            and (
+                values["enabled"] is False
+                or values["readOnly"] is True
+                or values["editable"] is False
+                and not owns_editor
+            )
+            else False
+        )
+        if matches_require_editable:
             self.fail("input_unavailable", "The requested control is disabled or read-only.")
         if not allow_internal:
             # A direct-only driver binds its keyboard contract to the exact
@@ -257,14 +266,19 @@ class ReceiverQuery(NativeGraph):
                     return ReceiverResolution(Actuator(focused))
                 await self._node(parent, depth=0)
                 role, values = await self._role(parent), await self._control_values(parent)
-                if (
-                    self.platform == "macos"
-                    and role in SCALAR_EDITORS
-                    and await self._role(self.root.node) == "textField"
-                    and not await self._relation(self.root.node, "children")
-                    and not await self._relation(parent, "children")
-                    and _scalar_proxy_declarations(values)
-                ):
+                matches_role = (
+                    True
+                    if (
+                        self.platform == "macos"
+                        and role in SCALAR_EDITORS
+                        and await self._role(self.root.node) == "textField"
+                        and not await self._relation(self.root.node, "children")
+                        and not await self._relation(parent, "children")
+                        and _scalar_proxy_declarations(values)
+                    )
+                    else False
+                )
+                if matches_role:
                     # AppKit can expose its live TextArea through Parent only:
                     # editor -> temporary text proxy -> observed scalar field.
                     # A published child editor remains an independent boundary;

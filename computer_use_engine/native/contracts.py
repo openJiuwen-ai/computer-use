@@ -11,7 +11,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
-from computer_use.protocol.execution import validatePrimitiveContract
+from computer_use.protocol.execution import validate_primitive_contract
 
 if TYPE_CHECKING:
     pass
@@ -94,16 +94,21 @@ class Binding:
         return self == other
 
     def canonical(self, value: "Binding") -> "Binding":
-        if (
-            not isinstance(value, Binding)
-            or value.session != self.session
-            or value.instance != self.instance
-            or value.surface != self.surface
-            or value.node != self.node
-            or value.capture != self.capture
-            or (self.root_window is not None or self.surface is None)
-            and value.root_window != self.root_window
-        ):
+        invalid_value = (
+            True
+            if (
+                not isinstance(value, Binding)
+                or value.session != self.session
+                or value.instance != self.instance
+                or value.surface != self.surface
+                or value.node != self.node
+                or value.capture != self.capture
+                or (self.root_window is not None or self.surface is None)
+                and value.root_window != self.root_window
+            )
+            else False
+        )
+        if invalid_value:
             raise ValueError("Native begin changed an already bound target")
         return value
 
@@ -449,13 +454,13 @@ class Primitive:
 
         if self.unit not in unit_contracts or not self.id:
             raise ValueError("Invalid native primitive contract")
-        validatePrimitiveContract(self.unit, self.channel, self.supported, self.readiness, self.pending, self.action)
+        validate_primitive_contract(self.unit, self.channel, self.supported, self.readiness, self.pending, self.action)
         if self.unit == "native_selection" and self.click is None:
             raise ValueError("Native selection requires an integrated click offer")
         if self.click is not None:
-            from computer_use.protocol.execution import validateClickOffer
+            from computer_use.protocol.execution import validate_click_offer
 
-            validateClickOffer(self.click.wire(), self.unit)
+            validate_click_offer(self.click.wire(), self.unit)
 
 
 @dataclass(frozen=True)

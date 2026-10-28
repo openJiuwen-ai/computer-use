@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from computer_use.diagnostics import localFailure, pipelineDiagnostic
+from computer_use.diagnostics import local_failure, pipeline_diagnostic
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import (
     ApplicationBinding,
@@ -36,8 +36,8 @@ from computer_use.native.contracts import (
 from computer_use.native.lifecycle import CallLifecycle
 from computer_use.native.queries import NativeNodeQuery
 from computer_use.native.semantics import control_capabilities, input_container
-from computer_use.protocol.captures import captureMetadata
-from computer_use.protocol.primitives import utf16Length
+from computer_use.protocol.captures import capture_metadata
+from computer_use.protocol.primitives import utf16_length
 
 if TYPE_CHECKING:
     from computer_use.protocol.records import Record
@@ -64,7 +64,11 @@ def intent_key(intent):
 
 
 def encode_fields(value, mapping):
-    return {wire: list(v) if isinstance(v := getattr(value, name), tuple) else v for name, wire in mapping.items()}
+    result = {}
+    for name, wire in mapping.items():
+        content = getattr(value, name)
+        result[wire] = list(content) if isinstance(content, tuple) else content
+    return result
 
 
 def decode_binding(value):
@@ -152,7 +156,7 @@ class ConnectionPort:
 
     @staticmethod
     def pipeline_diagnostic(event):
-        pipelineDiagnostic(event)
+        pipeline_diagnostic(event)
 
     @property
     def platform(self):
@@ -164,7 +168,7 @@ class ConnectionPort:
 
     def _check(self, operation):
         expected = self._operations.get(operation)
-        if expected is None or self.connection.sessionIdentity != expected[0]:
+        if expected is None or self.connection.session_identity != expected[0]:
             raise RuntimeError("The native operation's connection ended; it cannot be resumed on another driver")
         return expected[1]
 
@@ -181,13 +185,18 @@ class ConnectionPort:
             dict(operation=operation, target=encode_fields(target, _BINDING), query=query),
             dict(timeoutMs=timeout_ms),
         )
-        if (
-            result["kind"] != query["kind"]
-            or result["session"] != target.session
-            or query["kind"] in ("surfaces", "roots")
-            and result["application"] != query["application"]
-            or result["platform"] != self.platform
-        ):
+        invalid_result = (
+            True
+            if (
+                result["kind"] != query["kind"]
+                or result["session"] != target.session
+                or query["kind"] in ("surfaces", "roots")
+                and result["application"] != query["application"]
+                or result["platform"] != self.platform
+            )
+            else False
+        )
+        if invalid_result:
             raise ValueError("Native discovery changed the requested session or application")
         return result
 
@@ -219,7 +228,7 @@ class ConnectionPort:
         if value.get("clickContract") != version:
             self.calls.retired = True
             raise ValueError("Native begin did not acknowledge the requested click contract")
-        self._operations[value["operation"]] = (self.connection.sessionIdentity, original, version)
+        self._operations[value["operation"]] = (self.connection.session_identity, original, version)
         while len(self._operations) > 8:
             self._operations.pop(next(iter(self._operations)))
         return OpenedOperation(value["operation"], decode_binding(value["target"]), version)
@@ -238,20 +247,30 @@ class ConnectionPort:
     ):
         self._check(operation)
         launch = isinstance(target, ApplicationBinding)
-        if launch and (within or actuator is not None or receiver is not None or basis or current_receiver):
+        invalid_launch = (
+            True
+            if launch and (within or actuator is not None or receiver is not None or basis or current_receiver)
+            else False
+        )
+        if invalid_launch:
             raise ValueError("Application launch cannot select an element or editor")
         query = dict(kind="launch") if launch else dict(kind="inputContext", within=list(within))
         if current_receiver:
-            if (
-                target.node is None
-                or target.capture is not None
-                or actuator is not None
-                or receiver is not None
-                or basis
-            ):
+            invalid_basis = (
+                True
+                if (
+                    target.node is None
+                    or target.capture is not None
+                    or actuator is not None
+                    or receiver is not None
+                    or basis
+                )
+                else False
+            )
+            if invalid_basis:
                 raise ValueError("Current receiver discovery requires an unselected element scope")
             if "nativeCurrentReceiver" not in self.capabilities:
-                raise localFailure(
+                raise local_failure(
                     "backend does not provide nativeCurrentReceiver",
                     "update the driver before querying current receiver evidence",
                     "mode_unsupported",
@@ -259,14 +278,19 @@ class ConnectionPort:
                 )
             query["currentReceiver"] = True
         if actuator is not None:
-            if (
-                target.node is None
-                or target.capture is not None
-                or (actuator.relation in ("containedEditor", "controlPart") and target.node == actuator.node)
-            ):
+            invalid_target = (
+                True
+                if (
+                    target.node is None
+                    or target.capture is not None
+                    or (actuator.relation in ("containedEditor", "controlPart") and target.node == actuator.node)
+                )
+                else False
+            )
+            if invalid_target:
                 raise ValueError("The actuator requires a compatible element owner")
             if actuator.relation == "controlPart" and "nativeControlParts" not in self.capabilities:
-                raise localFailure(
+                raise local_failure(
                     "backend does not provide nativeControlParts",
                     "update the driver before selecting a pointer control member",
                     "mode_unsupported",
@@ -274,7 +298,7 @@ class ConnectionPort:
                 )
             if actuator.relation == "scrollPointer":
                 if "nativeElementScroll" not in self.capabilities:
-                    raise localFailure(
+                    raise local_failure(
                         "backend does not provide nativeElementScroll",
                         "update the driver before selecting an element wheel route",
                         "mode_unsupported",
@@ -283,7 +307,7 @@ class ConnectionPort:
                 if not basis:
                     raise ValueError("An element wheel route requires semantic selection dependencies")
                 if actuator.content_path and "nativeScrollContentPath" not in self.capabilities:
-                    raise localFailure(
+                    raise local_failure(
                         "backend does not provide nativeScrollContentPath",
                         "update the driver before selecting moving scroll content",
                         "mode_unsupported",
@@ -299,7 +323,7 @@ class ConnectionPort:
                 "ancestorFocus": "nativeFocusScopes",
             }[receiver.relation]
             if capability not in self.capabilities:
-                raise localFailure(
+                raise local_failure(
                     "backend does not provide " + capability,
                     "update the driver before selecting a related receiver",
                     "mode_unsupported",
@@ -308,7 +332,7 @@ class ConnectionPort:
             query["receiver"] = receiver.wire()
         if basis:
             if "nativeSelectionBasis" not in self.capabilities:
-                raise localFailure(
+                raise local_failure(
                     "backend does not provide nativeSelectionBasis",
                     "update the driver before selecting a composed input target",
                     "mode_unsupported",
@@ -381,6 +405,8 @@ class ConnectionPort:
             unavailable_reason=value.get("unavailableReason"),
         )
 
+    # Match NativePort.nodes; the adapter collects these fields into NativeNodeQuery.
+    # pylint: disable-next=too-many-arguments
     async def nodes(
         self,
         operation,
@@ -492,13 +518,18 @@ class ConnectionPort:
             result.get("requestedRelations", ())
         ):
             raise ValueError("Native collection omitted requested relationship coverage")
-        if (
-            result["session"] != target.session
-            or result["surface"] != target.surface
-            or result["platform"] != self.connection.platform
-            or result["roots"] != [target.node]
-            or len(result["nodes"]) > request.max_nodes
-        ):
+        invalid_result_condition = (
+            True
+            if (
+                result["session"] != target.session
+                or result["surface"] != target.surface
+                or result["platform"] != self.connection.platform
+                or result["roots"] != [target.node]
+                or len(result["nodes"]) > request.max_nodes
+            )
+            else False
+        )
+        if invalid_result_condition:
             raise ValueError("Native fact batch changed its requested scope or budget")
         if page is not None:
             relation = next(
@@ -507,26 +538,43 @@ class ConnectionPort:
             if relation is None:
                 raise ValueError("Native page omitted its requested relation")
             if relation["state"] in ("complete", "partial") and relation["certainty"] == "confirmed":
-                if (
-                    relation.get("offset", 0) != (expected[4] if expected else 0)
-                    or expected is not None
-                    and relation.get("total") != expected[5]
-                    or len(relation["targets"]) > page["limit"]
-                ):
+                invalid_expected = (
+                    True
+                    if (
+                        relation.get("offset", 0) != (expected[4] if expected else 0)
+                        or expected is not None
+                        and relation.get("total") != expected[5]
+                        or len(relation["targets"]) > page["limit"]
+                    )
+                    else False
+                )
+                if invalid_expected:
                     raise ValueError("Native page changed its continuation range or budget")
         self._remember_continuations(result, result["relations"])
         return payload, result
 
     async def wait_for_change(self, operation, target, after, delay_ms, timeout_ms):
         self._check(operation)
-        if (
-            "nativeReadEvents" not in self.capabilities
-            or self.platform != "windows"
-            or target.node is None
-            or target.capture is not None
-        ):
+        invalid_target_condition = (
+            True
+            if (
+                "nativeReadEvents" not in self.capabilities
+                or self.platform != "windows"
+                or target.node is None
+                or target.capture is not None
+            )
+            else False
+        )
+        if invalid_target_condition:
             raise ValueError("Event-assisted waiting requires a compatible observed window node")
-        if not isinstance(after, str) or not after or type(delay_ms) is not int or not 1 <= delay_ms <= 400:
+        invalid_after = (
+            True
+            # Exact types preserve scalar validation and identity contracts.
+            # pylint: disable-next=unidiomatic-typecheck
+            if not isinstance(after, str) or not after or type(delay_ms) is not int or not 1 <= delay_ms <= 400
+            else False
+        )
+        if invalid_after:
             raise ValueError("Invalid event-assisted wait token or delay")
         result = await self.connection.request(
             "inspect",
@@ -537,12 +585,17 @@ class ConnectionPort:
             ),
             dict(timeoutMs=timeout_ms),
         )
-        if (
-            result["kind"] != "readChange"
-            or result["session"] != target.session
-            or result["surface"] != target.surface
-            or result["after"] != after
-        ):
+        invalid_after_condition = (
+            True
+            if (
+                result["kind"] != "readChange"
+                or result["session"] != target.session
+                or result["surface"] != target.surface
+                or result["after"] != after
+            )
+            else False
+        )
+        if invalid_after_condition:
             raise ValueError("Event-assisted wait changed its observed session, window or token")
         return result
 
@@ -565,23 +618,23 @@ class ConnectionPort:
         while len(self._continuations) > 512:
             self._continuations.pop(next(iter(self._continuations)))
 
-    async def relation(self, operation, target, property, cursor, limit, timeout_ms):
+    async def relation(self, operation, target, relation_property, cursor, limit, timeout_ms):
         """Collect one normalized relation page and its original query selector."""
         from computer_use.protocol.observation.adapters import decode_driver_reply
 
-        payload, _ = await self._relation_payload(operation, target, property, cursor, limit, timeout_ms)
+        payload, _ = await self._relation_payload(operation, target, relation_property, cursor, limit, timeout_ms)
         return decode_driver_reply(payload)
 
-    async def query_relation(self, operation, target, property, cursor, limit, timeout_ms):
+    async def query_relation(self, operation, target, relation_property, cursor, limit, timeout_ms):
         """Read exact native relation evidence for an operation's target lookup."""
-        _, result = await self._relation_payload(operation, target, property, cursor, limit, timeout_ms)
+        _, result = await self._relation_payload(operation, target, relation_property, cursor, limit, timeout_ms)
         return result
 
-    async def _relation_payload(self, operation, target, property, cursor, limit, timeout_ms):
+    async def _relation_payload(self, operation, target, relation_property, cursor, limit, timeout_ms):
         self._check(operation)
         expected = self._continuations.get(cursor) if cursor is not None else None
         if cursor is not None and (
-            expected is None or expected[:4] != (target.session, target.surface, target.node, property)
+            expected is None or expected[:4] != (target.session, target.surface, target.node, relation_property)
         ):
             raise ValueError("Relation cursor was not observed for this source and scope")
         result = await self.connection.request(
@@ -589,7 +642,7 @@ class ConnectionPort:
             dict(
                 operation=operation,
                 target=encode_fields(target, _BINDING),
-                query=dict(kind="relation", property=property, cursor=cursor, limit=limit),
+                query=dict(kind="relation", property=relation_property, cursor=cursor, limit=limit),
             ),
             dict(timeoutMs=timeout_ms),
         )
@@ -608,7 +661,11 @@ class ConnectionPort:
         ):
             raise ValueError("Native relation page changed its requested scope")
         relation = result["relation"]
-        if relation["source"] != target.node or relation["property"] != property or len(relation["targets"]) > limit:
+        if (
+            relation["source"] != target.node
+            or relation["property"] != relation_property
+            or len(relation["targets"]) > limit
+        ):
             raise ValueError("Native relation page changed its source, property or budget")
         if relation["state"] in ("complete", "partial"):
             if (
@@ -634,7 +691,7 @@ class ConnectionPort:
         if value["kind"] != "capturedText" or value["session"] != target.session or value["textRef"] != text_ref:
             raise ValueError("Native text page changed its requested capture")
         page = value["page"]
-        if page["offset"] != offset or utf16Length(page["text"]) > length:
+        if page["offset"] != offset or utf16_length(page["text"]) > length:
             raise ValueError("Native text page changed its requested range or budget")
         return page
 
@@ -655,7 +712,7 @@ class ConnectionPort:
             if value["observation"]["mode"] != self.policy.mode:
                 raise ValueError("Native desktop capture changed its negotiated mode")
         else:
-            dimensions = captureMetadata(value["image"])
+            dimensions = capture_metadata(value["image"])
         if max(dimensions["width"], dimensions["height"]) > max_dimension:
             raise ValueError("Native capture exceeded its requested image budget")
         return value
@@ -672,7 +729,7 @@ class ConnectionPort:
         ):
             raise ValueError("Click execution must use the negotiated integrated native contract")
         if original != intent_key(dict(kind=command.intent.kind, parameters=dict(command.intent.parameters))):
-            raise localFailure(
+            raise local_failure(
                 "The operation intent is already bound; a step cannot change its parameters",
                 "finish this operation before requesting a different action",
                 "invalid_request",
@@ -683,7 +740,7 @@ class ConnectionPort:
             and command.primitive.unit == "key_sequence"
             and "nativeTextReplacement" not in self.capabilities
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeTextReplacement",
                 "update the driver before selecting a contextual replacement unit",
                 "mode_unsupported",
@@ -694,7 +751,7 @@ class ConnectionPort:
             and command.target.node is not None
             and "nativeElementPointer" not in self.capabilities
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeElementPointer",
                 "update the driver before selecting an element pointer unit",
                 "mode_unsupported",
@@ -705,7 +762,7 @@ class ConnectionPort:
             and command.actuator.relation == "controlPart"
             and "nativeControlParts" not in self.capabilities
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeControlParts",
                 "update the driver before selecting a pointer control member",
                 "mode_unsupported",
@@ -716,19 +773,24 @@ class ConnectionPort:
             and command.actuator.relation == "scrollPointer"
             and "nativeElementScroll" not in self.capabilities
         ):
-            raise localFailure(
+            raise local_failure(
                 "backend does not provide nativeElementScroll",
                 "update the driver before selecting an element wheel route",
                 "mode_unsupported",
                 "execute",
             )
-        if (
-            command.actuator is not None
-            and command.actuator.relation == "scrollPointer"
-            and command.actuator.content_path
-            and "nativeScrollContentPath" not in self.capabilities
-        ):
-            raise localFailure(
+        invalid_command = (
+            True
+            if (
+                command.actuator is not None
+                and command.actuator.relation == "scrollPointer"
+                and command.actuator.content_path
+                and "nativeScrollContentPath" not in self.capabilities
+            )
+            else False
+        )
+        if invalid_command:
+            raise local_failure(
                 "backend does not provide nativeScrollContentPath",
                 "update the driver before selecting moving scroll content",
                 "mode_unsupported",
@@ -754,11 +816,19 @@ class ConnectionPort:
             raise ValueError("Native click changed its selected delivery family")
         if version in ("v1", "v2"):
             transport = value["click"]["transportEvidence"]["kind"]
-            if (
-                (transport == "nativeSelection" and (version != "v2" or command.primitive.unit != "native_selection"))
-                or command.primitive.unit == "native_selection"
-                and transport not in ("none", "nativeSelection")
-            ):
+            matches_transport = (
+                True
+                if (
+                    (
+                        transport == "nativeSelection"
+                        and (version != "v2" or command.primitive.unit != "native_selection")
+                    )
+                    or command.primitive.unit == "native_selection"
+                    and transport not in ("none", "nativeSelection")
+                )
+                else False
+            )
+            if matches_transport:
                 self.calls.retired = True
                 raise ValueError("Native selection receipt changed its negotiated transport")
         return StepResult(

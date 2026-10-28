@@ -126,7 +126,7 @@ import AppKit
             guard let instance = instances.instance(selector) else {
                 throw DriverError(
                     "application instance selector expired or belongs to another session", code: .staleTarget,
-                    next: "use computer.listApps() to choose a current instance")
+                    next: "use computer.list_apps() to choose a current instance")
             }
             // Never fall through to installed lookup or launch for an instance ID.
             try BackgroundTarget(instance).validate()

@@ -18,6 +18,9 @@ import ApplicationServices
         // before using an ancestor as a control's interaction owner.
         var ancestors: [AXUIElement] = []
         var context: [Context] = []
+        // Input ownership follows this exact registered target lifetime. A new
+        // observation can refine it, but cannot transfer an editor to a new cell.
+        var cellEditorState = NativeCellEditorState()
 
         /// Original observation evidence, not a fresh parent/focus lookup.
         /// Identity validation checks these recorded roles before input uses
@@ -80,8 +83,9 @@ import ApplicationServices
     /// Reconcile evidence for the same native key, never search for a substitute
     /// object. Missing attributes retain historical constraints, not a claim of
     /// current input readiness; each native unit still rechecks live evidence.
-    nonisolated private static func reconcile(_ previous: Evidence, _: Target, _ next: Evidence, _ newTarget: Target)
-        -> (Evidence, Target)?
+    nonisolated private static func reconcile(
+        _ previous: Evidence, _ previousTarget: Target, _ next: Evidence, _ newTarget: Target
+    ) -> (Evidence, Target)?
     {
         guard let identity = previous.identity.refining(with: next.identity),
             previous.context.count == next.context.count
@@ -96,6 +100,7 @@ import ApplicationServices
         guard !oldKnown || !newKnown || previous.provider == next.provider else { return nil }
         let provider = newKnown ? next.provider : previous.provider
         var target = newTarget
+        target.cellEditorState = previousTarget.cellEditorState
         target.identity = identity
         target.role = identity.attributes["AXRole"] ?? newTarget.role
         target.provider = provider

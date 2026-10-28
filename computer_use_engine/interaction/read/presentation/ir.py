@@ -13,7 +13,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, NewType
 
 from computer_use.interaction.read.presentation.policy import display_copy
-from computer_use.interaction.read.presentation.tree import interactionView, unique, withInteractions
+from computer_use.interaction.read.presentation.tree import interaction_view, unique, with_interactions
 
 if TYPE_CHECKING:
     from typing import Any, Callable, Iterable, Iterator, Literal
@@ -142,7 +142,7 @@ class ProjectionInput:
             The immutable source graph retaining the existing source identities.
         """
         context = {} if context is None else dict(context)
-        native, nodes, parents, scopes, order = {}, {}, {}, {}, []
+        native, nodes, parents, scopes, traversal_order = {}, {}, {}, {}, []
 
         def source(node: NodeView) -> None:
             native[node["ref"]] = node
@@ -166,14 +166,14 @@ class ProjectionInput:
             projected = display_copy(node) if context.get("nativeFacts") else node
             nodes[ref] = freeze({key: value for key, value in projected.items() if key != "children"})
             scopes[ref] = scope
-            order.append(ref)
+            traversal_order.append(ref)
             for child in node["children"]:
                 parents[child["ref"]] = ref
                 display(child, scope)
 
         display(
-            interactionView(
-                withInteractions(root, context.get("inheritedBlocks")), bool(context.get("includeBackground"))
+            interaction_view(
+                with_interactions(root, context.get("inheritedBlocks")), bool(context.get("includeBackground"))
             ),
             root["ref"],
         )
@@ -182,7 +182,7 @@ class ProjectionInput:
             MappingProxyType(nodes),
             MappingProxyType(parents),
             MappingProxyType(scopes),
-            tuple(order),
+            tuple(traversal_order),
             SourceKey(root["ref"]),
             freeze(context),
         )
@@ -348,6 +348,8 @@ class ProjectionView:
         return self._ir.source.context
 
     @property
+    # API, protocol, and native binding names retain their established spelling.
+    # pylint: disable-next=invalid-name
     def nativeNodes(self) -> Mapping[str, NodeView]:
         return self._ir.source.native_nodes
 
@@ -380,6 +382,7 @@ class ProjectionView:
         return view_node(self._ir, self._ir.source.root)
 
     @property
+    # pylint: disable-next=invalid-name
     def foldedInto(self) -> Mapping[str, str]:
         return MappingProxyType(self._ir.folded_into)
 
@@ -398,10 +401,10 @@ class ProjectionView:
         return node["ref"] == self.context.get("subtreeRef") or node["ref"] in self.expanded
 
     @staticmethod
-    def memberOf(child: NodeView, owner: NodeView) -> bool:
+    def member_of(child: NodeView, owner: NodeView) -> bool:
         return any(m["ref"] == child["ref"] for m in owner.get("control", {}).get("members", ()))
 
-    def ancestorOf(self, ancestor: str, child: str) -> bool:
+    def ancestor_of(self, ancestor: str, child: str) -> bool:
         """Test whether an identity occurs in the child's original source-parent chain."""
         parent = self.parents.get(child)
         while parent is not None:
@@ -534,7 +537,10 @@ class ProjectionEditor:
             raise ValueError("Unknown presentation elision kind")
         ref = self._ref(source)
         destination_refs = tuple(SourceKey(self._ref(item)) for item in destinations)
-        if (kind == "fold" and len(destination_refs) != 1) or (kind == "empty" and destination_refs):
+        invalid_destination_refs = (
+            True if (kind == "fold" and len(destination_refs) != 1) or (kind == "empty" and destination_refs) else False
+        )
+        if invalid_destination_refs:
             raise ValueError("Invalid presentation elision destinations")
         self._ir.elisions[ref] = Elision(
             kind, destination_refs, self._ir.active_rule, (FactKey(SourceKey(ref), "children"),)

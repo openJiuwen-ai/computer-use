@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, cast
 
 from computer_use.interaction.write.model import AttemptOutcome
 from computer_use.native.contracts import Cleanup, Dispatch
@@ -30,13 +31,16 @@ def create(*, native: NativePort, state: WriteRunState) -> Callable[[AttemptOutc
         state.steps.append(step)
         state.preparation.extend(step.preparation)
         if step.click is not None:
+
+            def _iter_p(_source_items: Iterator[Any]) -> Iterator[Any]:
+                for p in _source_items:
+                    if (
+                        p.dispatch != Dispatch.NOT_DISPATCHED or p.effect != "contextOnly"
+                    ) and p.kind not in step.preparation:
+                        yield p.kind
+
             # Evidence cannot disappear merely because a backend omitted prose.
-            state.preparation.extend(
-                p.kind
-                for p in step.click.preparation_evidence
-                if (p.dispatch != Dispatch.NOT_DISPATCHED or p.effect != "contextOnly")
-                and p.kind not in step.preparation
-            )
+            state.preparation.extend(_iter_p(iter(step.click.preparation_evidence)))
         if not step.target.same_target(outcome.resolved.bound.spec.target):
             native.calls.retired = True
             state.dispatched = Dispatch.UNKNOWN
@@ -44,12 +48,17 @@ def create(*, native: NativePort, state: WriteRunState) -> Callable[[AttemptOutc
         if step.dispatch != Dispatch.NOT_DISPATCHED:
             state.dispatched = step.dispatch
         if outcome.command.primitive.click is not None:
-            if (
-                step.click is None
-                or step.click.continuation.target != step.target
-                or step.click.continuation.route_family != outcome.command.primitive.click.route_family
-                or any(p.scope != step.target for p in step.click.preparation_evidence)
-            ):
+            matches_step = (
+                True
+                if (
+                    step.click is None
+                    or step.click.continuation.target != step.target
+                    or step.click.continuation.route_family != outcome.command.primitive.click.route_family
+                    or any(p.scope != step.target for p in step.click.preparation_evidence)
+                )
+                else False
+            )
+            if matches_step:
                 native.calls.retired = True
                 state.dispatched = Dispatch.UNKNOWN
                 raise ValueError("Native click evidence changed its selected target or delivery")
