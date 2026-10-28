@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from computer_use._json import loads as jsonLoads
+from computer_use.json import loads as jsonLoads
 from computer_use.interaction.read.presentation.formatting import number_string
 from computer_use.paths import repository_root
 

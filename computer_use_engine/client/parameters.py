@@ -72,7 +72,7 @@ def view(value, full, menu_path=None):
         )
         if invalid_value_condition:
             raise local_failure(
-                "menuPath requires 1-8 nonempty titles and view='tree'", "copy the observed menu titles"
+                "menu_path requires 1-8 nonempty titles and view='tree'", "copy the observed menu titles"
             )
 
 

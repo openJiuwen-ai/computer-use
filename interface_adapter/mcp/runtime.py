@@ -12,7 +12,7 @@ from collections import deque
 from contextvars import ContextVar
 
 from computer_use import Computer
-from computer_use._identity import Record, WeakIdentityMap
+from computer_use.identity import Record, WeakIdentityMap
 from computer_use.client.host import (
     set_action_handler,
     set_diagnostic_handler,
@@ -113,7 +113,7 @@ class Runtime:
 
         def emit_image(png):
             if not any(image is png for image in run["images"]):
-                self.printImage(png)
+                self.print_image(png)
 
         run["observations"].flush(emit, emit_image)
         self.log_observations(run)
@@ -211,11 +211,9 @@ class Runtime:
         if observed is not None and observed["state"].get("screenshot") is not None:
             run["imageContexts"].set(observed["state"]["screenshot"], True)
 
-    # API, protocol, and native binding names retain their established spelling.
-    # pylint: disable-next=invalid-name
-    def printImage(self, png):
+    def print_image(self, png):
         if not isinstance(png, (bytes, bytearray, memoryview)):
-            raise TypeError("printImage() expects PNG bytes, such as state.screenshot.")
+            raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
         data = base64.b64encode(png).decode("ascii")
         decode_png(data)
         run = _runs.get()
@@ -286,7 +284,7 @@ class Runtime:
             __builtins__=builtins,
             computer=computer,
             print=self.print,
-            printImage=self.printImage,
+            print_image=self.print_image,
         )
 
     async def execute(self, message):

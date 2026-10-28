@@ -12,7 +12,7 @@ that worker retains the original JSONL contract until the parent is upgraded.
 import os
 from asyncio import IncompleteReadError, get_running_loop
 
-from computer_use._json import loads
+from computer_use.json import loads
 
 from .diagnostic_json import dumps
 

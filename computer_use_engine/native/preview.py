@@ -2,7 +2,7 @@ import asyncio
 import codecs
 import logging
 
-from computer_use._json import loads as jsonLoads
+from computer_use.json import loads as jsonLoads
 from computer_use.protocol.primitives import utf16_length
 
 # Private variables hold mutable session state.

@@ -1,6 +1,6 @@
 """Action receipt identity and captured-text delivery callbacks."""
 
-from computer_use._identity import FrozenRecord, WeakIdentityMap
+from computer_use.identity import FrozenRecord, WeakIdentityMap
 
 _actions = WeakIdentityMap()
 # Private variables hold mutable session state.

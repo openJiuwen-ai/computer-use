@@ -24,7 +24,7 @@ from .session import ExecutionSession
 DESCRIPTION = (
     "Execute Python with top-level await in a persistent Computer Use session on "
     "the MCP host. App selectors and file paths refer to that computer. "
-    "Preloaded: computer, print(*values), printImage(PNG bytes). Follow the "
+    "Preloaded: computer, print(*values), print_image(PNG bytes). Follow the "
     "Computer → App/Window → Element SDK. Variables survive calls. Await every "
     "operation. "
     "Actions emit dispatched/verified receipts only, without automatically "
@@ -34,7 +34,7 @@ DESCRIPTION = (
     "Reads automatically present text; diffs require host-confirmed retained "
     "history, otherwise full text is used. state.text is always complete for its "
     "bounded view. Use read(full=True) for full presentation, print() for other "
-    "values, and printImage() for images. printImage labels dimensions and "
+    "values, and print_image() for images. print_image labels dimensions and "
     "source without reading again. One call at a time; 45 s without native "
     "command progress; command starts/completions renew the watchdog, printing "
     "does not. Individual commands keep their own deadlines. "
@@ -104,7 +104,7 @@ class ComputerUseServer:
                                 type="string",
                                 minLength=1,
                                 maxLength=65536,
-                                description="Python code. Use print() / printImage() for output.",
+                                description="Python code. Use print() / print_image() for output.",
                             ),
                         ),
                         required=["code"],

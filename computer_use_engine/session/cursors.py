@@ -39,11 +39,11 @@ class TextCursors:
 
     def resolve(self, key, target):
         if not key.startswith("text_"):
-            raise local_failure("this cursor is not a text continuation", "use the cursor returned by readText()")
+            raise local_failure("this cursor is not a text continuation", "use the cursor returned by read_text()")
         entry = self._entries.get(key)
         if entry is None:
             raise local_failure(
-                "text continuation expired", "readText() without a cursor to start a new snapshot", "snapshot_expired"
+                "text continuation expired", "read_text() without a cursor to start a new snapshot", "snapshot_expired"
             )
         if entry.target != target:
             raise local_failure(

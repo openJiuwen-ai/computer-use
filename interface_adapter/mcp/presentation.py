@@ -1,5 +1,5 @@
-from computer_use._identity import WeakIdentityMap
-from computer_use._json import dumps
+from computer_use.identity import WeakIdentityMap
+from computer_use.json import dumps
 from computer_use.interaction.read.delivery.baseline.model import BaselineInput
 from computer_use.interaction.read.delivery.baseline.pipeline import BaselinePublicationPipeline
 from computer_use.interaction.read.delivery.diff.model import DeliverySelection

@@ -9,28 +9,27 @@ from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.protocol.png import png_size
 from computer_use.session.images import (
     _source,
-)
-from computer_use.session.images import (
-    image_delivered as image_delivered,
-)
-from computer_use.session.images import (
-    image_delivery_epoch as image_delivery_epoch,
-)
-from computer_use.session.images import (
-    image_delivery_required as image_delivery_required,
-)
-from computer_use.session.images import (
-    image_metadata as image_metadata,
+    image_delivered,
+    image_delivery_epoch,
+    image_delivery_required,
+    image_metadata,
+    require_image_delivery,
+    reset_image_delivery,
 )
 from computer_use.session.images import (
     register_image as register_session_image,
 )
-from computer_use.session.images import (
-    require_image_delivery as require_image_delivery,
-)
-from computer_use.session.images import (
-    reset_image_delivery as reset_image_delivery,
-)
+
+__all__ = [
+    "image_delivered",
+    "image_delivery_epoch",
+    "image_delivery_required",
+    "image_label",
+    "image_metadata",
+    "register_image",
+    "require_image_delivery",
+    "reset_image_delivery",
+]
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.content import DisplayText

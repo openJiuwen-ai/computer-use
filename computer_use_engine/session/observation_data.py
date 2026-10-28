@@ -1,4 +1,4 @@
-from .._identity import WeakIdentityMap
+from ..identity import WeakIdentityMap
 from ..protocol.primitives import frozen
 
 _views = WeakIdentityMap()

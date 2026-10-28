@@ -33,7 +33,7 @@ def action_fields(
         if not actions or not render_actions(source):
             continue
         # Names as well as descriptions must agree. Equal display labels alone
-        # do not mean that performAction accepts the same native action name.
+        # do not mean that perform_action accepts the same native action name.
         key = json.dumps([actions, render_actions(source)], ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         groups.setdefault(key, []).append(source)
     fields, ordinary = [], []

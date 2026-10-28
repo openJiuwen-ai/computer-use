@@ -7,7 +7,7 @@ App wrappers. The interaction controller performs that work and records results.
 import weakref
 from collections import OrderedDict
 
-from .._identity import WeakIdentityMap
+from ..identity import WeakIdentityMap
 from ..diagnostics import local_failure
 from ..native.contracts import Binding
 from ..protocol.primitives import reference

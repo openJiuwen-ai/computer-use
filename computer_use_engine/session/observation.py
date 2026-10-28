@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from computer_use._identity import FrozenRecord
+from computer_use.identity import FrozenRecord
 
 _UNSET = object()
 

@@ -1,4 +1,4 @@
-from computer_use._json import dumps, utf8
+from computer_use.json import dumps, utf8
 
 
 class OutputBuffer:
@@ -21,7 +21,7 @@ class OutputBuffer:
                 (
                     "Output limit reached (256 KiB UTF-8 text per call). This text block was not "
                     "emitted; earlier output and effects remain. Inspect a smaller part of the "
-                    "value or evidence file; for UI use a relevant subtree, menu or readText "
+                    "value or evidence file; for UI use a relevant subtree, menu or read_text "
                     "page. Do not repeat preceding actions just to print their "
                     "result."
                 )

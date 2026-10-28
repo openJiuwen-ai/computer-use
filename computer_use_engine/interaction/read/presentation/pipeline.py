@@ -24,18 +24,23 @@ from computer_use.interaction.read.presentation.preparation import (
     PreparationFailure,
     PreparedRoot,
     PreparedSnapshot,
+    prepare_snapshot,
     prepared_nodes,
-)
-from computer_use.interaction.read.presentation.preparation import (
-    prepare_snapshot as prepare_snapshot,
-)
-from computer_use.interaction.read.presentation.preparation import (
-    render_prepared_snapshot as render_prepared_snapshot,
+    render_prepared_snapshot,
 )
 from computer_use.interaction.read.presentation.rendering.pipeline import RenderPipeline
 from computer_use.interaction.read.presentation.semantics.pipeline import SemanticPipeline
 from computer_use.pipeline import Contract, Pipeline, Sequence
 from computer_use.pipeline.core import Node
+
+__all__ = [
+    "PrepareSnapshotPipeline",
+    "PresentationPipeline",
+    "RenderPreparedSnapshotPipeline",
+    "SnapshotPresentationPipeline",
+    "prepare_snapshot",
+    "render_prepared_snapshot",
+]
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.ir import ProjectionResult

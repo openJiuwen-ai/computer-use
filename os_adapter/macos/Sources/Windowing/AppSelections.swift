@@ -15,7 +15,7 @@ import AppKit
             throw DriverError(
                 "App id is unknown or expired; window references are not App ids", code: .staleTarget,
                 next: """
-                    pass an exact id from computer.listApps() to computer.app(id); for a ref shown in \
+                    pass an exact id from computer.list_apps() to computer.app(id); for a ref shown in \
                     Windows, use the observed app.window(ref)
                     """)
         }

@@ -2,10 +2,11 @@
 
 import weakref
 
-from .png import PNG as PNG
-from .png import decode_png, png_size
+from .png import PNG, decode_png, png_size
 from .primitives import frozen
 from .schema import array, enum, identity, number, obj, string
+
+__all__ = ["PNG", "capture_metadata", "decode_capture", "decode_stamp"]
 
 _interval = dict(startedAt=number(min=0), completedAt=number(min=0))
 _stamp = obj(dict(id=identity, **_interval))

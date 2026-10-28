@@ -3,7 +3,7 @@
 import hashlib
 import weakref
 
-from computer_use._identity import WeakIdentityMap
+from computer_use.identity import WeakIdentityMap
 from computer_use.protocol.captures import capture_metadata
 
 _sources = WeakIdentityMap()

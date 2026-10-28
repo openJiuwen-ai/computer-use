@@ -5,7 +5,7 @@ import re
 from typing import TYPE_CHECKING
 
 import regex
-from computer_use._json import loads as jsonLoads
+from computer_use.json import loads as jsonLoads
 from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.interaction.read.presentation.policy import editing
 from computer_use.interaction.read.presentation.tree import has_incomplete_children

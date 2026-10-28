@@ -92,7 +92,7 @@ def select_application(directory, selector):
                 "No observed running window matches "
                 + selector
                 + ". This driver does not discover or launch installed applications; "
-                "read the desktop or listApps() and select a running application/window.",
+                "read the desktop or list_apps() and select a running application/window.",
                 "application",
             )
         _refuse(

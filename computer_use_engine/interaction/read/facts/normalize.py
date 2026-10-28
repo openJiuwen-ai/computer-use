@@ -267,7 +267,7 @@ def normalize_facts(
                 text_refs[(ref, key)] = status.copy()
                 caption = "; captured text available"
                 caption += (
-                    " via this element's readText()"
+                    " via this element's read_text()"
                     if value_fields.get(ref) == key
                     else "; no public continuation for this field"
                 )

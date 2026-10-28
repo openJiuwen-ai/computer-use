@@ -22,7 +22,7 @@ from computer_use.interaction.read.presentation.formatting import json_string, n
 
 # Compatibility for historical callers.
 from computer_use.interaction.read.presentation.rendering.layout.empty_values import (
-    compact_empty_values as compact_empty_values,
+    compact_empty_values,
 )
 from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
 from computer_use.interaction.read.presentation.rendering.layout.pipeline import LayoutPipeline
@@ -42,6 +42,23 @@ from computer_use.interaction.read.presentation.tree import (
     value_label,
 )
 from computer_use.protocol.primitives import trim, utf16_length
+
+__all__ = [
+    "CONVENTIONAL",
+    "STANDARD_CLICK",
+    "bounded",
+    "compact_empty_values",
+    "field",
+    "partial",
+    "preview",
+    "quoted",
+    "render_projection",
+    "render_projection_lines",
+    "render_tree",
+    "rendered_actions",
+    "role",
+    "shortened",
+]
 
 "Full text rendering, with separate source-aware projection and line layout."
 
@@ -531,7 +548,7 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             fields.append("Shortcut: " + display(node["shortcut"], "Shortcut"))
         if "menuMark" in node:
             fields.append("Mark: " + (display(node["menuMark"], "Mark") if node["menuMark"] else "<none>"))
-        # The public readText continuation reads Value, not SelectedText. An
+        # The public read_text continuation reads Value, not SelectedText. An
         # acquired selection cannot be shortened without another valid entry.
         selected_parts = shortened(node.get("selectedText", ""), math.inf if coverage is not None else 200)
         if node.get("selectedText") and not selected_parts["omitted"]:
@@ -706,7 +723,7 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
 
             def body(value: str) -> None:
                 # Display provider paragraph separators without changing the
-                # captured source, UTF-16 offsets or readText pagination.
+                # captured source, UTF-16 offsets or read_text pagination.
                 lines_value.extend(indent + "\t| " + field(p) for p in re.split("\\r\\n|\\r|\\n", value))
 
             body(part["head"])
@@ -717,9 +734,9 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
         if block_value:
             continuation = (
                 (
-                    f"; use (await app.element({node['ref']})).readText()"
+                    f"; use (await app.element({node['ref']})).read_text()"
                     if context.get("publicApi")
-                    else f"; use element({quoted(node['ref'])}).readText()"
+                    else f"; use element({quoted(node['ref'])}).read_text()"
                 )
                 if "readableTextRefs" not in context or node["ref"] in context["readableTextRefs"]
                 else "; full captured value unavailable"

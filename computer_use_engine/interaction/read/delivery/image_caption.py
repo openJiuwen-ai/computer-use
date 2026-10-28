@@ -16,7 +16,7 @@ def png_summary(width: int, height: int, image_bytes: int) -> str:
         f"{number_string(height)}"
         f" px; "
         f"{number_string(image_bytes)}"
-        f" bytes; use printImage(...) to display)"
+        f" bytes; use print_image(...) to display)"
     )
 
 

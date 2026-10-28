@@ -7,7 +7,7 @@ from dataclasses import dataclass, is_dataclass, replace
 from functools import cached_property
 from typing import TYPE_CHECKING
 
-from computer_use._json import dumps, utf8
+from computer_use.json import dumps, utf8
 from computer_use.interaction.read.presentation.content import DisplayText, text
 from computer_use.protocol.observation import NativeObservation, encode_observation
 

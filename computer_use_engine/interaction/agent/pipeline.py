@@ -183,7 +183,7 @@ class AgentInterfacePipeline:
                 pending_observations_discarded(self.controller)
                 raise
             screenshot = observed["screenshot"]
-            # Publish the same public reference namespace as listApps, without
+            # Publish the same public reference namespace as list_apps, without
             # another directory scan or an accessibility-tree prerequisite.
             applications = {}
             desktop = observed["observation"]
@@ -445,7 +445,7 @@ class AgentInterfacePipeline:
     async def keyboard(self, ui: UIHandle, method: str, parameters: Record) -> ActionResult:
         await refresh(self.controller, ui)
         target = self.keyboard_context(ui)
-        intent = Intent(dict(typeText="insert", pressKey="key").get(method, method), parameters)
+        intent = Intent(dict(type_text="insert", press_key="key").get(method, method), parameters)
         # pylint: disable-next=protected-access
         return await self.controller._execute(ui, intent, target)
 

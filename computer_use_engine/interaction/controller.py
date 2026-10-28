@@ -185,12 +185,12 @@ class SessionController:
             parameter = "desktopRef"
         else:
             target, parameter = params["appRef"], "appRef"
-        intent = dict(typeText="insert", pressKey="key").get(method, method)
+        intent = dict(type_text="insert", press_key="key").get(method, method)
         return await self._execute(
             owner,
             Intent(intent, {k: v for k, v in params.items() if k != parameter}),
             target,
-            app_keyboard=owner is not None and method in ("typeText", "paste", "pressKey"),
+            app_keyboard=owner is not None and method in ("type_text", "paste", "press_key"),
         )
 
     async def act_element(

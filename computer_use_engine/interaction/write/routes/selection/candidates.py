@@ -143,7 +143,7 @@ def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     ):
         # An exclusive element click means the visible physical interaction,
         # including application click callbacks. UIA Select/Toggle can mutate
-        # state without those callbacks. Explicit performAction stays native;
+        # state without those callbacks. Explicit perform_action stays native;
         # shared keeps usable background actions ahead of foreground assistance.
         candidates = [p for p in candidates if p.channel == Channel.POINTER]
     if intent.kind == "paste":

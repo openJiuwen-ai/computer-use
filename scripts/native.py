@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from computer_use._json import loads as jsonLoads
+from computer_use.json import loads as jsonLoads
 from computer_use.paths import native_driver, repository_root
 from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
 

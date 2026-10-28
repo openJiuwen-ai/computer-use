@@ -63,7 +63,7 @@ class ApplicationReferences:
         if entry is None or entry.session != session:
             raise local_failure(
                 "application reference is unknown or belongs to an expired session",
-                "call listApps() and choose a returned integer id",
+                "call list_apps() and choose a returned integer id",
                 "stale_target",
             )
         return entry

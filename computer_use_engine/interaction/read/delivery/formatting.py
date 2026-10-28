@@ -162,7 +162,7 @@ def render_observation(observation: Record, observed: Record | None = None) -> R
             f"{number_string(screenshot['width'])}"
             f"x"
             f"{number_string(screenshot['height'])}"
-            f" px; printImage to view."
+            f" px; print_image to view."
         )
         if screenshot is not None
         else (f"Screenshot: unavailable ({field(observation.get('screenshotError', 'no captured window'))})")

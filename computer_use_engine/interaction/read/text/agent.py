@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from computer_use._identity import FrozenRecord
+from computer_use.identity import FrozenRecord
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.acquisition.text.model import CapturedTextRequest
 from computer_use.interaction.read.acquisition.text.pipeline import CapturedTextPipeline
@@ -91,7 +91,7 @@ class AgentTextReadPipeline:
             page = await collector.arun(CapturedTextRequest(source, offset=offset, length=16384))
             if total is not None and total != page["total"]:
                 raise local_failure(
-                    "captured text changed its declared range", "start a new readText()", "snapshot_expired"
+                    "captured text changed its declared range", "start a new read_text()", "snapshot_expired"
                 )
             total = page["total"]
             chunks.append(page["text"])

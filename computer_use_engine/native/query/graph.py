@@ -12,12 +12,12 @@ from computer_use.native.semantics import (
     FIELDS,
     PROPERTIES,
     RELATIONS,
+    UNKNOWN,
     field_value,
     normalize_control_values,
 )
-from computer_use.native.semantics import (
-    UNKNOWN as UNKNOWN,
-)
+
+__all__ = ["UNKNOWN", "NativeGraph"]
 
 
 class NativeGraph:

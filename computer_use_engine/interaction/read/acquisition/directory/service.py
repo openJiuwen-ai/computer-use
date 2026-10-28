@@ -5,14 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.native.query.directory import (
-    select_application as select_application,
+    select_application,
+    select_surface,
+    selected_window,
 )
-from computer_use.native.query.directory import (
-    select_surface as select_surface,
-)
-from computer_use.native.query.directory import (
-    selected_window as selected_window,
-)
+
+__all__ = ["NativeDirectory", "select_application", "select_surface", "selected_window"]
 
 if TYPE_CHECKING:
     from computer_use.native.contracts import Binding

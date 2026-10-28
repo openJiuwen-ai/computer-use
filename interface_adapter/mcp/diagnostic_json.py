@@ -10,7 +10,7 @@ exception records, and the established non-finite-number representation.
 
 import json
 
-from computer_use._json import dumps as legacyDumps
+from computer_use.json import dumps as legacyDumps
 
 
 def _is_native_observation(event):
