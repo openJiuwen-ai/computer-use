@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from computer_use.identity import FrozenRecord
 from computer_use.session.detail_pages import CapturedDetailPages
@@ -118,8 +118,6 @@ def peek_observation_text(state: Mapping[str, Any]) -> str | None:
     # pylint: disable-next=protected-access
     return state._rendered_text if isinstance(state, LazyObservation) else state.get("text")
 
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from computer_use.types import TextPage
