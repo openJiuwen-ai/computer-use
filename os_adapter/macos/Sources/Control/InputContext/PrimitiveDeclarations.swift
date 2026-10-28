@@ -83,12 +83,13 @@ import ApplicationServices
                 id: contract.id, supported: supported, readiness: conditions, exclusive: BackgroundTarget.isExclusive))
     }
 
-    func declareClick(_ unit: NativeInputUnit, offer: NativeClickContract) {
+    func declareClick(_ unit: NativeInputUnit, offer sampled: NativeClickContract) {
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
-                && $0.unit == unit && $0.click?.routeFamily == offer.routeFamily
+                && $0.unit == unit && $0.click?.routeFamily == sampled.routeFamily
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
+        let offer = sampled.retainingDocumentForeground(from: prior?.click)
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
             receiver: receiver, basis: basis, unit: unit, click: offer)

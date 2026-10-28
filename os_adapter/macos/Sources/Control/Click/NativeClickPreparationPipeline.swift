@@ -12,7 +12,7 @@ import ApplicationServices
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickPreparation)
         defer { metric?.end() }
-        if let document = plan.document, plan.documentPreparationRequired {
+        if let document = plan.document, plan.documentPreparation.required {
             if !BackgroundTarget(document.application).isForeground {
                 // AXMain/AXFocusedWindow can change while the native document
                 // responder remains inactive. Do not dispatch a hollow press.
@@ -27,8 +27,11 @@ import ApplicationServices
                 try await PrepareActionDocumentForegroundPass.run(
                     document, boundary: boundary, receipt: receipt, evidence: evidence)
             }
-            try PrepareActionDocumentContextPass.run(document, boundary: boundary, receipt: receipt, evidence: evidence)
-            try await ConfirmActionDocumentContextPass.run(document, boundary: boundary, evidence: evidence)
+            if plan.documentPreparation.windowSelectionRequired {
+                try PrepareActionDocumentContextPass.run(
+                    document, boundary: boundary, receipt: receipt, evidence: evidence)
+                try await ConfirmActionDocumentContextPass.run(document, boundary: boundary, evidence: evidence)
+            }
         }
         if case .menu(let unit, _, _, _) = plan.target {
             let foreground = plan.command.foreground && !BackgroundTarget(unit.application).isForeground

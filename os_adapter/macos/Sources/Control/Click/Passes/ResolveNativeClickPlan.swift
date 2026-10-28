@@ -75,8 +75,14 @@ import ApplicationServices
             target: target, offer: offer, pointer: pointer, command: command, operation: op, within: contract.within,
             step: step)
         if case .action(let node, let name, _) = target, name == kAXPressAction {
-            plan.document = try access.objects.nativeActionFacts(node).document
-            plan.documentPreparationRequired = try plan.document?.focus() == .other
+            let facts = try access.objects.nativeActionFacts(node)
+            guard !offer.documentForegroundRequired || facts.document != nil else {
+                throw NativePreparationUnavailable(
+                    description: "the original Web action's exact document is unavailable; AXPress was not sent")
+            }
+            plan.document = facts.document
+            plan.documentPreparation = try facts.documentPreparation(
+                name, retainedForegroundRequirement: offer.documentForegroundRequired)
         }
         return plan
     }

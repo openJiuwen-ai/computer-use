@@ -8,17 +8,45 @@ import ApplicationServices
 /// An observed local popup retains its own context and uses the addressed action.
 extension NativeElementControl {
     struct ActionFacts {
+        enum DocumentEvidence { case standard(NativeDocumentContext), other, unknown }
         let role: String?
         let actions: [NativeAction.Item]?
         let enabled: Bool?
         let applicationMenuContext: Bool
         let foreground: Bool
         var focusWritable: Bool = false
-        var document: NativeDocumentContext? = nil
+        var documentEvidence = DocumentEvidence.unknown
+        var document: NativeDocumentContext? {
+            if case .standard(let value) = documentEvidence { return value }
+            return nil
+        }
+        var webArea = NativeActionDocumentPolicy.WebArea.unknown
 
         @MainActor func allowsAction(_ action: String) -> Bool {
             NativeActionAdmission.allows(
                 action: action, role: role, focusWritable: focusWritable, foreground: foreground,
+                exclusive: BackgroundTarget.isExclusive)
+        }
+
+        @MainActor func documentPreparation(_ action: String, retainedForegroundRequirement: Bool = false) throws
+            -> NativeActionDocumentPolicy.Preparation
+        {
+            NativeActionDocumentPolicy.preparation(
+                action: action, exactStandardWindow: document != nil,
+                otherDocument: try action == kAXPressAction && document?.focus() == .other,
+                confirmedWebArea: webArea == .confirmed, foreground: foreground,
+                exclusive: BackgroundTarget.isExclusive, retainedForegroundRequirement: retainedForegroundRequirement)
+        }
+
+        @MainActor func documentForeground(_ action: String) -> NativeClickContract.DocumentForeground {
+            let kind: NativeActionDocumentPolicy.DocumentKind
+            switch documentEvidence {
+            case .standard: kind = .standard
+            case .other: kind = .other
+            case .unknown: kind = .unknown
+            }
+            return NativeActionDocumentPolicy.foregroundEvidence(
+                action: action, document: kind, web: webArea, foreground: foreground,
                 exclusive: BackgroundTarget.isExclusive)
         }
     }
@@ -38,9 +66,21 @@ extension NativeElementControl {
             foreground: BackgroundTarget(target.application).isForeground,
             focusWritable: AXAccess.writable(target.element, kAXFocusedAttribute).value == true)
         if let window = target.observedInteractionSurface,
-            inspection.attribute(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
+            let subrole = inspection.attribute(window, kAXSubroleAttribute) as? String, !subrole.isEmpty
         {
-            facts.document = NativeDocumentContext(application: target.application, window: window)
+            if subrole == kAXStandardWindowSubrole {
+                facts.documentEvidence = .standard(
+                    NativeDocumentContext(application: target.application, window: window))
+                if BackgroundTarget.isExclusive, facts.actions?.contains(where: { $0.name == kAXPressAction }) == true {
+                    facts.webArea = try NativeActionDocumentPolicy.classifyWebArea(
+                        element: target.element, window: window, same: { CFEqual($0, $1) },
+                        role: { AXAccess.read($0, kAXRoleAttribute).value as? String },
+                        parent: { AXAccess.element($0, kAXParentAttribute) },
+                        check: RequestDiagnostics.checkCancellation)
+                }
+            } else {
+                facts.documentEvidence = .other
+            }
         }
         return facts
     }

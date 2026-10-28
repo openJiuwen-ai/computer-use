@@ -42,11 +42,11 @@ import ApplicationServices
             let system = NativeClickContract(
                 routeFamily: "macos.hid.v1", delivery: .systemPointer,
                 admission: systemReady && !exposure ? .ready : .preparationRequired,
-                reason: exposure ? "The original element needs to be scrolled into view."
+                reason: exposure
+                    ? "The original element needs to be scrolled into view."
                     : systemReady ? nil : "The exact target window needs authorized foreground preparation.",
                 preparationOptions: systemReady ? (exposure ? ["background"] : []) : ["foreground"],
-                backgroundFamily: "macos.windowDirected.v1",
-                backgroundUnavailable: !transport || !directedAvailable)
+                backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !transport || !directedAvailable)
             for offer in foreground ? [system, directed] : [directed, system] {
                 declarations.declareClick(.pointer(.click), offer: offer)
             }
@@ -90,8 +90,9 @@ import ApplicationServices
                         try isMenu
                         ? access.units.menuUnit(binding.wire, within: plan.within).readiness(enabled: enabled)
                         : NativeReadiness()
-                    let documentRequired =
-                        try !isMenu && action.name == kAXPressAction && facts.document?.focus() == .other
+                    let documentPreparation =
+                        try isMenu ? NativeActionDocumentPolicy.Preparation() : facts.documentPreparation(action.name)
+                    let documentRequired = documentPreparation.required
                     let offer = NativeClickContract(
                         routeFamily: family, delivery: .objectAction,
                         admission: !supported
@@ -99,8 +100,11 @@ import ApplicationServices
                             : (isMenu && !readiness.ready) || documentRequired ? .preparationRequired : .ready,
                         reason: supported
                             ? nil : "The selected native action is disabled or unavailable in this scope.",
-                        preparationOptions: isMenu || documentRequired ? ["background", "foreground"] : [],
-                        backgroundFamily: isMenu || documentRequired ? family : nil)
+                        preparationOptions: documentPreparation.foregroundOnly
+                            ? ["foreground"] : isMenu || documentRequired ? ["background", "foreground"] : [],
+                        backgroundFamily: !documentPreparation.foregroundOnly && (isMenu || documentRequired)
+                            ? family : nil,
+                        documentForeground: isMenu ? .notRequired : facts.documentForeground(action.name))
                     declarations.declareClick(
                         isMenu
                             ? .menuAction(action.name, action.description) : .action(action.name, action.description),
@@ -127,9 +131,8 @@ import ApplicationServices
                                 application: unit.application, window: exposure.mapping, nativeWindow: unit.window),
                             at: exposure.point, exposure: true)
                         return NativeSampledInput(
-                            plan: plan, declarations: declarations, enabled: enabled,
-                            foreground: foreground, input: input,
-                            nativeRole: role, actionsComplete: complete, applicationMenu: menu)
+                            plan: plan, declarations: declarations, enabled: enabled, foreground: foreground,
+                            input: input, nativeRole: role, actionsComplete: complete, applicationMenu: menu)
                     }
                     let sampled = try unit.observedGeometry(allowWindowPreparation: true)
                     if let hit = sampled.hit {
