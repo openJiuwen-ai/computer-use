@@ -44,7 +44,7 @@ class NativeCurrentReceiver:
             # focused object. Missing role evidence does not license a child
             # search; the public resolver checks the candidate's own semantics.
             try:
-                role = self.ax.call(self.ax.A.Accessible.get_role_name, candidate)
+                role = self.ax.call(self.ax.atspi.Accessible.get_role_name, candidate)
             except self.ax.glib.Error:
                 ctx.check()
                 return True

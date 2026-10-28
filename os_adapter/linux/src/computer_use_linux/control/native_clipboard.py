@@ -27,9 +27,7 @@ class NativeClipboard:
         from Xlib import X, Xatom, display, protocol
         from Xlib.ext import xfixes
 
-        # API, protocol, and native binding names retain their established spelling.
-        # pylint: disable-next=invalid-name
-        self.X, self.atoms, self.event, self.request = X, Xatom, protocol.event, protocol.request
+        self.xlib, self.atoms, self.event, self.request = X, Xatom, protocol.event, protocol.request
         self.d = display.Display()
         self.max_property = min(self.MAX_BYTES, (min(self.d.display.info.max_request_length, 65535) - 6) * 4)
         self.closed = False
@@ -76,7 +74,7 @@ class NativeClipboard:
 
     def new_window(self):
         return self.d.screen().root.create_window(
-            0, 0, 1, 1, 0, self.X.CopyFromParent, event_mask=self.X.PropertyChangeMask
+            0, 0, 1, 1, 0, self.xlib.CopyFromParent, event_mask=self.xlib.PropertyChangeMask
         )
 
     @staticmethod
@@ -96,16 +94,16 @@ class NativeClipboard:
             event = self.d.next_event()
             if hasattr(event, "selection_timestamp") and event.selection in self.versions:
                 self.versions[event.selection] += 1
-            elif event.type == self.X.SelectionRequest:
+            elif event.type == self.xlib.SelectionRequest:
                 self.requests.append(event)
-            elif event.type == self.X.SelectionNotify:
+            elif event.type == self.xlib.SelectionNotify:
                 self.notifies.append(event)
-            elif event.type == self.X.PropertyNotify:
+            elif event.type == self.xlib.PropertyNotify:
                 key = self.xid(event.window), event.atom
                 if key in self.pending:
-                    if event.state == self.X.PropertyNewValue:
+                    if event.state == self.xlib.PropertyNewValue:
                         self.pending[key] = True
-                    elif event.state == self.X.PropertyDelete and self.pending[key]:
+                    elif event.state == self.xlib.PropertyDelete and self.pending[key]:
                         self.transferred = True
                         del self.pending[key]
                 if self.xid(event.window) == self.window.id:
@@ -149,7 +147,7 @@ class NativeClipboard:
 
         def ready():
             for event in tuple(self.properties):
-                if event.atom == atom and event.state == self.X.PropertyNewValue:
+                if event.atom == atom and event.state == self.xlib.PropertyNewValue:
                     self.properties.remove(event)
                     return event.time
             return None
@@ -177,7 +175,7 @@ class NativeClipboard:
         return self.wait(ready, ctx, timeout)
 
     def property_value(self, window, prop, limit):
-        value = window.get_property(prop, self.X.AnyPropertyType, 0, (limit + 3) // 4 + 1)
+        value = window.get_property(prop, self.xlib.AnyPropertyType, 0, (limit + 3) // 4 + 1)
         require(
             value is not None and value.format in (8, 16, 32),
             "Clipboard format has no preservable value.",
@@ -302,7 +300,7 @@ class NativeClipboard:
     def watch(self, requestor):
         if requestor.id not in self.watches:
             mask = requestor.get_attributes().your_event_mask
-            self.checked(requestor.change_attributes, event_mask=mask | self.X.PropertyChangeMask)
+            self.checked(requestor.change_attributes, event_mask=mask | self.xlib.PropertyChangeMask)
             self.watches[requestor.id] = mask
 
     def conversion(self, requestor, target, prop):
@@ -357,7 +355,7 @@ class NativeClipboard:
                             except Exception:
                                 converted = False
                             if not converted:
-                                pairs[i + 1] = self.X.NONE
+                                pairs[i + 1] = self.xlib.NONE
                         self.checked(requestor.change_property, prop, self.atom["ATOM_PAIR"], 32, pairs)
             elif okay:
                 okay = self.conversion(requestor, event.target, prop)
@@ -368,7 +366,7 @@ class NativeClipboard:
                     requestor=requestor,
                     selection=event.selection,
                     target=event.target,
-                    property=prop if okay else self.X.NONE,
+                    property=prop if okay else self.xlib.NONE,
                 ),
             )
         except Exception:
@@ -398,7 +396,7 @@ class NativeClipboard:
             self.checked(
                 self.request.SetSelectionOwner,
                 display=self.d.display,
-                window=self.X.NONE if clear else self.window.id,
+                window=self.xlib.NONE if clear else self.window.id,
                 selection=self.selection,
                 time=stamp,
             )

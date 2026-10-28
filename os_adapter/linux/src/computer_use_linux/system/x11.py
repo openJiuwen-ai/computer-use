@@ -8,6 +8,7 @@ import time
 
 from computer_use_linux.contracts.protocol import Failure, finite, integer, now, require, token
 from computer_use_linux.objects.registry import Window
+from computer_use_linux.system.x11_pointer import PointerCallbacks
 
 _RESOURCE_UNQUERIED = object()
 
@@ -36,9 +37,7 @@ class X11:
         from PIL import Image
         from Xlib import XK, X, display, protocol
 
-        # API, protocol, and native binding names retain their established spelling.
-        # pylint: disable-next=invalid-name
-        self.X, self.XK, self.events, self.Image = X, XK, protocol.event, Image
+        self.xlib, self.keysym, self.events, self.image = X, XK, protocol.event, Image
         self.d = display.Display()
         self.screen = self.d.screen()
         self.root = self.screen.root
@@ -55,7 +54,7 @@ class X11:
         return self.d.intern_atom(name)
 
     def prop(self, window, name, default=None):
-        value = window.get_full_property(self.atom(name), self.X.AnyPropertyType)
+        value = window.get_full_property(self.atom(name), self.xlib.AnyPropertyType)
         return default if value is None else value.value
 
     def native(self, xid):
@@ -66,10 +65,10 @@ class X11:
             event = self.d.next_event()
             if getattr(self, "window_captures", None) is not None:
                 self.window_captures.on_event(event)
-            if event.type == self.X.DestroyNotify:
+            if event.type == self.xlib.DestroyNotify:
                 self.retire(event.window.id)
                 self.watched.discard(event.window.id)
-            elif event.type == self.X.MappingNotify:
+            elif event.type == self.xlib.MappingNotify:
                 self.d.refresh_keyboard_mapping(event)
 
     @staticmethod
@@ -103,7 +102,7 @@ class X11:
             left, right, top, bottom = map(int, extents)
             frame = (rect[0] - left, rect[1] - top, rect[2] + left + right, rect[3] + top + bottom)
         if xid not in self.watched:
-            w.change_attributes(event_mask=attrs.your_event_mask | self.X.StructureNotifyMask)
+            w.change_attributes(event_mask=attrs.your_event_mask | self.xlib.StructureNotifyMask)
             self.watched.add(xid)
         return Window(
             xid,
@@ -113,7 +112,7 @@ class X11:
             rect,
             transient.id if transient else None,
             self.atom("_NET_WM_STATE_MODAL") in states,
-            attrs.map_state == self.X.IsViewable,
+            attrs.map_state == self.xlib.IsViewable,
             self.process_start(pid),
             frame,
             bool(attrs.override_redirect),
@@ -141,7 +140,7 @@ class X11:
                     True
                     if (
                         (managed is None or attrs.override_redirect)
-                        and attrs.map_state == self.X.IsViewable
+                        and attrs.map_state == self.xlib.IsViewable
                         and w.id not in ids
                     )
                     else False
@@ -241,9 +240,9 @@ class X11:
     def _request_activation(self, w, ctx):
         ctx.sent()
         message = self.events.ClientMessage(
-            window=w.key, client_type=self.atom("_NET_ACTIVE_WINDOW"), data=(32, [2, self.X.CurrentTime, 0, 0, 0])
+            window=w.key, client_type=self.atom("_NET_ACTIVE_WINDOW"), data=(32, [2, self.xlib.CurrentTime, 0, 0, 0])
         )
-        self.root.send_event(message, event_mask=self.X.SubstructureRedirectMask | self.X.SubstructureNotifyMask)
+        self.root.send_event(message, event_mask=self.xlib.SubstructureRedirectMask | self.xlib.SubstructureNotifyMask)
         self.d.flush()
 
     def activate(self, w, ctx):
@@ -330,7 +329,11 @@ class X11:
             raise Failure("A keyboard key is already held; input was not started.", "input_unavailable")
         mask = self.root.query_pointer().mask
         if mask & (
-            self.X.Button1Mask | self.X.Button2Mask | self.X.Button3Mask | self.X.Button4Mask | self.X.Button5Mask
+            self.xlib.Button1Mask
+            | self.xlib.Button2Mask
+            | self.xlib.Button3Mask
+            | self.xlib.Button4Mask
+            | self.xlib.Button5Mask
         ):
             raise Failure("A mouse button is already held; input was not started.", "input_unavailable")
 
@@ -441,16 +444,16 @@ class X11:
     def read_pixels(self, drawable, width, height):
         if width * height > 64 * 1024 * 1024:
             raise Failure("Capture exceeds pixel budget.", "observation_unavailable")
-        reply = drawable.get_image(0, 0, width, height, self.X.ZPixmap, 0xFFFFFFFF)
+        reply = drawable.get_image(0, 0, width, height, self.xlib.ZPixmap, 0xFFFFFFFF)
         if reply.depth not in (24, 32):
             raise Failure(f"Unsupported X11 image depth {reply.depth}.", "observation_unavailable")
         fmt = next((f for f in self.d.display.info.pixmap_formats if f.depth == reply.depth), None)
         if fmt is None or fmt.bits_per_pixel not in (24, 32):
             raise Failure("Unsupported X11 pixel format.", "observation_unavailable")
         stride = ((width * fmt.bits_per_pixel + fmt.scanline_pad - 1) // fmt.scanline_pad) * (fmt.scanline_pad // 8)
-        little = self.d.display.info.image_byte_order == self.X.LSBFirst
+        little = self.d.display.info.image_byte_order == self.xlib.LSBFirst
         raw = ("BGRX" if little else "XRGB") if fmt.bits_per_pixel == 32 else ("BGR" if little else "RGB")
-        return self.Image.frombytes("RGB", (width, height), reply.data, "raw", raw, stride, 1)
+        return self.image.frombytes("RGB", (width, height), reply.data, "raw", raw, stride, 1)
 
     def capture(self, instance, scope, ctx, *, max_dimension=4096):
         integer(max_dimension, 1, 4096)
@@ -473,7 +476,7 @@ class X11:
                 raise Failure("Desktop geometry changed during capture.", "stale_target")
             x, y, native_width, native_height = 0, 0, geom.width, geom.height
             kind = "desktop"
-        image.thumbnail((max_dimension, max_dimension), self.Image.Resampling.LANCZOS)
+        image.thumbnail((max_dimension, max_dimension), self.image.Resampling.LANCZOS)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
         ctx.check()
@@ -526,7 +529,7 @@ class X11:
             opcode=self.d.display.get_extension_major(xtest.extname),
             event_type=kind,
             detail=detail,
-            time=self.X.CurrentTime,
+            time=self.xlib.CurrentTime,
             root=self.root.id,
             x=x,
             y=y,
@@ -543,7 +546,7 @@ class X11:
         keysym = (
             ord(name)
             if len(name) == 1 and 0x21 <= ord(name) <= 0x7E
-            else self.XK.string_to_keysym(aliases.get(name, name))
+            else self.keysym.string_to_keysym(aliases.get(name, name))
         )
         code = self.d.keysym_to_keycode(keysym)
         if not code:
@@ -566,9 +569,9 @@ class X11:
                     before_dispatch()
                 # Keep ownership even when the X server reply is lost.
                 self.keys.add(code)
-                self._event(self.X.KeyPress, code)
+                self._event(self.xlib.KeyPress, code)
             for code in reversed(codes):
-                self._event(self.X.KeyRelease, code)
+                self._event(self.xlib.KeyRelease, code)
                 self.keys.discard(code)
         finally:
             self.release()
@@ -602,7 +605,7 @@ class X11:
                 dispatched = True
             # Own the release before sending: a lost reply is not no effect.
             self.keys.add(code)
-            self._event(self.X.KeyPress, code)
+            self._event(self.xlib.KeyPress, code)
 
         try:
             for code, shifted in plan.keys:
@@ -616,10 +619,10 @@ class X11:
                 check_plan(plan, keyboard.snapshot(), shifted)
                 ctx.check()
                 press(code)
-                self._event(self.X.KeyRelease, code)
+                self._event(self.xlib.KeyRelease, code)
                 self.keys.discard(code)
                 if shifted:
-                    self._event(self.X.KeyRelease, plan.snapshot.shift)
+                    self._event(self.xlib.KeyRelease, plan.snapshot.shift)
                     self.keys.discard(plan.snapshot.shift)
         finally:
             self.release()  # Cleanup must ignore cancellation and target loss.
@@ -679,8 +682,6 @@ class X11:
             count = max(1, round(pages * 8))
         return dict(points=tuple(normalized), button=number, count=count, motion=motion)
 
-    # A gesture and its dispatch guards execute within one native call.
-    # pylint: disable-next=too-many-arguments
     def pointer_sequence(
         self,
         kind,
@@ -690,19 +691,20 @@ class X11:
         count=1,
         direction=None,
         pages=1,
-        validate=lambda: None,
-        before_dispatch=lambda: None,
-        validate_drag=None,
-        scroll_step_complete=lambda: None,
-        event_progress=None,
+        *,
+        callbacks: PointerCallbacks | None = None,
     ):
         """Dispatch one prepared gesture; policy and target resolution stay above.
 
-        validate runs before the first motion and each button press. Once a drag
-        button is down, validate_drag checks its continuing scope without requiring
-        the original hit/layout: X11's implicit grab routes the remaining gesture.
+        Callbacks validate before the first motion and each button press. Once a
+        drag button is down, validate_drag checks its continuing scope without
+        requiring the original hit/layout: X11's implicit grab routes the gesture.
         Releases are cleanup and never depend on a surviving target or request.
         """
+        callbacks = PointerCallbacks() if callbacks is None else callbacks
+        validate, before_dispatch = callbacks.validate, callbacks.before_dispatch
+        validate_drag, scroll_step_complete = callbacks.validate_drag, callbacks.scroll_step_complete
+        event_progress = callbacks.event_progress
         plan = self.pointer_preflight(kind, points, button, count, direction, pages)
         ctx.check()
         self.require_idle_input()
@@ -721,26 +723,26 @@ class X11:
         try:
             ctx.sent()
             before_dispatch()
-            send(self.X.MotionNotify, x=plan["points"][0][0], y=plan["points"][0][1])
+            send(self.xlib.MotionNotify, x=plan["points"][0][0], y=plan["points"][0][1])
             if kind == "drag":
                 validate()
                 ctx.check()
                 # Ownership begins before dispatch: even a lost reply requires a
                 # release, but never another requested press or gesture replay.
                 self.buttons.add(number)
-                send(self.X.ButtonPress, number)
+                send(self.xlib.ButtonPress, number)
                 for x, y in plan["motion"]:
                     ctx.pause(0.012)
                     dragging()
                     ctx.check()
-                    send(self.X.MotionNotify, x=x, y=y)
+                    send(self.xlib.MotionNotify, x=x, y=y)
             else:
                 for index in range(plan["count"]):
                     validate()
                     ctx.check()
                     self.buttons.add(number)
-                    send(self.X.ButtonPress, number)
-                    send(self.X.ButtonRelease, number)
+                    send(self.xlib.ButtonPress, number)
+                    send(self.xlib.ButtonRelease, number)
                     self.buttons.discard(number)
                     if kind == "scroll":
                         scroll_step_complete()
@@ -774,11 +776,18 @@ class X11:
                 "Shared X11 visual pointer input requires host foreground-assist authorization.", "mode_unsupported"
             )
         return self.pointer_sequence(
-            kind, points, ctx, button, count, direction, pages, validate, before_dispatch, validate_drag
+            kind,
+            points,
+            ctx,
+            button,
+            count,
+            direction,
+            pages,
+            callbacks=PointerCallbacks(validate, before_dispatch, validate_drag),
         )
 
     def release(self, *, event_progress=None):
-        for kind, held in ((self.X.KeyRelease, self.keys), (self.X.ButtonRelease, self.buttons)):
+        for kind, held in ((self.xlib.KeyRelease, self.keys), (self.xlib.ButtonRelease, self.buttons)):
             for number in list(held):
                 try:
                     if event_progress is not None:

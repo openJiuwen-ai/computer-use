@@ -110,7 +110,7 @@ class NativeFacts:
 
     def call(self, interface, method, obj, *args):
         self.check()
-        fn = getattr(getattr(self.ax.A, interface, None), method, None)
+        fn = getattr(getattr(self.ax.atspi, interface, None), method, None)
         if fn is None:
             raise FieldUnavailable("unsupported", "This AT-SPI library does not expose " + method + ".")
         return self.ax.call(fn, obj, *args)
@@ -211,7 +211,7 @@ class NativeFacts:
                 )
             return value
         if name in STATES:
-            state = getattr(self.ax.A.StateType, STATES[name], None)
+            state = getattr(self.ax.atspi.StateType, STATES[name], None)
             if state is None:
                 raise FieldUnavailable("unsupported")
             states = self.cached(cache, "states", lambda: self.call("Accessible", "get_state_set", obj))
@@ -242,7 +242,7 @@ class NativeFacts:
             return dict(zip(("row", "column", "rowSpan", "columnSpan"), value))
         if name == "Component.extents":
             self.require_interface(obj, cache, "Component")
-            screen = getattr(getattr(self.ax.A, "CoordType", None), "SCREEN", None)
+            screen = getattr(getattr(self.ax.atspi, "CoordType", None), "SCREEN", None)
             if screen is None:
                 raise FieldUnavailable("unsupported", "This AT-SPI library does not expose screen coordinates.")
             value = self.call("Component", "get_extents", obj, screen)
@@ -517,7 +517,7 @@ class NativeFacts:
         if relation_property not in ("labelled-by", "label-for"):
             raise FieldUnavailable("unsupported")
         kind = getattr(
-            self.ax.A.RelationType, "LABELLED_BY" if relation_property == "labelled-by" else "LABEL_FOR", None
+            self.ax.atspi.RelationType, "LABELLED_BY" if relation_property == "labelled-by" else "LABEL_FOR", None
         )
         if kind is None:
             raise FieldUnavailable("unsupported")

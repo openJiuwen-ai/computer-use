@@ -9,6 +9,7 @@ from typing import Any, NamedTuple
 
 from computer_use_linux.contracts.protocol import Failure, fields, finite, integer, require
 from computer_use_linux.control.native_target import NativeTarget
+from computer_use_linux.system.x11_pointer import PointerCallbacks
 
 
 def pointer_intent(value, *, element=False):
@@ -217,10 +218,12 @@ class NativePointer:
                     points,
                     ctx,
                     **self.options(operation.intent),
-                    before_dispatch=barrier,
-                    validate=lambda: self.guard(operation, contract, ctx),
-                    validate_drag=lambda: self.guard(operation, contract, ctx, during_drag=True),
-                    scroll_step_complete=scroll_step_complete,
+                    callbacks=PointerCallbacks(
+                        before_dispatch=barrier,
+                        validate=lambda: self.guard(operation, contract, ctx),
+                        validate_drag=lambda: self.guard(operation, contract, ctx, during_drag=True),
+                        scroll_step_complete=scroll_step_complete,
+                    ),
                 )
                 dispatch, detail = "dispatched", "Pointer sequence sent; read to verify its effect."
                 ctx.check()

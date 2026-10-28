@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import os
 import shlex
 import shutil
@@ -12,6 +13,8 @@ from typing import Any
 from computer_use.json import loads as jsonLoads
 from computer_use.paths import native_driver, repository_root
 from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
+
+_LOG = logging.getLogger(__name__)
 
 
 def run(command, args, cwd=None, capture=False):
@@ -54,9 +57,7 @@ def build_mac_os(root=None):
         encoding="utf-8",
     )
     run("codesign", ["--force", "--sign", "-", "--identifier", "local.computer-use.driver", bundle], native)
-    # Console and transport output retain their documented stream format.
-    # pylint: disable-next=bad-builtin
-    print(executable)  # noqa: T201
+    sys.stdout.write(f"{executable}\n")
     return executable
 
 
@@ -230,8 +231,7 @@ def build_windows(root=None):
         ],
         native,
     )
-    # pylint: disable-next=bad-builtin
-    print(output)  # noqa: T201
+    sys.stdout.write(f"{output}\n")
     return output
 
 
@@ -288,8 +288,7 @@ def permissions(argv=None):
     )
     args = parser.parse_args(argv)
     status = read_permissions(args.request, protocol_version=args.protocol_version)
-    # pylint: disable-next=bad-builtin
-    print(json.dumps(status, ensure_ascii=False, separators=(",", ":")))  # noqa: T201
+    sys.stdout.write(json.dumps(status, ensure_ascii=False, separators=(",", ":")) + "\n")
     ready, missing = permission_state(status)
     if not ready:
         if sys.platform == "linux":
@@ -308,8 +307,7 @@ def permissions(argv=None):
             if args.request
             else "可运行 computer-use-permissions --request 发起系统授权提示。"
         )
-        # pylint: disable-next=bad-builtin
-        print(  # noqa: T201
+        _LOG.warning(
             (
                 f"未就绪："
                 f"{', '.join(missing)}"
@@ -317,8 +315,7 @@ def permissions(argv=None):
                 f"{message}"
                 f"\n权限归属以系统显示的启动程序为准（驱动、终端或 SSH 服务，例如 sshd-keygen-wrapper）；请从与 MCP "
                 f"相同的终端或 SSH 连接复查。请求命令不会代替你批准授权。"
-            ),
-            file=sys.stderr,
+            )
         )
         return 1
     return 0
@@ -378,8 +375,7 @@ def linux_session_launcher(*, directory=None, env=None):
         encoding="utf-8",
     )
     output.chmod(0o700)
-    # pylint: disable-next=bad-builtin
-    print(  # noqa: T201
+    sys.stdout.write(
         (
             f"Saved "
             f"{output}"
@@ -389,6 +385,7 @@ def linux_session_launcher(*, directory=None, env=None):
             f"{'Wayland native accessibility; capture/input limited' if wayland else 'X11'}"
             f"). Regenerate after logging out or changing the desktop session."
         )
+        + "\n"
     )
     return output
 
@@ -397,8 +394,7 @@ def _cli(action):
     try:
         result = action()
     except Exception as error:
-        # pylint: disable-next=bad-builtin
-        print(str(error), file=sys.stderr)  # noqa: T201
+        _LOG.error("%s", error)
         return 1
     return result if isinstance(result, int) else 0
 

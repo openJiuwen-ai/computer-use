@@ -21,6 +21,9 @@ __all__ = ["UNKNOWN", "NativeGraph"]
 
 
 class NativeGraph:
+    failure_target = "input receiver"
+    failure_next = "read the intended control or use its window observation; no input was sent by this lookup"
+
     def __init__(self, port, operation, root, remaining, *, fields, max_nodes=4096, max_depth=40, follow_relations=()):
         self.port, self.operation, self.root, self.remaining = port, operation, root, remaining
         self.platform = port.platform
@@ -93,16 +96,14 @@ class NativeGraph:
         if matches_edge:
             self.fail("observation_incomplete", "The control containment has conflicting native parent evidence.")
 
-    # Subclasses override this instance policy to report their own lookup target.
-    # pylint: disable-next=no-self-use
     def fail(self, code, detail):
         raise ComputerUseError(
             dict(
                 code=code,
                 effect="none",
-                target="input receiver",
+                target=self.failure_target,
                 detail=detail,
-                next="read the intended control or use its window observation; no input was sent by this lookup",
+                next=self.failure_next,
             )
         )
 

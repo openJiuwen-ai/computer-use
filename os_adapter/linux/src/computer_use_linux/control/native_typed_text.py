@@ -13,6 +13,7 @@ from computer_use_linux.contracts.protocol import Failure, integer, require
 from computer_use_linux.control.native_keyboard import NativeKeyboard
 from computer_use_linux.control.native_selection import Changed
 from computer_use_linux.control.native_sequence_receiver import NativeSequenceReceiver
+from computer_use_linux.system.x11_pointer import PointerCallbacks
 
 
 class NativeTypedText(NativeKeyboard):
@@ -197,7 +198,9 @@ class NativeTypedText(NativeKeyboard):
             before_dispatch()
             preparation.append("pointerFocus")
 
-        self.desktop.pointer_sequence("click", points, ctx, **options, validate=guard, before_dispatch=barrier)
+        self.desktop.pointer_sequence(
+            "click", points, ctx, **options, callbacks=PointerCallbacks(validate=guard, before_dispatch=barrier)
+        )
 
     def guard(self, contract, ctx):
         r = super().guard(contract, ctx)

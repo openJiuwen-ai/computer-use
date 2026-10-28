@@ -35,7 +35,9 @@ class NativeFocusDiscovery:
 
     def _hidden(self, obj):
         states = self._states(obj)
-        return not (states.contains(self.ax.A.StateType.SHOWING) or states.contains(self.ax.A.StateType.VISIBLE))
+        return not (
+            states.contains(self.ax.atspi.StateType.SHOWING) or states.contains(self.ax.atspi.StateType.VISIBLE)
+        )
 
     def focus_path(self, obj):
         path = self._path(obj)
@@ -45,7 +47,7 @@ class NativeFocusDiscovery:
         return None if any(self._hidden(self.objects[key]) for key in path) else path
 
     def _call(self, name, obj, *args):
-        return self.ax.call(getattr(self.ax.A.Accessible, name), obj, *args)
+        return self.ax.call(getattr(self.ax.atspi.Accessible, name), obj, *args)
 
     def _states(self, obj):
         self.ax.live(obj)
@@ -54,7 +56,7 @@ class NativeFocusDiscovery:
         return states
 
     def is_focused(self, obj):
-        return self._states(obj).contains(self.ax.A.StateType.FOCUSED)
+        return self._states(obj).contains(self.ax.atspi.StateType.FOCUSED)
 
     def _path(self, obj):
         root_key = self._key(self.root)
@@ -75,7 +77,7 @@ class NativeFocusDiscovery:
     def _collection(self):
         if "Collection" not in self._call("get_interfaces", self.root):
             return None
-        a = self.ax.A
+        a = self.ax.atspi
         states = a.StateSet()
         states.add(a.StateType.FOCUSED)
         match = a.CollectionMatchType.ALL

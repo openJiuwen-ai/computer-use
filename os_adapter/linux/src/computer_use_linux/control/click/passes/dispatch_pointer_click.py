@@ -1,5 +1,7 @@
 """One fixed XTest train, with native final guards and owned-input release."""
 
+from computer_use_linux.system.x11_pointer import PointerCallbacks
+
 
 def dispatch_pointer_click(operation, plan, ledger, ctx, diagnostics):
     unit, contract = plan.unit, plan.contract
@@ -17,9 +19,11 @@ def dispatch_pointer_click(operation, plan, ledger, ctx, diagnostics):
             points,
             ctx,
             **unit.options(operation.intent),
-            before_dispatch=barrier,
-            validate=lambda: unit.guard(operation, contract, ctx),
-            event_progress=ledger.event,
+            callbacks=PointerCallbacks(
+                before_dispatch=barrier,
+                validate=lambda: unit.guard(operation, contract, ctx),
+                event_progress=ledger.event,
+            ),
         )
         ledger.requested_complete = True
     with diagnostics.stage("postDispatchState"):

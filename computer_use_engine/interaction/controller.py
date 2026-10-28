@@ -18,7 +18,7 @@ from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
 from computer_use.native.transport import ConnectionPort
 from computer_use.protocol.observation import NativeNode
-from computer_use.protocol.session import desktop_mode, NATIVE_PROTOCOL_VERSION
+from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION, desktop_mode
 from computer_use.session.bindings import SessionBindings
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
 from computer_use.session.events import observations_invalidated
@@ -26,7 +26,8 @@ from computer_use.session.events import observations_invalidated
 if TYPE_CHECKING:
     from computer_use.interaction.model import ControllerAdapters
     from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
-    from computer_use.interaction.records import ElementPath as LookupPath, ElementSnapshot
+    from computer_use.interaction.records import ElementPath as LookupPath
+    from computer_use.interaction.records import ElementSnapshot
     from computer_use.interaction.requests import InteractionRequest
     from computer_use.native.contracts import OperationTarget
     from computer_use.native.port import NativePort
@@ -252,9 +253,8 @@ class SessionController:
             )
         return target
 
-    # pylint: disable-next=invalid-name
-    async def find(self, owner: object, path: LookupPath, timeoutMs: int, enabled: bool) -> ElementSnapshot:
-        return await self.run(FindElement(owner, path, timeoutMs, enabled))
+    async def find(self, owner: object, path: LookupPath, timeout_ms: int, enabled: bool) -> ElementSnapshot:
+        return await self.run(FindElement(owner, path, timeout_ms, enabled))
 
 
 if TYPE_CHECKING:

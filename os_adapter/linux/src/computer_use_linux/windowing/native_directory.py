@@ -120,8 +120,8 @@ class NativeDirectory:
             ctx.check()
             try:
                 ax.live(obj)
-                pid = ax.call(ax.A.Accessible.get_process_id, obj)
-                name = ax.call(ax.A.Accessible.get_name, obj)
+                pid = ax.call(ax.atspi.Accessible.get_process_id, obj)
+                name = ax.call(ax.atspi.Accessible.get_name, obj)
                 # Exact types preserve scalar validation and identity contracts.
                 # pylint: disable-next=unidiomatic-typecheck
                 if type(pid) is not int or not 0 <= pid <= 2147483647:
@@ -187,7 +187,7 @@ class NativeDirectory:
                 gap(notes, "Application directory limited to 4096 entries.")
                 break
             try:
-                record = NativeInstallation.capture(app, self.b.ax.gio, ctx, GLib=self.b.ax.glib)
+                record = NativeInstallation.capture(app, self.b.ax.gio, ctx, glib=self.b.ax.glib)
                 identifier_local = self.identity(("installation", record.key))
                 # A retained target remains immutable across catalogue refreshes.
                 self.installations.setdefault(identifier_local, record)
