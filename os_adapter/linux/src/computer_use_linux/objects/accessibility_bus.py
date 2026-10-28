@@ -5,9 +5,7 @@ import os
 from computer_use_linux.contracts.protocol import Failure
 
 
-# API, protocol, and native binding names retain their established spelling.
-# pylint: disable-next=invalid-name
-def connect_accessibility_bus(Gio, GLib):
+def connect_accessibility_bus(gio, glib):
     """Fail before libatspi's fatal initialization on a missing/stale session bus.
 
     Resolve through the selected session, not an X root property left by another
@@ -16,23 +14,23 @@ def connect_accessibility_bus(Gio, GLib):
     try:
         address = os.environ.get("AT_SPI_BUS_ADDRESS")
         if not address:
-            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            bus = gio.bus_get_sync(gio.BusType.SESSION, None)
             address = bus.call_sync(
                 "org.a11y.Bus",
                 "/org/a11y/bus",
                 "org.a11y.Bus",
                 "GetAddress",
                 None,
-                GLib.VariantType.new("(s)"),
-                Gio.DBusCallFlags.NONE,
+                glib.VariantType.new("(s)"),
+                gio.DBusCallFlags.NONE,
                 2000,
                 None,
             ).unpack()[0]
         if not address:
             raise ValueError("The session did not provide an accessibility bus.")
-        connection = Gio.DBusConnection.new_for_address_sync(
+        connection = gio.DBusConnection.new_for_address_sync(
             address,
-            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
             None,
             None,
         )
@@ -43,15 +41,15 @@ def connect_accessibility_bus(Gio, GLib):
                 "org.freedesktop.DBus",
                 "GetId",
                 None,
-                GLib.VariantType.new("(s)"),
-                Gio.DBusCallFlags.NONE,
+                glib.VariantType.new("(s)"),
+                gio.DBusCallFlags.NONE,
                 2000,
                 None,
             )
         finally:
             connection.close_sync(None)
         os.environ["AT_SPI_BUS_ADDRESS"] = address
-    except (GLib.Error, ValueError) as error:
+    except (glib.Error, ValueError) as error:
         raise Failure(
             f"Cannot connect to the selected desktop's accessibility bus: {error}",
             "observation_unavailable",

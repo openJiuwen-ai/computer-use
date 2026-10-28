@@ -183,9 +183,7 @@ class NativeInstallation:
         return self.key
 
     @classmethod
-    # API, protocol, and native binding names retain their established spelling.
-    # pylint: disable-next=invalid-name
-    def capture(cls, app, Gio, ctx=None, *, GLib):
+    def capture(cls, app, gio, ctx=None, *, glib):
         _check(ctx)
         identifier = app.get_id()
         if not isinstance(identifier, str) or not identifier.strip():
@@ -209,7 +207,7 @@ class NativeInstallation:
                 app,
             )
         before = _desktop_file(filename, ctx)
-        native = Gio.DesktopAppInfo.new_from_filename(before.path)
+        native = gio.DesktopAppInfo.new_from_filename(before.path)
         if native is None:
             if before != _desktop_file(filename, ctx):
                 raise Failure("Installed desktop entry changed during Gio parsing.", "stale_target", filename)
@@ -234,12 +232,12 @@ class NativeInstallation:
         executable, parse_reason = None, None
         commandline = native.get_commandline()
         try:
-            parsed, argv = GLib.shell_parse_argv(commandline or "")
+            parsed, argv = glib.shell_parse_argv(commandline or "")
             if parsed and argv and isinstance(argv[0], str):
                 executable = argv[0]
             if executable is None or "%" in executable:
                 parse_reason = "The executable argument is not a confirmed static desktop entry."
-        except GLib.Error:
+        except glib.Error:
             parse_reason = "GLib could not parse the desktop command identity."
         dbus, terminal = native.get_boolean("DBusActivatable"), native.get_boolean("Terminal")
         startup_class = native.get_startup_wm_class() if hasattr(native, "get_startup_wm_class") else None

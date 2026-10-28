@@ -128,7 +128,7 @@ class X11WindowCaptures:
                 mask = parent.get_attributes().your_event_mask
                 self._checked(
                     lambda caught, *, mask=mask, parent=parent: parent.change_attributes(
-                        event_mask=mask | self.x.X.StructureNotifyMask, onerror=caught
+                        event_mask=mask | self.x.xlib.StructureNotifyMask, onerror=caught
                     )
                 )
                 self.watches[parent.id] = [parent, mask, 1]
@@ -181,7 +181,7 @@ class X11WindowCaptures:
                 try:
                     # info() may have independently subscribed to this window
                     # after it was first watched as a capture ancestor.
-                    mask = watch[1] | (self.x.X.StructureNotifyMask if xid in self.x.watched else 0)
+                    mask = watch[1] | (self.x.xlib.StructureNotifyMask if xid in self.x.watched else 0)
                     self._checked(
                         lambda caught, *, mask=mask, watch=watch: watch[0].change_attributes(
                             event_mask=mask, onerror=caught
@@ -267,20 +267,20 @@ class X11WindowCaptures:
                     lease.sampled = False
             if xid != lease.window.id and xid not in lease.ancestors:
                 continue
-            if event.type == self.x.X.DestroyNotify and xid == lease.window.id:
+            if event.type == self.x.xlib.DestroyNotify and xid == lease.window.id:
                 try:
                     self._dispose(lease, destroyed=True)
                 except self.error.XError:
                     pass  # self.failed records uncertain cleanup for next read.
                 continue
-            changed = event.type in (self.x.X.MapNotify, self.x.X.UnmapNotify, self.x.X.ReparentNotify)
-            if event.type == self.x.X.ConfigureNotify and xid == lease.window.id:
+            changed = event.type in (self.x.xlib.MapNotify, self.x.xlib.UnmapNotify, self.x.xlib.ReparentNotify)
+            if event.type == self.x.xlib.ConfigureNotify and xid == lease.window.id:
                 size = (event.width, event.height)
                 changed = size != lease.size
                 lease.size = size
-            if event.type in (self.x.X.ReparentNotify, self.x.X.DestroyNotify):
+            if event.type in (self.x.xlib.ReparentNotify, self.x.xlib.DestroyNotify):
                 lease.parents_dirty = True
-            if changed or event.type == self.x.X.DestroyNotify:
+            if changed or event.type == self.x.xlib.DestroyNotify:
                 lease.epoch += 1
                 lease.sampled = False
                 lease.storage_dirty = True

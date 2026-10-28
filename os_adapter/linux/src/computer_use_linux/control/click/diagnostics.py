@@ -6,6 +6,7 @@ are added, and neither clock nor sink failures may affect the native operation.
 """
 
 import json
+import logging
 import os
 import sys
 import time
@@ -93,11 +94,18 @@ class ClickDiagnostics:
                         for key in ("dispatch", "confirmation", "cleanup", "errorCode", "retryReason", "click")
                     }
                 )
-            # Console and transport output retain their documented stream format.
-            # pylint: disable-next=bad-builtin
-            sys.stderr.write(
-                json.dumps(dict(message=value), ensure_ascii=True, allow_nan=False, separators=(",", ":")) + "\n"
+            # This structured diagnostic stream must retain its JSON Lines format.
+            handler = logging.StreamHandler(sys.stderr)
+            handler.handle(
+                logging.LogRecord(
+                    __name__,
+                    logging.INFO,
+                    __file__,
+                    0,
+                    json.dumps(dict(message=value), ensure_ascii=True, allow_nan=False, separators=(",", ":")),
+                    (),
+                    None,
+                )
             )
-            sys.stderr.flush()
         except BaseException:
             pass

@@ -74,17 +74,17 @@ class AccessibilityDesktop:
     def info(self, obj, app_name=""):
         ax = self.ax
         states = ax.live(obj)
-        pid = ax.call(ax.A.Accessible.get_process_id, obj)
-        app = ax.call(ax.A.Accessible.get_application, obj)
-        name = app_name or (ax.call(ax.A.Accessible.get_name, app) if app is not None else "")
+        pid = ax.call(ax.atspi.Accessible.get_process_id, obj)
+        app = ax.call(ax.atspi.Accessible.get_application, obj)
+        name = app_name or (ax.call(ax.atspi.Accessible.get_name, app) if app is not None else "")
         return Window(
             f"atspi:{ax.native_key(obj)}",
-            ax.call(ax.A.Accessible.get_name, obj),
+            ax.call(ax.atspi.Accessible.get_name, obj),
             name or "Unknown application",
             pid,
             ax.rect(obj),
-            modal=states.contains(ax.A.StateType.MODAL),
-            mapped=states.contains(ax.A.StateType.SHOWING),
+            modal=states.contains(ax.atspi.StateType.MODAL),
+            mapped=states.contains(ax.atspi.StateType.SHOWING),
             process_start=process_start(pid),
             accessible=obj,
         )
@@ -132,7 +132,8 @@ class AccessibilityDesktop:
         objects = {ax.native_key(w.accessible): w for w in windows}
         parents, unknown = {w.key: set() for w in windows}, set()
         kinds = {
-            getattr(ax.A.RelationType, name, None): name for name in ("SUBWINDOW_OF", "POPUP_FOR", "PARENT_WINDOW_OF")
+            getattr(ax.atspi.RelationType, name, None): name
+            for name in ("SUBWINDOW_OF", "POPUP_FOR", "PARENT_WINDOW_OF")
         }
         if None in kinds:
             kinds.pop(None)
@@ -140,7 +141,7 @@ class AccessibilityDesktop:
             gap(notes, "This AT-SPI library does not expose all window relation types.")
         for window in windows:
             try:
-                relations = ax.call(ax.A.Accessible.get_relation_set, window.accessible)
+                relations = ax.call(ax.atspi.Accessible.get_relation_set, window.accessible)
                 if not isinstance(relations, (list, tuple)) or len(relations) > 128:
                     raise Failure("Invalid or oversized native window relation set.", "observation_incomplete")
                 for relation in relations:

@@ -280,15 +280,13 @@ class Connection:
             raise RuntimeError("driver input channel closed")
         self._child.stdin.write(_json(value).encode("utf-8"))
 
-    # API, protocol, and native binding names retain their established spelling.
-    # pylint: disable-next=invalid-name
-    async def _negotiate(self, timeoutMs):
+    async def _negotiate(self, timeout_ms):
         if self._hello is not None:
             return
         mode, loop = desktop_mode(), asyncio.get_running_loop()
         future = loop.create_future()
         timer = loop.call_later(
-            timeoutMs / 1000, lambda: self.close(RuntimeError("protocol hello timed out; no system command was sent"))
+            timeout_ms / 1000, lambda: self.close(RuntimeError("protocol hello timed out; no system command was sent"))
         )
         self._handshake = dict(future=future, timer=timer)
         self._write(dict(version=self.protocol_version, id=0, method="hello", params=dict(desktopMode=mode)))

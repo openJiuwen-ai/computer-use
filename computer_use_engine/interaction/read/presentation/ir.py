@@ -348,9 +348,7 @@ class ProjectionView:
         return self._ir.source.context
 
     @property
-    # API, protocol, and native binding names retain their established spelling.
-    # pylint: disable-next=invalid-name
-    def nativeNodes(self) -> Mapping[str, NodeView]:
+    def native_nodes(self) -> Mapping[str, NodeView]:
         return self._ir.source.native_nodes
 
     @property
@@ -382,8 +380,7 @@ class ProjectionView:
         return view_node(self._ir, self._ir.source.root)
 
     @property
-    # pylint: disable-next=invalid-name
-    def foldedInto(self) -> Mapping[str, str]:
+    def folded_into(self) -> Mapping[str, str]:
         return MappingProxyType(self._ir.folded_into)
 
     @property
@@ -394,7 +391,7 @@ class ProjectionView:
     def expanded(self) -> frozenset[str]:
         return frozenset(
             m["ref"]
-            for m in self.nativeNodes.get(self.context.get("subtreeRef"), {}).get("control", {}).get("members", ())
+            for m in self.native_nodes.get(self.context.get("subtreeRef"), {}).get("control", {}).get("members", ())
         )
 
     def keep(self, node: NodeView) -> bool:
@@ -642,12 +639,12 @@ def validate_projection(ir: PresentationIR) -> None:
         if ref not in ir.nodes or ref in seen:
             raise ValueError("Projection contains an unknown or repeated element reference")
         seen.add(ref)
-        if any(source not in view.nativeNodes for source in node["sourceRefs"]):
+        if any(source not in view.native_nodes for source in node["sourceRefs"]):
             raise ValueError("Projection contains an unknown source reference")
         for part in node["textSources"]:
             if (
-                part["attribute"] not in view.nativeNodes.get(part["sourceRef"], {})
-                or view.nativeNodes[part["sourceRef"]][part["attribute"]] != part["text"]
+                part["attribute"] not in view.native_nodes.get(part["sourceRef"], {})
+                or view.native_nodes[part["sourceRef"]][part["attribute"]] != part["text"]
             ):
                 raise ValueError("Projection caption has no matching source field")
         pending.extend(node["children"])
@@ -660,7 +657,7 @@ def validate_projection(ir: PresentationIR) -> None:
     if set(ir.nodes) - seen - omitted:
         raise ValueError("Projection removed an element without recording its source")
     for ref, owner in ir.folded_into.items():
-        if ref not in view.nativeNodes or owner not in view.nativeNodes:
+        if ref not in view.native_nodes or owner not in view.native_nodes:
             raise ValueError("Projection fold has no native source or target")
 
 
@@ -702,7 +699,7 @@ def export_projection(ir: PresentationIR) -> ProjectionResult:
         for child in node["children"]:
             index_native(child)
 
-    index_native(thaw(view.nativeNodes[ir.source.root]))
+    index_native(thaw(view.native_nodes[ir.source.root]))
 
     def materialize(node: ViewNode) -> SemanticNode:
         result = {key: thaw(value) for key, value in node.items() if key not in ("children", "native")}

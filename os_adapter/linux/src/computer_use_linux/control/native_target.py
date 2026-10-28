@@ -23,7 +23,7 @@ class NativeTarget:
         self.b, self.ax, self.store, self.directory = backend, backend.ax, store, directory
 
     def call(self, interface, name, obj, *args):
-        method = getattr(getattr(self.ax.A, interface, None), name, None)
+        method = getattr(getattr(self.ax.atspi, interface, None), name, None)
         if method is None:
             raise Failure("Native provider has no " + interface + "." + name + ".", "input_unavailable")
         return self.ax.call(method, obj, *args)
@@ -36,7 +36,7 @@ class NativeTarget:
         return states
 
     def read_only(self, states):
-        flag = getattr(self.ax.A.StateType, "READ_ONLY", None)
+        flag = getattr(self.ax.atspi.StateType, "READ_ONLY", None)
         return flag is not None and states.contains(flag)
 
     def window(self, target, ctx):
@@ -110,7 +110,7 @@ class NativeTarget:
         self.validate_scope(target, within, ctx)
         states = self.state(self.store.get(target["node"], target["surface"]).obj)
         require(
-            any(states.contains(getattr(self.ax.A.StateType, key)) for key in ("ENABLED", "SENSITIVE")),
+            any(states.contains(getattr(self.ax.atspi.StateType, key)) for key in ("ENABLED", "SENSITIVE")),
             "The requested owner is disabled.",
             "input_unavailable",
         )
@@ -132,7 +132,7 @@ class NativeTarget:
         states = self.state(obj)
         interfaces = self.call("Accessible", "get_interfaces", obj)
         require(isinstance(interfaces, (list, tuple)), "Native interface list is unavailable.", "input_unavailable")
-        enabled = any(states.contains(getattr(self.ax.A.StateType, key)) for key in ("ENABLED", "SENSITIVE"))
+        enabled = any(states.contains(getattr(self.ax.atspi.StateType, key)) for key in ("ENABLED", "SENSITIVE"))
         role = self.call("Accessible", "get_role_name", obj)
         self.validate_scope(target, within, ctx)
         return TargetState(obj, states, interfaces, role, enabled)

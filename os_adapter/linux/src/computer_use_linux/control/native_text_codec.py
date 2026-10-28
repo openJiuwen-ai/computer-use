@@ -33,11 +33,11 @@ class TextCodec:
 
 
 def text_codec(ax, obj):
-    app = ax.call(ax.A.Accessible.get_application, obj)
+    app = ax.call(ax.atspi.Accessible.get_application, obj)
     if app is None:
         raise Failure("The native text provider identity is unavailable.", "input_unavailable")
-    toolkit = ax.call(ax.A.Accessible.get_toolkit_name, app)
-    version = ax.call(ax.A.Accessible.get_toolkit_version, app)
+    toolkit = ax.call(ax.atspi.Accessible.get_toolkit_name, app)
+    version = ax.call(ax.atspi.Accessible.get_toolkit_version, app)
     if not isinstance(toolkit, str) or not toolkit.strip() or not isinstance(version, str):
         raise Failure("The native text provider did not declare its argument contract.", "input_unavailable")
     return TextCodec(toolkit, version, toolkit.casefold() == "qt")

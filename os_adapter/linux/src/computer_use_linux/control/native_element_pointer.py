@@ -64,7 +64,7 @@ class NativeElementPointer(NativePointer):
             if "Component" not in interfaces:
                 return current if reported else None
             child = self.target.call(
-                "Component", "get_accessible_at_point", current, *point, self.ax.A.CoordType.SCREEN
+                "Component", "get_accessible_at_point", current, *point, self.ax.atspi.CoordType.SCREEN
             )
             if child is None:
                 return current if reported else None
@@ -84,11 +84,11 @@ class NativeElementPointer(NativePointer):
         require(
             native.mapped
             and "Component" in interfaces
-            and all(states.contains(getattr(self.ax.A.StateType, state)) for state in ("VISIBLE", "SHOWING")),
+            and all(states.contains(getattr(self.ax.atspi.StateType, state)) for state in ("VISIBLE", "SHOWING")),
             "The selected control has no currently visible pointer geometry.",
             "input_unavailable",
         )
-        rect = self.target.call("Component", "get_extents", obj, self.ax.A.CoordType.SCREEN)
+        rect = self.target.call("Component", "get_extents", obj, self.ax.atspi.CoordType.SCREEN)
         require(rect is not None, "The selected control has no native bounds.", "input_unavailable")
         frame = tuple(getattr(rect, key, None) for key in ("x", "y", "width", "height"))
         require(
@@ -154,7 +154,7 @@ class NativeElementPointer(NativePointer):
             )
             states = self.target.state(obj)
             require(
-                any(states.contains(getattr(self.ax.A.StateType, key)) for key in ("ENABLED", "SENSITIVE")),
+                any(states.contains(getattr(self.ax.atspi.StateType, key)) for key in ("ENABLED", "SENSITIVE")),
                 "The selected scroll member is disabled.",
                 "input_unavailable",
             )

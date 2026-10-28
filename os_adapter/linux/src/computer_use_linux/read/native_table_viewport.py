@@ -33,7 +33,7 @@ class TableViewport:
         return left is not None and right is not None and self.ax.native_key(left) == self.ax.native_key(right)
 
     def rect(self, obj):
-        value = self.call("Component", "get_extents", obj, self.ax.A.CoordType.SCREEN)
+        value = self.call("Component", "get_extents", obj, self.ax.atspi.CoordType.SCREEN)
         rect = tuple(getattr(value, key, None) for key in ("x", "y", "width", "height"))
         if (
             any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 2147483647 for v in rect)
@@ -65,7 +65,7 @@ class TableViewport:
         # establish viewport coverage: actual hits and bounds are still used.
         states = self.call("Accessible", "get_state_set", cell)
         if states is None or any(
-            not states.contains(getattr(self.ax.A.StateType, name)) for name in ("VISIBLE", "SHOWING")
+            not states.contains(getattr(self.ax.atspi.StateType, name)) for name in ("VISIBLE", "SHOWING")
         ):
             return None
         span = self.call("TableCell", "get_row_column_span", cell)
@@ -94,7 +94,7 @@ class TableViewport:
                 return span if span is not None and self.intersects(self.rect(current), frame) else None
             if "Component" not in interfaces:
                 break
-            child = self.call("Component", "get_accessible_at_point", current, *point, self.ax.A.CoordType.SCREEN)
+            child = self.call("Component", "get_accessible_at_point", current, *point, self.ax.atspi.CoordType.SCREEN)
             if child is None or self.same(child, current):
                 break
             current = child

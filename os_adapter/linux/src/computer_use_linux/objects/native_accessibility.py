@@ -37,9 +37,8 @@ class NativeAccessibility:
         )
 
     @property
-    # pylint: disable-next=invalid-name
-    def A(self):
-        # Existing callers also obtain native interface methods through A.
+    def atspi(self):
+        # Existing callers also obtain native interface methods through atspi.
         # Guard this boundary so retained objects cannot bypass initialization.
         self._ensure_started()
         return self._a
@@ -174,7 +173,7 @@ class NativeAccessibility:
         self._ensure_started()
         if self.ctx:
             remaining = self.ctx.remaining_ms
-            self.A.set_timeout(min(250, remaining), min(250, remaining))
+            self.atspi.set_timeout(min(250, remaining), min(250, remaining))
         try:
             return fn(*args)
         finally:
@@ -185,17 +184,17 @@ class NativeAccessibility:
             raise Failure("Native accessible was destroyed.", "stale_target")
         try:
             self.refresh(obj)
-            states = self.call(self.A.Accessible.get_state_set, obj)
-            if states is None or states.contains(self.A.StateType.DEFUNCT):
+            states = self.call(self.atspi.Accessible.get_state_set, obj)
+            if states is None or states.contains(self.atspi.StateType.DEFUNCT):
                 raise Failure("Native accessible is defunct or unavailable.", "stale_target")
-            if self.call(self.A.Accessible.get_role, obj) == self.A.Role.INVALID:
+            if self.call(self.atspi.Accessible.get_role, obj) == self.atspi.Role.INVALID:
                 raise Failure("Native accessible no longer exists.", "stale_target")
             return states
         except self.glib.Error as error:
             raise Failure("Cannot confirm native target: " + str(error), "stale_target") from error
 
     def children(self, obj, limit, notes):
-        total = self.call(self.A.Accessible.get_child_count, obj)
+        total = self.call(self.atspi.Accessible.get_child_count, obj)
         # Exact types preserve scalar validation and identity contracts.
         # pylint: disable-next=unidiomatic-typecheck
         if type(total) is not int or total < 0:
@@ -203,7 +202,7 @@ class NativeAccessibility:
         result = []
         for index in range(min(total, limit)):
             try:
-                child = self.call(self.A.Accessible.get_child_at_index, obj, index)
+                child = self.call(self.atspi.Accessible.get_child_at_index, obj, index)
             except self.glib.Error as error:
                 gap(notes, "Native directory child unavailable: " + str(error))
                 break
@@ -215,7 +214,7 @@ class NativeAccessibility:
         return result
 
     def applications(self, notes=None):
-        root = self.call(self.A.get_desktop, 0)
+        root = self.call(self.atspi.get_desktop, 0)
         if root is None:
             gap(notes, "AT-SPI desktop root is unavailable.")
             return []
@@ -226,8 +225,8 @@ class NativeAccessibility:
         for app in self.applications(notes):
             try:
                 self.live(app)
-                pid = self.call(self.A.Accessible.get_process_id, app)
-                name = self.call(self.A.Accessible.get_name, app)
+                pid = self.call(self.atspi.Accessible.get_process_id, app)
+                name = self.call(self.atspi.Accessible.get_name, app)
                 result.extend((obj, pid, name) for obj in self.children(app, 128, notes))
             except (Failure, self.glib.Error) as error:
                 if self.ctx:
@@ -242,9 +241,9 @@ class NativeAccessibility:
         return result
 
     def rect(self, obj):
-        if not self.call(self.A.Accessible.get_component_iface, obj):
+        if not self.call(self.atspi.Accessible.get_component_iface, obj):
             return None
-        rect = self.call(self.A.Component.get_extents, obj, self.A.CoordType.SCREEN)
+        rect = self.call(self.atspi.Component.get_extents, obj, self.atspi.CoordType.SCREEN)
         return (rect.x, rect.y, rect.width, rect.height) if rect.width > 0 and rect.height > 0 else None
 
     def matching_window(self, window, candidates):
@@ -254,7 +253,7 @@ class NativeAccessibility:
                 continue
             try:
                 rect = self.rect(obj)
-                title = self.call(self.A.Accessible.get_name, obj)
+                title = self.call(self.atspi.Accessible.get_name, obj)
                 bounds = (window.rect, window.frame_rect)
                 if rect and title == window.title:
                     for bound in bounds:

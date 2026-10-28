@@ -3,12 +3,15 @@
 import collections
 import hashlib
 import json
+import logging
 import queue
 import sys
 import threading
 import time
 
 from computer_use_linux.contracts.protocol import Failure, Request, fields, integer, require, token
+
+_LOG = logging.getLogger(__name__)
 
 
 class Server:
@@ -124,9 +127,7 @@ class Server:
                 if self.backend:
                     self.backend.close()
         if self.fatal:
-            # Console and transport output retain their documented stream format.
-            # pylint: disable-next=bad-builtin
-            print(self.fatal, file=sys.stderr)  # noqa: T201
+            _LOG.error("%s", self.fatal)
             return 1
         return 0
 
@@ -187,8 +188,7 @@ class Server:
                 failure["context"] = ctx.context
             reply = dict(error=failure)
         except Exception as error:
-            # pylint: disable-next=bad-builtin
-            print(f"request {identifier}: {type(error).__name__}: {error}", file=sys.stderr)  # noqa: T201
+            _LOG.error("request %s: %s: %s", identifier, type(error).__name__, error)
             failure = Failure(str(error) or type(error).__name__, target=ctx.target, effect=ctx.effect).wire()
             if ctx.context:
                 failure["context"] = ctx.context

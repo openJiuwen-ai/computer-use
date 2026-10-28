@@ -10,6 +10,7 @@ import asyncio
 import ctypes
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -22,6 +23,7 @@ from pathlib import Path
 from computer_use._process import resolve_executable
 
 DEFAULT_PORT = 18766
+_LOG = logging.getLogger(__name__)
 
 
 class _CleanupError(RuntimeError):
@@ -195,9 +197,7 @@ async def serve(port=DEFAULT_PORT, folder=None):
         except Exception as error:
             if authenticated and isinstance(error, _CleanupError):
                 failures.append(str(error))
-            # Console and transport output retain their documented stream format.
-            # pylint: disable-next=bad-builtin
-            print(str(error), file=sys.stderr, flush=True)  # noqa: T201
+            _LOG.error("%s", error)
         finally:
             writer.close()
             try:
@@ -222,10 +222,7 @@ async def serve(port=DEFAULT_PORT, folder=None):
         finally:
             temporary.unlink(missing_ok=True)
         await server.start_serving()
-        # pylint: disable-next=bad-builtin
-        print(  # noqa: T201
-            f"Desktop bridge ready: 127.0.0.1:{port}; session={session}; pid={os.getpid()}", file=sys.stderr, flush=True
-        )
+        _LOG.info("Desktop bridge ready: 127.0.0.1:%s; session=%s; pid=%s", port, session, os.getpid())
         await stopping.wait()
     finally:
         server.close()
@@ -306,6 +303,7 @@ def connect(port=DEFAULT_PORT, folder=None):
 
 
 def cli():
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("serve", "connect", "stop"))
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)

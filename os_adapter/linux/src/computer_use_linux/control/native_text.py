@@ -62,7 +62,7 @@ class NativeText:
         obj, states, interfaces, role, enabled = self.target.read(target, within, ctx)
         editable = (
             "EditableText" in interfaces
-            and states.contains(self.ax.A.StateType.EDITABLE)
+            and states.contains(self.ax.atspi.StateType.EDITABLE)
             and not self.target.read_only(states)
             and role != "password text"
         )

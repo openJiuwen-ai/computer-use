@@ -64,19 +64,21 @@ class NativeKeyboard:
             obj, states, interfaces, role, enabled = self.target.read(target, within, ctx)
             selected = self.directory.surfaces[target["surface"]]
             native = self.desktop.validate(selected)
-            focused = states.contains(self.ax.A.StateType.FOCUSED)
-            can_grab = "Component" in interfaces and states.contains(self.ax.A.StateType.FOCUSABLE)
+            focused = states.contains(self.ax.atspi.StateType.FOCUSED)
+            can_grab = "Component" in interfaces and states.contains(self.ax.atspi.StateType.FOCUSABLE)
         route = bool(native.mapped and self.desktop.active() == native.key and self.desktop.focus_belongs(native.key))
         if obj is not None:
             # Parent/interface/geometry queries can run application callbacks.
             # Refresh the addressed recipient after them, not a prior snapshot.
             states = self.target.state(obj)
-            focused = states.contains(self.ax.A.StateType.FOCUSED)
-            enabled = any(states.contains(getattr(self.ax.A.StateType, key)) for key in ("ENABLED", "SENSITIVE"))
-            can_grab = "Component" in interfaces and states.contains(self.ax.A.StateType.FOCUSABLE)
+            focused = states.contains(self.ax.atspi.StateType.FOCUSED)
+            enabled = any(states.contains(getattr(self.ax.atspi.StateType, key)) for key in ("ENABLED", "SENSITIVE"))
+            can_grab = "Component" in interfaces and states.contains(self.ax.atspi.StateType.FOCUSABLE)
             self.target.validate_scope(target, within, ctx)
             route = bool(route and self.desktop.active() == native.key and self.desktop.focus_belongs(native.key))
-        editable = obj is None or (states.contains(self.ax.A.StateType.EDITABLE) and not self.target.read_only(states))
+        editable = obj is None or (
+            states.contains(self.ax.atspi.StateType.EDITABLE) and not self.target.read_only(states)
+        )
         return dict(
             recipient=target,
             selected=selected,

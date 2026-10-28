@@ -35,7 +35,7 @@ def prune_empty_rows(
             return False
         if not (
             not any(
-                ref == state.context.get("focusedRef") or state.nativeNodes.get(ref, {}).get("focused")
+                ref == state.context.get("focusedRef") or state.native_nodes.get(ref, {}).get("focused")
                 for ref in node["sourceRefs"]
             )
         ):

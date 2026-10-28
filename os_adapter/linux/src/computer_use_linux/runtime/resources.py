@@ -27,7 +27,7 @@ def check_installation(version=6, *, installed=False):
     from computer_use_linux.objects.native_accessibility import NativeAccessibility
 
     # Construction loads exactly the GI namespaces used by v6; the bus and
-    # event listener stay lazy. Do not read .A or call applications here.
+    # event listener stay lazy. Do not read .atspi or call applications here.
     ax = NativeAccessibility()
     ax.close()
     for name, fallback in (("X11", "libX11.so.6"), ("xkbcommon", "libxkbcommon.so.0")):
@@ -68,7 +68,7 @@ def check_permissions(version=6):
         try:
             ctx = Request(time.monotonic() + 3, backend.stopped)
             backend.ax.begin(ctx)
-            root = backend.ax.call(backend.ax.A.get_desktop, 0)
+            root = backend.ax.call(backend.ax.atspi.get_desktop, 0)
             ctx.check()
             if root is None:
                 raise Failure("AT-SPI desktop root is unavailable.", "observation_unavailable")
