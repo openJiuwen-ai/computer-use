@@ -12,7 +12,12 @@ namespace ComputerUse.Windows
         NativeObjectState Read(Dictionary<string, object> target, string[] within, Request request);
         Action Prepare(NativeObjectState state, string unit, string action, string text, Request request);
     }
-
+    // Optional condition-aware query for the selected collapsed Expand route.
+    // Ordinary Read/ReadClick keep their existing provider-query sequence.
+    internal interface INativeExpansionObjectProvider
+    {
+        NativeObjectState ReadExpansion(Dictionary<string, object> target, string[] within, Request request);
+    }
     // Optional v1 observation port. Semantic metadata may be unavailable while
     // the retained target still has an independently validated pointer route.
     // Implementations must revalidate identity/scope after a metadata failure.

@@ -19,8 +19,7 @@ namespace ComputerUse.Windows
             internal int Left, Top, Right, Bottom;
             internal Rectangle Box
             {
-                get
-                {
+                get {
                     return Rectangle.FromLTRB(Left, Top, Right, Bottom);
                 }
             }
@@ -74,7 +73,8 @@ namespace ComputerUse.Windows
         }
 
         internal delegate bool EnumProc(IntPtr hwnd, IntPtr arg);
-        internal delegate void EventProc(IntPtr hook, uint kind, IntPtr hwnd, int objectId, int childId, uint thread, uint time);
+        internal delegate void EventProc(IntPtr hook, uint kind, IntPtr hwnd, int objectId, int childId, uint thread,
+                                         uint time);
         [DllImport("user32.dll")]
         internal static extern bool EnumWindows(EnumProc proc, IntPtr arg);
         [DllImport("user32.dll")]
@@ -161,9 +161,11 @@ namespace ComputerUse.Windows
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        internal static extern IntPtr SendMessageTimeout(IntPtr h, uint message, IntPtr w, string text, uint flags, uint timeout, out UIntPtr result);
+        internal static extern IntPtr SendMessageTimeout(IntPtr h, uint message, IntPtr w, string text, uint flags,
+                                                         uint timeout, out UIntPtr result);
         [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", SetLastError = true)]
-        internal static extern IntPtr SendMessageTimeoutRaw(IntPtr h, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out UIntPtr result);
+        internal static extern IntPtr SendMessageTimeoutRaw(IntPtr h, uint message, IntPtr w, IntPtr l, uint flags,
+                                                            uint timeout, out UIntPtr result);
         [DllImport("user32.dll")]
         internal static extern uint GetClipboardSequenceNumber();
         [DllImport("user32.dll")]
@@ -173,7 +175,8 @@ namespace ComputerUse.Windows
         [DllImport("user32.dll")]
         internal static extern IntPtr GetThreadDesktop(uint thread);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        internal static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, int length, out uint required);
+        internal static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, int length,
+                                                             out uint required);
         [DllImport("user32.dll")]
         internal static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")]
@@ -185,7 +188,8 @@ namespace ComputerUse.Windows
         [DllImport("dwmapi.dll")]
         internal static extern int DwmGetWindowAttribute(IntPtr h, uint attr, out int value, int size);
         [DllImport("user32.dll")]
-        internal static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, EventProc callback, uint process, uint thread, uint flags);
+        internal static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, EventProc callback,
+                                                      uint process, uint thread, uint flags);
         [DllImport("user32.dll")]
         internal static extern bool UnhookWinEvent(IntPtr hook);
         static readonly Dictionary<IntPtr, long> generations = new Dictionary<IntPtr, long>();
@@ -204,34 +208,35 @@ namespace ComputerUse.Windows
 
             var ready = new ManualResetEvent(false);
             var thread = new Thread(() =>
-            {
-                destroy = (hook, kind, h, obj, child, tid, time) =>
-                {
-                    if (obj == 0 && child == 0)
-                        lock (generations)
-                        {
-                            long n;
-                            generations.TryGetValue(h, out n);
-                            generations[h] = n + 1;
-                        }
-                };
-                var subscription = SetWinEventHook(0x8001, 0x8001, IntPtr.Zero, destroy, 0, 0, 0);
-                GenerationTrackingAvailable = subscription != IntPtr.Zero;
-                using (var availability = NativeDesktopState.Observe())
-                {
-                    ready.Set();
-                    try
-                    {
-                        Application.Run();
-                    }
-                    finally
-                    {
-                        GenerationTrackingAvailable = false;
-                        if (subscription != IntPtr.Zero)
-                            UnhookWinEvent(subscription);
-                    }
-                }
-            });
+                                    {
+                                        destroy = (hook, kind, h, obj, child, tid, time) =>
+                                        {
+                                            if (obj == 0 && child == 0)
+                                                lock (generations)
+                                                {
+                                                    long n;
+                                                    generations.TryGetValue(h, out n);
+                                                    generations[h] = n + 1;
+                                                }
+                                        };
+                                        var subscription =
+                                            SetWinEventHook(0x8001, 0x8001, IntPtr.Zero, destroy, 0, 0, 0);
+                                        GenerationTrackingAvailable = subscription != IntPtr.Zero;
+                                        using (var availability = NativeDesktopState.Observe())
+                                        {
+                                            ready.Set();
+                                            try
+                                            {
+                                                Application.Run();
+                                            }
+                                            finally
+                                            {
+                                                GenerationTrackingAvailable = false;
+                                                if (subscription != IntPtr.Zero)
+                                                    UnhookWinEvent(subscription);
+                                            }
+                                        }
+                                    });
             thread.IsBackground = true;
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
@@ -250,8 +255,7 @@ namespace ComputerUse.Windows
 
         internal static Dictionary<IntPtr, long> GenerationSnapshot()
         {
-            lock (generations)
-                return new Dictionary<IntPtr, long>(generations);
+            lock (generations) return new Dictionary<IntPtr, long>(generations);
         }
 
         internal static bool Interactive(bool requireForeground = true)
@@ -259,16 +263,52 @@ namespace ComputerUse.Windows
             var input = OpenInputDesktop(0, false, 1);
             if (input == IntPtr.Zero)
                 return false;
+            bool verifyCleanup = false;
+            Exception primary = null;
             try
             {
                 var a = new StringBuilder(256);
                 var b = new StringBuilder(256);
                 uint size;
-                return GetUserObjectInformation(input, 2, a, 512, out size) && GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()), 2, b, 512, out size) && a.ToString() == b.ToString() && (!requireForeground || GetForegroundWindow() != IntPtr.Zero);
+                if (!GetUserObjectInformation(input, 2, a, 512, out size) ||
+                    !GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()), 2, b, 512, out size) ||
+                    a.ToString() != b.ToString())
+                    return false;
+                // Preserve the original nonzero-foreground and explicit false
+                // paths, including their query sequence. Only FG0 needs the
+                // stronger own-session and same-desktop-object evidence.
+                if (!requireForeground || GetForegroundWindow() != IntPtr.Zero)
+                    return true;
+                verifyCleanup = true;
+                return NativeNullForegroundDesktop.Query(input, new NativeNullForegroundDesktopWin32());
+            }
+            catch (Exception error)
+            {
+                primary = error;
+                throw;
             }
             finally
             {
-                CloseDesktop(input);
+                if (!verifyCleanup)
+                    CloseDesktop(input);
+                else
+                {
+                    bool closed = false;
+                    Exception cleanup = null;
+                    try
+                    {
+                        closed = CloseDesktop(input);
+                    }
+                    catch (Exception error)
+                    {
+                        cleanup = error;
+                    }
+                    if (!closed)
+                        throw new NativeDesktopCleanupFailure(
+                            "CloseDesktop did not confirm release" +
+                                (cleanup == null ? "." : ": " + cleanup.GetType().Name + ": " + cleanup.Message),
+                            primary);
+                }
             }
         }
 
@@ -289,7 +329,8 @@ namespace ComputerUse.Windows
         internal static bool IsEdit(IntPtr h)
         {
             var name = Class(h);
-            return name.Equals("Edit", StringComparison.OrdinalIgnoreCase) || name.StartsWith("WindowsForms10.EDIT.", StringComparison.OrdinalIgnoreCase);
+            return name.Equals("Edit", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("WindowsForms10.EDIT.", StringComparison.OrdinalIgnoreCase);
         }
 
         internal static Rectangle Bounds(IntPtr h)
@@ -336,46 +377,38 @@ namespace ComputerUse.Windows
         internal static IntPtr Focus(IntPtr h)
         {
             uint pid;
-            var info = new GUI
-            {
-                Size = Marshal.SizeOf(typeof(GUI))
-            };
+            var info = new GUI { Size = Marshal.SizeOf(typeof(GUI)) };
             return GetGUIThreadInfo(GetWindowThreadProcessId(h, out pid), ref info) ? info.Focus : IntPtr.Zero;
         }
 
         internal static List<IntPtr> Windows()
         {
             var result = new List<IntPtr>();
-            EnumWindows((h, p) =>
-            {
-                int cloaked;
-                if (IsWindowVisible(h) && !AgentPointerWindow.IsDecoration(h) && (DwmGetWindowAttribute(h, 14, out cloaked, 4) != 0 || cloaked == 0))
-                    result.Add(h);
-                return true;
-            }, IntPtr.Zero);
+            EnumWindows(
+                (h, p) =>
+                {
+                    int cloaked;
+                    if (IsWindowVisible(h) && !AgentPointerWindow.IsDecoration(h) &&
+                        (DwmGetWindowAttribute(h, 14, out cloaked, 4) != 0 || cloaked == 0))
+                        result.Add(h);
+                    return true;
+                },
+                IntPtr.Zero);
             return result;
         }
 
         internal static void Released()
         {
-            foreach (int key in new[]
-            {
-                1,
-                2,
-                4,
-                16,
-                17,
-                18,
-                91,
-                92
-            }
+            foreach (int key in new[] { 1, 2, 4, 16, 17, 18, 91, 92 }
 
             )
                 if ((GetAsyncKeyState(key) & 0x8000) != 0)
-                    throw new Failure("input_unavailable", "a user key or mouse button is held; no input sent", "release held input before continuing");
+                    throw new Failure("input_unavailable", "a user key or mouse button is held; no input sent",
+                                      "release held input before continuing");
         }
 
-        internal static void Foreground(Window window, bool allowed, Request r, bool exclusiveRecovery = false, Action validate = null)
+        internal static void Foreground(Window window, bool allowed, Request r, bool exclusiveRecovery = false,
+                                        Action validate = null)
         {
             window.Validate();
             var h = window.Handle;
@@ -384,9 +417,15 @@ namespace ComputerUse.Windows
             if (GetForegroundWindow() == h && !IsIconic(h))
                 return;
             if (NoActivate(h))
-                throw new Failure("input_unavailable", "the selected window is nonactivating; foreground preparation would change its popup lifecycle; no requested input sent", "read the popup's current image and use its reachable pointer controls while its confirmed owner is foreground");
+                throw new Failure(
+                    "input_unavailable",
+                    "the selected window is nonactivating; foreground preparation would change its popup lifecycle; no requested input sent",
+                    "read the popup's current image and use its reachable pointer controls while its confirmed owner is foreground");
             if (!allowed)
-                throw new Failure("input_unavailable", "this route needs the target foreground window; strict shared mode did not activate it", "ask the host to enable COMPUTER_USE_FOREGROUND_ASSIST=1, or use a supported background control action");
+                throw new Failure(
+                    "input_unavailable",
+                    "this route needs the target foreground window; strict shared mode did not activate it",
+                    "ask the host to enable COMPUTER_USE_FOREGROUND_ASSIST=1, or use a supported background control action");
             NativeDesktopState.RequireInput();
             Released();
             r.Check();
@@ -403,7 +442,9 @@ namespace ComputerUse.Windows
                 }
 
                 if (IsIconic(h))
-                    throw new Failure("observation_unavailable", "the selected window did not restore within the preparation budget", "restore the intended window and read it again");
+                    throw new Failure("observation_unavailable",
+                                      "the selected window did not restore within the preparation budget",
+                                      "restore the intended window and read it again");
             }
 
             window.Validate();
@@ -430,7 +471,8 @@ namespace ComputerUse.Windows
                 try
                 {
                     var currentForeground = GetForegroundWindow();
-                    bool recoveringHidden = exclusiveRecovery && currentForeground != IntPtr.Zero && !IsWindowVisible(currentForeground);
+                    bool recoveringHidden =
+                        exclusiveRecovery && currentForeground != IntPtr.Zero && !IsWindowVisible(currentForeground);
                     if (!recoveringHidden)
                         UiaElement.FromHandle(h).SetFocus();
                     else
@@ -471,7 +513,10 @@ namespace ComputerUse.Windows
             {
                 try
                 {
-                    Console.Error.WriteLine(Wire.Json(Wire.Obj("kind", "foreground_recovery_preparation", "target", h.ToInt64(), "focusAttemptMs", focusMs, "focusFailure", focusFailure, "observationRemainingMs", Math.Min(r.Deadline, r.ObservationDeadline) - Wire.Now)));
+                    Console.Error.WriteLine(Wire.Json(
+                        Wire.Obj("kind", "foreground_recovery_preparation", "target", h.ToInt64(), "focusAttemptMs",
+                                 focusMs, "focusFailure", focusFailure, "observationRemainingMs",
+                                 Math.Min(r.Deadline, r.ObservationDeadline) - Wire.Now)));
                 }
                 catch (System.IO.IOException)
                 {
@@ -483,21 +528,26 @@ namespace ComputerUse.Windows
             if (GetForegroundWindow() != h)
             {
                 var foreground = GetForegroundWindow();
-                var queue = new GUI
-                {
-                    Size = Marshal.SizeOf(typeof(GUI))
-                };
+                var queue = new GUI { Size = Marshal.SizeOf(typeof(GUI)) };
                 bool known = GetGUIThreadInfo(0, ref queue);
                 try
                 {
-                    Console.Error.WriteLine(Wire.Json(Wire.Obj("kind", "foreground_preparation_denied", "target", h.ToInt64(), "targetPid", window.Pid, "activationAccepted", granted, "focusFailure", focusFailure, "foreground", foreground.ToInt64(), "foregroundPid", PID(foreground), "foregroundClass", Class(foreground), "foregroundVisible", IsWindowVisible(foreground), "queueKnown", known, "queueFlags", queue.Flags, "sessionAvailability", NativeDesktopState.Facts(), "active", queue.Active.ToInt64(), "focus", queue.Focus.ToInt64(), "capture", queue.Capture.ToInt64(), "requestedInputDispatched", false)));
+                    Console.Error.WriteLine(Wire.Json(Wire.Obj(
+                        "kind", "foreground_preparation_denied", "target", h.ToInt64(), "targetPid", window.Pid,
+                        "activationAccepted", granted, "focusFailure", focusFailure, "foreground", foreground.ToInt64(),
+                        "foregroundPid", PID(foreground), "foregroundClass", Class(foreground), "foregroundVisible",
+                        IsWindowVisible(foreground), "queueKnown", known, "queueFlags", queue.Flags,
+                        "sessionAvailability", NativeDesktopState.Facts(), "active", queue.Active.ToInt64(), "focus",
+                        queue.Focus.ToInt64(), "capture", queue.Capture.ToInt64(), "requestedInputDispatched", false)));
                 }
                 catch (System.IO.IOException)
                 {
                 }
 
                 NativeInputAccess.RequireForeground();
-                throw new Failure("input_unavailable", "Windows did not grant foreground activation; no requested input sent", "bring the intended window forward and read it again");
+                throw new Failure("input_unavailable",
+                                  "Windows did not grant foreground activation; no requested input sent",
+                                  "bring the intended window forward and read it again");
             }
 
             NoteVisualInput();
@@ -505,35 +555,16 @@ namespace ComputerUse.Windows
 
         internal static INPUT Key(ushort key, bool up, bool unicode = false, bool extended = false)
         {
-            return new INPUT
-            {
-                Type = 1,
-                Data = new UNION
-                {
-                    Keyboard = new KEY
-                    {
-                        Code = unicode ? (ushort)0 : key,
-                        Scan = unicode ? key : (ushort)0,
-                        Flags = (up ? 2u : 0u) | (unicode ? 4u : 0u) | (extended ? 1u : 0u)
-                    }
-                }
-            };
+            return new INPUT { Type = 1, Data = new UNION { Keyboard = new KEY {
+                                             Code = unicode ? (ushort)0 : key, Scan = unicode ? key : (ushort)0,
+                                             Flags = (up ? 2u : 0u) | (unicode ? 4u : 0u) | (extended ? 1u : 0u)
+                                         } } };
         }
 
         internal static INPUT Mouse(uint flags, int data = 0)
         {
-            return new INPUT
-            {
-                Type = 0,
-                Data = new UNION
-                {
-                    Mouse = new MOUSE
-                    {
-                        Flags = flags,
-                        Data = unchecked((uint)data)
-                    }
-                }
-            };
+            return new INPUT { Type = 0,
+                               Data = new UNION { Mouse = new MOUSE { Flags = flags, Data = unchecked((uint)data) } } };
         }
 
         internal static void Send(INPUT[] inputs, Request r)
@@ -541,7 +572,9 @@ namespace ComputerUse.Windows
             r.Sending();
             uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
             if (sent != inputs.Length)
-                throw new Failure("execution_unknown", "SendInput accepted " + sent + "/" + inputs.Length + " events (possibly blocked by integrity level); not retried");
+                throw new Failure("execution_unknown",
+                                  "SendInput accepted " + sent + "/" + inputs.Length +
+                                      " events (possibly blocked by integrity level); not retried");
         }
 
         internal static void Release(INPUT input)
@@ -554,7 +587,8 @@ namespace ComputerUse.Windows
             r.Sending();
             UIntPtr result;
             if (SendMessageTimeout(h, message, w, value, 2 | 32, 1000, out result) == IntPtr.Zero)
-                throw new Failure("execution_unknown", "native edit did not reply; it may have executed and was not retried");
+                throw new Failure("execution_unknown",
+                                  "native edit did not reply; it may have executed and was not retried");
         }
 
         internal static int[] Selection(IntPtr h)
@@ -568,11 +602,7 @@ namespace ComputerUse.Windows
                 UIntPtr result;
                 if (SendMessageTimeoutRaw(h, 0xB0, a, b, 2 | 32, 500, out result) == IntPtr.Zero)
                     return null;
-                return new[]
-                {
-                    Marshal.ReadInt32(a),
-                    Marshal.ReadInt32(b)
-                };
+                return new[] { Marshal.ReadInt32(a), Marshal.ReadInt32(b) };
             }
             finally
             {

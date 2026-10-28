@@ -15,7 +15,7 @@ namespace ComputerUse.Windows
         internal const string Effects = "QUERY";
         internal static NativeObjectState Run(ObjectDispatchPlan plan, Request r, INativeObjectProvider provider)
         {
-            var state = provider.Read(plan.Target, plan.Contract.Within, r);
+            var state = NativeObjectChecks.ReadForContract(plan, r, provider);
             NativeObjectChecks.CheckState(state, plan.Contract);
             return state;
         }

@@ -13,9 +13,10 @@ namespace ComputerUse.Windows
     internal sealed class Driver
     {
         readonly string session, mode;
-        readonly object gate = new object (), output = new object ();
+        readonly object gate = new object(), output = new object();
         readonly BlockingCollection<Action> work = new BlockingCollection<Action>();
-        readonly Dictionary<long, string> requests = new Dictionary<long, string>(), replies = new Dictionary<long, string>();
+        readonly Dictionary<long, string> requests = new Dictionary<long, string>(),
+                                          replies = new Dictionary<long, string>();
         readonly Queue<long> order = new Queue<long>();
         readonly Func<string, string, INativeRuntime> createRuntime;
         readonly Func<object> checkpoint;
@@ -29,7 +30,9 @@ namespace ComputerUse.Windows
         volatile bool hello, stopping, negotiating;
         int bytes;
         CancellationTokenSource cancellation;
-        internal Driver(Func<string, string, INativeRuntime> createRuntime, string session = null, Func<object> checkpoint = null, Func<bool> recycle = null, Func<object> pointerCheckpoint = null, Action stopDisplay = null)
+        internal Driver(Func<string, string, INativeRuntime> createRuntime, string session = null,
+                        Func<object> checkpoint = null, Func<bool> recycle = null,
+                        Func<object> pointerCheckpoint = null, Action stopDisplay = null)
         {
             if (createRuntime == null)
                 throw new ArgumentNullException("createRuntime");
@@ -66,13 +69,24 @@ namespace ComputerUse.Windows
             string line = Wire.Json(response);
             if (checkpoint != null)
             {
-                response["windowCheckpoint"] = latestCheckpoint ?? new object[0];
-                response["recycleReadWorker"] = recycle != null && recycle();
-                line = Wire.Json(response);
-                if (pointerCheckpoint != null)
+                var health = native as INativeWorkerHealthStatus;
+                string retirement = health == null ? null : health.WorkerRetirementReason;
+                if (retirement != null)
                 {
-                    response["pointerCheckpoint"] = pointerCheckpoint();
+                    // Private child envelope only; no provider callbacks are safe.
+                    response["workerRetirement"] = Wire.Obj("reason", retirement, "cleanup", "failed");
                     line = Wire.Json(response);
+                }
+                else
+                {
+                    response["windowCheckpoint"] = latestCheckpoint ?? new object[0];
+                    response["recycleReadWorker"] = recycle != null && recycle();
+                    line = Wire.Json(response);
+                    if (pointerCheckpoint != null)
+                    {
+                        response["pointerCheckpoint"] = pointerCheckpoint();
+                        line = Wire.Json(response);
+                    }
                 }
             }
 
@@ -99,7 +113,9 @@ namespace ComputerUse.Windows
 
         object Error(string code, string detail, string effect = "none", Request r = null)
         {
-            var d = Wire.Obj("code", code, "target", r == null ? "request" : r.Target, "effect", effect, "detail", detail, "next", "observe current state before continuing; never automatically replay uncertain input");
+            var d =
+                Wire.Obj("code", code, "target", r == null ? "request" : r.Target, "effect", effect, "detail", detail,
+                         "next", "observe current state before continuing; never automatically replay uncertain input");
             return Wire.Obj("error", d);
         }
 
@@ -136,7 +152,8 @@ namespace ComputerUse.Windows
                 if (p.ContainsKey("cancel"))
                 {
                     Wire.Keys(p, "version,session,cancel");
-                    if (Wire.Num(p, "version", version, version, true) != version || !hello || Wire.Str(p, "session") != session)
+                    if (Wire.Num(p, "version", version, version, true) != version || !hello ||
+                        Wire.Str(p, "session") != session)
                         throw new FormatException("invalid cancellation session");
                     long cancelled = (long)Wire.Num(p, "cancel", 1, 9007199254740991, true);
                     lock (gate)
@@ -175,20 +192,23 @@ namespace ComputerUse.Windows
                     // windowless MTA worker, including future COM providers.
                     negotiating = true;
                     work.Add(() =>
-                    {
-                        try
-                        {
-                            native = createRuntime(session, mode);
-                            hello = true;
-                            negotiating = false;
-                            Reply(0, Wire.Obj("result", Wire.Obj("platform", "windows", "desktopMode", mode, "maxTimeoutMs", 120000, "capabilities", native.Capabilities)));
-                        }
-                        catch (Exception error)
-                        {
-                            negotiating = false;
-                            Reply(0, Error("execution_failed", "native initialization failed: " + error.Message));
-                        }
-                    });
+                             {
+                                 try
+                                 {
+                                     native = createRuntime(session, mode);
+                                     hello = true;
+                                     negotiating = false;
+                                     Reply(0, Wire.Obj("result", Wire.Obj("platform", "windows", "desktopMode", mode,
+                                                                          "maxTimeoutMs", 120000, "capabilities",
+                                                                          native.Capabilities)));
+                                 }
+                                 catch (Exception error)
+                                 {
+                                     negotiating = false;
+                                     Reply(0,
+                                           Error("execution_failed", "native initialization failed: " + error.Message));
+                                 }
+                             });
                     return;
                 }
 
@@ -214,13 +234,15 @@ namespace ComputerUse.Windows
                         else if (replies.ContainsKey(current))
                             Write(replies[current]);
                         else
-                            Reply(current, Error("in_progress", "request already executing; no duplicate dispatched", "possible"));
+                            Reply(current, Error("in_progress", "request already executing; no duplicate dispatched",
+                                                 "possible"));
                         return;
                     }
 
                     if (current <= high)
                     {
-                        Reply(current, Error("request_expired", "request result no longer retained; no duplicate dispatched", "possible"));
+                        Reply(current, Error("request_expired",
+                                             "request result no longer retained; no duplicate dispatched", "possible"));
                         return;
                     }
 
@@ -256,14 +278,7 @@ namespace ComputerUse.Windows
             try
             {
                 r.Check();
-                if (!new[]
-                {
-                    "begin",
-                    "inspect",
-                    "capture",
-                    "execute",
-                    "finish"
-                }.Contains(method))
+                if (!new[] { "begin", "inspect", "capture", "execute", "finish" }.Contains(method))
                     throw new Failure("invalid_request", "method '" + method + "' is not supported by protocol v5");
                 var result = native.Perform(method, p, r);
                 // Units journal cancellation after possible dispatch in their
@@ -273,7 +288,10 @@ namespace ComputerUse.Windows
             catch (Exception error)
             {
                 var failure = error as Failure;
-                var code = failure == null ? (error is System.Windows.Automation.ElementNotAvailableException ? "stale_target" : "execution_failed") : failure.Code;
+                var code = failure == null
+                               ? (error is System.Windows.Automation.ElementNotAvailableException ? "stale_target"
+                                                                                                  : "execution_failed")
+                               : failure.Code;
                 response = Error(code, error.Message, r.Dispatched ? "partial" : r.Effect ? "possible" : "none", r);
                 if (failure != null)
                     Wire.Object(Wire.Object(response)["error"])["next"] = failure.Next;
@@ -281,7 +299,8 @@ namespace ComputerUse.Windows
 
             // Publish only after input cleanup and lease release; the client may
             // immediately send its next command when it receives this response.
-            if (checkpoint != null)
+            var health = native as INativeWorkerHealthStatus;
+            if (checkpoint != null && (health == null || health.WorkerRetirementReason == null))
                 latestCheckpoint = checkpoint();
             lock (gate)
             {
@@ -300,47 +319,49 @@ namespace ComputerUse.Windows
                 e.Cancel = true;
                 Stop();
             };
-            var reader = new Thread(() =>
-            {
-                try
-                {
-                    using (var input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false, true), false, 8192))
-                    {
-                        var buffer = new char[8192];
-                        var pending = new StringBuilder();
-                        int count;
-                        while (!stopping && (count = input.Read(buffer, 0, buffer.Length)) > 0)
-                        {
-                            for (int i = 0; i < count; i++)
-                            {
-                                if (buffer[i] == '\n')
-                                {
-                                    var line = pending.ToString().TrimEnd('\r');
-                                    pending.Clear();
-                                    Receive(line);
-                                }
-                                else
-                                {
-                                    pending.Append(buffer[i]);
-                                    if (pending.Length > 64 * 1024 * 1024)
-                                        throw new FormatException("request frame too large");
-                                }
-                            }
-                        }
+            var reader =
+                new Thread(() =>
+                           {
+                               try
+                               {
+                                   using (var input = new StreamReader(Console.OpenStandardInput(),
+                                                                       new UTF8Encoding(false, true), false, 8192))
+                                   {
+                                       var buffer = new char[8192];
+                                       var pending = new StringBuilder();
+                                       int count;
+                                       while (!stopping && (count = input.Read(buffer, 0, buffer.Length)) > 0)
+                                       {
+                                           for (int i = 0; i < count; i++)
+                                           {
+                                               if (buffer[i] == '\n')
+                                               {
+                                                   var line = pending.ToString().TrimEnd('\r');
+                                                   pending.Clear();
+                                                   Receive(line);
+                                               }
+                                               else
+                                               {
+                                                   pending.Append(buffer[i]);
+                                                   if (pending.Length > 64 * 1024 * 1024)
+                                                       throw new FormatException("request frame too large");
+                                               }
+                                           }
+                                       }
 
-                        if (pending.Length != 0)
-                            Console.Error.WriteLine("protocol: incomplete final frame");
-                    }
-                }
-                catch (Exception e)
-                {
-                    Console.Error.WriteLine("stdin: " + e.Message);
-                }
-                finally
-                {
-                    Stop();
-                }
-            });
+                                       if (pending.Length != 0)
+                                           Console.Error.WriteLine("protocol: incomplete final frame");
+                                   }
+                               }
+                               catch (Exception e)
+                               {
+                                   Console.Error.WriteLine("stdin: " + e.Message);
+                               }
+                               finally
+                               {
+                                   Stop();
+                               }
+                           });
             reader.IsBackground = true;
             reader.Start();
             try

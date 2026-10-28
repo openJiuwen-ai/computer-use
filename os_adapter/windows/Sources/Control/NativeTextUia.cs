@@ -18,9 +18,12 @@ namespace ComputerUse.Windows
                 if (!element.TryGetCurrentPattern(kind, out raw))
                     return null;
                 r.Check();
-                object value = kind == ValuePattern.Pattern ? (object)(((UIA.IUIAutomationValuePattern)raw).CurrentIsReadOnly != 0) : ((UiaTextPattern)raw).DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute);
+                object value =
+                    kind == ValuePattern.Pattern
+                        ? (object)(((UIA.IUIAutomationValuePattern)raw).CurrentIsReadOnly != 0)
+                        : ((UiaTextPattern)raw).DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute);
                 r.Check();
-                return value as bool? ;
+                return value as bool ? ;
             }
             catch
             {
@@ -28,16 +31,22 @@ namespace ComputerUse.Windows
                 return null;
             } // This route stays unknown; an independent object unit may remain usable.
         }
-
-        static void ReadTextCapability(UiaElement element, NativeKeyboardState state, Request r)
+        static void ReadTextCapability(UiaElement element, NativeKeyboardState state, Request r, bool selection = true)
         {
-            bool? valueReadOnly = ReadOnly(element, ValuePattern.Pattern, r), textReadOnly = ReadOnly(element, TextPattern.Pattern, r);
-            state.TextWritable = valueReadOnly == true || textReadOnly == true ? false : valueReadOnly == false || textReadOnly == false ? (bool? )true : null;
+
+            bool? valueReadOnly = ReadOnly(element, ValuePattern.Pattern, r),
+                  textReadOnly = ReadOnly(element, TextPattern.Pattern, r);
+            state.TextWritable = valueReadOnly == true || textReadOnly == true     ? false
+                                 : valueReadOnly == false || textReadOnly == false ? (bool?) true
+                                                                                   : null;
+            if (!selection)
+                return;
             try
             {
                 r.Check();
                 object raw;
-                state.TextSelection = element.TryGetCurrentPattern(TextPattern.Pattern, out raw) && ((UiaTextPattern)raw).SupportedTextSelection != SupportedTextSelection.None;
+                state.TextSelection = element.TryGetCurrentPattern(TextPattern.Pattern, out raw) &&
+                                      ((UiaTextPattern)raw).SupportedTextSelection != SupportedTextSelection.None;
                 r.Check();
             }
             catch
@@ -46,9 +55,11 @@ namespace ComputerUse.Windows
                 state.TextSelection = false;
             }
         }
-
-        sealed class Sequence : INativeKeyboardSequence, INativePasteClipboardSequence
+        sealed partial class Sequence : INativeKeyboardSequence,
+                                        INativePasteClipboardSequence,
+                                        INativeTypedTextDispatchSequence
         {
+
             readonly NativeUiaKeyboard owner;
             readonly Target target;
             readonly IntPtr focus;
@@ -59,12 +70,17 @@ namespace ComputerUse.Windows
             readonly ControlType role;
             readonly string nativeClass;
             readonly bool multiline;
+            readonly bool appInsertPinned;
+            UIA.IUIAutomationCacheRequest focusedIdentityCache;
             uint? paragraphStyle, paragraphMode;
             bool RichMultiline
             {
-                get
-                {
-                    return multiline && (nativeClass.Equals("RichEdit20W", StringComparison.OrdinalIgnoreCase) || nativeClass.Equals("RICHEDIT50W", StringComparison.OrdinalIgnoreCase) || nativeClass.StartsWith("WindowsForms10.RichEdit20W.", StringComparison.OrdinalIgnoreCase) || nativeClass.StartsWith("WindowsForms10.RICHEDIT50W.", StringComparison.OrdinalIgnoreCase));
+                get {
+                    return multiline &&
+                           (nativeClass.Equals("RichEdit20W", StringComparison.OrdinalIgnoreCase) ||
+                            nativeClass.Equals("RICHEDIT50W", StringComparison.OrdinalIgnoreCase) ||
+                            nativeClass.StartsWith("WindowsForms10.RichEdit20W.", StringComparison.OrdinalIgnoreCase) ||
+                            nativeClass.StartsWith("WindowsForms10.RICHEDIT50W.", StringComparison.OrdinalIgnoreCase));
                 }
             }
 
@@ -73,8 +89,10 @@ namespace ComputerUse.Windows
                 r.Check();
                 UIntPtr result;
                 uint timeout = (uint)Math.Max(1, Math.Min(100, r.Deadline - Wire.Now));
-                if (Native.SendMessageTimeoutRaw(focus, message, IntPtr.Zero, IntPtr.Zero, 2 | 32, timeout, out result) == IntPtr.Zero)
-                    throw new Failure("input_unavailable", "the native rich editor paragraph mode could not be confirmed; no paste sent");
+                if (Native.SendMessageTimeoutRaw(focus, message, IntPtr.Zero, IntPtr.Zero, 2 | 32, timeout,
+                                                 out result) == IntPtr.Zero)
+                    throw new Failure("input_unavailable",
+                                      "the native rich editor paragraph mode could not be confirmed; no paste sent");
                 r.Check();
                 return (uint)result.ToUInt64();
             }
@@ -90,14 +108,16 @@ namespace ComputerUse.Windows
                 paragraphMode = ReadMode(0x45a, r) & 3;
                 Validate(r);
                 if (paragraphMode != 1 && paragraphMode != 2)
-                    throw new Failure("input_unavailable", "the native rich editor text mode is unknown; no paste sent");
+                    throw new Failure("input_unavailable",
+                                      "the native rich editor text mode is unknown; no paste sent");
                 return paragraphStyle == 0 && paragraphMode == 2;
             }
-
-            internal Sequence(NativeUiaKeyboard owner, Target target, Request r)
+            internal Sequence(NativeUiaKeyboard owner, Target target, Request r, bool appInsertPinned = false)
             {
+
                 this.owner = owner;
                 this.target = target;
+                this.appInsertPinned = appInsertPinned;
                 owner.ValidateTarget(target, r);
                 r.Check();
                 // App.typeText follows the current keyboard recipient. Freeze
@@ -119,9 +139,11 @@ namespace ComputerUse.Windows
                     runtime = NativeReadStore.Runtime(element);
                     role = NativeUiaBoundary.Property(element, AutomationElement.ControlTypeProperty, r) as ControlType;
                     if (String.IsNullOrEmpty(runtime))
-                        throw new Failure("input_unavailable", "the current UIA keyboard recipient has no stable native identity");
+                        throw new Failure("input_unavailable",
+                                          "the current UIA keyboard recipient has no stable native identity");
                     var recipient = target.Editor ?? target.Node;
-                    if (!owner.store.Within(element, target.Window, r) || recipient != null && runtime != recipient.Runtime)
+                    if (!owner.store.Within(element, target.Window, r) ||
+                        recipient != null && runtime != recipient.Runtime)
                         throw new Failure("input_unavailable", "UIA focus is outside the selected keyboard recipient");
                 }
                 else if (target.Node != null)
@@ -138,8 +160,14 @@ namespace ComputerUse.Windows
             {
                 r.Check();
                 target.Window.Native.Validate();
-                if (!Native.IsWindow(focus) || Native.PID(focus) != pid || Native.Generation(focus) != generation || RichMultiline && (Native.Class(focus) != nativeClass || (Native.GetWindowLongPtr(focus, -16).ToInt64() & 4) == 0) || !Native.Inside(target.Window.Native.Handle, focus) || Native.GetForegroundWindow() != target.Window.Native.Handle || Native.Focus(target.Window.Native.Handle) != focus)
-                    throw new Failure("input_unavailable", "the native keyboard recipient changed during continuous input");
+                if (!Native.IsWindow(focus) || Native.PID(focus) != pid || Native.Generation(focus) != generation ||
+                    RichMultiline && (Native.Class(focus) != nativeClass ||
+                                      (Native.GetWindowLongPtr(focus, -16).ToInt64() & 4) == 0) ||
+                    !Native.Inside(target.Window.Native.Handle, focus) ||
+                    Native.GetForegroundWindow() != target.Window.Native.Handle ||
+                    Native.Focus(target.Window.Native.Handle) != focus)
+                    throw new Failure("input_unavailable",
+                                      "the native keyboard recipient changed during continuous input");
             }
 
             void NativeRoute(Request r)
@@ -147,10 +175,114 @@ namespace ComputerUse.Windows
                 NativeRecipient(r);
                 if (paragraphStyle.HasValue || paragraphMode.HasValue)
                 {
-                    if (paragraphStyle.HasValue && (ReadMode(0x4cd, r) & 1) != paragraphStyle.Value || paragraphMode.HasValue && (ReadMode(0x45a, r) & 3) != paragraphMode.Value)
-                        throw new Failure("input_unavailable", "the native rich editor paragraph mode changed before paste; no paste sent");
+                    if (paragraphStyle.HasValue && (ReadMode(0x4cd, r) & 1) != paragraphStyle.Value ||
+                        paragraphMode.HasValue && (ReadMode(0x45a, r) & 3) != paragraphMode.Value)
+                        throw new Failure("input_unavailable",
+                                          "the native rich editor paragraph mode changed before paste; no paste sent");
                     NativeRecipient(r); // Message handlers may change focus or destroy their window.
                 }
+            }
+            // Composite owners retain their complete existing discovery path.
+            // No other live editor may replace the receiver frozen here.
+            public bool SupportsDispatchSampling
+            {
+                get {
+                    return target.Editor == null && role != ControlType.ComboBox;
+                }
+            }
+            public void CheckNativeRecipient(Request r)
+            {
+                NativeRoute(r);
+            }
+            public NativeKeyboardState ReadDispatchState(NativeInputContract contract, Request r)
+            {
+                if (!SupportsDispatchSampling)
+                    throw new Failure("invalid_request",
+                                      "continuous dispatch sampling is not available for this composite receiver");
+                var state = owner.ReadTextDispatchState(target, contract, r);
+                if ((directedCharacters || appInsertPinned && selectionMechanism != null) && target.Node == null)
+                {
+                    // App's window Enabled=true is not evidence about its
+                    // actual editor. Sample that pinned receiver independently.
+                    var actual = CharacterWritable(r);
+                    state.Enabled = actual.Enabled;
+                    state.TextWritable = actual.TextWritable;
+                }
+                return state;
+            }
+            public void ValidateDispatchScope(Request r)
+            {
+                owner.ValidateTarget(target, r);
+            }
+            public void ValidateDispatchExplicitScope(Request r)
+            {
+                owner.RequireExplicitWithin(target, r);
+            }
+            void UiaRecipient(Request r)
+            {
+                if (element == null)
+                    return;
+                r.Check();
+                var current = UiaElement.FocusedElement;
+                r.Check();
+                if (current == null || NativeReadStore.Runtime(current) != runtime ||
+                    NativeReadStore.Runtime(element) != runtime ||
+                    NativeUiaBoundary.Property(element, AutomationElement.ControlTypeProperty, r)
+                            as ControlType != role ||
+                    !owner.store.Within(element, target.Window, r) ||
+                    !NativeKeyboardRoute.Contains(target.Window.Native.Handle, owner.store.NativeHandle(element, r),
+                                                  focus, true))
+                    throw new Failure("input_unavailable",
+                                      "the UIA keyboard recipient changed during continuous input");
+            }
+            public void ValidateDispatchReceiver(Request r)
+            {
+                if (element == null)
+                    return;
+                // Cache only the query specification, never a focus result or
+                // permission. All retained-element provider callbacks precede
+                // the fresh focused-element query for this scalar.
+                if (focusedIdentityCache == null)
+                    focusedIdentityCache = UiaClient.Cache(new[] { AutomationElement.RuntimeIdProperty.Id });
+                r.Check();
+                if (NativeReadStore.Runtime(element) != runtime ||
+                    NativeUiaBoundary.Property(element, AutomationElement.ControlTypeProperty, r)
+                            as ControlType != role ||
+                    !owner.store.Within(element, target.Window, r) ||
+                    !NativeKeyboardRoute.Contains(target.Window.Native.Handle, owner.store.NativeHandle(element, r),
+                                                  focus, true))
+                    throw new Failure("input_unavailable",
+                                      "the original UIA keyboard recipient changed during continuous input");
+                // Scoped directed qualification must precede the terminal ancestor check.
+                // The later focus stage samples only a fresh focused RuntimeId.
+                if (directedCharacters && target.Within.Length != 0)
+                    NativeCharacterEligibility.ValidateFocus(this, focus, r);
+                r.Check();
+            }
+            public void ValidateDispatchFocus(Request r)
+            {
+                if (element == null)
+                    return;
+                if (directedCharacters && target.Within.Length == 0)
+                {
+                    NativeCharacterEligibility.ValidateFocus(this, focus, r);
+                    return;
+                }
+                if (SampleFocusedRuntime(ref focusedIdentityCache, r) != runtime)
+                    throw new Failure("input_unavailable",
+                                      "the UIA keyboard recipient changed during continuous input");
+            }
+            public void ValidateDispatchQueue(NativeKeyboardState state, Request r)
+            {
+                NativeInputAccess.RequireWindow(target.Window.Native.Handle);
+                if (directedCharacters)
+                {
+                    NativeInputAccess.RequireWindow(focus);
+                    NativeCharacterWin32.RequireWritable(focus, target.Window.Native.Handle, characterFamily);
+                }
+                NativeRoute(r); // Every provider callback precedes this final native queue check.
+                state.Foreground = state.WindowRoute = state.Focused = true;
+                state.FocusedNode = target.Node == null ? null : target.Node.Id;
             }
 
             public void Validate(Request r)
@@ -159,22 +291,37 @@ namespace ComputerUse.Windows
                 owner.ValidateTarget(target, r);
                 if (target.Editor != null)
                     owner.ValidateEditor(target, r);
-                if (element != null)
+                UiaRecipient(r);
+                // Scoped paragraph-paste mode queries execute the original
+                // recipient's window procedure. Keep those queries before the
+                // terminal explicit scope/fresh focus checks, then native-only last.
+                bool scopedParagraph = target.Within.Length != 0 && (paragraphStyle.HasValue || paragraphMode.HasValue);
+                if (scopedParagraph)
+                    NativeRoute(r);
+                if (target.Within.Length != 0)
                 {
-                    r.Check();
-                    var current = UiaElement.FocusedElement;
-                    r.Check();
-                    if (current == null || NativeReadStore.Runtime(current) != runtime || NativeReadStore.Runtime(element) != runtime || NativeUiaBoundary.Property(element, AutomationElement.ControlTypeProperty, r) as ControlType != role || !owner.store.Within(element, target.Window, r) || !NativeKeyboardRoute.Contains(target.Window.Native.Handle, owner.store.NativeHandle(element, r), focus, true))
-                        throw new Failure("input_unavailable", "the UIA keyboard recipient changed during continuous input");
+                    owner.RequireExplicitWithin(target, r);
+                    if (SampleFocusedRuntime(ref focusedIdentityCache, r) != runtime)
+                        throw new Failure("input_unavailable",
+                                          "the UIA keyboard recipient changed after explicit scope validation");
                 }
-
-                NativeRoute(r); // Provider callbacks cannot leave an unchecked native queue.
+                if (scopedParagraph)
+                    NativeRecipient(r);
+                else
+                    NativeRoute(r); // Provider callbacks cannot leave an unchecked native queue.
             }
         }
 
         public INativeKeyboardSequence BeginSequence(NativeKeyboardState state, Request r)
         {
             return new Sequence(this, (Target)state.Native, r);
+        }
+        public INativeAppInsertRecipient CaptureAppInsertRecipient(NativeKeyboardState ready, Request r)
+        {
+            var target = (Target)ready.Native;
+            if (target.Node != null || target.Within.Length != 0 || !ready.Ready)
+                throw new Failure("invalid_request", "App recipient capture requires the original ready window scope");
+            return new Sequence(this, target, r, true);
         }
 
         UiaTextPattern TextPatternFor(NativeKeyboardState state, Request r)
@@ -183,11 +330,14 @@ namespace ComputerUse.Windows
             if (target.Node == null)
                 throw new Failure("invalid_request", "full replacement needs an observed text control");
             ValidateTarget(target, r);
-            var node = target.Editor == null ? store.Node(target.Node.Id, target.Node.Surface, r) : ValidateEditor(target, r);
+            var node =
+                target.Editor == null ? store.Node(target.Node.Id, target.Node.Surface, r) : ValidateEditor(target, r);
             object raw;
             r.Check();
-            if (!node.Element.TryGetCurrentPattern(TextPattern.Pattern, out raw) || ((UiaTextPattern)raw).SupportedTextSelection == SupportedTextSelection.None)
-                throw new Failure("input_unavailable", "the selected control no longer exposes a selectable text range");
+            if (!node.Element.TryGetCurrentPattern(TextPattern.Pattern, out raw) ||
+                ((UiaTextPattern)raw).SupportedTextSelection == SupportedTextSelection.None)
+                throw new Failure("input_unavailable",
+                                  "the selected control no longer exposes a selectable text range");
             r.Check();
             return (UiaTextPattern)raw;
         }
@@ -200,14 +350,15 @@ namespace ComputerUse.Windows
             var selected = pattern.GetSelection();
             r.Check();
             // Compare native endpoints, never strings, line endings or lengths.
-            bool empty = document.CompareEndpoints(TextPatternRangeEndpoint.Start, document, TextPatternRangeEndpoint.End) == 0;
-            bool full = selected.Length == 1 && selected[0].CompareEndpoints(TextPatternRangeEndpoint.Start, document, TextPatternRangeEndpoint.Start) == 0 && selected[0].CompareEndpoints(TextPatternRangeEndpoint.End, document, TextPatternRangeEndpoint.End) == 0;
+            bool empty =
+                document.CompareEndpoints(TextPatternRangeEndpoint.Start, document, TextPatternRangeEndpoint.End) == 0;
+            bool full =
+                selected.Length == 1 &&
+                selected[0].CompareEndpoints(TextPatternRangeEndpoint.Start, document,
+                                             TextPatternRangeEndpoint.Start) == 0 &&
+                selected[0].CompareEndpoints(TextPatternRangeEndpoint.End, document, TextPatternRangeEndpoint.End) == 0;
             r.Check();
-            return new NativeTextSelection
-            {
-                Empty = empty,
-                Full = full
-            };
+            return new NativeTextSelection { Empty = empty, Full = full };
         }
 
         public void SelectAll(NativeKeyboardState state, Request r)

@@ -94,6 +94,11 @@ def _window_shell(observation: NativeObservation) -> bool:
         return False
     if nodes[root].control_value is not None and nodes[root].control_value.value not in (None, ""):
         return False
+    # A window can expose its body directly through a document range even
+    # when its native child collection is empty. That text is positive content,
+    # independent of the window title and any separate control value.
+    if nodes[root].text is not None and nodes[root].text.content not in (None, ""):
+        return False
     # Relation coverage and label availability use different state rules. Index
     # their exact source paths once before inspecting every node and relation.
     limited_relations: set[tuple[str | int, ...]] = set()

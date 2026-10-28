@@ -111,7 +111,10 @@ def supplements(node: Mapping[str, Any]) -> dict[str, Any]:
     for path, item in node["values"].items():
         if not path.startswith("supplements[") or not isinstance(item, Mapping):
             continue
-        key, value = item["key"], item["value"]
+        # The fact index omits dataclass None fields; Supplement.value is
+        # nevertheless a required source slot, so an omitted index value is the
+        # original null, not an absent supplement or permission to invent data.
+        key, value = item["key"], item.get("value")
         if key.startswith("text.") and key.endswith(".coverage") and not isinstance(value, Mapping):
             conflicts.add(key)
         if key in result and result[key] != value:

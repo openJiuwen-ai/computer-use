@@ -1,6 +1,8 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"""Normalize acquired platform facts once, before the public presentation pipeline."""
+
 from __future__ import annotations
 
 import math
@@ -39,6 +41,7 @@ from ..model import (
 )
 from ..validation import validate_query_observation
 from . import macos_text, windows_text
+from .diagnostics import catalogue_fields, wrapped_status_code
 from .records import DriverObservationReply, DriverReadMetadata
 from .schema import (
     ACTION_KINDS,
@@ -54,7 +57,7 @@ from .schema import (
     role_name,
 )
 from .wire import DriverWire, query_facts
-from .diagnostics import catalogue_fields, wrapped_status_code
+
 
 _STATUS = {
     "not_read",
@@ -120,6 +123,7 @@ class NodeBuilder:
                     tuple(prop["key"]),
                     tuple(owner.wire.value(item) for item in prop["arguments"]),
                 )
+
         self.method_reads = {
             f"{prop['key'][0]}::{prop['key'][1]}#{index}": owner.wire.read_info(prop.get("read"))
             for index, prop in enumerate(owner.wire.nodes[identity]["properties"])
@@ -613,6 +617,11 @@ class Adapter:
 
     def special(self, node: NodeBuilder, name: str, value: Any) -> bool:
         """Handle compound declarations that cannot be reduced to a field rename."""
+        if name == "UIA.ReferenceScopeEvidence" and node.backend == "windows":
+            if name in node.row["fieldStatus"] or not windows_text.observation_scope_evidence(value):
+                return False
+            node.supplement(name, value, semantic_key="observation_scope")
+            return True
         if name == "AXSubrole":
             if not isinstance(value, str):
                 return False
@@ -1491,6 +1500,11 @@ class Adapter:
             evidence,
             offset=offset,
         )
+        membership = edge.get("membershipObservedAt")
+        if membership is not None:
+            node.supplement(
+                name + ".membershipObservedAt", {"relation": key, **membership}, semantic_key="relation_membership"
+            )
         self.relation_fields[(NodeId(node.identity), key)] = name
         if edge["state"] != "complete":
             continuation = ReadRef(edge["cursor"], "relation", "live") if isinstance(edge.get("cursor"), str) else None

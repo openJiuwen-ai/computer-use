@@ -1,6 +1,8 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"Cross-platform summaries of independent text and collection facts."
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -47,6 +49,24 @@ def read_summaries(
                 )
     for node in facts["nodes"]:
         ref, values = aliases[node["node"]], node["values"]
+        context = supplements(node)
+        scope = context.get("observation_scope", {})
+        if isinstance(scope, Mapping) and scope.get("input") == "observationOnly":
+            output.append(
+                f"Observation {ref}: read only; window ownership {scope['ownership']}. "
+                + (scope["detail"] + " " if scope["detail"] else "")
+                + "This reference does not authorize element input; select its confirmed window or use a current screenshot for coordinate input."
+            )
+        for path, supplement in values.items():
+            if not path.startswith("supplements[") or not isinstance(supplement, Mapping):
+                continue
+            membership = supplement.get("value")
+            if supplement.get("key") == "relation_membership" and isinstance(membership, Mapping):
+                output.append(
+                    f"Relation {membership['relation']} of {ref}: membership captured at {membership['completedAt']}; "
+                    "this page preserves earlier member references and does not assert current membership. "
+                    "Node values are observed separately; input still requires independent live validation."
+                )
         mode = values.get("structure.collection_mode")
         if mode in ("virtualized", "provider_managed"):
             output.append(

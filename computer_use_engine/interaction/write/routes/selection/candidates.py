@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from computer_use.interaction.write.routes.policy import refuse
 from computer_use.interaction.write.routes.selection.model import CandidateSet, SelectionRequest
 from computer_use.native.contracts import Channel, Knowledge
-from computer_use.native.semantics import action_for_intent
+from computer_use.native.semantics import action_for_intent, role_name
 from computer_use.protocol.execution import unit_contracts
 
 if TYPE_CHECKING:
@@ -133,6 +133,57 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
     return CandidateSet(request, tuple(candidates))
 
 
+def _windows_occluded_primary_action(value: CandidateSet, pointers: list[Primitive]) -> bool:
+    """Narrow permission after native foreign-occlusion preference, never a fallback.
+
+    Native Windows offers default here only after its query-only foreign-root
+    occlusion proof, and admits Expand only under its fresh/final Collapsed
+    contract. This phase retains the already resolved primary action;
+    it neither infers occlusion from !Ready nor invents an action from the role.
+    """
+    request, facts = value.request, value.request.facts
+    if (
+        facts.platform != "windows"
+        or facts.enabled != Knowledge.YES
+        or not facts.actions_complete
+        or role_name(facts.platform, facts.native_role) not in ("button", "link", "menuButton", "comboBox", "menuItem")
+        or facts.input.geometry_current != Knowledge.YES
+        or facts.input.pointer_route != Knowledge.NO
+    ):
+        return False
+    history = request.history
+    if history is not None and (
+        history.unavailable
+        or history.background_unavailable
+        or history.prepared
+        or history.click_refresh is not None
+        or history.failed_steps
+    ):
+        return False
+    if not any(
+        p.click is not None
+        and p.click.preference_profile == "default"
+        and p.click.admission in ("preparationRequired", "unavailable")
+        and p.readiness == Knowledge.NO
+        for p in pointers
+    ):
+        return False
+    # resolve_action_semantics already removed non-primary raw actions. In
+    # particular raw Invoke beside primary Toggle/Select/Expand is insufficient.
+    actions = [p for p in value.primitives if p.unit == "native_action"]
+    return (
+        len(actions) == 1
+        and actions[0].action in ("Invoke.Invoke", "ExpandCollapse.Expand")
+        and actions[0].supported == Knowledge.YES
+        and actions[0].readiness == Knowledge.YES
+        and not actions[0].pending
+        and actions[0].click is not None
+        and actions[0].click.interaction == "semantic"
+        and actions[0].click.delivery == "object_action"
+        and actions[0].click.admission == "ready"
+    )
+
+
 def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     """Apply desktop-mode and platform preferences while preserving the requested operation semantics."""
     request, candidates = value.request, list(value.primitives)
@@ -141,14 +192,18 @@ def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     # interaction preferences. Keep that branch independent.
     if intent.kind == "action":
         return value
-    if _exclusive_element_intent(request, "click") and any(
-        _physical_click_available(p, facts.platform) for p in candidates
-    ):
-        # An exclusive element click means the visible physical interaction,
-        # including application click callbacks. UIA Select/Toggle can mutate
-        # state without those callbacks. Explicit perform_action stays native;
-        # shared keeps usable background actions ahead of foreground assistance.
-        candidates = [p for p in candidates if p.channel == Channel.POINTER]
+    if _exclusive_element_intent(request, "click"):
+        pointers = [
+            p
+            for p in candidates
+            if p.unit == "pointer_sequence" and p.supported == Knowledge.YES and "geometry" not in p.pending
+        ]
+        physical = any(_physical_click_available(p, facts.platform) for p in pointers)
+        windows_default = facts.platform == "windows" and any(
+            p.click is not None and p.click.preference_profile == "default" for p in pointers
+        )
+        if physical or windows_default and not _windows_occluded_primary_action(value, pointers):
+            candidates = [p for p in candidates if p.channel == Channel.POINTER]
     if intent.kind == "paste":
         candidates = [p for p in candidates if p.unit in ("clipboard_paste", "prepare_receiver")]
     if intent.kind == "key":

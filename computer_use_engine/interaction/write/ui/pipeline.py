@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from computer_use.types import ActionResult, Point
 
 
+from .membership import compatible_membership
+
+
 class InterfacePointerPipeline:
     """Execute a gesture in an App or Window screenshot's coordinate space.
 
@@ -73,7 +76,7 @@ class InterfacePointerPipeline:
                 "mode_unsupported",
             )
         await refresh(self.controller, ui)
-        if image.membership != signature(allowed(ui)):
+        if not compatible_membership(image.membership, signature(allowed(ui))):
             image.expired = True
             raise local_failure(
                 "the window membership or modal layout changed", "read this UI image again", "snapshot_expired"

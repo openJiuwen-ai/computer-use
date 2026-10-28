@@ -340,13 +340,36 @@ def relation_record(
     )
     if invalid_details:
         raise ValueError("driver observation: invalid relation continuation")
+    membership = details.get("membershipObservedAt")
+    if membership is not None:
+        if (
+            not isinstance(membership, dict)
+            or set(membership) != {"id", "startedAt", "completedAt"}
+            or not isinstance(membership["id"], str)
+            or not membership["id"]
+            or any(
+                type(membership[name]) is not int or not 0 <= membership[name] <= 2**53 - 1
+                for name in ("startedAt", "completedAt")
+            )
+            or membership["completedAt"] < membership["startedAt"]
+            or membership["completedAt"] > wire.interval[1] // 1_000_000
+        ):
+            raise ValueError("driver observation: captured relation membership interval is invalid")
+        if state != "partial" or total is None or not details.get("detail"):
+            raise ValueError(
+                "driver observation: captured relation membership needs partial coverage, count and explanation"
+            )
     return {
         "source": node,
         "property": key,
         "targets": [item["node"] for item in items],
         "certainty": certainty,
         "state": state,
-        **{name: details[name] for name in ("offset", "total", "cursor", "detail") if name in details},
+        **{
+            name: details[name]
+            for name in ("offset", "total", "cursor", "detail", "membershipObservedAt")
+            if name in details
+        },
     }
 
 

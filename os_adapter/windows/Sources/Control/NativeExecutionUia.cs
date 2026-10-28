@@ -12,45 +12,18 @@ namespace ComputerUse.Windows
 {
     internal static class NativeUiaActions
     {
-        internal static readonly Dictionary<string, AutomationPattern> Patterns = new Dictionary<string, AutomationPattern>
-        {
-            {
-                "Invoke.Invoke",
-                InvokePattern.Pattern
-            },
-            {
-                "Toggle.Toggle",
-                TogglePattern.Pattern
-            },
-            {
-                "SelectionItem.Select",
-                SelectionItemPattern.Pattern
-            },
-            {
-                "SelectionItem.AddToSelection",
-                SelectionItemPattern.Pattern
-            },
-            {
-                "SelectionItem.RemoveFromSelection",
-                SelectionItemPattern.Pattern
-            },
-            {
-                "ExpandCollapse.Expand",
-                ExpandCollapsePattern.Pattern
-            },
-            {
-                "ExpandCollapse.Collapse",
-                ExpandCollapsePattern.Pattern
-            },
-            {
-                "ScrollItem.ScrollIntoView",
-                ScrollItemPattern.Pattern
-            },
-            {
-                "Window.Close",
-                WindowPattern.Pattern
-            }
-        };
+        internal static readonly Dictionary<string, AutomationPattern> Patterns =
+            new Dictionary<string, AutomationPattern> {
+                { "Invoke.Invoke", InvokePattern.Pattern },
+                { "Toggle.Toggle", TogglePattern.Pattern },
+                { "SelectionItem.Select", SelectionItemPattern.Pattern },
+                { "SelectionItem.AddToSelection", SelectionItemPattern.Pattern },
+                { "SelectionItem.RemoveFromSelection", SelectionItemPattern.Pattern },
+                { "ExpandCollapse.Expand", ExpandCollapsePattern.Pattern },
+                { "ExpandCollapse.Collapse", ExpandCollapsePattern.Pattern },
+                { "ScrollItem.ScrollIntoView", ScrollItemPattern.Pattern },
+                { "Window.Close", WindowPattern.Pattern }
+            };
         internal static string[] Names(HashSet<int> supported)
         {
             return Patterns.Where(p => supported.Contains(p.Value.Id)).Select(p => p.Key).ToArray();
@@ -107,7 +80,9 @@ namespace ComputerUse.Windows
             current.Native.Validate();
             r.Check();
             if (!ReferenceEquals(expected, current))
-                throw new Failure("stale_target", "the selected element's native interaction window changed during input preparation; no remaining input was sent");
+                throw new Failure(
+                    "stale_target",
+                    "the selected element's native interaction window changed during input preparation; no remaining input was sent");
         }
 
         NativeWindowRecord Modal(IntPtr handle, Request r)
@@ -134,10 +109,13 @@ namespace ComputerUse.Windows
             observed.Native.Validate();
             interaction.Native.Validate();
             r.Check();
-            if (!ReferenceEquals(observed, interaction) && (!OwnedBy(interaction.Native.Handle, observed.Native.Handle, r) || !Native.IsWindowVisible(interaction.Native.Handle) || Native.IsIconic(interaction.Native.Handle)))
+            if (!ReferenceEquals(observed, interaction) &&
+                (!OwnedBy(interaction.Native.Handle, observed.Native.Handle, r) ||
+                 !Native.IsWindowVisible(interaction.Native.Handle) || Native.IsIconic(interaction.Native.Handle)))
                 throw new Failure("stale_target", "the selected element's owned modal interaction window changed");
             if (!Native.IsWindowEnabled(interaction.Native.Handle))
-                throw new Failure("input_unavailable", "the selected native interaction window is disabled; the reason is not inferred");
+                throw new Failure("input_unavailable",
+                                  "the selected native interaction window is disabled; the reason is not inferred");
         }
 
         NativeWindowRecord WindowBoundary(NativeWindowRecord window, NativeNodeRecord node, Request r)
@@ -148,9 +126,13 @@ namespace ComputerUse.Windows
             var modals = new List<NativeWindowRecord>();
             if (node != null)
             {
-                IntPtr host = store.NativeHandle(node.Element, r), top = host == IntPtr.Zero ? IntPtr.Zero : Native.GetAncestor(host, 2);
-                if (top != IntPtr.Zero && top != window.Native.Handle && !OwnedBy(top, window.Native.Handle, r) && Modal(top, r) != null)
-                    throw new Failure("stale_target", "the selected control's native modal host is outside its original working window");
+                IntPtr host = store.NativeHandle(node.Element, r),
+                       top = host == IntPtr.Zero ? IntPtr.Zero : Native.GetAncestor(host, 2);
+                if (top != IntPtr.Zero && top != window.Native.Handle && !OwnedBy(top, window.Native.Handle, r) &&
+                    Modal(top, r) != null)
+                    throw new Failure(
+                        "stale_target",
+                        "the selected control's native modal host is outside its original working window");
             }
 
             foreach (var candidate in Native.Windows())
@@ -169,7 +151,8 @@ namespace ComputerUse.Windows
                 if (OwnedBy(candidate, interaction.Native.Handle, r))
                     interaction = native;
                 else if (!OwnedBy(interaction.Native.Handle, candidate, r))
-                    throw new Failure("blocked_by_modal", "the selected control has no unique owned modal interaction window");
+                    throw new Failure("blocked_by_modal",
+                                      "the selected control has no unique owned modal interaction window");
                 modals.Add(native);
             }
 
@@ -180,30 +163,19 @@ namespace ComputerUse.Windows
             foreach (var modal in modals)
             {
                 modal.Native.Validate();
-                if (!OwnedBy(modal.Native.Handle, window.Native.Handle, r) || !Native.IsWindowVisible(modal.Native.Handle))
+                if (!OwnedBy(modal.Native.Handle, window.Native.Handle, r) ||
+                    !Native.IsWindowVisible(modal.Native.Handle))
                     throw new Failure("stale_target", "the owned modal window changed during input validation");
             }
 
             RequireInteraction(window, interaction, r);
             return interaction;
         }
-
-        internal NativeWindowRecord Validate(Dictionary<string, object> target, string[] within, Request r)
+        // QUERY-only explicit caller scope on the original retained node.
+        // Each invocation owns fresh traversal state; it grants no durable input permission.
+        internal void RequireWithin(NativeNodeRecord node, string[] within, NativeWindowRecord window, Request r)
         {
-            r.Check();
-            if (!Native.Interactive())
-                throw new Failure("desktop_unavailable", "native input requires the current unlocked interactive desktop");
-            var window = store.Validate(target, r);
-            if (window == null)
-                throw new Failure("invalid_request", "native input needs an observed working window");
-            if (target["node"] == null)
-            {
-                if (within.Length != 0)
-                    throw new Failure("invalid_request", "window input cannot have element ancestors");
-                return WindowBoundary(window, null, r);
-            }
 
-            var node = store.Node((string)target["node"], (string)target["surface"], r);
             if (within.Contains(node.Id))
                 throw new Failure("invalid_request", "ancestor constraints must not include the selected control");
             var requiredAncestors = new HashSet<string>(within.Select(id => store.Node(id, node.Surface, r).Runtime));
@@ -228,18 +200,46 @@ namespace ComputerUse.Windows
                 if (requiredAncestors.Count != 0)
                     throw new Failure("stale_target", "the control left its observed ancestor scope");
             }
+        }
+        internal NativeWindowRecord Validate(Dictionary<string, object> target, string[] within, Request r)
+        {
+            r.Check();
+            if (!Native.Interactive())
+                throw new Failure("desktop_unavailable",
+                                  "native input requires the current unlocked interactive desktop");
+            var identity = store.ValidateInputTarget(target, r);
+            var window = identity.Window;
+            if (window == null)
+                throw new Failure("invalid_request", "native input needs an observed working window");
+            if (target["node"] == null)
+            {
+                if (within.Length != 0)
+                    throw new Failure("invalid_request", "window input cannot have element ancestors");
+                return WindowBoundary(window, null, r);
+            }
+            // ValidateInputTarget just checked this original Node; no provider
+            // callback occurred since. The final store.Validate below remains
+            // mandatory after ancestor/modal queries and is not memoized.
+            var node = identity.Node;
+            RequireWithin(node, within, window, r);
 
             // UIA callbacks during parent queries may destroy or move windows.
             var interaction = WindowBoundary(window, node, r);
             store.Validate(target, r);
+            // Modal and final original-identity provider queries can reparent the
+            // same live node. Recheck only explicit constraints, never the whole boundary.
+            if (within.Length != 0)
+                RequireWithin(node, within, window, r);
             RequireInteraction(window, interaction, r);
             r.Check();
             return interaction;
         }
     }
-
-    internal sealed class NativeUiaObjects : INativeObjectProvider, INativeClickObjectProvider
+    internal sealed partial class NativeUiaObjects : INativeObjectProvider,
+                                                     INativeClickObjectProvider,
+                                                     INativeExpansionObjectProvider
     {
+
         readonly NativeReadStore store;
         readonly NativeUiaBoundary boundary;
         internal NativeUiaObjects(NativeReadStore store)
@@ -309,9 +309,14 @@ namespace ComputerUse.Windows
         {
             return ReadState(target, within, r, true);
         }
-
-        NativeObjectState ReadState(Dictionary<string, object> target, string[] within, Request r, bool click)
+        public NativeObjectState ReadExpansion(Dictionary<string, object> target, string[] within, Request r)
         {
+            return ReadState(target, within, r, true, true);
+        }
+        NativeObjectState ReadState(Dictionary<string, object> target, string[] within, Request r, bool click,
+                                    bool expansion = false)
+        {
+
             // Resolve the retained object first; provider calls may change the
             // UI, so scope/ancestors/modal are checked once after those calls.
             // Repeated global scans cannot make independent UIA calls atomic.
@@ -320,25 +325,34 @@ namespace ComputerUse.Windows
                 throw new Failure("invalid_request", "object input needs an observed native element");
             var node = store.Node((string)target["node"], (string)target["surface"], r);
             var element = node.Element;
-            var state = new NativeObjectState
-            {
-                Native = element
-            };
+            var state = new NativeObjectState { Native = element };
             Action metadata = () =>
             {
                 var role = NativeUiaBoundary.Property(element, AutomationElement.ControlTypeProperty, r) as ControlType;
                 state.Role = role == null ? null : role.ProgrammaticName;
                 state.Label = NativeUiaBoundary.Label(element, r);
-                state.Enabled = NativeUiaBoundary.Property(element, AutomationElement.IsEnabledProperty, r) as bool? ;
+                state.Enabled = NativeUiaBoundary.Property(element, AutomationElement.IsEnabledProperty, r) as bool ? ;
                 r.Check();
                 var patterns = new HashSet<int>(element.GetSupportedPatterns().Select(p => p.Id));
                 r.Check();
                 state.Actions = NativeUiaActions.Names(patterns);
                 state.ActionsComplete = true;
+                if (expansion && patterns.Contains(ExpandCollapsePattern.Pattern.Id))
+                {
+                    var observed =
+                        NativeUiaBoundary.Property(element, ExpandCollapsePattern.ExpandCollapseStateProperty, r);
+                    state.CollapsedExpansion =
+                        observed is ExpandCollapseState
+                            ? (bool?)((ExpandCollapseState)observed == ExpandCollapseState.Collapsed)
+                            : null;
+                }
                 state.Replaceable = false;
                 if (!click && patterns.Contains(ValuePattern.Pattern.Id))
                 {
-                    NativeObjectValueObservation.Read(state, () => NativeUiaBoundary.Property(element, ValuePattern.IsReadOnlyProperty, r), () => NativeUiaBoundary.Property(element, AutomationElement.IsPasswordProperty, r), () => NativeUiaBoundary.Property(element, ValuePattern.ValueProperty, r), r);
+                    NativeObjectValueObservation.Read(
+                        state, () => NativeUiaBoundary.Property(element, ValuePattern.IsReadOnlyProperty, r),
+                        () => NativeUiaBoundary.Property(element, AutomationElement.IsPasswordProperty, r),
+                        () => NativeUiaBoundary.Property(element, ValuePattern.ValueProperty, r), r);
                 }
             };
             if (click)
@@ -384,31 +398,32 @@ namespace ComputerUse.Windows
             }
 
             AutomationPattern type;
-            if (!NativeUiaActions.Patterns.TryGetValue(action, out type) || !element.TryGetCurrentPattern(type, out pattern))
+            if (!NativeUiaActions.Patterns.TryGetValue(action, out type) ||
+                !element.TryGetCurrentPattern(type, out pattern))
                 throw new Failure("input_unavailable", "the selected UIA pattern is no longer available");
             r.Check();
             switch (action)
             {
-                case "Invoke.Invoke":
-                    return WithRepaint(() => ((UIA.IUIAutomationInvokePattern)pattern).Invoke());
-                case "Toggle.Toggle":
-                    return WithRepaint(() => ((UIA.IUIAutomationTogglePattern)pattern).Toggle());
-                case "SelectionItem.Select":
-                    return WithRepaint(() => ((UIA.IUIAutomationSelectionItemPattern)pattern).Select());
-                case "SelectionItem.AddToSelection":
-                    return WithRepaint(() => ((UIA.IUIAutomationSelectionItemPattern)pattern).AddToSelection());
-                case "SelectionItem.RemoveFromSelection":
-                    return WithRepaint(() => ((UIA.IUIAutomationSelectionItemPattern)pattern).RemoveFromSelection());
-                case "ExpandCollapse.Expand":
-                    return WithRepaint(() => ((UIA.IUIAutomationExpandCollapsePattern)pattern).Expand());
-                case "ExpandCollapse.Collapse":
-                    return WithRepaint(() => ((UIA.IUIAutomationExpandCollapsePattern)pattern).Collapse());
-                case "ScrollItem.ScrollIntoView":
-                    return WithRepaint(() => ((UIA.IUIAutomationScrollItemPattern)pattern).ScrollIntoView());
-                case "Window.Close":
-                    return WithRepaint(() => ((UIA.IUIAutomationWindowPattern)pattern).Close());
-                default:
-                    throw new Failure("invalid_request", "unknown native UIA action");
+            case "Invoke.Invoke":
+                return WithRepaint(() => ((UIA.IUIAutomationInvokePattern)pattern).Invoke());
+            case "Toggle.Toggle":
+                return WithRepaint(() => ((UIA.IUIAutomationTogglePattern)pattern).Toggle());
+            case "SelectionItem.Select":
+                return WithRepaint(() => ((UIA.IUIAutomationSelectionItemPattern)pattern).Select());
+            case "SelectionItem.AddToSelection":
+                return WithRepaint(() => ((UIA.IUIAutomationSelectionItemPattern)pattern).AddToSelection());
+            case "SelectionItem.RemoveFromSelection":
+                return WithRepaint(() => ((UIA.IUIAutomationSelectionItemPattern)pattern).RemoveFromSelection());
+            case "ExpandCollapse.Expand":
+                return WithRepaint(() => ((UIA.IUIAutomationExpandCollapsePattern)pattern).Expand());
+            case "ExpandCollapse.Collapse":
+                return WithRepaint(() => ((UIA.IUIAutomationExpandCollapsePattern)pattern).Collapse());
+            case "ScrollItem.ScrollIntoView":
+                return WithRepaint(() => ((UIA.IUIAutomationScrollItemPattern)pattern).ScrollIntoView());
+            case "Window.Close":
+                return WithRepaint(() => ((UIA.IUIAutomationWindowPattern)pattern).Close());
+            default:
+                throw new Failure("invalid_request", "unknown native UIA action");
             }
         }
     }

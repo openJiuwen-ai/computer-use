@@ -10,12 +10,19 @@ namespace ComputerUse.Windows
     // Public request journaling lives in Driver. A replaceable worker owns all
     // UIA objects. Only verified Win32 window identities survive a read timeout;
     // element, text, image and operation tokens are never silently reconstructed.
-    internal sealed class NativeIsolatedRuntime : INativeRuntime
+    internal sealed class NativeIsolatedRuntime : INativeRuntime, INativeWorkerHealthStatus
     {
         readonly string session, mode;
         readonly AgentPointer pointer = new AgentPointer();
-        NativeChildProcess child;
-        readonly Dictionary<string, Dictionary<string, object>> windows = new Dictionary<string, Dictionary<string, object>>();
+        INativeWorkerProcess child;
+        readonly Func<INativeWorkerProcess> createChild;
+        public string WorkerRetirementReason { get; private set; }
+        internal bool WorkerExitConfirmed { get; private set; }
+        internal string WorkerDisposalFailure { get; private set; }
+        string retiredOperation;
+        string retiredCleanup;
+        readonly Dictionary<string, Dictionary<string, object>> windows =
+            new Dictionary<string, Dictionary<string, object>>();
         readonly Dictionary<string, long> generations = new Dictionary<string, long>();
         readonly HashSet<string> completedReads = new HashSet<string>();
         readonly Queue<string> completedOrder = new Queue<string>();
@@ -26,16 +33,15 @@ namespace ComputerUse.Windows
         string[] capabilities;
         public string[] Capabilities
         {
-            get
-            {
+            get {
                 return capabilities.Concat(new[] { "nativeReadIsolation", "nativeWindowReadiness" }).ToArray();
             }
         }
-
-        internal NativeIsolatedRuntime(string session, string mode)
+        internal NativeIsolatedRuntime(string session, string mode, Func<INativeWorkerProcess> createChild = null)
         {
             this.session = session;
             this.mode = mode;
+            this.createChild = createChild ?? (() => new NativeChildProcess("--native-worker"));
             try
             {
                 Start(new Request(CancellationToken.None, 8000));
@@ -51,13 +57,9 @@ namespace ComputerUse.Windows
         {
             try
             {
-                new Window
-                {
-                    Handle = new IntPtr(Convert.ToInt64(item["handle"])),
-                    Pid = Convert.ToUInt32(item["pid"]),
-                    Started = Int64.Parse((string)item["started"]),
-                    Generation = generation
-                }.Validate();
+                new Window { Handle = new IntPtr(Convert.ToInt64(item["handle"])), Pid = Convert.ToUInt32(item["pid"]),
+                             Started = Int64.Parse((string)item["started"]), Generation = generation }
+                    .Validate();
                 return true;
             }
             catch
@@ -69,7 +71,7 @@ namespace ComputerUse.Windows
         void Start(Request request)
         {
             if (retired)
-                throw new Failure("execution_unknown", "native worker cleanup could not be confirmed; reconnect before further operations");
+                throw new Failure("execution_unknown", "native worker is retired; reconnect before further operations");
             if (child != null)
                 return;
             foreach (string id in windows.Keys.ToArray())
@@ -78,8 +80,7 @@ namespace ComputerUse.Windows
                     windows.Remove(id);
                     generations.Remove(id);
                 }
-
-            child = new NativeChildProcess("--native-worker");
+            child = createChild();
             sequence = 0;
             try
             {
@@ -104,7 +105,8 @@ namespace ComputerUse.Windows
             {
                 request.Check();
                 if (Wire.Now >= limit)
-                    throw new Failure("observation_unavailable", "native provider did not return within the isolated read budget");
+                    throw new Failure("observation_unavailable",
+                                      "native provider did not return within the isolated read budget");
                 string line = child.Poll(20);
                 if (line != null)
                 {
@@ -150,19 +152,87 @@ namespace ComputerUse.Windows
                 generations[id] = generation;
             }
         }
-
+        bool StopOwnedWorker(int grace = 0)
+        {
+            if (child == null)
+                return WorkerExitConfirmed;
+            bool confirmed = false;
+            try
+            {
+                confirmed = child.Stop(grace) && child.ExitConfirmed;
+            }
+            catch
+            {
+            }
+            if (!confirmed)
+                return false;
+            WorkerExitConfirmed = true;
+            var stopped = child;
+            child = null;
+            // Process exit is proven; disposal cannot erase the original receipt
+            // or upgrade the operation's failed preparation-cleanup evidence.
+            try
+            {
+                stopped.Dispose();
+            }
+            catch (Exception error)
+            {
+                WorkerDisposalFailure = error.GetType().Name + ": " + error.Message;
+                retired = true;
+            }
+            return true;
+        }
         void RetireWorker()
         {
             if (child == null)
                 return;
-            if (!child.Stop())
+            if (!StopOwnedWorker())
             {
                 retired = true;
                 throw new Failure("execution_unknown", "isolated native worker termination was not confirmed");
             }
-
-            child.Dispose();
-            child = null;
+            if (WorkerDisposalFailure != null)
+                throw new Failure("execution_unknown",
+                                  "isolated native worker exited, but process-resource cleanup failed");
+        }
+        void RetireUnsafeWorker(string reason, Dictionary<string, object> response)
+        {
+            // Sticky before Stop: exceptions/false results never reopen this session.
+            retired = true;
+            if (WorkerRetirementReason == null)
+                WorkerRetirementReason = reason;
+            retiredOperation = operation;
+            retiredCleanup = "failed";
+            bool stopped = StopOwnedWorker();
+            try
+            {
+                pointer.End(false);
+            }
+            catch
+            {
+            }
+            object raw;
+            if (response.TryGetValue("result", out raw))
+            {
+                var receipt = Wire.Object(raw);
+                // Retain original dispatch, preparation and error evidence. A
+                // poisoned success must still fail closed through existing fields.
+                if (receipt.ContainsKey("cleanup"))
+                    receipt["cleanup"] = "failed";
+                if (receipt.ContainsKey("retryReason"))
+                    receipt["retryReason"] = null;
+                if (receipt.ContainsKey("errorCode") && receipt["errorCode"] == null)
+                    receipt["errorCode"] = "execution_unknown";
+                if (!stopped && receipt.ContainsKey("detail"))
+                    receipt["detail"] = (string)receipt["detail"] +
+                                        " Native worker termination was not confirmed; reconnect before further input.";
+            }
+            else if (!stopped && response.TryGetValue("error", out raw))
+            {
+                var error = Wire.Object(raw);
+                error["detail"] = (string)error["detail"] + " Native worker termination was not confirmed.";
+                error["next"] = "reconnect and observe; do not replay the original input";
+            }
         }
 
         void EndInterruptedRead()
@@ -210,6 +280,8 @@ namespace ComputerUse.Windows
 
         object PerformCore(string method, Dictionary<string, object> parameters, Request request)
         {
+            if (method == "finish" && retiredOperation != null && Wire.Str(parameters, "operation") == retiredOperation)
+                return Wire.Obj("cleanup", retiredCleanup);
             if (method == "finish" && completedReads.Contains(Wire.Str(parameters, "operation")))
                 return Wire.Obj("cleanup", "complete");
             if (recycleRequested)
@@ -224,25 +296,26 @@ namespace ComputerUse.Windows
                 // one read lease. Drain only their Win32 metadata; the Python
                 // caller finishes this lease before reading trees or pixels.
                 var query = method == "inspect" ? Wire.Object(parameters["query"]) : null;
-                if (query == null || !new[]
-                {
-                    "applications",
-                    "surfaces"
-                }.Contains(Wire.Str(query, "kind")))
-                    throw new Failure("stale_target", "UIA enrichment failed; finish this read lease before collecting more observations");
+                if (query == null || !new[] { "applications", "surfaces" }.Contains(Wire.Str(query, "kind")))
+                    throw new Failure(
+                        "stale_target",
+                        "UIA enrichment failed; finish this read lease before collecting more observations");
             }
 
             Start(request);
             bool writeRequest = writing || method == "begin" && Equals(parameters["mode"], "write");
             long id = ++sequence;
             var before = Native.GenerationSnapshot();
-            child.Send(Wire.Obj("version", 6, "session", session, "id", id, "method", method, "params", parameters, "timeoutMs", Math.Max(1, Math.Min(120000, (int)(request.Deadline - Wire.Now)))));
+            child.Send(Wire.Obj("version", 6, "session", session, "id", id, "method", method, "params", parameters,
+                                "timeoutMs", Math.Max(1, Math.Min(120000, (int)(request.Deadline - Wire.Now)))));
             Dictionary<string, object> response;
             try
             {
                 // Input retains its own deadline/cleanup contract. This limit
                 // applies only to observations and never replays a command.
-                response = Receive(request, writeRequest ? request.Deadline : Math.Min(request.Deadline, Wire.Now + Request.IsolatedReadMs));
+                response =
+                    Receive(request, writeRequest ? request.Deadline
+                                                  : Math.Min(request.Deadline, Wire.Now + Request.IsolatedReadMs));
             }
             catch (Exception error)
             {
@@ -258,22 +331,26 @@ namespace ComputerUse.Windows
                     }
 
                     // Let native units release paired keys before terminating.
-                    if (child.Stop(750))
-                    {
-                        child.Dispose();
-                        child = null;
-                    }
-                    else
-                        retired = true;
                     retired = true;
-                    throw new Failure("execution_unknown", "native write worker stopped responding; no command was replayed; reconnect and observe");
+                    if (WorkerRetirementReason == null)
+                        WorkerRetirementReason = "native write worker did not return";
+                    retiredOperation = operation;
+                    retiredCleanup = "unknown";
+                    bool stopped = StopOwnedWorker(750);
+                    throw new Failure(
+                        "execution_unknown",
+                        "native write worker stopped responding; no command was replayed; reconnect and observe" +
+                            (stopped ? "" : "; worker termination was not confirmed"));
                 }
 
                 EndInterruptedRead();
                 var failure = error as Failure;
                 if (failure != null && (failure.Code == "cancelled" || failure.Code == "deadline_exceeded"))
                     throw;
-                throw new Failure("observation_unavailable", "read worker was stopped after a blocked or failed provider call; the selected window is retained, old element/text/image references require a fresh read. " + error.Message);
+                throw new Failure(
+                    "observation_unavailable",
+                    "read worker was stopped after a blocked or failed provider call; the selected window is retained, old element/text/image references require a fresh read. " +
+                        error.Message);
             }
 
             if (Convert.ToInt64(response["id"]) != id || !Equals(response["session"], session))
@@ -281,28 +358,47 @@ namespace ComputerUse.Windows
                 RetireWorker();
                 throw new Failure("observation_unavailable", "native worker response identity mismatch");
             }
-
-            Checkpoint(response["windowCheckpoint"], before);
-            try
+            object retirement;
+            if (response.TryGetValue("workerRetirement", out retirement))
             {
-                pointer.Checkpoint(windows, generations);
-                if (response.ContainsKey("pointerCheckpoint"))
-                    pointer.Notice(response["pointerCheckpoint"]);
-            }
-            catch
-            {
-            }
-
-            if (response.ContainsKey("recycleReadWorker") && Equals(response["recycleReadWorker"], true))
-            {
-                if (writeRequest)
+                string reason = "invalid native worker retirement evidence";
+                try
                 {
-                    retired = true;
-                    RetireWorker();
-                    throw new Failure("execution_unknown", "native write worker unexpectedly requested read recovery");
+                    var health = Wire.Object(retirement);
+                    Wire.Keys(health, "reason,cleanup");
+                    if (Wire.Str(health, "cleanup") == "failed")
+                        reason = Wire.Str(health, "reason");
                 }
-
-                recycleRequested = true;
+                catch
+                {
+                }
+                // Even malformed health evidence invalidates the worker; do not
+                // parse a checkpoint or run another request to investigate it.
+                RetireUnsafeWorker(reason, response);
+            }
+            else
+            {
+                Checkpoint(response["windowCheckpoint"], before);
+                try
+                {
+                    pointer.Checkpoint(windows, generations);
+                    if (response.ContainsKey("pointerCheckpoint"))
+                        pointer.Notice(response["pointerCheckpoint"]);
+                }
+                catch
+                {
+                }
+                if (response.ContainsKey("recycleReadWorker") && Equals(response["recycleReadWorker"], true))
+                {
+                    if (writeRequest)
+                    {
+                        retired = true;
+                        RetireWorker();
+                        throw new Failure("execution_unknown",
+                                          "native write worker unexpectedly requested read recovery");
+                    }
+                    recycleRequested = true;
+                }
             }
 
             object raw;
@@ -328,8 +424,7 @@ namespace ComputerUse.Windows
                     {
                     }
             }
-
-            if (method == "inspect" || method == "capture")
+            if (!retired && (method == "inspect" || method == "capture"))
                 try
                 {
                     pointer.Observe(method, parameters, result);
@@ -352,6 +447,8 @@ namespace ComputerUse.Windows
 
         public void Expire()
         {
+            if (retired)
+                return;
             if (writing && Wire.Now >= readDeadline)
                 pointer.End(false);
             if (recycleRequested && Wire.Now >= readDeadline)
@@ -368,9 +465,32 @@ namespace ComputerUse.Windows
             pointer.Dispose();
             if (child != null)
             {
-                child.Stop(750);
-                child.Dispose();
-                child = null;
+                bool stopped = false;
+                try
+                {
+                    stopped = child.Stop(750) && child.ExitConfirmed;
+                }
+                catch
+                {
+                }
+                WorkerExitConfirmed = stopped;
+                if (!stopped)
+                    retired = true;
+                // Disposing the owned job is final containment; do not turn it
+                // into a claim that the earlier stop or detach was confirmed.
+                try
+                {
+                    child.Dispose();
+                }
+                catch (Exception error)
+                {
+                    WorkerDisposalFailure = error.GetType().Name + ": " + error.Message;
+                    retired = true;
+                }
+                finally
+                {
+                    child = null;
+                }
             }
         }
     }

@@ -11,21 +11,24 @@ namespace ComputerUse.Windows
     // Python chooses which declared action represents the user's intention.
     internal sealed class NativeExecution
     {
-        static readonly string[] ObjectCapabilities =
-        {
-            "nativeBoundContracts",
-            "nativeUnitReadinessV2",
-            "nativeActionIntents",
-            "nativeWindowScope",
-            "nativeTextReplacement",
-            "desktopCoordination",
-            "nativeClickPipelineV1"
-        };
+        static readonly string[] ObjectCapabilities = { "nativeBoundContracts",  "nativeUnitReadinessV2",
+                                                        "nativeActionIntents",   "nativeWindowScope",
+                                                        "nativeTextReplacement", "desktopCoordination",
+                                                        "nativeClickPipelineV1" };
         internal string[] Capabilities
         {
-            get
-            {
-                return ObjectCapabilities.Concat(keyboard == null ? new string[0] : new[] { "nativeKeyboardIntents" }).Concat(keyboard != null && keyboard.SupportsText ? new[] { "nativeTextInput" } : new string[0]).Concat(pointer == null ? new string[0] : new[] { "nativePointer" }).Concat(pointer != null && pointer.SupportsElements ? new[] { "nativeElementPointer" } : new string[0]).Concat(desktopKeyboard != null && pointer != null && pointer.SupportsDesktop ? new[] { "nativeDesktopInput" } : new string[0]).Concat(currentReceiver == null ? new string[0] : new[] { "nativeCurrentReceiver" }).Concat(scroll == null ? new string[0] : new[] { "nativeScrollPattern" }).ToArray();
+            get {
+                return ObjectCapabilities.Concat(keyboard == null ? new string[0] : new[] { "nativeKeyboardIntents" })
+                    .Concat(keyboard != null && keyboard.SupportsText ? new[] { "nativeTextInput" } : new string[0])
+                    .Concat(pointer == null ? new string[0] : new[] { "nativePointer" })
+                    .Concat(pointer != null && pointer.SupportsElements ? new[] { "nativeElementPointer" }
+                                                                        : new string[0])
+                    .Concat(desktopKeyboard != null && pointer != null && pointer.SupportsDesktop
+                                ? new[] { "nativeDesktopInput" }
+                                : new string[0])
+                    .Concat(currentReceiver == null ? new string[0] : new[] { "nativeCurrentReceiver" })
+                    .Concat(scroll == null ? new string[0] : new[] { "nativeScrollPattern" })
+                    .ToArray();
             }
         }
 
@@ -37,7 +40,10 @@ namespace ComputerUse.Windows
         readonly NativePointer pointer;
         readonly NativeScroll scroll;
         readonly INativeCurrentReceiverProvider currentReceiver;
-        internal NativeExecution(INativeObjectProvider provider, NativeKeyboard keyboard = null, NativePointer pointer = null, NativeScroll scroll = null, NativeKeyboard desktopKeyboard = null, INativeCurrentReceiverProvider currentReceiver = null)
+        internal NativeExecution(INativeObjectProvider provider, NativeKeyboard keyboard = null,
+                                 NativePointer pointer = null, NativeScroll scroll = null,
+                                 NativeKeyboard desktopKeyboard = null,
+                                 INativeCurrentReceiverProvider currentReceiver = null)
         {
             this.provider = provider;
             this.objects = new NativeObjectPipeline(provider);
@@ -63,12 +69,9 @@ namespace ComputerUse.Windows
                 if (target["capture"] == null)
                     throw new Failure("invalid_request", "desktop input requires an observed desktop capture");
                 if (desktopKeyboard == null)
-                    throw new Failure("mode_unsupported", "desktop input requires exclusive mode and a desktop keyboard provider");
-                if (!new[]
-                {
-                    "key",
-                    "insert"
-                }.Contains((string)intent["kind"]))
+                    throw new Failure("mode_unsupported",
+                                      "desktop input requires exclusive mode and a desktop keyboard provider");
+                if (!new[] { "key", "insert" }.Contains((string)intent["kind"]))
                     throw new Failure("invalid_request", "desktop keyboard supports key and insert intents");
                 desktopKeyboard.ValidateIntent(intent);
             }
@@ -84,13 +87,7 @@ namespace ComputerUse.Windows
 
         static bool KeyboardIntent(Dictionary<string, object> intent)
         {
-            return new[]
-            {
-                "focus",
-                "key",
-                "insert",
-                "paste"
-            }.Contains((string)intent["kind"]);
+            return new[] { "focus", "key", "insert", "paste" }.Contains((string)intent["kind"]);
         }
 
         internal static void ValidateIntent(Dictionary<string, object> intent)
@@ -114,36 +111,45 @@ namespace ComputerUse.Windows
             else if (kind == "click")
             {
                 Wire.Keys(p, "", "button,count");
-                if (p.ContainsKey("button") && !new[]
-                {
-                    "left",
-                    "right",
-                    "middle"
-                }.Contains(Wire.Str(p, "button")))
+                if (p.ContainsKey("button") && !new[] { "left", "right", "middle" }.Contains(Wire.Str(p, "button")))
                     throw new Failure("invalid_request", "invalid click button");
                 if (p.ContainsKey("count"))
                     Wire.Num(p, "count", 1, 2, true);
-                if (p.ContainsKey("button") && (string)p["button"] != "left" || p.ContainsKey("count") && Convert.ToInt32(p["count"]) != 1)
-                    throw new Failure("mode_unsupported", "this object unit cannot synthesize right or repeated pointer clicks");
+                if (p.ContainsKey("button") && (string)p["button"] != "left" ||
+                    p.ContainsKey("count") && Convert.ToInt32(p["count"]) != 1)
+                    throw new Failure("mode_unsupported",
+                                      "this object unit cannot synthesize right or repeated pointer clicks");
             }
             else
-                throw new Failure("mode_unsupported", "this Windows native slice provides addressed actions and whole-value replacement only");
+                throw new Failure(
+                    "mode_unsupported",
+                    "this Windows native slice provides addressed actions and whole-value replacement only");
         }
 
-        internal object InspectCurrentReceiver(NativeWriteOperation operation, Dictionary<string, object> target, Request r)
+        internal object InspectCurrentReceiver(NativeWriteOperation operation, Dictionary<string, object> target,
+                                               Request r)
         {
             if (currentReceiver == null)
                 throw new Failure("mode_unsupported", "native current receiver discovery is unavailable");
             if (operation.Dispatched)
                 throw new Failure("execution_unknown", "current receiver discovery cannot follow dispatched input");
             if (operation.Selected != null)
-                throw new Failure("invalid_request", "current receiver discovery must precede input contract selection");
+                throw new Failure("invalid_request",
+                                  "current receiver discovery must precede input contract selection");
             var evidence = currentReceiver.Read(target, r);
             r.Check();
-            return Wire.Obj("kind", "inputContext", "binding", new Dictionary<string, object>(target), "observed", "observation:" + Guid.NewGuid().ToString("N"), "targetLabel", "Current receiver container", "identity", "yes", "withinScope", "yes", "enabled", "unknown", "blockedBy", new string[0], "primitives", new object[0], "within", new string[0], "input", Wire.Obj("foregroundSurface", null, "keyboardSurface", null, "focusedNode", null, "focusAncestors", new string[0], "editor", null, "editorOwner", null, "selectionKnown", "unknown", "geometryCurrent", "unknown", "windowRoute", "unknown", "currentReceiver", evidence.WireValue()));
+            return Wire.Obj("kind", "inputContext", "binding", new Dictionary<string, object>(target), "observed",
+                            "observation:" + Guid.NewGuid().ToString("N"), "targetLabel", "Current receiver container",
+                            "identity", "yes", "withinScope", "yes", "enabled", "unknown", "blockedBy", new string[0],
+                            "primitives", new object[0], "within", new string[0], "input",
+                            Wire.Obj("foregroundSurface", null, "keyboardSurface", null, "focusedNode", null,
+                                     "focusAncestors", new string[0], "editor", null, "editorOwner", null,
+                                     "selectionKnown", "unknown", "geometryCurrent", "unknown", "windowRoute",
+                                     "unknown", "currentReceiver", evidence.WireValue()));
         }
 
-        internal object Inspect(NativeWriteOperation operation, Dictionary<string, object> target, string[] within, Request r)
+        internal object Inspect(NativeWriteOperation operation, Dictionary<string, object> target, string[] within,
+                                Request r)
         {
             operation.Bind(target, within);
             operation.Contracts.Clear();
@@ -154,11 +160,43 @@ namespace ComputerUse.Windows
             if ((string)operation.Intent["kind"] == "scroll" && scroll != null)
                 return scroll.Inspect(operation, target, within, r);
             if (KeyboardIntent(operation.Intent) && keyboard != null)
-                return keyboard.Inspect(operation, target, within, r);
+            {
+                var keyboardFacts = Wire.Object(keyboard.Inspect(operation, target, within, r));
+                var inserts = provider as INativeSelectionInsertProvider;
+                if ((string)operation.Intent["kind"] == "insert" &&
+                    (target["node"] != null && inserts != null ||
+                     operation.AppInsertPin != null && operation.AppInsertPin.AppInsertRecipient != null))
+                {
+                    var offer = target["node"] != null
+                                    ? inserts.OfferSelectionInsert(target, within, r)
+                                    : operation.AppInsertPin.AppInsertRecipient.OfferSelectionInsert(r);
+                    r.Check();
+                    if (offer != null)
+                    {
+                        var contract = new NativeInputContract { Id = "primitive:" + Guid.NewGuid().ToString("N"),
+                                                                 Unit = "native_text_edit",
+                                                                 Target = new Dictionary<string, object>(target),
+                                                                 Within = (string[])within.Clone(),
+                                                                 Role = offer.Initial.Role,
+                                                                 Supported = true,
+                                                                 Text = true,
+                                                                 SelectionInsert = offer,
+                                                                 AppInsertPin = operation.AppInsertPin };
+                        operation.Contracts.Add(contract.Id, contract);
+                        var primitive =
+                            Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "object", "supported", "yes",
+                                     "readiness", "yes", "pending", new string[0], "backgroundPreparation", "no");
+                        keyboardFacts["primitives"] =
+                            Wire.Array(keyboardFacts["primitives"]).Concat(new[] { primitive }).ToArray();
+                    }
+                }
+                return keyboardFacts;
+            }
             if (target["node"] == null)
                 throw new Failure("invalid_request", "object input needs an observed native element");
             var clickProvider = operation.ClickV1 ? provider as INativeClickObjectProvider : null;
-            var state = clickProvider == null ? provider.Read(target, within, r) : clickProvider.ReadClick(target, within, r);
+            var state =
+                clickProvider == null ? provider.Read(target, within, r) : clickProvider.ReadClick(target, within, r);
             r.Check();
             Dictionary<string, object> pointerFacts = null;
             string pointerUnavailable = null;
@@ -171,12 +209,79 @@ namespace ComputerUse.Windows
                 catch (Failure error)
                 {
                     var options = Wire.Object(operation.Intent["parameters"]);
-                    bool ordinary = (!options.ContainsKey("button") || (string)options["button"] == "left") && (!options.ContainsKey("count") || Convert.ToInt32(options["count"]) == 1);
+                    bool ordinary = (!options.ContainsKey("button") || (string)options["button"] == "left") &&
+                                    (!options.ContainsKey("count") || Convert.ToInt32(options["count"]) == 1);
                     if (!ordinary || error.Code != "input_unavailable")
                         throw;
                     pointerUnavailable = error.Message;
-                // Geometry absence may leave an independent object action.
-                // No pointer input or focus preparation has been sent.
+                    // Geometry absence may leave an independent object action.
+                    // No pointer input or focus preparation has been sent.
+                }
+            }
+            // Only opaque ids returned by this inspection may lend their
+            // typed obstruction fact. Never scan retained historic contracts.
+            var currentPointers = new List<NativeInputContract>();
+            if (pointerFacts != null)
+                foreach (var item in Wire.Array(pointerFacts["primitives"]).Select(Wire.Object))
+                {
+                    NativeInputContract current;
+                    if (operation.Contracts.TryGetValue((string)item["id"], out current) && current.Pointer != null &&
+                        NativeWriteOperation.Same(current.Target, target) && current.Within != null && within != null &&
+                        current.Within.SequenceEqual(within))
+                        currentPointers.Add(current);
+                }
+            bool occludedThisInspection = currentPointers.Any(
+                current => current.Pointer.Occlusion != null && current.Pointer.Occlusion.TargetCondition != null &&
+                           current.Click != null && current.Click.PreferenceProfile == "default");
+            bool hasExpansion = state.ActionsComplete && state.Actions.Contains("ExpandCollapse.Expand");
+            string originalRole = state.Role;
+            // Conservative shapes whose public click primary is Expand. A
+            // Button/Hyperlink/SplitButton with Invoke+Expand stays physical.
+            bool primaryExpansion =
+                hasExpansion && (originalRole == "ControlType.ComboBox" || originalRole == "ControlType.MenuItem");
+            bool semanticOcclusion = false;
+            if (occludedThisInspection)
+            {
+                if (hasExpansion)
+                {
+                    var expansion = provider as INativeExpansionObjectProvider;
+                    if (primaryExpansion && expansion != null)
+                    {
+                        state = expansion.ReadExpansion(target, within, r);
+                        r.Check();
+                        semanticOcclusion =
+                            state.Role == originalRole &&
+                            (state.Role == "ControlType.ComboBox" || state.Role == "ControlType.MenuItem") &&
+                            state.CollapsedExpansion == true && state.Enabled == true && state.ActionsComplete &&
+                            state.Actions.Count(action => action == "ExpandCollapse.Expand") == 1;
+                    }
+                }
+                else
+                    semanticOcclusion =
+                        new[] { "ControlType.Button", "ControlType.Hyperlink", "ControlType.SplitButton",
+                                "ControlType.ComboBox", "ControlType.MenuItem" }
+                            .Contains(state.Role) &&
+                        state.Enabled == true && state.ActionsComplete &&
+                        state.Actions.Count(action => action == "Invoke.Invoke") == 1;
+                if (!semanticOcclusion)
+                {
+                    // An original primary Expand cannot silently become raw
+                    // Invoke. Preserve the ordinary physical selection profile.
+                    foreach (var current in currentPointers)
+                    {
+                        var offer = current.Click;
+                        if (offer == null || offer.PreferenceProfile != "default")
+                            continue;
+                        current.Click = new NativeClickOffer(offer.RouteFamily, offer.Interaction, offer.Delivery,
+                                                             offer.Admission, offer.Reason, offer.PreparationOptions,
+                                                             "physicalWhenAvailableInExclusive");
+                    }
+                    foreach (var item in Wire.Array(pointerFacts["primitives"]).Select(Wire.Object))
+                    {
+                        var current = currentPointers.FirstOrDefault(contract => contract.Id == (string)item["id"]);
+                        if (current != null)
+                            item["click"] = current.Click.WireValue();
+                    }
                 }
             }
 
@@ -184,22 +289,42 @@ namespace ComputerUse.Windows
             string kind = (string)operation.Intent["kind"];
             Action<string, string, bool?> declare = (unit, action, supported) =>
             {
-                var contract = new NativeInputContract
-                {
-                    Id = "primitive:" + Guid.NewGuid().ToString("N"),
-                    Target = new Dictionary<string, object>(target),
-                    Within = (string[])within.Clone(),
-                    Unit = unit,
-                    Action = action,
-                    Role = state.Role
-                };
+                var contract = new NativeInputContract { Id = "primitive:" + Guid.NewGuid().ToString("N"),
+                                                         Target = new Dictionary<string, object>(target),
+                                                         Within = (string[])within.Clone(),
+                                                         Unit = unit,
+                                                         Action = action,
+                                                         Role = state.Role };
+                contract.FixedClickChoice =
+                    operation.ClickV1 && semanticOcclusion &&
+                    (primaryExpansion ? action == "ExpandCollapse.Expand" : action == "Invoke.Invoke");
+                contract.RequireCollapsedExpansion = contract.FixedClickChoice && action == "ExpandCollapse.Expand";
+                if (contract.FixedClickChoice)
+                    contract.ClickTargetCondition =
+                        currentPointers
+                            .First(current => current.Pointer.Occlusion != null &&
+                                              current.Pointer.Occlusion.TargetCondition != null)
+                            .Pointer.Occlusion.TargetCondition;
                 operation.Contracts.Add(contract.Id, contract);
-                var item = Wire.Obj("id", contract.Id, "unit", unit, "channel", "object", "supported", supported == true ? "yes" : supported == false ? "no" : "unknown", "readiness", supported == true && state.Enabled == true ? "yes" : "no", "pending", state.Enabled == true ? new string[0] : new[] { "enabled" }, "backgroundPreparation", "no");
+                var item = Wire.Obj("id", contract.Id, "unit", unit, "channel", "object", "supported",
+                                    supported == true    ? "yes"
+                                    : supported == false ? "no"
+                                                         : "unknown",
+                                    "readiness", supported == true && state.Enabled == true ? "yes" : "no", "pending",
+                                    state.Enabled == true ? new string[0] : new[] { "enabled" },
+                                    "backgroundPreparation", "no");
                 if (action != null)
                     item["action"] = Wire.Obj("name", action, "description", action);
                 if (operation.ClickV1)
                 {
-                    contract.Click = new NativeClickOffer("windows.uia." + action, "semantic", "object_action", supported == true && state.Enabled == true ? "ready" : state.Enabled == null ? "insufficientEvidence" : "unavailable", supported == true && state.Enabled == true ? null : "The selected UIA action is not currently enabled.", new string[0]);
+                    contract.Click = new NativeClickOffer("windows.uia." + action, "semantic", "object_action",
+                                                          supported == true && state.Enabled == true ? "ready"
+                                                          : state.Enabled == null ? "insufficientEvidence"
+                                                                                  : "unavailable",
+                                                          supported == true && state.Enabled == true
+                                                              ? null
+                                                              : "The selected UIA action is not currently enabled.",
+                                                          new string[0]);
                     item["click"] = contract.Click.WireValue();
                 }
 
@@ -210,7 +335,19 @@ namespace ComputerUse.Windows
             else if (state.ActionsComplete)
                 foreach (string action in state.Actions)
                     declare("native_action", action, true);
-            var result = Wire.Obj("kind", "inputContext", "binding", new Dictionary<string, object>(target), "observed", "observation:" + Guid.NewGuid().ToString("N"), "targetLabel", String.IsNullOrWhiteSpace(state.Label) ? "Native control" : state.Label, "identity", "yes", "withinScope", "yes", "enabled", state.Enabled == true ? "yes" : state.Enabled == false ? "no" : "unknown", "blockedBy", new string[0], "primitives", primitives, "nativeRole", state.Role, "actionsComplete", state.ActionsComplete, "within", within, "input", Wire.Obj("foregroundSurface", null, "keyboardSurface", null, "focusedNode", null, "focusAncestors", new string[0], "editor", null, "editorOwner", null, "selectionKnown", "unknown", "geometryCurrent", "unknown", "windowRoute", "unknown"));
+            var result =
+                Wire.Obj("kind", "inputContext", "binding", new Dictionary<string, object>(target), "observed",
+                         "observation:" + Guid.NewGuid().ToString("N"), "targetLabel",
+                         String.IsNullOrWhiteSpace(state.Label) ? "Native control" : state.Label, "identity", "yes",
+                         "withinScope", "yes", "enabled",
+                         state.Enabled == true    ? "yes"
+                         : state.Enabled == false ? "no"
+                                                  : "unknown",
+                         "blockedBy", new string[0], "primitives", primitives, "nativeRole", state.Role,
+                         "actionsComplete", state.ActionsComplete, "within", within, "input",
+                         Wire.Obj("foregroundSurface", null, "keyboardSurface", null, "focusedNode", null,
+                                  "focusAncestors", new string[0], "editor", null, "editorOwner", null,
+                                  "selectionKnown", "unknown", "geometryCurrent", "unknown", "windowRoute", "unknown"));
             if (kind == "replace" && keyboard != null && keyboard.SupportsText)
             {
                 try
@@ -226,13 +363,9 @@ namespace ComputerUse.Windows
                     // erase an independently declared ValuePattern edit.
                     // Identity, modality and cancellation still propagate;
                     // object execution performs its usual final native guards.
-                    if (state.Replaceable != true || r.Effect || r.Dispatched || !new[]
-                    {
-                        "input_unavailable",
-                        "mode_unsupported",
-                        "observation_incomplete",
-                        "ambiguous_target"
-                    }.Contains(error.Code))
+                    if (state.Replaceable != true || r.Effect || r.Dispatched ||
+                        !new[] { "input_unavailable", "mode_unsupported", "observation_incomplete", "ambiguous_target" }
+                             .Contains(error.Code))
                         throw;
                     result["unavailableReason"] = "The optional keyboard route is unavailable: " + error.Message;
                 }
@@ -241,7 +374,8 @@ namespace ComputerUse.Windows
                     r.Check();
                     if (state.Replaceable != true || r.Effect || r.Dispatched)
                         throw;
-                    result["unavailableReason"] = "The optional keyboard provider query failed; the independent object replacement remains available.";
+                    result["unavailableReason"] =
+                        "The optional keyboard provider query failed; the independent object replacement remains available.";
                 }
             }
 
@@ -251,37 +385,32 @@ namespace ComputerUse.Windows
                 result["input"] = pointerFacts["input"];
             }
 
-            var unavailable = new[]
-            {
-                state.ClickMetadataUnavailable,
-                pointerUnavailable
-            }.Where(x => x != null).ToArray();
+            var unavailable =
+                new[] { state.ClickMetadataUnavailable, pointerUnavailable }.Where(x => x != null).ToArray();
             if (unavailable.Length != 0)
                 result["unavailableReason"] = String.Join(" ", unavailable);
             return result;
         }
 
-        internal object Execute(NativeWriteOperation operation, Dictionary<string, object> command, Request r, string operationId = null, long? step = null)
+        internal object Execute(NativeWriteOperation operation, Dictionary<string, object> command, Request r,
+                                string operationId = null, long? step = null)
         {
             if (operation.ClickV1)
                 return clicks.Execute(operation, command, r, operationId, step);
             NativeInputContract selected;
-            if (pointer != null && operation.Contracts.TryGetValue((string)command["primitiveId"], out selected) && selected.Unit == "pointer_sequence")
+            if (pointer != null && operation.Contracts.TryGetValue((string)command["primitiveId"], out selected) &&
+                selected.Unit == "pointer_sequence")
                 return pointer.Execute(operation, command, r);
             if (scroll != null && (string)command["kind"] == "native_scroll")
                 return scroll.Execute(operation, command, r);
             var keyboardUnit = Wire.Object(command["target"])["surface"] == null ? desktopKeyboard : keyboard;
-            if (keyboardUnit != null && new[]
-            {
-                "key_sequence",
-                "prepare_receiver",
-                "clipboard_paste"
-            }.Contains((string)command["kind"]))
+            if (keyboardUnit != null &&
+                new[] { "key_sequence", "prepare_receiver", "clipboard_paste" }.Contains((string)command["kind"]))
                 return keyboardUnit.Execute(operation, command, r);
             return objects.Execute(operation, command, r);
         }
     }
-// NativeDispatchPipeline for addressed UIA objects. NativeRuntime owns the
-// cross-request resource scope and step journal. These local passes never
-// choose another route or replay after a provider callback.
+    // NativeDispatchPipeline for addressed UIA objects. NativeRuntime owns the
+    // cross-request resource scope and step journal. These local passes never
+    // choose another route or replay after a provider callback.
 }

@@ -11,8 +11,11 @@ namespace ComputerUse.Windows
     {
         internal static void Validate(string text)
         {
-            if (Encoding.UTF8.GetByteCount(text) > 1024 * 1024 || text.Any(c => Char.IsControl(c) || c == '\u2028' || c == '\u2029'))
-                throw new Failure("invalid_request", "typing requires at most 1 MiB of single-line text; use explicit paste for multiline content");
+            if (Encoding.UTF8.GetByteCount(text) > 1024 * 1024 ||
+                text.Any(c => Char.IsControl(c) || c == '\u2028' || c == '\u2029'))
+                throw new Failure(
+                    "invalid_request",
+                    "typing requires at most 1 MiB of single-line text; use explicit paste for multiline content");
             for (int n = 0; n < text.Length; n++)
             {
                 if (Char.IsHighSurrogate(text[n]))
@@ -29,11 +32,8 @@ namespace ComputerUse.Windows
         {
             for (int n = 0; n < text.Length; n++)
             {
-                var events = new List<NativeKeyEvent>
-                {
-                    new NativeKeyEvent(text[n], false, true),
-                    new NativeKeyEvent(text[n], true, true)
-                };
+                var events = new List<NativeKeyEvent> { new NativeKeyEvent(text[n], false, true),
+                                                        new NativeKeyEvent(text[n], true, true) };
                 if (Char.IsHighSurrogate(text[n]))
                 {
                     n++;
@@ -43,6 +43,12 @@ namespace ComputerUse.Windows
 
                 yield return events.ToArray();
             }
+        }
+        internal static IEnumerable<NativeTextScalar> Scalars(string text)
+        {
+            foreach (var events in Characters(text))
+                yield return new NativeTextScalar(
+                    new String(events.Where(e => e.Unicode && !e.Up).Select(e => (char)e.Code).ToArray()), events);
         }
     }
 
@@ -90,18 +96,34 @@ namespace ComputerUse.Windows
     }
 
     // A continuous recipe for the already selected target. It does not choose
-    // an editor, a route or a foreground policy, and never substitutes paste.
+    // an editor or foreground policy, and never substitutes paste. Its text
+    // transport is selected once from the pinned native recipient evidence.
     internal static class NativeTypedText
     {
-        internal static void Send(NativeKeyboard keyboard, INativeKeyboardTextProvider provider, NativeWriteOperation operation, NativeInputContract contract, Request r, Dictionary<string, object> result, List<string> preparation)
+        internal static void Send(NativeKeyboard keyboard, INativeKeyboardTextProvider provider,
+                                  NativeWriteOperation operation, NativeInputContract contract, Request r,
+                                  Dictionary<string, object> result, List<string> preparation,
+                                  INativeTextScheduler scheduler = null)
         {
             string text = (string)Wire.Object(operation.Intent["parameters"])["text"];
             var state = keyboard.Guard(contract, r);
             if (!state.Ready)
                 throw new Failure("input_unavailable", "the selected text recipient is not ready");
-            var sequence = provider.BeginSequence(state, r);
+            // All App insert candidates borrow the operation's first ready
+            // recipient. Never begin another sequence that could capture B.
+            var pinned = contract.AppInsertPin == null ? null : contract.AppInsertPin.AppInsertRecipient;
+            var sequence = pinned == null ? provider.BeginSequence(state, r) : pinned.Sequence;
+            if (pinned != null)
+                sequence.Validate(r);
+            var characterSequence = contract.Replacement ? null : sequence as INativeCharacterTextSequence;
+            bool directedCharacters =
+                characterSequence != null &&
+                SelectCharacterDeliveryPass.Run(characterSequence, r) == NativeTextDelivery.DirectedCharacters;
+            var dispatchSequence = sequence as INativeTypedTextDispatchSequence;
             Func<NativeKeyboardState> receiver = () =>
             {
+                if (dispatchSequence != null && dispatchSequence.SupportsDispatchSampling)
+                    return NativeTextDispatchPipeline.Run(dispatchSequence, contract, r);
                 var current = keyboard.Guard(contract, r);
                 if (!current.Ready)
                     throw new Failure("input_unavailable", "the original text recipient is no longer ready");
@@ -124,7 +146,8 @@ namespace ComputerUse.Windows
                 {
                     var selected = selection();
                     if (!selected.Empty && !selected.Full)
-                        throw new Failure("input_unavailable", "the complete control contents are no longer selected; replacement stopped");
+                        throw new Failure("input_unavailable",
+                                          "the complete control contents are no longer selected; replacement stopped");
                 }
                 else
                     receiver();
@@ -132,7 +155,8 @@ namespace ComputerUse.Windows
             try
             {
                 var replacements = provider as INativeKeyboardReplacementProvider;
-                var replacement = contract.Replacement && replacements != null ? replacements.Replacement(state, text, r) : null;
+                var replacement =
+                    contract.Replacement && replacements != null ? replacements.Replacement(state, text, r) : null;
                 if (replacement != null)
                 {
                     for (int index = 0; index < replacement.Count; index++)
@@ -149,21 +173,29 @@ namespace ComputerUse.Windows
                         part.Select();
                         receiver();
                         if (!part.Selected())
-                            throw new Failure("input_unavailable", "the addressed editor segment was not selected; no segment text sent");
+                            throw new Failure("input_unavailable",
+                                              "the addressed editor segment was not selected; no segment text sent");
                         bool first = true;
                         int position = 0;
                         foreach (var events in NativeText.Characters(part.Text))
                         {
                             double before = Wire.Now;
-                            keyboard.SendBatch(operation, events, r, result, () =>
-                            {
-                                receiver();
-                                if (first && !part.Selected())
-                                    throw new Failure("input_unavailable", "the addressed segment selection changed before its first character");
-                                receiver(); // Selection providers can change focus while answering.
-                            });
+                            keyboard.SendBatch(
+                                operation, events, r, result,
+                                () =>
+                                {
+                                    receiver();
+                                    if (first && !part.Selected())
+                                        throw new Failure(
+                                            "input_unavailable",
+                                            "the addressed segment selection changed before its first character");
+                                    receiver(); // Selection providers can change focus while answering.
+                                });
                             if (timing)
-                                Console.Error.WriteLine("native_text segment=" + index + " character=" + delivered + " guard_and_send_ms=" + (Wire.Now - before).ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+                                Console.Error.WriteLine(
+                                    "native_text segment=" + index + " character=" + delivered + " guard_and_send_ms=" +
+                                    (Wire.Now - before)
+                                        .ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
                             first = false;
                             delivered++;
                             position++;
@@ -179,7 +211,9 @@ namespace ComputerUse.Windows
                                 {
                                     r.Check();
                                     if (Wire.Now >= progressUntil)
-                                        throw new Failure("execution_unknown", "the editor did not apply the requested segment prefix; no further text sent");
+                                        throw new Failure(
+                                            "execution_unknown",
+                                            "the editor did not apply the requested segment prefix; no further text sent");
                                     r.Wait(delay);
                                     delay = Math.Min(120, delay + 20);
                                 }
@@ -195,7 +229,9 @@ namespace ComputerUse.Windows
                         {
                             receiver();
                             if (Wire.Now >= until)
-                                throw new Failure("execution_unknown", "the editor did not apply the requested segment; no alternate input was sent");
+                                throw new Failure(
+                                    "execution_unknown",
+                                    "the editor did not apply the requested segment; no alternate input was sent");
                             // Let the provider's outer event loop consume keys
                             // and timers between UIA calls; do not keep it busy
                             // with a tight cross-process observation loop.
@@ -206,9 +242,12 @@ namespace ComputerUse.Windows
 
                     receiver();
                     if (!replacement.Applied(r))
-                        throw new Failure("execution_unknown", "the requested complete editor value was not observed; no alternate input was sent");
+                        throw new Failure(
+                            "execution_unknown",
+                            "the requested complete editor value was not observed; no alternate input was sent");
                     result["confirmation"] = "confirmed";
-                    result["detail"] = "Requested text was observed after editing the control's native segments; submission still requires a separate action.";
+                    result["detail"] =
+                        "Requested text was observed after editing the control's native segments; submission still requires a separate action.";
                     return;
                 }
 
@@ -230,10 +269,11 @@ namespace ComputerUse.Windows
                             if (selected.Empty || selected.Full)
                                 break;
                             if (Wire.Now >= until)
-                                throw new Failure("input_unavailable", "native full selection did not become observable; replacement stopped");
+                                throw new Failure(
+                                    "input_unavailable",
+                                    "native full selection did not become observable; replacement stopped");
                             r.Wait(20);
-                        }
-                        while (true);
+                        } while (true);
                     }
 
                     guard();
@@ -241,30 +281,58 @@ namespace ComputerUse.Windows
                     {
                         selected = selection();
                         if (!selected.Empty)
-                            keyboard.SendBatch(operation, NativeKeys.Chord("BackSpace", "shared"), r, result, () =>
-                            {
-                                var latest = selection();
-                                if (latest.Empty || !latest.Full)
-                                    throw new Failure("input_unavailable", "the original full selection changed before deletion; no deletion sent");
-                            });
+                            keyboard.SendBatch(
+                                operation, NativeKeys.Chord("BackSpace", "shared"), r, result,
+                                () =>
+                                {
+                                    var latest = selection();
+                                    if (latest.Empty || !latest.Full)
+                                        throw new Failure(
+                                            "input_unavailable",
+                                            "the original full selection changed before deletion; no deletion sent");
+                                });
                         else
                             result["confirmation"] = "confirmed";
                     }
                 }
-
-                foreach (var events in NativeText.Characters(text))
+                scheduler = scheduler ?? new NativeRequestTextScheduler();
+                var pacing = directedCharacters ? new NativeCharacterPacing(scheduler.Now) : null;
+                foreach (var scalar in NativeText.Scalars(text))
                 {
+
                     double before = Wire.Now;
-                    keyboard.SendBatch(operation, events, r, result, guard);
+                    if (directedCharacters)
+                        NativeCharacterDispatchPipeline.Run(characterSequence, scalar, operation, r, result, guard);
+                    else
+                        keyboard.SendBatch(operation, scalar.KeyboardEvents, r, result, guard);
                     if (timing)
-                        Console.Error.WriteLine("native_text character=" + delivered + " guard_and_send_ms=" + (Wire.Now - before).ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+                        Console.Error.WriteLine(
+                            "native_text character=" + delivered + " guard_and_send_ms=" +
+                            (Wire.Now - before).ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
                     started = true;
                     delivered++;
+                    if (pacing != null)
+                        pacing.CompletedScalar();
                     if (delivered < total)
-                        r.Wait(10); // Yield to normal asynchronous input processing; not an acknowledgement.
+                    {
+                        if (pacing == null)
+                            scheduler.Wait(r, 10); // Original global keyboard scheduling, unchanged.
+                        else if (pacing.ShouldYield(scheduler.Now))
+                        {
+                            // No yield between high/low surrogate units. This
+                            // is a fairness opportunity, not an acknowledgement
+                            // of posted focus, modal or timer work. The next
+                            // scalar still runs its complete fresh guard.
+                            scheduler.Wait(r, 1);
+                            pacing.Resumed(scheduler.Now);
+                        }
+                    }
                 }
-
-                result["detail"] = operation.Dispatched ? "Keyboard text recipe sent; read to verify its effect." : "The text operation needed no input.";
+                result["detail"] =
+                    !operation.Dispatched ? "The text operation needed no input."
+                    : directedCharacters
+                        ? "Directed character messages sent to the original native Edit at its caret/selection; no physical keydown/up, paste or submission was sent. Read to verify its effect."
+                        : "Keyboard text recipe sent; read to verify its effect.";
             }
             catch
             {

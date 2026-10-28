@@ -19,10 +19,18 @@ namespace ComputerUse.Windows
         {
             var target = Wire.Object(command["target"]);
             string unit = Wire.Str(command, "kind"), id = Wire.Str(command, "primitiveId");
-            var result = Wire.Obj("target", new Dictionary<string, object>(target), "dispatch", "notDispatched", "detail", "No native input dispatched.", "preparation", new string[0], "confirmation", "unavailable", "cleanup", "complete", "errorCode", null, "retryReason", null, "context", null);
+            var result =
+                Wire.Obj("target", new Dictionary<string, object>(target), "dispatch", "notDispatched", "detail",
+                         "No native input dispatched.", "preparation", new string[0], "confirmation", "unavailable",
+                         "cleanup", "complete", "errorCode", null, "retryReason", null, "context", null);
             try
             {
                 var plan = ResolveNativeTargetPass.Run(operation, command, target, unit, id);
+                if (plan.Contract.SelectionInsert != null)
+                {
+                    NativeSelectionInsertPipeline.Run(plan.Contract.SelectionInsert, plan.Text, operation, r, result);
+                    return result;
+                }
                 var state = ReadInitialTargetPass.Run(plan, r, provider);
                 var mutate = PrepareNativeUnitPass.Run(plan, state, r, provider);
                 CheckDispatchConditionsPass.Run(plan, r, provider);

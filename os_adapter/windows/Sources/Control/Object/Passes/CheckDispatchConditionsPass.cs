@@ -17,7 +17,7 @@ namespace ComputerUse.Windows
         {
             // Pattern acquisition can run callbacks. Keep this second read
             // next to Sending/mutation inside the same native execute call.
-            var current = provider.Read(plan.Target, plan.Contract.Within, r);
+            var current = NativeObjectChecks.ReadForContract(plan, r, provider);
             NativeObjectChecks.CheckState(current, plan.Contract);
         }
     }

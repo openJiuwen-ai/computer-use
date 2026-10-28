@@ -27,11 +27,11 @@ namespace ComputerUse.Windows
         static UIA.IUIAutomation client;
         internal static UIA.IUIAutomation Current
         {
-            get
-            {
+            get {
                 if (client == null)
                 {
-                    var created = (UIA.IUIAutomation)Activator.CreateInstance(typeof(UIA.IUIAutomation).Assembly.GetType("NativeUIA.CUIAutomation8Class", true));
+                    var created = (UIA.IUIAutomation)Activator.CreateInstance(
+                        typeof(UIA.IUIAutomation).Assembly.GetType("NativeUIA.CUIAutomation8Class", true));
                     // UIA defaults to focusing before control-pattern actions.
                     // Focus preparation belongs to our explicit desktop policy,
                     // not a hidden side effect of selection/value/Invoke calls.
@@ -53,10 +53,17 @@ namespace ComputerUse.Windows
         // LookupById is inherited from AutomationIdentifier and does not
         // initialize ControlType's registrations when no managed UIA element
         // has been used. Build the map from the public constants explicitly.
-        static readonly Dictionary<int, ControlType> ControlTypes = typeof(ControlType).GetFields(BindingFlags.Public | BindingFlags.Static).Where(f => f.FieldType == typeof(ControlType)).Select(f => (ControlType)f.GetValue(null)).ToDictionary(t => t.Id);
+        static readonly Dictionary<int, ControlType> ControlTypes =
+            typeof(ControlType)
+                .GetFields(BindingFlags.Public | BindingFlags.Static)
+                .Where(f => f.FieldType == typeof(ControlType))
+                .Select(f => (ControlType)f.GetValue(null))
+                .ToDictionary(t => t.Id);
         static Pattern[] PatternIds()
         {
-            var ids = typeof(UIA.UIA_PatternIds).GetFields(BindingFlags.Public | BindingFlags.Static).ToDictionary(f => f.Name, f => Convert.ToInt32(f.GetRawConstantValue()));
+            var ids = typeof(UIA.UIA_PatternIds)
+                          .GetFields(BindingFlags.Public | BindingFlags.Static)
+                          .ToDictionary(f => f.Name, f => Convert.ToInt32(f.GetRawConstantValue()));
             var result = new List<Pattern>();
             foreach (var f in typeof(UIA.UIA_PropertyIds).GetFields(BindingFlags.Public | BindingFlags.Static))
             {
@@ -81,7 +88,8 @@ namespace ComputerUse.Windows
                     continue;
                 int id;
                 if (ids.TryGetValue("UIA_" + patternName + "Id", out id))
-                    result.Add(new Pattern { Id = id, Available = Convert.ToInt32(f.GetRawConstantValue()), ProgrammaticName = patternName + "Identifiers.Pattern" });
+                    result.Add(new Pattern { Id = id, Available = Convert.ToInt32(f.GetRawConstantValue()),
+                                             ProgrammaticName = patternName + "Identifiers.Pattern" });
             }
 
             return result.OrderBy(p => p.Id).ToArray();
@@ -142,12 +150,12 @@ namespace ComputerUse.Windows
         {
             return Wrap(Call(() => Current.RawViewWalker.GetNextSiblingElement(e.Native)));
         }
-
-        internal static UiaElement[] Elements(UIA.IUIAutomationElementArray array)
+        internal static UiaElement[] Elements(UIA.IUIAutomationElementArray array,
+                                              Action<int, Exception> onUnavailable = null)
         {
             if (array == null)
                 return new UiaElement[0];
-            return Enumerable.Range(0, array.Length).Select(i => Wrap(array.GetElement(i))).ToArray();
+            return NativeElementArray.Read(array.Length, i => Wrap(array.GetElement(i)), onUnavailable);
         }
 
         internal static bool SameCom(object a, object b)
@@ -167,12 +175,11 @@ namespace ComputerUse.Windows
                     Marshal.Release(y);
             }
         }
-
-        internal static object Value(object value, int property = 0)
+        internal static object Value(object value, int property = 0, Action<int, Exception> onUnavailable = null)
         {
             try
             {
-                return DecodeValue(value, property);
+                return DecodeValue(value, property, onUnavailable);
             }
             catch (Exception error)
             {
@@ -182,7 +189,7 @@ namespace ComputerUse.Windows
             }
         }
 
-        static object DecodeValue(object value, int property)
+        static object DecodeValue(object value, int property, Action<int, Exception> onUnavailable)
         {
             if (value == null)
                 return null;
@@ -197,7 +204,7 @@ namespace ComputerUse.Windows
                     return Wrap(element);
                 var elements = value as UIA.IUIAutomationElementArray;
                 if (elements != null)
-                    return Elements(elements);
+                    return Elements(elements, onUnavailable);
             }
 
             if (property == AutomationElement.ControlTypeProperty.Id)
@@ -229,6 +236,10 @@ namespace ComputerUse.Windows
             if (property == TablePattern.RowOrColumnMajorProperty.Id)
                 return (RowOrColumnMajor)Convert.ToInt32(value);
             var array = value as Array;
+            if (onUnavailable != null && array != null &&
+                array.Cast<object>().All(item => item == null || item is UIA.IUIAutomationElement))
+                return NativeElementArray.Read(array.Length, i => Wrap((UIA.IUIAutomationElement)array.GetValue(i)),
+                                               onUnavailable);
             if (array != null && array.Cast<object>().All(item => item is UIA.IUIAutomationElement))
                 return array.Cast<UIA.IUIAutomationElement>().Select(Wrap).ToArray();
             return value;
@@ -261,7 +272,8 @@ namespace ComputerUse.Windows
 
         internal static UiaElement FromPoint(NativePointerPoint p)
         {
-            return UiaClient.Wrap(UiaClient.Call(() => UiaClient.Current.ElementFromPoint(new UIA.tagPOINT { x = p.X, y = p.Y })));
+            return UiaClient.Wrap(
+                UiaClient.Call(() => UiaClient.Current.ElementFromPoint(new UIA.tagPOINT { x = p.X, y = p.Y })));
         }
 
         internal bool TryClickablePoint(out NativePointerPoint result)
@@ -274,16 +286,14 @@ namespace ComputerUse.Windows
 
         internal static UiaElement RootElement
         {
-            get
-            {
+            get {
                 return UiaClient.Wrap(UiaClient.Current.GetRootElement());
             }
         }
 
         internal static UiaElement FocusedElement
         {
-            get
-            {
+            get {
                 return UiaClient.Wrap(UiaClient.Call(() => UiaClient.Current.GetFocusedElement()));
             }
         }
@@ -298,20 +308,22 @@ namespace ComputerUse.Windows
         {
             return GetCurrentPropertyValue(field.Id, ignoreDefault);
         }
-
-        internal object GetCurrentPropertyValue(int field, bool ignoreDefault = false)
+        internal object GetCurrentPropertyValue(int field, bool ignoreDefault = false,
+                                                Action<int, Exception> onUnavailable = null)
         {
-            return UiaClient.Value(UiaClient.Call(() => Native.GetCurrentPropertyValueEx(field, ignoreDefault ? 1 : 0)), field);
+            return UiaClient.Value(UiaClient.Call(() => Native.GetCurrentPropertyValueEx(field, ignoreDefault ? 1 : 0)),
+                                   field, onUnavailable);
         }
 
         internal object GetCachedPropertyValue(AutomationProperty field, bool ignoreDefault = false)
         {
             return GetCachedPropertyValue(field.Id, ignoreDefault);
         }
-
-        internal object GetCachedPropertyValue(int field, bool ignoreDefault = false)
+        internal object GetCachedPropertyValue(int field, bool ignoreDefault = false,
+                                               Action<int, Exception> onUnavailable = null)
         {
-            return UiaClient.Value(UiaClient.Call(() => Native.GetCachedPropertyValueEx(field, ignoreDefault ? 1 : 0)), field);
+            return UiaClient.Value(UiaClient.Call(() => Native.GetCachedPropertyValueEx(field, ignoreDefault ? 1 : 0)),
+                                   field, onUnavailable);
         }
 
         internal UiaElement Snapshot(UIA.IUIAutomationCacheRequest cache)
@@ -321,12 +333,14 @@ namespace ComputerUse.Windows
 
         internal UiaElement[] CachedChildren
         {
-            get
-            {
+            get {
                 return UiaClient.Elements(UiaClient.Call(() => Native.GetCachedChildren()));
             }
         }
-
+        internal UiaElement[] ReadCachedChildren(Action<int, Exception> onUnavailable)
+        {
+            return UiaClient.Elements(UiaClient.Call(() => Native.GetCachedChildren()), onUnavailable);
+        }
         internal UiaClient.Pattern[] GetSupportedPatterns(bool cached = false)
         {
             var source = cached ? this : Snapshot(UiaClient.Cache(UiaClient.Patterns.Select(p => p.Available)));
@@ -352,20 +366,27 @@ namespace ComputerUse.Windows
                 result = new UiaTextPattern((UIA.IUIAutomationTextPattern)result);
             return true;
         }
-
+        internal UiaTextChildPattern ReadTextChildPattern()
+        {
+            // TextChild is a Windows 8+ native pattern absent from the older
+            // managed AutomationPattern identifiers. Use the host type library.
+            var value = UiaClient.Call(() => Native.GetCurrentPattern((int)UIA.UIA_PatternIds.UIA_TextChildPatternId));
+            if (value == null)
+                throw new NativeFieldUnavailable("unsupported", "UIA no longer exposes the declared TextChildPattern");
+            return new UiaTextChildPattern((UIA.IUIAutomationTextChildPattern)value);
+        }
         internal void SetFocus()
         {
             UiaClient.Call(() =>
-            {
-                Native.SetFocus();
-                return true;
-            });
+                           {
+                               Native.SetFocus();
+                               return true;
+                           });
         }
 
         internal Info Current
         {
-            get
-            {
+            get {
                 return new Info(this);
             }
         }
@@ -380,16 +401,14 @@ namespace ComputerUse.Windows
 
             internal int NativeWindowHandle
             {
-                get
-                {
+                get {
                     return Convert.ToInt32(e.GetCurrentPropertyValue(AutomationElement.NativeWindowHandleProperty));
                 }
             }
 
             internal string Name
             {
-                get
-                {
+                get {
                     return (string)e.GetCurrentPropertyValue(AutomationElement.NameProperty);
                 }
             }
@@ -398,6 +417,27 @@ namespace ComputerUse.Windows
 
     // Text helpers translate COM arrays/endpoints without changing their
     // meaning. Native text ranges remain objects, never inferred offsets.
+    internal sealed class UiaTextChildPattern
+    {
+        readonly UIA.IUIAutomationTextChildPattern pattern;
+        internal UiaTextChildPattern(UIA.IUIAutomationTextChildPattern value)
+        {
+            pattern = value;
+        }
+        internal UiaElement TextContainer
+        {
+            get {
+                return UiaClient.Wrap(UiaClient.Call(() => pattern.TextContainer));
+            }
+        }
+        internal UiaTextRange TextRange
+        {
+            get {
+                var range = UiaClient.Call(() => pattern.TextRange);
+                return range == null ? null : new UiaTextRange(range);
+            }
+        }
+    }
     internal sealed class UiaTextPattern
     {
         readonly UIA.IUIAutomationTextPattern pattern;
@@ -414,8 +454,7 @@ namespace ComputerUse.Windows
 
         internal UiaTextRange DocumentRange
         {
-            get
-            {
+            get {
                 if (legacy != null)
                 {
                     var value = legacy.DocumentRange;
@@ -429,9 +468,9 @@ namespace ComputerUse.Windows
 
         internal SupportedTextSelection SupportedTextSelection
         {
-            get
-            {
-                return legacy == null ? (SupportedTextSelection)pattern.SupportedTextSelection : legacy.SupportedTextSelection;
+            get {
+                return legacy == null ? (SupportedTextSelection)pattern.SupportedTextSelection
+                                      : legacy.SupportedTextSelection;
             }
         }
 
@@ -460,7 +499,8 @@ namespace ComputerUse.Windows
         internal UiaTextRange RangeFromChild(UiaElement child)
         {
             if (legacy != null)
-                throw new NativeFieldUnavailable("unsupported", "Legacy text supplement cannot bind native embedded object identities");
+                throw new NativeFieldUnavailable(
+                    "unsupported", "Legacy text supplement cannot bind native embedded object identities");
             var value = pattern.RangeFromChild(child.Native);
             return value == null ? null : new UiaTextRange(value);
         }
@@ -487,7 +527,8 @@ namespace ComputerUse.Windows
 
         internal object GetAttributeValue(AutomationTextAttribute field)
         {
-            return legacy == null ? UiaClient.Value(range.GetAttributeValue(field.Id)) : legacy.GetAttributeValue(field);
+            return legacy == null ? UiaClient.Value(range.GetAttributeValue(field.Id))
+                                  : legacy.GetAttributeValue(field);
         }
 
         internal object GetAttributeValue(int field)
@@ -496,7 +537,8 @@ namespace ComputerUse.Windows
                 return UiaClient.Value(range.GetAttributeValue(field));
             var attribute = AutomationTextAttribute.LookupById(field);
             if (attribute == null)
-                throw new NativeFieldUnavailable("unsupported", "Text attribute is unavailable through the legacy supplement");
+                throw new NativeFieldUnavailable("unsupported",
+                                                 "Text attribute is unavailable through the legacy supplement");
             return legacy.GetAttributeValue(attribute);
         }
 
@@ -504,7 +546,8 @@ namespace ComputerUse.Windows
         {
             if (legacy != null)
                 return legacy.CompareEndpoints(a, other.legacy, b);
-            return range.CompareEndpoints((UIA.TextPatternRangeEndpoint)a, other.range, (UIA.TextPatternRangeEndpoint)b);
+            return range.CompareEndpoints((UIA.TextPatternRangeEndpoint)a, other.range,
+                                          (UIA.TextPatternRangeEndpoint)b);
         }
 
         internal Rect[] GetBoundingRectangles()
@@ -515,17 +558,20 @@ namespace ComputerUse.Windows
             if (raw == null || raw.Length % 4 != 0)
                 throw new InvalidOperationException("Invalid UIA text rectangle array");
             var values = raw.Cast<object>().Select(Convert.ToDouble).ToArray();
-            return Enumerable.Range(0, values.Length / 4).Select(i => new Rect(values[i * 4], values[i * 4 + 1], values[i * 4 + 2], values[i * 4 + 3])).ToArray();
+            return Enumerable.Range(0, values.Length / 4)
+                .Select(i => new Rect(values[i * 4], values[i * 4 + 1], values[i * 4 + 2], values[i * 4 + 3]))
+                .ToArray();
         }
-
-        internal UiaElement[] GetChildren()
+        internal UiaElement[] GetChildren(Action<int, Exception> onUnavailable = null)
         {
             if (legacy == null)
-                return UiaClient.Elements(range.GetChildren());
+                return UiaClient.Elements(range.GetChildren(), onUnavailable);
             // A legacy text supplement grants no native object/input identity.
             // Do not merge unrelated client objects by labels or coordinates.
             if (legacy.GetChildren().Length != 0)
-                throw new NativeFieldUnavailable("unsupported", "Legacy text proxy exposes embedded objects without native COM identities; use RawViewChildren.");
+                throw new NativeFieldUnavailable(
+                    "unsupported",
+                    "Legacy text proxy exposes embedded objects without native COM identities; use RawViewChildren.");
             return new UiaElement[0];
         }
 
@@ -556,13 +602,17 @@ namespace ComputerUse.Windows
 
         internal int MoveEndpointByUnit(TextPatternRangeEndpoint endpoint, TextUnit unit, int count)
         {
-            return legacy == null ? range.MoveEndpointByUnit((UIA.TextPatternRangeEndpoint)endpoint, (UIA.TextUnit)unit, count) : legacy.MoveEndpointByUnit(endpoint, unit, count);
+            return legacy == null
+                       ? range.MoveEndpointByUnit((UIA.TextPatternRangeEndpoint)endpoint, (UIA.TextUnit)unit, count)
+                       : legacy.MoveEndpointByUnit(endpoint, unit, count);
         }
 
-        internal void MoveEndpointByRange(TextPatternRangeEndpoint endpoint, UiaTextRange other, TextPatternRangeEndpoint otherEndpoint)
+        internal void MoveEndpointByRange(TextPatternRangeEndpoint endpoint, UiaTextRange other,
+                                          TextPatternRangeEndpoint otherEndpoint)
         {
             if (legacy == null)
-                range.MoveEndpointByRange((UIA.TextPatternRangeEndpoint)endpoint, other.range, (UIA.TextPatternRangeEndpoint)otherEndpoint);
+                range.MoveEndpointByRange((UIA.TextPatternRangeEndpoint)endpoint, other.range,
+                                          (UIA.TextPatternRangeEndpoint)otherEndpoint);
             else
                 legacy.MoveEndpointByRange(endpoint, other.legacy, otherEndpoint);
         }

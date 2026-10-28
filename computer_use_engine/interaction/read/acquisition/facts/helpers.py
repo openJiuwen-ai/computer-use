@@ -15,6 +15,7 @@ from computer_use.native.semantics import (
     RAW_NODE_METADATA_FIELDS,
     TABLE_FIELDS,
     WINDOWS_ON_DEMAND_FIELDS,
+    WINDOWS_OBSERVATION_SCOPE_FIELDS,
     WINDOWS_READ_V2_FIELDS,
     WINDOWS_TEXT_CONTEXT_FIELDS,
     WINDOWS_TEXT_LINE_FIELDS,
@@ -119,6 +120,8 @@ def plan_fact_profile(scope: FactScope, capabilities: NativeReadCapabilities) ->
         if platform == "windows" and "nativeUiaReadV2" not in features:
             fields = [key for key in fields if key not in WINDOWS_READ_V2_FIELDS]
         if platform == "windows":
+            if "nativeObservationScopes" not in features:
+                fields = [key for key in fields if key not in WINDOWS_OBSERVATION_SCOPE_FIELDS]
             fields = [key for key in fields if key not in WINDOWS_ON_DEMAND_FIELDS]
             if "nativeUiaTextLines" not in features:
                 fields = [key for key in fields if key not in WINDOWS_TEXT_LINE_FIELDS]
