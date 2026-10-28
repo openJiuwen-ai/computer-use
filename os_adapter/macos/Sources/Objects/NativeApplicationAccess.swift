@@ -41,14 +41,12 @@ import ApplicationServices
 
     func readRoot(_ ref: String) throws -> ReadRoot { return try reader.readRoot(ref) }
 
-    func nativeFacts(
-        _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
-        childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
-        advertisedFields: [String] = [], followRelations: [String] = []
-    ) throws -> [String: Any] {
-        try facts.collect(
-            ref, session: session, fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: childrenPage,
-            relationPage: relationPage, advertisedFields: advertisedFields, followRelations: followRelations)
+    func nativeFacts(_ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
+                     childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil, advertisedFields: [String] = [],
+                     followRelations: [String] = [], textContent: Bool = false) throws -> [String: Any] {
+        try facts.collect(ref, session: session, fields: fields, maxNodes: maxNodes, maxDepth: maxDepth,
+                          childrenPage: childrenPage, relationPage: relationPage, advertisedFields: advertisedFields, followRelations: followRelations,
+                          textContent: textContent)
     }
 
     func nativeReadTarget(_ ref: String) throws -> ApplicationElements.Target { try facts.readTarget(ref) }

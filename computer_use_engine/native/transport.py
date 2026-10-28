@@ -426,6 +426,7 @@ class ConnectionPort:
         follow_relations=None,
         focused_fields=None,
         primary_fields=None,
+        text_content=None,
     ):
         """Collect unified observation facts with their separate query scope."""
         from computer_use.protocol.observation.adapters import decode_driver_reply
@@ -440,6 +441,7 @@ class ConnectionPort:
             follow_relations=follow_relations,
             focused_fields=focused_fields,
             primary_fields=primary_fields,
+            text_content=text_content,
         )
         payload, facts = await self._nodes_payload(operation, target, request, timeout_ms)
         reply = decode_driver_reply(payload)
@@ -467,6 +469,12 @@ class ConnectionPort:
     ) -> tuple[Record, Record]:
         self._check(operation)
         query = dict(kind="nodes", fields=list(request.fields), maxNodes=request.max_nodes, maxDepth=request.max_depth)
+        if request.text_content is not None:
+            if self.platform != "macos" or "nativeParameterizedText" not in self.connection.capabilities:
+                raise ValueError("This driver cannot capture parameterized native text")
+            if type(request.text_content) is not bool:
+                raise ValueError("text_content must be a boolean")
+            query["textContent"] = request.text_content
         if request.primary_fields is not None:
             if "nativeUiaTextLines" not in self.connection.capabilities:
                 raise ValueError("This driver cannot limit line probing to primary text objects")

@@ -122,11 +122,8 @@ enum NativeInspectQuery {
     case launch
     case surfaces(application: String)
     case roots(application: String)
-    case inputContext(
-        within: [String], actuator: Actuator?, receiver: Receiver?, basis: [Dependency], currentReceiver: Bool)
-    case nodes(
-        fields: [String], maxNodes: Int, maxDepth: Int, childrenPage: ChildrenPage?, relationPage: RelationPage?,
-        advertisedFields: [String], followRelations: [String])
+    case inputContext(within: [String], actuator: Actuator?, receiver: Receiver?, basis: [Dependency], currentReceiver: Bool)
+    case nodes(fields: [String], maxNodes: Int, maxDepth: Int, childrenPage: ChildrenPage?, relationPage: RelationPage?, advertisedFields: [String], followRelations: [String], textContent: Bool)
     case relation(property: String, cursor: String?, limit: Int)
     case capturedText(ref: String, offset: Int, length: Int)
 
@@ -200,12 +197,11 @@ enum NativeInspectQuery {
             let hasRelationPage = (raw as? [String: Any])?.keys.contains("relationPage") == true
             let hasAdvertised = (raw as? [String: Any])?.keys.contains("advertisedFields") == true
             let hasFollow = (raw as? [String: Any])?.keys.contains("followRelations") == true
-            let p = try object(
-                raw,
-                keys: Set(
-                    ["kind", "fields", "maxNodes", "maxDepth"] + (hasPage ? ["childrenPage"] : [])
-                        + (hasAdvertised ? ["advertisedFields"] : []) + (hasRelationPage ? ["relationPage"] : [])
-                        + (hasFollow ? ["followRelations"] : [])))
+            let hasText = (raw as? [String: Any])?.keys.contains("textContent") == true
+            let p = try object(raw, keys: Set(["kind", "fields", "maxNodes", "maxDepth"]
+                + (hasPage ? ["childrenPage"] : []) + (hasAdvertised ? ["advertisedFields"] : [])
+                + (hasRelationPage ? ["relationPage"] : [])
+                + (hasFollow ? ["followRelations"] : []) + (hasText ? ["textContent"] : [])))
             let fields = try Self.names(p["fields"], label: "fields", min: 1, max: 128)
             let advertised =
                 hasAdvertised ? try Self.names(p["advertisedFields"], label: "advertisedFields", min: 1, max: 128) : []
@@ -223,11 +219,10 @@ enum NativeInspectQuery {
                 throw DriverError(
                     "a relation page needs depth and space for its root and targets", code: .invalidRequest)
             }
-            self = .nodes(
-                fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: page, relationPage: relationPage,
-                advertisedFields: advertised,
-                followRelations: hasFollow
-                    ? try Self.names(p["followRelations"], label: "followRelations", min: 1, max: 16) : [])
+            self = .nodes(fields: fields, maxNodes: maxNodes, maxDepth: maxDepth,
+                childrenPage: page, relationPage: relationPage, advertisedFields: advertised,
+                followRelations: hasFollow ? try Self.names(p["followRelations"], label: "followRelations", min: 1, max: 16) : [],
+                textContent: hasText ? try boolean(p["textContent"], label: "textContent") : false)
         case "relation":
             let p = try object(raw, keys: ["kind", "property", "cursor", "limit"])
             self = .relation(

@@ -24,16 +24,12 @@ import ApplicationServices
                 try access.objects.nativeRelation(
                     node, session: access.session, property: property, cursor: cursor, limit: limit)
             }
-        case .nodes(
-            let fields, let nodes, let depth, let childrenPage, let relationPage, let advertisedFields,
-            let followRelations):
-            try ValidateNativeNodeProfilePass.run(
-                access: access, fields: fields, followRelations: followRelations, relationPage: relationPage)
+        case .nodes(let fields, let nodes, let depth, let childrenPage, let relationPage, let advertisedFields, let followRelations, let textContent):
+            try ValidateNativeNodeProfilePass.run(access: access, fields: fields, followRelations: followRelations, relationPage: relationPage)
             return try NativeNodeQueryPipeline.collect(p["target"], op: op, access: access) { node in
-                try access.objects.nativeFacts(
-                    node, session: access.session, fields: fields, maxNodes: nodes, maxDepth: depth,
-                    childrenPage: childrenPage, relationPage: relationPage, advertisedFields: advertisedFields,
-                    followRelations: followRelations)
+                try access.objects.nativeFacts(node, session: access.session, fields: fields,
+                    maxNodes: nodes, maxDepth: depth, childrenPage: childrenPage, relationPage: relationPage,
+                    advertisedFields: advertisedFields, followRelations: followRelations, textContent: textContent)
             }
         case .inputContext(let within, let actuator, let receiver, let basis, let currentReceiver):
             return try NativeInputContextPipeline.collect(

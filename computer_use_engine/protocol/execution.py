@@ -291,6 +291,7 @@ _inspect_queries = {
             kind=enum("nodes"),
             fields=array(identity, min=1, max=128),
             advertisedFields=array(identity, min=1, max=128).optional(),
+            textContent=boolean().optional(),
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),
             primaryFields=array(enum("Text.LineRanges"), min=1, max=1).optional(),
