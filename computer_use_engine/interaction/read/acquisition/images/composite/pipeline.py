@@ -1,21 +1,30 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"Compose only proved window layouts; retain independent native capture maps."
+"""Compose only proved window layouts; retain independent native capture maps."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Literal, cast
+
+if TYPE_CHECKING:
+    from typing import Any, Sequence
+
+    from computer_use.interaction.controller import SessionController
+    from computer_use.interaction.read.acquisition.images.capture import WindowImage
+    from computer_use.interaction.read.views.pipeline import WindowPart
+    from computer_use.interaction.records import UIHandle
 import base64
 import hashlib
 import math
 import weakref
-from dataclasses import replace
+from dataclasses import asdict, replace
 from io import BytesIO
-from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from computer_use.interaction.query.instances.membership import ancestor
 from computer_use.interaction.read.presentation.content import DisplayText, template, text
+from computer_use.interaction.read.presentation.headers import ImageHeader
 from computer_use.protocol.captures import capture_metadata, decode_capture
 from computer_use.session.interface_images import (
     ImagePiece,
@@ -25,13 +34,6 @@ from computer_use.session.interface_images import (
     signature,
 )
 from PIL import Image
-
-if TYPE_CHECKING:
-    from typing import Any, Sequence
-
-    from computer_use.interaction.controller import SessionController
-    from computer_use.interaction.read.views.pipeline import WindowPart
-    from computer_use.interaction.records import UIHandle
 
 
 class InterfaceImagePipeline:
@@ -60,23 +62,21 @@ class InterfaceImagePipeline:
         from computer_use.interaction.query.instances.scope import allowed
 
         members = allowed(ui)
-        images = []
-        for part in parts:
-            if part.image is not None:
-                key = next(key for key, item in members.items() if item["surface"] == part.target.surface)
-                images.append((key, part.image))
+        images = [
+            (next(key for key, item in members.items() if item["surface"] == part.target.surface), part.image)
+            for part in parts
+            if part.image is not None
+        ]
         if not images:
             return None, [
                 text(
-                    (
-                        "Screenshot: unavailable; use member-window reads or "
-                        'Computer.read(view="image") for visual '
-                        "observation."
-                    )
-                )
+                    'Screenshot: unavailable; use member-window reads or Computer.read(view="image") for visual observation.'
+                ),
+                DisplayText("image_header", (ImageHeader("unavailable", (), False, (), None),)),
             ]
         unique = dict(images)
         images = list(unique.items())
+        collected = tuple(images)
         try:
             if len(images) != len(members):
                 raise ValueError("Some member windows could not be captured or exceeded the read budget.")
@@ -84,12 +84,9 @@ class InterfaceImagePipeline:
                 raise ValueError("The window captures use different native coordinate spaces.")
             frames = {key: frame(image) for key, image in images} if len(images) > 1 else {}
             for index, (key, image) in enumerate(images):
-                for other, _ in images[slice(index + 1, None)]:
+                for other, _ in images[index + 1 :]:
                     if overlaps(frames[key], frames[other]) and not (
-                        # The pipeline shares retained bindings with their owning service.
-                        # pylint: disable-next=protected-access
                         ancestor(cast("DirectoryFacts", ui._instance.directory), key, other)
-                        # pylint: disable-next=protected-access
                         or ancestor(cast("DirectoryFacts", ui._instance.directory), other, key)
                     ):
                         raise ValueError(
@@ -97,7 +94,6 @@ class InterfaceImagePipeline:
                         )
 
             def depth(key: str) -> int:
-                # pylint: disable-next=protected-access
                 return sum(ancestor(ui._instance.directory, key, other) for other in members if key != other)
 
             images.sort(key=lambda item: depth(item[0]))
@@ -130,7 +126,6 @@ class InterfaceImagePipeline:
                     buffer = BytesIO()
                     pixels.save(buffer, format="PNG")
                 stamps = [capture_metadata(image.image) for _, image in images]
-                # pylint: disable-next=protected-access
                 scope = "ui:" + cast("WorkingWindow", ui._instance.anchor).root.surface + ":" + str(ui._anchor)
                 png = decode_capture(
                     dict(
@@ -147,33 +142,65 @@ class InterfaceImagePipeline:
                     scope,
                 )
                 canvas = InterfaceImage(png, tuple(pieces), signature(members), (left, top), scale)
-            notes = [
-                template(
-                    "Screenshot: {}; origin=top-left; coordinates belong only to this App/Window object.",
-                    "instance window layout" if len(images) > 1 else "window",
-                ),
-                text("Window images were captured separately; image/tree contents are not an atomic snapshot."),
-            ]
+            displayed = tuple(key for key, _ in images)
+            kind = "single" if len(images) == 1 else "composite"
+            notes = []
         except (ValueError, OSError) as error:
             key, image = images[0]
             canvas = InterfaceImage(image.image, (), signature(members), unavailable_mapping=True)
-            # pylint: disable-next=protected-access
             ref = next(ref for ref, window in ui._instance.windows.items() if window == key)
+            displayed, kind = (key,), "partial"
             notes = [
                 template(
                     "Screenshot: partial; shows only window {}, not the complete instance layout. {}", ref, str(error)
                 ),
                 template(
-                    (
-                        "Coordinates unavailable on this partial canvas; use "
-                        'app.window({}).read(view="image") or '
-                        'Computer.read(view="image").'
-                    ),
+                    'Coordinates unavailable on this partial canvas; use app.window({}).read(view="image") or Computer.read(view="image").',
                     ref,
                 ),
             ]
         self.register(ui, canvas)
+        summary = self.metadata(ui, canvas, collected, displayed, kind)
+        notes.append(DisplayText("image_header", (summary,)))
         return canvas, notes
+
+    @staticmethod
+    def metadata(
+        ui: UIHandle,
+        canvas: InterfaceImage,
+        images: Sequence[tuple[str, WindowImage]],
+        displayed: tuple[str, ...],
+        kind: Literal["single", "composite", "partial"],
+    ) -> ImageHeader:
+        """Freeze original captures and the actual displayed sources before publication.
+
+        Partial canvases retain their selected source independently of empty pieces.
+        Pixel composition, image registration and input mappings stay unchanged.
+        """
+        aliases = {window: ref for ref, window in ui._instance.windows.items()}
+        captures = tuple(
+            dict(
+                window=key,
+                ref=aliases[key],
+                displayed=key in displayed,
+                target=asdict(image.target),
+                observed=image.observed,
+                coordinates=image.coordinates,
+                capture=capture_metadata(image.image),
+            )
+            for key, image in images
+        )
+        return ImageHeader(
+            kind,
+            tuple(aliases[key] for key in displayed),
+            not canvas.unavailable_mapping,
+            captures,
+            capture_metadata(canvas.png),
+            tuple((piece.window, piece.box) for piece in canvas.pieces),
+            canvas.origin,
+            canvas.scale,
+            canvas.membership,
+        )
 
     def register(self, ui: UIHandle, canvas: InterfaceImage) -> None:
         """Retain the composite image's source windows and coordinate mapping.
@@ -184,31 +211,24 @@ class InterfaceImagePipeline:
         """
         adapters = self.controller.adapters
         canvas.digest = hashlib.sha256(canvas.png).digest()
-        # pylint: disable-next=protected-access
         previous = ui._image
 
         def sources(value: Any) -> tuple[Any, ...]:
             return tuple((piece.window, replace(piece.image.target, capture=None), piece.box) for piece in value.pieces)
 
-        matches_previous = (
-            True
-            if (
-                previous is not None
-                and not previous.expired
-                and not previous.unavailable_mapping
-                and previous.delivered == adapters.image_delivery_epoch()
-                and previous.digest == canvas.digest
-                and previous.membership == canvas.membership
-                and sources(previous) == sources(canvas)
-            )
-            else False
-        )
-        if matches_previous:
+        if (
+            previous is not None
+            and not previous.expired
+            and not previous.unavailable_mapping
+            and previous.delivered == adapters.image_delivery_epoch()
+            and previous.digest == canvas.digest
+            and previous.membership == canvas.membership
+            and sources(previous) == sources(canvas)
+        ):
             # Knowledge of identical pixels can survive a fresh capture. The
             # command still dispatches through its new native token and map.
             canvas.delivered = previous.delivered
         owner, value = weakref.ref(ui), weakref.ref(canvas)
-        # pylint: disable-next=protected-access
         session = cast("WorkingWindow", ui._instance.anchor).root.session
         controller = weakref.ref(self.controller)
 
@@ -218,7 +238,6 @@ class InterfaceImagePipeline:
                 target is not None
                 and image is not None
                 and native is not None
-                # pylint: disable-next=protected-access
                 and target._image is image
                 and not image.expired
                 and native.transport.session == session
@@ -233,13 +252,10 @@ class InterfaceImagePipeline:
             canvas.png,
             dict(
                 kind="window",
-                # pylint: disable-next=protected-access
                 selector=str(ui._instance.selector),
                 context=template(
                     "App instance {}; {}",
-                    # pylint: disable-next=protected-access
                     cast("WorkingWindow", ui._instance.anchor).name,
-                    # pylint: disable-next=protected-access
                     "overall view" if ui._anchor is None else "fixed Window",
                 ),
                 current=current,

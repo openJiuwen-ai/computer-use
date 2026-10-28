@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from computer_use.interaction.read.presentation.fallback import literal
@@ -16,6 +16,42 @@ def unit_label(unit: str | None) -> str:
     return {"utf16_code_unit": "UTF-16", "unicode_codepoint": "Unicode code points", "utf8_byte": "UTF-8 bytes"}.get(
         unit, unit or "unspecified unit"
     )
+
+
+def selection_suffix(spans: Sequence[Mapping[str, Any]], state: str, total: int | None, unit: str | None) -> str:
+    """Render selection ranges without repeating their count, index and unit.
+
+    Offsets retain their declared unit and half-open bounds. Collapsed ranges,
+    missing per-range text and empty strings remain separate facts.
+    """
+    count = (
+        f"; {len(spans)}/{total} ranges"
+        if type(total) is int
+        else (f"; {len(spans)} ranges" if len(spans) != 1 else "")
+    )
+    pieces: list[str] = []
+    for span in spans:
+        if "start" in span and "end" in span:
+            position = f"[{span['start']}, {span['end']}) {unit_label(unit)}"
+        elif "start" in span or "end" in span:
+            position = f"start={span.get('start', 'unknown')}, end={span.get('end', 'unknown')}; " + unit_label(unit)
+        else:
+            position = "position unknown" + ("; " + unit_label(unit) if unit is not None else "")
+        content = span.get("text")
+        text = (
+            "range text not reported"
+            if content is None
+            else literal(content[:160]) + ("…" if len(content) > 160 else "")
+        )
+        collapsed = (
+            "; collapsed"
+            if span.get("collapsed") is True
+            else "; not collapsed"
+            if span.get("collapsed") is False
+            else ""
+        )
+        pieces.append(position + collapsed + "; " + text)
+    return f" ({state}{count}): " + (" | ".join(pieces) or "none")
 
 
 def _content(node: Mapping[str, Any]) -> str | None:

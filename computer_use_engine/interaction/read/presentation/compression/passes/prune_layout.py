@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.compression.boundaries import anonymous_layout
-from computer_use.interaction.read.presentation.compression.policy import REGIONS, WRAPPERS, layout
-
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.compression.model import Scope
     from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView, ViewNode
+from computer_use.interaction.read.presentation.compression.boundaries import anonymous_layout
+from computer_use.interaction.read.presentation.compression.evidence import transparent_provider_wrapper
+from computer_use.interaction.read.presentation.compression.policy import REGIONS, WRAPPERS, layout
 
 
 def prune_layout(
@@ -31,24 +31,21 @@ def prune_layout(
         and (parent["role"] not in WRAPPERS or parent.get("name") or parent.get("description"))
     )
     removable = anonymous_layout(node) if state.context.get("compact") else layout(node)
+    if not removable and state.context.get("compact") and transparent_provider_wrapper(state, node):
+        removable = anonymous_layout({**node, "preserveGroup": False})
     raw_layout = (
         node.get("_factBacked")
         and node["role"] == "group"
         and node.get("isControlElement") is False
         and node.get("isContentElement") is False
     )
-    matches_removable = (
-        True
-        if (
-            not state.keep(node)
-            and node["ref"] != state.context.get("focusedRef")
-            and removable
-            and (not scope.in_table or node["role"] not in ("cell", "column"))
-            and (len(node["children"]) <= 1 or sole_wrapper or raw_layout)
-        )
-        else False
-    )
-    if matches_removable:
+    if (
+        not state.keep(node)
+        and node["ref"] != state.context.get("focusedRef")
+        and removable
+        and (not scope.in_table or node["role"] not in ("cell", "column"))
+        and (len(node["children"]) <= 1 or sole_wrapper or raw_layout)
+    ):
         edit.elide(node, "splice", node["children"])
         return node["children"]
     return [node]

@@ -106,6 +106,9 @@ class Element:
 
 # 以下是只读返回数据，不是模型需要创建的操作对象。
 class Observation:
+    async def read_details(
+        self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
+    ) -> TextPage: ...
     text: str
     screenshot: bytearray | None
 

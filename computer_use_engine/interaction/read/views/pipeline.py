@@ -5,30 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
-
-from computer_use.diagnostics import local_failure
-from computer_use.errors import ComputerUseError
-from computer_use.interaction.query.instances.membership import ancestor
-from computer_use.interaction.query.instances.scope import adopt, allowed, resolve
-from computer_use.interaction.read.acquisition.components.support import collect_component
-from computer_use.interaction.read.model import (
-    AppObservation,
-    MenuAppObservation,
-    WindowSelectionRequired,
-)
-from computer_use.interaction.read.presentation.content import DisplayText, join, template
-from computer_use.interaction.read.presentation.content import json_value as quoted
-from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
-from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
-from computer_use.native.contracts import Binding
-from computer_use.native.query.directory import select_surface
-from computer_use.session.interfaces import WindowIdentity
-
-from .menus import InterfaceMenuPipeline, remember_menu
-from .publication import directory_text, publish, tree_document
 
 if TYPE_CHECKING:
     from typing import Sequence
@@ -42,6 +19,30 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import SurfaceInfo
     from computer_use.session.interfaces import InstanceState
     from computer_use.types import Observation
+from dataclasses import dataclass
+
+from computer_use.diagnostics import local_failure
+from computer_use.errors import ComputerUseError
+from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.query.instances.scope import adopt, allowed, resolve
+from computer_use.interaction.read.acquisition.components.support import collect_component
+from computer_use.interaction.read.limits import DEFAULT_WINDOW_MAX_NODES
+from computer_use.interaction.read.model import (
+    AppObservation,
+    MenuAppObservation,
+    WindowSelectionRequired,
+)
+from computer_use.interaction.read.presentation.content import DisplayText, join, template
+from computer_use.interaction.read.presentation.document import DisplayDocument
+from computer_use.interaction.read.presentation.interface.disclosure.groups.model import WindowDisclosureContext
+from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
+from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
+from computer_use.native.contracts import Binding
+from computer_use.native.query.directory import select_surface
+from computer_use.session.interfaces import WindowIdentity
+
+from .menus import InterfaceMenuPipeline, remember_menu
+from .publication import capture_header, publish, tree_document
 
 
 @dataclass
@@ -70,6 +71,18 @@ def member_target(instance: InstanceState, item: SurfaceInfo) -> Binding:
     return Binding(anchor.session, anchor.instance, anchor.root_window, item["surface"], item["node"])
 
 
+def _gap_line(gap: ObservationGap, *, concise: bool = False) -> DisplayText:
+    """Expose the directory's actual gap; the Skill supplies the normal reread syntax."""
+    if (
+        concise
+        and gap.component == "directory"
+        and gap.code == "observation_incomplete"
+        and gap.next == "inspect the directory again if the required window is missing"
+    ):
+        return template("Directory incomplete: {0}.", gap.detail)
+    return template("{0}: {1}: {2}; next: {3}", gap.component, gap.code, gap.detail, gap.next)
+
+
 def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> None:
     """Retain snapshots and native bindings for the observed interface windows.
 
@@ -78,8 +91,6 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
             route.
         ui: App or Window handle whose instance and observation bounds constrain the operation.
     """
-    # The pipeline shares retained bindings with their owning service.
-    # pylint: disable-next=protected-access
     instance = ui._instance
     window = next(key for key, item in instance.members.items() if item["surface"] == part.target.surface)
     owner = instance.owners[window]
@@ -90,7 +101,6 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     # observation must not retarget a fixed member during a semantic lookup.
     state.selection, state.observation = None, None
     if part.tree is not None:
-        # pylint: disable-next=protected-access
         controller._remember(state, part.target, part.tree)
         identity = WindowIdentity.of(instance.members[window])
         for ref in part.tree.refs:
@@ -127,23 +137,17 @@ class InterfaceReadPipeline:
             full: Whether delivery requests a complete tree instead of an eligible diff.
             menu_path: Requested menu path; None keeps the ordinary window read.
         """
-        # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
         directory, first = await resolve(controller, ui, view)
         if instance.anchor is None:
             state = controller.state(ui)
-            matches_view = (
-                True
-                if (
-                    not directory["surfaces"]
-                    and not directory["stopReasons"]
-                    and state.running is not None
-                    and view != "image"
-                    and "nativeApplicationRoots" in controller.transport.capabilities
-                )
-                else False
-            )
-            if matches_view:
+            if (
+                not directory["surfaces"]
+                and not directory["stopReasons"]
+                and state.running is not None
+                and view != "image"
+                and "nativeApplicationRoots" in controller.transport.capabilities
+            ):
                 return await InterfaceMenuPipeline(controller).run(
                     ui, menu_path or (), observed=first if isinstance(first, MenuAppObservation) else None
                 )
@@ -170,7 +174,6 @@ class InterfaceReadPipeline:
         if menu_path is not None:
             return await InterfaceMenuPipeline(controller).run(ui, menu_path)
         permitted = allowed(ui)
-        # pylint: disable-next=protected-access
         anchor = ui._anchor or instance.anchor.root.root_window
         principal_error = None
         try:
@@ -180,24 +183,19 @@ class InterfaceReadPipeline:
             principal, principal_error = anchor, error
         ordered = [principal, *[key for key in permitted if key != principal]]
         parts, notes = [], []
-        # pylint: disable-next=protected-access
         ui._lookup_scopes = ()
-        # pylint: disable-next=protected-access
         ui._menu_only = False
         for index, key in enumerate(ordered[:6]):
             if key not in permitted or any(part.target.surface == permitted[key]["surface"] for part in parts):
                 continue
             item = permitted[key]
-            # pylint: disable-next=protected-access
             if index == 0 and principal_error is None and ui._anchor is None:
-                # pylint: disable-next=protected-access
                 selected = controller.reader._selection(
                     instance.anchor.application, instance.anchor.name, directory, anchor
                 )
                 try:
                     observed = (
                         first
-                        # pylint: disable-next=protected-access
                         if isinstance(first, AppObservation) and ui._anchor is None
                         else await controller.reader.read(selected, view=view, overview=False)
                     )
@@ -225,7 +223,6 @@ class InterfaceReadPipeline:
                     )
                     parts.append(part)
                     remember(controller, ui, part)
-                    # pylint: disable-next=protected-access
                     ui._context = item["window"] if cast("AppObservation", observed).scope_confirmed else None
                     continue
                 if observed is not None:
@@ -238,7 +235,7 @@ class InterfaceReadPipeline:
                         "observation_incomplete",
                     )
                     continue
-            part = await self.member(ui, item, view, max_nodes=1000 if index == 0 else 200)
+            part = await self.member(ui, item, view, max_nodes=DEFAULT_WINDOW_MAX_NODES if index == 0 else 200)
             parts.append(part)
             remember(controller, ui, part)
         captured = {part.target.surface for part in parts}
@@ -249,19 +246,31 @@ class InterfaceReadPipeline:
                 remember(controller, ui, part)
                 captured.add(item["surface"])
         if principal_error is not None:
-            # pylint: disable-next=protected-access
             ui._context = None
             notes.append(
                 "Current input window is not uniquely confirmed; explicit elements remain scoped to their windows."
             )
-        # pylint: disable-next=protected-access
         elif parts and ui._anchor is not None:
-            # pylint: disable-next=protected-access
             ui._context = principal
         for key in (key for key, item in permitted.items() if item["surface"] not in captured):
             ref = next(ref for ref, window in instance.windows.items() if window == key)
             notes.append(template("Window {0}: not expanded (read budget); use app.window({0}).read().", ref))
-        lines: list[str | DisplayText | DisplayDocument] = list(directory_text(controller, ui, directory))
+        # Select the actual document parts once. Header coverage and body delivery
+        # must use the same windows, including their original collection objects.
+        displayed_parts: list[tuple[str, WindowPart]] = []
+        shown: set[str] = set()
+        for part in parts:
+            key = next(key for key, item in permitted.items() if item["surface"] == part.target.surface)
+            if key not in shown:
+                shown.add(key)
+                displayed_parts.append((key, part))
+        delivered_gaps = tuple(
+            (part.source.directory, part.gaps)
+            for _, part in displayed_parts
+            if view != "image" and part.tree is not None and part.source is not None
+        )
+        header = capture_header(controller, ui, directory, parts=displayed_parts, delivered_gaps=delivered_gaps)
+        lines: list[str | DisplayText | DisplayDocument] = [DisplayText("interface_header", (header,))]
         if isinstance(first, AppObservation) and first.launch:
             lines.append(template("Launch: {0}", first.launch["detail"]))
         screenshot = None
@@ -271,20 +280,18 @@ class InterfaceReadPipeline:
             image, image_notes = InterfaceImagePipeline(controller).run(ui, parts)
             ui._image, screenshot = image, image.png if image is not None else None
             lines += image_notes
-        else:
-            lines.append("Screenshot: not requested")
-        trees, shown = [], set()
+        trees = []
         if view != "image":
             lines.append("Tree: full")
         else:
             lines.append("Tree: not requested")
-        for part in parts:
-            key = next(key for key, item in permitted.items() if item["surface"] == part.target.surface)
-            if key in shown:
-                continue
-            shown.add(key)
+        recovery_prefix = 0
+        for key, part in displayed_parts:
             ref = next(ref for ref, window in instance.windows.items() if window == key)
-            lines.append(template("Window {0}: {1}", ref, quoted(permitted[key]["title"])))
+            if len(header.scoped) != 1:
+                lines.append(
+                    DisplayText("member_heading", (next(window for window in header.windows if window.ref == ref),))
+                )
             if part.source is not None:
                 lines.extend(part.source.context_notes)
             blockers = [
@@ -307,21 +314,48 @@ class InterfaceReadPipeline:
                 )
             if part.tree is not None:
                 trees.append((part.target, part.tree))
-                prepared = self.preparation.run(SnapshotRenderRequest(part.tree, compact=True, public_api=True))
+                member = next(window for window in header.windows if window.ref == ref)
+                window_context = WindowDisclosureContext(
+                    ref,
+                    member.current,
+                    member.modal,
+                    tuple(next(r for r, w in instance.windows.items() if w == item["window"]) for item in blockers),
+                    directory_complete=not directory["stopReasons"],
+                    scope_confirmed=(
+                        part.tree.native.session == part.target.session
+                        and part.tree.native.roots == (part.target.node,)
+                    ),
+                )
+                prepared = self.preparation.run(
+                    SnapshotRenderRequest(
+                        part.tree,
+                        compact=True,
+                        public_api=True,
+                        window_context=window_context,
+                        recovery_prefix_units=recovery_prefix,
+                    )
+                )
+                recovery_prefix = max(
+                    (
+                        group.recovery_units
+                        for root in prepared.roots
+                        if root.groups is not None
+                        for group in root.groups.groups
+                    ),
+                    default=recovery_prefix,
+                )
                 lines.append(tree_document(controller, part.target, part.tree, prepared=prepared))
             elif view != "image":
                 lines.append("Tree: unavailable for this window; use its image when available.")
             if part.menus is not None:
-                lines.append("Application menu (context of this window):")
+                lines.append("Application menu:")
                 owners, menu_trees = remember_menu(controller, ui, part.menus, key)
                 ui._lookup_scopes += owners
                 for target, tree in menu_trees:
                     trees.append((target, tree))
                     prepared = self.preparation.run(SnapshotRenderRequest(tree, compact=True, public_api=True))
                     lines.append(tree_document(controller, target, tree, prepared=prepared))
-            lines += [
-                template("{0}: {1}: {2}; next: {3}", gap.component, gap.code, gap.detail, gap.next) for gap in part.gaps
-            ]
+            lines += [_gap_line(gap, concise=True) for gap in part.gaps]
             if part.image is not None:
                 from computer_use.protocol.captures import capture_metadata
 
@@ -330,7 +364,6 @@ class InterfaceReadPipeline:
                     for note in capture_metadata(part.image.image).get("stopReasons", ())
                 ]
         lines += notes
-        # pylint: disable-next=protected-access
         scope = instance.anchor.root.surface + (":app" if ui._anchor is None else ":window:" + ui._anchor) + ":" + view
         return publish(
             controller,
@@ -353,7 +386,6 @@ class InterfaceReadPipeline:
             max_nodes: Maximum number of native objects this collection may read.
         """
         controller = self.controller
-        # pylint: disable-next=protected-access
         target = member_target(ui._instance, item)
         tree = image = None
         gaps = []

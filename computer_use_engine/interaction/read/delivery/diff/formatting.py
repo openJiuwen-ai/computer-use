@@ -47,16 +47,26 @@ def _related(node: PreparedNode) -> tuple[str, ...]:
 def _compatible(
     before: DisplayTree, after: DisplayTree, previous_refs: Mapping[str, object], current_refs: Mapping[str, object]
 ) -> bool:
-    """Require stable scope, bound nodes, containment, and survivor order."""
-    if before.scope != after.scope or before.indent != after.indent or before.details != after.details:
-        return False
+    """Require compatible presentation versions, scope, bindings and survivor order."""
     if (
-        before.prepared.request.compact != after.prepared.request.compact
+        before.scope != after.scope
+        or before.indent != after.indent
+        or before.details != after.details
+        or before.prepared.request.compact != after.prepared.request.compact
         or before.prepared.request.public_api != after.prepared.request.public_api
         or before.prepared.snapshot.root_contexts != after.prepared.snapshot.root_contexts
+        or any(root.failure for root in (*before.prepared.roots, *after.prepared.roots))
     ):
         return False
-    if any(root.failure for root in (*before.prepared.roots, *after.prepared.roots)):
+    previous_versions = {
+        root.root_ref: root.interface.format_version if root.interface else None for root in before.prepared.roots
+    }
+    current_versions = {
+        root.root_ref: root.interface.format_version if root.interface else None for root in after.prepared.roots
+    }
+    if set(previous_versions.values()) != set(current_versions.values()) or any(
+        previous_versions[ref] != current_versions[ref] for ref in previous_versions.keys() & current_versions.keys()
+    ):
         return False
     for tree, bindings in ((before, previous_refs), (after, current_refs)):
         seen: dict[str, PreparedNode] = {}
@@ -85,17 +95,12 @@ def _compare(before: DisplayTree, after: DisplayTree) -> _TreeComparison:
         if node.parent is not None:
             children.setdefault(node.parent, []).append(node.ref)
         facts = node.fields
-        matches_facts = (
-            True
-            if (
-                facts.get("partialReason") is not None
-                or facts.get("childOmissions")
-                or "nextChildOffset" in facts
-                or facts.get("childrenRead", 0) < facts.get("childCount", 0)
-            )
-            else False
-        )
-        if matches_facts:
+        if (
+            facts.get("partialReason") is not None
+            or facts.get("childOmissions")
+            or "nextChildOffset" in facts
+            or facts.get("childrenRead", 0) < facts.get("childCount", 0)
+        ):
             delta.context.add(node.ref)
     for ref in delta.changes:
         if ref in old and new[ref].parent is not None and _content(old[ref]) != _content(new[ref]):
@@ -136,18 +141,13 @@ def _related_context(deltas: list[_TreeComparison]) -> None:
                 relations.setdefault(target, []).append(node.ref)
         for ref, members in children.items():
             parent = nodes[ref].fields
-            matches_parent = (
-                True
-                if (
-                    parent["role"] in ("group", "cell")
-                    and not parent.get("name")
-                    and not parent.get("description")
-                    and len(members) > 1
-                    and any(node.fields["role"] in ("staticText", "heading") for node in members)
-                )
-                else False
-            )
-            if matches_parent:
+            if (
+                parent["role"] in ("group", "cell")
+                and not parent.get("name")
+                and not parent.get("description")
+                and len(members) > 1
+                and any(node.fields["role"] in ("staticText", "heading") for node in members)
+            ):
                 relations[ref].extend(node.ref for node in members)
         relationships.append({ref: tuple(dict.fromkeys(items)) for ref, items in relations.items()})
     pending = [(index, ref) for index, delta in enumerate(deltas) for ref in (*delta.changes, *delta.context)]
@@ -178,17 +178,12 @@ def plan_document_diff(
     not_observed: set[str] | frozenset[str] = frozenset(),
 ) -> DeltaPlan:
     """Choose complete or incremental delivery using only structured observation data."""
-    matches_before = (
-        True
-        if (
-            not isinstance(before, DisplayDocument)
-            or not isinstance(after, DisplayDocument)
-            or before.context != after.context
-            or any(previous_refs[ref] != current_refs[ref] for ref in previous_refs.keys() & current_refs.keys())
-        )
-        else False
-    )
-    if matches_before:
+    if (
+        not isinstance(before, DisplayDocument)
+        or not isinstance(after, DisplayDocument)
+        or before.context != after.context
+        or any(previous_refs[ref] != current_refs[ref] for ref in previous_refs.keys() & current_refs.keys())
+    ):
         return DeltaPlan()
     old_trees = [part for part in before.parts if isinstance(part, DisplayTree)]
     new_trees = [part for part in after.parts if isinstance(part, DisplayTree)]

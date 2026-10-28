@@ -189,7 +189,7 @@ class NativeAppReader:
         *,
         window: str | None = None,
         fields: list[str] | None = None,
-        max_nodes: int = 1000,
+        max_nodes: int | None = None,
         max_depth: int | None = None,
         max_dimension: int = 2048,
         timeout_ms: int = 30000,
@@ -203,7 +203,8 @@ class NativeAppReader:
 
         Args:
             fields: Requested or accounted native fields; unknown fields remain explicit facts.
-            max_nodes: Maximum number of native objects this collection may read.
+            max_nodes: Maximum native objects to collect; None uses the selected
+                window or menu branch's default.
             max_depth: Maximum native relation depth; None uses the existing platform default.
             max_dimension: Maximum image edge length in pixels, preserving aspect ratio.
             timeout_ms: Maximum duration in milliseconds, bounded by the enclosing call deadline.

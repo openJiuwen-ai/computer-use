@@ -9,8 +9,18 @@ continuation to menu or window observation, never the preparation child.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import AsyncIterator, NoReturn
+
+    from computer_use.interaction.controller import SessionController
+    from computer_use.interaction.read.app import NativeAppReader
+    from computer_use.interaction.read.app_read.model import ReadRequest
+    from computer_use.interaction.read.model import AppObservation, MenuAppObservation
+    from computer_use.interaction.requests import InteractionRequest
+    from computer_use.pipeline.core import Control, Step
+from contextlib import asynccontextmanager
 
 from computer_use.interaction.control import scope_control
 from computer_use.interaction.read.acquisition.pipeline import AcquisitionPipeline
@@ -22,6 +32,7 @@ from computer_use.interaction.read.app_read.model import (
 )
 from computer_use.interaction.read.app_read.pipeline import AppReadPreparationPipeline
 from computer_use.interaction.read.delivery.pipeline import AppDeliveryPipeline
+from computer_use.interaction.read.limits import DEFAULT_MENU_MAX_NODES
 from computer_use.interaction.read.numbering.observation.pipeline import (
     NumberedPresentationPipeline,
 )
@@ -32,14 +43,6 @@ from computer_use.interaction.read.passes.select_read_components import (
 )
 from computer_use.pipeline import Contract, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
-
-if TYPE_CHECKING:
-    from typing import AsyncIterator, NoReturn
-
-    from computer_use.interaction.read.app import NativeAppReader
-    from computer_use.interaction.read.app_read.model import ReadRequest
-    from computer_use.interaction.read.model import AppObservation, MenuAppObservation
-    from computer_use.pipeline.core import Control, Step
 
 
 class WindowObservationPipeline(Pipeline["ApplicationSelection", "AppObservation"]):
@@ -86,8 +89,6 @@ class _ReadCallBody(Node["ReadCall", "AppObservation | MenuAppObservation"]):
 
         async def menu(value: ApplicationSelection, control: Control) -> MenuAppObservation:
             request = value.request
-            # The pipeline shares retained bindings with their owning service.
-            # pylint: disable-next=protected-access
             return await services._menu_observation(
                 value.application,
                 value.selection,
@@ -96,7 +97,7 @@ class _ReadCallBody(Node["ReadCall", "AppObservation | MenuAppObservation"]):
                 value.launch,
                 value.call.remaining,
                 fields=request.fields,
-                max_nodes=request.max_nodes,
+                max_nodes=DEFAULT_MENU_MAX_NODES if request.max_nodes is None else request.max_nodes,
                 max_depth=request.max_depth,
                 _control=control,
             )
@@ -181,7 +182,6 @@ class ApplicationObservationPipeline(Node["ReadRequest", "AppObservation | MenuA
             return await self.body.arun(ReadInvocation(request, receipt), control)
         except BaseException as error:
             if receipt.launch is not None:
-                # pylint: disable-next=protected-access
                 annotated = self.services._after_launch(error, receipt.launch)
                 if annotated is not error:
                     raise annotated from error
@@ -189,3 +189,28 @@ class ApplicationObservationPipeline(Node["ReadRequest", "AppObservation | MenuA
 
     def _run(self, value: ReadRequest, control: Control) -> AppObservation | MenuAppObservation:
         raise TypeError("App reads require arun()")
+
+
+class ReadPipeline(Node["InteractionRequest", "ReadResult"]):
+    """Enter the session's observation flows.
+
+    Delegate the typed read request to application, desktop, element, or captured-text
+    handling. Return the result produced by the selected branch.
+    """
+
+    def __init__(self, controller: SessionController) -> None:
+        from computer_use.interaction.read.requests.pipeline import SessionReadPipeline
+
+        self.body = SessionReadPipeline(controller)
+        self.children = (self.body,)
+        super().__init__("ReadPipeline", self.body.contract)
+
+    async def _arun(self, value: InteractionRequest, control: Control) -> ReadResult:
+        return await self.body.arun(value, control)
+
+    def _run(self, value: InteractionRequest, control: Control) -> ReadResult:
+        raise TypeError("System reads require arun()")
+
+
+if TYPE_CHECKING:
+    from computer_use.interaction.records import ReadResult

@@ -154,6 +154,12 @@ class SessionController:
             )
             return node.role in {"group", "unknown", "window", "sheet", "dialog", "alert"} and not writable
 
+        def text_source(ref: str, token: str) -> str | None:
+            """Use the acquisition's explicit readText source without changing input values."""
+            if tree.collection is not None and (path := tree.collection.text_read_fields.get(token)):
+                return ".".join(map(str, path))
+            return tree.value_fields.get(ref)
+
         return cast(
             "dict[str, ElementSnapshot]",
             {
@@ -162,7 +168,7 @@ class SessionController:
                     binding=replace(target, node=node, capture=None),
                     scope_kind=tree.scope_kind,
                     source=dict(ref=ref, observed=tree.facts["observed"]),
-                    text=captured_field(tree, ref, tree.value_fields.get(ref), nodes=native_nodes),
+                    text=captured_field(tree, ref, text_source(ref, node), nodes=native_nodes),
                     children=captured_children(tree, ref, relations=child_relations),
                 )
                 for ref, node in tree.refs.items()

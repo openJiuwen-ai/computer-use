@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal
 from computer_use.interaction.read.presentation.ir import freeze
 
 if TYPE_CHECKING:
+    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
     from computer_use.interaction.read.presentation.records import RenderedTree
 
 
@@ -25,7 +26,21 @@ class DisplayText:
     """
 
     kind: Literal[
-        "literal", "template", "quoted", "json", "field", "number", "join", "indent", "details_hint", "desktop"
+        "literal",
+        "template",
+        "quoted",
+        "json",
+        "field",
+        "number",
+        "join",
+        "indent",
+        "details_hint",
+        "desktop",
+        "interface_header",
+        "member_heading",
+        "image_header",
+        "captured_metadata",
+        "capture_status",
     ]
     values: tuple[object, ...]
 
@@ -65,6 +80,30 @@ def join(parts: Iterable[str | DisplayText], separator: str = "\n") -> DisplayTe
     return DisplayText("join", (separator, tuple(text(part) if isinstance(part, str) else part for part in parts)))
 
 
+def live_subtree_hint(roots: Iterable[str]) -> str:
+    """Point to bounded local detail pages when any source has captured supplements."""
+    distinct = tuple(dict.fromkeys(roots))
+    from computer_use.interaction.read.presentation.details import DETAILS_HINT
+
+    return "\n" + DETAILS_HINT if distinct else ""
+
+
+def omit_public_details_hint(prepared: PreparedSnapshot) -> bool:
+    """Use the Skill's detail-page instructions for ordinary compact whole views.
+
+    Explicit subtrees and diagnostic formatters retain their local instruction.
+    The typed source remains in the document and still supplies captured details.
+    """
+    request = getattr(prepared, "request", None)
+    return bool(
+        request is not None
+        and request.compact
+        and request.public_api
+        and request.share_descriptions
+        and all(root.source is not None and not root.source.context.get("subtreeRef") for root in prepared.roots)
+    )
+
+
 def render_text(value: DisplayText | str, *, snapshots: Mapping[int, RenderedTree] | None = None) -> str:
     """Render a structured field as part of the final output operation."""
     if isinstance(value, str):
@@ -101,13 +140,17 @@ def render_text(value: DisplayText | str, *, snapshots: Mapping[int, RenderedTre
         from computer_use.interaction.read.presentation.rendering.desktop import render_desktop
 
         return render_desktop(*args)
+    if kind == "capture_status":
+        return f"Capture status (system sharing indicator, Window {args[0].window}):\n"
+    if kind in ("interface_header", "member_heading", "image_header", "captured_metadata"):
+        from computer_use.interaction.read.presentation import headers
+
+        return getattr(headers, kind)(args[0])
     if kind == "details_hint":
         if snapshots is None or id(args[0]) not in snapshots:
             raise ValueError("A details hint requires its already-rendered snapshot source")
+        if omit_public_details_hint(args[0]):
+            return ""
         rendered = snapshots[id(args[0])]
-        return (
-            "\nAdditional native facts/actions/relations: (await app.element(" + str(args[1]) + ")).read()"
-            if rendered["details"] != rendered["text"]
-            else ""
-        )
+        return live_subtree_hint((str(args[1]),)) if rendered["details"] != rendered["text"] else ""
     raise ValueError("Unknown structured text operation: " + kind)

@@ -9,9 +9,21 @@ editor, never the input graph or execution ports as mutable shared state.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, Callable
+
+    from computer_use.interaction.read.presentation.ir import (
+        ProjectionEditor,
+        ProjectionResult,
+        ProjectionView,
+        ViewNode,
+    )
+    from computer_use.interaction.read.presentation.records import SemanticNode
+    from computer_use.pipeline.core import Control, Step
+    from computer_use.protocol.records import Record
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
 
 from computer_use.interaction.read.presentation.compression.model import (
     CompressionRun,
@@ -24,17 +36,35 @@ from computer_use.interaction.read.presentation.compression.passes.associate_lab
 from computer_use.interaction.read.presentation.compression.passes.build_presentation_ir import (
     stage as build_presentation_ir,
 )
+from computer_use.interaction.read.presentation.compression.passes.collapse_transparent_groups import (
+    collapse_transparent_groups,
+)
+from computer_use.interaction.read.presentation.compression.passes.compose_passive_text_lines import (
+    stage as compose_passive_text_lines,
+)
+from computer_use.interaction.read.presentation.compression.passes.deduplicate_derived_container_captions import (
+    deduplicate_derived_container_captions,
+)
+from computer_use.interaction.read.presentation.compression.passes.deduplicate_row_captions import (
+    deduplicate_row_captions,
+)
 from computer_use.interaction.read.presentation.compression.passes.finalize_sources import (
     finalize_sources,
 )
 from computer_use.interaction.read.presentation.compression.passes.flatten_redundant_hierarchy import (
     flatten_redundant_hierarchy,
 )
+from computer_use.interaction.read.presentation.compression.passes.fold_native_caption_components import (
+    fold_native_caption_components,
+)
 from computer_use.interaction.read.presentation.compression.passes.merge_control_labels import (
     merge_control_labels,
 )
 from computer_use.interaction.read.presentation.compression.passes.merge_editors import (
     merge_editors,
+)
+from computer_use.interaction.read.presentation.compression.passes.merge_owned_passive_content import (
+    merge_owned_passive_content,
 )
 from computer_use.interaction.read.presentation.compression.passes.merge_region_labels import (
     merge_region_labels,
@@ -52,30 +82,28 @@ from computer_use.interaction.read.presentation.compression.passes.prune_layout 
 from computer_use.interaction.read.presentation.compression.passes.reconstruct_outlines import (
     reconstruct_outlines,
 )
+from computer_use.interaction.read.presentation.compression.passes.share_empty_descriptions import (
+    share_empty_descriptions,
+)
 from computer_use.interaction.read.presentation.compression.passes.validate_projection import (
     stage as validate_projection,
 )
 from computer_use.interaction.read.presentation.ir import ProjectionInput
+from computer_use.interaction.read.presentation.spatial.passes.protect_regions import stage as protect_spatial_regions
+from computer_use.interaction.read.presentation.spatial.pipeline import SpatialOrganizationPipeline
 from computer_use.interaction.read.presentation.tree import is_window
 from computer_use.pipeline import Contract, Effect, Pass, Pipeline, Sequence
 from computer_use.pipeline.core import Node
 
-if TYPE_CHECKING:
-    from typing import Callable
-
-    from computer_use.interaction.read.presentation.ir import (
-        ProjectionEditor,
-        ProjectionResult,
-        ProjectionView,
-        ViewNode,
-    )
-    from computer_use.interaction.read.presentation.records import SemanticNode
-    from computer_use.pipeline.core import Control, Step
-    from computer_use.protocol.records import Record
-
-
 BEFORE_CHILDREN = (promote_description, merge_editors, merge_control_labels)
-AFTER_CHILDREN = (merge_repeated_text, merge_region_labels, flatten_redundant_hierarchy, prune_layout, prune_empty_rows)
+AFTER_CHILDREN = (
+    merge_repeated_text,
+    merge_region_labels,
+    flatten_redundant_hierarchy,
+    prune_layout,
+    prune_empty_rows,
+    collapse_transparent_groups,
+)
 
 
 @dataclass(frozen=True)
@@ -107,53 +135,71 @@ class Rule:
         )
 
 
-def _iter_step(_source_items: Iterator[Any]) -> Iterator[Any]:
-    for step, reads, writes in _source_items:
-        yield (step, Rule(step, reads, writes))
-
-
-RULES = dict(
-    _iter_step(
-        iter(
+RULES = {
+    step: Rule(step, reads, writes)
+    for step, reads, writes in (
+        (share_empty_descriptions, ("complete empty descriptions", "source scopes"), ("shared field destinations",)),
+        (
+            associate_labels,
+            ("label relations", "source scopes"),
+            ("caption fields", "label elisions", "ordered children"),
+        ),
+        (promote_description, ("description", "control semantics"), ("caption fields",)),
+        (
+            merge_editors,
+            ("control members", "values", "selection"),
+            ("selection fields", "editor elisions", "ordered children"),
+        ),
+        (
+            merge_control_labels,
+            ("control members", "label facts"),
+            ("caption fields", "label elisions", "ordered children"),
+        ),
+        (
+            collapse_transparent_groups,
+            ("local child coverage", "display boundary evidence"),
+            ("transparent group elisions", "ordered children"),
+        ),
+        (merge_repeated_text, ("whole caption fields",), ("caption sources", "label elisions", "ordered children")),
+        (merge_region_labels, ("heading children",), ("caption fields", "label elisions", "ordered children")),
+        (flatten_redundant_hierarchy, ("layout boundaries",), ("splice elisions", "ordered children")),
+        (prune_layout, ("layout boundaries",), ("splice elisions",)),
+        (
+            prune_empty_rows,
             (
-                (
-                    associate_labels,
-                    ("label relations", "source scopes"),
-                    ("caption fields", "label elisions", "ordered children"),
-                ),
-                (promote_description, ("description", "control semantics"), ("caption fields",)),
-                (
-                    merge_editors,
-                    ("control members", "values", "selection"),
-                    ("selection fields", "editor elisions", "ordered children"),
-                ),
-                (
-                    merge_control_labels,
-                    ("control members", "label facts"),
-                    ("caption fields", "label elisions", "ordered children"),
-                ),
-                (
-                    merge_repeated_text,
-                    ("whole caption fields",),
-                    ("caption sources", "label elisions", "ordered children"),
-                ),
-                (merge_region_labels, ("heading children",), ("caption fields", "label elisions", "ordered children")),
-                (flatten_redundant_hierarchy, ("layout boundaries",), ("splice elisions", "ordered children")),
-                (prune_layout, ("layout boundaries",), ("splice elisions",)),
-                (
-                    prune_empty_rows,
-                    (
-                        "row state",
-                        "focus",
-                    ),
-                    ("empty elisions",),
-                ),
-                (reconstruct_outlines, ("disclosure relations",), ("ordered children", "outline depth")),
-                (finalize_sources, ("source routes", "elisions"), ("final source destinations",)),
-            )
-        )
+                "row state",
+                "focus",
+            ),
+            ("empty elisions",),
+        ),
+        (reconstruct_outlines, ("disclosure relations",), ("ordered children", "outline depth")),
+        (
+            deduplicate_row_captions,
+            ("caption sources", "source scopes", "original containment"),
+            ("caption fields", "caption destinations"),
+        ),
+        (
+            deduplicate_derived_container_captions,
+            ("complete retained caption fields", "independent primary targets", "source scopes"),
+            ("derived container names", "caption destinations"),
+        ),
+        (
+            fold_native_caption_components,
+            ("complete native caption", "ordered passive text and input evidence"),
+            ("caption component elisions", "native caption equivalence evidence"),
+        ),
+        (
+            merge_owned_passive_content,
+            ("complete local ownership", "exact caption sources", "display boundary evidence"),
+            ("owned content elisions", "derived caption fields", "ordered children"),
+        ),
+        (
+            finalize_sources,
+            ("source routes", "elisions"),
+            ("final source destinations", "folded source role declarations"),
+        ),
     )
-)
+}
 
 
 def apply_rule(step: Callable[..., Any], view: ProjectionView, edit: ProjectionEditor, *arguments: object) -> Any:
@@ -257,9 +303,17 @@ class CompressionPipeline(Pipeline["ProjectionInput", "ProjectionResult"]):
             name="CompressionPipeline",
             steps=[
                 build_presentation_ir(),
+                whole_rule(share_empty_descriptions),
                 whole_rule(associate_labels),
+                protect_spatial_regions(),
+                compose_passive_text_lines(),
                 CompressionTraversal(),
                 whole_rule(reconstruct_outlines),
+                SpatialOrganizationPipeline(),
+                whole_rule(deduplicate_row_captions),
+                whole_rule(deduplicate_derived_container_captions),
+                whole_rule(fold_native_caption_components),
+                whole_rule(merge_owned_passive_content),
                 whole_rule(finalize_sources),
                 validate_projection(),
             ],

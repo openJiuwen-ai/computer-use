@@ -7,6 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.presentation.compression.descriptions import shared_description
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from computer_use.interaction.read.presentation.records import NodeView
 from computer_use.interaction.read.presentation.policy import independent_actions
 from computer_use.interaction.read.presentation.tree import (
     carries_value,
@@ -17,11 +23,6 @@ from computer_use.interaction.read.presentation.tree import (
     unique,
 )
 from computer_use.native.semantics import TABLE_FIELDS
-
-if TYPE_CHECKING:
-    from typing import Any
-
-    from computer_use.interaction.read.presentation.records import NodeView
 
 WRAPPERS = {"group", "cell", "column"}
 REGIONS = {
@@ -88,9 +89,18 @@ def protected_content(node: NodeView) -> bool:
     """
     return bool(
         "selectionRange" in node
-        or node.get("selectedText")
+        or node.get("selectedText") is not None
         or node.get("actionsUnavailable")
         or node.get("placeholder")
+        or "documentUrl" in node
+        or "documentReports" in node
+        or any(
+            field in node and node[field] is not False
+            for field in ("readOnly", "textReadOnly", "rangeReadOnly", "unsaved", "invalid", "errorRelations")
+        )
+        or any(
+            field in node and not shared_description(node, field) for field in ("valueDescription", "rangeDescription")
+        )
         or any(node.get(field) for field in ("documentText", "controlValue", "rangeValue"))
         or any(
             node.get(field) for field in ("headingLevel", "landmarkType", "localizedLandmarkType", "fullDescription")
@@ -194,36 +204,26 @@ def secondary_actions(node: NodeView) -> list[Any]:
             )
         ):
             continue
-        matches_kind = (
-            True
-            if (
-                kind == "select"
-                and not node.get("selectable")
-                and caps is None
-                and node["role"] in ("menuItem", "menuBarItem")
-            )
-            else False
-        )
-        if matches_kind:
+        if (
+            kind == "select"
+            and not node.get("selectable")
+            and caps is None
+            and node["role"] in ("menuItem", "menuBarItem")
+        ):
             continue
-        matches_kind_condition = (
-            True
-            if (
-                kind == "show_menu"
-                and not node.get("selectable")
-                and node.get("pressable")
-                and node["role"] in ("popUpButton", "menuButton", "comboBox")
-                and (
-                    caps is None
-                    or (
-                        caps.get("click") == "available"
-                        and not any(a.get("kind", a["name"]) == "invoke" for a in node.get("actions", []))
-                    )
+        if (
+            kind == "show_menu"
+            and not node.get("selectable")
+            and node.get("pressable")
+            and node["role"] in ("popUpButton", "menuButton", "comboBox")
+            and (
+                caps is None
+                or (
+                    caps.get("click") == "available"
+                    and not any(a.get("kind", a["name"]) == "invoke" for a in node.get("actions", []))
                 )
             )
-            else False
-        )
-        if matches_kind_condition:
+        ):
             continue
         if kind in ("expand", "collapse") and node.get("expandable") and caps is None:
             continue

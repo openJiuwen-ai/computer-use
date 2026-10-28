@@ -235,10 +235,17 @@ class NativeReader:
         children_page: RelationPage | None = None,
         relation_page: RelationPage | None = None,
         scope_kind: str | None = None,
+        query_remaining: Remaining | None = None,
         _control: Control | None = None,
     ) -> SemanticSnapshot:
-        """Collect inside an existing node or window read operation."""
-        request = FactReadRequest(read, node, fields, max_nodes, max_depth, children_page, relation_page, scope_kind)
+        """Collect inside an existing node or window read operation.
+
+        A narrower query allowance limits the native request while the lease's
+        original deadline still bounds normalization and final publication checks.
+        """
+        request = FactReadRequest(
+            read, node, fields, max_nodes, max_depth, children_page, relation_page, scope_kind, query_remaining
+        )
         control = scope_control(self.port, read.remaining, _control or Control())
         return await FactCollectionPipeline(self).arun(request, control)
 

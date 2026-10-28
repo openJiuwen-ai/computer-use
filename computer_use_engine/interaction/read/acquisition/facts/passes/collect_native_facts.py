@@ -23,13 +23,17 @@ def create(*, reader: NativeReader) -> Callable[[FactProfile, Control], Awaitabl
         limits.
         """
         read, target = plan.scope.request.read, plan.scope.target
+        timeout_ms = read.remaining()
+        query_remaining = plan.scope.request.query_remaining
+        if query_remaining is not None:
+            timeout_ms = min(timeout_ms, query_remaining())
         reply = await reader.port.nodes(
             read.token,
             target,
             plan.fields,
             plan.scope.request.max_nodes,
             plan.max_depth,
-            read.remaining(),
+            timeout_ms,
             scope_kind=plan.scope.request.scope_kind,
             **plan.options,
         )

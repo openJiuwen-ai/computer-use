@@ -160,6 +160,7 @@ class ContentPages:
         inline_children: Iterable[str] = (),
         public_api: bool = False,
         children_only: bool = False,
+        concise: bool = False,
     ) -> DisplayText:
         """Capture continuation aliases and commands as structured fields for final rendering."""
         refs = {node: ref for ref, node in tree.refs.items()}
@@ -193,14 +194,24 @@ class ContentPages:
                 continue
             if alias is not None:
                 if public_api:
-                    lines.append(
-                        template(
-                            "{0} {1}, continuation: node = await app.element({0}); await node.read(cursor={2})",
-                            ref,
-                            label,
-                            json_value(alias),
+                    if concise and compact:
+                        lines.append(
+                            template(
+                                "{1} [{0}]: cursor={2} (live order)",
+                                ref,
+                                "Children" if label == "children" else label,
+                                json_value(alias),
+                            )
                         )
-                    )
+                    else:
+                        lines.append(
+                            template(
+                                "{0} {1}, continuation: node = await app.element({0}); await node.read(cursor={2})",
+                                ref,
+                                label,
+                                json_value(alias),
+                            )
+                        )
                     continue
                 lines.append(
                     template(
@@ -215,6 +226,8 @@ class ContentPages:
                 )
             else:
                 lines.append(template("{0} {1}: continuation expired; read this element again.", ref, label))
+        if concise and compact and public_api:
+            return text("") if not lines else join(("\n", join(lines)), separator="")
         return (
             text("") if not lines else join(("\nContinue reading (live order; changed prefixes expire):", join(lines)))
         )

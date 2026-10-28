@@ -34,6 +34,8 @@ from computer_use.client.images import (
     reset_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
+from computer_use.session.observation import peek_observation_text
+from computer_use.session.detail_pages import CapturedDetailPage, CapturedDetailText
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
 from computer_use.native.preview import latest_preview_sink
 from computer_use.protocol.png import decode_png
@@ -206,7 +208,8 @@ class Runtime:
         if end not in (None, "\n"):
             text += end
         self.emit(dict(type="text", text=text), True)
-        observed = run["observations"].printed(text)
+        details = any(isinstance(value, (CapturedDetailPage, CapturedDetailText)) for value in values)
+        observed = None if details else run["observations"].printed(text)
         if observed is not None:
             self.log_observations(run, materializedOnly=True)
         if observed is not None and observed["state"].get("screenshot") is not None:

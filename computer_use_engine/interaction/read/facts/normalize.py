@@ -8,13 +8,21 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from computer_use.interaction.read.facts.documents import document_projection
 from computer_use.interaction.read.facts.groups import render_properties
 from computer_use.interaction.read.facts.index import data, field_name, observation_index
 from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+from computer_use.interaction.read.facts.states import (
+    PUBLIC_STATES,
+    READ_ONLY_FIELDS,
+    error_relation,
+    supplement_states,
+)
+from computer_use.interaction.read.facts.values import numeric_aliases
 from computer_use.interaction.read.presentation.fallback import literal
 from computer_use.interaction.read.presentation.records import ReferenceAllocator
-from computer_use.protocol.observation import NativeNode, NativeObservation
-from computer_use.protocol.primitives import required_item, safe_integer
+from computer_use.protocol.observation import FieldPath, NativeNode, NativeObservation
+from computer_use.protocol.primitives import safe_integer
 
 _ROLES = {
     "checkbox": "checkBox",
@@ -30,6 +38,8 @@ _ROLES = {
 }
 _FIELDS = {
     "role_description": "roleDescription",
+    "control_value.description": "valueDescription",
+    "numeric_value.description": "rangeDescription",
     "text.selected_text": "selectedText",
     "states.checked": "toggleState",
     "structure.heading_level": "headingLevel",
@@ -79,6 +89,31 @@ def _primary_value(source: dict[str, Any], node: NativeNode) -> str | None:
     return next((key for key in ("control_value.value", text_source, "numeric_value.value") if key in values), None)
 
 
+def _disclosure_fields(source: dict[str, Any], role: str | None) -> frozenset[str]:
+    """Identify complete, agreeing outline disclosure reports and their source fields.
+
+    The normalized ``disclosing`` supplement reports outline-row disclosure state.
+    Keep it independent of ``states.expanded`` so contradictory native reports can
+    both be displayed. Unknown types, duplicate conflicts, and read gaps retain their
+    original supplementary representation.
+    """
+    if role not in ("row", "tree_item"):
+        return frozenset()
+    values = {
+        key: item.get("value")
+        for key, item in source["values"].items()
+        if key.startswith("supplements[") and item["key"] == "disclosing"
+    }
+    if not values or any(type(value) is not bool for value in values.values()) or len(set(values.values())) != 1:
+        return frozenset()
+    paths = [source["fieldPaths"][key] for key in values]
+    for key in source["fieldStatus"]:
+        status_path = source["fieldPaths"][key]
+        if any(path[: len(status_path)] == status_path or status_path[: len(path)] == path for path in paths):
+            return frozenset()
+    return frozenset(values)
+
+
 def normalize_facts(
     value: NativeObservation,
     references: ReferenceAllocator,
@@ -86,6 +121,8 @@ def normalize_facts(
     driver_features: Iterable[str] = (),
     scope_kind: str | None = None,
     operation_capabilities: Mapping[str, Mapping[str, str]] | None = None,
+    diagnostic_fields: Mapping[str, Iterable[FieldPath]] | None = None,
+    field_sources: Mapping[tuple[str, FieldPath], str] | None = None,
 ) -> SemanticSnapshot:
     """Organize a unified fact graph into source-accounted presentation roots.
 
@@ -109,6 +146,7 @@ def normalize_facts(
 
     for source in batch["nodes"]:
         token, raw = source["node"], source["values"]
+        diagnostics = frozenset((diagnostic_fields or {}).get(token, ()))
         original, ref = value.nodes[token], aliases[token]
         if not source["observed"] and token not in value.roots:
             for key, status in source["fieldStatus"].items():
@@ -131,8 +169,13 @@ def normalize_facts(
             node["subrole"] = original.role
         nodes[token] = node
         primary = _primary_value(source, original)
+        disclosure_fields = _disclosure_fields(source, original.role)
+        document = document_projection(source, original.supplements)
+        states = supplement_states(source)
         if primary is not None:
             value_fields[ref] = primary
+        if aliases_of_value := numeric_aliases(source, primary, field_sources or {}):
+            node["_numericValueAliases"] = [_VALUE_FIELDS[name] for name in aliases_of_value]
         for key, item in raw.items():
             field = None
             if key == "role":
@@ -152,10 +195,18 @@ def normalize_facts(
                     "selectedChildCount",
                 ) or safe_integer(item):
                     field = candidate
+            elif key in READ_ONLY_FIELDS and key not in source["fieldStatus"]:
+                field = READ_ONLY_FIELDS[key]
+            elif key in states:
+                field, item = states[key]
             elif key.startswith("states.") and key[7:] in _DISPLAY_STATES:
                 field = key[7:]
             elif key == "states.expanded" and item in ("expanded", "collapsed"):
                 field, item = "expanded", item == "expanded"
+            elif key in disclosure_fields:
+                field, item = "disclosing", item["value"]
+            elif document is not None and key in document.sources:
+                field, item = document.field, document.value
             elif key in _VALUE_FIELDS:
                 field = "value" if key == primary else _VALUE_FIELDS[key]
                 item = _value_text(item, aliases)
@@ -176,6 +227,8 @@ def normalize_facts(
                     representation="field",
                     normalized=node[field],
                 )
+                if field in PUBLIC_STATES and item is not False:
+                    node["preserveGroup"] = True
             else:
                 structural = key in _STRUCTURAL_FIELDS
                 sources[(ref, key)] = dict(
@@ -186,42 +239,36 @@ def normalize_facts(
                 )
                 if not structural:
                     grouped.setdefault((key, literal(item)), []).append(ref)
-                provider_fact = key.startswith("supplements[") and item["key"].startswith("provider.")
+                provider_fact = (
+                    key.startswith("supplements[")
+                    and item["key"].startswith("provider.")
+                    and source["fieldPaths"][key] not in diagnostics
+                )
                 meaningful_extra = (
                     key.startswith("supplements[")
                     and item["key"] in ("item_status", "item_type")
                     and bool(item["value"])
                 )
                 invalid_geometry = key.startswith("geometry.") and isinstance(item, dict) and item.get("valid") is False
-                matches_provider_fact = (
-                    True
-                    if (
-                        provider_fact
-                        or meaningful_extra
-                        or invalid_geometry
-                        or key in ("states.editable", "text.read_only")
-                        and item is True
-                    )
-                    else False
-                )
-                if matches_provider_fact:
+                if (
+                    provider_fact
+                    or meaningful_extra
+                    or invalid_geometry
+                    or key in ("states.editable", "text.read_only")
+                    and item is True
+                ):
                     node["preserveGroup"] = True
         for axis in ("row", "column"):
             index, span = raw.get("structure." + axis + "_index"), raw.get("structure." + axis + "_span")
             keys = ("structure." + axis + "_index", "structure." + axis + "_span")
-            matches_safe_integer = (
-                True
-                if (
-                    safe_integer(index)
-                    and safe_integer(span)
-                    and index >= 0
-                    and span >= 0
-                    and safe_integer(index + span)
-                    and not any(key in source["fieldStatus"] for key in keys)
-                )
-                else False
-            )
-            if matches_safe_integer:
+            if (
+                safe_integer(index)
+                and safe_integer(span)
+                and index >= 0
+                and span >= 0
+                and safe_integer(index + span)
+                and not any(key in source["fieldStatus"] for key in keys)
+            ):
                 field = axis + "Range"
                 node[field] = dict(location=index, length=span)
                 for key in ("structure." + axis + "_index", "structure." + axis + "_span"):
@@ -233,20 +280,15 @@ def normalize_facts(
                         projections=[dict(field=field, normalized=node[field])],
                     )
                     annotation = (key, literal(raw[key]))
-                    required_item(grouped, annotation).remove(ref)
-                    if not required_item(grouped, annotation):
+                    grouped[annotation].remove(ref)
+                    if not grouped[annotation]:
                         del grouped[annotation]
-        matches_original = (
-            True
-            if (
-                original.text
-                and original.text.unit in ("unicode_codepoint", "utf16_code_unit")
-                and original.text.selections
-                and len(original.text.selections) == 1
-            )
-            else False
-        )
-        if matches_original:
+        if (
+            original.text
+            and original.text.unit in ("unicode_codepoint", "utf16_code_unit")
+            and original.text.selections
+            and len(original.text.selections) == 1
+        ):
             selection = original.text.selections[0]
             if selection.start is not None and selection.end is not None:
                 node["selectionRange"] = dict(location=selection.start, length=selection.end - selection.start)
@@ -270,7 +312,7 @@ def normalize_facts(
                 text_refs[(ref, key)] = status.copy()
                 caption = "; captured text available"
                 caption += (
-                    " via this element's read_text()"
+                    " via this element's readText()"
                     if value_fields.get(ref) == key
                     else "; no public continuation for this field"
                 )
@@ -279,8 +321,8 @@ def normalize_facts(
                         status.get("unit"), status.get("unit") or "units"
                     )
                     caption += f"; {status['totalUnits']} {unit}"
-                required_item(grouped, (key, label)).remove(ref)
-                if not required_item(grouped, (key, label)):
+                grouped[(key, label)].remove(ref)
+                if not grouped[(key, label)]:
                     del grouped[(key, label)]
                 grouped.setdefault((key, label + caption), []).append(ref)
             incidental_range = (
@@ -311,7 +353,7 @@ def normalize_facts(
             extra_edges.append(relation)
             continue
         if kind == "children" and confirmed:
-            if len(required_item(child_views, token)) > 1:
+            if len(child_views[token]) > 1:
                 source["preserveGroup"] = True
                 source["partialReason"] = "multiple observed child views; inspect relationship details"
                 extra_edges.append(relation)
@@ -327,34 +369,24 @@ def normalize_facts(
                 source["partialReason"] = "observed children partly collected; see Relation details"
             if any(target in batch["unread"] for target in targets):
                 source["partialReason"] = "child facts have not been collected"
+        elif (
+            kind == "labelled_by" and confirmed and complete and len(targets) == 1 and targets[0] not in batch["unread"]
+        ):
+            source["titleRef"] = aliases[targets[0]]
+            extra_edges.append(relation)
+        elif kind == "labels" and confirmed:
+            source["labelTargets"] = [aliases[target] for target in targets]
+            source["incompleteLabelRelation"] = not complete or any(target in batch["unread"] for target in targets)
+            extra_edges.append(relation)
+        elif kind == "disclosed_by" and confirmed and complete and len(targets) == 1:
+            source["disclosedBy"] = aliases[targets[0]]
+            extra_edges.append(relation)
+        elif kind == "error":
+            source.setdefault("errorRelations", []).append(error_relation(relation, aliases))
+            source["preserveGroup"] = True
+            extra_edges.append(relation)
         else:
-            matches_confirmed_condition = (
-                True
-                if (
-                    kind == "labelled_by"
-                    and confirmed
-                    and complete
-                    and len(targets) == 1
-                    and targets[0] not in batch["unread"]
-                )
-                else False
-            )
-            if matches_confirmed_condition:
-                source["titleRef"] = aliases[targets[0]]
-                extra_edges.append(relation)
-            elif kind == "labels" and confirmed:
-                source["labelTargets"] = [aliases[target] for target in targets]
-                source["incompleteLabelRelation"] = not complete or any(target in batch["unread"] for target in targets)
-                extra_edges.append(relation)
-            else:
-                matches_confirmed = (
-                    True if kind == "disclosed_by" and confirmed and complete and len(targets) == 1 else False
-                )
-                if matches_confirmed:
-                    source["disclosedBy"] = aliases[targets[0]]
-                    extra_edges.append(relation)
-                else:
-                    extra_edges.append(relation)
+            extra_edges.append(relation)
         if not complete or not confirmed:
             source["preserveGroup"] = True
 
