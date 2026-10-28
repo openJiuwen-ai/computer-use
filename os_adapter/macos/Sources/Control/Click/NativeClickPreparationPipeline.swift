@@ -44,7 +44,7 @@ import ApplicationServices
             switch plan.offer.delivery {
             case .windowDirected:
                 let pointer = preparation.pointer
-                try pointer.requireWindowDirectedPreparation()
+                try pointer.validateWindowIdentity()
                 do {
                     let outcome = try await NativeFocusPipeline.prepare(
                         BackgroundTarget(pointer.application), window: pointer.window,

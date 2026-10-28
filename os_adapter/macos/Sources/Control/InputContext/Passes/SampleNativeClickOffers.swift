@@ -24,10 +24,9 @@ import ApplicationServices
             foreground = pointer.foregroundWindow(at: point)
             input["geometryCurrent"] = "yes"
             var transport = true
-            do {
-                try BackgroundEvents.requirePointerRoute(window: pointer.window)
-            } catch is NativePreparationUnavailable { transport = false }
-            let directedAvailable = !BackgroundTarget.isExclusive && transport && pointer.canPrepareWindowDirected()
+            do { try BackgroundEvents.requirePointerRoute(window: pointer.window) }
+            catch is NativePreparationUnavailable { transport = false }
+            let directedAvailable = !BackgroundTarget.isExclusive && transport
             let systemReady = pointer.ready(at: point, delivery: .systemPointer)
             let directed = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
@@ -36,11 +35,8 @@ import ApplicationServices
                     : .unavailable,
                 reason: BackgroundTarget.isExclusive
                     ? "Exclusive mode uses desktop mouse input."
-                    : !transport
-                        ? "Window-directed mouse transport is unavailable."
-                        : !directedAvailable
-                            ? "The first mouse-down may only activate this window; foreground preparation is required."
-                            : nil, preparationOptions: directedAvailable ? ["background"] : [])
+                    : !transport ? "Window-directed mouse transport is unavailable." : nil,
+                preparationOptions: directedAvailable ? ["background"] : [])
             try RequestDiagnostics.checkCancellation()
             let system = NativeClickContract(
                 routeFamily: "macos.hid.v1", delivery: .systemPointer,
@@ -86,9 +82,8 @@ import ApplicationServices
                     let isMenu = applicationRoot
                     // NSMenu can expose a stale disabled bit until its retained
                     // document path is prepared. The menu unit owns that refresh.
-                    let supported =
-                        (isMenu || facts.enabled != false) && (!menu || isMenu)
-                        && (action.name != kAXRaiseAction || BackgroundTarget.isExclusive || foreground)
+                    let supported = (isMenu || facts.enabled != false) && (!menu || isMenu)
+                        && facts.allowsAction(action.name)
                     let family = (isMenu ? "macos.menuAction." : "macos.axAction.") + action.name
                     let readiness =
                         try isMenu

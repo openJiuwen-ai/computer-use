@@ -13,7 +13,13 @@ extension NativeElementControl {
         let enabled: Bool?
         let applicationMenuContext: Bool
         let foreground: Bool
+        var focusWritable: Bool = false
         var document: NativeDocumentContext? = nil
+
+        @MainActor func allowsAction(_ action: String) -> Bool {
+            NativeActionAdmission.allows(action: action, role: role, focusWritable: focusWritable,
+                foreground: foreground, exclusive: BackgroundTarget.isExclusive)
+        }
     }
 
     func nativeActionFacts(_ ref: String) throws -> ActionFacts {
@@ -27,10 +33,9 @@ extension NativeElementControl {
             role: role, actions: try declaredActions(target.element),
             enabled: (inspection.attribute(target.element, kAXEnabledAttribute) as? NSNumber)?.boolValue,
             applicationMenuContext: [kAXMenuBarRole, kAXMenuBarItemRole].contains(role ?? "")
-                || target.ancestors.contains {
-                    inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole
-                },
-            foreground: BackgroundTarget(target.application).isForeground)
+                || target.ancestors.contains { inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole },
+            foreground: BackgroundTarget(target.application).isForeground,
+            focusWritable: AXAccess.writable(target.element, kAXFocusedAttribute).value == true)
         if let window = target.observedInteractionSurface,
             inspection.attribute(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
         {
@@ -53,7 +58,7 @@ extension NativeElementControl {
             throw DriverError("the selected native action is no longer declared", code: .inputUnavailable)
         }
         let background = BackgroundTarget(target.application)
-        if action == kAXRaiseAction, !BackgroundTarget.isExclusive, !background.isForeground {
+        if !facts.allowsAction(action) {
             throw DriverError("raising a background window requires exclusive mode", code: .modeUnsupported)
         }
         if !background.allowsMenuPopup, [kAXPressAction, kAXPickAction].contains(action),

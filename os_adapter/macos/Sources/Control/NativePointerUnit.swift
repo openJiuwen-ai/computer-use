@@ -3,8 +3,9 @@
 import AppKit
 import ApplicationServices
 
-/// A transport receipt does not prove that a first mouse-down reaches content.
-/// Passive wheel delivery has no initial button event to consume for activation.
+/// Window-directed transport can address background content without global
+/// activation. Readiness permits one delivery; its receipt leaves the actual
+/// content effect unconfirmed until a subsequent observation.
 enum NativePointerReadiness {
     enum WindowKind { case keyRequiring, otherDeclared, visualOnly, identityConflict }
     enum WindowFocus: Equatable {
@@ -80,7 +81,7 @@ enum NativePointerReadiness {
             case .identityConflict: return false
             }
         }
-        return kind == .scroll && !exclusive && backgroundPrepared
+        return !exclusive && backgroundPrepared && windowKind != .identityConflict
     }
 }
 
@@ -173,24 +174,6 @@ enum NativePointerReadiness {
         }
     }
 
-    /// Process-addressed notifications and AXMain cannot establish a cold
-    /// content window's real key state. Already-foreground window selection
-    /// remains available; passive wheel input retains its background route.
-    func canPrepareWindowDirected(kind: NativePointerIntent.Kind = .click) -> Bool {
-        kind == .scroll || target.isForeground
-    }
-
-    func requireWindowDirectedPreparation(kind: NativePointerIntent.Kind = .click) throws {
-        try validateWindowIdentity()
-        guard canPrepareWindowDirected(kind: kind) else {
-            throw NativePreparationUnavailable(
-                description: """
-                    the first mouse-down may only activate this window; foreground preparation is required \
-                    before sending pointer input
-                    """)
-        }
-    }
-
     /// The caller supplies an already-checked physical foreground/window hit.
     /// Reuse this for offer sampling, preparation and final event validation.
     private struct Readiness {
@@ -211,14 +194,11 @@ enum NativePointerReadiness {
         // object/process/window and physical hit remain checked for every event.
         let declared = declaredWindow ?? (foreground && kind != .scroll ? windowKind : .visualOnly)
         let focus = foreground && declared == .keyRequiring ? windowFocus() : .notRequired
-        let prepared =
-            !foreground && kind == .scroll && !BackgroundTarget.isExclusive
-            && BackgroundEvents.pointerPreparationIsCurrent(target, window: window, needsKeyWindow: false)
-        return Readiness(
-            ready: NativePointerReadiness.ready(
-                kind: kind, foreground: foreground, windowKind: declared, focus: focus, initialFocus: initialFocus,
-                backgroundPrepared: prepared, exclusive: BackgroundTarget.isExclusive), foreground: foreground,
-            focus: focus, windowKind: declared)
+        let prepared = !foreground && !BackgroundTarget.isExclusive
+            && BackgroundEvents.pointerPreparationIsCurrent(target, window: window, needsKeyWindow: kind != .scroll)
+        return Readiness(ready: NativePointerReadiness.ready(kind: kind, foreground: foreground, windowKind: declared,
+            focus: focus, initialFocus: initialFocus, backgroundPrepared: prepared, exclusive: BackgroundTarget.isExclusive),
+            foreground: foreground, focus: focus, windowKind: declared)
     }
 
     private func sampleReadiness(
@@ -286,7 +266,6 @@ enum NativePointerReadiness {
                 target, window: window.id, pointerAt: kind != .scroll && windowKind == .keyRequiring ? nil : point,
                 onAction: { onPreparation("foreground window activation") }, onCleanupUnknown: onCleanupUnknown)
         } else {
-            try requireWindowDirectedPreparation(kind: kind)
             do {
                 try await NativeFocusPipeline.prepare(
                     target, window: window, nativeWindow: nativeWindow, needsKeyWindow: kind != .scroll,
