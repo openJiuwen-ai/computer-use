@@ -14,6 +14,8 @@ from computer_use.json import loads as jsonLoads
 from computer_use.paths import native_driver, repository_root
 from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
 
+from .console import report
+
 _LOG = logging.getLogger(__name__)
 
 
@@ -57,7 +59,7 @@ def build_mac_os(root=None):
         encoding="utf-8",
     )
     run("codesign", ["--force", "--sign", "-", "--identifier", "local.computer-use.driver", bundle], native)
-    sys.stdout.write(f"{executable}\n")
+    report(executable)
     return executable
 
 
@@ -231,7 +233,7 @@ def build_windows(root=None):
         ],
         native,
     )
-    sys.stdout.write(f"{output}\n")
+    report(output)
     return output
 
 
@@ -288,7 +290,7 @@ def permissions(argv=None):
     )
     args = parser.parse_args(argv)
     status = read_permissions(args.request, protocol_version=args.protocol_version)
-    sys.stdout.write(json.dumps(status, ensure_ascii=False, separators=(",", ":")) + "\n")
+    report(json.dumps(status, ensure_ascii=False, separators=(",", ":")))
     ready, missing = permission_state(status)
     if not ready:
         if sys.platform == "linux":
@@ -375,7 +377,7 @@ def linux_session_launcher(*, directory=None, env=None):
         encoding="utf-8",
     )
     output.chmod(0o700)
-    sys.stdout.write(
+    report(
         (
             f"Saved "
             f"{output}"
@@ -385,7 +387,6 @@ def linux_session_launcher(*, directory=None, env=None):
             f"{'Wayland native accessibility; capture/input limited' if wayland else 'X11'}"
             f"). Regenerate after logging out or changing the desktop session."
         )
-        + "\n"
     )
     return output
 

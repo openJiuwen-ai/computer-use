@@ -10,6 +10,7 @@ from typing import Any
 from computer_use.interaction.read.presentation.formatting import number_string
 from computer_use.json import loads as jsonLoads
 from computer_use.paths import repository_root
+from computer_use_native_tools.console import report
 
 "Strict compiler for the shared cursor SVG profile and motion keyframes."
 
@@ -762,7 +763,7 @@ def generate_pointer_assets(check=False, root=None):
 
 
 def cli():
-    sys.stdout.write(str(generate_pointer_assets(check="--check" in sys.argv[1:])) + "\n")
+    report(generate_pointer_assets(check="--check" in sys.argv[1:]))
 
 
 if __name__ == "__main__":
