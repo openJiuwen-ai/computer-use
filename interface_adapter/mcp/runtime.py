@@ -42,6 +42,7 @@ from computer_use.session.observation import peek_observation_text
 from .image_delivery import prepare_image
 from .output import ObservationOutput, ObservationPresenter, OutputBuffer
 from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
+from .worker_lifecycle import READY_ENV
 
 _runs = ContextVar("computer_use_execution", default=None)
 
@@ -185,7 +186,7 @@ class Runtime:
         if run is None or not run["active"]:
             return
         if file is not None and file not in (sys.stdout, sys.stderr):
-            _originalPrint(*values, sep=sep, end=end, file=file, flush=flush)
+            _original_print(*values, sep=sep, end=end, file=file, flush=flush)
             return
         if len(values) == 1:
             receipt = result_receipt(values[0])
@@ -351,7 +352,7 @@ class Runtime:
                 await transport.wait_closed()
 
 
-_originalPrint = builtins.print
+_original_print = builtins.print
 
 
 class ConsoleWriter(io.TextIOBase):
@@ -373,12 +374,16 @@ async def main():
     from .worker_transport import worker_connection
 
     protocol = consume_protocol()
+    ready_requested = os.environ.pop(READY_ENV, None) == "1"
     reader, writer = await worker_connection()
 
     messages = WorkerMessageWriter(writer, protocol=protocol)
     runtime = Runtime(messages.send)
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
+    if ready_requested:
+        messages.send(dict(ready=True))
+        await writer.drain()
 
     async def stop():
         await runtime.close()

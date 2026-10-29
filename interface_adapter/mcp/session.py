@@ -15,7 +15,10 @@ from computer_use.session.operations import eager
 from .history import HISTORY_KEY, HistoryGate
 from .diagnostics import Journal
 from .output import OutputBuffer, is_output
+from .worker_lifecycle import EXIT_SETTLE_SECONDS, READY_ENV, WorkerLifecycle, WorkerStartupFailure
 from .worker_transport import FRAMED_PROTOCOL, read_message, write_message
+
+CLEANUP_TIMEOUT_SECONDS = 5
 
 RESET_NOTICE = (
     "Execution session cleared. Recreate App variables and read again. Actions "
@@ -38,6 +41,7 @@ class ExecutionSession:
         self._writer = self._reader = None
         self._closed = self._starting = False
         self._start_task = None
+        self._worker = None
         self._generation = 0
         self._next_id = 1
         self._journal, self._history = Journal(), HistoryGate()
@@ -75,20 +79,60 @@ class ExecutionSession:
                 self._starting = False
 
         starting.add_done_callback(started)
+        startup_cancel = None
+        if signal is not None:
+
+            async def cancel_startup():
+                await signal.wait()
+                self.reset("Call cancelled before code was sent.")
+
+            startup_cancel = self._track(cancel_startup())
         try:
             await asyncio.shield(starting)
+            worker = self._worker
+            if (
+                generation == self._generation
+                and worker is not None
+                and (worker.failed or self._writer is None or self._writer.is_closing())
+            ):
+                worker.failed = True
+                await worker.settle(min(EXIT_SETTLE_SECONDS, worker.remaining()))
+                raise WorkerStartupFailure(worker.failure("The worker channel closed before this call was sent."))
         except asyncio.CancelledError:
             await asyncio.shield(self.reset("Call cancelled."))
             raise
         except Exception as error:
-            return execution_error(str(error))
+            worker = self._worker
+            reason = (
+                str(error)
+                if isinstance(error, WorkerStartupFailure)
+                else worker.failure(f"Cannot start worker ({type(error).__name__}).")
+                if worker is not None
+                else f"Execution worker startup failed ({type(error).__name__}). This call's code was not sent."
+            )
+            if generation == self._generation:
+                reset = await self.reset(reason)
+            else:
+                reset = await asyncio.shield(self._resetting) if self._resetting is not None else None
+            result = execution_error(
+                reason + ("\n" + reset["content"][0]["text"] if reset is not None and reset.get("isError") else "")
+            )
+            result["_meta"] = {"computer-use": self._journal.metadata()}
+            return result
+        finally:
+            if startup_cancel is not None:
+                startup_cancel.cancel()
         if generation != self._generation or self._closed:
+            reset = await asyncio.shield(self._resetting) if self._resetting is not None else None
+            reason = (
+                "Call cancelled before code was sent. "
+                if signal is not None and signal.is_set()
+                else "Execution was reset before code was sent. "
+            )
             return execution_error(
-                (
-                    "Execution was reset before code was sent. No code was executed; recreate "
-                    "variables before "
-                    "continuing."
-                )
+                reason
+                + "No code was executed for this call; recreate variables before continuing."
+                + ("\n" + reset["content"][0]["text"] if reset is not None and reset.get("isError") else "")
             )
         if signal is not None and signal.is_set():
             return execution_error("Call cancelled before execution.")
@@ -107,7 +151,15 @@ class ExecutionSession:
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         pending = dict(
-            id=id_, title=title, startedAt=loop.time(), output=OutputBuffer(), future=future, timer=None, cancel=None
+            id=id_,
+            title=title,
+            startedAt=loop.time(),
+            output=OutputBuffer(),
+            future=future,
+            timer=None,
+            cancel=None,
+            sent=False,
+            deadline=loop.time() + self.timeout_ms / 1000,
         )
 
         def stalled():
@@ -117,6 +169,7 @@ class ExecutionSession:
             if pending["timer"] is not None:
                 pending["timer"].cancel()
             pending["timer"] = loop.call_later(self.timeout_ms / 1000, stalled)
+            pending["deadline"] = loop.time() + self.timeout_ms / 1000
             try:
                 if on_progress is not None:
                     result = on_progress()
@@ -142,6 +195,9 @@ class ExecutionSession:
 
             pending["cancel"] = self._track(cancel())
         try:
+            # A write may partially dispatch before raising. Preserve unknown
+            # effects on send failure; never replay the request automatically.
+            pending["sent"] = True
             write_message(
                 self._writer,
                 dict(
@@ -161,30 +217,57 @@ class ExecutionSession:
 
     async def _start(self):
         if self._child is not None:
+            if self._worker is not None and self._worker.failed:
+                worker = self._worker
+                await worker.settle()
+                raise WorkerStartupFailure(worker.failure("The worker channel closed."))
             return
+        worker = WorkerLifecycle(self._generation, self.timeout_ms / 1000, self._track, self._journal.record)
+        self._worker = worker
         env = dict(
             os.environ,
             COMPUTER_USE_REMOTE_PREVIEW="1" if self.on_preview is not None else "",
             COMPUTER_USE_DEMO_FOREGROUND="1" if self.demo_foreground else "0",
             COMPUTER_USE_LIFETIME_FD="4",
             COMPUTER_USE_WORKER_PROTOCOL=FRAMED_PROTOCOL,
+            **{READY_ENV: "1"},
         )
         if os.name == "nt":
-            from .windows_worker import start_windows_worker
+            from .windows_worker import WorkerInterpreterOutsideJob, start_windows_worker
 
-            child, self._reader, self._writer, job, listener = await start_windows_worker(env)
-            self._child = child
+            def spawned(child, job, listener):
+                self._child = child
+                worker.attach(child)
 
-            async def exited():
-                try:
-                    await child.wait()
-                    await job.wait_empty()
-                finally:
-                    job.close()
-                    await listener.wait_closed()
+                async def exited():
+                    try:
+                        await worker.exited
+                        await job.wait_empty()
+                    finally:
+                        job.close()
+                        await listener.wait_closed()
 
-            self._exited = self._track(exited())
-            self._track(self._receive(child, self._reader))
+                self._exited = self._track(exited())
+
+            try:
+                child, self._reader, self._writer, job, listener = await start_windows_worker(
+                    env, stderr=asyncio.subprocess.PIPE, on_spawned=spawned, timeout=worker.remaining()
+                )
+            except Exception as error:
+                await worker.settle(min(EXIT_SETTLE_SECONDS, worker.remaining()))
+                worker.stop_startup()
+                # Only a typed launcher refusal admits its fixed safe reason.
+                # Unknown exceptions may carry code, credentials or provider
+                # values in __str__; retain their type, never their body.
+                detail = (
+                    f"{WorkerInterpreterOutsideJob.code}: {WorkerInterpreterOutsideJob.detail}"
+                    if isinstance(error, WorkerInterpreterOutsideJob)
+                    else f"The worker could not connect ({type(error).__name__})."
+                )
+                raise WorkerStartupFailure(worker.failure(detail)) from None
+
+            self._track(self._receive(child, self._reader, worker))
+            await self._wait_ready(worker)
             return
         parent_value, child_socket = socket.socketpair()
         life_read, life_write = os.pipe()
@@ -200,7 +283,7 @@ class ExecutionSession:
                 "computer_use_mcp.runtime",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
                 pass_fds=(child_socket.fileno(), life_write),
                 env=env,
             )
@@ -212,6 +295,7 @@ class ExecutionSession:
             child_socket.close()
             os.close(life_write)
         self._child = child
+        worker.attach(child)
         parent_value.setblocking(False)
         self._reader, self._writer = await asyncio.open_connection(sock=parent_value, limit=12 * 1024 * 1024)
         lifetime = asyncio.StreamReader()
@@ -221,16 +305,29 @@ class ExecutionSession:
 
         async def exited():
             try:
-                await child.wait()
+                await worker.exited
                 while await lifetime.read(65536):
                     pass
             finally:
                 transport.close()
 
         self._exited = self._track(exited())
-        self._track(self._receive(child, self._reader))
+        self._track(self._receive(child, self._reader, worker))
+        await self._wait_ready(worker)
 
-    async def _receive(self, child, reader):
+    async def _wait_ready(self, worker):
+        if worker.generation != self._generation:
+            return
+        try:
+            ready = await asyncio.wait_for(asyncio.shield(worker.ready), worker.remaining())
+        except TimeoutError:
+            worker.failed = True
+            raise WorkerStartupFailure(worker.failure("Timed out waiting for worker readiness.")) from None
+        if not ready and worker.generation == self._generation:
+            raise WorkerStartupFailure(worker.failure())
+
+    async def _receive(self, child, reader, worker):
+        error = None
         try:
             while True:
                 message = await read_message(reader)
@@ -240,7 +337,9 @@ class ExecutionSession:
                     continue
                 if not isinstance(message, dict):
                     raise ValueError("Execution process returned invalid output.")
-                if "preview" in message:
+                if message.get("ready") is True:
+                    worker.mark_ready()
+                elif "preview" in message:
                     if is_preview_event(message["preview"]):
                         try:
                             if self.on_preview is not None:
@@ -280,11 +379,35 @@ class ExecutionSession:
                     ):
                         raise ValueError("Execution process returned invalid output.")
                     self._finish(message)
-            if self._child is child:
-                self.reset(f"Execution process exited ({child.returncode}).")
-        except Exception as error:
-            if self._child is child:
-                self.reset(f"Execution process failed: {error}")
+        except Exception as failure:
+            error = failure
+        if self._child is not child:
+            return
+        worker.failed = True
+        pending = self._pending
+        sent = pending is not None and pending["sent"]
+        deadline = pending["deadline"] if pending is not None else worker.deadline
+        remaining = max(0, deadline - asyncio.get_running_loop().time())
+        await worker.settle(
+            min(EXIT_SETTLE_SECONDS, remaining) if not worker.started or pending else EXIT_SETTLE_SECONDS
+        )
+        if self._child is not child:
+            return
+        detail = f"Worker communication failed ({type(error).__name__})." if error is not None else None
+        reason = worker.failure(detail, sent=sent)
+        self._journal.record(
+            dict(
+                kind="worker_failure",
+                workerGeneration=worker.generation,
+                workerPid=child.pid,
+                phase="startup" if not worker.started else "execution" if sent else "idle",
+                returncode=child.returncode,
+                reason=reason,
+            )
+        )
+        worker.stop_startup()
+        if worker.started:
+            self.reset(reason)
 
     def _finish(self, result):
         pending, self._pending = self._pending, None
@@ -323,6 +446,9 @@ class ExecutionSession:
         if self._resetting is not None:
             return self._resetting
         self._generation += 1
+        worker, self._worker = self._worker, None
+        if worker is not None:
+            worker.stop_startup()
         starting = self._start_task
         child, self._child = self._child, None
         if child is not None and child.returncode is None:
@@ -335,6 +461,7 @@ class ExecutionSession:
         if self._writer is not None:
             self._writer.close()
             self._writer = None
+        self._reader = None
         if self._pending is not None:
             self._pending["cleanup"]()
 
@@ -347,6 +474,9 @@ class ExecutionSession:
             # Process creation yields in Python. A reset during that yield must
             # retire the newly created worker before admitting any later call.
             late, self._child = self._child, None
+            late_worker, self._worker = self._worker, None
+            if late_worker is not None:
+                late_worker.stop_startup()
             if late is not None and late.returncode is None:
                 try:
                     late.kill()
@@ -360,6 +490,10 @@ class ExecutionSession:
                 await asyncio.shield(earlier)
             if exited is not None and exited is not earlier:
                 await asyncio.shield(exited)
+            if worker is not None and worker.exited is not None:
+                await asyncio.shield(worker.exited)
+            if late_worker is not None and late_worker.exited is not None and late_worker is not worker:
+                await asyncio.shield(late_worker.exited)
 
         retired = self._track(retire())
         self._retiring = retired
@@ -368,7 +502,7 @@ class ExecutionSession:
             failure = None
             try:
                 if retired is not None:
-                    await asyncio.wait_for(asyncio.shield(retired), 5)
+                    await asyncio.wait_for(asyncio.shield(retired), CLEANUP_TIMEOUT_SECONDS)
             except TimeoutError:
                 failure = (
                     "Native cleanup is still pending; capture stop is unconfirmed. Actions may "

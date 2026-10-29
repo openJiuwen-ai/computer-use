@@ -19,6 +19,19 @@ import sys
 from typing import NamedTuple
 
 
+class WorkerInterpreterOutsideJob(RuntimeError):
+    """Controlled launcher refusal; its public diagnosis contains no input."""
+
+    code = "worker_interpreter_outside_job"
+    detail = (
+        "Worker interpreter escaped its lifetime Job. Use an ordinary CPython "
+        "installation (uv --managed-python), not a Microsoft Store execution alias."
+    )
+
+    def __init__(self):
+        super().__init__(self.detail)
+
+
 class _BasicLimits(ctypes.Structure):
     _fields_ = [
         ("processTime", ctypes.c_int64),
@@ -188,9 +201,10 @@ class WorkerResources(NamedTuple):
 
 
 async def start_windows_worker(
-    env, *, module="computer_use_mcp.runtime", stderr=asyncio.subprocess.DEVNULL
+    env, *, module="computer_use_mcp.runtime", stderr=asyncio.subprocess.DEVNULL, on_spawned=None, timeout=15
 ) -> WorkerResources:
     loop = asyncio.get_running_loop()
+    deadline = loop.time() + min(15, timeout)
     connected = loop.create_future()
     token = secrets.token_hex(32).encode("ascii")
     candidates = set()
@@ -220,13 +234,7 @@ async def start_windows_worker(
                 if not 0 < pid <= 0xFFFFFFFF:
                     raise ValueError("Invalid worker process identity.")
                 if not job.contains(pid):
-                    raise RuntimeError(
-                        (
-                            "Worker interpreter escaped its lifetime Job. Use an ordinary CPython "
-                            "installation (uv --managed-python), not a Microsoft Store execution "
-                            "alias."
-                        )
-                    )
+                    raise WorkerInterpreterOutsideJob()
                 connected.set_result((reader, writer))
                 accepted = True
         except (asyncio.IncompleteReadError, ValueError, OSError, RuntimeError) as error:
@@ -243,6 +251,7 @@ async def start_windows_worker(
 
     server = await asyncio.start_server(accept, "127.0.0.1", 0, limit=12 * 1024 * 1024)
     job = child = None
+    adopted = False
     try:
         job = WindowsJob()
         env = dict(
@@ -262,23 +271,47 @@ async def start_windows_worker(
             env=env,
             creationflags=(subprocess.CREATE_NO_WINDOW | 4) if os.name == "nt" else 0,
         )
+        if on_spawned is not None:
+            # The session adopts the process, stderr, Job and listener before
+            # any startup wait can fail or be interrupted.
+            on_spawned(child, job, server)
+            adopted = True
         job.assign(child.pid)
         if os.name == "nt":
             resume_suspended(child.pid)
-        reader, writer = await asyncio.wait_for(connected, 15)
+        exited = asyncio.create_task(child.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {connected, exited}, timeout=max(0, deadline - loop.time()), return_when=asyncio.FIRST_COMPLETED
+            )
+            if connected in done:
+                reader, writer = connected.result()
+            elif exited in done:
+                raise RuntimeError("Execution worker exited before connecting.")
+            else:
+                raise TimeoutError("Execution worker did not connect before its startup deadline.")
+        finally:
+            if not exited.done():
+                exited.cancel()
+            await asyncio.gather(exited, return_exceptions=True)
         return WorkerResources(child, reader, writer, job, server)
     except BaseException:
-        if job is not None:
-            job.close()
-        if child is not None and child.returncode is None:
-            try:
-                child.kill()
-            except ProcessLookupError:
-                pass
-            await child.wait()
-        if connected.done() and not connected.cancelled() and connected.exception() is None:
-            _, writer = connected.result()
-            writer.close()
+        try:
+            if job is not None and not adopted:
+                job.close()
+            if child is not None:
+                if child.returncode is None:
+                    try:
+                        child.kill()
+                    except ProcessLookupError:
+                        pass
+                await child.wait()
+            if connected.done() and not connected.cancelled() and connected.exception() is None:
+                _, writer = connected.result()
+                writer.close()
+        finally:
+            if job is not None and not adopted:
+                job.close()
         raise
     finally:
         server.close()
@@ -288,5 +321,5 @@ async def start_windows_worker(
             await asyncio.gather(*tuple(candidates), return_exceptions=True)
         # wait_closed includes accepted streams on newer Python versions.
         # The session owns that barrier until the worker channel has closed.
-        if child is None or child.returncode is not None:
+        if not adopted and (child is None or child.returncode is not None):
             await server.wait_closed()
