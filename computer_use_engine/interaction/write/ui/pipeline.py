@@ -10,12 +10,14 @@ from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.query.instances.scope import allowed, refresh, validate_session
+from computer_use.interaction.requests import ExecuteAction
 from computer_use.native.contracts import Intent
 from computer_use.session.interface_images import frame, signature
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.records import UIHandle
+    from computer_use.pipeline.core import Control, Step
     from computer_use.protocol.records import Record
     from computer_use.session.interface_images import InterfaceImage
     from computer_use.types import ActionResult, Point
@@ -29,13 +31,17 @@ class InterfacePointerPipeline:
     before dispatch, then return the mapped window's action result.
 
     Attributes:
-        controller: Supplies current UI membership, captured windows, and action execution.
+        controller: Supplies current UI membership and captured windows.
+        write: Shared action flow composed after coordinate validation.
     """
 
-    def __init__(self, controller: SessionController) -> None:
+    def __init__(self, controller: SessionController, write: Step[ExecuteAction, ActionResult]) -> None:
         self.controller = controller
+        self.write = write
 
-    async def run(self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record) -> ActionResult:
+    async def run(
+        self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record, control: Control
+    ) -> ActionResult:
         """Validate the delivered image mapping and execute the gesture on its native window.
 
         Args:
@@ -43,6 +49,7 @@ class InterfacePointerPipeline:
             intent: Pointer operation, such as click or drag.
             points: Gesture points in delivered-image pixels, from the top-left origin.
             options: Mouse button, click count, and other validated gesture options.
+            control: Parent execution metadata passed to the write child.
 
         Returns:
             The action receipt for the mapped member window.
@@ -86,8 +93,7 @@ class InterfacePointerPipeline:
         else:
             x, y = mapped[0][1]
             parameters = dict(x=x, y=y, **options)
-        # pylint: disable-next=protected-access
-        return await self.controller._execute(ui, Intent(intent, parameters), piece.image.target)
+        return await self.write.arun(ExecuteAction(ui, Intent(intent, parameters), piece.image.target), control)
 
     async def check_layout(self, image: InterfaceImage) -> None:
         """Require captured member windows to retain their size and relative positions."""
