@@ -202,7 +202,13 @@ import ApplicationServices
         let windows: [NativeApplicationAccess.Window]
         do {
             windows = try NativePointerTiming.measure("captureScope.accessibilityWindows", metadata: metadata) {
-                try state.applications.windows(selected.owner, nativeWindows: native, purpose: .inputValidation)
+                // The retained root is only a discovery hint. The collector
+                // re-reads live window/modal edges and prunes other contents
+                // only after proving their ancestry ends at this application.
+                // Missing/replaced roots retain its existing full-scan fallback.
+                try state.applications.windows(
+                    selected.owner, nativeWindows: native, contentRoot: windowElement(root, owner: selected.owner),
+                    purpose: .inputValidation)
             }
         } catch {
             try RequestDiagnostics.checkCancellation()
