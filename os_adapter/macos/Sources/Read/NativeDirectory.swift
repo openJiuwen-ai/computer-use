@@ -259,11 +259,22 @@ import ApplicationServices
         // A positively observed modal/sheet with an unresolved owner is a
         // critical unknown, not evidence that it is an unrelated non-modal.
         // Incomplete ordinary control contents are not a global input blocker.
-        if windows.contains(where: {
-            !path.contains($0.ref)
-                && (($0.parentUnknown && $0.modal == true)
-                    || ($0.kind == "sheet" && $0.modal != false && ($0.parentUnknown || $0.parent == nil)))
-        }) {
+        let unresolvedModal = windows.contains { modal in
+            guard !path.contains(modal.ref), modal.modal == true || (modal.kind == "sheet" && modal.modal != false)
+            else { return false }
+            if modal.kind == "sheet" && modal.parent == nil { return true }
+            var current: String? = modal.ref, seen = Set<String>()
+            while let ref = current {
+                if path.contains(ref) { return false }
+                guard seen.insert(ref).inserted, let owner = windows.first(where: { $0.ref == ref }),
+                    !owner.parentUnknown else { return true }
+                current = owner.parent
+            }
+            // Only a complete chain to a positively known independent root
+            // proves another document; a missing/unknown/cyclic link cannot.
+            return false
+        }
+        if unresolvedModal {
             throw DriverError("a live modal surface has unresolved ownership", code: .inputUnavailable)
         }
         let blocked = try NativeWindowBoundary.blocked(

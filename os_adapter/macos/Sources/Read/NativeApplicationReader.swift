@@ -147,7 +147,8 @@ import ApplicationServices
     private func collectWindows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
         purpose: NativeWindowQueryPurpose, projection: Projection, reportIssue: ((String) -> Void)? = nil,
-        parentQuery: String? = nil, required: [AXUIElement] = [], modalHints: [AXUIElement] = []
+        parentQuery: String? = nil, required: [AXUIElement] = [], modalHints: [AXUIElement] = [],
+        discoverRequired: Bool = false
     ) throws -> Collection {
         let timing = NativeWindowQueryTiming.start(metadata: {
             ["pid": app.processIdentifier, "purpose": purpose == .inputValidation ? "inputValidation" : "observation",
@@ -438,7 +439,10 @@ import ApplicationServices
             if cursor == candidates.count, frontierCursor < inputFrontiers.count {
                 let parent = inputFrontiers[frontierCursor]
                 frontierCursor += 1
-                for child in try immediateSurfaces(parent) {
+                let children: [AXUIElement]
+                if discoverRequired { children = try nestedSurfaces(parent, recursive: true) }
+                else { children = try immediateSurfaces(parent) }
+                for child in children {
                     owners.append((child, parent))
                     candidates.append(child)
                 }
@@ -582,7 +586,7 @@ import ApplicationServices
         // reachable solely through an anchor inside an excluded ancestor.
         // Rediscover it through live child edges before declaring it closed;
         // never authorize input from the retained object alone.
-        if projection == .inputBoundary,
+        if projection == .inputBoundary, !discoverRequired,
             (required + (contentRoot.map { [$0] } ?? [])).contains(where: { expected in
                 !result.contains(where: { CFEqual($0.element, expected) })
             })
@@ -591,13 +595,14 @@ import ApplicationServices
             // Retention or a successful role getter alone cannot prove its live
             // attachment. Expand the same collector once under the same request.
             timing?.count("requiredSurfaceDiscoveryFallback")
-            guard case .catalogue(let expanded) = try collectWindows(
-                app, nativeWindows: nativeWindows, purpose: purpose, projection: .catalogue,
-                reportIssue: reportIssue, parentQuery: timing?.id)
-            else { preconditionFailure("required-surface fallback lost its catalogue") }
+            guard case .inputBoundary(let expanded) = try collectWindows(
+                app, nativeWindows: nativeWindows, purpose: purpose, projection: .inputBoundary,
+                reportIssue: reportIssue, parentQuery: timing?.id,
+                required: required + (contentRoot.map { [$0] } ?? []), modalHints: modalHints,
+                discoverRequired: true)
+            else { preconditionFailure("required-surface fallback lost its typed boundary") }
             outcome = "returned"
-            return .inputBoundary(.init(windows: expanded, issue: boundaryIssue, expandedRequiredSurface: true,
-                                        unresolvedModalHints: unresolvedModalHints(in: expanded)))
+            return .inputBoundary(expanded)
         }
         if projection != .inputBoundary, let contentRoot, !result.contains(where: { CFEqual($0.element, contentRoot) }) {
             timing?.count("contentRootMissingFallback")
@@ -646,6 +651,8 @@ import ApplicationServices
                 // AXSheet is the native document-modal role; an explicit false
                 // or unavailable owner is never changed into application-wide modality.
                 if result[index].kind == "sheet" && item.modal == nil { result[index].modal = true }
+            } else if projection == .inputBoundary, parent != nil {
+                result[index].parentUnknown = true
             }
         }
         if projection == .keyboardDispatch {
@@ -693,7 +700,7 @@ import ApplicationServices
                 for item in result { timing.root(item.element, ref: item.ref, nativeID: item.nativeID) }
             }
             outcome = "returned"
-            return .inputBoundary(.init(windows: result, issue: boundaryIssue, expandedRequiredSurface: false,
+            return .inputBoundary(.init(windows: result, issue: boundaryIssue, expandedRequiredSurface: discoverRequired,
                                         unresolvedModalHints: unresolvedModalHints(in: result)))
         }
         // Merge only one-to-one native matches. Same-title/overlapping windows
