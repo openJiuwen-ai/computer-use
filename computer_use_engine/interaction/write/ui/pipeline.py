@@ -82,7 +82,10 @@ class InterfacePointerPipeline:
                 "use an authorized exclusive desktop image for a cross-window drag",
                 "mode_unsupported",
             )
-        await refresh(self.controller, ui)
+        # This gesture addresses a retained image, not provider controls. Query
+        # fresh window/membership facts; native dispatch still validates the
+        # original capture, identity, modality and physical target boundary.
+        await refresh(self.controller, ui, accessibility=False)
         if not compatible_membership(image.membership, signature(allowed(ui))):
             image.expired = True
             raise local_failure(
