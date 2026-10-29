@@ -197,8 +197,11 @@ def needs_pointer_member(facts: Facts, intent: Intent, attempts: RouteHistory) -
 
     candidates = list(_iter_p(iter(_candidates(facts, intent))))
     if any(p.click is not None for p in candidates):
+        # Enumeration retains unavailable offers for refusal diagnostics.
+        candidates = [p for p in candidates if p.click is None or p.click.admission != "unavailable"]
         return (
-            intent.kind == "click"
+            bool(candidates)
+            and intent.kind == "click"
             and facts.identity == facts.within_scope == Knowledge.YES
             and facts.enabled != Knowledge.NO
             and not facts.blocked_by
