@@ -411,7 +411,7 @@ import ApplicationServices
             ownerBoundary: { popup, owner in
                 self.ownerQueries += 1
                 return try NativePopupOwnerBoundary.blocked(
-                    popup: popup, owner: owner, windows: self.windows, same: { CFEqual($0, $1) }, focused: "M")
+                    popup: popup, owner: owner, windows: self.windows, same: { CFEqual($0, $1) })
             })
     }
     func checkContainment(_ binding: [String: Any], within: [String], op: NativeOperation) throws {}

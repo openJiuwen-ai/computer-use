@@ -3,7 +3,7 @@
 import Foundation
 
 /// Existing modal policy queried for the original logical owner, independently
-/// from the narrower popup catalogue. This type grants no input permission.
+/// from the same query-local scope catalogue. This type grants no input permission.
 enum NativePopupOwnerBoundary {
     struct Window<Node> {
         let ref: String
@@ -12,7 +12,7 @@ enum NativePopupOwnerBoundary {
         var modal: Bool? = false
     }
     static func blocked<Node>(
-        popup: Node, owner: Node, windows: [Window<Node>], same: (Node, Node) -> Bool, focused: String?
+        popup: Node, owner: Node, windows: [Window<Node>], same: (Node, Node) -> Bool
     ) throws -> [String] {
         let owners = windows.filter { same($0.element, owner) }
         guard owners.count == 1 else {
@@ -32,6 +32,6 @@ enum NativePopupOwnerBoundary {
         }
         return try NativeWindowBoundary.blocked(
             root: original.ref, target: original.ref,
-            windows: windows.map { .init(ref: $0.ref, parent: $0.parent, modal: $0.modal == true) }, focused: focused)
+            windows: windows.map { .init(ref: $0.ref, parent: $0.parent, modal: $0.modal == true) })
     }
 }

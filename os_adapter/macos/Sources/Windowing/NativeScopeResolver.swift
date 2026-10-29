@@ -157,10 +157,9 @@ import ApplicationServices
         // on the target's ancestor path contains that target, not blocks it.
         // Preserve the existing admission of a uniquely observed app-modal,
         // then validate its live boundary without selecting a different view.
-        let focused = applications.focusedWindow(entry.owner, windows: windows)
         let blocked = try NativeWindowBoundary.blocked(
             root: appModal ? window : root, target: window, windows: graph,
-            focused: focused)
+            focused: applications.focusedWindow(entry.owner, windows: windows))
         // AXChildren can expose a menu's list in the document while AXWindow
         // correctly names a separate popup. Keep the document/root binding and
         // the exact element; resolve only its physical input surface from a
@@ -184,11 +183,11 @@ import ApplicationServices
         {
             return NativeInputScope(
                 wire: value.wire, application: entry.owner, window: popup, menuRoot: nil, blocked: blocked,
-                windowEvidence: .init(windows: windows, focused: focused))
+                windowEvidence: .init(windows: windows))
         }
         return NativeInputScope(
             wire: value.wire, application: entry.owner, window: nativeWindow, menuRoot: nil, blocked: blocked,
-            windowEvidence: .init(windows: windows, focused: focused))
+            windowEvidence: .init(windows: windows))
     }
 
     /// QUERY admission for an already selected, unconstrained local dispatch.
@@ -485,7 +484,7 @@ import ApplicationServices
                 return try NativePopupOwnerBoundary.blocked(
                     popup: popup, owner: owner,
                     windows: graph.windows.map { .init(ref: $0.ref, element: $0.element, parent: $0.parent, modal: $0.modal) },
-                    same: { CFEqual($0, $1) }, focused: graph.focused)
+                    same: { CFEqual($0, $1) })
             })
     }
 

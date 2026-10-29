@@ -8,23 +8,51 @@ import ApplicationServices
     let pid: pid_t
     let until: TimeInterval
     let check: () throws -> Void
+    var adapter = Adapter()
 
-    private func prepare(_ element: AXUIElement) throws -> Bool {
+    /// Per-query OS ports; no proxy registry or independent observation state.
+    @MainActor struct Adapter {
+        var timeout: (AXUIElement, Float) -> AXError = { AXUIElementSetMessagingTimeout($0, $1) }
+        var pid: (AXUIElement) -> pid_t? = { element in
+            var actual: pid_t = 0
+            return AXUIElementGetPid(element, &actual) == .success ? actual : nil
+        }
+        var value: (AXUIElement, String) -> CFTypeRef? = { AXAccess.read($0, $1).value }
+        var count: (AXUIElement) -> CFIndex? = { element in
+            var count: CFIndex = 0
+            return AXUIElementGetAttributeValueCount(element, kAXChildrenAttribute as CFString, &count) == .success
+                ? count : nil
+        }
+        var children: (AXUIElement, CFIndex) -> [AXUIElement]? = { element, count in
+            var raw: CFArray?
+            guard AXUIElementCopyAttributeValues(element, kAXChildrenAttribute as CFString, 0, count, &raw) == .success
+            else { return nil }
+            return raw as? [AXUIElement]
+        }
+        var windowID: (AXUIElement) -> UInt32? = { BackgroundEvents.nativeWindowID($0) }
+    }
+
+    /// Timeout is mutable state on this exact retained AX proxy. Every borrowed
+    /// query restores the ordinary project limit, including PID-only checks and
+    /// cancellation. Cleanup performs no AX content query and cannot mask errors.
+    private func scoped<Value>(_ element: AXUIElement, _ query: () throws -> Value?) throws -> Value? {
         try check()
         let remaining = until - ProcessInfo.processInfo.systemUptime
         guard remaining > 0 else {
             try check()
-            return false
+            return nil
         }
-        AXUIElementSetMessagingTimeout(element, Float(min(Double(AXMessaging.timeoutSeconds), remaining)))
-        var actual: pid_t = 0
-        return AXUIElementGetPid(element, &actual) == .success && actual == pid
+        _ = adapter.timeout(element, Float(min(Double(AXMessaging.timeoutSeconds), remaining)))
+        defer { _ = adapter.timeout(element, AXMessaging.timeoutSeconds) }
+        guard adapter.pid(element) == pid else { return nil }
+        return try query()
     }
     private func value(_ element: AXUIElement, _ key: String) throws -> CFTypeRef? {
-        guard try prepare(element) else { return nil }
-        let result = AXAccess.read(element, key).value
-        try check()
-        return result
+        try scoped(element) {
+            let result = adapter.value(element, key)
+            try check()
+            return result
+        }
     }
     func facts() -> NativePopupFacts<AXUIElement, NativeProcessIdentity> {
         .init(
@@ -35,27 +63,23 @@ import ApplicationServices
                 guard let raw = try value(element, kAXParentAttribute), CFGetTypeID(raw) == AXUIElementGetTypeID()
                 else { return nil }
                 let parent = unsafeDowncast(raw, to: AXUIElement.self)
-                return try prepare(parent) ? parent : nil
+                return try scoped(parent) { parent }
             },
             children: { element in
-                guard try prepare(element) else { return nil }
-                var count: CFIndex = 0, raw: CFArray?
-                guard AXUIElementGetAttributeValueCount(element, kAXChildrenAttribute as CFString, &count) == .success,
-                    count >= 0, count <= 2048
-                else { return nil }
-                try check()
-                guard
-                    AXUIElementCopyAttributeValues(element, kAXChildrenAttribute as CFString, 0, count, &raw)
-                        == .success, let children = raw as? [AXUIElement], children.count == count
-                else { return nil }
-                try check()
-                return children
+                try scoped(element) {
+                    guard let count = adapter.count(element), count >= 0, count <= 2048 else { return nil }
+                    try check()
+                    guard let children = adapter.children(element, count), children.count == count else { return nil }
+                    try check()
+                    return children
+                }
             },
             windowID: { element in
-                guard try prepare(element) else { return nil }
-                let result = BackgroundEvents.nativeWindowID(element)
-                try check()
-                return result
+                try scoped(element) {
+                    let result = adapter.windowID(element)
+                    try check()
+                    return result
+                }
             },
             process: {
                 try check()
