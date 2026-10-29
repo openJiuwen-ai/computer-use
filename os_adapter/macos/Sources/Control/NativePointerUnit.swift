@@ -233,13 +233,29 @@ enum NativePointerReadiness {
         let ready: Bool
         let foreground: Bool
         let hit: NativeInputWindowHit?
+        let windowKind: NativePointerReadiness.WindowKind
+        let focus: NativePointerReadiness.WindowFocus
+
+        init(
+            ready: Bool, foreground: Bool, hit: NativeInputWindowHit?,
+            windowKind: NativePointerReadiness.WindowKind = .visualOnly,
+            focus: NativePointerReadiness.WindowFocus = .notRequired
+        ) {
+            self.ready = ready
+            self.foreground = foreground
+            self.hit = hit
+            self.windowKind = windowKind
+            self.focus = focus
+        }
     }
 
     /// Preserve the already queried physical hit instead of reconstructing it
     /// from a ready boolean when a popup offer needs a typed point proof.
     func physicalClickSample(at point: CGPoint) -> PhysicalClickSample {
         let value = sampleReadiness(at: point, kind: .click, delivery: .systemPointer)
-        return .init(ready: value.ready, foreground: value.foreground, hit: value.hit)
+        return .init(
+            ready: value.ready, foreground: value.foreground, hit: value.hit,
+            windowKind: value.windowKind, focus: value.focus)
     }
 
     private func diagnoseReadiness(_ value: Readiness, at point: CGPoint, phase: String) {

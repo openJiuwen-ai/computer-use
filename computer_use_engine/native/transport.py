@@ -117,6 +117,7 @@ def decode_click_offer(value):
             value["reason"],
             tuple(value["preparationOptions"]),
             value["preferenceProfile"],
+            "readyPhysical" if value.get("preferenceHint") == "readyPhysical" else None,
         )
     )
 

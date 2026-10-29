@@ -8,6 +8,7 @@ import ApplicationServices
 /// by the execute caller.
 struct NativeClickContract: Equatable {
     enum Admission: String { case ready, preparationRequired, unavailable, insufficientEvidence }
+    enum PreferenceHint: String { case readyPhysical }
     enum DocumentForeground: Equatable {
         case notRequired, required(ready: Bool), unconfirmed(ready: Bool)
         var required: Bool {
@@ -25,6 +26,7 @@ struct NativeClickContract: Equatable {
     var popupPointer: NativePopupPointerQualification? = nil
     // Native retained requirement, not execute-caller authority or wire data.
     var documentForeground = DocumentForeground.notRequired
+    var preferenceHint: PreferenceHint? = nil
     var documentForegroundRequired: Bool { documentForeground.required }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -38,6 +40,7 @@ struct NativeClickContract: Equatable {
             && lhs.admission == rhs.admission && lhs.reason == rhs.reason
             && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
             && lhs.backgroundUnavailable == rhs.backgroundUnavailable && lhs.documentForeground == rhs.documentForeground
+            && lhs.preferenceHint == rhs.preferenceHint
     }
 
     /// A refresh of the same retained selection cannot erase proved Web
@@ -51,15 +54,17 @@ struct NativeClickContract: Equatable {
             admission: !ready && admission == .ready ? .preparationRequired : admission, reason: reason,
             preparationOptions: ready ? preparationOptions : ["foreground"],
             backgroundFamily: ready ? backgroundFamily : nil, backgroundUnavailable: backgroundUnavailable,
-            documentForeground: .required(ready: ready))
+            documentForeground: .required(ready: ready), preferenceHint: preferenceHint)
     }
 
     var wire: [String: Any] {
-        [
+        var value: [String: Any] = [
             "routeFamily": routeFamily,
             "interaction": [.objectAction, .objectSelection].contains(delivery) ? "semantic" : "pointer",
             "delivery": delivery.rawValue, "admission": admission.rawValue, "reason": reason as Any? ?? NSNull(),
             "preparationOptions": preparationOptions, "preferenceProfile": "default"
         ]
+        if let preferenceHint { value["preferenceHint"] = preferenceHint.rawValue }
+        return value
     }
 }

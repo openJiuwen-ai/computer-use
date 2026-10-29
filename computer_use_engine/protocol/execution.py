@@ -86,6 +86,8 @@ click_offer = obj(
         reason=string().nullable(),
         preparationOptions=array(enum("background", "foreground"), max=2),
         preferenceProfile=enum("default", "physicalWhenAvailableInExclusive"),
+        # Advisory metadata from newer peers must not invalidate a legal click.
+        preferenceHint=unknown().optional(),
     )
 )
 click_dispatch = enum("notDispatched", "dispatched", "partial", "unknown")

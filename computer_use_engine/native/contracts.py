@@ -351,9 +351,11 @@ class ClickOffer:
     reason: str | None = None
     preparation_options: tuple[str, ...] = ()
     preference_profile: str = "default"
+    # A query-local ordering hint; never excludes another valid delivery.
+    preference_hint: Literal["readyPhysical"] | None = None
 
     def wire(self):
-        return dict(
+        value = dict(
             routeFamily=self.route_family,
             interaction=self.interaction,
             delivery=self.delivery,
@@ -362,6 +364,9 @@ class ClickOffer:
             preparationOptions=list(self.preparation_options),
             preferenceProfile=self.preference_profile,
         )
+        if self.preference_hint is not None:
+            value["preferenceHint"] = self.preference_hint
+        return value
 
 
 @dataclass(frozen=True)

@@ -217,6 +217,46 @@ def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     return CandidateSet(request, tuple(candidates))
 
 
+def _ready_physical_preference(value: CandidateSet) -> set[str]:
+    """Promote one native-proved ready pointer, without changing eligibility."""
+    request, facts = value.request, value.request.facts
+    intent, binding = request.intent, cast("Binding", facts.binding)
+    if (
+        not _exclusive_element_intent(request, "click", platform="macos")
+        or binding.capture is not None
+        or set(intent.parameters) - {"button", "count"}
+        or intent.parameters.get("button", "left") != "left"
+        or intent.parameters.get("count", 1) != 1
+        or facts.actuator is not None
+        or facts.receiver is not None
+        or facts.application_menu is True
+        or facts.input.foreground_surface != binding.surface
+        or facts.input.pointer_hit != binding.node
+        or facts.input.geometry_current != Knowledge.YES
+        or any(p.unit == "native_selection" for p in value.primitives)
+    ):
+        return set()
+    # Consume the already resolved primary; raw secondary Press never overrides
+    # ShowMenu, selection or an explicit native action's semantics.
+    actions = [p for p in value.primitives if p.unit == "native_action"]
+    if len(actions) != 1 or actions[0].action != "AXPress":
+        return set()
+    return {
+        p.id
+        for p in value.primitives
+        if p.unit == "pointer_sequence"
+        and p.channel == Channel.POINTER
+        and p.supported == Knowledge.YES
+        and p.readiness == Knowledge.YES
+        and not p.pending
+        and p.click is not None
+        and p.click.preference_hint == "readyPhysical"
+        and p.click.delivery == "desktop_pointer"
+        and p.click.admission == "ready"
+        and not p.click.preparation_options
+    }
+
+
 def order_supported_candidates(value: CandidateSet) -> CandidateSet:
     """Order supported object, editor, keyboard, and pointer units for route selection."""
     request, candidates = value.request, value.primitives
@@ -228,6 +268,7 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
     # a keyboard contract is already ready, use that editing path instead.
     # choose() still requires editing evidence before permitting keyboard input.
     order = {Channel.OBJECT: 0, Channel.EDITOR: 2, Channel.KEYBOARD: 3, Channel.POINTER: 4}
+    preferred = _ready_physical_preference(value)
 
     def priority(primitive: Primitive) -> tuple[int, int, int, str]:
         channel_order = order.get(primitive.channel)
@@ -236,7 +277,7 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
         if primitive.click is not None:
             offer = primitive.click
             return (
-                channel_order,
+                -1 if primitive.id in preferred else channel_order,
                 1 if primitive.unit == "native_selection" else 0,
                 0 if offer.admission == "ready" and offer.delivery == "desktop_pointer" else 1,
                 offer.route_family,

@@ -21,6 +21,7 @@ import ApplicationServices
         var enabled: Bool?, foreground = false, role: String?, complete = false, menu = false
         func pointerOffers(
             _ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false,
+            originalElementHit: Bool = false,
             qualifyPopup: ((NativePointerUnit.PhysicalClickSample) -> NativePopupPointerQualification?)? = nil
         ) throws {
             try pointer.validateWindowIdentity()
@@ -49,7 +50,10 @@ import ApplicationServices
                 try BackgroundEvents.requirePointerRoute(window: pointer.window)
             } catch is NativePreparationUnavailable { transport = false }
             let directedAvailable = !BackgroundTarget.isExclusive && transport
-            let systemReady = pointer.ready(at: point, delivery: .systemPointer)
+            // The same existing HID readiness query retains its provenance;
+            // do not sample readiness again to manufacture a preference.
+            let physical = pointer.physicalClickSample(at: point)
+            let systemReady = physical.ready
             let directed = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
                 admission: directedAvailable
@@ -68,7 +72,10 @@ import ApplicationServices
                     : systemReady ? nil : "The exact target window needs authorized foreground preparation.",
                 preparationOptions: systemReady ? (exposure ? ["background"] : []) : ["foreground"],
                 backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !transport || !directedAvailable)
-            for offer in foreground ? [system, directed] : [directed, system] {
+            let preferredSystem = NativeReadyPhysicalClickPreference.offer(
+                system, intent: op.request, exclusive: BackgroundTarget.isExclusive,
+                originalElementHit: !exposure && originalElementHit, window: pointer.window.id, sample: physical)
+            for offer in foreground ? [preferredSystem, directed] : [directed, preferredSystem] {
                 declarations.declareClick(.pointer(.click), offer: offer)
             }
             input["pointerRoute"] = systemReady || directed.admission == .ready ? "yes" : "no"
@@ -202,7 +209,11 @@ import ApplicationServices
                                         foreground: physical.foreground), same: { CFEqual($0, $1) })
                             })
                     } else {
-                        try pointerOffers(pointer, at: geometry.point)
+                        try pointerOffers(
+                            pointer, at: geometry.point,
+                            originalElementHit: plan.actuator == nil && plan.receiver == nil
+                                && facts.actions?.contains(where: { $0.name == kAXPressAction }) == true
+                                && sampled.hit.map { CFEqual($0, unit.element) } == true)
                     }
                 } catch let error as DriverError where error.code == .inputUnavailable || error.code == .modeUnsupported
                 {
