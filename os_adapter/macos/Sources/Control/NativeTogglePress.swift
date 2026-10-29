@@ -20,9 +20,10 @@ enum NativeTogglePress {
     }
 
     static func mayConfirm(_ status: AXError) -> Bool {
-        // Only returned action errors can be checked against local toggle state.
-        // Transport/timeouts and invalid objects retain their original failure.
-        [.failure, .attributeUnsupported, .actionUnsupported].contains(status)
+        // A returned AXPress cannotComplete may follow an effective action
+        // (AXUIElementPerformAction SDK contract). This admits readback only;
+        // outer cancellation/timeouts and invalid objects remain failures.
+        [.failure, .attributeUnsupported, .actionUnsupported, .cannotComplete].contains(status)
     }
 
     static func shows(role: String, before: String, after: String) -> Bool {
