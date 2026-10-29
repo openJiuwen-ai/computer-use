@@ -195,10 +195,15 @@ import ApplicationServices
         surface: Surface, blocked: [String]
     ) {
         let selected = try windowScope(instance: instance, root: root, surface: id).surface
-        let native = NativeWindows.list(selected.owner)
+        let metadata = { ["rootWindow": root, "surface": id] as [String: Any] }
+        let native = NativePointerTiming.measure("captureScope.nativeWindows", metadata: metadata) {
+            NativeWindows.list(selected.owner)
+        }
         let windows: [NativeApplicationAccess.Window]
         do {
-            windows = try state.applications.windows(selected.owner, nativeWindows: native, purpose: .inputValidation)
+            windows = try NativePointerTiming.measure("captureScope.accessibilityWindows", metadata: metadata) {
+                try state.applications.windows(selected.owner, nativeWindows: native, purpose: .inputValidation)
+            }
         } catch {
             try RequestDiagnostics.checkCancellation()
             // A directly selected native window is still an addressable

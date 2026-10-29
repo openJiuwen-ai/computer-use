@@ -34,6 +34,11 @@ import ApplicationServices
         guard let window = WindowServerInfo.window(mapping.id),
             (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == mapping.pid
         else { throw ObservationChanged("window disappeared or owner changed; read the app again") }
+        NativePointerTiming.record("captureGeometrySample", metadata: {
+            ["window": mapping.id, "targetPID": mapping.pid,
+             "retainedFrame": [mapping.frame.minX, mapping.frame.minY, mapping.frame.width, mapping.frame.height],
+             "sampledBounds": window[kCGWindowBounds as String] as Any? ?? NSNull()]
+        })
         guard let rawBounds = window[kCGWindowBounds as String] as? [String: Any],
             let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary), bounds == mapping.frame
         else { throw ObservationChanged("window disappeared or geometry changed; read the app again") }
