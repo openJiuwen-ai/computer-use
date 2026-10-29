@@ -195,23 +195,25 @@ class ExecutionSession:
 
             pending["cancel"] = self._track(cancel())
         try:
-            # A write may partially dispatch before raising. Preserve unknown
-            # effects on send failure; never replay the request automatically.
-            pending["sent"] = True
-            write_message(
-                self._writer,
-                dict(
-                    code=code,
-                    executionId=id_,
-                    history=policy,
-                ),
-            )
-            await self._writer.drain()
-        except Exception as error:
-            self.reset(f"Cannot send code: {error}")
-        try:
+            try:
+                # A write may partially dispatch before raising. Preserve unknown
+                # effects on send failure; never replay the request automatically.
+                pending["sent"] = True
+                write_message(
+                    self._writer,
+                    dict(
+                        code=code,
+                        executionId=id_,
+                        history=policy,
+                    ),
+                )
+                await self._writer.drain()
+            except Exception as error:
+                self.reset(f"Cannot send code: {error}")
             return await asyncio.shield(future)
         except asyncio.CancelledError:
+            # Cancellation while draining an already-written request has the
+            # same unknown effects and retirement barrier as awaiting its result.
             await asyncio.shield(self.reset("Call cancelled."))
             raise
 

@@ -282,6 +282,116 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(self.children[-1].returncode)
         self.assertEqual(Path(self.env["MCP_FIXTURE_DISPATCHES"]).read_text(), "received\n")
 
+    async def test_task_cancellation_during_send_drain_retires_sent_request(self):
+        self.assertEqual(text(await self.session.execute("import asyncio\ncounter = 0\nprint('ready')")), "ready")
+        old = self.session._child
+        writer = self.session._writer
+        original_drain = writer.drain
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blockedDrain():
+            await original_drain()
+            entered.set()
+            await release.wait()
+
+        with patch.object(writer, "drain", blockedDrain):
+            try:
+                pending = self.session.execute("counter += 1\nprint('sent:' + str(counter))\nawait asyncio.sleep(30)")
+                await asyncio.wait_for(entered.wait(), 3)
+                await self.until(
+                    lambda: any(
+                        event["kind"] == "output" and event["content"].get("text") == "sent:1"
+                        for event in self.events()
+                    )
+                )
+                state = self.session._pending
+                self.assertTrue(state["sent"])
+                pending.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(pending, 2)
+                self.assertIsNone(self.session._child)
+                self.assertIsNotNone(old.returncode)
+                self.assertIsNone(self.session._pending)
+                self.assertTrue(state["timer"].cancelled())
+                ended = next(
+                    event
+                    for event in self.events()
+                    if event["kind"] == "execution_end" and event["executionId"] == state["id"]
+                )
+                self.assertIn("sent:1", text(ended))
+                self.assertIn("may already have executed", text(ended))
+                self.assertNotIn("code was not sent", text(ended))
+                reset = next(event for event in self.events() if event["kind"] == "execution_reset")
+                self.assertIn("Call cancelled", reset["reason"])
+                self.assertTrue(reset["complete"])
+            finally:
+                release.set()
+        fresh = await self.session.execute("print('counter' in globals())")
+        self.assertEqual(text(fresh), "False")
+        self.assertEqual(fresh["_meta"]["computer-use"]["executionId"], state["id"] + 1)
+        self.assertEqual(len(self.children), 2)
+        self.assertEqual(
+            sum(event["kind"] == "execution_start" and event["executionId"] == state["id"] for event in self.events()),
+            1,
+        )
+
+    async def test_cancel_during_send_drain_preserves_pending_native_cleanup(self):
+        self.assertEqual(text(await self.session.execute("print('ready')")), "ready")
+        old = self.session._child
+        writer = self.session._writer
+        original_drain = writer.drain
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blockedDrain():
+            await original_drain()
+            entered.set()
+            await release.wait()
+
+        with (
+            patch.object(writer, "drain", blockedDrain),
+            patch("computer_use_mcp.session.CLEANUP_TIMEOUT_SECONDS", 0.05),
+        ):
+            try:
+                pending = self.session.execute(
+                    "import asyncio, subprocess, sys\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(0.6)'], "
+                    "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=(4,))\n"
+                    "print('native lifetime held')\nawait asyncio.sleep(30)",
+                )
+                await asyncio.wait_for(entered.wait(), 3)
+                await self.until(
+                    lambda: any(
+                        event["kind"] == "output" and event["content"].get("text") == "native lifetime held"
+                        for event in self.events()
+                    )
+                )
+                state = self.session._pending
+                pending.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(pending, 2)
+                self.assertTrue(state["sent"])
+                self.assertIsNotNone(old.returncode)
+                self.assertIsNone(self.session._pending)
+                self.assertIsNotNone(self.session._retiring)
+                reset = next(event for event in self.events() if event["kind"] == "execution_reset")
+                self.assertFalse(reset["complete"])
+                ended = next(
+                    event
+                    for event in self.events()
+                    if event["kind"] == "execution_end" and event["executionId"] == state["id"]
+                )
+                self.assertIn("Native cleanup is still pending", text(ended))
+                self.assertIn("may already have executed", text(ended))
+                self.assertNotIn("code was not sent", text(ended))
+                self.assertIn("Native cleanup is still pending", text(await self.session.execute("pass")))
+                self.assertEqual(len(self.children), 1)
+            finally:
+                release.set()
+                if self.session._child is not None or self.session._pending is not None:
+                    await self.session.reset("Test cleanup.")
+        await self.until(lambda: self.session._retiring is None)
+        self.assertEqual(text(await self.session.execute("print('fresh')")), "fresh")
+
     async def test_close_during_startup_is_prompt_and_never_admits_another_call(self):
         os.environ["MCP_FIXTURE_FAULT"] = "startup-wait"
         pending = self.session.execute("pass")
