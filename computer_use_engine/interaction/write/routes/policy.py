@@ -180,7 +180,12 @@ def has_ready_route(facts: Facts, intent: Intent) -> bool:
 
 
 def needs_pointer_member(facts: Facts, intent: Intent, attempts: RouteHistory) -> bool:
-    """Check whether every remaining click route requires pointer geometry."""
+    """Check whether remaining click routes need read-only member qualification.
+
+    Integrated click offers express missing evidence in their admission, rather
+    than the legacy pending-geometry condition. Neither form authorizes input;
+    the resolver must still prove the hit's control-part relationship.
+    """
 
     def _iter_p(_source_items: Iterator[Any]) -> Iterator[Any]:
         for p in _source_items:
@@ -191,6 +196,17 @@ def needs_pointer_member(facts: Facts, intent: Intent, attempts: RouteHistory) -
                 yield p
 
     candidates = list(_iter_p(iter(_candidates(facts, intent))))
+    if any(p.click is not None for p in candidates):
+        return (
+            intent.kind == "click"
+            and facts.identity == facts.within_scope == Knowledge.YES
+            and facts.enabled != Knowledge.NO
+            and not facts.blocked_by
+            and all(
+                p.unit == "pointer_sequence" and p.click is not None and p.click.admission == "insufficientEvidence"
+                for p in candidates
+            )
+        )
     return any(p.unit == "pointer_sequence" and "geometry" in p.pending for p in candidates) and not any(
         "geometry" not in p.pending for p in candidates
     )
