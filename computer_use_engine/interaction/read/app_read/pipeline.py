@@ -113,7 +113,7 @@ class DirectorySelectionPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                     value.read,
                     surfaces_query(
                         value.application["id"],
-                        accessibility=value.call.request.view != "image",
+                        profile=value.call.request.directory_profile,
                         capabilities=services.port.connection.capabilities,
                     ),
                     _control=control,
@@ -219,6 +219,7 @@ class LaunchCoordinator(Pipeline["ApplicationSelection", "ApplicationSelection"]
                 launched=value.launch["dispatch"] == Dispatch.DISPATCHED.value,
                 installation=value.installation,
                 on_scope=value.request.on_scope,
+                profile=value.request.directory_profile,
                 _control=control,
             )
             return replace(value, application=application, directory=directory)
@@ -284,6 +285,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                 launched=True,
                 installation=selector.installation,
                 on_scope=call.request.on_scope,
+                profile=call.request.directory_profile,
                 _control=control,
             )
             return ApplicationSelection(call, application, directory)
@@ -312,6 +314,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                             value.call.remaining,
                             _control=control,
                             include_overview=value.request.overview,
+                            profile=value.request.directory_profile,
                         ) from error
                     raise
             elif window is not None:

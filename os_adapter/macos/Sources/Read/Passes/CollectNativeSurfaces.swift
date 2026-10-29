@@ -5,7 +5,8 @@ import ApplicationServices
 
 /// QUERY/RESOURCE: collect only the requested native facts using original services and registration timing.
 @MainActor enum CollectNativeSurfacesPass {
-    static func run(_ request: NativeReadRequest, application: String, access: NativeQueryAccess) throws -> [String:
+    static func run(_ request: NativeReadRequest, application: String,
+                    profile: NativeInspectQuery.SurfaceProfile, access: NativeQueryAccess) throws -> [String:
         Any]
     {
         let op = request.operation, requested = request.requested
@@ -13,7 +14,7 @@ import ApplicationServices
             throw DriverError("directory query requires a session read scope", code: .invalidRequest)
         }
         try access.sharing.checkAvailable()
-        let result = try access.directory.collectSurfaces(application)
+        let result = try access.directory.collectSurfaces(application, profile: profile)
         try op.check()
         return result
     }

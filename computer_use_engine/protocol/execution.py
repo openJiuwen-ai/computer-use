@@ -284,7 +284,14 @@ def decode_selection_basis(value):
 _inspect_queries = {
     "launch": obj(dict(kind=enum("launch"))),
     "applications": obj(dict(kind=enum("applications"))),
-    "surfaces": obj(dict(kind=enum("surfaces"), application=identity, includeAccessibility=boolean().optional())),
+    "surfaces": obj(
+        dict(
+            kind=enum("surfaces"),
+            application=identity,
+            includeAccessibility=boolean().optional(),
+            profile=enum("visual").optional(),
+        )
+    ),
     "roots": obj(dict(kind=enum("roots"), application=identity)),
     "inputContext": obj(
         dict(
@@ -332,6 +339,8 @@ def decode_inspect_query(value):
     if not isinstance(value, dict) or not isinstance(value.get("kind"), str) or value["kind"] not in _inspect_queries:
         raise ValueError("protocol: unknown native inspection query")
     result = _inspect_queries[value["kind"]].parse(value)
+    if "profile" in result and "includeAccessibility" in result:
+        raise ValueError("protocol: surface profile and legacy accessibility flag cannot be combined")
     if "currentReceiver" in result and (
         result["currentReceiver"] is not True or any(key in result for key in ("actuator", "receiver", "basis"))
     ):

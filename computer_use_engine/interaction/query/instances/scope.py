@@ -11,7 +11,7 @@ from computer_use.diagnostics import local_failure
 from computer_use.interaction.query.instances.membership import ancestor, automatic_root, membership_evidence
 from computer_use.interaction.read.model import WindowSelectionRequired
 from computer_use.native.contracts import Knowledge
-from computer_use.native.query.directory import select_application, selected_window, surfaces_query
+from computer_use.native.query.directory import SurfaceReadProfile, select_application, selected_window, surfaces_query
 from computer_use.native.scopes import (
     FixedWindowInvalidated,
     FixedWindowUnconfirmed,
@@ -254,7 +254,9 @@ async def resolve(
     # pylint: disable-next=protected-access
     directory = await controller.reader.directory._query(
         surfaces_query(
-            application["id"], accessibility=view != "image", capabilities=controller.transport.capabilities
+            application["id"],
+            profile=SurfaceReadProfile.VISUAL if view == "image" else SurfaceReadProfile.ACCESSIBILITY,
+            capabilities=controller.transport.capabilities,
         ),
         30000,
     )

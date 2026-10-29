@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from computer_use.identity import FrozenRecord
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
-from computer_use.native.query.directory import surfaces_query
+from computer_use.native.query.directory import SurfaceReadProfile, surfaces_query
 from computer_use.session.interfaces import ApplicationEntry
 
 from .membership import roots
@@ -49,7 +49,7 @@ class ApplicationDiscoveryPipeline:
                     surfaces = await self.directory._query(
                         surfaces_query(
                             application["id"],
-                            accessibility=False,
+                            profile=SurfaceReadProfile.VISUAL,
                             capabilities=self.directory.port.connection.capabilities,
                         ),
                         30000,

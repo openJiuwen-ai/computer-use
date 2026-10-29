@@ -68,10 +68,12 @@ import ApplicationServices
 
     func windows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
-        purpose: NativeWindowQueryPurpose = .observation, reportIssue: ((String) -> Void)? = nil
+        purpose: NativeWindowQueryPurpose = .observation, profile: NativeInspectQuery.SurfaceProfile = .accessibility,
+        modalHints: [NativeApplicationReader.ModalHint] = [], reportIssue: ((String) -> Void)? = nil
     ) throws -> [Window] {
         return try reader.windows(
-            app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose, reportIssue: reportIssue)
+            app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose, profile: profile,
+            modalHints: modalHints, reportIssue: reportIssue)
     }
 
     func keyboardBoundary(_ app: NSRunningApplication, contentRoot: AXUIElement) throws

@@ -26,6 +26,12 @@ import ApplicationServices
     /// Native window adapters share this directory's retained identities. The
     /// defaults are live OS queries; tests replace only these leaf adapters.
     @MainActor struct WindowServices {
+        var locate: ((String) throws -> NSRunningApplication)? = nil
+        var listIfAvailable: (NSRunningApplication) -> [NativeWindows.Window]? = { NativeWindows.listIfAvailable($0) }
+        var trusted: () -> Bool = AXIsProcessTrusted
+        var activate: ((NSRunningApplication) -> AccessibilityActivation.Outcome)? = nil
+        var focusedWindow: ((NSRunningApplication) -> AXUIElement?)? = nil
+        var registerRoot: ((AXUIElement, NSRunningApplication, String) throws -> String)? = nil
         var list: (NSRunningApplication) -> [NativeWindows.Window] = { NativeWindows.list($0) }
         var owner: (NSRunningApplication) throws -> Void = { try BackgroundTarget($0).validate() }
         var process: (pid_t) -> NativeProcessIdentity? = { NativeProcessIdentity.read($0) }
@@ -219,12 +225,7 @@ import ApplicationServices
         let native = NativePointerTiming.measure("captureScope.nativeWindows", metadata: metadata) {
             windowServices.list(selected.owner)
         }
-        var modalHints = [NativeApplicationReader.ModalHint]()
-        for surface in surfaces.values where surface.owner.isEqual(selected.owner) {
-            guard case .retainedModal(let identity)? = surface.queryHint else { continue }
-            try RequestDiagnostics.checkCancellation()
-            modalHints.append(.init(identity: identity, nativePresence: identity.native.map { modalPresence($0, current: native) }))
-        }
+        let modalHints = try retainedModalHints(owner: selected.owner, native: native)
         let necessaryHints = modalHints.contains {
             $0.nativePresence != .ended && $0.identity.window != selected.window
         }
@@ -367,6 +368,16 @@ import ApplicationServices
         }
     }
 
+    private func retainedModalHints(owner: NSRunningApplication, native: [NativeWindows.Window]) throws
+        -> [NativeApplicationReader.ModalHint]
+    {
+        try surfaces.values.filter { $0.owner.isEqual(owner) }.compactMap { surface in
+            guard case .retainedModal(let identity)? = surface.queryHint else { return nil }
+            try RequestDiagnostics.checkCancellation()
+            return .init(identity: identity, nativePresence: identity.native.map { modalPresence($0, current: native) })
+        }
+    }
+
     func remember(_ observed: Surface) {
         var surface = observed
         if case .observedModal? = surface.queryHint {
@@ -415,37 +426,50 @@ import ApplicationServices
         return value
     }
 
-    func collectSurfaces(_ application: String) throws -> [String: Any] {
-        guard ApplicationInstances<NSRunningApplication>.isInstanceSelector(application),
-            case .running(let app) = try state.discovery.locate(application)
-        else {
+    func collectSurfaces(_ application: String, profile: NativeInspectQuery.SurfaceProfile = .accessibility) throws -> [String: Any] {
+        guard ApplicationInstances<NSRunningApplication>.isInstanceSelector(application) else {
             throw DriverError(
                 "surface discovery requires an observed running-application id; it never launches an application",
                 code: .invalidRequest)
+        }
+        let app: NSRunningApplication
+        if let locate = windowServices.locate { app = try locate(application) }
+        else {
+            guard case .running(let observed) = try state.discovery.locate(application) else {
+                throw DriverError("surface discovery requires an observed running-application id", code: .invalidRequest)
+            }
+            app = observed
         }
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         var reasons = [String]()
         var provider: [String: Any] = [
             "status": "permissionUnavailable", "attribute": NSNull(), "writeStatus": NSNull()
         ]
-        if AXIsProcessTrusted() {
+        if profile == .visual {
+            // This narrow contract avoids provider initialization and content
+            // reads. Window-level AX facts remain optional live evidence.
+            provider["status"] = "notRequested"
+        } else if windowServices.trusted() {
             // Provider initialization is a platform operation, not window
             // activation. Reuse the lifetime-bounded opt-in used by normal
             // reads, and expose acknowledgement without claiming readiness.
-            let activation = state.accessibilityActivation.ensure(app)
+            let activation = windowServices.activate?(app) ?? state.accessibilityActivation.ensure(app)
             provider = [
                 "status": activation.kind.rawValue, "attribute": activation.attribute?.rawValue as Any? ?? NSNull(),
                 "writeStatus": activation.writeStatus?.rawValue as Any? ?? NSNull()
             ]
         }
-        let native = NativeWindows.listIfAvailable(app)
+        let native = windowServices.listIfAvailable(app)
         if native == nil { reasons.append("WindowServer catalogue unavailable") }
-        if !AXIsProcessTrusted() { reasons.append("accessibility permission unavailable; native windows are retained") }
+        if !windowServices.trusted() { reasons.append("accessibility permission unavailable; native windows are retained") }
         // Reuse the platform's explicit AX/WindowServer correspondence. This
         // describes native ownership, not AppSelection's default-view policy.
         let ax: [NativeApplicationAccess.Window]
         do {
-            ax = try state.applications.windows(app, nativeWindows: native ?? [], reportIssue: { reasons.append($0) })
+            ax = try state.applications.windows(
+                app, nativeWindows: native ?? [], profile: profile,
+                modalHints: profile == .visual ? retainedModalHints(owner: app, native: native ?? []) : [],
+                reportIssue: { reasons.append($0) })
         } catch {
             try RequestDiagnostics.checkCancellation()
             reasons.append(
@@ -460,27 +484,44 @@ import ApplicationServices
         }
         var entries = [[String: Any]](), known = Set<String>()
         func append(
-            window: String, title: String, kind: String, parent: String?, parentUnknown: Bool = false, modal: Bool?,
+            window: String, title: String, kind: String, parent: String?, parentUnknown: Bool = false,
+            applicationParent: Bool = false, modal: Bool?,
             element: AXUIElement?
         ) throws {
             guard known.insert(window).inserted else { return }
             guard entries.count < 512 else { return }
             try RequestDiagnostics.checkCancellation()
+            let parent = profile == .visual && parentUnknown ? nil : parent
             let scope = state.applications.observationScope(app, window: element, reference: window)
             let instance = state.appSelections.get(owner: app, root: window)
-            let node = try element.map { try state.applications.registerNativeRoot($0, app: app, scope: scope) }
+            let node = try (profile == .visual ? nil : element).map {
+                try windowServices.registerRoot?($0, app, scope)
+                    ?? state.applications.registerNativeRoot($0, app: app, scope: scope)
+            }
             // AXApplication may contain a native attached window. Confirmed
             // native edges supplement AX; conflicts remain explicit unknowns.
             var parentState = parent == nil ? "unknown" : "known"
-            if !parentUnknown, parent == nil, let element, let owner = AXAccess.element(element, kAXParentAttribute),
+            if profile == .visual, !parentUnknown, parent == nil, applicationParent { parentState = "none" }
+            if profile != .visual, !parentUnknown, parent == nil, let element, let owner = AXAccess.element(element, kAXParentAttribute),
                 AXAccess.read(owner, kAXRoleAttribute).value as? String == kAXApplicationRole
             {
                 parentState = "none"
             }
             let matching = visual[window] ?? []
+            // A native-only image refresh must not discard an older exact AX
+            // binding or its modal-query hint. Retention proves no current AX
+            // fact; the same input boundary will revalidate it before dispatch.
+            let previous = surfaces[scope]
+            let retainedElement: AXUIElement?
+            if profile == .visual, element == nil, let previous, previous.owner.isEqual(app),
+                previous.window == window, let oldNative = previous.native,
+                matching.count == 1, matching[0].mapping.id == oldNative.mapping.id,
+                matching[0].process == oldNative.process
+            { retainedElement = previous.element }
+            else { retainedElement = element }
             remember(
                 Surface(
-                    owner: app, window: window, scope: scope, parent: parent, element: element,
+                    owner: app, window: window, scope: scope, parent: parent, element: retainedElement,
                     native: matching.count == 1 ? matching[0] : nil,
                     queryHint: modal == true || (kind == "sheet" && modal != false) ? .observedModal : nil))
             entries.append([
@@ -492,7 +533,8 @@ import ApplicationServices
         for item in ax {
             try append(
                 window: item.ref, title: item.title, kind: item.kind, parent: item.parent,
-                parentUnknown: item.parentUnknown, modal: item.modal, element: item.element)
+                parentUnknown: item.parentUnknown, applicationParent: item.applicationParent,
+                modal: item.modal, element: item.element)
         }
         for item in native ?? [] {
             let ref = state.applications.windowReference(item)
@@ -504,10 +546,15 @@ import ApplicationServices
         // selection and input readiness. Never infer it from z-order, main
         // window, title or the foreground application. Unmapped is unknown.
         var focusedWindow: String?
-        if AXIsProcessTrusted() {
-            let root = AXUIElementCreateApplication(app.processIdentifier)
-            AXMessaging.configure(root)
-            if let focused = AXAccess.element(root, kAXFocusedWindowAttribute) {
+        if windowServices.trusted() {
+            let focused: AXUIElement?
+            if let read = windowServices.focusedWindow { focused = read(app) }
+            else {
+                let root = AXUIElementCreateApplication(app.processIdentifier)
+                AXMessaging.configure(root)
+                focused = AXAccess.element(root, kAXFocusedWindowAttribute)
+            }
+            if let focused {
                 let matches = entries.compactMap { item -> String? in
                     guard let scope = item["surface"] as? String, let element = surfaces[scope]?.element,
                         CFEqual(element, focused)
@@ -518,7 +565,7 @@ import ApplicationServices
             }
         }
         if known.count > entries.count { reasons.append("surface catalogue entry limit") }
-        try BackgroundTarget(app).validate()
+        try windowServices.owner(app)
         var value = result("surfaces", began: began, reasons: reasons)
         value["application"] = application
         value["surfaces"] = entries

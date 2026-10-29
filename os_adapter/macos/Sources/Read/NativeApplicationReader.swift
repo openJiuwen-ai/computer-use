@@ -81,6 +81,9 @@ import ApplicationServices
         var kind: String = "window"
         var parent: String? = nil
         var parentUnknown: Bool = false
+        // A fresh AX path reached this process's application, not merely an
+        // absent parent/native parent zero. Used by visual directory rows.
+        var applicationParent: Bool = false
         var nativeID: CGWindowID? = nil
         var modal: Bool? = nil
         var document: String? = nil
@@ -96,12 +99,14 @@ import ApplicationServices
 
     func windows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
-        purpose: NativeWindowQueryPurpose = .observation, reportIssue: ((String) -> Void)? = nil
+        purpose: NativeWindowQueryPurpose = .observation, profile: NativeInspectQuery.SurfaceProfile = .accessibility,
+        modalHints: [ModalHint] = [], reportIssue: ((String) -> Void)? = nil
     ) throws -> [Window] {
         guard
             case .catalogue(let windows) = try collectWindows(
-                app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose, projection: .catalogue,
-                reportIssue: reportIssue)
+                app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose,
+                projection: profile == .visual ? .visualCatalogue : .catalogue,
+                reportIssue: reportIssue, modalHints: modalHints)
         else { preconditionFailure("catalogue adapter received a boundary projection") }
         return windows
     }
@@ -153,7 +158,7 @@ import ApplicationServices
         return result
     }
 
-    private enum Projection: Equatable { case catalogue, keyboardDispatch, inputBoundary }
+    private enum Projection: Equatable { case catalogue, visualCatalogue, keyboardDispatch, inputBoundary }
     private enum Collection {
         case catalogue([Window])
         case boundary(NativeKeyboardBoundaryProjection<AXUIElement>)
@@ -168,7 +173,7 @@ import ApplicationServices
     ) throws -> Collection {
         let timing = NativeWindowQueryTiming.start(metadata: {
             ["pid": app.processIdentifier, "purpose": purpose == .inputValidation ? "inputValidation" : "observation",
-             "projection": projection == .catalogue ? "catalogue" : projection == .keyboardDispatch ? "keyboardDispatch" : "inputBoundary",
+             "projection": String(describing: projection),
              "parentQuery": parentQuery as Any? ?? NSNull(), "hasContentRoot": contentRoot != nil]
         })
         if let contentRoot { timing?.root(contentRoot, selected: true) }
@@ -202,7 +207,7 @@ import ApplicationServices
                 return .inputBoundary(.init(windows: [], issue: "AX trust unavailable", expandedRequiredSurface: false,
                     unresolvedModalHints: Set(modalHints.filter { $0.nativePresence != .ended }.map { $0.identity.window })))
             }
-            return projection == .catalogue
+            return projection == .catalogue || projection == .visualCatalogue
                 ? .catalogue([]) : .boundary(.init(windows: [], issue: "AX trust unavailable"))
         }
         let process =
@@ -241,6 +246,9 @@ import ApplicationServices
                 return hints
             },
             inputWindow: {
+                // A visual catalogue has no control recipient to resolve. The
+                // helper may walk AXFocusedUIElement and its content ancestry.
+                if projection == .visualCatalogue { return nil }
                 let observer: NativeWindowsReadObserver?
                 if let capture {
                     observer = { pid, root, read in capture.record(pid: pid, root: root, read: read) }
@@ -265,7 +273,8 @@ import ApplicationServices
         var owners = [(child: AXUIElement, parent: AXUIElement)]()
         var unknownBoundaryParents = [AXUIElement]()
         let surfaceRoles = [kAXWindowRole, kAXSheetRole, "AXPopover"]
-        var focus = linkedElement(root, kAXFocusedUIElementAttribute), focusPath = [AXUIElement]()
+        var focus = projection == .visualCatalogue ? nil : linkedElement(root, kAXFocusedUIElementAttribute)
+        var focusPath = [AXUIElement]()
         var focusedSurface: AXUIElement?
         let focusDeadline = ProcessInfo.processInfo.systemUptime + 0.1
         while let node = focus, focusPath.count < 32, ProcessInfo.processInfo.systemUptime < focusDeadline,
@@ -376,7 +385,7 @@ import ApplicationServices
                     if let original = hint.identity.element, CFEqual(match.element, original) { return match }
                     // A new proxy can supply facts for the same CG surface,
                     // not for an inner sheet sharing an unknown backing window.
-                    guard [kAXWindowRole, "sheet", "popover"].contains(match.kind),
+                    guard [kAXWindowRole, "window", "dialog", "panel", "sheet", "popover"].contains(match.kind),
                         let ancestry = inputParents.first(where: { CFEqual($0.child, match.element) }),
                         ancestry.known else { return nil }
                     if let parent = ancestry.parent {
@@ -500,6 +509,11 @@ import ApplicationServices
                 if hint.nativePresence == .ended { absentModalHints.insert(hint.identity.window); continue }
                 if hint.identity.native != nil && hint.nativePresence != .live { continue }
                 if modalRow(hint, in: result) != nil { continue }
+                // Pixel discovery does not inspect an anchor control's child
+                // relation to rediscover a deeply attached historical modal.
+                // Keep the missing fact explicit and its identity retained;
+                // the input projection owns live forward-membership checks.
+                if projection == .visualCatalogue { continue }
                 guard let element = hint.identity.element else { continue }
                 let read = queryRead(element, kAXModalAttribute)
                 if case .invalid = read {
@@ -521,7 +535,10 @@ import ApplicationServices
             }
             try RequestDiagnostics.checkCancellation()
             let candidate = candidates[cursor]
-            let element = timed("helper.presentedWindow", root: candidate) {
+            // Presenter reconciliation can compare ordinary window contents.
+            // Visual discovery keeps the declared identity; uncertain native
+            // correspondence remains an explicit native-only/AX-only row.
+            let element = projection == .visualCatalogue ? candidate : timed("helper.presentedWindow", root: candidate) {
                 query.presentedWindow(candidate, app.processIdentifier, timing)
             }
             cursor += 1
@@ -535,7 +552,7 @@ import ApplicationServices
             // confirmed surface edges. A failed optional role must not erase a
             // positive AXModal or AXSheets fact on that exact candidate.
             let role = reportedRole ?? ""
-            guard (projection == .inputBoundary || (reportedRole != nil &&
+            guard (projection == .inputBoundary || projection == .visualCatalogue || (reportedRole != nil &&
                 ([kAXWindowRole, kAXSheetRole, "AXPopover"].contains(role)
                     || declaredRoots.contains { CFEqual($0, element) }))),
                 !result.contains(where: { CFEqual($0.element, element) })
@@ -546,7 +563,7 @@ import ApplicationServices
                 continue
             }
             timing?.root(element, role: reportedRole, selected: contentRoot.map { CFEqual($0, element) })
-            if projection != .catalogue {
+            if projection != .catalogue && projection != .visualCatalogue {
                 let modal: Bool?
                 if projection == .inputBoundary {
                     let read = queryRead(element, kAXModalAttribute)
@@ -571,9 +588,13 @@ import ApplicationServices
                         kind: role == kAXSheetRole ? "sheet" : role == "AXPopover" ? "popover" : role.isEmpty ? "unknown" : role,
                         modal: modal))
             } else {
-                let subrole = attribute(element, kAXSubroleAttribute) as? String ?? ""
+                // Some providers declare an inline editor/control as a window
+                // root. Preserve its identity and boundary facts, without
+                // asking that control for presentation/body metadata.
+                let presentation = projection != .visualCatalogue || surfaceRoles.contains(role)
+                let subrole = presentation ? attribute(element, kAXSubroleAttribute) as? String ?? "" : ""
                 let kind =
-                    role == "AXPopover"
+                    !presentation ? "unknown" : role == "AXPopover"
                     ? "popover"
                     : role == kAXSheetRole
                         ? "sheet"
@@ -585,11 +606,11 @@ import ApplicationServices
                         ref: registry.reference(
                             for: Identity(
                                 pid: pid, launched: app.launchDate, element: element, incarnation: incarnation)),
-                        title: attribute(element, kAXTitleAttribute) as? String ?? "", element: element,
+                        title: presentation ? attribute(element, kAXTitleAttribute) as? String ?? "" : "", element: element,
                         kind: kind, modal: attribute(element, kAXModalAttribute) as? Bool))
             }
             if let timing, let item = result.last { timing.root(item.element, ref: item.ref) }
-            if projection == .inputBoundary {
+            if projection == .inputBoundary || projection == .visualCatalogue {
                 try RequestDiagnostics.checkCancellation()
                 inputNativeIDs.append((element, query.nativeID(element)))
             }
@@ -615,15 +636,17 @@ import ApplicationServices
                 sheets = attribute(element, "AXSheets") as? [AXUIElement] ?? []
             }
             for child in sheets {
-                if projection == .inputBoundary { inputSheets.append(child) }
+                if projection == .inputBoundary || projection == .visualCatalogue { inputSheets.append(child) }
                 owners.append((child, element))
                 candidates.append(child)
             }
-            if projection == .inputBoundary {
+            if projection == .inputBoundary || projection == .visualCatalogue {
                 let parent = try inputParent(element)
                 inputParents.append((element, parent.parent, parent.known))
                 if let parent = parent.parent { candidates.append(parent) }
-                inputFrontiers.append(element)
+                if projection == .inputBoundary || surfaceRoles.contains(role)
+                    || inputSheets.contains(where: { CFEqual($0, element) })
+                { inputFrontiers.append(element) }
                 continue
             }
             // Discovery reads still expand every window. Input validation may
@@ -689,12 +712,15 @@ import ApplicationServices
             let item = result[index]
             let forward = owners.filter { CFEqual($0.child, item.element) }.map(\.parent)
             var parent = forward.first
-            if projection == .inputBoundary {
+            if projection == .inputBoundary || projection == .visualCatalogue {
                 if inputSheets.contains(where: { CFEqual($0, item.element) }) { result[index].kind = "sheet" }
                 if let parent, forward.dropFirst().contains(where: { !CFEqual($0, parent) }) {
                     result[index].parentUnknown = true
                 }
                 let actual = inputParents.first { CFEqual($0.child, item.element) }
+                if projection == .visualCatalogue, actual?.known == true, actual?.parent == nil, parent == nil {
+                    result[index].applicationParent = true
+                }
                 if let forward = parent, let actual = actual?.parent, !CFEqual(forward, actual) {
                     result[index].parentUnknown = true
                 } else if parent == nil {
@@ -702,7 +728,7 @@ import ApplicationServices
                     result[index].parentUnknown = result[index].parentUnknown || actual?.known != true
                 }
             }
-            if projection != .inputBoundary, parent == nil, let raw = attribute(item.element, kAXParentAttribute),
+            if projection != .inputBoundary && projection != .visualCatalogue, parent == nil, let raw = attribute(item.element, kAXParentAttribute),
                 CFGetTypeID(raw) == AXUIElementGetTypeID()
             {
                 parent = unsafeDowncast(raw, to: AXUIElement.self)
@@ -721,7 +747,7 @@ import ApplicationServices
                 // AXSheet is the native document-modal role; an explicit false
                 // or unavailable owner is never changed into application-wide modality.
                 if result[index].kind == "sheet" && item.modal == nil { result[index].modal = true }
-            } else if projection == .inputBoundary, parent != nil {
+            } else if (projection == .inputBoundary || projection == .visualCatalogue), parent != nil {
                 result[index].parentUnknown = true
             }
         }
@@ -777,6 +803,9 @@ import ApplicationServices
         // Read each AX hint once, not once per pair of AX/native windows.
         let hints = try result.map { item in
             try RequestDiagnostics.checkCancellation()
+            if projection == .visualCatalogue, item.kind == "unknown" {
+                return reportedID(item.element).map { WindowSelection.Hint(frame: nil, title: "", id: $0) }
+            }
             return timed("helper.nativeHint", root: item.element) {
                 query.hint(item.element, timing)
             }
@@ -807,6 +836,7 @@ import ApplicationServices
             Window(
                 ref: remapped[item.ref] ?? item.ref, title: item.title, element: item.element, kind: item.kind,
                 parent: item.parent.map { remapped[$0] ?? $0 },
+                parentUnknown: item.parentUnknown, applicationParent: item.applicationParent,
                 nativeID: exactNativeIDs[remapped[item.ref] ?? item.ref], modal: item.modal)
         }
         // A native child (including system sharing controls) may report the
@@ -816,8 +846,12 @@ import ApplicationServices
         for index in mapped.indices {
             mapped[index].parent = relations.parents[mapped[index].ref]
             mapped[index].parentUnknown = relations.unresolved.contains(mapped[index].ref)
+                || (projection == .visualCatalogue && mapped[index].parentUnknown)
         }
         if !relations.unresolved.isEmpty { issue("some native window parent relationships could not be confirmed") }
+        if projection == .visualCatalogue, !unresolvedModalHints(in: result).isEmpty {
+            issue("previously observed modal identity could not be revalidated; input still requires a fresh boundary check")
+        }
         // Identical titles are insufficient for choosing a newly opened file.
         // Preserve each exact window's own native URI, without inspecting its
         // contents, guessing from a parent or querying unrelated unique titles.
@@ -825,6 +859,7 @@ import ApplicationServices
         let documentDeadline = ProcessInfo.processInfo.systemUptime + 0.2
         for index in mapped.indices where (titleCounts[mapped[index].title] ?? 0) > 1 {
             try RequestDiagnostics.checkCancellation()
+            if projection == .visualCatalogue, mapped[index].kind == "unknown" { continue }
             guard ProcessInfo.processInfo.systemUptime < documentDeadline else { break }
             if let raw = attribute(mapped[index].element, kAXDocumentAttribute),
                 let value = (raw as? String) ?? (raw as? URL)?.absoluteString, !value.isEmpty

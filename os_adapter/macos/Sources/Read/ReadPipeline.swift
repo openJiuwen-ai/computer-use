@@ -14,8 +14,8 @@ import ApplicationServices
         case .applications: return try CollectApplicationDirectoryPass.run(request, access: access)
         case .capturedText(let ref, let offset, let length):
             return try ReadCapturedNativeTextPass.run(request, ref: ref, offset: offset, length: length, access: access)
-        case .surfaces(let application):
-            return try CollectNativeSurfacesPass.run(request, application: application, access: access)
+        case .surfaces(let application, let profile):
+            return try CollectNativeSurfacesPass.run(request, application: application, profile: profile, access: access)
         case .roots(let application):
             return try CollectNativeRootsPass.run(request, application: application, access: access)
         case .relation(let property, let cursor, let limit):

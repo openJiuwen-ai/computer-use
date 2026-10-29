@@ -142,8 +142,7 @@ import CoreGraphics
                             "capabilities": [
                                 "cancel", "requestDedup", "desktopCoordination", "nativeOperations",
                                 "nativeInputActivityV1", "nativeBoundContracts", "nativeUnitReadinessV2",
-                                "nativeClickPipelineV1", "nativeClickPipelineV2", "nativeClickPreferenceHintsV1",
-                                "nativeDirectory",
+                                "nativeClickPipelineV1", "nativeClickPipelineV2", "nativeClickPreferenceHintsV1", "nativeDirectory", "nativeVisualSurfaceQuery",
                                 "nativeApplicationRoots", "nativeMenuActions", "nativeMenuShortcuts", "nativeCapture",
                                 "nativeCaptureKinds", "nativeDesktopInput", "nativeRelations", "nativeNodePages",
                                 "nativeNodeDepthBudget", "nativeRelationPages", "nativeCapturedText",

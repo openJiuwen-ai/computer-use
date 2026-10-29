@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
+from computer_use.native.query.directory import SurfaceReadProfile
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ class StartupDirectoryState:
         on_scope: Callback that retains the established running/working scope in its existing
             owner.
         attempt: Zero-based startup-discovery attempt consumed by the startup gate.
+        profile: Original directory intent retained through all startup attempts.
     """
 
     application: ApplicationInfo
@@ -42,6 +44,7 @@ class StartupDirectoryState:
     installation: str | None = None
     on_scope: Callable[[RunningApplication | WorkingWindow], None] | None = None
     attempt: int = 0
+    profile: SurfaceReadProfile = SurfaceReadProfile.ACCESSIBILITY
 
 
 @dataclass(frozen=True)

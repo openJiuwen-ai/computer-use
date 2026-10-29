@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.app import WorkingWindow
+from computer_use.native.query.directory import SurfaceReadProfile
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
@@ -21,6 +23,12 @@ if TYPE_CHECKING:
 
 
 PURE, QUERY, RESOURCE = {Effect.PURE}, {Effect.QUERY}, {Effect.RESOURCE}
+
+
+class ReadComponentKind(Enum):
+    WINDOW = "window"
+    MENU = "menu"
+    IMAGE_UNAVAILABLE = "image_unavailable"
 
 
 @dataclass(frozen=True)
@@ -56,6 +64,10 @@ class ReadRequest:
     on_scope: Callable[[RunningApplication | WorkingWindow], None] | None = None
     view: str = "both"
     overview: bool = True
+
+    @property
+    def directory_profile(self) -> SurfaceReadProfile:
+        return SurfaceReadProfile.VISUAL if self.view == "image" else SurfaceReadProfile.ACCESSIBILITY
 
 
 @dataclass

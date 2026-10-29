@@ -33,6 +33,7 @@ def plan(value: ApplicationSelection, control: Control) -> ReadPlan:
             view=request.view,
             overview=request.overview,
         ),
+        request.directory_profile,
     )
 
 

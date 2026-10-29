@@ -5,6 +5,8 @@ import Foundation
 /// Decode once, before native target access. This is wire shape validation;
 /// platform field support and live scope checks stay in the selected collector.
 enum NativeInspectQuery {
+    /// Window facts for pixels are distinct from provider/content discovery.
+    enum SurfaceProfile: Equatable { case accessibility, visual }
     struct ChildrenPage {
         let cursor: String?
         let limit: Int
@@ -120,7 +122,7 @@ enum NativeInspectQuery {
 
     case applications
     case launch
-    case surfaces(application: String)
+    case surfaces(application: String, profile: SurfaceProfile)
     case roots(application: String)
     case inputContext(
         within: [String], actuator: Actuator?, receiver: Receiver?, basis: [Dependency], currentReceiver: Bool)
@@ -147,8 +149,13 @@ enum NativeInspectQuery {
             _ = try object(raw, keys: ["kind"])
             self = .applications
         case "surfaces":
-            let p = try object(raw, keys: ["kind", "application"])
-            self = .surfaces(application: try string(p["application"], label: "application"))
+            let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true
+            let p = try object(raw, keys: hasProfile ? ["kind", "application", "profile"] : ["kind", "application"])
+            if hasProfile, try string(p["profile"], label: "profile") != "visual" {
+                throw DriverError("unsupported surface profile", code: .invalidRequest)
+            }
+            self = .surfaces(application: try string(p["application"], label: "application"),
+                             profile: hasProfile ? .visual : .accessibility)
         case "roots":
             let p = try object(raw, keys: ["kind", "application"])
             self = .roots(application: try string(p["application"], label: "application"))
