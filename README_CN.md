@@ -108,7 +108,83 @@ async def main():
 asyncio.run(main())
 ```
 
+### 使用 Computer Use Agent
+
+使用 Python 3.12 或 3.13 安装 Agent 可选依赖并生成模型配置：
+
+```bash
+uv sync --extra agent
+uv run computer-use-agent --init-config
+```
+
+在 `~/.computer-use/agent/config.json` 中填写 `model`、`provider`、`api_base` 和 `api_key`。模型需要支持工具调用和图片输入。环境变量 `MODEL_NAME`、`MODEL_PROVIDER`、`API_BASE`、`API_KEY` 覆盖文件配置；也支持 `OPENAI_MODEL`、`OPENAI_BASE_URL` 和 `OPENAI_API_KEY`。
+
+```bash
+uv run computer-use-agent
+uv run computer-use-agent "打开预定会议表单，停在提交前"
+```
+
+省略任务时进入多轮对话。界面流式显示回复和操作标题；回车发送，Ctrl+J 或 Alt+回车换行。`/debug`、`/normal` 切换工具详情；`/compact` 压缩历史并保留 Python 会话；`/new` 开始新对话；`/exit` 或 Ctrl+D 退出，Ctrl+C 中断并退出。macOS 终端通过本机预览展示收到的截图，`--no-preview` 可关闭。
+
+本机 Agent 默认使用 `exclusive`，`--desktop shared` 选择共享模式，`--config` 指定配置文件。可选的 `mcp` 对象通过 `command`、`args`、`env`、`cwd` 连接其他桌面宿主，例如通过 SSH 在目标电脑启动 `computer-use-mcp --desktop exclusive`；使用自定义 MCP 命令时，桌面模式由该命令决定。对话记录与截图保存在 `~/.computer-use/agent/runs/`。
+
+### 接入 openJiuwen DeepAgent
+
+`ComputerUseAgent` 继承 DeepAgent 的标准 `invoke()`、`stream()` 接口，也可交给 `Runner` 执行。模型使用 openJiuwen 原生配置构建，后续消息复用 `conversation_id`：
+
+```python
+import asyncio
+import os
+
+from openjiuwen.core.foundation.llm import Model, ModelClientConfig, ModelRequestConfig
+
+from computer_use_agent import create_agent
+
+
+async def main():
+    model = Model(
+        model_client_config=ModelClientConfig(
+            client_provider=os.getenv("MODEL_PROVIDER", "OpenAI"),
+            api_base=os.environ["API_BASE"],
+            api_key=os.environ["API_KEY"],
+        ),
+        model_config=ModelRequestConfig(model=os.environ["MODEL_NAME"]),
+    )
+    async with create_agent(model) as agent:
+        conversation_id = "desktop-conversation"
+        print(await agent.invoke({"query": "列出正在运行的应用", "conversation_id": conversation_id}))
+        async for chunk in agent.stream({"query": "查看计算器窗口", "conversation_id": conversation_id}):
+            print(chunk)
+
+
+asyncio.run(main())
+```
+
+已有 DeepAgent 可通过 `ComputerUseToolkit` 接入原生工具集合：
+
+```python
+from openjiuwen.harness import create_deep_agent
+
+from computer_use_agent import ComputerUseToolkit
+
+
+async def run(model):
+    async with ComputerUseToolkit() as desktop:
+        agent = create_deep_agent(
+            model,
+            tools=desktop.tools,
+            system_prompt=desktop.system_prompt,
+            parallel_tool_calls=False,
+            enable_tool_resilience_rail=False,
+            enable_sys_operation=False,
+            enable_read_image_multimodal=True,
+        )
+        return await agent.invoke({"query": "列出正在运行的应用"})
+```
+
 ## 架构简介
+
+`computer_use_agent/` 组装 openJiuwen DeepAgent 及电脑操作工具，`interface_adapter/cli/` 提供直接对话界面。标准 Agent 调用和对话界面共用现有 MCP 执行环境。
 
 MCP 宿主通过持久化 Python 执行环境向智能体提供 SDK。App 和 Window 共用 `UI` 接口，Element 保留独立的操作目标：
 
@@ -141,7 +217,10 @@ os_adapter：macOS / Windows / Linux
 
 ```
 computer-use/
-├── interface_adapter/mcp/   # stdio MCP 宿主与持久化 Python 执行环境
+├── interface_adapter/       # Agent 与用户接入
+│   ├── mcp/                 # stdio MCP 宿主与持久化 Python 执行环境
+│   └── cli/                 # 直接对话、配置与本机预览
+├── computer_use_agent/      # openJiuwen DeepAgent 组装与工具接入
 ├── computer_use_engine/     # computer_use SDK、观察与操作管线
 ├── os_adapter/              # 各平台原生后端与共用资源
 │   ├── macos/
@@ -159,6 +238,8 @@ computer-use/
 - [SDK 接口参考](computer_use_engine/__init__.pyi)：`Computer`、`App`、`Window`、`Element` 的公开接口与参数类型。
 - [MCP 服务入口](interface_adapter/mcp/server.py)：工具定义、执行说明与桌面模式参数。
 - [原生环境准备命令](scripts/native.py)：各平台构建、权限检查与 Linux 会话配置。
+- [DeepAgent 接入](computer_use_agent/agent.py)：标准 Agent 入口与会话生命周期。
+- [直接对话](interface_adapter/cli/main.py)：命令行选项与交互命令。
 
 ## 参与贡献
 

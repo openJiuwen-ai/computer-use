@@ -108,7 +108,83 @@ async def main():
 asyncio.run(main())
 ```
 
+### Use the Computer Use Agent
+
+With Python 3.12 or 3.13, install the optional agent dependencies and generate a model configuration:
+
+```bash
+uv sync --extra agent
+uv run computer-use-agent --init-config
+```
+
+Set `model`, `provider`, `api_base` and `api_key` in `~/.computer-use/agent/config.json`. The model must support tool calls and image input. `MODEL_NAME`, `MODEL_PROVIDER`, `API_BASE` and `API_KEY` override file settings; `OPENAI_MODEL`, `OPENAI_BASE_URL` and `OPENAI_API_KEY` are also accepted.
+
+```bash
+uv run computer-use-agent
+uv run computer-use-agent "Open the meeting scheduling form and stop before submitting"
+```
+
+Omit the task to start a conversation. Replies and operation titles stream to the terminal; Enter sends, Ctrl+J or Alt+Enter inserts a newline. `/debug` and `/normal` switch tool detail, `/compact` compresses history while retaining the Python session, `/new` starts a clean conversation, and `/exit` or Ctrl+D exits. Ctrl+C cancels and exits. macOS terminals display received screenshots in a local preview; `--no-preview` disables it.
+
+The local agent defaults to `exclusive`; `--desktop shared` selects shared mode. `--config` selects another configuration file. An optional `mcp` object with `command`, `args`, `env` and `cwd` connects to another desktop host, such as an SSH command that starts `computer-use-mcp --desktop exclusive` there. A custom MCP command determines its own desktop mode. Conversation records and screenshots are saved under `~/.computer-use/agent/runs/`.
+
+### Integrate with openJiuwen DeepAgent
+
+`ComputerUseAgent` inherits the standard DeepAgent `invoke()` and `stream()` interfaces and works with `Runner`. Pass a native openJiuwen `Model` and retain `conversation_id` for follow-up messages:
+
+```python
+import asyncio
+import os
+
+from openjiuwen.core.foundation.llm import Model, ModelClientConfig, ModelRequestConfig
+
+from computer_use_agent import create_agent
+
+
+async def main():
+    model = Model(
+        model_client_config=ModelClientConfig(
+            client_provider=os.getenv("MODEL_PROVIDER", "OpenAI"),
+            api_base=os.environ["API_BASE"],
+            api_key=os.environ["API_KEY"],
+        ),
+        model_config=ModelRequestConfig(model=os.environ["MODEL_NAME"]),
+    )
+    async with create_agent(model) as agent:
+        conversation_id = "desktop-conversation"
+        print(await agent.invoke({"query": "List the running applications", "conversation_id": conversation_id}))
+        async for chunk in agent.stream({"query": "Inspect the calculator window", "conversation_id": conversation_id}):
+            print(chunk)
+
+
+asyncio.run(main())
+```
+
+Existing DeepAgent assemblies can use the native tools from `ComputerUseToolkit`:
+
+```python
+from openjiuwen.harness import create_deep_agent
+
+from computer_use_agent import ComputerUseToolkit
+
+
+async def run(model):
+    async with ComputerUseToolkit() as desktop:
+        agent = create_deep_agent(
+            model,
+            tools=desktop.tools,
+            system_prompt=desktop.system_prompt,
+            parallel_tool_calls=False,
+            enable_tool_resilience_rail=False,
+            enable_sys_operation=False,
+            enable_read_image_multimodal=True,
+        )
+        return await agent.invoke({"query": "List the running applications"})
+```
+
 ## Architecture
+
+`computer_use_agent/` assembles the openJiuwen DeepAgent and its computer-operation tools. `interface_adapter/cli/` provides the direct conversation interface. Both standard Agent calls and the CLI use the existing MCP execution environment.
 
 The MCP host exposes the SDK to an agent through persistent Python execution. Applications and windows share the `UI` interface, while elements retain their own operation targets:
 
@@ -141,7 +217,10 @@ The core components are organized as follows:
 
 ```
 computer-use/
-├── interface_adapter/mcp/   # stdio MCP host and persistent Python execution
+├── interface_adapter/       # agent and user interfaces
+│   ├── mcp/                 # stdio MCP host and persistent Python execution
+│   └── cli/                 # direct conversation, configuration and preview
+├── computer_use_agent/      # openJiuwen DeepAgent assembly and tool integration
 ├── computer_use_engine/     # computer_use SDK, observation and operation pipelines
 ├── os_adapter/              # native platform backends and shared resources
 │   ├── macos/
@@ -159,6 +238,8 @@ computer-use/
 - [SDK API reference](computer_use_engine/__init__.pyi): public interfaces and parameter types for `Computer`, `App`, `Window` and `Element`.
 - [MCP server](interface_adapter/mcp/server.py): tool schemas, execution instructions and desktop-mode arguments.
 - [Native setup commands](scripts/native.py): platform builds, permission checks and Linux session setup.
+- [DeepAgent integration](computer_use_agent/agent.py): standard agent entry and conversation lifecycle.
+- [Direct conversation](interface_adapter/cli/main.py): CLI options and interactive commands.
 
 ## Contributing
 

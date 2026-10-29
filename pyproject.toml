@@ -13,6 +13,13 @@ dependencies = [
     "pillow>=12.3,<13",
 ]
 
+[project.optional-dependencies]
+agent = [
+    "openjiuwen==0.1.19.post3; python_version < '3.14'",
+    "prompt-toolkit>=3.0.51,<4",
+    "rich>=13,<15",
+]
+
 [dependency-groups]
 test = [
     "pytest>=8.3.5",
@@ -35,6 +42,7 @@ computer-use-mcp = "computer_use_mcp.server:cli"
 computer-use-build = "computer_use_native_tools.native:build_cli"
 computer-use-permissions = "computer_use_native_tools.native:permissions_cli"
 computer-use-linux-session = "computer_use_native_tools.native:linux_launcher_cli"
+computer-use-agent = "computer_use_cli.main:cli"
 
 [tool.setuptools]
 include-package-data = false
@@ -42,6 +50,7 @@ license-files = ["LICENSE", "OPEN_SOURCE_SOFTWARE_NOTICE.md"]
 
 [tool.setuptools.package-data]
 computer_use = ["*.pyi", "py.typed"]
+computer_use_cli = ["config.example.json", "preview/*.swift"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

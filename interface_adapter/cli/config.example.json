@@ -1,0 +1,10 @@
+{
+  "model": "",
+  "provider": "OpenAI",
+  "api_base": "https://api.openai.com/v1",
+  "api_key": "",
+  "desktop": "exclusive",
+  "max_iterations": 40,
+  "context_window": 48000,
+  "model_timeout": 600
+}
