@@ -26,7 +26,15 @@ Computer Use 是 openJiuwen 智能体系统服务层（Agent System Service）�
 
 ### 一句话接入现有 Agent
 
-将下面这句话发送给支持命令执行和 MCP 配置的 Agent：
+将对应文案发送给能修改项目代码、执行命令的编程 Agent：
+
+**接入 DeepAgent：**
+
+```text
+请阅读 https://gitcode.com/openJiuwen/computer-use 的 README，将 Computer Use DeepAgent 接入当前项目，按文档安装 Agent 依赖并准备本机后端，复用项目的模型配置，通过 create_agent 和标准 invoke/stream 接口调用（已有 openJiuwen DeepAgent 则接入 ComputerUseToolkit），最后用“列出正在运行的应用”验证接入。
+```
+
+**通过 MCP 接入：**
 
 ```text
 请阅读 https://gitcode.com/openJiuwen/computer-use 的 README，在本机安装并构建 Computer Use，按文档将 computer-use-mcp 接入你当前的 MCP 工具配置，检查桌面访问权限，并调用 computer_use 列出正在运行的应用以验证接入。

@@ -26,7 +26,15 @@ Developers can adopt it in two ways:
 
 ### Connect your existing agent with one prompt
 
-Send this prompt to an agent that can run commands and configure MCP servers:
+Send the appropriate prompt to a coding agent that can edit your project and run commands:
+
+**Integrate DeepAgent:**
+
+```text
+Read the README at https://gitcode.com/openJiuwen/computer-use and integrate Computer Use DeepAgent into this project, install the agent dependencies and prepare the local backend as documented, reuse the project's model configuration with create_agent and the standard invoke/stream interfaces (or add ComputerUseToolkit to an existing openJiuwen DeepAgent), and verify the integration with the task "List the running applications".
+```
+
+**Connect over MCP:**
 
 ```text
 Read the README at https://gitcode.com/openJiuwen/computer-use, install and build Computer Use on this computer, add computer-use-mcp to your current MCP tool configuration as documented, check desktop permissions, and use the computer_use tool to list running applications to verify the connection.
