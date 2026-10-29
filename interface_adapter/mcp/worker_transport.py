@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Parent-selected messages on the private worker connection.
+"""Private worker IPC: connection authentication, framing, and ordered writes.
 
 The native protocol permits 64 MiB replies. A full command diagnostic can thus
 exceed the stream's 12 MiB flow-control watermark. A length prefix separates
@@ -12,12 +12,14 @@ An already imported older parent starts a worker without a version variable;
 that worker retains the original JSONL contract until the parent is upgraded.
 """
 
+import asyncio
 import os
+import socket
 from asyncio import IncompleteReadError, get_running_loop
 
 from computer_use.json import loads
 
-from .diagnostic_json import dumps
+from .diagnostics import dumps
 
 MAX_MESSAGE_BYTES = 128 * 1024 * 1024
 HEADER_BYTES = 4
@@ -115,3 +117,26 @@ async def read_message(reader, *, protocol=FRAMED_PROTOCOL):
     if not isinstance(message, dict):
         raise TypeError("Internal worker message must be a JSON object.")
     return message
+
+
+async def worker_connection():
+    port = os.environ.pop("COMPUTER_USE_WORKER_PORT", None)
+    if port is not None:
+        token = os.environ.pop("COMPUTER_USE_WORKER_TOKEN", "")
+        if len(token) != 64 or any(char not in "0123456789abcdef" for char in token):
+            raise RuntimeError("Invalid internal worker authentication.")
+        reader, writer = await asyncio.open_connection("127.0.0.1", int(port), limit=12 * 1024 * 1024)
+        try:
+            writer.write((token + "\t" + str(os.getpid()) + "\n").encode("ascii"))
+            await writer.drain()
+        except BaseException:
+            writer.close()
+            raise
+        return reader, writer
+    ipc = socket.socket(fileno=3)
+    try:
+        ipc.setblocking(False)
+        return await asyncio.open_connection(sock=ipc, limit=12 * 1024 * 1024)
+    except BaseException:
+        ipc.close()
+        raise

@@ -1,6 +1,8 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"""Parent-process supervisor: worker lifetime, execution watchdog, history gate, and journal."""
+
 import asyncio
 import logging
 import os
@@ -11,12 +13,9 @@ from computer_use.native.preview import is_preview_event
 from computer_use.session.operations import eager
 
 from .history import HISTORY_KEY, HistoryGate
-from .journal import Journal
+from .diagnostics import Journal
 from .output import OutputBuffer, is_output
-from .worker_protocol import FRAMED_PROTOCOL, read_message, write_message
-
-"Supervise one persistent Python worker and its inherited native lifetimes."
-
+from .worker_transport import FRAMED_PROTOCOL, read_message, write_message
 
 RESET_NOTICE = (
     "Execution session cleared. Recreate App variables and read again. Actions "
