@@ -19,6 +19,7 @@ import ApplicationServices
     var dispatchExpectedNativeID: CGWindowID? = nil
 
     typealias State = NativeReceiverSnapshot
+    enum ReadinessUse { case admission, receiver }
 
     private var background: BackgroundTarget { BackgroundTarget(application) }
 
@@ -212,7 +213,11 @@ import ApplicationServices
     func readiness(
         kind: NativeKeyboardIntent.Kind, key: String? = nil, text: String? = nil,
         replacement: NativeReplacementUnit.Selection? = nil, prepared: Bool = false, state: State? = nil,
-        includeDelivery: Bool = true, textPolicy: NativeKeyboardInterpreterEvidence.Policy = .existing
+        includeDelivery: Bool = true, textPolicy: NativeKeyboardInterpreterEvidence.Policy = .existing,
+        use: ReadinessUse = .admission,
+        replacementSnapshot: (AXUIElement, NativeReplacementUnit.Selection) -> NativeReplacementUnit.Snapshot? = {
+            NativeReplacementUnit(element: $0).snapshot($1)
+        }
     ) throws -> NativeReadiness {
         let state = try state ?? sample()
         let receiver = state.receiver(element)
@@ -224,10 +229,12 @@ import ApplicationServices
         // not application consumption. Live receiver checks still apply at
         // every dispatch; it never authorizes activation or replay afterwards.
         if kind == .replace {
-            let selection = element.flatMap { node in
-                replacement.flatMap { NativeReplacementUnit(element: node).snapshot($0) }
+            if use == .admission {
+                let selection = element.flatMap { node in
+                    replacement.flatMap { replacementSnapshot(node, $0) }
+                }
+                conditions.append(("selection", selection == nil ? "unknown" : "yes"))
             }
-            conditions.append(("selection", selection == nil ? "unknown" : "yes"))
             if try requiresCellEditorActivation(), let element,
                 try NativeCellEditorHandoff.activationNeedsForeground(
                     element: element, application: application, window: window)
@@ -241,6 +248,21 @@ import ApplicationServices
             }
         }
         return NativeReadiness(conditions)
+    }
+
+    /// Selection is sampled for admission; the replacement owner alone proves
+    /// its full selection before content. Per-fragment receiver validation must
+    /// not resample a selection that normal editing/autocompletion can change.
+    func receiverReadiness(
+        _ request: NativeKeyboardIntent, replacement: NativeReplacementUnit.Selection?, prepared: Bool, state: State,
+        replacementSnapshot: (AXUIElement, NativeReplacementUnit.Selection) -> NativeReplacementUnit.Snapshot? = {
+            NativeReplacementUnit(element: $0).snapshot($1)
+        }
+    ) throws -> NativeReadiness {
+        try readiness(
+            kind: request.kind, key: request.key, text: request.value, replacement: replacement,
+            prepared: prepared, state: state, includeDelivery: false, use: .receiver,
+            replacementSnapshot: replacementSnapshot)
     }
 
     func prepare(
@@ -435,12 +457,9 @@ import ApplicationServices
             // proof, not an observation hint, authorizes the retained owner.
             if let ownedEditor { current.relatedEditor = ownedEditor.owner }
             try continuity?.validate(current, ownedEditor: ownedEditor)
-            guard
-                try self.readiness(
-                    kind: request.kind, key: request.key, text: request.value, replacement: replacement,
-                    prepared: prepared, state: current, includeDelivery: false
-                ).ready
-            else {
+            guard try self.receiverReadiness(
+                request, replacement: replacement, prepared: prepared, state: current
+            ).ready else {
                 throw DriverError(
                     "keyboard unit readiness changed; remaining key events were not sent", code: .inputUnavailable)
             }
