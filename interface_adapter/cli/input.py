@@ -66,7 +66,7 @@ class MessageInput:
                         )
                     raw = await self.reader.readline()
                     value = raw.decode(getattr(self.stream, "encoding", None) or "utf-8", "replace")
-            except (OSError, PermissionError, ValueError):
+            except (OSError, ValueError):
                 value = self.stream.readline()
         else:
             from anyio import to_thread

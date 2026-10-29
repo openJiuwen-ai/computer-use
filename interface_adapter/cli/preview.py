@@ -112,7 +112,7 @@ class Preview:
                 if value is not None:
                     self.process.stdin.write((json.dumps(value) + "\n").encode())
                     await self.process.stdin.drain()
-        except (BrokenPipeError, ConnectionError):
+        except ConnectionError:
             return
 
     async def close(self):

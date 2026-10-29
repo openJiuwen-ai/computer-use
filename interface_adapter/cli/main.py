@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+from computer_use_native_tools.console import report
+
 from .config import config_path, initialize, load
 
 logger = logging.getLogger(__name__)
@@ -104,9 +106,9 @@ async def main(argv=None):
         try:
             initialize(destination)
         except FileExistsError:
-            sys.stdout.write(f"模型配置已存在：{destination}\n")
+            report(f"模型配置已存在：{destination}")
             return 0
-        sys.stdout.write(f"模型配置：{destination}\n")
+        report(f"模型配置：{destination}")
         return 0
     journal = preview = terminal = None
     previous_logging = configure_logging = error_handler = None
@@ -157,7 +159,7 @@ async def main(argv=None):
                 terminal.line("准备本机预览…")
                 try:
                     preview = await Preview.start()
-                except (OSError, RuntimeError, TimeoutError) as error:
+                except (OSError, RuntimeError) as error:
                     terminal.line(f"预览：{error}", style="yellow")
 
             def event(kind, data):
@@ -182,7 +184,7 @@ async def main(argv=None):
                 try:
                     loop.add_signal_handler(sig, current.cancel)
                     installed.append(sig)
-                except (NotImplementedError, RuntimeError):
+                except RuntimeError:
                     pass
             async with create_agent(
                 model,
@@ -205,7 +207,7 @@ async def main(argv=None):
         if terminal is not None:
             terminal.line(message, style="red")
         else:
-            sys.stderr.write(message + "\n")
+            report(message, stream=sys.stderr)
         if journal is not None:
             journal.record("error", {"message": message})
         return 1
@@ -226,4 +228,4 @@ async def main(argv=None):
 
 
 def cli():
-    raise SystemExit(asyncio.run(main()))
+    return asyncio.run(main())

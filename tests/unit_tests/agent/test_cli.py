@@ -33,6 +33,29 @@ def test_cli_configuration_and_legacy_aliases(tmp_path, monkeypatch):
     assert value["api_key"] == "environment-key"
 
 
+def test_cli_config_init_reports_once_and_preserves_existing_file(tmp_path, capsys):
+    path = tmp_path / "config.json"
+    args = ["--init-config", "--config", str(path)]
+    assert asyncio.run(main(args)) == 0
+    output = capsys.readouterr()
+    assert output.out == f"模型配置：{path}\n"
+    assert output.err == ""
+    path.write_text("existing configuration", encoding="utf-8")
+    assert asyncio.run(main(args)) == 0
+    output = capsys.readouterr()
+    assert output.out == f"模型配置已存在：{path}\n"
+    assert output.err == ""
+    assert path.read_text(encoding="utf-8") == "existing configuration"
+
+
+def test_cli_startup_error_uses_stderr(tmp_path, capsys):
+    path = tmp_path / "missing.json"
+    assert asyncio.run(main(["--config", str(path), "--no-preview"])) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert str(path) in output.err
+
+
 def test_journal_saves_images_and_redacts_secrets(tmp_path):
     import base64
 

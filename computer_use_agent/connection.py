@@ -77,7 +77,7 @@ class McpConnection:
                 self._ready.set_exception(error)
             elif not isinstance(error, asyncio.CancelledError):
                 logger.exception("Computer Use MCP connection ended")
-                raise
+                raise RuntimeError("Computer Use MCP connection ended; previous actions may have executed.") from error
         finally:
             self.session = None
 

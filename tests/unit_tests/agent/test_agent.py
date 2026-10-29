@@ -95,17 +95,23 @@ def test_standard_toolkit_delivers_images_to_model(model_server, tmp_path):
     )
 
 
-def test_cancellation_resets_python_without_replay():
+def test_cancellation_resets_python_without_replay(tmp_path):
     events = []
+    started = tmp_path / "started"
 
     async def run():
         async with ComputerUseToolkit(on_event=lambda kind, data: events.append((kind, data))) as toolkit:
             call = asyncio.create_task(
-                toolkit.tools[0].invoke({"code": "marker = 'before'; await __import__('asyncio').sleep(60)"})
+                toolkit.tools[0].invoke(
+                    {
+                        "code": f"from pathlib import Path; marker = 'before'; "
+                        f"Path({str(started)!r}).write_text(marker); await __import__('asyncio').sleep(60)"
+                    }
+                )
             )
-            while toolkit.connection.session is None or toolkit.connection._active is None:
-                await asyncio.sleep(0.01)
-            await asyncio.sleep(0.2)
+            async with asyncio.timeout(30):
+                while not started.exists():
+                    await asyncio.sleep(0.01)
             call.cancel()
             await asyncio.gather(call, return_exceptions=True)
             result = await toolkit.tools[0].invoke({"code": "print('marker' in globals())"})
@@ -114,6 +120,24 @@ def test_cancellation_resets_python_without_replay():
     asyncio.run(run())
     assert sum(kind == "tool_call" and "marker =" in data["arguments"].get("code", "") for kind, data in events) == 1
     assert any(kind == "tool_cancelled" for kind, _ in events)
+
+
+def test_tool_stream_returns_one_complete_result_without_replay():
+    events = []
+    code = "stream_calls = globals().get('stream_calls', 0) + 1; print(stream_calls)"
+
+    async def run():
+        async with ComputerUseToolkit(on_event=lambda kind, data: events.append((kind, data))) as toolkit:
+            outputs = [output async for output in toolkit.tools[0].stream({"code": code})]
+            assert len(outputs) == 1
+            assert outputs[0].success is True
+            assert "1" in outputs[0].data["content"]
+            assert "content" in outputs[0].data["mcp_result"]
+            result = await toolkit.tools[0].invoke({"code": "print(stream_calls)"})
+            assert "1" in result.data["content"]
+
+    asyncio.run(run())
+    assert sum(kind == "tool_call" and data["arguments"].get("code") == code for kind, data in events) == 1
 
 
 def test_partial_output_and_error_status_are_retained():
@@ -128,6 +152,45 @@ def test_partial_output_and_error_status_are_retained():
             assert result.data["mcp_result"]["isError"] is True
 
     asyncio.run(run())
+
+
+def test_connection_shutdown_error_preserves_cause_without_reconnect(monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    import pytest
+
+    from computer_use_agent import McpConfig
+    from computer_use_agent.connection import McpConnection
+
+    failure = OSError("Transport shutdown failed")
+    connections = []
+
+    async def initialize():
+        return None
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        connections.append(args)
+        yield (None, None)
+        raise failure
+
+    @asynccontextmanager
+    async def session(*streams):
+        yield SimpleNamespace(initialize=initialize)
+
+    monkeypatch.setattr("computer_use_agent.connection.stdio_client", transport)
+    monkeypatch.setattr("computer_use_agent.connection.ClientSession", session)
+
+    async def run():
+        connection = McpConnection(McpConfig(command="unused"))
+        await connection.start()
+        with pytest.raises(RuntimeError, match="previous actions may have executed") as raised:
+            await connection.close()
+        assert raised.value.__cause__ is failure
+
+    asyncio.run(run())
+    assert len(connections) == 1
 
 
 def test_toolkit_close_is_idempotent_and_sessions_are_isolated():

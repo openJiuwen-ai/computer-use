@@ -44,7 +44,7 @@ class ModelServer:
             def log_message(self, *args):
                 return
 
-            def do_POST(self):
+            def do_post(self):
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 owner.requests.append(request)
                 # Compressors make independent requests without desktop tools.
@@ -92,6 +92,9 @@ class ModelServer:
                             }
                         ).encode()
                     )
+
+            # BaseHTTPRequestHandler dispatches requests through this protocol name.
+            do_POST = do_post
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)

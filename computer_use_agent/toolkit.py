@@ -43,8 +43,7 @@ class DesktopTool(Tool):
         return await self.toolkit.call(self.card.name, inputs)
 
     async def stream(self, inputs, **kwargs):
-        raise NotImplementedError("Use invoke; Computer Use results contain text and image blocks.")
-        yield
+        yield await self.toolkit.call(self.card.name, inputs)
 
     def render_for_llm(self, output):
         return output.data["content"]
