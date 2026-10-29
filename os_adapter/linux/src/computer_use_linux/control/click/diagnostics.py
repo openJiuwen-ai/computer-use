@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Optional timing projection; never an execution precondition or journal.
 
 The existing native-input trace switch sends bounded JSON to stderr, where the

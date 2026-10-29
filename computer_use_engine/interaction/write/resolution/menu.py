@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Establish the selected menu's native ancestry and submenu state."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Session-owned native references and immutable read captures for protocol 6.
 
 References identify retained GObject proxies within an observed surface. They

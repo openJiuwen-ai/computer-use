@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Independent directory reads never widen a window-scoped native lease."""
 
 from __future__ import annotations

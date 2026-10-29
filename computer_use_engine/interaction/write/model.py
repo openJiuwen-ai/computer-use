@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Write-stage records for fixed targets, resolution evidence, route plans, and native receipts."""
 
 from __future__ import annotations

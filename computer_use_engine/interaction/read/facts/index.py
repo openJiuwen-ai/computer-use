@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Request-local indexes of unified observation facts for presentation accounting."""
 
 from __future__ import annotations

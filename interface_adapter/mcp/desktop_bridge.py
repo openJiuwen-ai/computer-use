@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Relay MCP stdio from SSH's service session to an interactive desktop.
 
 The desktop process listens only on loopback and authenticates each connection

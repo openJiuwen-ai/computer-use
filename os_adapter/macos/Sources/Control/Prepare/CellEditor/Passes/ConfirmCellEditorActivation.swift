@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import Foundation
 
 /// QUERY/RESOURCE: publish only a complete live cell-to-editor ownership proof.

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Carry native call identity and remaining time into a child flow."""
 
 from __future__ import annotations

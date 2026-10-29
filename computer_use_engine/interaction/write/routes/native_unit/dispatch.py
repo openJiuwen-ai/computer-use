@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Shared execution of a selected native command within its existing call scope."""
 
 from __future__ import annotations

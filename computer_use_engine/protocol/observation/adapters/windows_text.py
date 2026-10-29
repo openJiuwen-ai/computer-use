@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Validate the existing UIA text-anchor and endpoint evidence at normalization."""
 
 from __future__ import annotations

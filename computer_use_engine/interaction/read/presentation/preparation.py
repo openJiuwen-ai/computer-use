@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Immutable display projections prepared before delivery and text rendering."""
 
 from __future__ import annotations

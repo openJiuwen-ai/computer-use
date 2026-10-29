@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Pointer input for one retained AT-SPI object, without keyboard focus.
 
 Geometry belongs to the requested object. Python may select its exact native

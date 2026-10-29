@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Compact wire/log serialization, including immutable mappings and UTF-16 text."""
 
 import json

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One selected native click: preparation, final boundary and dispatch."""
 
 from computer_use_linux.contracts.protocol import Failure, require

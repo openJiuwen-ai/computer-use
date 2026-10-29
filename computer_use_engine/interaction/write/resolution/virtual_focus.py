@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Relate a text editor to an explicitly owned or linked active-descendant popup.
 
 Structural relation evidence is retained while the active suggestion is

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """RESOURCE: publish_native_operation; only explicitly borrowed capabilities are available.
 
 Input/output follow the native stage contract. Failures propagate unchanged;

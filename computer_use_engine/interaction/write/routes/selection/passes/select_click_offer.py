@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Select one fixed delivery using route-local evidence and background-first policy."""
 
 from dataclasses import replace

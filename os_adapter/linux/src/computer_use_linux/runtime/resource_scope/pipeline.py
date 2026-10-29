@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """The sole operation Owner; resource lifetime still spans protocol frames."""
 
 import time

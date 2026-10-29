@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Route one session request to its execution branch in a single decision.
 
 The branch key encodes both axes that the router needs: who issued the request

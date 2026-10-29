@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Local observation gaps must not hide lost sessions or uncertain cleanup."""
 
 from __future__ import annotations

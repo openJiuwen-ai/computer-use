@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import ApplicationServices
 
 /// Provider-owned text positions are opaque. Do not reinterpret them as UTF-16

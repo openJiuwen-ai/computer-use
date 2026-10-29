@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Parent-selected messages on the private worker connection.
 
 The native protocol permits 64 MiB replies. A full command diagnostic can thus

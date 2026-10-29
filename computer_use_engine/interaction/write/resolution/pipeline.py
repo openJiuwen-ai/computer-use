@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Compose target, receiver, focus, pointer, scrolling, and menu resolution."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import ApplicationServices
 
 /// Recheck selected receiver relations under their SelectionBasis. The same

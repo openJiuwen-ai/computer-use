@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Bounded raw graph reads shared by semantic paths and input resolution.
 
 One operation and deadline; completeness is never inferred from missing data.

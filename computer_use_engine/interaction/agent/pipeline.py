@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Translate public UI handles into scoped session reads, queries, and input."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// Display time only. No input timing, application state or desktop policy.
 struct AgentPointerVisualState {
     private(set) var active = false

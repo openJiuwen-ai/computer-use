@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One action route; final guard, journal and send stay adjacent."""
 
 from contextlib import nullcontext

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Immutable, platform-normalized facts consumed by shared presentation passes.
 
 Element identities are driver-owned strings. Graph relationships may be cyclic;

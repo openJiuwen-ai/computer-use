@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Bound AT-SPI receiver preparation and X11 key sequences.
 
 Python selects the route and authorizes preparation. The driver rechecks the

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Pure candidate phases shared by selection and narrow resolver probes."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Read-only menu source selection, bounded path matching and fact collection.
 
 Window sources and application roots use separate native scopes. A path only

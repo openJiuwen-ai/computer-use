@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Share identical secondary-action lists without sharing execution targets."""
 
 from __future__ import annotations

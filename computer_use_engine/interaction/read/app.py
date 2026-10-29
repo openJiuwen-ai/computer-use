@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Python coordination of discovery, fixed-window observation and projection.
 
 Used by the public v5 NativeController for a fixed working-window session.

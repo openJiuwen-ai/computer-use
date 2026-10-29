@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """AT-SPI connection for v5 raw facts, without starting a screen reader.
 
 Native object handles and events stay here. Control classification, text

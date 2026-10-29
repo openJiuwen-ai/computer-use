@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Data-only views consumed by presentation, independent of read services.
 
 Semantic nodes are open dictionaries: platform metadata and unknown native

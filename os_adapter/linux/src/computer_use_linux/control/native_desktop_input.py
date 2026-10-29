@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Exclusive keyboard input bound to an observed desktop's native window.
 
 No activation, receiver preparation or retry is performed. Existing optional

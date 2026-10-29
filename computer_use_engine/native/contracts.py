@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Targets, observations, and execution results shared with native adapters.
 
 Python selects routes from observed facts. Native execution units check the

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Apply the host operation guard around asynchronous session branches."""
 
 from __future__ import annotations

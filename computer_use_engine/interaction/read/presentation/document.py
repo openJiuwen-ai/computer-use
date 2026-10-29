@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Immutable semantic display document consumed by diff planning and final rendering."""
 
 from __future__ import annotations

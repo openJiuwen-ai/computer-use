@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Reconcile an App query/input context when an observed modal closes.
 
 Reconciliation follows the confirmed modal-parent chain back toward the

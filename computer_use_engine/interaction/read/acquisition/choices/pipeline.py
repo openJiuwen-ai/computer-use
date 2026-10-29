@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Observe window choices and recheck the catalogue after overview capture."""
 
 from __future__ import annotations

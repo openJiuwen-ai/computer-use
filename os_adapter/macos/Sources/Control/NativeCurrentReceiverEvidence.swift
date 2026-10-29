@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// A bounded positive focus path. It never inventories sibling subtrees or
 /// interprets a missing optional observation as destruction of the scope.
 enum NativeCurrentReceiverEvidence {

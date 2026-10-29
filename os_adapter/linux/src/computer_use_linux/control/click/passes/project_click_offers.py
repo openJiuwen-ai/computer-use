@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Project retained native contracts; no native preparation or input."""
 
 from copy import deepcopy

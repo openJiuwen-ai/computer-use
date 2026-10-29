@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Callbacks that guard one XTEST pointer sequence and report its progress."""
 
 from collections.abc import Callable

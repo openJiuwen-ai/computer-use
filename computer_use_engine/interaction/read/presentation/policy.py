@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Evidence used only to organize a fact-backed display, never to route input.
 
 Supporting actions and provider-wide metadata are still emitted by native fact

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """The write main pipeline: fixed intent, resolution, one route and a Gate."""
 
 from __future__ import annotations

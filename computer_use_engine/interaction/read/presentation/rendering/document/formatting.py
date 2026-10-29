@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Generate full or incremental text at the final presentation boundary."""
 
 from __future__ import annotations

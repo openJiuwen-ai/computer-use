@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Keep the explicitly addressed target for direct execution."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """PURE: validate the original capture request and its read lease."""
 
 from computer_use_linux.contracts.protocol import fields, integer, require, string

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// Validate the currently reported forward child edges, not a title or reverse
 /// parent/window attributes. Observation membership does not authorize input.
 /// Providers can recycle AX references by position: this does not establish an

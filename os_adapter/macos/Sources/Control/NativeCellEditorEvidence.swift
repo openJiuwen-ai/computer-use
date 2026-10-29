@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import CoreGraphics
 
 /// A provider may keep the concrete cell focused while a selected sibling

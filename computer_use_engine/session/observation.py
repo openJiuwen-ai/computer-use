@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Immutable observations whose complete text is rendered at an output boundary."""
 
 from __future__ import annotations

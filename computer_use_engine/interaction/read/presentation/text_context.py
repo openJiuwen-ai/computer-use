@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Readable range and ordering summaries from normalized text-space facts."""
 
 from __future__ import annotations

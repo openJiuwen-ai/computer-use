@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// PURE: separate semantic receiver readiness from delivery preparation.
 enum NativeKeyboardTransportPolicy {
     enum Window: Equatable { case target, other, hidden, unavailable }

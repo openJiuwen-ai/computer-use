@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Narrow execution service backed by the single composable call lifetime."""
 
 from __future__ import annotations

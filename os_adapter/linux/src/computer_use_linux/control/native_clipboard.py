@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One X11 clipboard lease around one externally guarded paste shortcut.
 
 This is an ICCCM selection owner, not an input strategy. It never sends keys,

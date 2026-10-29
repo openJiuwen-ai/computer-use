@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from computer_use.identity import WeakIdentityMap
 from computer_use.json import dumps
 from computer_use.interaction.read.delivery.baseline.model import BaselineInput

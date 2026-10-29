@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Render prepared snapshot sources before the terminal text-assembly Pass."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Prepare immutable projections, then render them at the final output boundary."""
 
 from __future__ import annotations

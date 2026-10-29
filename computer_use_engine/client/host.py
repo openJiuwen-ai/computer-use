@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from computer_use.diagnostics import record_structured_observations, set_diagnostic_handler
 from computer_use.native.preview import set_preview_handler
 from computer_use.session.events import set_action_handler, set_observation_handler

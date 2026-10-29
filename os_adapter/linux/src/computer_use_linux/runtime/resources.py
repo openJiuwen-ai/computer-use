@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Installation and read-only resource checks for the protocol 6 driver.
 
 The v6 check uses the same lazy native resources as its driver. This is not an input

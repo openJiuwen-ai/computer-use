@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One native text edit; guarded deletion/insertion retain partial receipts."""
 
 from computer_use_linux.contracts.protocol import Failure, integer, require

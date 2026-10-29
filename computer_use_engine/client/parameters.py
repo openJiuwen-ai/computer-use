@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Validate public intent before preparing input or acquiring native resources."""
 
 from computer_use.diagnostics import local_failure

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Session-owned bindings. Display numbers never route input by themselves."""
 
 from __future__ import annotations

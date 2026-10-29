@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Addressed EditableText units, without candidate search or fallback policy.
 
 The SDK chooses a primitive. This unit checks its original object and native

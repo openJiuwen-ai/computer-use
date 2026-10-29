@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Structured text fields; formatting is evaluated only at a rendering boundary."""
 
 from __future__ import annotations

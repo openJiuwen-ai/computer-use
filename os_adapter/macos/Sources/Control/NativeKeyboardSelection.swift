@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import ApplicationServices
 
 /// Evidence for an addressed Select All keyboard recipe, not proof that an

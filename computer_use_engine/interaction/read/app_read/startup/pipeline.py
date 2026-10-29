@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Observe an already dispatched startup with the existing five-round budget.
 
 Only catalogues and their declared associations may change the selected running

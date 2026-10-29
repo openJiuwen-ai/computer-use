@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One owner for App identity, explicit window catalogues and observed references.
 
 This store never discovers windows, chooses a current modal or constructs public

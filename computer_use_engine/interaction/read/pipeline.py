@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Application read entry: preparation, branch acquisition, and final delivery.
 
 AppReadPreparationPipeline only returns its selected scope. This parent owns

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One source-preserving compression traversal with explicit pure rules.
 
 The traversal owns ordering. Rules receive a read-only view plus a narrow

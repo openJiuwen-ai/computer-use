@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Discovery facts do not require an accessibility root or an image capture."""
 
 from copy import deepcopy

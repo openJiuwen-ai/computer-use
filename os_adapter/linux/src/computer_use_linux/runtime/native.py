@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Protocol 6 operations; never forward to legacy Reader or Control."""
 
 from __future__ import annotations

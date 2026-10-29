@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Session discovery and pure working-window selection for the v5 read chain.
 
 No launch, focus, screenshot, or legacy readApp bootstrap occurs here. A native-

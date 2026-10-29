@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Bounded platform-neutral observation validation, before any projection."""
 
 from .primitives import safe_integer

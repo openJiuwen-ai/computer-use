@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Interpret a reported focus token through the requested control's composition.
 
 Passive control content and logical collection items can establish membership.

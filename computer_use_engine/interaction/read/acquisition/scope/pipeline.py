@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Fixed-root discovery composes a read lease, directory query and pure choice."""
 
 from __future__ import annotations

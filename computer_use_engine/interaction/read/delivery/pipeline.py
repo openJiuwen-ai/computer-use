@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Number only selected attempts, then assemble the fixed-window observation."""
 
 from __future__ import annotations

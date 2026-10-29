@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Full display projection; rules and ordering live in projection_rules.
 
 These compatibility entry points return the same native-source/provenance

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Read-only AT-SPI focus discovery shared by observation and input guards.
 
 Returns native objects with live parent-path evidence. Events and Collection

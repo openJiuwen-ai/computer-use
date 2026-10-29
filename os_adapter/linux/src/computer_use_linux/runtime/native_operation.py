@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One bounded native operation, one selected target, one input barrier."""
 
 from __future__ import annotations

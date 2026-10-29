@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import Foundation
 
 /// PURE: reject legacy/unknown methods before parsing their payload or borrowing an operation.

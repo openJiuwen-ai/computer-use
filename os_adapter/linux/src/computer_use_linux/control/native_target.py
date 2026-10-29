@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Current native object/scope checks shared by addressed execution units.
 
 No candidate search, action semantics, projection, or route selection here.

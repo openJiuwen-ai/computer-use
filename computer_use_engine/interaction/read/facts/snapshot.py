@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Immutable fact identity with a separate semantic tree view."""
 
 from __future__ import annotations

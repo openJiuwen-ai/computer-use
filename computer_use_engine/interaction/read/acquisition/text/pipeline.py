@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Immutable captured-text reads: local values and native pages are distinct.
 
 A text capture outlives its live element, but not its driver session. Neither

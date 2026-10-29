@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Format full or incremental text from final snapshot renders."""
 
 from __future__ import annotations

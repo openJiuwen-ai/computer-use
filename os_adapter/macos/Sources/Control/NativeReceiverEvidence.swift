@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// Native window-focus evidence for process-addressed keyboard events. A
 /// window number in a posted event is not itself proof of the receiving window.
 enum NativeReceiverEvidence {

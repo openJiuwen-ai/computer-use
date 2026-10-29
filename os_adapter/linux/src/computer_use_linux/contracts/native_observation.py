@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Lossless NativeObservation wire primitives for the independent Linux driver.
 
 The driver has no dependency on the public SDK. These constructors implement

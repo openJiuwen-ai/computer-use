@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Pure native fact and control semantics shared by reading and execution.
 
 Names describe data; no role alone grants an input route. Unknown roles remain

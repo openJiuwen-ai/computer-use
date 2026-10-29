@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Pure full/diff selection and delivery-confirmed baseline publication.
 
 The existing caller decides when output was delivered. These pipelines neither

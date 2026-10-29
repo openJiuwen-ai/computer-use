@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from .captures import capture_metadata, decode_capture, decode_stamp
 from .png import png_size
 from .primitives import nonempty, record

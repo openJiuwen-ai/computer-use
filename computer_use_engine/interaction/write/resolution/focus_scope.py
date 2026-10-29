@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Interpret coarse macOS focus reports using the requested editor's ancestry.
 
 A provider may report a layout container as FocusedUIElement while the editor

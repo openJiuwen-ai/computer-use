@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Validate unified observation types, references and bounded query coverage."""
 
 from __future__ import annotations

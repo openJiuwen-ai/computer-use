@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Human intent: a desktop, an application instance, a window, or a control."""
 
 from __future__ import annotations

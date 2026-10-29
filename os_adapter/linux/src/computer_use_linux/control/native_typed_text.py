@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One keyboard text recipe for the already selected native receiver.
 
 Insert follows the live keyboard selection. Replacement selects and proves the

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 "Compose only proved window layouts; retain independent native capture maps."
 
 from __future__ import annotations

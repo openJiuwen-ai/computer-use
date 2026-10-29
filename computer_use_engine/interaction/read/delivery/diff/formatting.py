@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Plan incremental delivery from immutable display facts and containment."""
 
 from __future__ import annotations

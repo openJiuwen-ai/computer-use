@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Native pixels and immutable geometry, independent of an AT-SPI tree.
 
 The SDK owns observation layout and image delivery. This module retains only

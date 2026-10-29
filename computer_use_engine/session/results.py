@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Action receipt identity and captured-text delivery callbacks."""
 
 from computer_use.identity import FrozenRecord, WeakIdentityMap

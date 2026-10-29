@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Account for native values at their actual presentation destinations.
 
 The renderer records emissions, not property reads or string matches. Values

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Bounded AT-SPI Table/Component sampling, independent of input and selection.
 
 AT-SPI has no required visible-cells property. Hit testing supplies native cell

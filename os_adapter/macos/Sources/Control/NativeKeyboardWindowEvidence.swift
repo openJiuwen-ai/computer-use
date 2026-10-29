@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// Prefer authorized foreground setup before synthetic document activation only
 /// when declared AX selectors have no remaining selection to perform. This is
 /// a preparation choice, not a universal key-window or dispatch prerequisite.

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 // Build-time only. Derive COM declarations from the host Windows type library;
 // never maintain hand-written vtable layouts or ship a downloaded interop DLL.
 using System;

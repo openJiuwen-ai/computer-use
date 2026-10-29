@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Task-facing presentation policy. Exact facts remain in snapshot details.
 
 These are rendering choices, never changes to capabilities, source values or

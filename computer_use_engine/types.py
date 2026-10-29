@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Small public values; native identities and wire options stay private."""
 
 from dataclasses import dataclass

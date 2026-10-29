@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Bounded AT-SPI facts. No control classification, projection or input here."""
 
 from __future__ import annotations

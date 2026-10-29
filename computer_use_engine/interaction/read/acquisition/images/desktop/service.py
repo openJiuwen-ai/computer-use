@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Desktop observation over native protocols; no input or AX subtree needed."""
 
 from __future__ import annotations

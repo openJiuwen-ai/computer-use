@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Session-specific desktop services; AT-SPI remains usable without X11.
 
 The accessibility-only provider intentionally has no screenshot or synthetic
