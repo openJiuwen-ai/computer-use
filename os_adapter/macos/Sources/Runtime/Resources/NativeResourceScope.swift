@@ -25,7 +25,7 @@ import ApplicationServices
             let selection = NativeSelectionBasis(access: access.objects)
             let op = NativeOperation(
                 timeoutMs: remaining, writable: mode == "write", intent: request, target: binding,
-                clickContract: begin.clickContract,
+                clickContract: begin.clickContract, clickPreferenceHints: begin.clickPreferenceHints,
                 release: {
                     selection.clear()
                     releaseNode()

@@ -97,7 +97,9 @@ import ApplicationServices
                 && sameProof($0.click?.popupPointer, sampled.popupPointer)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
-        let offer = sampled.retainingDocumentForeground(from: prior?.click)
+        var offer = sampled.retainingDocumentForeground(from: prior?.click)
+        // Legacy click-contract decoders reject even optional unknown fields.
+        if !op.clickPreferenceHints { offer.preferenceHint = nil }
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
             receiver: receiver, basis: basis, unit: unit, click: offer)

@@ -11,6 +11,8 @@ import Foundation
     let writable: Bool
     let request: NativeIntent
     let clickContract: String?
+    /// Advisory wire metadata is emitted only for an explicitly opted-in client.
+    let clickPreferenceHints: Bool
     var intent: String { request.kind }
     let target: [String: Any]
     private(set) var state = State.active
@@ -43,6 +45,7 @@ import Foundation
 
     init(
         timeoutMs: Int, writable: Bool, intent: NativeIntent, target: [String: Any], clickContract: String? = nil,
+        clickPreferenceHints: Bool = false,
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, release: @escaping () -> Void,
         cancelActive: @escaping () -> Void
     ) {
@@ -52,6 +55,7 @@ import Foundation
         self.request = intent
         self.target = target
         self.clickContract = clickContract
+        self.clickPreferenceHints = clickPreferenceHints
         self.release = release
         self.cancelActive = cancelActive
         timer = Task { @MainActor [weak self] in

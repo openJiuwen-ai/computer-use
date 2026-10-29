@@ -177,7 +177,13 @@ unit_contracts = {
 
 _intent = obj(dict(kind=enum("read", *intent_kinds), parameters=unknown()))
 _begin = obj(
-    dict(mode=enum("read", "write"), target=operation_target, intent=_intent, clickContract=enum("v1", "v2").optional())
+    dict(
+        mode=enum("read", "write"),
+        target=operation_target,
+        intent=_intent,
+        clickContract=enum("v1", "v2").optional(),
+        clickPreferenceHints=enum("v1").optional(),
+    )
 )
 _unit_command = obj(
     dict(kind=enum(*unit_contracts), primitiveId=identity, target=operation_target, foreground=boolean())
@@ -209,6 +215,8 @@ def decode_begin(value):
     intent, mode = result["intent"], result["mode"]
     if "clickContract" in result and (mode != "write" or intent["kind"] != "click"):
         raise ValueError("protocol: click contract requires a write click operation")
+    if "clickPreferenceHints" in result and "clickContract" not in result:
+        raise ValueError("protocol: click preference metadata requires a click contract")
     if not isinstance(intent["parameters"], dict):
         raise ValueError("protocol: native intent parameters must be an object")
     try:
