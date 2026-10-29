@@ -84,9 +84,17 @@ import ApplicationServices
     }
 
     func declareClick(_ unit: NativeInputUnit, offer sampled: NativeClickContract) {
+        func sameProof(_ old: NativePopupPointerQualification?, _ new: NativePopupPointerQualification?) -> Bool {
+            switch (old, new) {
+            case (nil, nil): return true
+            case (let a?, let b?): return a.matches(b, same: { CFEqual($0, $1) })
+            default: return false
+            }
+        }
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
                 && $0.unit == unit && $0.click?.routeFamily == sampled.routeFamily
+                && sameProof($0.click?.popupPointer, sampled.popupPointer)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
         let offer = sampled.retainingDocumentForeground(from: prior?.click)

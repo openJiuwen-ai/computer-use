@@ -21,6 +21,10 @@ extension NativeElementControl {
             return nil
         }
         var webArea = NativeActionDocumentPolicy.WebArea.unknown
+        /// Borrowed immutable observation constraints, never action authority.
+        var popupContext: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>? = nil
+        /// Current native leaf membership, separate from the observed owner.
+        var popupElementWindowID: UInt32? = nil
 
         @MainActor func allowsAction(_ action: String) -> Bool {
             NativeActionAdmission.allows(
@@ -80,6 +84,17 @@ extension NativeElementControl {
                 }
             } else {
                 facts.documentEvidence = .other
+            }
+        }
+        if let context = target.popupOwner, target.ancestors.count == 2, CFEqual(target.ancestors[0], context.popup),
+            CFEqual(target.ancestors[1], context.list), let observed = target.observedInteractionSurface,
+            CFEqual(observed, context.popup)
+        {
+            facts.popupContext = context
+            if role == "AXStaticText" {
+                try RequestDiagnostics.checkCancellation()
+                facts.popupElementWindowID = BackgroundEvents.nativeWindowID(target.element)
+                try RequestDiagnostics.checkCancellation()
             }
         }
         return facts

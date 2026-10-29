@@ -1,6 +1,7 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import Foundation
+import ApplicationServices
 
 /// Immutable v1 offer retained by the original primitive store. The wire is
 /// a selection projection; native authority and delivery are never supplied
@@ -21,9 +22,23 @@ struct NativeClickContract: Equatable {
     let preparationOptions: [String]
     var backgroundFamily: String? = nil
     var backgroundUnavailable = false
+    var popupPointer: NativePopupPointerQualification? = nil
     // Native retained requirement, not execute-caller authority or wire data.
     var documentForeground = DocumentForeground.notRequired
     var documentForegroundRequired: Bool { documentForeground.required }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        let popupMatches: Bool
+        switch (lhs.popupPointer, rhs.popupPointer) {
+        case (nil, nil): popupMatches = true
+        case (let a?, let b?): popupMatches = a.matches(b, same: { CFEqual($0, $1) })
+        default: popupMatches = false
+        }
+        return popupMatches && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
+            && lhs.admission == rhs.admission && lhs.reason == rhs.reason
+            && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
+            && lhs.backgroundUnavailable == rhs.backgroundUnavailable && lhs.documentForeground == rhs.documentForeground
+    }
 
     /// A refresh of the same retained selection cannot erase proved Web
     /// foreground requirements merely because a parent getter is unavailable.

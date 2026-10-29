@@ -18,11 +18,18 @@ import ApplicationServices
     ) throws -> NativeSelectedTextUnit
     func elementPointerUnit(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator?) throws
         -> NativeElementPointerUnit
+    func popupPointerUnit(_ binding: [String: Any], qualification: NativePopupPointerQualification) throws
+        -> any NativePopupPointerInput
     func menuUnit(_ binding: [String: Any], within: [String]) throws -> NativeMenuUnit
     func scrollUnit(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator) throws -> NativeScrollUnit
 }
 
 extension NativeInputUnitAccess {
+    func popupPointerUnit(_ binding: [String: Any], qualification: NativePopupPointerQualification) throws
+        -> any NativePopupPointerInput
+    {
+        NativePopupPointerUnit(element: try elementPointerUnit(binding, actuator: nil), qualification: qualification)
+    }
     func elementPointerUnit(_ binding: [String: Any]) throws -> NativeElementPointerUnit {
         try elementPointerUnit(binding, actuator: nil)
     }

@@ -19,8 +19,29 @@ import ApplicationServices
             "windowRoute": "unknown", "pointerRoute": "unknown"
         ]
         var enabled: Bool?, foreground = false, role: String?, complete = false, menu = false
-        func pointerOffers(_ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false) throws {
+        func pointerOffers(
+            _ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false,
+            qualifyPopup: ((NativePointerUnit.PhysicalClickSample) -> NativePopupPointerQualification?)? = nil
+        ) throws {
             try pointer.validateWindowIdentity()
+            if let qualifyPopup {
+                // The existing point readiness sample retains its physical hit.
+                // No preparation or second directory is needed for this offer.
+                let physical = pointer.physicalClickSample(at: point)
+                try RequestDiagnostics.checkCancellation()
+                let proof = physical.ready ? qualifyPopup(physical) : nil
+                foreground = physical.foreground
+                input["geometryCurrent"] = "yes"
+                input["pointerRoute"] = proof == nil ? "no" : "yes"
+                declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(proof))
+                declarations.declareClick(
+                    .pointer(.click),
+                    offer: .init(
+                        routeFamily: "macos.windowDirected.v1", delivery: .windowDirected, admission: .unavailable,
+                        reason: "This popup choice requires its confirmed foreground pointer point.",
+                        preparationOptions: []))
+                return
+            }
             foreground = pointer.foregroundWindow(at: point)
             input["geometryCurrent"] = "yes"
             var transport = true
@@ -78,6 +99,15 @@ import ApplicationServices
             complete = facts.actions != nil
             menu = facts.applicationMenuContext
             let applicationRoot = access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") != nil
+            var popupChoice = false
+            if !applicationRoot, !menu, plan.actuator == nil, plan.receiver == nil,
+                NativePopupClickPolicy.permitsIntent(op.request), let context = facts.popupContext
+            {
+                popupChoice = NativePopupClickPolicy.requiresPointer(
+                    context: context, window: context.popup, currentWindowID: facts.popupElementWindowID, role: role,
+                    enabled: facts.enabled, focusWritable: facts.focusWritable, actions: facts.actions,
+                    same: { CFEqual($0, $1) })
+            }
             if plan.actuator == nil {
                 for action in facts.actions ?? [] {
                     let isMenu = applicationRoot
@@ -108,7 +138,7 @@ import ApplicationServices
                     declarations.declareClick(
                         isMenu
                             ? .menuAction(action.name, action.description) : .action(action.name, action.description),
-                        offer: offer)
+                        offer: NativePopupClickPolicy.actionOffer(offer, requiresPointer: popupChoice))
                 }
             }
             if !applicationRoot && !menu {
@@ -126,6 +156,10 @@ import ApplicationServices
                 do {
                     let unit = try access.units.elementPointerUnit(binding.wire, actuator: plan.actuator)
                     if let exposure = try unit.exposure() {
+                        if popupChoice {
+                            throw DriverError(
+                                "the original popup choice must already be visible", code: .inputUnavailable)
+                        }
                         try pointerOffers(
                             NativePointerUnit(
                                 application: unit.application, window: exposure.mapping, nativeWindow: unit.window),
@@ -134,7 +168,7 @@ import ApplicationServices
                             plan: plan, declarations: declarations, enabled: enabled, foreground: foreground,
                             input: input, nativeRole: role, actionsComplete: complete, applicationMenu: menu)
                     }
-                    let sampled = try unit.observedGeometry(allowWindowPreparation: true)
+                    let sampled = try unit.observedGeometry(allowWindowPreparation: !popupChoice)
                     if let hit = sampled.hit {
                         if CFEqual(hit, unit.element) {
                             input["pointerHit"] = binding.node!
@@ -154,10 +188,22 @@ import ApplicationServices
                         throw DriverError(
                             "the element's center is not confirmed as this native hit target", code: .inputUnavailable)
                     }
-                    try pointerOffers(
-                        NativePointerUnit(
-                            application: unit.application, window: geometry.mapping, nativeWindow: unit.window),
-                        at: geometry.point)
+                    let pointer = NativePointerUnit(
+                        application: unit.application, window: geometry.mapping, nativeWindow: unit.window)
+                    if popupChoice, let context = facts.popupContext {
+                        try pointerOffers(
+                            pointer, at: geometry.point,
+                            qualifyPopup: { physical in
+                                guard let hit = physical.hit else { return nil }
+                                return NativePopupPointerQualification(
+                                    context: context, element: unit.element, pid: unit.application.processIdentifier,
+                                    sample: .init(
+                                        geometry: geometry, hit: sampled.hit, physicalHit: hit,
+                                        foreground: physical.foreground), same: { CFEqual($0, $1) })
+                            })
+                    } else {
+                        try pointerOffers(pointer, at: geometry.point)
+                    }
                 } catch let error as DriverError where error.code == .inputUnavailable || error.code == .modeUnsupported
                 {
                     // A pointer geometry failure cannot erase an independent

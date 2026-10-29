@@ -74,9 +74,10 @@ import ApplicationServices
         }
     }
 
-    private func register(_ element: AXUIElement, app: NSRunningApplication, scope: String, parent: Target? = nil)
-        throws -> (String, Target)
-    {
+    private func register(
+        _ element: AXUIElement, app: NSRunningApplication, scope: String, parent: Target? = nil,
+        diagnosticBudget: (() throws -> Bool)? = nil, observationDeadline: TimeInterval? = nil
+    ) throws -> (String, Target) {
         try RequestDiagnostics.checkCancellation()
         AXMessaging.configure(element)
         let key = Identity(pid: app.processIdentifier, launched: app.launchDate, element: element, scope: scope)
@@ -94,6 +95,30 @@ import ApplicationServices
             provider: provider.identity, providerKnown: provider.known,
             ancestors: parent.map { $0.ancestors + [$0.element] } ?? [],
             context: parent.map(ApplicationElements.childContext) ?? [])
+        target.popupOwner = parent?.popupOwner
+        if role == kAXListRole, let parent, parent.role == kAXWindowRole,
+            parent.identity.attributes[kAXSubroleAttribute] == "AXDialog", let budget = diagnosticBudget,
+            let observationDeadline
+        {
+            // Once per original popup/list during this bounded observation,
+            // then inherited by its leaves. Query/dispatch never fills an old
+            // stamp from a current owner. Unknown evidence leaves the tree intact.
+            do {
+                // Optional provenance leaves a reserve for the ordinary tree
+                // and never resets this collection's original deadline.
+                let until = min(observationDeadline - 0.1, ProcessInfo.processInfo.systemUptime + 0.1)
+                let facts = NativePopupAXFacts(
+                    pid: app.processIdentifier, until: until,
+                    check: {
+                        guard try budget(), ProcessInfo.processInfo.systemUptime < until else {
+                            throw NativePopupObservationUnavailable()
+                        }
+                    }
+                ).facts()
+                target.popupOwner = try NativePopupAttachment.observe(
+                    popup: parent.element, list: element, facts: facts, same: { CFEqual($0, $1) })
+            } catch is NativePopupObservationUnavailable {}
+        }
         if parent == nil, let previous, previous.identity.refining(with: identity) != nil,
             !provider.known || !(previous.providerKnown || previous.provider != nil)
                 || previous.provider == provider.identity
@@ -102,6 +127,7 @@ import ApplicationServices
             // path and cannot erase the one already observed.
             target.ancestors = previous.ancestors
             target.context = previous.context
+            target.popupOwner = previous.popupOwner
         }
         let ref = registry.observe(
             key,
@@ -115,12 +141,15 @@ import ApplicationServices
         try register(element, app: app, scope: scope).0
     }
 
-    private func related(_ element: AXUIElement, app: NSRunningApplication, scope: String, parent: Target? = nil) throws
-        -> (String, Target)?
-    {
-        do { return try register(element, app: app, scope: scope, parent: parent) } catch let error as DriverError
-            where error.code == .staleTarget
-        { return nil }
+    private func related(
+        _ element: AXUIElement, app: NSRunningApplication, scope: String, parent: Target? = nil,
+        diagnosticBudget: (() throws -> Bool)? = nil, observationDeadline: TimeInterval? = nil
+    ) throws -> (String, Target)? {
+        do {
+            return try register(
+                element, app: app, scope: scope, parent: parent, diagnosticBudget: diagnosticBudget,
+                observationDeadline: observationDeadline)
+        } catch let error as DriverError where error.code == .staleTarget { return nil }
     }
 
     private func stamp(_ began: Int64) -> [String: Any] {
@@ -467,7 +496,8 @@ import ApplicationServices
                         guard
                             let (life, child) = try related(
                                 element, app: root.application, scope: root.scope,
-                                parent: property == "AXChildren" ? target : nil)
+                                parent: property == "AXChildren" ? target : nil, diagnosticBudget: reading,
+                                observationDeadline: deadline)
                         else {
                             expired = true
                             break

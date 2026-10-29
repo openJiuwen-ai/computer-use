@@ -8,6 +8,7 @@ import ApplicationServices
     func inputBinding(_ raw: Any?, input: Bool, attachedMenuAction: Bool) throws -> (
         wire: [String: Any], blocked: [String], node: String?
     )
+    func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String]
     func keyboardBoundaryAnchor(_ binding: [String: Any], application: NSRunningApplication, window: AXUIElement) throws
         -> NativeKeyboardBoundaryAnchor?
     func keyboardBoundary(_ anchor: NativeKeyboardBoundaryAnchor) throws -> NativeKeyboardBoundaryDecision
@@ -22,6 +23,9 @@ import ApplicationServices
 }
 
 extension NativeScopeAccess {
+    func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String] {
+        throw DriverError("qualified popup pointer boundary unavailable", code: .inputUnavailable)
+    }
     // Existing adapters do not opt into this new strategy implicitly.
     func keyboardBoundaryAnchor(_ binding: [String: Any], application: NSRunningApplication, window: AXUIElement) throws
         -> NativeKeyboardBoundaryAnchor?

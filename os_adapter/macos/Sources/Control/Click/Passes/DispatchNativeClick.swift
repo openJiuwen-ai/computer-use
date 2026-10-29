@@ -68,6 +68,10 @@ import ApplicationServices
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery)
+        case .popupPointer(let unit):
+            try await unit.deliver(
+                plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
+                onCleanupUnknown: receipt.recordCleanupUnknown)
         case .desktop(let unit):
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,

@@ -49,7 +49,12 @@ import ApplicationServices
                 unit: command.kind, kind: "click", parameters: op.request.parameters, foreground: false,
                 element: !capture)
             pointer = request
-            if capture {
+            if let qualification = offer.popupPointer {
+                guard !capture, contract.actuator == nil, offer.delivery == .systemPointer, !command.foreground,
+                    NativePopupClickPolicy.permitsIntent(op.request)
+                else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
+                target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))
+            } else if capture {
                 let unit = NativePointerUnit(capture: try access.captures.input(command.target).entry)
                 try unit.validateParameters(request)
                 target = .captured(unit)

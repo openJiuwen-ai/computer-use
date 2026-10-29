@@ -13,6 +13,9 @@ import ApplicationServices
     var member: AXUIElement? = nil
     var kind: NativePointerIntent.Kind = .click
     var logicalWindow: AXUIElement? = nil
+    /// Only the selected qualified-popup adapter sets this. Ordinary pointers
+    /// retain their existing fresh gesture geometry and exposure preparation.
+    var frozenGeometry: Geometry? = nil
 
     struct Geometry {
         let mapping: WindowGeometry.WindowMapping
@@ -238,7 +241,7 @@ import ApplicationServices
     }
 
     func geometry() throws -> Geometry {
-        let sampled = try sample()
+        let sampled = try sample(frozen: frozenGeometry)
         // A distinct member is selected by the Python semantic resolver and
         // guarded by its native fact dependencies. This unit never searches
         // children or accepts a hit merely because it lies in the rectangle.
@@ -248,6 +251,18 @@ import ApplicationServices
                 code: .inputUnavailable)
         }
         return sampled.geometry
+    }
+
+    /// Fresh exact-point evidence for the qualified popup boundary. This uses
+    /// the same element hit and independent physical-window readers as delivery.
+    func popupPhysicalSample(_ frozen: Geometry) throws -> NativePopupPointerSample<AXUIElement> {
+        let sampled = try sample(frozen: frozen)
+        let pointer = NativePointerUnit(application: application, window: sampled.geometry.mapping, nativeWindow: window)
+        let physical = pointer.physicalClickSample(at: frozen.point)
+        return .init(
+            geometry: sampled.geometry, hit: sampled.selection.basis == .exactHit ? sampled.hit : nil,
+            physicalHit: physical.hit ?? .init(windowServer: .unavailable, accessibility: nil),
+            foreground: physical.foreground && physical.ready)
     }
 
     /// Query projection keeps a mismatching native hit visible so the public

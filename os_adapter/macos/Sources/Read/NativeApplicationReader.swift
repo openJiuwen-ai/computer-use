@@ -22,6 +22,7 @@ import ApplicationServices
         let observedInteractionSurface: AXUIElement?
         let validate: () throws -> Void
         var cellEditorState: NativeCellEditorState? = nil
+        var popupOwner: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>? = nil
     }
 
     func readRoot(_ ref: String) throws -> ReadRoot {
@@ -38,7 +39,7 @@ import ApplicationServices
         return ReadRoot(
             element: target.element, application: target.application, scope: target.scope, ancestors: target.ancestors,
             observedInteractionSurface: target.observedInteractionSurface, validate: validate,
-            cellEditorState: target.cellEditorState)
+            cellEditorState: target.cellEditorState, popupOwner: target.popupOwner)
     }
 
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any] {

@@ -229,6 +229,19 @@ enum NativePointerReadiness {
         return result
     }
 
+    struct PhysicalClickSample {
+        let ready: Bool
+        let foreground: Bool
+        let hit: NativeInputWindowHit?
+    }
+
+    /// Preserve the already queried physical hit instead of reconstructing it
+    /// from a ready boolean when a popup offer needs a typed point proof.
+    func physicalClickSample(at point: CGPoint) -> PhysicalClickSample {
+        let value = sampleReadiness(at: point, kind: .click, delivery: .systemPointer)
+        return .init(ready: value.ready, foreground: value.foreground, hit: value.hit)
+    }
+
     private func diagnoseReadiness(_ value: Readiness, at point: CGPoint, phase: String) {
         guard WindowGeometry.inputDiagnosticsEnabled else { return }
         diagnose([
