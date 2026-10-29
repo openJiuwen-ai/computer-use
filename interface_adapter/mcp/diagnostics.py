@@ -1,6 +1,14 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"""Serialize diagnostic evidence and persist the server-owned execution journal.
+
+IPC and JSONL logs share dumps(). Importing this module performs no file I/O;
+only constructing Journal creates a private log. This module does not own UI
+presentation, history cursors, worker transport, or execution state.
+"""
+
+import json
 import os
 import sys
 import uuid
@@ -8,8 +16,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from computer_use.diagnostics import SDK_VERSION
+from computer_use.json import dumps as legacyDumps
 
-from .diagnostic_json import dumps
+
+def _is_native_observation(event):
+    if not isinstance(event, dict):
+        return False
+    result = event.get("result")
+    if not isinstance(result, dict):
+        return False
+    return (
+        event.get("kind") == "command_end" and event.get("method") == "inspect" and result.get("kind") == "observation"
+    )
+
+
+def dumps(value):
+    """Encode validated native evidence directly, retaining the general-record fallback."""
+    event = value.get("diagnostic", value) if isinstance(value, dict) else None
+    if _is_native_observation(event):
+        try:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError):
+            # Keep the diagnostic callback tolerant of non-native/custom
+            # records rather than losing evidence to an optimization.
+            pass
+    return legacyDumps(value)
 
 
 def now():

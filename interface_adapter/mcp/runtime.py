@@ -1,6 +1,8 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"""Worker-process entry point: persistent Python execution embedding the computer_use SDK."""
+
 import ast
 import asyncio
 import base64
@@ -37,12 +39,8 @@ from computer_use.native.preview import latest_preview_sink
 from computer_use.protocol.png import decode_png
 from computer_use.session.observation import peek_observation_text
 
-from .output import OutputBuffer
-from .presentation import ObservationOutput, ObservationPresenter
-from .worker_protocol import WorkerMessageWriter, consume_protocol, read_message
-
-"Persistent Python worker. User code never shares the MCP server's stdout."
-
+from .output import ObservationOutput, ObservationPresenter, OutputBuffer
+from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
 
 _runs = ContextVar("computer_use_execution", default=None)
 
@@ -365,7 +363,7 @@ class ConsoleWriter(io.TextIOBase):
 
 
 async def main():
-    from .worker_connection import worker_connection
+    from .worker_transport import worker_connection
 
     protocol = consume_protocol()
     reader, writer = await worker_connection()

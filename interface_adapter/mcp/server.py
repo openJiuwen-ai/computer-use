@@ -1,6 +1,8 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"""MCP protocol endpoint in the parent process: tools, capabilities, and request validation."""
+
 import argparse
 import asyncio
 import logging
@@ -20,9 +22,6 @@ from mcp.server.stdio import stdio_server
 
 from .history import HISTORY_KEY, history_request
 from .session import ExecutionSession
-
-"Stdio MCP host. Tool output retains its content blocks and history metadata."
-
 
 DESCRIPTION = (
     "Execute Python with top-level await in a persistent Computer Use session on "
