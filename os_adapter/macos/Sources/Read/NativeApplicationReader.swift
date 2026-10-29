@@ -124,6 +124,7 @@ import ApplicationServices
         let issue: String?
         let expandedRequiredSurface: Bool
         var unresolvedModalHints = Set<String>()
+        var parentEvidence: NativeWindowParents.Result? = nil
     }
 
     struct ModalIdentity {
@@ -767,7 +768,7 @@ import ApplicationServices
             }
             outcome = "returned"
             return .inputBoundary(.init(windows: result, issue: boundaryIssue, expandedRequiredSurface: discoverRequired,
-                                        unresolvedModalHints: unresolvedModalHints(in: result)))
+                                        unresolvedModalHints: unresolvedModalHints(in: result), parentEvidence: relations))
         }
         // Merge only one-to-one native matches. Same-title/overlapping windows
         // must not collapse, nor may a sheet borrow its parent's identity.

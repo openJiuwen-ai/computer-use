@@ -270,7 +270,9 @@ import ApplicationServices
         // A modal is not its own blocker, nor the blocker of an input surface
         // whose current path already proves that modal is its ancestor. Keep
         // ordinary native-root visual degradation independent of AX details.
-        guard boundary.unresolvedModalHints.isSubset(of: path) else {
+        let requiredModalHints = boundary.unresolvedModalHints.subtracting(
+            unrelatedModalHints(boundary, hints: modalHints, native: native, root: root))
+        guard requiredModalHints.isSubset(of: path) else {
             throw DriverError("a previously observed modal surface cannot be revalidated", code: .inputUnavailable)
         }
         // A positively observed modal/sheet with an unresolved owner is a
@@ -300,6 +302,51 @@ import ApplicationServices
             focused: state.applications.focusedWindow(selected.owner, windows: windows))
         return (selected, blocked)
     }
+    /// An unavailable modal proxy is irrelevant only with positive current
+    /// native attachment into a different, fully known independent AX root.
+    /// Reuse this collector's parent evidence; no historical edge authorizes it.
+    private func unrelatedModalHints(
+        _ boundary: NativeApplicationReader.InputBoundary, hints: [NativeApplicationReader.ModalHint],
+        native: [NativeWindows.Window], root: String
+    ) -> Set<String> {
+        guard let evidence = boundary.parentEvidence else { return [] }
+        let windows = boundary.windows
+        func independentRoot(_ ref: String) -> String? {
+            var current = ref, seen = Set<String>()
+            while seen.insert(current).inserted {
+                guard let row = windows.first(where: { $0.ref == current }), !row.parentUnknown,
+                    !evidence.unresolved.contains(current), row.parent == evidence.parents[current] else { return nil }
+                guard let parent = row.parent else { return row.kind == kAXWindowRole ? row.ref : nil }
+                current = parent
+            }
+            return nil
+        }
+        guard let selectedRoot = independentRoot(root) else { return [] }
+        func nativeOwnerRoot(_ hint: NativeApplicationReader.ModalHint) -> String? {
+            guard hint.nativePresence == .live, let expected = hint.identity.native else { return nil }
+            var id = expected.id, seen = Set<CGWindowID>()
+            for _ in 0..<32 {
+                guard seen.insert(id).inserted else { return nil }
+                let candidates = native.filter { $0.mapping.id == id }
+                guard candidates.count == 1, let current = candidates.first, current.process == expected.process,
+                    let parentID = current.parentID, parentID != 0 else { return nil }
+                let owners = native.filter { $0.mapping.id == parentID }
+                guard owners.count == 1, let parent = owners.first, parent.process == expected.process else { return nil }
+                let ref = state.applications.windowReference(current), owner = state.applications.windowReference(parent)
+                guard !evidence.unresolved.contains(ref), !evidence.unresolved.contains(owner),
+                    evidence.parents[ref] == owner else { return nil }
+                if windows.contains(where: { $0.ref == owner }) { return independentRoot(owner) }
+                id = parentID
+            }
+            return nil
+        }
+        return Set(hints.compactMap { hint in
+            guard boundary.unresolvedModalHints.contains(hint.identity.window),
+                let owner = nativeOwnerRoot(hint), owner != selectedRoot else { return nil }
+            return hint.identity.window
+        })
+    }
+
     private func modalPresence(
         _ expected: NativeApplicationReader.ModalIdentity.Native, current: [NativeWindows.Window]
     ) -> NativeApplicationReader.ModalPresence {
