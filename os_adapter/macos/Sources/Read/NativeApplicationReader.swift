@@ -123,12 +123,27 @@ import ApplicationServices
         let windows: [Window]
         let issue: String?
         let expandedRequiredSurface: Bool
-        var unresolvedModalHints = false
+        var unresolvedModalHints = Set<String>()
+    }
+
+    struct ModalIdentity {
+        struct Native {
+            let id: CGWindowID
+            let process: NativeProcessIdentity
+        }
+        let window: String
+        let element: AXUIElement?
+        let native: Native?
+    }
+    enum ModalPresence { case live, ended, unknown }
+    struct ModalHint {
+        let identity: ModalIdentity
+        let nativePresence: ModalPresence?
     }
 
     func inputBoundary(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window], contentRoot: AXUIElement?,
-        required: [AXUIElement], modalHints: [AXUIElement]
+        required: [AXUIElement], modalHints: [ModalHint]
     ) throws -> InputBoundary {
         guard case .inputBoundary(let result) = try collectWindows(
             app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: .inputValidation,
@@ -147,7 +162,7 @@ import ApplicationServices
     private func collectWindows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
         purpose: NativeWindowQueryPurpose, projection: Projection, reportIssue: ((String) -> Void)? = nil,
-        parentQuery: String? = nil, required: [AXUIElement] = [], modalHints: [AXUIElement] = [],
+        parentQuery: String? = nil, required: [AXUIElement] = [], modalHints: [ModalHint] = [],
         discoverRequired: Bool = false
     ) throws -> Collection {
         let timing = NativeWindowQueryTiming.start(metadata: {
@@ -184,7 +199,7 @@ import ApplicationServices
             outcome = "returned"
             if projection == .inputBoundary {
                 return .inputBoundary(.init(windows: [], issue: "AX trust unavailable", expandedRequiredSurface: false,
-                                            unresolvedModalHints: !modalHints.isEmpty))
+                    unresolvedModalHints: Set(modalHints.filter { $0.nativePresence != .ended }.map { $0.identity.window })))
             }
             return projection == .catalogue
                 ? .catalogue([]) : .boundary(.init(windows: [], issue: "AX trust unavailable"))
@@ -346,12 +361,41 @@ import ApplicationServices
         var inputFrontiers = [AXUIElement](), frontierCursor = 0
         var inputParents = [(child: AXUIElement, parent: AXUIElement?, known: Bool)]()
         var inputSheets = [AXUIElement]()
-        var modalHintCursor = 0, absentModalHints = [AXUIElement]()
-        func unresolvedModalHints(in windows: [Window]) -> Bool {
-            modalHints.contains { hint in
-                if absentModalHints.contains(where: { CFEqual($0, hint) }) { return false }
-                return windows.first(where: { CFEqual($0.element, hint) })?.modal == nil
+        var inputNativeIDs = [(element: AXUIElement, id: CGWindowID?)]()
+        var modalHintCursor = 0, absentModalHints = Set<String>()
+        func reportedID(_ element: AXUIElement) -> CGWindowID? {
+            inputNativeIDs.first(where: { CFEqual($0.element, element) })?.id
+        }
+        func modalRow(_ hint: ModalHint, in windows: [Window]) -> Window? {
+            if let native = hint.identity.native {
+                guard hint.nativePresence == .live else { return nil }
+                let matches = windows.filter { reportedID($0.element) == native.id }
+                if matches.count > 1 { return nil }
+                if let match = matches.first {
+                    if let original = hint.identity.element, CFEqual(match.element, original) { return match }
+                    // A new proxy can supply facts for the same CG surface,
+                    // not for an inner sheet sharing an unknown backing window.
+                    guard [kAXWindowRole, "sheet", "popover"].contains(match.kind),
+                        let ancestry = inputParents.first(where: { CFEqual($0.child, match.element) }),
+                        ancestry.known else { return nil }
+                    if let parent = ancestry.parent {
+                        guard let id = reportedID(parent), id != native.id else { return nil }
+                    }
+                    return match
+                }
+                // The original live AX object may temporarily lack its bridge;
+                // an explicit different ID is a conflict, never a replacement.
+                guard let original = hint.identity.element else { return nil }
+                return windows.first { CFEqual($0.element, original) && reportedID($0.element) == nil }
             }
+            guard let original = hint.identity.element else { return nil }
+            return windows.first { CFEqual($0.element, original) }
+        }
+        func unresolvedModalHints(in windows: [Window]) -> Set<String> {
+            Set(modalHints.compactMap { hint in
+                if absentModalHints.contains(hint.identity.window) { return nil }
+                return modalRow(hint, in: windows)?.modal == nil ? hint.identity.window : nil
+            })
         }
         func inputParent(_ child: AXUIElement) throws -> (parent: AXUIElement?, known: Bool) {
             try RequestDiagnostics.checkCancellation()
@@ -452,13 +496,24 @@ import ApplicationServices
                 try RequestDiagnostics.checkCancellation()
                 let hint = modalHints[modalHintCursor]
                 modalHintCursor += 1
-                if result.contains(where: { CFEqual($0.element, hint) }) { continue }
-                let read = queryRead(hint, kAXModalAttribute)
-                if case .invalid = read { absentModalHints.append(hint); continue }
-                if read.value as? Bool == false { absentModalHints.append(hint); continue }
-                switch try modalMembership(hint) {
-                case .live: candidates.append(hint)
-                case .absent: absentModalHints.append(hint)
+                if hint.nativePresence == .ended { absentModalHints.insert(hint.identity.window); continue }
+                if hint.identity.native != nil && hint.nativePresence != .live { continue }
+                if modalRow(hint, in: result) != nil { continue }
+                guard let element = hint.identity.element else { continue }
+                let read = queryRead(element, kAXModalAttribute)
+                if case .invalid = read {
+                    if hint.identity.native == nil { absentModalHints.insert(hint.identity.window) }
+                    continue
+                }
+                if hint.identity.native == nil && read.value as? Bool == false {
+                    absentModalHints.insert(hint.identity.window); continue
+                }
+                if let native = hint.identity.native, let id = query.nativeID(element), id != native.id { continue }
+                switch try modalMembership(element) {
+                case .live: candidates.append(element)
+                case .absent:
+                    // A detached/invalid AX proxy does not end a live CG window.
+                    if hint.identity.native == nil { absentModalHints.insert(hint.identity.window) }
                 case .unknown: break
                 }
                 continue
@@ -491,6 +546,16 @@ import ApplicationServices
             }
             timing?.root(element, role: reportedRole, selected: contentRoot.map { CFEqual($0, element) })
             if projection != .catalogue {
+                let modal: Bool?
+                if projection == .inputBoundary {
+                    let read = queryRead(element, kAXModalAttribute)
+                    // Invalid proxies can remain in a provider's declaration.
+                    // Drop that row, not the separate retained CG identity.
+                    if case .invalid = read { continue }
+                    modal = read.value as? Bool
+                } else {
+                    modal = attribute(element, kAXModalAttribute) as? Bool
+                }
                 // Boundary projections do not read presentation fields. The
                 // input projection uses the original alias registry; private
                 // keyboard keys retain their existing no-alias contract.
@@ -503,7 +568,7 @@ import ApplicationServices
                     Window(
                         ref: ref, title: "", element: element,
                         kind: role == kAXSheetRole ? "sheet" : role == "AXPopover" ? "popover" : role.isEmpty ? "unknown" : role,
-                        modal: attribute(element, kAXModalAttribute) as? Bool))
+                        modal: modal))
             } else {
                 let subrole = attribute(element, kAXSubroleAttribute) as? String ?? ""
                 let kind =
@@ -523,6 +588,10 @@ import ApplicationServices
                         kind: kind, modal: attribute(element, kAXModalAttribute) as? Bool))
             }
             if let timing, let item = result.last { timing.root(item.element, ref: item.ref) }
+            if projection == .inputBoundary {
+                try RequestDiagnostics.checkCancellation()
+                inputNativeIDs.append((element, query.nativeID(element)))
+            }
             // Sheets are often absent from AXWindows. Explicit native ownership
             // is retained; title, screen position and current focus prove no owner.
             let sheets: [AXUIElement]
@@ -671,10 +740,7 @@ import ApplicationServices
         if projection == .inputBoundary {
             // Native parent supplementation needs exact IDs, not titles,
             // document URIs or file/control contents. Keep one-to-one identity.
-            let ids = try result.map { item in
-                try RequestDiagnostics.checkCancellation()
-                return query.nativeID(item.element)
-            }
+            let ids = result.map { reportedID($0.element) }
             var refs = [String: String]()
             for index in result.indices {
                 guard let id = ids[index], ids.filter({ $0 == id }).count == 1,

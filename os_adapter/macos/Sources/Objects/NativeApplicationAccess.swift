@@ -80,7 +80,7 @@ import ApplicationServices
 
     func inputBoundary(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window], contentRoot: AXUIElement?,
-        required: [AXUIElement], modalHints: [AXUIElement] = []
+        required: [AXUIElement], modalHints: [NativeApplicationReader.ModalHint] = []
     ) throws -> NativeApplicationReader.InputBoundary {
         try reader.inputBoundary(app, nativeWindows: nativeWindows, contentRoot: contentRoot, required: required,
                                  modalHints: modalHints)

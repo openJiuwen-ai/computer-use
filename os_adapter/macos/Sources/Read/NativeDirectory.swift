@@ -7,7 +7,10 @@ import ApplicationServices
 /// collector never picks a document, launches, activates, or reads its contents.
 @MainActor final class NativeDirectory {
     struct Surface {
-        enum QueryHint { case observedModal }
+        enum QueryHint {
+            case observedModal
+            case retainedModal(NativeApplicationReader.ModalIdentity)
+        }
         let owner: NSRunningApplication
         let window: String
         let scope: String
@@ -27,6 +30,8 @@ import ApplicationServices
         var owner: (NSRunningApplication) throws -> Void = { try BackgroundTarget($0).validate() }
         var process: (pid_t) -> NativeProcessIdentity? = { NativeProcessIdentity.read($0) }
         var info: (CGWindowID) -> [String: Any]? = { WindowServerInfo.window($0) }
+        var presence: (CGWindowID) -> WindowServerInfo.Presence = { WindowServerInfo.read($0) }
+        var isGone: (pid_t) -> Bool = { NativeProcessIdentity.isGone($0) }
         var role: (AXUIElement) -> String? = { AXAccess.read($0, kAXRoleAttribute).value as? String }
     }
     private let windowServices: WindowServices
@@ -214,9 +219,15 @@ import ApplicationServices
         let native = NativePointerTiming.measure("captureScope.nativeWindows", metadata: metadata) {
             windowServices.list(selected.owner)
         }
-        let modalHints = surfaces.values.filter {
-            $0.owner.isEqual(selected.owner) && $0.native == nil && $0.queryHint == .observedModal
-        }.compactMap(\.element)
+        var modalHints = [NativeApplicationReader.ModalHint]()
+        for surface in surfaces.values where surface.owner.isEqual(selected.owner) {
+            guard case .retainedModal(let identity)? = surface.queryHint else { continue }
+            try RequestDiagnostics.checkCancellation()
+            modalHints.append(.init(identity: identity, nativePresence: identity.native.map { modalPresence($0, current: native) }))
+        }
+        let necessaryHints = modalHints.contains {
+            $0.nativePresence != .ended && $0.identity.window != selected.window
+        }
         let boundary: NativeApplicationReader.InputBoundary
         do {
             boundary = try NativePointerTiming.measure("captureScope.accessibilityWindows", metadata: metadata) {
@@ -234,11 +245,8 @@ import ApplicationServices
             try RequestDiagnostics.checkCancellation()
             // A directly selected native window is still an addressable
             // visual scope. Unknown AX data is not proof that it is closed.
-            guard selected.window == root, selected.native != nil, modalHints.isEmpty else { throw error }
+            guard selected.window == root, selected.native != nil, !necessaryHints else { throw error }
             return (selected, [])
-        }
-        guard !boundary.unresolvedModalHints else {
-            throw DriverError("a previously observed modal surface cannot be revalidated", code: .inputUnavailable)
         }
         let windows = boundary.windows
         if selected.native == nil {
@@ -255,6 +263,15 @@ import ApplicationServices
                 throw DriverError("current input-surface ownership cannot be confirmed", code: .inputUnavailable)
             }
             current = row.parent
+        }
+        guard path.contains(root) else {
+            throw DriverError("input surface left its selected working-window range", code: .staleTarget)
+        }
+        // A modal is not its own blocker, nor the blocker of an input surface
+        // whose current path already proves that modal is its ancestor. Keep
+        // ordinary native-root visual degradation independent of AX details.
+        guard boundary.unresolvedModalHints.isSubset(of: path) else {
+            throw DriverError("a previously observed modal surface cannot be revalidated", code: .inputUnavailable)
         }
         // A positively observed modal/sheet with an unresolved owner is a
         // critical unknown, not evidence that it is an unrelated non-modal.
@@ -283,7 +300,39 @@ import ApplicationServices
             focused: state.applications.focusedWindow(selected.owner, windows: windows))
         return (selected, blocked)
     }
-    func remember(_ surface: Surface) {
+    private func modalPresence(
+        _ expected: NativeApplicationReader.ModalIdentity.Native, current: [NativeWindows.Window]
+    ) -> NativeApplicationReader.ModalPresence {
+        if let window = current.first(where: { $0.mapping.id == expected.id }) {
+            return window.process == expected.process ? .live : .ended
+        }
+        let process = current.first(where: { $0.process.pid == expected.process.pid })?.process
+            ?? windowServices.process(expected.process.pid)
+        guard let process else { return windowServices.isGone(expected.process.pid) ? .ended : .unknown }
+        guard process == expected.process else { return .ended }
+        switch windowServices.presence(expected.id) {
+        case .present(let row):
+            guard (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value == expected.id,
+                let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return .unknown }
+            return pid == expected.process.pid ? .live : .ended
+        case .absent: return .ended
+        case .unavailable: return .unknown
+        }
+    }
+
+    func remember(_ observed: Surface) {
+        var surface = observed
+        if case .observedModal? = surface.queryHint {
+            surface.queryHint = .retainedModal(.init(
+                window: surface.window, element: surface.element,
+                native: surface.native.map { .init(id: $0.mapping.id, process: $0.process) }))
+        } else if surface.queryHint == nil, let previous = surfaces[surface.scope],
+            previous.owner.isEqual(surface.owner), previous.window == surface.window
+        {
+            // Missing/new AX details do not erase the prior positive identity.
+            // It only asks a future input query; no modality verdict is reused.
+            surface.queryHint = previous.queryHint
+        }
         surfaces[surface.scope] = surface
         order.removeAll { $0 == surface.scope }
         order.append(surface.scope)
