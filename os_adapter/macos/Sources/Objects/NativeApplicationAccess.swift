@@ -12,11 +12,11 @@ import ApplicationServices
     private let reader: NativeApplicationReader
     private let control: NativeElementControl
     private let facts: NativeFactCollector
-    init() {
+    init(windowQuery: NativeWindowQueryAPI? = nil) {
         let registry = ApplicationElements()
         let inspection = NativeElementInspection(registry: registry)
         self.registry = registry
-        self.reader = NativeApplicationReader(registry: registry, inspection: inspection)
+        self.reader = NativeApplicationReader(registry: registry, inspection: inspection, query: windowQuery)
         self.control = NativeElementControl(registry: registry, inspection: inspection)
         self.facts = NativeFactCollector(registry: registry, inspection: inspection)
     }
@@ -78,6 +78,14 @@ import ApplicationServices
         -> NativeKeyboardBoundaryProjection<AXUIElement>
     { try reader.keyboardBoundary(app, contentRoot: contentRoot) }
 
+    func inputBoundary(
+        _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window], contentRoot: AXUIElement?,
+        required: [AXUIElement], modalHints: [AXUIElement] = []
+    ) throws -> NativeApplicationReader.InputBoundary {
+        try reader.inputBoundary(app, nativeWindows: nativeWindows, contentRoot: contentRoot, required: required,
+                                 modalHints: modalHints)
+    }
+
     func knownWindowReference(_ element: AXUIElement, app: NSRunningApplication, process: NativeProcessIdentity)
         -> String?
     {
@@ -92,12 +100,7 @@ import ApplicationServices
     /// Read the current native focus against this exact catalogue. Titles,
     /// z-order and the app's main window cannot substitute for AXFocusedWindow.
     func focusedWindow(_ app: NSRunningApplication, windows: [Window]) -> String? {
-        guard AXIsProcessTrusted() else { return nil }
-        let root = AXUIElementCreateApplication(app.processIdentifier)
-        AXMessaging.configure(root)
-        guard let focused = AXAccess.element(root, kAXFocusedWindowAttribute) else { return nil }
-        let matches = windows.filter { CFEqual($0.element, focused) }
-        return matches.count == 1 ? matches[0].ref : nil
+        reader.focusedWindow(app, windows: windows)
     }
 
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts {

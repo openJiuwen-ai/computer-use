@@ -7,15 +7,29 @@ import ApplicationServices
 /// collector never picks a document, launches, activates, or reads its contents.
 @MainActor final class NativeDirectory {
     struct Surface {
+        enum QueryHint { case observedModal }
         let owner: NSRunningApplication
         let window: String
         let scope: String
         let parent: String?
         let element: AXUIElement?
         let native: NativeWindows.Window?
+        // Historical evidence selects a query; it never proves current
+        // membership, ownership, or modality. Keep it with this identity.
+        var queryHint: QueryHint? = nil
     }
     private let state: NativeDesktopState
     private let session: String
+    /// Native window adapters share this directory's retained identities. The
+    /// defaults are live OS queries; tests replace only these leaf adapters.
+    @MainActor struct WindowServices {
+        var list: (NSRunningApplication) -> [NativeWindows.Window] = { NativeWindows.list($0) }
+        var owner: (NSRunningApplication) throws -> Void = { try BackgroundTarget($0).validate() }
+        var process: (pid_t) -> NativeProcessIdentity? = { NativeProcessIdentity.read($0) }
+        var info: (CGWindowID) -> [String: Any]? = { WindowServerInfo.window($0) }
+        var role: (AXUIElement) -> String? = { AXAccess.read($0, kAXRoleAttribute).value as? String }
+    }
+    private let windowServices: WindowServices
     private var surfaces = [String: Surface]()
     private var order = [String]()
     struct ApplicationRoot {
@@ -34,9 +48,10 @@ import ApplicationServices
     private var installationIDs = [NativeInstallation: String]()
     private var installationOrder = [String]()
 
-    init(state: NativeDesktopState, session: String) {
+    init(state: NativeDesktopState, session: String, windowServices: WindowServices = WindowServices()) {
         self.state = state
         self.session = session
+        self.windowServices = windowServices
     }
     func surface(_ id: String) -> Surface? { surfaces[id] }
     func windowElement(_ window: String, owner: NSRunningApplication) -> AXUIElement? {
@@ -173,17 +188,17 @@ import ApplicationServices
     }
 
     func validateWindow(_ surface: Surface) throws {
-        try BackgroundTarget(surface.owner).validate()
+        try windowServices.owner(surface.owner)
         if let native = surface.native {
-            guard NativeProcessIdentity.read(native.process.pid) == native.process,
-                let window = WindowServerInfo.window(native.mapping.id),
+            guard windowServices.process(native.process.pid) == native.process,
+                let window = windowServices.info(native.mapping.id),
                 (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == native.process.pid
             else { throw DriverError("observed native window closed or its process changed", code: .staleTarget) }
             return
         }
         // AX-only surfaces have no independent WindowServer identity. Query the
         // exact retained object, without requiring its label, children or focus.
-        guard let element = surface.element, AXAccess.read(element, kAXRoleAttribute).value as? String != nil else {
+        guard let element = surface.element, windowServices.role(element) != nil else {
             throw DriverError("observed window is no longer available", code: .staleTarget)
         }
     }
@@ -197,25 +212,59 @@ import ApplicationServices
         let selected = try windowScope(instance: instance, root: root, surface: id).surface
         let metadata = { ["rootWindow": root, "surface": id] as [String: Any] }
         let native = NativePointerTiming.measure("captureScope.nativeWindows", metadata: metadata) {
-            NativeWindows.list(selected.owner)
+            windowServices.list(selected.owner)
         }
-        let windows: [NativeApplicationAccess.Window]
+        let modalHints = surfaces.values.filter {
+            $0.owner.isEqual(selected.owner) && $0.native == nil && $0.queryHint == .observedModal
+        }.compactMap(\.element)
+        let boundary: NativeApplicationReader.InputBoundary
         do {
-            windows = try NativePointerTiming.measure("captureScope.accessibilityWindows", metadata: metadata) {
-                // The retained root is only a discovery hint. The collector
-                // re-reads live window/modal edges and prunes other contents
-                // only after proving their ancestry ends at this application.
-                // Missing/replaced roots retain its existing full-scan fallback.
-                try state.applications.windows(
+            boundary = try NativePointerTiming.measure("captureScope.accessibilityWindows", metadata: metadata) {
+                let original = windowElement(root, owner: selected.owner)
+                // The same collector samples live boundary facts first. Only
+                // a required root/surface missing from that frontier needs its
+                // existing content-discovery fallback. No retained edge proves
+                // current modality or membership by itself.
+                return try state.applications.inputBoundary(
                     selected.owner, nativeWindows: native, contentRoot: windowElement(root, owner: selected.owner),
-                    purpose: .inputValidation)
+                    required: [original, selected.element].compactMap { $0 },
+                    modalHints: modalHints)
             }
         } catch {
             try RequestDiagnostics.checkCancellation()
             // A directly selected native window is still an addressable
             // visual scope. Unknown AX data is not proof that it is closed.
-            guard selected.window == root, selected.native != nil else { throw error }
+            guard selected.window == root, selected.native != nil, modalHints.isEmpty else { throw error }
             return (selected, [])
+        }
+        guard !boundary.unresolvedModalHints else {
+            throw DriverError("a previously observed modal surface cannot be revalidated", code: .inputUnavailable)
+        }
+        let windows = boundary.windows
+        if selected.native == nil {
+            // An AX-only surface has no independent physical-window identity
+            // to retain the visual route when provider membership disappears.
+            guard let expected = selected.element,
+                windows.contains(where: { $0.ref == selected.window && CFEqual($0.element, expected) })
+            else { throw DriverError("the bound AX-only surface cannot be found in its live scope", code: .inputUnavailable) }
+        }
+        var path = Set<String>(), current: String? = selected.window
+        while let ref = current, path.insert(ref).inserted {
+            if ref == root { break }
+            guard let row = windows.first(where: { $0.ref == ref }), !row.parentUnknown else {
+                throw DriverError("current input-surface ownership cannot be confirmed", code: .inputUnavailable)
+            }
+            current = row.parent
+        }
+        // A positively observed modal/sheet with an unresolved owner is a
+        // critical unknown, not evidence that it is an unrelated non-modal.
+        // Incomplete ordinary control contents are not a global input blocker.
+        if windows.contains(where: {
+            !path.contains($0.ref)
+                && (($0.parentUnknown && $0.modal == true)
+                    || ($0.kind == "sheet" && $0.modal != false && ($0.parentUnknown || $0.parent == nil)))
+        }) {
+            throw DriverError("a live modal surface has unresolved ownership", code: .inputUnavailable)
         }
         let blocked = try NativeWindowBoundary.blocked(
             root: root, target: selected.window,
@@ -223,7 +272,7 @@ import ApplicationServices
             focused: state.applications.focusedWindow(selected.owner, windows: windows))
         return (selected, blocked)
     }
-    private func remember(_ surface: Surface) {
+    func remember(_ surface: Surface) {
         surfaces[surface.scope] = surface
         order.removeAll { $0 == surface.scope }
         order.append(surface.scope)
@@ -325,7 +374,8 @@ import ApplicationServices
             remember(
                 Surface(
                     owner: app, window: window, scope: scope, parent: parent, element: element,
-                    native: matching.count == 1 ? matching[0] : nil))
+                    native: matching.count == 1 ? matching[0] : nil,
+                    queryHint: modal == true || (kind == "sheet" && modal != false) ? .observedModal : nil))
             entries.append([
                 "window": window, "instance": instance.id, "surface": scope, "node": node as Any? ?? NSNull(),
                 "title": title, "kind": kind, "parent": parent as Any? ?? NSNull(), "parentState": parentState,

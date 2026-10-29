@@ -9,9 +9,11 @@ import ApplicationServices
     private typealias Identity = ApplicationElements.Identity
     private let registry: ApplicationElements
     private let inspection: NativeElementInspection
-    init(registry: ApplicationElements, inspection: NativeElementInspection) {
+    private let query: NativeWindowQueryAPI
+    init(registry: ApplicationElements, inspection: NativeElementInspection, query: NativeWindowQueryAPI? = nil) {
         self.registry = registry
         self.inspection = inspection
+        self.query = query ?? NativeWindowQueryAPI(attribute: inspection.attribute)
     }
 
     struct ReadRoot {
@@ -73,7 +75,7 @@ import ApplicationServices
     }
 
     struct Window {
-        let ref: String
+        var ref: String
         let title: String
         let element: AXUIElement
         var kind: String = "window"
@@ -82,6 +84,14 @@ import ApplicationServices
         var nativeID: CGWindowID? = nil
         var modal: Bool? = nil
         var document: String? = nil
+    }
+
+    func focusedWindow(_ app: NSRunningApplication, windows: [Window]) -> String? {
+        guard query.trusted() else { return nil }
+        let root = query.application(app.processIdentifier)
+        guard let focused = query.element(root, kAXFocusedWindowAttribute) else { return nil }
+        let matches = windows.filter { CFEqual($0.element, focused) }
+        return matches.count == 1 ? matches[0].ref : nil
     }
 
     func windows(
@@ -106,20 +116,42 @@ import ApplicationServices
         return result
     }
 
-    private enum Projection: Equatable { case catalogue, keyboardDispatch }
+    /// Physical window input needs current surface boundaries, not a rendered
+    /// directory or all controls below a file browser. Rows retain uncertainty;
+    /// this projection alone never grants permission to post an event.
+    struct InputBoundary {
+        let windows: [Window]
+        let issue: String?
+        let expandedRequiredSurface: Bool
+        var unresolvedModalHints = false
+    }
+
+    func inputBoundary(
+        _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window], contentRoot: AXUIElement?,
+        required: [AXUIElement], modalHints: [AXUIElement]
+    ) throws -> InputBoundary {
+        guard case .inputBoundary(let result) = try collectWindows(
+            app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: .inputValidation,
+            projection: .inputBoundary, required: required, modalHints: modalHints)
+        else { preconditionFailure("input boundary adapter received another projection") }
+        return result
+    }
+
+    private enum Projection: Equatable { case catalogue, keyboardDispatch, inputBoundary }
     private enum Collection {
         case catalogue([Window])
         case boundary(NativeKeyboardBoundaryProjection<AXUIElement>)
+        case inputBoundary(InputBoundary)
     }
 
     private func collectWindows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
         purpose: NativeWindowQueryPurpose, projection: Projection, reportIssue: ((String) -> Void)? = nil,
-        parentQuery: String? = nil
+        parentQuery: String? = nil, required: [AXUIElement] = [], modalHints: [AXUIElement] = []
     ) throws -> Collection {
         let timing = NativeWindowQueryTiming.start(metadata: {
             ["pid": app.processIdentifier, "purpose": purpose == .inputValidation ? "inputValidation" : "observation",
-             "projection": projection == .catalogue ? "catalogue" : "keyboardDispatch",
+             "projection": projection == .catalogue ? "catalogue" : projection == .keyboardDispatch ? "keyboardDispatch" : "inputBoundary",
              "parentQuery": parentQuery as Any? ?? NSNull(), "hasContentRoot": contentRoot != nil]
         })
         if let contentRoot { timing?.root(contentRoot, selected: true) }
@@ -133,13 +165,13 @@ import ApplicationServices
         func attribute(
             _ node: AXUIElement, _ key: String, stage: String = "getter.catalogue", root: AXUIElement? = nil
         ) -> CFTypeRef? {
-            timed(stage, property: key, root: root ?? node) { inspection.attribute(node, key) }
+            timed(stage, property: key, root: root ?? node) { query.attribute(node, key) }
         }
         func linkedElement(_ node: AXUIElement, _ key: String) -> AXUIElement? {
-            timed("getter.link", property: key) { AXAccess.element(node, key) }
+            timed("getter.link", property: key) { query.element(node, key) }
         }
         func queryRead(_ node: AXUIElement, _ key: String) -> AXRead<CFTypeRef> {
-            timed("getter.read", property: key, root: node) { AXAccess.read(node, key) }
+            timed("getter.read", property: key, root: node) { query.read(node, key) }
         }
         var boundaryIssue: String?
         func issue(_ detail: String) {
@@ -147,8 +179,12 @@ import ApplicationServices
             reportIssue?(detail)
         }
         try RequestDiagnostics.checkCancellation()
-        guard AXIsProcessTrusted() else {
+        guard query.trusted() else {
             outcome = "returned"
+            if projection == .inputBoundary {
+                return .inputBoundary(.init(windows: [], issue: "AX trust unavailable", expandedRequiredSurface: false,
+                                            unresolvedModalHints: !modalHints.isEmpty))
+            }
             return projection == .catalogue
                 ? .catalogue([]) : .boundary(.init(windows: [], issue: "AX trust unavailable"))
         }
@@ -156,8 +192,7 @@ import ApplicationServices
             nativeWindows.first { $0.process.pid == app.processIdentifier }?.process
             ?? NativeProcessIdentity.read(app.processIdentifier)
         let incarnation = process?.incarnation
-        let root = AXUIElementCreateApplication(app.processIdentifier)
-        AXMessaging.configure(root)
+        let root = query.application(app.processIdentifier)
         // Only this synchronous input collector can consume the helper's last
         // actual declaration attempt. Observation and final receiver samples
         // retain their independent reads; no earlier array is fed to helpers.
@@ -168,7 +203,7 @@ import ApplicationServices
             purpose: purpose,
             declared: {
                 let read = queryRead(root, kAXWindowsAttribute)
-                if projection == .keyboardDispatch {
+                if projection != .catalogue {
                     guard let raw = read.value, let elements = NativeWindowDeclarationCapture.completeElements(raw)
                     else {
                         issue("AXWindows catalogue unavailable or malformed")
@@ -196,8 +231,7 @@ import ApplicationServices
                     observer = nil
                 }
                 return timed("helper.inputWindow") {
-                    WindowGeometry.inputWindow(
-                        pid: app.processIdentifier, onWindowsRead: observer, queryTiming: timing)
+                    query.inputWindow(app.processIdentifier, observer, timing)
                 }
             },
             latestDeclared: {
@@ -235,7 +269,7 @@ import ApplicationServices
         // through actual child edges; never infer ownership from screen overlap.
         let surfaceDeadline = ProcessInfo.processInfo.systemUptime + 0.4
         var scanned = [AXUIElement]()
-        let surfaceRelations = timing.map { AXRelationReader(api: $0.relationAPI()) } ?? AXRelationReader()
+        let surfaceRelations = AXRelationReader(api: timing?.relationAPI(query.relations) ?? query.relations)
         var surfaceIssues = Set<String>()
         func surfaceIssue(_ detail: String) { if surfaceIssues.insert(detail).inserted { issue(detail) } }
         func nestedSurfaces(_ parent: AXUIElement, recursive: Bool) throws -> [AXUIElement] {
@@ -308,19 +342,142 @@ import ApplicationServices
                 return found
             }
         }
+        var inputFrontiers = [AXUIElement](), frontierCursor = 0
+        var inputParents = [(child: AXUIElement, parent: AXUIElement?, known: Bool)]()
+        var inputSheets = [AXUIElement]()
+        var modalHintCursor = 0, absentModalHints = [AXUIElement]()
+        func unresolvedModalHints(in windows: [Window]) -> Bool {
+            modalHints.contains { hint in
+                if absentModalHints.contains(where: { CFEqual($0, hint) }) { return false }
+                return windows.first(where: { CFEqual($0.element, hint) })?.modal == nil
+            }
+        }
+        func inputParent(_ child: AXUIElement) throws -> (parent: AXUIElement?, known: Bool) {
+            try RequestDiagnostics.checkCancellation()
+            var current = linkedElement(child, kAXParentAttribute), seen = [child]
+            for _ in 0..<32 {
+                try RequestDiagnostics.checkCancellation()
+                guard let node = current, !seen.contains(where: { CFEqual($0, node) }) else { return (nil, false) }
+                if CFEqual(node, root) { return (nil, true) }
+                seen.append(node)
+                let (status, pid) = query.pid(node)
+                guard status == .success, pid == app.processIdentifier else { return (nil, false) }
+                guard let role = attribute(node, kAXRoleAttribute) as? String else { return (nil, false) }
+                if surfaceRoles.contains(role) { return (node, true) }
+                current = linkedElement(node, kAXParentAttribute)
+            }
+            return (nil, false)
+        }
+        // One bounded page per surface; never enqueue ordinary controls here.
+        // All candidates' scalars/sheets/parents are sampled before this phase.
+        // Every getter shares the original request deadline; there is no renewed
+        // per-root tree-discovery clock or operation budget.
+        func immediateSurfaces(_ parent: AXUIElement) throws -> [AXUIElement] {
+            try timed("phase.inputSurfaceFrontier", root: parent) {
+                try RequestDiagnostics.checkCancellation()
+                timing?.surfaceRoot = parent
+                defer { timing?.surfaceRoot = nil }
+                let relation = try surfaceRelations.read(
+                    parent, source: "input-surface-frontier", property: kAXChildrenAttribute, limit: 512,
+                    withinBudget: { try RequestDiagnostics.checkCancellation(); return true })
+                guard case .page(let page) = relation else {
+                    if case .failure(let failure) = relation,
+                        !["unsupported", "absent"].contains(failure["state"] as? String ?? "")
+                    { surfaceIssue("immediate surface relation unavailable") }
+                    return []
+                }
+                if page.prefix.count < page.total || page.issue != nil { surfaceIssue("immediate surface relation incomplete") }
+                var found = [AXUIElement]()
+                for child in page.targets {
+                    try RequestDiagnostics.checkCancellation()
+                    if surfaceRoles.contains(attribute(child, kAXRoleAttribute, stage: "getter.frontier.role", root: parent) as? String ?? "") {
+                        found.append(child)
+                    }
+                }
+                return found
+            }
+        }
+        enum Membership { case live, absent, unknown }
+        // Only a previously observed modal identity requests this bounded path
+        // query. Neither old modality/parent data nor a retained Role proves
+        // liveness. Check each current parent edge in its forward relation.
+        func modalMembership(_ hint: AXUIElement) throws -> Membership {
+            var child = hint, seen = [AXUIElement]()
+            for _ in 0..<32 {
+                try RequestDiagnostics.checkCancellation()
+                guard !seen.contains(where: { CFEqual($0, child) }) else { return .unknown }
+                seen.append(child)
+                let read = queryRead(child, kAXParentAttribute)
+                if case .invalid = read, CFEqual(child, hint) { return .absent }
+                guard let raw = read.value, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return .unknown }
+                let parent = unsafeDowncast(raw, to: AXUIElement.self)
+                let (status, pid) = query.pid(parent)
+                guard status == .success, pid == app.processIdentifier else { return .unknown }
+                let relation = try surfaceRelations.read(
+                    parent, source: "observed-modal-membership", property: kAXChildrenAttribute, limit: 512,
+                    withinBudget: { try RequestDiagnostics.checkCancellation(); return true })
+                guard case .page(let page) = relation else { return .unknown }
+                guard page.targets.contains(where: { CFEqual($0, child) }) else {
+                    guard page.prefix.count == page.total && page.issue == nil else { return .unknown }
+                    // Absence from an old parent is not absence after a
+                    // concurrent reparent. Keep that transition unknown.
+                    try RequestDiagnostics.checkCancellation()
+                    let current = queryRead(child, kAXParentAttribute)
+                    if case .invalid = current, CFEqual(child, hint) { return .absent }
+                    guard let raw = current.value, CFGetTypeID(raw) == AXUIElementGetTypeID(),
+                        CFEqual(raw, parent) else { return .unknown }
+                    return .absent
+                }
+                if CFEqual(parent, root) || result.contains(where: { CFEqual($0.element, parent) }) { return .live }
+                child = parent
+            }
+            return .unknown
+        }
         var cursor = 0
-        while cursor < candidates.count {
+        while cursor < candidates.count || frontierCursor < inputFrontiers.count || modalHintCursor < modalHints.count {
+            if cursor == candidates.count, frontierCursor < inputFrontiers.count {
+                let parent = inputFrontiers[frontierCursor]
+                frontierCursor += 1
+                for child in try immediateSurfaces(parent) {
+                    owners.append((child, parent))
+                    candidates.append(child)
+                }
+                continue
+            }
+            if cursor == candidates.count {
+                try RequestDiagnostics.checkCancellation()
+                let hint = modalHints[modalHintCursor]
+                modalHintCursor += 1
+                if result.contains(where: { CFEqual($0.element, hint) }) { continue }
+                let read = queryRead(hint, kAXModalAttribute)
+                if case .invalid = read { absentModalHints.append(hint); continue }
+                if read.value as? Bool == false { absentModalHints.append(hint); continue }
+                switch try modalMembership(hint) {
+                case .live: candidates.append(hint)
+                case .absent: absentModalHints.append(hint)
+                case .unknown: break
+                }
+                continue
+            }
             try RequestDiagnostics.checkCancellation()
             let candidate = candidates[cursor]
             let element = timed("helper.presentedWindow", root: candidate) {
-                WindowGeometry.presentedWindow(candidate, pid: app.processIdentifier, queryTiming: timing)
+                query.presentedWindow(candidate, app.processIdentifier, timing)
             }
             cursor += 1
-            var pid: pid_t = 0
-            guard AXUIElementGetPid(element, &pid) == .success, pid == app.processIdentifier,
-                let role = attribute(element, kAXRoleAttribute) as? String,
+            let (pidStatus, pid) = query.pid(element)
+            guard pidStatus == .success, pid == app.processIdentifier else {
+                if projection == .keyboardDispatch { issue("surface candidate identity or role unavailable") }
+                continue
+            }
+            let reportedRole = attribute(element, kAXRoleAttribute) as? String
+            // Input candidates already come from native declarations/hints or
+            // confirmed surface edges. A failed optional role must not erase a
+            // positive AXModal or AXSheets fact on that exact candidate.
+            let role = reportedRole ?? ""
+            guard (projection == .inputBoundary || (reportedRole != nil &&
                 ([kAXWindowRole, kAXSheetRole, "AXPopover"].contains(role)
-                    || declaredRoots.contains { CFEqual($0, element) }),
+                    || declaredRoots.contains { CFEqual($0, element) }))),
                 !result.contains(where: { CFEqual($0.element, element) })
             else {
                 if projection == .keyboardDispatch && !result.contains(where: { CFEqual($0.element, element) }) {
@@ -328,15 +485,20 @@ import ApplicationServices
                 }
                 continue
             }
-            timing?.root(element, role: role, selected: contentRoot.map { CFEqual($0, element) })
-            if projection == .keyboardDispatch {
+            timing?.root(element, role: reportedRole, selected: contentRoot.map { CFEqual($0, element) })
+            if projection != .catalogue {
+                // Boundary projections do not read presentation fields. The
+                // input projection uses the original alias registry; private
+                // keyboard keys retain their existing no-alias contract.
+                let ref = projection == .keyboardDispatch ? "boundary:\(result.count)" : registry.reference(
+                    for: Identity(pid: pid, launched: app.launchDate, element: element, incarnation: incarnation))
                 // Private per-collection keys never allocate or rewrite public aliases.
                 // Unread presentation fields stay inside this collector and are
                 // removed by the typed boundary adapter before returning.
                 result.append(
                     Window(
-                        ref: "boundary:\(result.count)", title: "", element: element,
-                        kind: role == kAXSheetRole ? "sheet" : role == "AXPopover" ? "popover" : role,
+                        ref: ref, title: "", element: element,
+                        kind: role == kAXSheetRole ? "sheet" : role == "AXPopover" ? "popover" : role.isEmpty ? "unknown" : role,
                         modal: attribute(element, kAXModalAttribute) as? Bool))
             } else {
                 let subrole = attribute(element, kAXSubroleAttribute) as? String ?? ""
@@ -360,7 +522,7 @@ import ApplicationServices
             // Sheets are often absent from AXWindows. Explicit native ownership
             // is retained; title, screen position and current focus prove no owner.
             let sheets: [AXUIElement]
-            if projection == .keyboardDispatch {
+            if projection != .catalogue {
                 let read = queryRead(element, "AXSheets")
                 switch read {
                 case .value(let raw):
@@ -379,8 +541,16 @@ import ApplicationServices
                 sheets = attribute(element, "AXSheets") as? [AXUIElement] ?? []
             }
             for child in sheets {
+                if projection == .inputBoundary { inputSheets.append(child) }
                 owners.append((child, element))
                 candidates.append(child)
+            }
+            if projection == .inputBoundary {
+                let parent = try inputParent(element)
+                inputParents.append((element, parent.parent, parent.known))
+                if let parent = parent.parent { candidates.append(parent) }
+                inputFrontiers.append(element)
+                continue
             }
             // Discovery reads still expand every window. Input validation may
             // exclude only contents proven outside its interaction range;
@@ -397,8 +567,8 @@ import ApplicationServices
                             return linkedElement(node, kAXParentAttribute)
                         },
                         isApplication: { node in
-                            var pid: pid_t = 0
-                            return AXUIElementGetPid(node, &pid) == .success && pid == app.processIdentifier
+                            let (status, pid) = query.pid(node)
+                            return status == .success && pid == app.processIdentifier
                                 && attribute(node, kAXRoleAttribute) as? String == kAXApplicationRole
                         })
                 } ?? true
@@ -412,7 +582,24 @@ import ApplicationServices
         // reachable solely through an anchor inside an excluded ancestor.
         // Rediscover it through live child edges before declaring it closed;
         // never authorize input from the retained object alone.
-        if let contentRoot, !result.contains(where: { CFEqual($0.element, contentRoot) }) {
+        if projection == .inputBoundary,
+            (required + (contentRoot.map { [$0] } ?? [])).contains(where: { expected in
+                !result.contains(where: { CFEqual($0.element, expected) })
+            })
+        {
+            // Only a missing required bound surface needs content discovery.
+            // Retention or a successful role getter alone cannot prove its live
+            // attachment. Expand the same collector once under the same request.
+            timing?.count("requiredSurfaceDiscoveryFallback")
+            guard case .catalogue(let expanded) = try collectWindows(
+                app, nativeWindows: nativeWindows, purpose: purpose, projection: .catalogue,
+                reportIssue: reportIssue, parentQuery: timing?.id)
+            else { preconditionFailure("required-surface fallback lost its catalogue") }
+            outcome = "returned"
+            return .inputBoundary(.init(windows: expanded, issue: boundaryIssue, expandedRequiredSurface: true,
+                                        unresolvedModalHints: unresolvedModalHints(in: expanded)))
+        }
+        if projection != .inputBoundary, let contentRoot, !result.contains(where: { CFEqual($0.element, contentRoot) }) {
             timing?.count("contentRootMissingFallback")
             let fallback = try timed("phase.fullDiscoveryFallback") {
                 try collectWindows(
@@ -425,8 +612,22 @@ import ApplicationServices
         for index in result.indices {
             try RequestDiagnostics.checkCancellation()
             let item = result[index]
-            var parent = owners.first { CFEqual($0.child, item.element) }?.parent
-            if parent == nil, let raw = attribute(item.element, kAXParentAttribute),
+            let forward = owners.filter { CFEqual($0.child, item.element) }.map(\.parent)
+            var parent = forward.first
+            if projection == .inputBoundary {
+                if inputSheets.contains(where: { CFEqual($0, item.element) }) { result[index].kind = "sheet" }
+                if let parent, forward.dropFirst().contains(where: { !CFEqual($0, parent) }) {
+                    result[index].parentUnknown = true
+                }
+                let actual = inputParents.first { CFEqual($0.child, item.element) }
+                if let forward = parent, let actual = actual?.parent, !CFEqual(forward, actual) {
+                    result[index].parentUnknown = true
+                } else if parent == nil {
+                    parent = actual?.parent
+                    result[index].parentUnknown = result[index].parentUnknown || actual?.known != true
+                }
+            }
+            if projection != .inputBoundary, parent == nil, let raw = attribute(item.element, kAXParentAttribute),
                 CFGetTypeID(raw) == AXUIElementGetTypeID()
             {
                 parent = unsafeDowncast(raw, to: AXUIElement.self)
@@ -444,7 +645,7 @@ import ApplicationServices
                 result[index].parent = owner.ref
                 // AXSheet is the native document-modal role; an explicit false
                 // or unavailable owner is never changed into application-wide modality.
-                if item.kind == "sheet" && item.modal == nil { result[index].modal = true }
+                if result[index].kind == "sheet" && item.modal == nil { result[index].modal = true }
             }
         }
         if projection == .keyboardDispatch {
@@ -460,6 +661,41 @@ import ApplicationServices
             outcome = "returned"
             return .boundary(.init(windows: rows, issue: boundaryIssue))
         }
+        if projection == .inputBoundary {
+            // Native parent supplementation needs exact IDs, not titles,
+            // document URIs or file/control contents. Keep one-to-one identity.
+            let ids = try result.map { item in
+                try RequestDiagnostics.checkCancellation()
+                return query.nativeID(item.element)
+            }
+            var refs = [String: String]()
+            for index in result.indices {
+                guard let id = ids[index], ids.filter({ $0 == id }).count == 1,
+                    let native = nativeWindows.first(where: { $0.mapping.id == id && $0.process.pid == app.processIdentifier })
+                else { continue }
+                refs[result[index].ref] = registry.windowReference(native, element: result[index].element)
+                result[index].nativeID = id
+            }
+            for index in result.indices {
+                result[index].ref = refs[result[index].ref] ?? result[index].ref
+                result[index].parent = result[index].parent.map { refs[$0] ?? $0 }
+            }
+            let relations = windowParents(result, native: nativeWindows, pid: app.processIdentifier)
+            for index in result.indices {
+                let previous = result[index].parent
+                result[index].parent = relations.parents[result[index].ref]
+                // An exact native parent can resolve absent AX ancestry. A
+                // conflicting live forward/native relationship stays unknown.
+                result[index].parentUnknown = relations.unresolved.contains(result[index].ref)
+                    || (result[index].parentUnknown && (previous != nil || result[index].parent == nil))
+            }
+            if let timing {
+                for item in result { timing.root(item.element, ref: item.ref, nativeID: item.nativeID) }
+            }
+            outcome = "returned"
+            return .inputBoundary(.init(windows: result, issue: boundaryIssue, expandedRequiredSurface: false,
+                                        unresolvedModalHints: unresolvedModalHints(in: result)))
+        }
         // Merge only one-to-one native matches. Same-title/overlapping windows
         // must not collapse, nor may a sheet borrow its parent's identity.
         var remapped = [String: String]()
@@ -468,7 +704,7 @@ import ApplicationServices
         let hints = try result.map { item in
             try RequestDiagnostics.checkCancellation()
             return timed("helper.nativeHint", root: item.element) {
-                WindowGeometry.hint(item.element, onWindowsRead: nil, queryTiming: timing)
+                query.hint(item.element, timing)
             }
         }
         let matchesByWindow = hints.map { raw -> [NativeWindows.Window] in
