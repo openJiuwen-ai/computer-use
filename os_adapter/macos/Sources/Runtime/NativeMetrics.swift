@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import Foundation
 
 /// Request-scoped diagnostics, not observations or action receipts. Timings are

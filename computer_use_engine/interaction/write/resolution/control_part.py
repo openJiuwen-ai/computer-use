@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Qualify a native pointer hit as a component of the requested control.
 
 Passive labels and layout members may supply the hit path. Independent

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Platform field names mapped to the shared observation vocabulary."""
 
 from __future__ import annotations

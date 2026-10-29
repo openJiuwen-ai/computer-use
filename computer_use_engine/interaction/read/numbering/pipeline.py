@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Stable session numbers, allocated in the existing interleaved display order.
 
 Each part is previewed then assigned before the next preview. A later display

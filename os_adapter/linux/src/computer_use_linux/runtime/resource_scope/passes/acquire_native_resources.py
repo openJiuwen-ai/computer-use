@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """RESOURCE: acquire_native_resources; only explicitly borrowed capabilities are available.
 
 Input/output follow the native stage contract. Failures propagate unchanged;

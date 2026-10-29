@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Capture identities are object-local; never recovered from equal PNG bytes."""
 
 import weakref

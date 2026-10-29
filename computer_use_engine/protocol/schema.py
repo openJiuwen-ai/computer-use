@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """The small strict-schema subset used by the native protocol.
 
 Preserves field order, omitted-vs-null, and the original validation diagnostics.

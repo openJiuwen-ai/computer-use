@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 def action_matches(catalogue, selected):
     """Exact native identity, including description when it was observed.
 

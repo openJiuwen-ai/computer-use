@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// A page action is a provider-declared discrete operation. Increment and
 /// decrement do not specify a page length; fractional pages need wheel input.
 enum NativeScrollAction {

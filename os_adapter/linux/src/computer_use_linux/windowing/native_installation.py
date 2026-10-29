@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Retained desktop recipes; GLib resolves static identity, Gio launches Exec.
 
 The record binds a catalogue entry to one concrete file, not to a later desktop

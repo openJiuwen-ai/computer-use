@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import AppKit
 
 /// A single explicit paste temporarily owns the clipboard. Materialize every

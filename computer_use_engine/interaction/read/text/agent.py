@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Current text capture, then immutable code-point pages with opaque cursors."""
 
 from __future__ import annotations

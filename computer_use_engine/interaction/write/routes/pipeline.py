@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Select an input route, then execute its family through the native-unit scope."""
 
 from __future__ import annotations

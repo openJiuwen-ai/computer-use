@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// Recheck selected containment, without finding a new semantic target.
 /// Parent evidence is cheap; incomplete parent providers can be checked using
 /// their forward children. A complete conflicting parent path is never hidden.

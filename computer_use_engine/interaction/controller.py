@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Own one native session and connect public handles to its execution pipeline."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Lossless presentation of properties with identical values and reference sets.
 
 Each output record is a Cartesian product: every named property has exactly the

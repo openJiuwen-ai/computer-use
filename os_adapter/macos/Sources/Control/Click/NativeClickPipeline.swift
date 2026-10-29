@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import AppKit
 
 /// One admitted click attempt. Candidate selection and any later attempt stay

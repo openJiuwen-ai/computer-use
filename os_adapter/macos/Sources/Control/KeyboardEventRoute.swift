@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// The accessibility service and the process receiving AppKit key events are
 /// different identities. Web content is exposed by a renderer, but its host
 /// WebView forwards keyboard events from the host window to that renderer.

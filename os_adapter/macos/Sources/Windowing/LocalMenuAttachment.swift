@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// A local popup may be a child of a document AX tree while AXWindow names
 /// its separate popup surface. Only a live, exact forward path authorizes an
 /// action. A choice list published by a menu/combobox has the same logical

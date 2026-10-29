@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import AppKit
 
 /// PREPARE: select only the retained document; no editor focus or content input.

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Resolve container forwarding from scope-bounded native focus evidence.
 
 New drivers report the current recipient and its live parent path in one query.

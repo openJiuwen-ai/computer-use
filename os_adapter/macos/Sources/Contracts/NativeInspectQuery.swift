@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import Foundation
 
 /// Decode once, before native target access. This is wire shape validation;

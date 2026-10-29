@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One call budget, stage ownership and cleanup state for native reads and writes."""
 
 from __future__ import annotations

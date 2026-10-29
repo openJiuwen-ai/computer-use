@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import CoreGraphics
 
 /// A captured HID key-up clears session state without repeating request text.

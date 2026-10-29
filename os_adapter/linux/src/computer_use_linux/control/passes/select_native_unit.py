@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """PURE: select_native_unit; only explicitly borrowed capabilities are available.
 
 Input/output follow the native stage contract. Failures propagate unchanged;

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Strict wire DTOs for protocol v6 execution; no platform or policy imports."""
 
 import json

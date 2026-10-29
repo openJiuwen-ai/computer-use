@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Image identity and delivery authority; formatting is supplied by the client."""
 
 import hashlib

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """V6 read: fixed instance scope -> bounded members -> one public observation."""
 
 from __future__ import annotations

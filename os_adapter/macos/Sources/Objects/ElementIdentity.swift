@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import Foundation
 
 /// Evidence that an observed native object still represents the same target.

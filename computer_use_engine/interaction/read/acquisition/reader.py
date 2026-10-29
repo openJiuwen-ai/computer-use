@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """The staged v5 native read pipeline, independent of Agent/MCP and UI input."""
 
 from __future__ import annotations

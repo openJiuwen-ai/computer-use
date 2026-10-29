@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Stable recovery categories, preserved from computer_use_engine/errors.ts."""
 
 from __future__ import annotations

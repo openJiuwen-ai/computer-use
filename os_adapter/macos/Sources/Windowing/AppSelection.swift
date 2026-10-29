@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import Foundation
 
 /// An App is a persistent working-window selection, not a process-wide cursor.

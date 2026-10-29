@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Plan structured delivery and generate its text at the terminal stage."""
 
 from __future__ import annotations

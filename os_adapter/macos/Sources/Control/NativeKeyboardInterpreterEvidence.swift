@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import Foundation
 
 /// A positive local-Web observation selects a transport; missing parent data

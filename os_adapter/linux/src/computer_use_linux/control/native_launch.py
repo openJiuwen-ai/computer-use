@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One retained Gio installation launch and its direct process receipt.
 
 GSpawn's PID callback identifies the process Gio created. It does not identify

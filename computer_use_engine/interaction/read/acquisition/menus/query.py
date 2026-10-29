@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Read native menus inside their actual application or working-window scope.
 
 No menu opening, focus, command validation or input occurs here. Application

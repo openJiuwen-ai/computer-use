@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Route identity, attempt history, and target-boundary checks shared by write selection."""
 
 from __future__ import annotations

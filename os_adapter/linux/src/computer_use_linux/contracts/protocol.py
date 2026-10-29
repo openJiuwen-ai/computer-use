@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Protocol 6 framing, cancellation and bounded request execution."""
 
 from __future__ import annotations

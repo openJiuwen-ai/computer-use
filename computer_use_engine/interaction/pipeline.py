@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Route public handle requests and the two internal request kinds."""
 
 from __future__ import annotations

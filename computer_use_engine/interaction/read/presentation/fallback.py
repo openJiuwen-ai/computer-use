@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """A source-preserving presentation of native display facts when projection fails.
 
 This formatter deliberately has no dependency on the semantic tree renderer.

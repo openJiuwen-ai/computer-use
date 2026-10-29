@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Resolve one logical instance, then retain only confirmed member windows."""
 
 from __future__ import annotations

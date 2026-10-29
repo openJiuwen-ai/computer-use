@@ -1,4 +1,6 @@
 // swift-tools-version: 6.0
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import PackageDescription
 
 let package = Package(

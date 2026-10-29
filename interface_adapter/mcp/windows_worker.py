@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Windows worker IPC and lifetime supervision, without inherited POSIX FDs.
 
 The worker joins a kill-on-close Job before any user code is sent. A reset

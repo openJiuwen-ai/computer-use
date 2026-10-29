@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Text-free incremental presentation contracts shared with the terminal renderer."""
 
 from __future__ import annotations

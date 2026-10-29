@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """The single Engine owner of busy/retired checks and write-call claims."""
 
 from __future__ import annotations

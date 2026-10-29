@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One fixed XTest train, with native final guards and owned-input release."""
 
 from computer_use_linux.system.x11_pointer import PointerCallbacks

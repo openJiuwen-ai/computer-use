@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Explicit terminal entry for formatting immutable display documents."""
 
 from __future__ import annotations

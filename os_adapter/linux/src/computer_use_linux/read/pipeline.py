@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Native query composition. The Runtime injects only query capabilities."""
 
 from computer_use_linux.contracts.protocol import Failure

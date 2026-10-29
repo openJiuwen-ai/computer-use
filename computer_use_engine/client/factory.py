@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Assemble public handles and presentation callbacks for one native session."""
 
 from computer_use.interaction.controller import SessionController

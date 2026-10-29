@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Static, domain-independent composition of typed read/write stages.
 
 The runner owns control flow only. Domain facts travel as explicit values;

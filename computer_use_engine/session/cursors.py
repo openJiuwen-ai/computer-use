@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Bounded opaque continuations, bound to a native source and a read method."""
 
 from collections import OrderedDict

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Typed execution nodes for composing and tracing hierarchical flows."""
 
 from __future__ import annotations

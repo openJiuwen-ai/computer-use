@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Publish collected AT-SPI facts as a single typed NativeObservation graph."""
 
 from __future__ import annotations

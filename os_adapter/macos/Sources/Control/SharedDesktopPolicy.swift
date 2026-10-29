@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// Native system launcher items act on the shared desktop itself: pressing an
 /// app/document/window item can launch or activate a different application.
 /// These are AX semantics, independent of process names, labels and URLs.

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Resolve internal text editors from editing declarations and native containment.
 
 The original requested control remains the semantic target. The selected

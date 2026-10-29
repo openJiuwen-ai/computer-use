@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Directory observation adapter; identity matching is shared in native.query."""
 
 from __future__ import annotations

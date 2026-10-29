@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Native write entry: resolve -> select -> one deduplicated unit -> expire."""
 
 from .passes.resolve_native_step import resolve_native_step

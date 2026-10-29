@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Explicit v6 subtree reads, with fixed targets and opaque relation cursors."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import AppKit
 
 /// PREPARE: obtain the authorized exact document without a content mouse primer.

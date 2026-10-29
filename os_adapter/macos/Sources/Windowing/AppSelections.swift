@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import AppKit
 
 /// Opaque selections survive focus/title changes, but never a closed root or process restart.

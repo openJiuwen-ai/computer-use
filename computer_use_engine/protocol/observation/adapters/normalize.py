@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Normalize acquired platform facts once, before the public presentation pipeline."""
 
 from __future__ import annotations

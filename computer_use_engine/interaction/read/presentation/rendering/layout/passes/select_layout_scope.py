@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Compact observations and explicit subtree reads retain natural lines."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Encode validated native observations without the model presentation formatter.
 
 Native observation diagnostics contain only JSON values, already validated by

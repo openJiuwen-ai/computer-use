@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Parse the model operation without resolving or dispatching it."""
 
 from __future__ import annotations

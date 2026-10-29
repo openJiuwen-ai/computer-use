@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """QUERY/RESOURCE: collect_launch_facts using only the named query service."""
 
 

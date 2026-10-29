@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """A bound keyboard paste: receiver preparation, clipboard lease, one shortcut.
 
 The Python engine selects preparation and authorization. No clipboard is

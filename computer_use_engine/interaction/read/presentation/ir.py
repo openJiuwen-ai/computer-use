@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Read-only source facts and a locally editable presentation forest.
 
 An edit changes only presentation. Native routes and source keys cannot be

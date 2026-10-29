@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Translate one confirmed UI-image gesture to one retained native capture."""
 
 from __future__ import annotations

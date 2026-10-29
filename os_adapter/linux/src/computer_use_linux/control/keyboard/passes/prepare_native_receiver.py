@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Native stage prepare_native_receiver; bounded explicit dependencies, no route fallback.
 
 Effect and failure behavior remain the original native stage contract.

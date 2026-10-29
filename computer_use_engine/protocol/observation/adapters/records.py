@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Request routing retained beside, rather than inside, the observation graph."""
 
 from __future__ import annotations

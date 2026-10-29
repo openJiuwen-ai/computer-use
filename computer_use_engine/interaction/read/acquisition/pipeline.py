@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """A fixed-window read is a bounded acquisition loop, never an input retry."""
 
 from __future__ import annotations

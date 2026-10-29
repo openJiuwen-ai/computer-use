@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Apply selected snapshot aliases, then present the final observation."""
 
 from __future__ import annotations

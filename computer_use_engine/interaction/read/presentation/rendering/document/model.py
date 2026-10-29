@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Inputs to final snapshot rendering and text-only document assembly."""
 
 from __future__ import annotations

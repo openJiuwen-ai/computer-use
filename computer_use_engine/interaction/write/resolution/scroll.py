@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Resolve element scrolling to native page buttons or a qualified wheel region.
 
 The nearest scrolling ancestor defines the viewport. Its native page button

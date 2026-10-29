@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Exec-only FD adapter for the existing native driver's 3/4 pipe contract.
 
 Using exec avoids fork-time Python callbacks in a possibly multithreaded host.

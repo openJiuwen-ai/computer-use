@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Validate and reconcile an API action before executing and publishing its receipt."""
 
 from __future__ import annotations

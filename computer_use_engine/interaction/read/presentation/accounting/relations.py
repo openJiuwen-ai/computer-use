@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Account for native relations against the hierarchy actually displayed.
 
 This is a presentation pass. Neither a displayed ancestor nor an annotation

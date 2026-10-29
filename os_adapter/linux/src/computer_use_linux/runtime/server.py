@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One protocol thread owns sequencing, request cache and cancellation."""
 
 import collections

@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import ApplicationServices
 
 /// Passive raw results from actual WindowGeometry AXWindows getters. No AX

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """A pointer sequence bound to original pixels, independent of accessibility.
 
 Python chooses preparation versus dispatch. Native code proves window identity,

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Query current focus and its necessary containment path without preparing input."""
 
 from computer_use_linux.contracts.protocol import Failure, require

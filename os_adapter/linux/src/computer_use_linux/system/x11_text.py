@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Read-only XKB text plans. No keymap mutation, composition, or clipboard use.
 
 XkbTranslateKeyCode uses the current lookup modifiers and group, rather than a

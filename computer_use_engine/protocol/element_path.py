@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from .primitives import frozen, trim, utf16_length
 from .schema import role
 

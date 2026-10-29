@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Wire primitives, including JavaScript/UTF-16 numeric and string boundaries.
 
 These helpers preserve the existing protocol; they are not a JS evaluator.

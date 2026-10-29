@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Python window thumbnails from independent native captures, with no input map.
 
 The grid is a contact sheet, never a reconstruction of native z-order or window

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Pure table/selection presentation; no target resolution or native input."""
 
 from __future__ import annotations

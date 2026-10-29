@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Build semantic controls from native facts without changing their identities.
 
 Composition is a hint to the lossless projection, not a licence to remove a

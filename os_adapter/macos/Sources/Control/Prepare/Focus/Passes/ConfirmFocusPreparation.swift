@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import AppKit
 
 /// QUERY/RESOURCE: retain transport evidence, without claiming keyboard focus.

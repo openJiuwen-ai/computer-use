@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// QUERY ordering for one synchronous window collector. Input validation may
 /// consume a later declaration read performed by its input-window helper;
 /// ordinary observation retains declaration -> hints -> input-window order.

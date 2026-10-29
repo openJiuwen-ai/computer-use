@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """QUERY/RESOURCE: resolve the existing operation-local selection evidence."""
 
 

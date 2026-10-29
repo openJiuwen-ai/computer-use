@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Native fact and relation collection with explicit profile/query boundaries.
 
 No input route or presentation compression is available here. The existing

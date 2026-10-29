@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Concrete NativePort over the same supervised JSONL connection as observation.
 
 No UI policy lives here: this module converts typed engine objects and strict

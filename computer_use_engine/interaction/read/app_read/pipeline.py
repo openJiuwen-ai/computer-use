@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Read request parsing, fixed scope selection and explicit startup coordination.
 
 Launching is a write branch before ReadPipeline. A failed observation never

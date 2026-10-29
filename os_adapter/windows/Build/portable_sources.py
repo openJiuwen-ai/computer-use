@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Portable native mechanism source groups; excludes COM/Win32 and workers.
 
 Each historic mechanism source gains only its extracted contracts and pipeline

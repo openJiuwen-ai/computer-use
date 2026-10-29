@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Requests passed between session adapters and the execution branches."""
 
 from __future__ import annotations

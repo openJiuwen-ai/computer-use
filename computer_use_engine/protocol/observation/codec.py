@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Serialize the normalized observation model independently of driver wire data."""
 
 from __future__ import annotations

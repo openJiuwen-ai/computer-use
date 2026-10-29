@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Bounded semantic path resolution inside an already-open native operation.
 
 This consumes native facts, never display text. Native adapters only collect

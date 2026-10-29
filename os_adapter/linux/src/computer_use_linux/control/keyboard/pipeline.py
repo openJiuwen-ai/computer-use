@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Native keyboard preparation composition; no requested content is sent."""
 
 from .passes.observe_preparation import observe_preparation

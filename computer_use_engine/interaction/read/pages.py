@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Public continuation aliases for observed native relationship pages.
 
 Aliases grant no input authority. A page keeps its source binding, property

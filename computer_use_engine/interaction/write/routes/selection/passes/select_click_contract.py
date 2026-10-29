@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Choose the negotiated click branch without changing other write intents."""
 
 from computer_use.interaction.write.routes.selection.model import CandidateSet

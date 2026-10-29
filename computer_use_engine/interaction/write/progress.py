@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One owner for attempts/effects and a pure write replanning Gate."""
 
 from __future__ import annotations

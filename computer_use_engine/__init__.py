@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Computer Use SDK: public Python API and cross-platform desktop semantics."""
 
 from .client.computer import UI, App, Computer, Element, Window

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Shared adapter interface for native observation and input execution."""
 
 from __future__ import annotations

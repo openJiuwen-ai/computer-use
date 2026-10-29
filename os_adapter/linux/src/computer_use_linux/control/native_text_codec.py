@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Native argument units, not a text-input fallback policy.
 
 libatspi forwards InsertText.length as a byte count. Qt 5/6's AT-SPI adaptor

@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from datetime import datetime, timezone
 
 from computer_use.errors import ComputerUseError

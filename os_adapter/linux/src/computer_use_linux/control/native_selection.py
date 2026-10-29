@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Operation-local facts used by Python to select a native input recipient.
 
 The driver preserves and rechecks facts; it never searches for an editor or

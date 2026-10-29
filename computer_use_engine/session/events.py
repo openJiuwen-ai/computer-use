@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 "Host delivery callbacks; these records do not execute computer operations."
 
 # Private variables hold mutable session state.

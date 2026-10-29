@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// PURE: call-local query strategy. Legacy is absorbing; it never stores facts,
 /// grants dispatch, retries input or changes a request's budget/progress.
 struct NativeKeyboardBoundaryPolicy {

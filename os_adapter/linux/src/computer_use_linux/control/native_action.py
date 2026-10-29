@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One addressed AT-SPI action; semantic selection belongs to the SDK.
 
 Action indices are transient provider positions, never public element IDs or

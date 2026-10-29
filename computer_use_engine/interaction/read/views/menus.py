@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Observe menus as separate native scopes, preserving their input context."""
 
 from __future__ import annotations

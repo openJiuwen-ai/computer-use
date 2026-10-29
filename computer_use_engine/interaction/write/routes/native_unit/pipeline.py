@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """One shared native invocation lease for prepare and dispatch branches."""
 
 from __future__ import annotations

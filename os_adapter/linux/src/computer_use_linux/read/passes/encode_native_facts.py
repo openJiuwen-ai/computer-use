@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Encode accessibility collections as the shared NativeObservation graph."""
 
 from computer_use_linux.read.native_observation import encode_observation

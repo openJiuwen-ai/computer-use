@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Explicit window pixels, independent of accessibility nodes and tree rendering."""
 
 from __future__ import annotations

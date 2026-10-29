@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """String/number formatting at the existing model-observation boundary."""
 
 from __future__ import annotations

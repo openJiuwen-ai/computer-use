@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Send one integrated native click attempt within the existing invocation lease."""
 
 from __future__ import annotations

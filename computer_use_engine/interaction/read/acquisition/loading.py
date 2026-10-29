@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Read-refresh evidence from unified observation facts.
 
 Loading, exposed content, and collection coverage remain independent. These

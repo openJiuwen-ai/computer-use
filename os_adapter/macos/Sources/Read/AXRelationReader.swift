@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import ApplicationServices
 
 /// Native relation acquisition shared by tree reads and explicit continuation.

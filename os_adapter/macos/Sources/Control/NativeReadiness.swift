@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 /// Entry conditions of one selected native unit, for the operation's immutable
 /// intent. Unknown evidence stays unknown; readiness is never dispatch authority.
 struct NativeReadiness {

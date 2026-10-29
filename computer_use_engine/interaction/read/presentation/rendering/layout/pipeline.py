@@ -1,3 +1,6 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Text-only packing after semantic rendering; references retain their source."""
 
 from __future__ import annotations
