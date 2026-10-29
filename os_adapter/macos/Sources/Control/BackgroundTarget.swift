@@ -30,7 +30,7 @@ import ApplicationServices
 
 /// A process identity from an observation, never a lookup of the current foreground app.
 @MainActor struct BackgroundTarget {
-    private static let desktopMode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "shared"
+    static let desktopMode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "shared"
     let application: NSRunningApplication
     let launched: Date?
     private let nativeIdentity: NativeProcessIdentity?

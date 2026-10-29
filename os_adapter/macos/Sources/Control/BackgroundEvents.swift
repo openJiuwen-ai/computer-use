@@ -65,7 +65,7 @@ import ApplicationServices
     /// Request foreground selection of the exact window without a mouse primer.
     /// This changes real desktop focus and requires the caller's authorization.
     /// Returning does not prove native key-window state or input consumption.
-    static func selectForegroundWindow(_ id: CGWindowID) throws {
+    @MainActor static func selectForegroundWindow(_ id: CGWindowID) throws {
         guard let setFront, let mainConnection, let windowOwner, let connectionPSN else {
             throw DriverError("native foreground window preparation is unavailable", code: .inputUnavailable)
         }
@@ -73,9 +73,12 @@ import ApplicationServices
         guard windowOwner(mainConnection(), id, &owner) == 0, connectionPSN(owner, &psn) == 0 else {
             throw DriverError("foreground window owner is unavailable", code: .staleTarget)
         }
-        guard setFront(&psn, id, 0x200) == 0 else {
-            throw DriverError("native foreground activation failed", code: .inputUnavailable)
-        }
+        let activity = NativeInputActivity.begin(
+            device: .focus, transport: .windowServer, mechanism: "selectForegroundWindow", window: id,
+            stage: .preparation)
+        let status = setFront(&psn, id, 0x200)
+        activity?.returned(status: Int(status))
+        guard status == 0 else { throw DriverError("native foreground activation failed", code: .inputUnavailable) }
     }
 
     private typealias ActualPID = @convention(c) (AXUIElement, UnsafeMutablePointer<pid_t>) -> Int32
@@ -343,10 +346,14 @@ import ApplicationServices
         return result
     }
 
-    static func postKey(_ event: CGEvent, to recipient: KeyboardRecipient) {
+    @MainActor static func postKey(_ event: CGEvent, to recipient: KeyboardRecipient) {
         setField!(event, 40, Int64(recipient.pid))
         setField!(event, 51, Int64(recipient.window ?? 0))
+        let activity = NativeInputActivity.begin(
+            device: .keyboard, transport: .process, mechanism: "CGEvent.postToPid", pid: recipient.pid,
+            window: recipient.window, event: event, presenterPID: recipient.presenter)
         event.postToPid(recipient.pid)
+        activity?.returned()
     }
 
     static func requireKeyboardRoute() throws {
@@ -391,7 +398,7 @@ import ApplicationServices
             && SyntheticFocusCoordinator.shared.isCurrent(target, window: window, needsKeyWindow: needsKeyWindow)
     }
 
-    static func post(
+    @MainActor static func post(
         _ event: CGEvent, window: WindowGeometry.WindowMapping, point: CGPoint? = nil, clickGroup: Int64 = 0
     ) {
         // prepare() resolves routing functions even when foreground targets skip activation.
@@ -405,6 +412,10 @@ import ApplicationServices
             setLocation!(event, point.x - window.frame.minX, point.y - window.frame.minY)
         }
         // One delivery, never duplicate through a second route after an uncertain result.
+        let activity = NativeInputActivity.begin(
+            device: .mouse, transport: .process, mechanism: "CGEvent.postToPid", pid: window.pid, window: window.id,
+            event: event)
         event.postToPid(window.pid)
+        activity?.returned()
     }
 }

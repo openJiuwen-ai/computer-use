@@ -25,7 +25,10 @@ import ApplicationServices
             application: application, window: window, receiverRelation: receiverRelation)
         let receiver = current.receiver(element)
         if receiver == "yes", let cellEditor,
-            try cellEditor.association(window: window).map({ proof in element.map { CFEqual($0, proof.editor) } == true }) != true {
+            try cellEditor.association(window: window).map({ proof in
+                element.map { CFEqual($0, proof.editor) } == true
+            }) != true
+        {
             return NativeReadiness([("receiver", "unknown")])
         }
         return NativeReadiness([("receiver", receiver)])
@@ -42,7 +45,7 @@ import ApplicationServices
     /// checks; the narrow setter port permits a no-desktop ordering regression.
     static func setFocus(
         _ element: AXUIElement, detail: String, check: () throws -> Void, onPreparation: (String) -> Void,
-        set: (AXUIElement, CFString, CFTypeRef) -> AXError = AXMessaging.setAttributeValue
+        set: @MainActor (AXUIElement, CFString, CFTypeRef) -> AXError = AXMessaging.setAttributeValue
     ) throws {
         try check()
         onPreparation(detail)

@@ -22,42 +22,51 @@ import ApplicationServices
             withJSONObject: decoded.value, options: [.sortedKeys, .withoutEscapingSlashes])
         return try await op.execute(step: request.step, payload: payload) {
             let receipt = NativeExecutionReceipt(target: decoded.target, onEffect: access.recordEffect)
-            if op.clickContract != nil {
-                // Lookup is inside dedup admission but before live resolution,
-                // so an expired target still reports the selected stable family.
-                let offer = access.contracts.primitiveContracts(op.token).first { $0.id == id }?.click
-                receipt.click = NativeClickEvidence(
-                    target: decoded.target, family: offer?.routeFamily ?? "macos.unresolved")
-            }
-            do {
-                let resolved = try ResolveNativeTargetPass.run(decoded, op: op, access: access)
-                let boundary = NativeUnitBoundary.make(
-                    decoded, op: op, resolved: resolved, receipt: receipt, access: access)
-                try CheckNativeWriteBoundaryPass.run(boundary)
-                if op.clickContract != nil {
-                    await NativeClickPipeline.run(
-                        decoded, resolved: resolved, operation: op, step: request.step, boundary: boundary,
-                        receipt: receipt, access: access)
-                } else {
-                    let route = try NativeRoutePipeline.select(
-                        decoded, op: op, resolved: resolved, boundary: boundary, receipt: receipt, access: access)
-                    switch route {
-                    case .prepare(let body):
-                        try await NativePreparePipeline.run(body, boundary: boundary, op: op, id: id)
-                    case .dispatch(let body): try await NativeDispatchPipeline.run(body, receipt: receipt)
+            let activity = NativeInputActivity(
+                operation: op.token, step: request.step, command: kind, intent: op.request.kind, target: decoded.target,
+                mode: BackgroundTarget.desktopMode)
+            return await NativeInputActivity.$current.withValue(activity) {
+                await NativeInputActivity.$stage.withValue(kind == "prepare_receiver" ? .preparation : .input) {
+                    defer { activity.finish(dispatch: receipt.dispatch, cleanup: receipt.cleanup) }
+                    if op.clickContract != nil {
+                        // Lookup is inside dedup admission but before live resolution,
+                        // so an expired target still reports the selected stable family.
+                        let offer = access.contracts.primitiveContracts(op.token).first { $0.id == id }?.click
+                        receipt.click = NativeClickEvidence(
+                            target: decoded.target, family: offer?.routeFamily ?? "macos.unresolved")
                     }
-                }
-            } catch {
-                if op.clickContract != nil {
-                    NativeClickPipeline.failResolution(
-                        error, command: decoded, operation: op, step: request.step, receipt: receipt)
-                } else {
-                    BuildNativeFailureReceiptPass.run(
-                        error, kind: kind, foreground: foreground, id: id, op: op, receipt: receipt)
+                    do {
+                        let resolved = try ResolveNativeTargetPass.run(decoded, op: op, access: access)
+                        let boundary = NativeUnitBoundary.make(
+                            decoded, op: op, resolved: resolved, receipt: receipt, access: access)
+                        try CheckNativeWriteBoundaryPass.run(boundary)
+                        if op.clickContract != nil {
+                            await NativeClickPipeline.run(
+                                decoded, resolved: resolved, operation: op, step: request.step, boundary: boundary,
+                                receipt: receipt, access: access)
+                        } else {
+                            let route = try NativeRoutePipeline.select(
+                                decoded, op: op, resolved: resolved, boundary: boundary, receipt: receipt,
+                                access: access)
+                            switch route {
+                            case .prepare(let body):
+                                try await NativePreparePipeline.run(body, boundary: boundary, op: op, id: id)
+                            case .dispatch(let body): try await NativeDispatchPipeline.run(body, receipt: receipt)
+                            }
+                        }
+                    } catch {
+                        if op.clickContract != nil {
+                            NativeClickPipeline.failResolution(
+                                error, command: decoded, operation: op, step: request.step, receipt: receipt)
+                        } else {
+                            BuildNativeFailureReceiptPass.run(
+                                error, kind: kind, foreground: foreground, id: id, op: op, receipt: receipt)
+                        }
+                    }
+                    AgentPointer.current?.recordOutcome(success: receipt.succeeded)
+                    return receipt.wire
                 }
             }
-            AgentPointer.current?.recordOutcome(success: receipt.succeeded)
-            return receipt.wire
         }
     }
 }

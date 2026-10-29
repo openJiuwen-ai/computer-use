@@ -141,18 +141,19 @@ import CoreGraphics
                             "platform": "macos", "desktopMode": mode, "maxTimeoutMs": 120_000,
                             "capabilities": [
                                 "cancel", "requestDedup", "desktopCoordination", "nativeOperations",
-                                "nativeBoundContracts", "nativeUnitReadinessV2", "nativeClickPipelineV1",
-                                "nativeClickPipelineV2", "nativeDirectory", "nativeApplicationRoots",
-                                "nativeMenuActions", "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds",
-                                "nativeDesktopInput", "nativeRelations", "nativeNodePages", "nativeNodeDepthBudget",
-                                "nativeRelationPages", "nativeCapturedText", "nativeParameterizedText",
-                                "nativeRawNodeMetadata", "nativeAXAttributeQueries", "nativeActionIntents",
-                                "nativeWindowScope", "nativeKeyboardIntents", "nativeTextInput", "nativeActuators",
-                                "nativeTextReplacement", "nativeSelectedText", "nativeEditorPreparation",
-                                "nativePointer", "nativeElementPointer", "nativeElementScroll", "nativeSelectionBasis",
-                                "nativeControlParts", "nativeTableFacts", "nativeBusyFacts", "nativeVirtualFocus",
-                                "nativeFocusMembers", "nativeFocusScopes", "nativeCurrentReceiver",
-                                "nativeAdvertisedFields", "nativeFollowRelations", "nativeLaunch", "nativeScroll"
+                                "nativeInputActivityV1", "nativeBoundContracts", "nativeUnitReadinessV2",
+                                "nativeClickPipelineV1", "nativeClickPipelineV2", "nativeDirectory",
+                                "nativeApplicationRoots", "nativeMenuActions", "nativeMenuShortcuts", "nativeCapture",
+                                "nativeCaptureKinds", "nativeDesktopInput", "nativeRelations", "nativeNodePages",
+                                "nativeNodeDepthBudget", "nativeRelationPages", "nativeCapturedText",
+                                "nativeParameterizedText", "nativeRawNodeMetadata", "nativeAXAttributeQueries",
+                                "nativeActionIntents", "nativeWindowScope", "nativeKeyboardIntents", "nativeTextInput",
+                                "nativeActuators", "nativeTextReplacement", "nativeSelectedText",
+                                "nativeEditorPreparation", "nativePointer", "nativeElementPointer",
+                                "nativeElementScroll", "nativeSelectionBasis", "nativeControlParts", "nativeTableFacts",
+                                "nativeBusyFacts", "nativeVirtualFocus", "nativeFocusMembers", "nativeFocusScopes",
+                                "nativeCurrentReceiver", "nativeAdvertisedFields", "nativeFollowRelations",
+                                "nativeLaunch", "nativeScroll"
                             ]
                         ]
                     ])

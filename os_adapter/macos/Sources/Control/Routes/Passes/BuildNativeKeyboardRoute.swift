@@ -102,8 +102,10 @@ import ApplicationServices
             }
             if case .scopedForegroundHID(let scoped) = delivery {
                 try await unit.confirmSelectedDelivery(delivery, check: checkBoundary)
-                try NativeScopedKeyboardPreparation.prepare(
-                    scoped, check: checkBoundary, onPreparation: receipt.recordPreparation)
+                try NativeInputActivity.$stage.withValue(.preparation) {
+                    try NativeScopedKeyboardPreparation.prepare(
+                        scoped, check: checkBoundary, onPreparation: receipt.recordPreparation)
+                }
             }
             let alreadySatisfied = try await dispatchUnit.deliver(
                 keyboard, delivery: delivery, replacement: replacement, prepared: op.preparationConfirmed(id),

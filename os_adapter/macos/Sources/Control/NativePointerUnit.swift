@@ -393,7 +393,11 @@ enum NativePointerReadiness {
                 dragging: request.kind == .drag ? event.type != .leftMouseUp : nil)
             event.location = point
             if global {
+                let activity = NativeInputActivity.begin(
+                    device: .mouse, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap", pid: window.pid,
+                    window: window.id, event: event)
                 event.post(tap: .cghidEventTap)
+                activity?.returned()
             } else {
                 BackgroundEvents.post(event, window: window, point: point, clickGroup: sequence.group)
             }
