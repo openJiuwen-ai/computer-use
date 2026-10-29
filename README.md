@@ -24,6 +24,14 @@ Developers can adopt it in two ways:
 
 ## Quick Start
 
+### Connect your existing agent with one prompt
+
+Send this prompt to an agent that can run commands and configure MCP servers:
+
+```text
+Read the README at https://gitcode.com/openJiuwen/computer-use, install and build Computer Use on this computer, add computer-use-mcp to your current MCP tool configuration as documented, check desktop permissions, and use the computer_use tool to list running applications to verify the connection.
+```
+
 ### Install and prepare the host
 
 Install Python 3.12 or later and `uv`, then clone the repository and install its dependencies:

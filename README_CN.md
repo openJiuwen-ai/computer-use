@@ -24,6 +24,14 @@ Computer Use 是 openJiuwen 智能体系统服务层（Agent System Service）�
 
 ## 快速开始
 
+### 一句话接入现有 Agent
+
+将下面这句话发送给支持命令执行和 MCP 配置的 Agent：
+
+```text
+请阅读 https://gitcode.com/openJiuwen/computer-use 的 README，在本机安装并构建 Computer Use，按文档将 computer-use-mcp 接入你当前的 MCP 工具配置，检查桌面访问权限，并调用 computer_use 列出正在运行的应用以验证接入。
+```
+
 ### 安装与准备宿主
 
 安装 Python 3.12 或更高版本及 `uv`，然后克隆仓库并安装依赖：
