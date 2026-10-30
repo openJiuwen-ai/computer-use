@@ -23,12 +23,15 @@ class AgentConfig:
     max_iterations: int = 40
     context_window: int = 1_000_000
     workspace: str | None = None
+    gaze_connection_file: str | None = None
 
     def __post_init__(self):
         if self.desktop not in ("shared", "exclusive"):
             raise ValueError("desktop must be shared or exclusive")
         if self.max_iterations < 1 or self.context_window < 1:
             raise ValueError("max_iterations and context_window must be positive")
+        if self.gaze_connection_file is not None and (self.mcp is not None or sys.platform != "darwin"):
+            raise ValueError("gaze requires the default local macOS MCP connection")
 
     def mcp_config(self) -> McpConfig:
         return self.mcp or McpConfig(

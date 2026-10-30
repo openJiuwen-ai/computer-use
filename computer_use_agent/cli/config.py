@@ -76,6 +76,7 @@ def build(value, *, workspace):
         max_iterations=value.get("max_iterations", 40),
         context_window=value.get("context_window", 1_000_000),
         workspace=str(workspace),
+        gaze_connection_file=value.get("gaze_connection_file"),
         mcp=McpConfig(
             command=mcp["command"],
             args=tuple(mcp.get("args", ())),
