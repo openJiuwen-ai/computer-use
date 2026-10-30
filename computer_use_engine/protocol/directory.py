@@ -18,6 +18,7 @@ _application = obj(
         aliases=array(identity, max=16).optional(),
         matchKeys=array(identity, max=64).optional(),
         windows=array(obj(dict(selector=identity, window=identity)), max=512).optional(),
+        nativeIdentity=obj({"processId": number(integer=True, min=1)}).optional(),
     )
 )
 _surface = obj(

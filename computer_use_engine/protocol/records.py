@@ -118,6 +118,7 @@ class ApplicationInfo(TypedDict):
         aliases: Additional names supplied by the provider.
         matchKeys: Application lookup keys supplied by the provider.
         windows: Additional selectable working-window choices.
+        nativeIdentity: Optional host-local process identity for scoped discovery.
     """
 
     id: str
@@ -128,6 +129,7 @@ class ApplicationInfo(TypedDict):
     aliases: NotRequired[list[str]]
     matchKeys: NotRequired[list[str]]
     windows: NotRequired[list[Record]]
+    nativeIdentity: NotRequired[Record]
 
 
 class SurfaceInfo(TypedDict):
