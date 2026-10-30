@@ -33,6 +33,9 @@ _surface = obj(
         modal=boolean().nullable(),
         nativeWindow=boolean(),
         accessibility=boolean(),
+        nativeIdentity=obj(
+            dict(processId=number(integer=True, min=1), windowId=number(integer=True, min=1))
+        ).optional(),
     )
 )
 _common = dict(

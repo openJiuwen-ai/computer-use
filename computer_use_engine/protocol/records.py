@@ -145,6 +145,7 @@ class SurfaceInfo(TypedDict):
         modal: Reported modality; None means unknown.
         nativeWindow: Whether a native window identity was observed.
         accessibility: Whether an accessibility root was observed.
+        nativeIdentity: Optional host-local process/window IDs observed by the native provider.
     """
 
     window: str
@@ -158,6 +159,7 @@ class SurfaceInfo(TypedDict):
     modal: bool | None
     nativeWindow: bool
     accessibility: bool
+    nativeIdentity: NotRequired[Record]
 
 
 NativeDirectory: TypeAlias = Record
