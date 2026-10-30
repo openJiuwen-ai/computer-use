@@ -37,4 +37,6 @@ class AgentConfig:
         return self.mcp or McpConfig(
             command=sys.executable,
             args=("-m", "computer_use_mcp", "--desktop", self.desktop),
+            # Gaze draws its own feedback; the pointer panel appears as an occluding window.
+            env={"COMPUTER_USE_POINTER": "0"} if self.gaze_connection_file is not None else {},
         )

@@ -111,6 +111,12 @@ def test_gaze_is_opt_in_and_host_local(gaze_service):
         AgentConfig(gaze_connection_file=str(gaze_service.path), mcp=McpConfig(command="ssh"))
 
 
+def test_gaze_session_disables_the_decorative_pointer_occluder(gaze_service):
+    config = AgentConfig(gaze_connection_file=str(gaze_service.path))
+    assert config.mcp_config().env["COMPUTER_USE_POINTER"] == "0"
+    assert "COMPUTER_USE_POINTER" not in AgentConfig().mcp_config().env
+
+
 def test_cli_passes_gaze_configuration(gaze_service, tmp_path):
     from computer_use_agent.cli.config import build
 

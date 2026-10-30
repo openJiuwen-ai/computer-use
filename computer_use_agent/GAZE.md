@@ -37,6 +37,8 @@ The model supplies only an optional selection ID. Validated numeric IDs are inse
 
 Resolution uses the application's optional `nativeIdentity.processId` to query only the owning process's window catalogue. It does not enumerate unrelated applications' windows. Rebuild the macOS driver together with the SDK: both application and surface identity extensions are required; an older driver fails safely instead of falling back to global discovery. Window identity is still checked independently before the normal read.
 
+Gaze-enabled sessions use the gaze service's own crosshair and outline. Their local MCP process sets the existing `COMPUTER_USE_POINTER=0` option because the engine's transparent pointer panel would otherwise appear to the gaze service as a window covering the target. This disables only the engine's decorative pointer for that session, including its general tool; ordinary sessions retain the default pointer. Real occlusion checks remain active.
+
 Only a successful engine read followed by validation can acknowledge a voice observation. A cancelled claim waits for its bounded HTTP response to obtain the ID needed for cleanup. If a reply is lost or release cannot be confirmed, the tool refuses another read. The service must expire the lease within 120 seconds; after that, recreate the toolkit and obtain a new confirmation. Capture is never automatically retried.
 
 The existing general Python `computer_use` tool is unchanged and can perform actions. This helper does not impose a read-only policy on the whole agent or pause a running Python batch. A separate action policy is needed before porting the older per-action gesture guard. Use ordinary host permissions and desktop mode for the rest of the agent.
