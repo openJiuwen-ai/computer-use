@@ -208,7 +208,7 @@ uv run --extra agent computer-use-agent "打开预定会议表单，停在提交
 ```mermaid
 flowchart TD
     App["Agent 应用"] --> Agent["computer_use_agent · DeepAgent"]
-    CLI["interface_adapter/cli"] --> Agent
+    CLI["computer_use_agent/cli"] --> Agent
     Agent --> MCP["interface_adapter/mcp"]
     External["其他智能体"] --> MCP
     MCP --> Engine["computer_use_engine · Python SDK"]
@@ -235,10 +235,10 @@ DeepAgent 负责模型调用、对话上下文与工具循环；引擎维护 `Co
 
 ```
 computer-use/
-├── interface_adapter/       # 接入层：MCP 与直接对话
-│   ├── mcp/                 # stdio MCP 宿主与持久化 Python 执行环境
-│   └── cli/                 # 直接对话、配置与本机预览
+├── interface_adapter/       # 接入层：MCP 接入
+│   └── mcp/                 # stdio MCP 宿主与持久化 Python 执行环境
 ├── computer_use_agent/      # Agent 组装层：DeepAgent、上下文与工具接入
+│   └── cli/                 # 直接对话、配置与本机预览
 ├── computer_use_engine/     # 引擎层：公共 SDK、观察与操作管线
 ├── os_adapter/              # 操作系统适配层：原生后端与共用资源
 │   ├── macos/
@@ -258,7 +258,7 @@ computer-use/
 - [SDK 接口参考](computer_use_engine/__init__.pyi)：`Computer`、`App`、`Window`、`Element` 的公开接口与参数类型。
 - [MCP 服务入口](interface_adapter/mcp/server.py)：工具定义、执行说明与桌面模式参数。
 - [原生环境准备命令](scripts/native.py)：各平台构建、权限检查与 Linux 会话配置。
-- [直接对话](interface_adapter/cli/main.py)：命令行选项与交互命令。
+- [直接对话](computer_use_agent/cli/main.py)：命令行选项与交互命令。
 
 ## 参与贡献
 

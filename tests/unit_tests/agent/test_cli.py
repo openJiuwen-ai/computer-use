@@ -10,11 +10,11 @@ import subprocess
 import sys
 import time
 
-from computer_use_cli.config import initialize, load
-from computer_use_cli.input import MessageInput
-from computer_use_cli.journal import Journal
-from computer_use_cli.main import main
-from computer_use_cli.terminal import Terminal
+from computer_use_agent.cli.config import initialize, load
+from computer_use_agent.cli.input import MessageInput
+from computer_use_agent.cli.journal import Journal
+from computer_use_agent.cli.main import main
+from computer_use_agent.cli.terminal import Terminal
 from rich.console import Console
 
 from .conftest import answer, tool_call
@@ -141,7 +141,7 @@ def test_interactive_commands_preserve_execution_session(model_server, tmp_path,
     for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL"):
         monkeypatch.delenv(key, raising=False)
     result = subprocess.run(
-        [sys.executable, "-m", "computer_use_cli", "--config", str(path), "--no-preview"],
+        [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path), "--no-preview"],
         input="/debug\nInitialize counter\n/normal\nIncrement counter\n/compact\n/new\n/exit\n",
         text=True,
         capture_output=True,
@@ -206,7 +206,7 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
     for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL"):
         monkeypatch.delenv(key, raising=False)
     process = subprocess.Popen(
-        [sys.executable, "-m", "computer_use_cli", "--config", str(path), "--no-preview", "Wait until cancelled"],
+        [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path), "--no-preview", "Wait until cancelled"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

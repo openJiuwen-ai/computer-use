@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parent
 PACKAGE_ROOTS = {
     "computer_use": "computer_use_engine",
     "computer_use_agent": "computer_use_agent",
-    "computer_use_cli": "interface_adapter/cli",
     "computer_use_mcp": "interface_adapter/mcp",
     "computer_use_native_tools": "scripts",
 }

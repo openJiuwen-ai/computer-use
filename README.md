@@ -208,7 +208,7 @@ The project has four layers: interfaces, agent assembly, the execution engine an
 ```mermaid
 flowchart TD
     App["Agent application"] --> Agent["computer_use_agent · DeepAgent"]
-    CLI["interface_adapter/cli"] --> Agent
+    CLI["computer_use_agent/cli"] --> Agent
     Agent --> MCP["interface_adapter/mcp"]
     External["External agent"] --> MCP
     MCP --> Engine["computer_use_engine · Python SDK"]
@@ -235,10 +235,10 @@ The four layers and supporting files are organized as follows:
 
 ```
 computer-use/
-├── interface_adapter/       # access layer: MCP and direct conversation
-│   ├── mcp/                 # stdio MCP host and persistent Python execution
-│   └── cli/                 # direct conversation, configuration and preview
+├── interface_adapter/       # access layer: MCP integration
+│   └── mcp/                 # stdio MCP host and persistent Python execution
 ├── computer_use_agent/      # agent assembly: DeepAgent, context and tool integration
+│   └── cli/                 # direct conversation, configuration and preview
 ├── computer_use_engine/     # engine: public SDK, observation and operation pipelines
 ├── os_adapter/              # OS adaptation: native platform backends and resources
 │   ├── macos/
@@ -258,7 +258,7 @@ computer-use/
 - [SDK API reference](computer_use_engine/__init__.pyi): public interfaces and parameter types for `Computer`, `App`, `Window` and `Element`.
 - [MCP server](interface_adapter/mcp/server.py): tool schemas, execution instructions and desktop-mode arguments.
 - [Native setup commands](scripts/native.py): platform builds, permission checks and Linux session setup.
-- [Direct conversation](interface_adapter/cli/main.py): CLI options and interactive commands.
+- [Direct conversation](computer_use_agent/cli/main.py): CLI options and interactive commands.
 
 ## Contributing
 

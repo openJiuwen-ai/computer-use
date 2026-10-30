@@ -17,7 +17,7 @@ def initialize(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with path.open("x", encoding="utf-8") as stream:
         path.chmod(0o600)
-        stream.write(files("computer_use_cli").joinpath("config.example.json").read_text(encoding="utf-8"))
+        stream.write(files("computer_use_agent.cli").joinpath("config.example.json").read_text(encoding="utf-8"))
 
 
 def load(path: Path | None = None, *, overrides=None):

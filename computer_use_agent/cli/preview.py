@@ -35,7 +35,7 @@ async def run(command, *args):
 async def build():
     if sys.platform != "darwin":
         raise RuntimeError("The local preview requires macOS.")
-    with as_file(files("computer_use_cli").joinpath("preview")) as source:
+    with as_file(files("computer_use_agent.cli").joinpath("preview")) as source:
         sources = [source / "main.swift", source / "PreviewController.swift"]
         digest = hashlib.sha256(platform.machine().encode())
         for file in sources:
