@@ -5,6 +5,6 @@
   "api_key": "",
   "desktop": "exclusive",
   "max_iterations": 40,
-  "context_window": 48000,
+  "context_window": 1000000,
   "model_timeout": 600
 }

@@ -35,7 +35,7 @@ def load(path: Path | None = None, *, overrides=None):
     if "modelTimeoutMs" in value and "model_timeout" not in value:
         value["model_timeout"] = value["modelTimeoutMs"] / 1000
     if "context_window" not in value and isinstance(value.get("context"), dict):
-        value["context_window"] = value["context"].get("windowTokens", 48000)
+        value["context_window"] = value["context"].get("windowTokens", 1_000_000)
     environment = {
         "model": os.getenv("MODEL_NAME") or os.getenv("OPENAI_MODEL"),
         "provider": os.getenv("MODEL_PROVIDER"),
@@ -74,7 +74,7 @@ def build(value, *, workspace):
     config = AgentConfig(
         desktop=value.get("desktop", "exclusive"),
         max_iterations=value.get("max_iterations", 40),
-        context_window=value.get("context_window", 48000),
+        context_window=value.get("context_window", 1_000_000),
         workspace=str(workspace),
         mcp=McpConfig(
             command=mcp["command"],

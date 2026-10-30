@@ -21,7 +21,7 @@ class AgentConfig:
     desktop: Literal["shared", "exclusive"] = "exclusive"
     mcp: McpConfig | None = None
     max_iterations: int = 40
-    context_window: int = 48000
+    context_window: int = 1_000_000
     workspace: str | None = None
 
     def __post_init__(self):
