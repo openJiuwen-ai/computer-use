@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent
 # one Python namespace: the Linux driver is an independent installable package.
 PACKAGE_ROOTS = {
     "computer_use": "computer_use_engine",
+    "computer_use_agent": "computer_use_agent",
     "computer_use_mcp": "interface_adapter/mcp",
     "computer_use_native_tools": "scripts",
 }

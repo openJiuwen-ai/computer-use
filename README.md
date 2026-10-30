@@ -14,15 +14,31 @@ English | [简体中文](README_CN.md)
 
 ## Introduction
 
-Computer Use is the desktop-operation component of the openJiuwen Agent System Service layer. It packages "operating a computer" as an independently deployable execution runtime: it reads the accessibility tree and window captures of native applications, dispatches mouse and keyboard input by element or by coordinates, and returns a verifiable receipt for every step. Any agent framework can integrate it over MCP or the Python SDK; openJiuwen's JiuwenSwarm uses it as a sub-agent. macOS, Windows and Linux are supported.
+Computer Use is the desktop-operation component of the openJiuwen Agent System Service layer. It reads the accessibility tree and screenshots of desktop applications, operates controls through mouse and keyboard input, and returns operation receipts. It supports macOS, Windows and Linux.
 
 Developers can adopt it in two ways:
 
-**Option 1: use the backend computer_use engine only.** Unlike one-tool-per-action designs, the engine exposes a single tool to the model, `computer_use(title, code)`: the model writes Python against the three-level `Computer → App → Element` SDK to complete multi-step work. The accessibility tree comes first and screenshots second; actions return only `dispatched` or `verified` receipts, and outcomes must be confirmed by reading the UI again.
+**Option 1: integrate the computer_use engine.** Connect an agent through MCP or call the Python SDK directly. The MCP tool `computer_use(title, code)` runs Python against the `Computer → App / Window → Element` interface, with variables retained across calls. Agents use accessibility trees and screenshots to locate controls and verify operation results.
 
-**Option 2: use the DeepAgent that embeds the computer_use engine.** Send the task to the agent directly; the agent recognizes, observes and operates the desktop to complete it.
+**Option 2: integrate the Computer Use DeepAgent.** Use the agent assembled on openJiuwen DeepAgent through its standard `invoke()`, `stream()` and `Runner` interfaces. Applications pass natural-language tasks to the agent, which observes the desktop, performs operations and checks their results.
 
 ## Quick Start
+
+### Connect your existing agent with one prompt
+
+Send the appropriate prompt to a coding agent that can edit your project and run commands:
+
+**Integrate DeepAgent:**
+
+```text
+Read the README at https://gitcode.com/openJiuwen/computer-use and integrate Computer Use DeepAgent into this project, install the agent dependencies and prepare the local backend as documented, reuse the project's model configuration with create_agent and the standard invoke/stream interfaces (or add ComputerUseToolkit to an existing openJiuwen DeepAgent), and verify the integration with the task "List the running applications".
+```
+
+**Connect over MCP:**
+
+```text
+Read the README at https://gitcode.com/openJiuwen/computer-use, install and build Computer Use on this computer, add computer-use-mcp to your current MCP tool configuration as documented, check desktop permissions, and use the computer_use tool to list running applications to verify the connection.
+```
 
 ### Install and prepare the host
 
@@ -31,7 +47,7 @@ Install Python 3.12 or later and `uv`, then clone the repository and install its
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync --group dev
+uv sync
 ```
 
 Prepare the native dependencies on the computer whose desktop you will operate:
@@ -57,7 +73,9 @@ uv run computer-use-permissions
 
 On macOS, use `uv run computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch MCP.
 
-### Start the MCP server
+### Option 1: integrate the engine
+
+#### MCP
 
 ```bash
 uv run computer-use-mcp --desktop exclusive
@@ -89,7 +107,7 @@ print(await computer.list_apps())
 
 Select an application with `computer.app(id)`, observe it with `await app.read(view="both")`, and resolve a control with `await app.element(name_or_path)` before operating it.
 
-### Use the Python SDK
+#### Python SDK
 
 Save this example as `list_apps.py` and run it with `uv run python list_apps.py`:
 
@@ -108,26 +126,102 @@ async def main():
 asyncio.run(main())
 ```
 
-## Architecture
+### Option 2: integrate DeepAgent
 
-The MCP host exposes the SDK to an agent through persistent Python execution. Applications and windows share the `UI` interface, while elements retain their own operation targets:
+Use Python 3.12 or 3.13 and install the agent dependencies:
 
-```text
-Agent / MCP client
-        ↓ stdio
-interface_adapter/mcp
-        ↓ Python SDK
-Computer → App / Window → Element
-        ↓ read / query / write pipelines
-os_adapter: macOS / Windows / Linux
-        ↓ native accessibility, capture and input
-Desktop applications
+```bash
+uv sync --extra agent
 ```
 
-The shared Python layer manages handles, target scope, observation presentation and operation routing. Each native backend resolves operating-system objects, prepares the input receiver and dispatches the selected operation. Action receipts describe dispatch or verification; agents read the interface again to confirm the task's result.
+Configure a model that supports tool calls and image input using openJiuwen's `ModelClientConfig` and `ModelRequestConfig`. The example reads the provider, endpoint, credentials and model name from `MODEL_PROVIDER`, `API_BASE`, `API_KEY` and `MODEL_NAME`.
+
+`ComputerUseAgent` inherits the standard DeepAgent `invoke()` and `stream()` interfaces and works with `Runner`. Pass a native openJiuwen `Model` and retain `conversation_id` for follow-up messages:
+
+```python
+import asyncio
+import os
+
+from openjiuwen.core.foundation.llm import Model, ModelClientConfig, ModelRequestConfig
+
+from computer_use_agent import create_agent
+
+
+async def main():
+    model = Model(
+        model_client_config=ModelClientConfig(
+            client_provider=os.getenv("MODEL_PROVIDER", "OpenAI"),
+            api_base=os.environ["API_BASE"],
+            api_key=os.environ["API_KEY"],
+        ),
+        model_config=ModelRequestConfig(model=os.environ["MODEL_NAME"]),
+    )
+    async with create_agent(model) as agent:
+        conversation_id = "desktop-conversation"
+        print(await agent.invoke({"query": "List the running applications", "conversation_id": conversation_id}))
+        async for chunk in agent.stream({"query": "Inspect the calculator window", "conversation_id": conversation_id}):
+            print(chunk)
+
+
+asyncio.run(main())
+```
+
+The agent operates the local desktop in `exclusive` mode by default. Pass `config=AgentConfig(desktop="shared")` to select shared mode, or configure `AgentConfig.mcp` with `McpConfig` to connect to another MCP host. The async context manager closes the computer-operation session when the conversation ends.
+
+Existing openJiuwen DeepAgent applications can also add the standard tools provided by `ComputerUseToolkit`:
+
+```python
+from openjiuwen.harness import create_deep_agent
+
+from computer_use_agent import ComputerUseToolkit
+
+
+async def run(model):
+    async with ComputerUseToolkit() as desktop:
+        agent = create_deep_agent(
+            model,
+            tools=desktop.tools,
+            system_prompt=desktop.system_prompt,
+            parallel_tool_calls=False,
+            enable_tool_resilience_rail=False,
+            enable_sys_operation=False,
+            enable_read_image_multimodal=True,
+        )
+        return await agent.invoke({"query": "List the running applications"})
+```
+
+#### Run directly with the CLI
+
+The same agent can also run from the CLI. First run `uv run --extra agent computer-use-agent --init-config` and fill in `model`, `provider`, `api_base` and `api_key` in `~/.computer-use/agent/config.json`. Start a conversation or pass a task to execute once:
+
+```bash
+uv run --extra agent computer-use-agent
+uv run --extra agent computer-use-agent "Open the meeting scheduling form and stop before submitting"
+```
+
+Run `uv run --extra agent computer-use-agent --help` for CLI options.
+
+## Architecture
+
+The project has four layers: interfaces, agent assembly, the execution engine and OS adapters. Applications can integrate DeepAgent, connect an external agent over MCP, or call the SDK directly:
+
+```mermaid
+flowchart TD
+    App["Agent application"] --> Agent["computer_use_agent · DeepAgent"]
+    CLI["computer_use_agent/cli"] --> Agent
+    Agent --> MCP["interface_adapter/mcp"]
+    External["External agent"] --> MCP
+    MCP --> Engine["computer_use_engine · Python SDK"]
+    Python["Python application"] --> Engine
+    Engine --> OS["os_adapter · macOS / Windows / Linux"]
+    OS --> Desktop["Desktop applications"]
+```
+
+DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App / Window → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. Agents read the UI again to confirm task results after receiving `dispatched` or `verified` receipts.
 
 ## Features
 
+- **DeepAgent integration**: standard openJiuwen invocation, streaming and Runner integration, with computer-operation tools reusable in existing DeepAgent applications.
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.
 - **Verifiable receipts**: every action returns `dispatched` / `verified`; failures are structured as `code / effect / next`.
@@ -137,13 +231,16 @@ The shared Python layer manages handles, target scope, observation presentation 
 
 ## Project Structure
 
-The core components are organized as follows:
+The four layers and supporting files are organized as follows:
 
 ```
 computer-use/
-├── interface_adapter/mcp/   # stdio MCP host and persistent Python execution
-├── computer_use_engine/     # computer_use SDK, observation and operation pipelines
-├── os_adapter/              # native platform backends and shared resources
+├── interface_adapter/       # access layer: MCP integration
+│   └── mcp/                 # stdio MCP host and persistent Python execution
+├── computer_use_agent/      # agent assembly: DeepAgent, context and tool integration
+│   └── cli/                 # direct conversation and configuration
+├── computer_use_engine/     # engine: public SDK, observation and operation pipelines
+├── os_adapter/              # OS adaptation: native platform backends and resources
 │   ├── macos/
 │   ├── windows/
 │   └── linux/
@@ -156,9 +253,12 @@ computer-use/
 
 ## Documentation
 
+- [DeepAgent integration](computer_use_agent/agent.py): agent construction, standard invocation and conversation lifecycle.
+- [DeepAgent tools](computer_use_agent/toolkit.py): tools for existing openJiuwen applications.
 - [SDK API reference](computer_use_engine/__init__.pyi): public interfaces and parameter types for `Computer`, `App`, `Window` and `Element`.
 - [MCP server](interface_adapter/mcp/server.py): tool schemas, execution instructions and desktop-mode arguments.
 - [Native setup commands](scripts/native.py): platform builds, permission checks and Linux session setup.
+- [Direct conversation](computer_use_agent/cli/main.py): CLI options and interactive commands.
 
 ## Contributing
 
