@@ -24,7 +24,7 @@ def gaze_service(tmp_path):
             window_id=456,
             source="camera",
             confirmation_method="thumb",
-            read_only=False,
+            read_only=True,
             expires_in_seconds=120,
         )
         requests = []
@@ -140,6 +140,14 @@ def test_confirmed_target_read_uses_fixed_code_and_releases(gaze_service, monkey
     assert len({r["owner"] for r in gaze_service.requests}) == 1
 
 
+def test_read_requests_a_read_only_lease_and_refuses_a_legacy_mutable_claim(gaze_service, monkeypatch):
+    gaze_service.receipt = {**gaze_service.receipt, "read_only": False}
+    _, tool, calls = toolkit_for(gaze_service, monkeypatch)
+    result = asyncio.run(tool.invoke({}))
+    assert not result.success and not calls
+    assert gaze_service.requests[0]["read_only"] is True
+
+
 @pytest.mark.parametrize(
     "inputs", [{"code": "anything"}, {"expected_selection_id": ""}, {"expected_selection_id": True}, None]
 )
@@ -159,7 +167,7 @@ def test_bad_inputs_never_claim(gaze_service, monkeypatch, inputs):
         dict(read_only="yes"),
         dict(confirmation_method="unknown"),
         dict(confirmation_method="voice", read_only=False),
-        dict(confirmation_method="thumb", read_only=True),
+        dict(confirmation_method="thumb", read_only=False),
     ],
 )
 def test_invalid_receipt_never_reads_and_releases(gaze_service, monkeypatch, change):

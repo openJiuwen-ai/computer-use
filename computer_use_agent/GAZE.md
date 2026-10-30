@@ -6,11 +6,11 @@ This adapter consumes an existing service; the gaze estimator, calibration UI an
 
 The host supplies a JSON file with `url` and `token`. The URL must be `http://127.0.0.1:<port>` without a path, credentials, query or fragment. Requests are POSTs to `/api/target`, authenticated with `X-Session-Token`. Redirects and environment proxies are disabled. Each response is limited to 16 KiB. Service errors are not copied into model output.
 
-Each invocation creates a unique `owner`. Request bodies contain `action`, `owner`, and `selection_id` (null until claimed). `claim` also sends `expected_selection_id`, or null. The service must enforce exclusive ownership, freshness, camera/calibration validity and native window identity continuously. Simulated/rehearsal selections must be rejected. The adapter also checks the returned source, IDs and selection correspondence.
+Each invocation creates a unique `owner`. Request bodies contain `action`, `owner`, and `selection_id` (null until claimed). `claim` also sends `expected_selection_id`, or null, and `read_only: true`. The service must enforce exclusive ownership, freshness at claim, and native window identity throughout the read. Once claimed, looking away can preserve this read-only target; stopping the camera, invalidating calibration, changing the window, or reaching expiry must still revoke it. Simulated/rehearsal selections must be rejected. The adapter also checks the returned source, IDs and selection correspondence.
 
 | Action | Required response / behavior |
 | --- | --- |
-| `claim` | Claim one fresh confirmed target. Voice selections require exact `expected_selection_id`. Return the receipt below. |
+| `claim` | Claim one fresh confirmed target with `read_only: true`. Voice selections and any repeated claim of an existing read-only lease require exact `expected_selection_id`. Return the receipt below. A service that does not acknowledge read-only scope is rejected before any engine read. |
 | `validate` | Reject expired/changed selections or ownership mismatch; otherwise return the same receipt with the current remaining lifetime. |
 | `observed` | For a voice selection only, acknowledge successful observation with `{"observed":true}`. |
 | `release` | Release only this owner's selection; return `{"released":true}`. |
@@ -24,12 +24,12 @@ Receipt fields consumed by the adapter:
   "window_id": 456,
   "source": "camera",
   "confirmation_method": "thumb",
-  "read_only": false,
+  "read_only": true,
   "expires_in_seconds": 120
 }
 ```
 
-`confirmation_method` is `thumb`, `double_blink` or `voice`; `read_only` must be true exactly for voice receipts, and voice requests require their exact original selection ID. IDs must be positive integers. Additional receipt fields may be returned by the service but are not forwarded as model instructions. HTTP 400/401/403 means the request was refused without acquiring a claim; other failures leave the claim outcome uncertain.
+`confirmation_method` is `thumb`, `double_blink` or `voice`; this tool requires `read_only` to be exactly true for all three methods. Voice requests also require their exact original selection ID and the `observed` acknowledgement; gesture reads do not acknowledge speech. IDs must be positive integers. Additional receipt fields may be returned by the service but are not forwarded as model instructions. HTTP 400/401/403 means the request was refused without acquiring a claim; other failures leave the claim outcome uncertain. Update the local gaze service together with this adapter; older services that ignore the read-only claim flag are refused safely.
 
 ## Execution and failure behavior
 

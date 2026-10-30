@@ -113,14 +113,13 @@ class GazeReadTool(Tool):
             selection is None
             or receipt.get("source") != "camera"
             or any(type(receipt.get(key)) is not int or receipt[key] <= 0 for key in ("pid", "window_id"))
-            or type(receipt.get("read_only")) is not bool
+            or receipt.get("read_only") is not True
             or receipt.get("confirmation_method") not in ("thumb", "double_blink", "voice")
-            or (receipt["confirmation_method"] == "voice") != receipt["read_only"]
             or type(remaining) not in (int, float)
             or not math.isfinite(remaining)
             or remaining <= 0
             or (expected is not None and selection != expected)
-            or (receipt["read_only"] and selection != expected)
+            or (receipt["confirmation_method"] == "voice" and selection != expected)
         ):
             raise _GazeError("Gaze selection is missing, stale or mismatched; confirm the intended window again.")
         return tuple(
@@ -158,7 +157,7 @@ class GazeReadTool(Tool):
         expected = inputs.get("expected_selection_id")
         result = None
         try:
-            claim = asyncio.create_task(self._request("claim", owner, expected_selection_id=expected))
+            claim = asyncio.create_task(self._request("claim", owner, expected_selection_id=expected, read_only=True))
             try:
                 receipt = await asyncio.shield(claim)
             except asyncio.CancelledError:
@@ -194,7 +193,7 @@ class GazeReadTool(Tool):
                 raise _GazeError(
                     "The engine could not read the confirmed window; no observation acknowledged. Confirm again."
                 )
-            if receipt["read_only"]:
+            if receipt["confirmation_method"] == "voice":
                 acknowledged = await self._request("observed", owner, selection)
                 if acknowledged.get("observed") is not True:
                     raise _GazeError("Gaze service did not acknowledge the voice observation.")
