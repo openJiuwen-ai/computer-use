@@ -71,7 +71,7 @@ class RelationPresentation:
                     relation["state"] == "complete"
                     and relation["certainty"] == "confirmed"
                     and relation.get("offset", 0) == 0
-                    and relation.get("positions", list(range(len(targets)))) == list(range(len(targets)))
+                    and tuple(relation.get("positions", range(len(targets)))) == tuple(range(len(targets)))
                     and relation.get("total", len(targets)) == len(targets)
                     and not set(relation).difference(
                         {

@@ -12,6 +12,8 @@ import ApplicationServices
         switch request.query {
         case .launch: return try CollectLaunchDeclarationPass.run(request, access: access)
         case .applications: return try CollectApplicationDirectoryPass.run(request, access: access)
+        case .surfaceBatch(let applications, let profile):
+            return try NativeSurfaceBatchPipeline.collect(request, applications: applications, profile: profile, access: access)
         case .capturedText(let ref, let offset, let length):
             return try ReadCapturedNativeTextPass.run(request, ref: ref, offset: offset, length: length, access: access)
         case .surfaces(let application, let profile):

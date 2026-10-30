@@ -284,6 +284,9 @@ def decode_selection_basis(value):
 _inspect_queries = {
     "launch": obj(dict(kind=enum("launch"))),
     "applications": obj(dict(kind=enum("applications"))),
+    "surfaceBatch": obj(
+        dict(kind=enum("surfaceBatch"), applications=array(identity, min=1, max=64), profile=enum("visual").optional())
+    ),
     "surfaces": obj(
         dict(
             kind=enum("surfaces"),
@@ -381,7 +384,7 @@ def decode_inspect_query(value):
         and selected["node"] in (selected["region"], selected["bar"])
     ):
         raise ValueError("protocol: a page button must be distinct from its region and bar")
-    for key in ("within", "fields", "followRelations"):
+    for key in ("within", "fields", "followRelations", "applications"):
         if key in result and len(set(result[key])) != len(result[key]):
             raise ValueError("protocol: duplicate native query " + key)
     return result
@@ -576,7 +579,7 @@ _desktop_capture = obj(
 )
 
 
-def decode_execution_result(method, value):
+def decode_execution_result(method, value, *, retain_observation=False):
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "readChange":
         result = _read_change.parse(value)
         if len(set(result["events"])) != len(result["events"]) or (result["reason"] == "event") != bool(
@@ -605,9 +608,17 @@ def decode_execution_result(method, value):
         if p["unit"] != "launch_application":
             raise ValueError("protocol: inconsistent application launch contract")
         return result
-    if method == "inspect" and isinstance(value, dict) and value.get("kind") in ("applications", "surfaces", "roots"):
+    if (
+        method == "inspect"
+        and isinstance(value, dict)
+        and value.get("kind") in ("applications", "surfaces", "roots", "surfaceBatch")
+    ):
         return decode_directory(value)
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "observation":
+        if retain_observation:
+            from .observation.adapters.wire import DecodedDriverObservation
+
+            return DecodedDriverObservation(value)
         validate_driver_payload(value)
         return value
     result = _schemas[method].parse(value)

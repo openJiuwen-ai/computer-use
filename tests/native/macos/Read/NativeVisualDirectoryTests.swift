@@ -20,12 +20,23 @@ import ApplicationServices
         var focused: AXUIElement?
         var nativeAvailable = true
         var nativeIDs: [CGWindowID] = [380]
+        var failedApplications = Set<String>()
+        var locations = [String]()
+        var elapsed = 100.0
+        var onLocate: (() -> Void)?
         var nextID: pid_t = 19100
         lazy var access = NativeApplicationAccess(windowQuery: api())
         lazy var state = NativeDesktopState(applications: access, appSelections: AppSelections(validateOwner: { _ in }))
         lazy var directory: NativeDirectory = {
             var services = NativeDirectory.WindowServices()
-            services.locate = { _ in self.app }
+            services.locate = { name in
+                self.locations.append(name)
+                self.onLocate?()
+                if self.failedApplications.contains(name) {
+                    throw DriverError("scripted provider failure", code: .observationIncomplete)
+                }
+                return self.app
+            }
             services.listIfAvailable = { _ in self.nativeAvailable ? self.windows() : nil }
             services.list = { _ in self.windows() }
             services.trusted = { self.trusted }
@@ -143,7 +154,53 @@ import ApplicationServices
         try nativeOnlyRefreshRetainsBinding()
         try declaredControlRootDoesNotOpenItsContents()
         try legacyContentPositiveControl()
+        try visualBatchesRetainProfileFailuresAndDeadline()
         print("NativeVisualDirectoryTests passed")
+    }
+
+
+    @MainActor static func visualBatchesRetainProfileFailuresAndDeadline() throws {
+        let scene = Scene()
+        let execution = NativeExecution(state: scene.state, session: "visual-scene", cancelActive: {})
+        execution.directory = scene.directory
+        let target: [String: Any] = ["session": "visual-scene", "instance": NSNull(),
+            "rootWindow": NSNull(), "surface": NSNull(), "node": NSNull(), "capture": NSNull()]
+        func collect(_ profile: String?, _ applications: [String]) throws -> [String: Any] {
+            let intent = try NativeIntent(["kind": "read", "parameters": [:]], mode: "read")
+            let op = NativeOperation(timeoutMs: 30000, writable: false, intent: intent, target: target,
+                now: { scene.elapsed }, release: {}, cancelActive: {})
+            defer { _ = op.finish() }
+            var query: [String: Any] = ["kind": "surfaceBatch", "applications": applications]
+            if let profile { query["profile"] = profile }
+            return try ReadPipeline.collect(["operation": op.token, "target": target, "query": query],
+                operation: { _ in op }, access: execution.queryAccess)
+        }
+        scene.failedApplications.insert("instance:gap")
+        let names = ["instance:first", "instance:gap", "instance:last"]
+        let result = try collect("visual", names)
+        let entries = result["entries"] as! [[String: Any]]
+        precondition(entries.map { $0["application"] as! String } == names)
+        precondition(entries[1]["result"] == nil && entries[1]["error"] != nil)
+        for index in [0, 2] {
+            let directory = entries[index]["result"] as! [String: Any]
+            precondition(directory["application"] as? String == names[index])
+            let rows = directory["surfaces"] as! [[String: Any]]
+            precondition(rows.count == 1 && rows[0]["node"] is NSNull)
+        }
+        precondition(scene.content.isEmpty && scene.activation == 0,
+            "visual batch initialized a provider or entered control contents")
+        let legacy = try collect(nil, ["instance:first"])["entries"] as! [[String: Any]]
+        precondition(legacy[0]["error"] != nil && scene.activation == 1 && !scene.content.isEmpty,
+            "default batch no longer preserves accessibility collection")
+        scene.locations.removeAll()
+        scene.onLocate = { scene.elapsed += 31 }
+        do {
+            _ = try collect("visual", ["instance:first", "instance:last"])
+            preconditionFailure("batch restarted its operation deadline")
+        } catch let error as DriverError {
+            precondition(error.code == .executionFailed)
+        }
+        precondition(scene.locations == ["instance:first"], "expired batch continued to another application")
     }
 
     @MainActor static func visualWindowFacts() throws {

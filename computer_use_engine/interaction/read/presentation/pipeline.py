@@ -112,7 +112,7 @@ class _BranchCollection(Node["SnapshotRenderRequest", "PreparedSnapshot"]):
         from dataclasses import replace
 
         captured = CapturedSnapshot.capture(request.snapshot)
-        snapshot = captured.materialize()
+        snapshot = captured.materialize(read_only_facts=True)
         local_request = replace(request, snapshot=snapshot)
         roots = []
         recovery_prefix = request.recovery_prefix_units
@@ -171,7 +171,7 @@ class _RenderPreparedRoots(Node["PreparedSnapshot", "SnapshotParts"]):
     def _run(self, prepared: PreparedSnapshot, control: Control) -> SnapshotParts:
         from dataclasses import replace
 
-        snapshot = prepared.snapshot.materialize()
+        snapshot = prepared.snapshot.materialize(read_only_facts=True)
         request = replace(prepared.request, snapshot=snapshot)
         parts, uncompressed = [], None
         for root, projection in zip(snapshot.roots, prepared.roots):

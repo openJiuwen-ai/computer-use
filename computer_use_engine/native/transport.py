@@ -203,6 +203,11 @@ class ConnectionPort:
         )
         if invalid_result:
             raise ValueError("Native discovery changed the requested session or application")
+        if (
+            query["kind"] == "surfaceBatch"
+            and [entry["application"] for entry in result["entries"]] != query["applications"]
+        ):
+            raise ValueError("Native discovery changed the requested application order or coverage")
         return result
 
     async def begin(self, intent, target, timeout_ms):

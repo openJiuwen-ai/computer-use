@@ -142,8 +142,9 @@ def _copy_collections(value: Any, *, immutable: bool) -> Any:
 class CapturedSnapshot:
     """Freeze the captured facts and aliases used to prepare one display.
 
-    Every collection is detached from its originating snapshot. Rendering creates a
-    request-local copy so neither later observations nor callers can change this view.
+    Every collection is detached from its originating snapshot. Rendering creates
+    local display copies over the captured immutable facts, retaining this view
+    independently of later observations and caller edits.
     """
 
     native: NativeObservation
@@ -162,19 +163,28 @@ class CapturedSnapshot:
     @classmethod
     def capture(cls, snapshot: SnapshotFacts) -> CapturedSnapshot:
         """Copy and freeze the facts needed by compression and source accounting."""
-        return cls(
-            **{
-                item.name: _copy_collections(
-                    getattr(snapshot, item.name, None) if item.name == "collection" else getattr(snapshot, item.name),
-                    immutable=True,
-                )
-                for item in fields(cls)
-            }
-        )
+        values = {
+            item.name: getattr(snapshot, item.name, None) if item.name == "collection" else getattr(snapshot, item.name)
+            for item in fields(cls)
+        }
+        # One memo covers aliases shared by the fact, field and tree indexes.
+        return cls(**_copy_collections(values, immutable=True))
 
-    def materialize(self) -> SnapshotFacts:
-        """Return a local semantic snapshot for the existing pure presentation routines."""
-        values = {item.name: _copy_collections(getattr(self, item.name), immutable=False) for item in fields(self)}
+    def materialize(self, *, read_only_facts: bool = False) -> SnapshotFacts:
+        """Copy the local display view, optionally sharing its frozen source facts.
+
+        Presentation never edits the source index. The default retains the
+        detached mutable-copy contract for callers that need an editable copy.
+        """
+        # Display edits must not change the independent normalization ledger,
+        # even when both originally referenced the same nested source value.
+        values = {
+            item.name: _copy_collections(getattr(self, item.name), immutable=False)
+            for item in fields(self)
+            if not read_only_facts or item.name != "facts"
+        }
+        if read_only_facts:
+            values["facts"] = self.facts
         values["driver_features"] = self.driver_features
         return _MaterializedSnapshot(**values)
 

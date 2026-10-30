@@ -5,10 +5,9 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.facts.normalize import normalize_facts
+from computer_use.interaction.read.facts.normalize import renumber_snapshot
 from computer_use.interaction.read.numbering.model import PURE, NumberingRun, _References
 from computer_use.pipeline import Contract, Pass
 
@@ -24,18 +23,7 @@ def rewrite_structured_refs(value: NumberingRun, control: Control) -> tuple[Sema
         if snapshot.refs == {ref: native for native, ref in mapping.items()}:
             snapshots.append(snapshot)
             continue
-        normalized = normalize_facts(
-            snapshot.native,
-            _References(snapshot.facts["session"], mapping),
-            driver_features=snapshot.driver_features,
-            scope_kind=snapshot.scope_kind,
-            operation_capabilities=(
-                snapshot.collection.operation_capabilities if snapshot.collection is not None else None
-            ),
-            diagnostic_fields=(snapshot.collection.diagnostic_fields if snapshot.collection is not None else None),
-            field_sources=(snapshot.collection.field_sources if snapshot.collection is not None else None),
-        )
-        snapshots.append(replace(normalized, collection=snapshot.collection))
+        snapshots.append(renumber_snapshot(snapshot, _References(snapshot.facts["session"], mapping)))
     return tuple(snapshots)
 
 

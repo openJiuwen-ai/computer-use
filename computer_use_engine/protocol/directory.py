@@ -5,7 +5,7 @@
 
 from copy import deepcopy
 
-from .schema import array, boolean, count, enum, identity, number, obj, string
+from .schema import array, boolean, count, enum, identity, number, obj, string, unknown
 
 _stamp = obj(dict(id=identity, startedAt=count, completedAt=count))
 _application = obj(
@@ -39,6 +39,15 @@ _common = dict(
     session=identity, platform=enum("macos", "windows", "linux"), observed=_stamp, stopReasons=array(identity, max=128)
 )
 _schemas = {
+    "surfaceBatch": obj(
+        dict(
+            kind=enum("surfaceBatch"),
+            entries=array(
+                obj(dict(application=identity, result=unknown().optional(), error=unknown().optional())), max=64
+            ),
+            **_common,
+        )
+    ),
     "applications": obj(
         dict(
             kind=enum("applications"),
@@ -71,10 +80,35 @@ _schemas = {
 
 
 def decode_directory(value):
-    result = deepcopy(_schemas[value["kind"]].parse(value))
+    parsed = _schemas[value["kind"]].parse(value)
+    result = parsed if value["kind"] == "surfaceBatch" else deepcopy(parsed)
     if result["observed"]["completedAt"] < result["observed"]["startedAt"]:
         raise ValueError("protocol: directory collection interval is reversed")
-    if result["kind"] == "applications":
+    if result["kind"] == "surfaceBatch":
+        from .session import decode_failure
+
+        applications = []
+        for entry in result["entries"]:
+            applications.append(entry["application"])
+            if ("result" in entry) == ("error" in entry):
+                raise ValueError("protocol: a batch entry needs one result or failure")
+            if "result" in entry:
+                if not isinstance(entry["result"], dict) or entry["result"].get("kind") != "surfaces":
+                    raise ValueError("protocol: batch entry must contain a surface directory")
+                item = decode_directory(entry["result"])
+                if (
+                    item["kind"] != "surfaces"
+                    or item["application"] != entry["application"]
+                    or item["session"] != result["session"]
+                    or item["platform"] != result["platform"]
+                ):
+                    raise ValueError("protocol: batch surface directory changed its scope")
+                entry["result"] = item
+            else:
+                entry["error"] = decode_failure(entry["error"])
+        if len(applications) != len(set(applications)):
+            raise ValueError("protocol: duplicate batch application")
+    elif result["kind"] == "applications":
         identifiers = [item["id"] for item in result["applications"]]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("protocol: duplicate application lifetime")

@@ -28,6 +28,7 @@ from computer_use.interaction.read.presentation.compact import observation_warni
 from computer_use.interaction.read.presentation.containment import PublishedTableColumn
 from computer_use.interaction.read.presentation.details import captured_read_issues
 from computer_use.interaction.read.presentation.fallback import literal
+from computer_use.interaction.read.presentation.ir import thaw
 from computer_use.interaction.read.presentation.model import PURE, SnapshotParts
 from computer_use.interaction.read.presentation.rendering.formatting import field
 from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedLiteral
@@ -172,8 +173,8 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
                         source=entry.source,
                         property="text.selections",
                         path=("text", "selections"),
-                        spans=[dict(span) for span in entry.spans],
-                        coverage=dict(entry.coverage),
+                        spans=thaw(entry.spans),
+                        coverage=thaw(entry.coverage),
                         interval=entry.interval,
                         unit=entry.unit,
                         state=entry.read_state,

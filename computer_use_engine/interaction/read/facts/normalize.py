@@ -23,6 +23,7 @@ from computer_use.interaction.read.presentation.fallback import literal
 from computer_use.interaction.read.presentation.records import ReferenceAllocator
 from computer_use.protocol.observation import FieldPath, NativeNode, NativeObservation
 from computer_use.protocol.primitives import required_item, safe_integer
+from computer_use.protocol.records import FactCollection
 
 
 _ROLES = {
@@ -136,7 +137,48 @@ def normalize_facts(
         raise TypeError("normalizeFacts requires a normalized NativeObservation")
     if references.session != value.session:
         raise ValueError("Native display references belong to another session")
-    batch = observation_index(value)
+    return _project_facts(
+        value,
+        observation_index(value),
+        references,
+        driver_features,
+        scope_kind,
+        operation_capabilities,
+        diagnostic_fields,
+        field_sources,
+    )
+
+
+def renumber_snapshot(snapshot: SemanticSnapshot, references: ReferenceAllocator) -> SemanticSnapshot:
+    """Apply aliases to the display view without rebuilding its source fact index."""
+    from dataclasses import replace
+
+    if references.session != snapshot.native.session:
+        raise ValueError("Native display references belong to another session")
+    projected = _project_facts(
+        snapshot.native,
+        snapshot.facts,
+        references,
+        snapshot.driver_features,
+        snapshot.scope_kind,
+        snapshot.collection.operation_capabilities if snapshot.collection is not None else None,
+        snapshot.collection.diagnostic_fields if snapshot.collection is not None else None,
+        snapshot.collection.field_sources if snapshot.collection is not None else None,
+    )
+    return replace(projected, collection=snapshot.collection)
+
+
+def _project_facts(
+    value: NativeObservation,
+    batch: FactCollection,
+    references: ReferenceAllocator,
+    driver_features: Iterable[str],
+    scope_kind: str | None,
+    operation_capabilities: Mapping[str, Mapping[str, str]] | None,
+    diagnostic_fields: Mapping[str, Iterable[FieldPath]] | None,
+    field_sources: Mapping[tuple[str, FieldPath], str] | None,
+) -> SemanticSnapshot:
+    """Build an alias-dependent display view over one acquired source index."""
     ordered_tokens = [source["node"] for source in batch["nodes"] if source["observed"]]
     observed_tokens = set(ordered_tokens)
     ordered_tokens.extend(token for token in value.nodes if token not in observed_tokens)

@@ -27,6 +27,22 @@ import Foundation
         let cases = try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as! [[String: Any]]
         for test in cases { precondition(accepted(test["query"]!) == test["valid"] as! Bool, test["name"] as! String) }
         let within = (0..<17).map { "node-\($0)" }
+        for visual in [false, true] {
+            var raw: [String: Any] = ["kind": "surfaceBatch", "applications": ["first", "second"]]
+            if visual { raw["profile"] = "visual" }
+            guard case .surfaceBatch(let applications, let profile) = try NativeInspectQuery(raw) else {
+                preconditionFailure("lost application batch query")
+            }
+            precondition(applications == ["first", "second"])
+            precondition(profile == (visual ? .visual : .accessibility))
+        }
+        precondition(!accepted(["kind": "surfaceBatch", "applications": []]))
+        precondition(!accepted(["kind": "surfaceBatch", "applications": ["same", "same"]]))
+        precondition(!accepted(["kind": "surfaceBatch", "applications": (0..<65).map { "app-\($0)" }]))
+        precondition(!accepted(["kind": "surfaceBatch", "applications": ["first"], "target": "other"]))
+        for profile: Any in [NSNull(), false, "accessibility", "contents"] {
+            precondition(!accepted(["kind": "surfaceBatch", "applications": ["first"], "profile": profile]))
+        }
         precondition(accepted(["kind":"surfaces", "application":"instance:test"]))
         if case .surfaces(let application, let profile) = try NativeInspectQuery([
             "kind":"surfaces", "application":"instance:test", "profile":"visual"

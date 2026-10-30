@@ -1529,6 +1529,22 @@ def decode_driver_reply(value: Any) -> DriverObservationReply:
     Raises:
         ValueError: The driver response violates identity, type or coverage contracts.
     """
+    from .wire import DecodedDriverObservation
+
+    if isinstance(value, DecodedDriverObservation):
+        if value.reply is None:
+            if value.wire.has_semantic_urls:
+                # Native queries retain relative CFURL values. Only the
+                # semantic view resolves their provider-declared base URL.
+                wire = DriverWire(value.wire.raw, semantic_values=True)
+                facts = query_facts(wire)
+            else:
+                from copy import copy
+
+                wire, facts = copy(value.wire), value.facts
+                wire.semantic_values = True
+            value.reply = Adapter(wire, facts).normalize()
+        return value.reply
     wire = DriverWire(value, semantic_values=True)
     return Adapter(wire, query_facts(wire)).normalize()
 

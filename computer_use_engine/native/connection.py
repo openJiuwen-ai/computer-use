@@ -786,7 +786,7 @@ class Connection:
                     failure = decode_failure(response["error"])
                     error = failure_error(pending["method"], failure)
                 else:
-                    result = decode_execution_result(pending["method"], response["result"])
+                    result = decode_execution_result(pending["method"], response["result"], retain_observation=True)
                 desktop_capture = (
                     pending["method"] == "capture" and result is not None and result.get("kind") == "desktopCapture"
                 )
@@ -797,6 +797,10 @@ class Connection:
                 ):
                     raise ValueError("protocol: desktop observation mode differs from the negotiated session")
                 summary = result
+                from computer_use.protocol.observation.adapters.wire import DecodedDriverObservation
+
+                if isinstance(result, DecodedDriverObservation):
+                    summary = result.wire.raw
                 if desktop_capture and result is not None:
                     summary = {
                         **result,

@@ -121,6 +121,7 @@ enum NativeInspectQuery {
     }
 
     case applications
+    case surfaceBatch(applications: [String], profile: SurfaceProfile)
     case launch
     case surfaces(application: String, profile: SurfaceProfile)
     case roots(application: String)
@@ -148,6 +149,15 @@ enum NativeInspectQuery {
         case "applications":
             _ = try object(raw, keys: ["kind"])
             self = .applications
+        case "surfaceBatch":
+            let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true
+            let p = try object(raw, keys: hasProfile ? ["kind", "applications", "profile"] : ["kind", "applications"])
+            if hasProfile, try string(p["profile"], label: "profile") != "visual" {
+                throw DriverError("unsupported surface profile", code: .invalidRequest)
+            }
+            self = .surfaceBatch(
+                applications: try Self.names(p["applications"], label: "applications", min: 1, max: 64),
+                profile: hasProfile ? .visual : .accessibility)
         case "surfaces":
             let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true
             let p = try object(raw, keys: hasProfile ? ["kind", "application", "profile"] : ["kind", "application"])

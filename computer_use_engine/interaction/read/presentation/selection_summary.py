@@ -13,6 +13,7 @@ from typing import Any
 
 from computer_use.interaction.read.facts.groups import reference_set
 from computer_use.interaction.read.presentation.fallback import literal
+from computer_use.interaction.read.presentation.ir import thaw
 from computer_use.interaction.read.presentation.text_context import selection_suffix, supplements, unit_label
 from computer_use.interaction.read.presentation.policy import editing
 
@@ -262,10 +263,7 @@ def selection_summary_plan(
             and all(span.get("collapsed") is True and span.get("text") in (None, "") for span in selections)
         ):
             identity = json.dumps(
-                [unit, [dict(span) for span in selections], dict(coverage)],
-                ensure_ascii=False,
-                sort_keys=True,
-                allow_nan=False,
+                [unit, thaw(selections), thaw(coverage)], ensure_ascii=False, sort_keys=True, allow_nan=False
             )
             group = (scopes[ref], identity)
         focus_paths = ("states.focused", "text.selected_text", "text.caret", "text.caret_active")
