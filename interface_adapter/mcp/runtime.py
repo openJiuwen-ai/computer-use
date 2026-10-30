@@ -126,7 +126,7 @@ class Runtime:
         if run is None or not run["active"]:
             return
         self.flush_observations(run)
-        self.emit(dict(type="text", text=run["actions"].render(receipt)))
+        self.emit(dict(type="text", text=run["actions"].render(receipt)), True)
 
     def text_page(self, source, page):
         run = _runs.get()
