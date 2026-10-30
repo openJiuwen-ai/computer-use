@@ -58,6 +58,7 @@ class ComputerUseToolkit:
         self.connection = McpConnection(self.config.mcp_config(), stderr=stderr)
         self.on_event = on_event
         self._closing = None
+        self.gaze_tool = None
         self.tools = [
             DesktopTool(
                 self,
@@ -71,6 +72,11 @@ class ComputerUseToolkit:
             ),
             DesktopTool(self, name="computer_use_reset", description=RESET_DESCRIPTION, properties={}, required=[]),
         ]
+        if self.config.gaze_connection_file is not None:
+            from .gaze import GazeReadTool
+
+            self.gaze_tool = GazeReadTool(self, self.config.gaze_connection_file)
+            self.tools.append(self.gaze_tool)
 
     @property
     def system_prompt(self):
@@ -112,6 +118,8 @@ class ComputerUseToolkit:
 
     async def _close(self):
         try:
+            if self.gaze_tool is not None:
+                await self.gaze_tool.close()
             await self.connection.cancel_current()
             if self.connection.session is not None:
                 async with asyncio.timeout(10):

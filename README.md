@@ -201,6 +201,24 @@ uv run --extra agent computer-use-agent "Open the meeting scheduling form and st
 
 Run `uv run --extra agent computer-use-agent --help` for CLI options.
 
+### Optional gaze-selected window reading (macOS)
+
+An existing local gaze-selection service can supply the confirmed window to the agent. Set `AgentConfig(gaze_connection_file="/absolute/path/to/connection.json")`, or add `gaze_connection_file` to the CLI's JSON configuration. The agent gains `read_gaze_target(expected_selection_id?)`; voice requests require their exact selection ID. The default tools and behavior are unchanged when this option is omitted.
+
+The service and calibrated camera panel must already be running on this Mac; they are not bundled or started by this option. Its connection file contains `{"url":"http://127.0.0.1:PORT","token":"SESSION_TOKEN"}`. Keep the token private. Only the default local macOS MCP connection is supported: OS window IDs cannot be transferred to a remote host.
+
+Rebuild the driver with `uv run computer-use-build`. Discovery now carries optional `nativeIdentity` evidence (process ID and native window ID). `computer_use.integrations.macos.app_for_window(computer, process_id=..., window_id=...)` resolves it to the engine's existing App reference. It fails on missing or ambiguous matches; it never uses titles or list positions. Update the Python package and driver together. An older driver remains usable with the new package for ordinary operations, but cannot resolve gaze targets without this evidence.
+
+The tool claims and validates a fresh selection, reads through the same MCP session, validates again, and releases the claim. A changed selection discards the snapshot from the tool response. A successful read includes the selected App's confirmed attached dialogs under the existing SDK scope. This is a read helper, not an action-approval gate: the separate `computer_use` tool remains available. Local diagnostic observers can receive the intermediate capture even when the final response is discarded. An uncertain claim/release stops further gaze reads; wait for the service's 120-second lease expiry before recreating the toolkit and confirming again.
+
+Test a confirmed selection without a model call:
+
+```bash
+uv run --extra agent python tests/manual/read_gaze_target.py /absolute/path/to/connection.json /tmp/gaze-read
+```
+
+The script saves the observation and images locally. [Service contract and limitations](computer_use_agent/GAZE.md) describe the integration boundary. Camera accuracy and calibration still require a live user test.
+
 ## Architecture
 
 The project has four layers: interfaces, agent assembly, the execution engine and OS adapters. Applications can integrate DeepAgent, connect an external agent over MCP, or call the SDK directly:

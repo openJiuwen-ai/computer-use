@@ -201,6 +201,24 @@ uv run --extra agent computer-use-agent "打开预定会议表单，停在提交
 
 命令行选项可通过 `uv run --extra agent computer-use-agent --help` 查看。
 
+### 可选：读取视线确认的窗口（macOS）
+
+已有的本地视线选择服务可以把用户确认的窗口交给 Agent。设置 `AgentConfig(gaze_connection_file="/absolute/path/to/connection.json")`，或在 CLI 的 JSON 配置中加入 `gaze_connection_file`，即可启用 `read_gaze_target(expected_selection_id?)`。语音请求必须传入对应的选择 ID。不配置时，默认工具和行为保持不变。
+
+视线服务及完成校准的摄像头面板需要事先在同一台 Mac 上运行；本项目不会自动安装或启动它们。连接文件格式为 `{"url":"http://127.0.0.1:PORT","token":"SESSION_TOKEN"}`，请勿公开令牌。该功能只支持默认的本机 macOS MCP 连接，不支持自定义或远程 MCP。
+
+请运行 `uv run computer-use-build` 重建驱动，并同时更新 Python 包和驱动。新增的可选 `nativeIdentity` 字段携带进程 ID 和原生窗口 ID；`computer_use.integrations.macos.app_for_window` 通过现有发现流程把它们映射为 App 引用，不按标题或列表顺序猜测。缺少或存在多个匹配时直接失败。旧驱动仍可配合新包执行普通操作，但无法提供此映射。
+
+工具在读取前后验证同一个选择，结束后释放占用；选择变化时不向模型返回快照。读取范围遵循现有 App 语义，包含已确认的附属对话框。该工具只负责读取，不构成操作授权，也不限制另一个 `computer_use` 工具。本地诊断回调可能收到随后被丢弃的中间捕获结果。若占用或释放结果不确定，请等待服务的 120 秒租约过期，再重建 toolkit 并重新确认。
+
+无需调用模型即可验证一次已确认的选择：
+
+```bash
+uv run --extra agent python tests/manual/read_gaze_target.py /absolute/path/to/connection.json /tmp/gaze-read
+```
+
+脚本将观察结果和图片保存在本地。详见[服务接口与限制](computer_use_agent/GAZE.md)。摄像头准确性与校准仍需真人实测。
+
 ## 架构简介
 
 项目由接入层、Agent 组装层、引擎层和操作系统适配层组成。应用可以集成 DeepAgent，也可以通过 MCP 接入其他智能体，或直接调用 SDK：
