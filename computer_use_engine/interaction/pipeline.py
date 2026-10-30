@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.agent.pipeline import AgentDispatch
+from computer_use.interaction.agent.pipeline import AgentDispatch, AgentInterfacePipeline
 from computer_use.interaction.passes.select_route import AGENT_ROUTES, QUERY, WRITE, stage as select_route
 from computer_use.interaction.query.pipeline import QueryPipeline
 from computer_use.interaction.write.request.pipeline import ControllerWritePipeline
@@ -24,29 +24,31 @@ class SessionPipeline(Pipeline["InteractionRequest", "InteractionResult"]):
 
     One selector names the branch from the request type. Public-handle
     requests share the UI adapter branch, keyed by their effect class so the
-    trace still records read/write/query. The internal branches serve the
-    requests the adapter re-enters with: ExecuteAction (write) and
-    FindElement (query). Reads have no internal branch; they run through the
-    adapter's reader services.
+    trace still records read/write/query. Internal branches serve standalone
+    desktop/session requests. The adapter composes the same write and lookup
+    instances directly, without re-entering this router.
 
     Attributes:
-        controller: Session services shared by the branch pipelines and UI adapter.
+        write: Shared action execution flow.
+        lookup: Shared element lookup flow.
+        interfaces: Public-handle adapter composing those flows.
     """
 
     def __init__(self, controller: SessionController) -> None:
-        self.controller = controller
+        self.write = ControllerWritePipeline(controller)
+        self.lookup = QueryPipeline(controller)
+        self.interfaces = AgentInterfacePipeline(controller, self.write, self.lookup)
         super().__init__(root=self.build())
 
     def build(self) -> Step[InteractionRequest, InteractionResult]:
-        controller = self.controller
-        agent = AgentDispatch(controller)
+        agent = AgentDispatch(self.interfaces)
         return Select(
             name="SessionPipeline",
             selector=select_route(),
             branches={
                 **{route: agent for route in AGENT_ROUTES},
-                WRITE: ControllerWritePipeline(controller),
-                QUERY: QueryPipeline(controller),
+                WRITE: self.write,
+                QUERY: self.lookup,
             },
         )
 

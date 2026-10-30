@@ -19,6 +19,8 @@ from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.ir import freeze
 from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, member_target
 from computer_use.interaction.read.views.publication import publish
+from computer_use.interaction.requests import ExecuteAction, FindElement
+from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
 from computer_use.native.contracts import Intent, Knowledge
 from computer_use.native.query.directory import select_surface
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
@@ -47,7 +49,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.records import ElementSnapshot, UIHandle
     from computer_use.native.contracts import Binding
-    from computer_use.pipeline.core import Control
+    from computer_use.pipeline.core import Control, Step
     from computer_use.protocol.records import Record
     from computer_use.types import ActionResult, AppInfo, ElementPath, Observation, Point, TextPage
 
@@ -65,10 +67,19 @@ class AgentInterfacePipeline:
         text_cursors: Registry linking text continuation tokens to captured sources.
         discovery: Flow publishing application and root-window choices.
         read_pipeline: Flow observing App/Window views and publishing their results.
+        write: Shared action flow, entered after public-scope validation.
+        lookup: Shared lookup flow, entered once for each observed scope.
     """
 
-    def __init__(self, controller: SessionController) -> None:
+    def __init__(
+        self,
+        controller: SessionController,
+        write: Step[ExecuteAction, ActionResult],
+        lookup: Step[FindElement, ElementSnapshot],
+    ) -> None:
         self.controller = controller
+        self.write = write
+        self.lookup = lookup
         self.references = ApplicationReferences()
         self.text_cursors = TextCursors()
         self.discovery = ApplicationDiscoveryPipeline(controller.reader.directory, self.references)
@@ -297,13 +308,16 @@ class AgentInterfacePipeline:
             "stale_target",
         )
 
-    async def element(self, ui: UIHandle, target: int | str | ElementPath, timeout_ms: int) -> ElementSnapshot:
+    async def element(
+        self, ui: UIHandle, target: int | str | ElementPath, timeout_ms: int, control: Control
+    ) -> ElementSnapshot:
         """Resolve an observed number, exact name, or path within this UI view.
 
         Args:
             ui: App/Window view constraining lookup and reference ownership.
             target: Integer reference, exact accessible name, or semantic path.
             timeout_ms: Total wait allowed for path lookup, in milliseconds.
+            control: Parent execution metadata passed to each lookup child.
 
         Returns:
             The uniquely matched element's binding and retained observation sources.
@@ -315,10 +329,9 @@ class AgentInterfacePipeline:
         # Exact types preserve scalar validation and identity contracts.
         # pylint: disable-next=unidiomatic-typecheck
         if type(target) is int:
-            ref = str(target)
             try:
                 # pylint: disable-next=protected-access
-                snapshot = cast("ElementSnapshot", ui._instance.refs[ref])
+                snapshot = cast("ElementSnapshot", ui._instance.refs[str(target)])
             except KeyError:
                 raise local_failure(
                     "element reference was not observed in this instance",
@@ -361,7 +374,9 @@ class AgentInterfacePipeline:
         end = monotonic() + timeout_ms / 1000
         for owner in owners:
             try:
-                snapshot = await self.controller.find(owner, path, max(0, round((end - monotonic()) * 1000)), False)
+                snapshot = await self.lookup.arun(
+                    FindElement(owner, path, max(0, round((end - monotonic()) * 1000)), False), control
+                )
             except ComputerUseError as error:
                 if error.code == "element_not_found":
                     continue
@@ -445,15 +460,14 @@ class AgentInterfacePipeline:
             )
         return replace(member_target(instance, choices[key]), node=None)
 
-    async def keyboard(self, ui: UIHandle, method: str, parameters: Record) -> ActionResult:
+    async def keyboard(self, ui: UIHandle, method: str, parameters: Record, control: Control) -> ActionResult:
         await refresh(self.controller, ui)
         target = self.keyboard_context(ui)
         intent = Intent(dict(type_text="insert", press_key="key").get(method, method), parameters)
-        # pylint: disable-next=protected-access
-        return await self.controller._execute(ui, intent, target)
+        return await self.write.arun(ExecuteAction(ui, intent, target), control)
 
     async def act_element(
-        self, ui: UIHandle, snapshot: ElementSnapshot, intent: str, parameters: Record
+        self, ui: UIHandle, snapshot: ElementSnapshot, intent: str, parameters: Record, control: Control
     ) -> ActionResult:
         """Validate an element and dispatch direct or current-container input.
 
@@ -462,6 +476,7 @@ class AgentInterfacePipeline:
             snapshot: Bound element and its container classification.
             intent: Requested operation, such as insert, replace, click, or key.
             parameters: Text, key, or other parameters for the operation.
+            control: Parent execution metadata passed to the write child.
 
         Returns:
             Execution outcome reported by the session's write branch.
@@ -481,17 +496,14 @@ class AgentInterfacePipeline:
             and intent in ("insert", "paste", "key", "focus")
             and not (intent in ("insert", "paste") and parameters.get("text") == "")
         )
-        if forward:
-            # pylint: disable-next=protected-access
-            return await self.controller._execute(
-                ui, Intent(intent, parameters), snapshot["binding"], forward_current=True
-            )
-        return await self.controller.act_element(ui, snapshot, None, intent, parameters)
+        return await self.write.arun(
+            ExecuteAction(ui, Intent(intent, parameters), snapshot["binding"], forward_current=bool(forward)), control
+        )
 
-    async def pointer(self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record) -> ActionResult:
-        from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
-
-        return await InterfacePointerPipeline(self.controller).run(ui, intent, points, options)
+    async def pointer(
+        self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record, control: Control
+    ) -> ActionResult:
+        return await InterfacePointerPipeline(self.controller, self.write).run(ui, intent, points, options, control)
 
     async def read_element(self, ui: UIHandle, snapshot: ElementSnapshot, cursor: str | None) -> Observation:
         from computer_use.interaction.read.element.agent import AgentElementReadPipeline
@@ -528,15 +540,16 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
     Its owner, target, and options become arguments to the corresponding adapter.
 
     Attributes:
-        controller: Session whose UI adapter handles the selected operation.
+        interfaces: Adapter with explicitly shared write and lookup child flows.
     """
 
-    def __init__(self, controller: SessionController) -> None:
-        self.controller = controller
+    def __init__(self, interfaces: AgentInterfacePipeline) -> None:
+        self.interfaces = interfaces
+        self.children = (interfaces.write, interfaces.lookup)
         super().__init__("AgentInterface", Contract(object, object, frozenset(Effect)))
 
     async def _arun(self, request: InterfaceRequest, control: Control) -> AgentResult:
-        api = self.controller.interfaces
+        api = self.interfaces
         if isinstance(request, ObserveUI):
             return await api.read(request.owner, request.view, request.full, request.menu_path)
         if isinstance(request, ObserveDesktop):
@@ -548,13 +561,13 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
         if isinstance(request, DiscoverApps):
             return await api.list_applications()
         if isinstance(request, ResolveElement):
-            return await api.element(request.owner, request.target, request.timeout_ms)
+            return await api.element(request.owner, request.target, request.timeout_ms, control)
         if isinstance(request, ActOnElement):
-            return await api.act_element(request.owner, request.snapshot, request.intent, request.parameters)
+            return await api.act_element(request.owner, request.snapshot, request.intent, request.parameters, control)
         if isinstance(request, UIKeyboard):
-            return await api.keyboard(request.owner, request.method, request.parameters)
+            return await api.keyboard(request.owner, request.method, request.parameters, control)
         if isinstance(request, UIPointer):
-            return await api.pointer(request.owner, request.intent, request.points, request.options)
+            return await api.pointer(request.owner, request.intent, request.points, request.options, control)
         raise TypeError("Unknown agent interface request")
 
     def _run(self, value: InterfaceRequest, control: Control) -> AgentResult:

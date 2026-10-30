@@ -73,9 +73,7 @@ class SessionController:
         self.reader, self.desktop_reader = NativeAppReader(self.port), NativeDesktopReader(self.port)
         self.engine, self.pages = Engine(self.port), ContentPages()
         self.pipeline = SessionPipeline(self)
-        from computer_use.interaction.agent.pipeline import AgentInterfacePipeline
-
-        self.interfaces = AgentInterfacePipeline(self)
+        self.interfaces = self.pipeline.interfaces
 
     @overload
     async def run(self, request: ObserveUI | ObserveDesktop | ObserveElement) -> Observation:
