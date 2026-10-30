@@ -29,7 +29,7 @@ Receipt fields consumed by the adapter:
 }
 ```
 
-`confirmation_method` is `thumb`, `double_blink` or `voice`; `read_only` is a boolean, and voice requests require their exact original selection ID. IDs must be positive integers. Additional receipt fields may be returned by the service but are not forwarded as model instructions. HTTP 400/401/403 means the request was refused without acquiring a claim; other failures leave the claim outcome uncertain.
+`confirmation_method` is `thumb`, `double_blink` or `voice`; `read_only` must be true exactly for voice receipts, and voice requests require their exact original selection ID. IDs must be positive integers. Additional receipt fields may be returned by the service but are not forwarded as model instructions. HTTP 400/401/403 means the request was refused without acquiring a claim; other failures leave the claim outcome uncertain.
 
 ## Execution and failure behavior
 

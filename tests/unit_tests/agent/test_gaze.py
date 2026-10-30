@@ -158,12 +158,14 @@ def test_bad_inputs_never_claim(gaze_service, monkeypatch, inputs):
         dict(expires_in_seconds=0),
         dict(read_only="yes"),
         dict(confirmation_method="unknown"),
+        dict(confirmation_method="voice", read_only=False),
+        dict(confirmation_method="thumb", read_only=True),
     ],
 )
 def test_invalid_receipt_never_reads_and_releases(gaze_service, monkeypatch, change):
     gaze_service.receipt = {**gaze_service.receipt, **change}
     _, tool, calls = toolkit_for(gaze_service, monkeypatch)
-    assert not asyncio.run(tool.invoke({})).success
+    assert not asyncio.run(tool.invoke({"expected_selection_id": "selection-1"})).success
     assert not calls and not gaze_service.leased
 
 

@@ -115,6 +115,7 @@ class GazeReadTool(Tool):
             or any(type(receipt.get(key)) is not int or receipt[key] <= 0 for key in ("pid", "window_id"))
             or type(receipt.get("read_only")) is not bool
             or receipt.get("confirmation_method") not in ("thumb", "double_blink", "voice")
+            or (receipt["confirmation_method"] == "voice") != receipt["read_only"]
             or type(remaining) not in (int, float)
             or not math.isfinite(remaining)
             or remaining <= 0
