@@ -32,7 +32,6 @@ def parser():
     result.add_argument("--desktop", choices=("shared", "exclusive"), help="Desktop mode for the local MCP server.")
     result.add_argument("--max-iterations", type=int)
     result.add_argument("--debug", action="store_true")
-    result.add_argument("--no-preview", action="store_true")
     return result
 
 
@@ -110,7 +109,7 @@ async def main(argv=None):
             return 0
         report(f"模型配置：{destination}")
         return 0
-    journal = preview = terminal = None
+    journal = terminal = None
     previous_logging = configure_logging = error_handler = None
     installed = []
     try:
@@ -153,20 +152,10 @@ async def main(argv=None):
                 from .config import build
 
                 model, config = build(settings, workspace=journal.directory / "workspace")
-            if sys.platform == "darwin" and sys.stdout.isatty() and not args.no_preview:
-                from .preview import Preview
-
-                terminal.line("准备本机预览…")
-                try:
-                    preview = await Preview.start()
-                except (OSError, RuntimeError) as error:
-                    terminal.line(f"预览：{error}", style="yellow")
 
             def event(kind, data):
                 journal.record(kind, data)
                 terminal.event(kind, data)
-                if preview is not None:
-                    preview.event(kind, data)
 
             terminal.line(
                 f"Computer Use · DeepAgent\n模型：{settings['model']}\n"
@@ -212,8 +201,6 @@ async def main(argv=None):
             journal.record("error", {"message": message})
         return 1
     finally:
-        if preview is not None:
-            await preview.close()
         if terminal is not None:
             terminal.finish()
         if journal is not None:

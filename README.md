@@ -238,7 +238,7 @@ computer-use/
 ├── interface_adapter/       # access layer: MCP integration
 │   └── mcp/                 # stdio MCP host and persistent Python execution
 ├── computer_use_agent/      # agent assembly: DeepAgent, context and tool integration
-│   └── cli/                 # direct conversation, configuration and preview
+│   └── cli/                 # direct conversation and configuration
 ├── computer_use_engine/     # engine: public SDK, observation and operation pipelines
 ├── os_adapter/              # OS adaptation: native platform backends and resources
 │   ├── macos/

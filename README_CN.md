@@ -238,7 +238,7 @@ computer-use/
 ├── interface_adapter/       # 接入层：MCP 接入
 │   └── mcp/                 # stdio MCP 宿主与持久化 Python 执行环境
 ├── computer_use_agent/      # Agent 组装层：DeepAgent、上下文与工具接入
-│   └── cli/                 # 直接对话、配置与本机预览
+│   └── cli/                 # 直接对话与配置
 ├── computer_use_engine/     # 引擎层：公共 SDK、观察与操作管线
 ├── os_adapter/              # 操作系统适配层：原生后端与共用资源
 │   ├── macos/

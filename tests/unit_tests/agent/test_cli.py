@@ -50,7 +50,7 @@ def test_cli_config_init_reports_once_and_preserves_existing_file(tmp_path, caps
 
 def test_cli_startup_error_uses_stderr(tmp_path, capsys):
     path = tmp_path / "missing.json"
-    assert asyncio.run(main(["--config", str(path), "--no-preview"])) == 1
+    assert asyncio.run(main(["--config", str(path)])) == 1
     output = capsys.readouterr()
     assert output.out == ""
     assert str(path) in output.err
@@ -111,7 +111,7 @@ def test_cli_single_task(model_server, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("API_BASE", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    assert asyncio.run(main(["--config", str(path), "--no-preview", "Run the CLI test"])) == 0
+    assert asyncio.run(main(["--config", str(path), "Run the CLI test"])) == 0
     assert "CLI task complete" in capsys.readouterr().out
     records = list((tmp_path / ".computer-use/agent/runs").glob("*/events.jsonl"))
     assert len(records) == 1
@@ -141,7 +141,7 @@ def test_interactive_commands_preserve_execution_session(model_server, tmp_path,
     for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL"):
         monkeypatch.delenv(key, raising=False)
     result = subprocess.run(
-        [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path), "--no-preview"],
+        [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path)],
         input="/debug\nInitialize counter\n/normal\nIncrement counter\n/compact\n/new\n/exit\n",
         text=True,
         capture_output=True,
@@ -206,7 +206,7 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
     for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL"):
         monkeypatch.delenv(key, raising=False)
     process = subprocess.Popen(
-        [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path), "--no-preview", "Wait until cancelled"],
+        [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path), "Wait until cancelled"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
