@@ -117,7 +117,6 @@ def decode_click_offer(value):
             value["reason"],
             tuple(value["preparationOptions"]),
             value["preferenceProfile"],
-            "readyPhysical" if value.get("preferenceHint") == "readyPhysical" else None,
         )
     )
 
@@ -234,8 +233,6 @@ class ConnectionPort:
         request = dict(intent=json.loads(original), mode=mode, target=encode_target(target))
         if version is not None:
             request["clickContract"] = version
-            if "nativeClickPreferenceHintsV1" in self.capabilities:
-                request["clickPreferenceHints"] = "v1"
         value = await self.connection.request("begin", request, dict(timeoutMs=timeout_ms))
         if value.get("clickContract") != version:
             self.calls.retired = True

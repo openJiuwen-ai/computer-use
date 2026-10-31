@@ -45,6 +45,10 @@ import ApplicationServices
         }
         if let preparation = try SampleNativeClickPreparationPass.run(plan, boundary: boundary), preparation.needed {
             switch plan.offer.delivery {
+            case .windowDirected where plan.command.foreground:
+                try AuthorizeNativeClickForegroundPass.run(plan)
+                try await PrepareNativeClickForegroundPass.run(
+                    preparation, boundary: boundary, receipt: receipt, evidence: evidence)
             case .windowDirected:
                 let pointer = preparation.pointer
                 try pointer.validateWindowIdentity()

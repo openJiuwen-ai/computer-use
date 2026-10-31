@@ -669,7 +669,7 @@ namespace ComputerUse.Windows
                     throw new Failure(
                         "stale_target",
                         "the observed UIA element's current working-window ownership cannot be confirmed",
-                        "read the desktop and select the intended window or popup; exclusive mode can use a fresh desktop image for coordinate input");
+                        "read the desktop and select the intended window or popup; use a fresh desktop image for coordinate input");
             }
             catch (Failure)
             {

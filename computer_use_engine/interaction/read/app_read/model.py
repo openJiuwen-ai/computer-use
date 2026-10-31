@@ -50,6 +50,8 @@ class ReadRequest:
             owner.
         view: Requested observation components: tree, image, or both.
         overview: Whether to collect previews of related application windows.
+        source_directory: Fresh directory resolved by the enclosing interface read;
+            acquisition still rechecks scope after collection.
     """
 
     selector: str | RunningApplication | WorkingWindow
@@ -64,6 +66,7 @@ class ReadRequest:
     on_scope: Callable[[RunningApplication | WorkingWindow], None] | None = None
     view: str = "both"
     overview: bool = True
+    source_directory: DirectoryFacts | None = None
 
     @property
     def directory_profile(self) -> SurfaceReadProfile:

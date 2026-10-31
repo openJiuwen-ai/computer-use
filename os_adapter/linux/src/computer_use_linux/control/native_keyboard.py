@@ -40,7 +40,7 @@ class NativeKeyboard:
     def prepare(self, operation, contract, foreground, ctx, preparation):
         from .keyboard.pipeline import NativePreparePipeline
 
-        return NativePreparePipeline(self.guard, self.route_key, self.desktop, self.target, self.b.mode).run(
+        return NativePreparePipeline(self.guard, self.route_key, self.desktop, self.target).run(
             operation, contract, foreground, ctx, preparation
         )
 

@@ -64,7 +64,7 @@ namespace ComputerUse.Windows
             {
                 receiver();
                 lease.Install(text, r, finalParagraph, consumer);
-                keyboard.SendBatch(operation, NativeKeys.Chord("ctrl+v", "shared"), r, result,
+                keyboard.SendBatch(operation, NativeKeys.Chord("ctrl+v"), r, result,
                                    () =>
                                    {
                                        // UIA validation can run application callbacks, including

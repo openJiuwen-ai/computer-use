@@ -5,9 +5,9 @@
 
 import argparse
 import logging
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 GROUPS = (
@@ -16,9 +16,13 @@ GROUPS = (
     "NativePopupAXFacts",
     "NativeReplacementReceiver",
     "NativeWindowQueryTiming",
-    "NativeReadyPhysicalClickPreference",
+    "NativeUnifiedPointerPolicy",
+    "NativeForegroundPreparation",
     "NativeInputWindowScope",
     "NativeVisualDirectory",
+    "NativeKeyboardEndpoint",
+    "NativeKeyboardRecipient",
+    "NativeWriteStage",
 )
 
 

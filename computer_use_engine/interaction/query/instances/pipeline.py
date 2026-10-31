@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.identity import FrozenRecord
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
+from computer_use.identity import FrozenRecord
 from computer_use.native.query.directory import SurfaceReadProfile, surfaces_query
-from computer_use.session.interfaces import ApplicationEntry
 from computer_use.protocol.session import failure_error
+from computer_use.session.interfaces import ApplicationEntry
 
 from .membership import roots
 
@@ -26,8 +26,9 @@ if TYPE_CHECKING:
 class ApplicationDiscoveryPipeline:
     """Publish selectable App instances from application and window catalogues.
 
-    Running applications with discovered root windows expand into instance
-    choices; other applications retain an application-level entry. Each choice
+    Drivers declaring nativeApplicationListing publish fresh application entries.
+    The selected App read discovers independent windows. Other drivers retain
+    their existing root-window discovery. Each choice
     receives a public reference used to construct its App handle.
 
     Attributes:
@@ -44,6 +45,7 @@ class ApplicationDiscoveryPipeline:
         result = []
         running = [app["id"] for app in directory["applications"] if app["isRunning"]]
         capabilities = self.directory.port.connection.capabilities
+        application_listing = "nativeApplicationListing" in capabilities
         batch_enabled = "nativeSurfaceBatch" in capabilities and "nativeReadIsolation" not in capabilities
         # A visual single-query capability does not promise a visual batch.
         # Keep its established route when only legacy batching is available.
@@ -52,7 +54,7 @@ class ApplicationDiscoveryPipeline:
         )
         batch_entries = {}
         for application in directory["applications"]:
-            if application["isRunning"]:
+            if application["isRunning"] and not application_listing:
                 try:
                     if batch_enabled:
                         if application["id"] not in batch_entries:

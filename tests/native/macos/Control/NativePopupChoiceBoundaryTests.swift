@@ -7,12 +7,6 @@ import ApplicationServices
 /// facts and the OS input adapter substituted. No desktop input is posted.
 @main struct NativePopupChoiceBoundaryTests {
     @MainActor static func main() async throws {
-        if CommandLine.arguments.contains("--shared-check") {
-            precondition(BackgroundTarget.desktopMode == "shared")
-            try await sharedForeground()
-            print("PASS shared foreground physical qualification; background has zero preparation/input")
-            return
-        }
         setenv("COMPUTER_USE_DESKTOP", "exclusive", 1)
         if CommandLine.arguments.contains("--offers") {
             let probe = PopupChoiceProbe()
@@ -40,14 +34,7 @@ import ApplicationServices
         try versions()
         try registryVersions()
         try await noReplayAndDeclaredPress()
-        let child = Process()
-        child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
-        child.arguments = ["--shared-check"]
-        child.environment = ProcessInfo.processInfo.environment.merging(
-            ["COMPUTER_USE_DESKTOP": "shared"], uniquingKeysWith: { _, value in value })
-        try child.run()
-        child.waitUntilExit()
-        precondition(child.terminationStatus == 0)
+        try await foregroundQualification()
         print(
             "PASS original Manual effect through production pointer pipeline; strict context/physical/modal/route/version/no-replay boundaries"
         )
@@ -288,15 +275,15 @@ import ApplicationServices
         precondition(ordinary.mode == "Manual" && ordinary.presses == 1 && ordinary.events.isEmpty)
     }
 
-    @MainActor static func sharedForeground() async throws {
+    @MainActor static func foregroundQualification() async throws {
         precondition(
             NativePointerReadiness.ready(
                 kind: .click, foreground: true, windowKind: .otherDeclared, focus: .notRequired,
-                backgroundPrepared: false, exclusive: false))
+                backgroundPrepared: false))
         precondition(
             !NativePointerReadiness.ready(
                 kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
-                backgroundPrepared: false, exclusive: false))
+                backgroundPrepared: false))
         let ready = PopupChoiceProbe()
         let result = try await ready.click()
         precondition(ready.mode == "Manual" && ready.presses == 0)

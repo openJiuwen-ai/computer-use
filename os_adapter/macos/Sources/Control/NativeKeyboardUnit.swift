@@ -96,7 +96,18 @@ import ApplicationServices
         kind: NativeKeyboardIntent.Kind, text: String?, state: State,
         textPolicy: NativeKeyboardInterpreterEvidence.Policy
     ) throws -> Bool {
-        try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)?.unavailable != true
+        let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
+        if proposal?.unavailable == true { return false }
+        // Focus preparation can reveal a different editing capability or event
+        // endpoint. Do not probe an unrelated current receiver before that work.
+        // Scoped HID owns its separate admission proof, independently of a PID.
+        if kind == .focus || state.receiver(element) != "yes" || proposal?.needsForeground == true { return true }
+        return try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
+            try BackgroundEvents.requireKeyboardRoute()
+            _ = try BackgroundEvents.keyboardRecipient(
+                NativeWindowUnit(application: application, window: state.window ?? window).mapping())
+            return true
+        }
     }
 
     /// Fresh positive mechanism evidence, not a record of an attempted input.
@@ -189,9 +200,10 @@ import ApplicationServices
         let recipient = try BackgroundEvents.keyboardRecipient(
             NativeWindowUnit(application: application, window: state.window ?? window).mapping())
         let recipientRoute: String
-        switch recipient.hostRoute {
-        case .some(.hostedWeb(_)): recipientRoute = "hostedWeb"
+        switch recipient.remoteRoute {
+        case .some(.hostedWeb(_, _)): recipientRoute = "hostedWeb"
         case .some(.ordinaryApplication(_)): recipientRoute = "ordinaryApplication"
+        case .some(.viewService(_)): recipientRoute = "service"
         case .none: recipientRoute = recipient.remoteElement == nil ? "local" : "service"
         }
         diagnose(
@@ -205,7 +217,7 @@ import ApplicationServices
             .init(
                 localProcess: recipient.pid == application.processIdentifier
                     && recipient.presenter == application.processIdentifier && recipient.remoteElement == nil
-                    && recipient.hostRoute == nil, noObservedWeb: proposal?.interpreter.kind == .noObservedWeb,
+                    && recipient.remoteRoute == nil, noObservedWeb: proposal?.interpreter.kind == .noObservedWeb,
                 sameKeyboardSurface: CFEqual(state.window ?? window, window), nativeID: recipient.window))
         return .process(recipient)
     }
@@ -330,9 +342,7 @@ import ApplicationServices
                 background, window: mapping.id, onAction: { onPreparation("foreground window activation") },
                 onCleanupUnknown: onCleanupUnknown)
         } else if proposal?.needsForeground != true {
-            if (ForegroundAssist.enabled || BackgroundTarget.isExclusive),
-                windowCommandScope
-                    && request.usesWindowCommand(replacementShortcut: replacement?.usesWindowCommand == true)
+            if request.usesWindowCommand(replacementShortcut: replacement?.usesWindowCommand == true)
                     && !background.isForeground,
                 AXAccess.read(keyboardWindow, kAXRoleAttribute).value as? String == kAXWindowRole,
                 AXAccess.read(keyboardWindow, kAXSubroleAttribute).value as? String == kAXStandardWindowSubrole,
@@ -343,7 +353,9 @@ import ApplicationServices
                 AXUIElementSetMessagingTimeout(root, 0.1)
                 if AXAccess.writable(root, kAXFocusedWindowAttribute).value == false {
                     let selection = NativeKeyboardWindowEvidence.BackgroundSelection(
-                        foregroundAllowed: true, windowScope: windowCommandScope, windowCommand: true,
+                        // Command-key equivalents use the window/application
+                        // responder chain even when an Element is addressed.
+                        windowScope: true, windowCommand: true,
                         foreground: false, standardWindow: true, focused: false, windowFocusWritable: false,
                         appFocusWritable: false, main: AXAccess.read(keyboardWindow, kAXMainAttribute).value as? Bool,
                         mainWindowMatches: AXAccess.element(root, kAXMainWindowAttribute).map {

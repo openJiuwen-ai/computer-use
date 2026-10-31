@@ -20,9 +20,11 @@ enum NativeInputUnit: Equatable {
     case scroll
     case launch(NativeInstallation)
 
-    func declaration(id: String, supported: Bool, readiness: NativeReadiness, exclusive: Bool) -> [String: Any] {
+    func declaration(id: String, supported: Bool, readiness: NativeReadiness) -> [String: Any] {
         var wire: [String: Any] = [
-            "id": id, "channel": "object", "supported": supported ? "yes" : "no", "readiness": readiness.state,
+            "id": id, "channel": "object",
+            "supported": supported && (readiness.ready || readiness.preparationAllowed) ? "yes" : "no",
+            "readiness": readiness.state,
             "pending": readiness.pending, "backgroundPreparation": "no"
         ]
         switch self {
@@ -57,11 +59,14 @@ enum NativeInputUnit: Equatable {
         case .pointer:
             wire["unit"] = "pointer_sequence"
             wire["channel"] = "pointer"
-            wire["backgroundPreparation"] = exclusive ? "no" : "yes"
+            wire["backgroundPreparation"] = "yes"
         case .desktop(let intent):
             let pointer = NativePointerIntent.Kind(rawValue: intent) != nil
             wire["unit"] = pointer ? "pointer_sequence" : "key_sequence"
             wire["channel"] = pointer ? "pointer" : "keyboard"
+        }
+        if !readiness.preparationAllowed || readiness.pending.contains("foreground") {
+            wire["backgroundPreparation"] = "no"
         }
         return wire
     }

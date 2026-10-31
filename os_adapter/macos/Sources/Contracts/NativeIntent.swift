@@ -30,26 +30,17 @@ struct NativeBeginRequest {
     let mode: String
     let intent: NativeIntent
     let clickContract: String?
-    let clickPreferenceHints: Bool
 
     init(_ raw: Any?) throws {
         let rawKeys = (raw as? [String: Any])?.keys
         let extended = rawKeys?.contains("clickContract") == true
-        let preferences = rawKeys?.contains("clickPreferenceHints") == true
-        value = try object(raw, keys: Set(["mode", "target", "intent"]
-            + (extended ? ["clickContract"] : []) + (preferences ? ["clickPreferenceHints"] : [])))
+        value = try object(raw, keys: Set(["mode", "target", "intent"] + (extended ? ["clickContract"] : [])))
         mode = try string(value["mode"], label: "mode")
         intent = try NativeIntent(value["intent"], mode: mode)
         clickContract = extended ? try string(value["clickContract"], label: "clickContract") : nil
         guard
             clickContract == nil || (["v1", "v2"].contains(clickContract!) && mode == "write" && intent.kind == "click")
         else { throw DriverError("unsupported click contract for this operation", code: .invalidRequest) }
-        if preferences {
-            guard clickContract != nil,
-                try string(value["clickPreferenceHints"], label: "clickPreferenceHints") == "v1"
-            else { throw DriverError("unsupported click preference metadata", code: .invalidRequest) }
-        }
-        clickPreferenceHints = preferences
         _ = try nativeOperationTarget(value["target"], installation: intent.kind == "launch")
     }
 }

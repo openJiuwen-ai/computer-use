@@ -351,8 +351,6 @@ class ClickOffer:
     reason: str | None = None
     preparation_options: tuple[str, ...] = ()
     preference_profile: str = "default"
-    # A query-local ordering hint; never excludes another valid delivery.
-    preference_hint: Literal["readyPhysical"] | None = None
 
     def wire(self):
         value = dict(
@@ -364,8 +362,6 @@ class ClickOffer:
             preparationOptions=list(self.preparation_options),
             preferenceProfile=self.preference_profile,
         )
-        if self.preference_hint is not None:
-            value["preferenceHint"] = self.preference_hint
         return value
 
 
@@ -503,18 +499,17 @@ class Facts:
 
 @dataclass(frozen=True)
 class HostPolicy:
-    """Host-selected desktop mode and permission for foreground assistance."""
+    """Complete desktop input authority; preparation and delivery remain route-local."""
 
-    mode: str = "shared"
-    foreground_assist: bool = False
+    mode: str = "exclusive"
 
     def __post_init__(self):
-        if self.mode not in ("shared", "exclusive"):
-            raise ValueError("Unknown desktop mode")
+        if self.mode != "exclusive":
+            raise ValueError("Desktop mode must be exclusive")
 
     @property
     def foreground_allowed(self):
-        return self.mode == "exclusive" or self.foreground_assist
+        return True
 
 
 @dataclass(frozen=True)

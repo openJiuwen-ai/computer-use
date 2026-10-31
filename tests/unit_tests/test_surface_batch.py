@@ -7,16 +7,15 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock
-from computer_use.interaction.read.acquisition.directory.service import NativeDirectory
-from computer_use.native.query.directory import SurfaceReadProfile
-from computer_use.protocol.execution import decode_inspect_query
-from computer_use.native.contracts import Binding, HostPolicy
-from computer_use.native.transport import ConnectionPort
-from computer_use.protocol.directory import decode_directory
-
 
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.pipeline import ApplicationDiscoveryPipeline
+from computer_use.interaction.read.acquisition.directory.service import NativeDirectory
+from computer_use.native.contracts import Binding, HostPolicy
+from computer_use.native.query.directory import SurfaceReadProfile
+from computer_use.native.transport import ConnectionPort
+from computer_use.protocol.directory import decode_directory
+from computer_use.protocol.execution import decode_inspect_query
 from computer_use.session.interfaces import ApplicationReferences
 
 
@@ -239,7 +238,7 @@ class BatchScopeTests(IsolatedAsyncioTestCase):
                 session_identity=(1, "session"),
                 request=AsyncMock(return_value=payload),
             )
-            port = ConnectionPort(connection, HostPolicy("shared"))
+            port = ConnectionPort(connection, HostPolicy("exclusive"))
             port._operations["read"] = (connection.session_identity, None)
             call = port.directory(
                 "read", Binding("session", None, None, None), dict(kind="surfaceBatch", applications=["a", "b"]), 30000

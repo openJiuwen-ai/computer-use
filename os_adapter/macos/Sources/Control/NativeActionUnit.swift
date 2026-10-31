@@ -26,12 +26,6 @@ extension NativeElementControl {
         /// Current native leaf membership, separate from the observed owner.
         var popupElementWindowID: UInt32? = nil
 
-        @MainActor func allowsAction(_ action: String) -> Bool {
-            NativeActionAdmission.allows(
-                action: action, role: role, focusWritable: focusWritable, foreground: foreground,
-                exclusive: BackgroundTarget.isExclusive)
-        }
-
         @MainActor func documentPreparation(_ action: String, retainedForegroundRequirement: Bool = false) throws
             -> NativeActionDocumentPolicy.Preparation
         {
@@ -39,7 +33,7 @@ extension NativeElementControl {
                 action: action, exactStandardWindow: document != nil,
                 otherDocument: try action == kAXPressAction && document?.focus() == .other,
                 confirmedWebArea: webArea == .confirmed, foreground: foreground,
-                exclusive: BackgroundTarget.isExclusive, retainedForegroundRequirement: retainedForegroundRequirement)
+                retainedForegroundRequirement: retainedForegroundRequirement)
         }
 
         @MainActor func documentForeground(_ action: String) -> NativeClickContract.DocumentForeground {
@@ -50,8 +44,7 @@ extension NativeElementControl {
             case .unknown: kind = .unknown
             }
             return NativeActionDocumentPolicy.foregroundEvidence(
-                action: action, document: kind, web: webArea, foreground: foreground,
-                exclusive: BackgroundTarget.isExclusive)
+                action: action, document: kind, web: webArea, foreground: foreground)
         }
     }
 
@@ -75,7 +68,7 @@ extension NativeElementControl {
             if subrole == kAXStandardWindowSubrole {
                 facts.documentEvidence = .standard(
                     NativeDocumentContext(application: target.application, window: window))
-                if BackgroundTarget.isExclusive, facts.actions?.contains(where: { $0.name == kAXPressAction }) == true {
+                if facts.actions?.contains(where: { $0.name == kAXPressAction }) == true {
                     facts.webArea = try NativeActionDocumentPolicy.classifyWebArea(
                         element: target.element, window: window, same: { CFEqual($0, $1) },
                         role: { AXAccess.read($0, kAXRoleAttribute).value as? String },
@@ -114,14 +107,6 @@ extension NativeElementControl {
             throw DriverError("the selected native action is no longer declared", code: .inputUnavailable)
         }
         let background = BackgroundTarget(target.application)
-        if !facts.allowsAction(action) {
-            throw DriverError("raising a background window requires exclusive mode", code: .modeUnsupported)
-        }
-        if !background.allowsMenuPopup, [kAXPressAction, kAXPickAction].contains(action),
-            inspection.opensMenu(target.element)
-        {
-            throw DriverError("opening an application menu is unavailable in this desktop mode", code: .modeUnsupported)
-        }
         try inspection.requireEnabled(target.element)
         try inspection.validateTargetIdentity(target)
         try background.validate(input: true)

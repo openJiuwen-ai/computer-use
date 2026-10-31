@@ -6,13 +6,12 @@
 import json
 import math
 
-from .primitives import required_item
-
 from .action_context import decode_action_context
 from .captures import capture_metadata, decode_capture, decode_stamp
 from .desktop import decode_desktop_observation
 from .directory import _application, decode_directory
 from .observation.adapters import validate_driver_payload
+from .primitives import required_item
 from .schema import array, boolean, enum, identity, number, obj, string, union, unknown
 from .text import decode_text_page
 
@@ -85,9 +84,7 @@ click_offer = obj(
         admission=enum("ready", "preparationRequired", "unavailable", "insufficientEvidence"),
         reason=string().nullable(),
         preparationOptions=array(enum("background", "foreground"), max=2),
-        preferenceProfile=enum("default", "physicalWhenAvailableInExclusive"),
-        # Advisory metadata from newer peers must not invalidate a legal click.
-        preferenceHint=unknown().optional(),
+        preferenceProfile=enum("default", "physicalRequired"),
     )
 )
 click_dispatch = enum("notDispatched", "dispatched", "partial", "unknown")
@@ -182,7 +179,6 @@ _begin = obj(
         target=operation_target,
         intent=_intent,
         clickContract=enum("v1", "v2").optional(),
-        clickPreferenceHints=enum("v1").optional(),
     )
 )
 _unit_command = obj(
@@ -215,8 +211,6 @@ def decode_begin(value):
     intent, mode = result["intent"], result["mode"]
     if "clickContract" in result and (mode != "write" or intent["kind"] != "click"):
         raise ValueError("protocol: click contract requires a write click operation")
-    if "clickPreferenceHints" in result and "clickContract" not in result:
-        raise ValueError("protocol: click preference metadata requires a click contract")
     if not isinstance(intent["parameters"], dict):
         raise ValueError("protocol: native intent parameters must be an object")
     try:

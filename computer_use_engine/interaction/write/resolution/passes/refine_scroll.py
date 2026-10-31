@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from computer_use.interaction.write.model import ResolutionFrame
 from computer_use.interaction.write.resolution.checks import parts
 from computer_use.interaction.write.resolution.scroll import ScrollPointerQuery
-from computer_use.interaction.write.routes.policy import needs_pointer_member, validate_target
+from computer_use.interaction.write.routes.policy import validate_target
 from computer_use.pipeline import Contract, Effect, Pass
 
 if TYPE_CHECKING:
@@ -25,9 +25,9 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
     async def refine_scroll(frame: ResolutionFrame, _: object) -> ResolutionFrame:
         """Refine an element-scroll route using the current wheel hit.
 
-        When pointer geometry is needed, qualify the hit inside the selected scrolling
-        region. Retain the member and return freshly inspected facts with its actuator
-        and supporting evidence.
+        Qualify a distinct hit inside the selected scrolling region even when
+        its unqualified pointer route cannot prepare or dispatch. This read-only
+        proof is what can establish that route's receiver, not an input attempt.
         """
         intent, target, operation, remaining = parts(frame)
         facts = cast("Facts", frame.facts)
@@ -38,7 +38,6 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
                 and facts.actuator is not None
                 and (facts.actuator.relation == "scrollPointer")
                 and (facts.input.pointer_hit not in (None, facts.actuator.node))
-                and needs_pointer_member(facts, intent, frame.request.history)
             )
             else False
         )

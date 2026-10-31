@@ -217,7 +217,7 @@ namespace ComputerUse.Windows
             bool natural = false;
             // Ordinary routes keep their original query order. Additional
             // root/target-queue evidence belongs only to this selected permit.
-            if (allowNatural && !foregroundReady && mode == "exclusive" && gesture.CanActivateWindow && physicalReady &&
+            if (allowNatural && !foregroundReady && gesture.CanActivateWindow && physicalReady &&
                 recipient == main)
             {
                 bool originalRootHit = Native.Inside(main, destination);
@@ -232,7 +232,7 @@ namespace ComputerUse.Windows
                     bool idle = NativePointerClickAdmission.QueueIdle(known, gui.Capture, gui.Flags) &&
                                 NativePointerClickAdmission.QueueIdle(targetKnown, targetGui.Capture, targetGui.Flags);
                     natural = NativePointerClickAdmission.NaturalActivation(
-                        mode, gesture, physicalReady, originalRootHit,
+                        gesture, physicalReady, originalRootHit,
                         idle && Native.IsWindowVisible(main) && !Native.IsIconic(main) &&
                             Native.IsWindowEnabled(main) && Native.Interactive());
                 }
@@ -247,7 +247,7 @@ namespace ComputerUse.Windows
                 ForegroundReady = foregroundReady,
                 Recipient = destination,
                 CaptureBlocked = known && gui.Capture != IntPtr.Zero && (!belongs || sibling),
-                Occlusion = mode == "exclusive" && allowNatural && gesture.CanActivateWindow
+                Occlusion = allowNatural && gesture.CanActivateWindow
                                 ? ReadOcclusion(interaction.Native, point, known, gui, physicalReady, r)
                                 : null
             };

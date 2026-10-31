@@ -12,7 +12,6 @@ import Foundation
     let request: NativeIntent
     let clickContract: String?
     /// Advisory wire metadata is emitted only for an explicitly opted-in client.
-    let clickPreferenceHints: Bool
     var intent: String { request.kind }
     let target: [String: Any]
     private(set) var state = State.active
@@ -45,7 +44,6 @@ import Foundation
 
     init(
         timeoutMs: Int, writable: Bool, intent: NativeIntent, target: [String: Any], clickContract: String? = nil,
-        clickPreferenceHints: Bool = false,
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, release: @escaping () -> Void,
         cancelActive: @escaping () -> Void
     ) {
@@ -55,7 +53,6 @@ import Foundation
         self.request = intent
         self.target = target
         self.clickContract = clickContract
-        self.clickPreferenceHints = clickPreferenceHints
         self.release = release
         self.cancelActive = cancelActive
         timer = Task { @MainActor [weak self] in
@@ -106,11 +103,8 @@ import Foundation
         try backgroundPreparationUnavailable(primitive)
     }
 
-    func requireForegroundPreparation(_ primitive: String, hostAllowed: Bool) throws {
+    func requireForegroundPreparation(_ primitive: String) throws {
         try check(write: true)
-        guard hostAllowed else {
-            throw DriverError("foreground assistance is not enabled by this host", code: .modeUnsupported)
-        }
         guard !inputStarted, unavailableBackgroundPreparation.contains(primitive) else {
             throw DriverError(
                 """
@@ -132,18 +126,13 @@ import Foundation
     }
 
     func requireClickForeground(
-        target: [String: Any], within: [String], backgroundFamily: String?, backgroundUnavailable: Bool,
-        hostAllowed: Bool, exclusive: Bool
+        target: [String: Any], within: [String], backgroundFamily: String?, backgroundUnavailable: Bool
     ) throws {
         try check(write: true)
         guard clickContract != nil, !inputStarted, !clickPreparationRequiresObservation else {
             throw DriverError(
                 "click already produced input or incompatible preparation", code: .executionUnknown, effect: .possible)
         }
-        guard hostAllowed else {
-            throw DriverError("foreground assistance is not enabled by this host", code: .modeUnsupported)
-        }
-        if exclusive { return }
         let recorded =
             backgroundFamily.map { family in
                 clickAuthorities.contains {

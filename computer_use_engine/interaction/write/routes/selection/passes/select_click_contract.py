@@ -8,11 +8,11 @@ from computer_use.pipeline import Contract, Pass
 
 
 def execute(value: CandidateSet, control: object) -> str:
-    """The native operation declares v1 candidates only after explicit negotiation."""
+    """Select atomic click offers or the ordinary native-unit pipeline."""
     return (
         "click"
         if value.request.intent.kind == "click" and any(p.click is not None for p in value.request.facts.primitives)
-        else "legacy"
+        else "unit"
     )
 
 

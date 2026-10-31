@@ -213,7 +213,9 @@ class InterfaceReadPipeline:
                         first
                         # pylint: disable-next=protected-access
                         if isinstance(first, AppObservation) and ui._anchor is None
-                        else await controller.reader.read(selected, view=view, overview=False)
+                        else await controller.reader.read(
+                            selected, view=view, overview=False, source_directory=directory
+                        )
                     )
                 except WindowSelectionRequired as error:
                     observed, principal_error = None, error

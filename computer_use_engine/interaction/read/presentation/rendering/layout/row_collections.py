@@ -11,6 +11,7 @@ from types import MappingProxyType
 
 from computer_use.interaction.read.presentation.rendering.layout.model import RowCollection
 from computer_use.protocol.observation import NativeObservation, Relation
+from computer_use.protocol.observation.issues import ReadIssueIndex
 
 
 def capture_row_collections(observation: NativeObservation, refs: Mapping[str, str]) -> Mapping[str, RowCollection]:
@@ -21,6 +22,7 @@ def capture_row_collections(observation: NativeObservation, refs: Mapping[str, s
     """
     counts = Counter(refs.values())
     aliases = {token: ref for ref, token in refs.items() if counts[token] == 1}
+    issues = ReadIssueIndex(observation.issues)
 
     def complete(token: str, kind: str) -> Relation | None:
         node = observation.nodes.get(token)
@@ -39,10 +41,7 @@ def capture_row_collections(observation: NativeObservation, refs: Mapping[str, s
             or relation.positions != tuple(range(len(relation.targets)))
             or len(set(relation.targets)) != len(relation.targets)
             or any(target not in observation.nodes or target not in aliases for target in relation.targets)
-            or any(
-                issue.path[: len(prefix)] == prefix or prefix[: len(issue.path)] == issue.path
-                for issue in observation.issues
-            )
+            or issues.overlapping(prefix)
         ):
             return None
         return relation

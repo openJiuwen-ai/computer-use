@@ -32,12 +32,20 @@ import ApplicationServices
         }
     }
 
+    struct Observation {
+        let geometry: Geometry
+        let hit: AXUIElement?
+        let basis: NativeElementHitSelection.Basis
+        let preparation: NativeElementHitSelection.Preparation
+        var dispatchGeometryReady: Bool { basis != .rejected }
+    }
+
     private struct Sample {
         let geometry: Geometry
         let selection: NativeElementHitSelection.Selection<AXUIElement>
         var hit: AXUIElement? { selection.observation.hit }
         var accepted: Bool { selection.basis != .rejected }
-        var covered: Bool { selection.observation.evidence.relation == .otherWindow }
+        var preparation: NativeElementHitSelection.Preparation { NativeElementHitSelection.preparation(selection) }
     }
 
     private func activationPoint() -> CGPoint? {
@@ -60,8 +68,8 @@ import ApplicationServices
 
     private func validatePhysicalWindow() throws {
         if let logicalWindow, !CFEqual(logicalWindow, window) {
-            guard let current = WindowGeometry.owningWindow(
-                element, pid: application.processIdentifier, in: window), CFEqual(current, window)
+            guard let current = WindowGeometry.owningWindow(element, pid: application.processIdentifier, in: window),
+                CFEqual(current, window)
             else { throw DriverError("the original popup element changed its physical window", code: .staleTarget) }
         }
     }
@@ -91,9 +99,7 @@ import ApplicationServices
         // click control. Preserve its center and viewport for the public hit
         // refinement contract; click-specific search must not alter pages.
         let expand = kind == .click
-        let visible =
-            expand
-            ? viewport.clipped : frame.intersection(mapping.frame)
+        let visible = expand ? viewport.clipped : frame.intersection(mapping.frame)
         guard !visible.isNull, visible.width > 0, visible.height > 0 else {
             throw DriverError(
                 "the selected element is outside its window or known scrolling bounds", code: .inputUnavailable)
@@ -113,7 +119,7 @@ import ApplicationServices
         var boundedRoot: AXUIElement?
         var observations = [[String: Any]]()
         let selected = try NativeElementHitSelection.select(
-            candidates, exclusive: BackgroundTarget.isExclusive,
+            candidates,
             canContinue: { candidate in
                 try RequestDiagnostics.checkCancellation()
                 return frozen != nil || candidate.source == .center || ProcessInfo.processInfo.systemUptime < deadline
@@ -143,6 +149,8 @@ import ApplicationServices
                 if status == .success, let hit {
                     if CFEqual(hit, member ?? element) {
                         relation = .target
+                    } else if CFEqual(hit, window) {
+                        relation = .windowRoot
                     } else if let owner = WindowGeometry.owningWindow(
                         hit, pid: application.processIdentifier, in: window)
                     {
@@ -220,8 +228,8 @@ import ApplicationServices
                 let foreground =
                     evidence.relation == .coarseAncestorWindow
                     ? coarseForeground
-                    : !BackgroundTarget.isExclusive && candidate.permitsGeometryFallback
-                        && evidence.permitsBackgroundGeometry ? pointer.foregroundWindow(at: candidate.point) : true
+                    : candidate.permitsGeometryFallback && evidence.permitsBackgroundGeometry
+                        ? pointer.foregroundWindow(at: candidate.point) : true
                 return .init(evidence: evidence, hit: status == .success ? hit : nil, foreground: foreground)
             })
         guard let selected else {
@@ -257,7 +265,8 @@ import ApplicationServices
     /// the same element hit and independent physical-window readers as delivery.
     func popupPhysicalSample(_ frozen: Geometry) throws -> NativePopupPointerSample<AXUIElement> {
         let sampled = try sample(frozen: frozen)
-        let pointer = NativePointerUnit(application: application, window: sampled.geometry.mapping, nativeWindow: window)
+        let pointer = NativePointerUnit(
+            application: application, window: sampled.geometry.mapping, nativeWindow: window)
         let physical = pointer.physicalClickSample(at: frozen.point)
         return .init(
             geometry: sampled.geometry, hit: sampled.selection.basis == .exactHit ? sampled.hit : nil,
@@ -268,21 +277,32 @@ import ApplicationServices
     /// Query projection keeps a mismatching native hit visible so the public
     /// resolver can prove an existing control-part relationship. It grants no
     /// permission to dispatch to that hit or to the owner's rectangle.
-    func observedGeometry(allowWindowPreparation: Bool = false) throws -> (geometry: Geometry?, hit: AXUIElement?) {
+    func observedGeometry() throws -> Observation {
         let value = try sample()
-        let preparable = allowWindowPreparation && value.covered
-        return (value.accepted || preparable ? value.geometry : nil, value.hit)
+        return Observation(
+            geometry: value.geometry, hit: value.hit, basis: value.selection.basis, preparation: value.preparation)
     }
 
     /// The original window may first need to be uncovered. This query never
     /// accepts another control in that window, and dispatch still uses geometry().
     func preparationGeometry() throws -> Geometry {
-        guard let value = try observedGeometry(allowWindowPreparation: true).geometry else {
+        let observed = try observedGeometry()
+        guard observed.preparation != .unavailable else {
             throw DriverError(
                 "no sampled pointer point belongs to this native target or its available window route",
                 code: .inputUnavailable)
         }
-        return value
+        return observed.geometry
+    }
+
+    func backgroundPreparationAvailable() throws -> Bool {
+        let sampled = try sample()
+        guard sampled.preparation != .foreground else { return false }
+        let pointer = NativePointerUnit(
+            application: application, window: sampled.geometry.mapping, nativeWindow: window)
+        let delivery = try pointer.resolvedDelivery(nil, at: sampled.geometry.point, kind: kind)
+        return delivery == .systemPointer
+            ? pointer.foregroundWindow(at: sampled.geometry.point) : pointer.backgroundPreparationAvailable(kind: kind)
     }
 
     func conditions() throws -> (
@@ -292,16 +312,19 @@ import ApplicationServices
         do { sampled = try sample() } catch let error as DriverError
             where error.code == .inputUnavailable || error.code == .modeUnsupported
         { return (NativeReadiness([("geometry", "unknown")]), false, false, false, nil) }
-        guard sampled.accepted else {
-            if sampled.covered { return (NativeReadiness([("receiver", "no")]), false, true, false, sampled.hit) }
-            return (NativeReadiness([("geometry", "unknown")]), false, false, false, sampled.hit)
-        }
         let pointer = NativePointerUnit(
             application: application, window: sampled.geometry.mapping, nativeWindow: window)
+        if !sampled.accepted {
+            let preparable = sampled.preparation == .foreground
+            let readiness = NativeReadiness(
+                [(preparable ? "foreground" : "receiver", "no")], preparationAllowed: preparable)
+            return (readiness, pointer.foregroundWindow(at: sampled.geometry.point), true, false, sampled.hit)
+        }
+        let delivery = try pointer.resolvedDelivery(nil, at: sampled.geometry.point, kind: kind)
         let foreground = pointer.foregroundWindow(at: sampled.geometry.point),
-            route = pointer.ready(at: sampled.geometry.point, kind: kind)
+            route = pointer.ready(at: sampled.geometry.point, kind: kind, delivery: delivery)
         var required = [("receiver", route ? "yes" : "no")]
-        if BackgroundTarget.isExclusive { required.append(("foreground", foreground ? "yes" : "no")) }
+        if delivery == .systemPointer && !foreground { required.append(("foreground", "no")) }
         return (NativeReadiness(required), foreground, true, route, sampled.hit)
     }
 
@@ -327,15 +350,15 @@ import ApplicationServices
                 "kind": "element_pointer_preparation_geometry", "phase": "beforePreparation",
                 "window": selected.mapping.id,
                 "windowFrame": [
-                    selected.mapping.frame.minX, selected.mapping.frame.minY,
-                    selected.mapping.frame.width, selected.mapping.frame.height
+                    selected.mapping.frame.minX, selected.mapping.frame.minY, selected.mapping.frame.width,
+                    selected.mapping.frame.height
                 ],
                 "elementFrame": [selected.frame.minX, selected.frame.minY, selected.frame.width, selected.frame.height],
                 "point": [selected.point.x, selected.point.y]
             ])
         }
         if !sampled.accepted {
-            guard sampled.covered else {
+            guard sampled.preparation != .unavailable else {
                 throw DriverError(
                     "no sampled pointer point belongs to this native target or its available window route",
                     code: .inputUnavailable)
@@ -345,17 +368,17 @@ import ApplicationServices
                 // Record unavailability before Python may choose authorized
                 // foreground preparation; no requested input has been sent.
                 throw NativePreparationUnavailable(
-                    description: "another window covers the element's native hit target; no pointer event sent")
+                    description: "the element hit needs foreground window preparation; no pointer event sent")
             }
         }
         // Occlusion and ordinary preparation use the same exact-window
         // contract, including explicit key preparation for standard documents.
         let pointer = NativePointerUnit(application: application, window: selected.mapping, nativeWindow: window)
+        let delivery = try pointer.resolvedDelivery(nil, at: selected.point, kind: kind)
         do {
             let outcome = try await pointer.prepareWindowContext(
-                foreground: foreground, atNative: selected.point, kind: kind, check: check,
-                onPreparation: onPreparation,
-                onCleanupUnknown: onCleanupUnknown)
+                foreground: foreground, atNative: selected.point, kind: kind, delivery: delivery, check: check,
+                onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
             // Preparation may move the same original window or element. No
             // requested mouse event has been sent, so refresh before admitting
             // a point; only actual delivery freezes its gesture coordinates.
@@ -370,8 +393,8 @@ import ApplicationServices
                     "kind": "element_pointer_preparation_geometry", "phase": "afterRefresh",
                     "window": current.mapping.id,
                     "windowFrame": [
-                        current.mapping.frame.minX, current.mapping.frame.minY,
-                        current.mapping.frame.width, current.mapping.frame.height
+                        current.mapping.frame.minX, current.mapping.frame.minY, current.mapping.frame.width,
+                        current.mapping.frame.height
                     ],
                     "elementFrame": [current.frame.minX, current.frame.minY, current.frame.width, current.frame.height],
                     "point": [current.point.x, current.point.y]
@@ -382,7 +405,7 @@ import ApplicationServices
                 // new point must use the refreshed mapping of this exact window.
                 let refreshed = NativePointerUnit(
                     application: application, window: current.mapping, nativeWindow: window)
-                try refreshed.requirePointReadiness(atNative: current.point, kind: kind)
+                try refreshed.requirePointReadiness(atNative: current.point, kind: kind, delivery: delivery)
             }
         } catch {
             if WindowGeometry.inputDiagnosticsEnabled {

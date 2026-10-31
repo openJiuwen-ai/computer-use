@@ -67,9 +67,6 @@ class NativePointer:
         self.b.ensure_unlocked()
         image = self.captures.input(target)
         if target["surface"] is None:
-            require(
-                self.b.mode == "exclusive", "Desktop-wide pointer input requires exclusive mode.", "mode_unsupported"
-            )
             return image, None, None
         if during_drag:
             # The server's implicit grab routes an in-progress drag. A newly
@@ -160,11 +157,6 @@ class NativePointer:
             return True
         if not foreground:
             return False  # No addressed X11 operation uncovers an obscured pixel.
-        require(
-            self.b.mode == "exclusive" or self.desktop.assist,
-            "Host policy does not permit foreground assistance.",
-            "mode_unsupported",
-        )
         require(
             native is not None and not native.override_redirect,
             "An unmanaged popup cannot be activated to repair a pointer route.",

@@ -33,9 +33,6 @@ import ApplicationServices
         try BackgroundTarget(pointer.application).validate(input: true)
         try BackgroundTarget.validateReleasedInput()
         if plan.offer.delivery == .windowDirected {
-            guard !BackgroundTarget.isExclusive else {
-                throw DriverError("window-directed clicks are unavailable in exclusive mode", code: .modeUnsupported)
-            }
             try BackgroundEvents.requirePointerRoute(window: pointer.window)
         }
         let needed = !pointer.ready(at: point, delivery: plan.offer.delivery)

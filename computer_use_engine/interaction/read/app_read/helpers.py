@@ -39,6 +39,14 @@ def parse_read_request(request: ReadRequest, control: Control) -> ReadRequest:
         raise ValueError("Invalid launch option or observed window id")
     if isinstance(selector, WorkingWindow) and window is not None:
         raise ValueError("A bound WorkingWindow cannot be retargeted; select a new working window explicitly")
+    if request.source_directory is not None:
+        if not isinstance(selector, WorkingWindow):
+            raise ValueError("A resolved directory requires its fixed working-window selection")
+        if (
+            request.source_directory["session"] != selector.root.session
+            or request.source_directory["application"] != selector.application
+        ):
+            raise ValueError("The resolved directory belongs to another application or session")
     if isinstance(selector, SelectedApplicationWindow):
         if window is not None and window != selector.window:
             raise ValueError("An exact window choice cannot be retargeted")

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from computer_use.interaction.write.routes.policy import refuse
 from computer_use.interaction.write.routes.selection.model import CandidateSet, SelectionRequest
 from computer_use.native.contracts import Channel, Knowledge
-from computer_use.native.semantics import action_for_intent, role_name
+from computer_use.native.semantics import action_for_intent
 from computer_use.protocol.execution import unit_contracts
 
 if TYPE_CHECKING:
@@ -27,28 +27,28 @@ _DATETIME_LITERAL = re.compile(
 )
 
 
-def _exclusive_element_intent(request: SelectionRequest, kind: str, *, platform: str | None = None) -> bool:
-    """Restrict a preference to the existing host mode and exact element intent."""
-    policy = request.policy
-    if policy is None or policy.mode != "exclusive":
-        return False
+def _element_intent(request: SelectionRequest, kind: str, *, platform: str | None = None) -> bool:
+    """Restrict mechanism requirements to the exact addressed element intent."""
     if platform is not None and request.facts.platform != platform:
         return False
     return request.intent.kind == kind and cast("Binding", request.facts.binding).node is not None
 
 
-def _physical_click_available(primitive: Primitive, platform: str) -> bool:
-    """A physical preference needs an offered pointer route with usable geometry."""
-    if primitive.unit != "pointer_sequence" or primitive.supported != Knowledge.YES or "geometry" in primitive.pending:
-        return False
-    if primitive.click is not None:
-        return primitive.click.preference_profile == "physicalWhenAvailableInExclusive"
-    return platform == "windows"
+def _physical_click_required(primitive: Primitive) -> bool:
+    """A physical requirement comes from native mechanism evidence, never host mode."""
+    return (
+        primitive.unit == "pointer_sequence"
+        and primitive.supported == Knowledge.YES
+        and "geometry" not in primitive.pending
+        and primitive.click is not None
+        and primitive.click.admission in ("ready", "preparationRequired")
+        and primitive.click.preference_profile == "physicalRequired"
+    )
 
 
 def _contextual_replacement(request: SelectionRequest, candidates: Sequence[Primitive]) -> bool:
     """Keep editor callbacks and segmented-date semantics on the offered keyboard route."""
-    if not _exclusive_element_intent(request, "replace", platform="windows"):
+    if not _element_intent(request, "replace", platform="windows"):
         return False
     facts = request.facts
     if facts.native_role == "ControlType.ComboBox":
@@ -133,76 +133,21 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
     return CandidateSet(request, tuple(candidates))
 
 
-def _windows_occluded_primary_action(value: CandidateSet, pointers: list[Primitive]) -> bool:
-    """Narrow permission after native foreign-occlusion preference, never a fallback.
-
-    Native Windows offers default here only after its query-only foreign-root
-    occlusion proof, and admits Expand only under its fresh/final Collapsed
-    contract. This phase retains the already resolved primary action;
-    it neither infers occlusion from !Ready nor invents an action from the role.
-    """
-    request, facts = value.request, value.request.facts
-    if (
-        facts.platform != "windows"
-        or facts.enabled != Knowledge.YES
-        or not facts.actions_complete
-        or role_name(facts.platform, facts.native_role) not in ("button", "link", "menuButton", "comboBox", "menuItem")
-        or facts.input.geometry_current != Knowledge.YES
-        or facts.input.pointer_route != Knowledge.NO
-    ):
-        return False
-    history = request.history
-    if history is not None and (
-        history.unavailable
-        or history.background_unavailable
-        or history.prepared
-        or history.click_refresh is not None
-        or history.failed_steps
-    ):
-        return False
-    if not any(
-        p.click is not None
-        and p.click.preference_profile == "default"
-        and p.click.admission in ("preparationRequired", "unavailable")
-        and p.readiness == Knowledge.NO
-        for p in pointers
-    ):
-        return False
-    # resolve_action_semantics already removed non-primary raw actions. In
-    # particular raw Invoke beside primary Toggle/Select/Expand is insufficient.
-    actions = [p for p in value.primitives if p.unit == "native_action"]
-    return (
-        len(actions) == 1
-        and actions[0].action in ("Invoke.Invoke", "ExpandCollapse.Expand")
-        and actions[0].supported == Knowledge.YES
-        and actions[0].readiness == Knowledge.YES
-        and not actions[0].pending
-        and actions[0].click is not None
-        and actions[0].click.interaction == "semantic"
-        and actions[0].click.delivery == "object_action"
-        and actions[0].click.admission == "ready"
-    )
-
-
 def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
-    """Apply desktop-mode and platform preferences while preserving the requested operation semantics."""
+    """Apply native mechanism requirements while preserving the requested operation semantics."""
     request, candidates = value.request, list(value.primitives)
-    facts, intent = request.facts, request.intent
+    intent = request.intent
     # Explicit native action matching historically returns before physical
     # interaction preferences. Keep that branch independent.
     if intent.kind == "action":
         return value
-    if _exclusive_element_intent(request, "click"):
+    if _element_intent(request, "click"):
         pointers = [
             p
             for p in candidates
             if p.unit == "pointer_sequence" and p.supported == Knowledge.YES and "geometry" not in p.pending
         ]
-        physical = any(_physical_click_available(p, facts.platform) for p in pointers)
-        windows_default = facts.platform == "windows" and any(
-            p.click is not None and p.click.preference_profile == "default" for p in pointers
-        )
-        if physical or windows_default and not _windows_occluded_primary_action(value, pointers):
+        if any(_physical_click_required(p) for p in pointers):
             candidates = [p for p in candidates if p.channel == Channel.POINTER]
     if intent.kind == "paste":
         candidates = [p for p in candidates if p.unit in ("clipboard_paste", "prepare_receiver")]
@@ -217,46 +162,6 @@ def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     return CandidateSet(request, tuple(candidates))
 
 
-def _ready_physical_preference(value: CandidateSet) -> set[str]:
-    """Promote one native-proved ready pointer, without changing eligibility."""
-    request, facts = value.request, value.request.facts
-    intent, binding = request.intent, cast("Binding", facts.binding)
-    if (
-        not _exclusive_element_intent(request, "click", platform="macos")
-        or binding.capture is not None
-        or set(intent.parameters) - {"button", "count"}
-        or intent.parameters.get("button", "left") != "left"
-        or intent.parameters.get("count", 1) != 1
-        or facts.actuator is not None
-        or facts.receiver is not None
-        or facts.application_menu is True
-        or facts.input.foreground_surface != binding.surface
-        or facts.input.pointer_hit != binding.node
-        or facts.input.geometry_current != Knowledge.YES
-        or any(p.unit == "native_selection" for p in value.primitives)
-    ):
-        return set()
-    # Consume the already resolved primary; raw secondary Press never overrides
-    # ShowMenu, selection or an explicit native action's semantics.
-    actions = [p for p in value.primitives if p.unit == "native_action"]
-    if len(actions) != 1 or actions[0].action != "AXPress":
-        return set()
-    return {
-        p.id
-        for p in value.primitives
-        if p.unit == "pointer_sequence"
-        and p.channel == Channel.POINTER
-        and p.supported == Knowledge.YES
-        and p.readiness == Knowledge.YES
-        and not p.pending
-        and p.click is not None
-        and p.click.preference_hint == "readyPhysical"
-        and p.click.delivery == "desktop_pointer"
-        and p.click.admission == "ready"
-        and not p.click.preparation_options
-    }
-
-
 def order_supported_candidates(value: CandidateSet) -> CandidateSet:
     """Order supported object, editor, keyboard, and pointer units for route selection."""
     request, candidates = value.request, value.primitives
@@ -268,7 +173,6 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
     # a keyboard contract is already ready, use that editing path instead.
     # choose() still requires editing evidence before permitting keyboard input.
     order = {Channel.OBJECT: 0, Channel.EDITOR: 2, Channel.KEYBOARD: 3, Channel.POINTER: 4}
-    preferred = _ready_physical_preference(value)
 
     def priority(primitive: Primitive) -> tuple[int, int, int, str]:
         channel_order = order.get(primitive.channel)
@@ -277,9 +181,9 @@ def order_supported_candidates(value: CandidateSet) -> CandidateSet:
         if primitive.click is not None:
             offer = primitive.click
             return (
-                -1 if primitive.id in preferred else channel_order,
+                channel_order,
                 1 if primitive.unit == "native_selection" else 0,
-                0 if offer.admission == "ready" and offer.delivery == "desktop_pointer" else 1,
+                1 if offer.delivery == "desktop_pointer" else 0,
                 offer.route_family,
             )
         ready_text_keys = (
@@ -320,8 +224,7 @@ CANDIDATE_PHASES = (
 
 def enumerate_candidates(facts: Facts, intent: Intent, policy: HostPolicy | None = None) -> tuple[Primitive, ...]:
     """Run the pure candidate phases for resolver capability checks."""
-    # This is a narrow predicate helper for resolver Passes as well as the
-    # compatibility policy API; it must not start a nested registered graph.
+    # Resolver predicates reuse the pure phases without starting another graph.
     value = SelectionRequest(facts, intent, policy)
     for _, phase, _, _, _ in CANDIDATE_PHASES:
         value = phase(value)

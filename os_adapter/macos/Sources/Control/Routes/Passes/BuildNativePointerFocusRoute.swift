@@ -26,8 +26,8 @@ import ApplicationServices
             receiverRelation: selected.receiverRelation, cellEditor: selected.cellEditor)
         return .prepare {
             if foreground {
-                try op.requireForegroundPreparation(
-                    id, hostAllowed: ForegroundAssist.enabled || BackgroundTarget.isExclusive)
+                if try !unit.backgroundPreparationAvailable() { try op.recordBackgroundMechanismUnavailable(id) }
+                try op.requireForegroundPreparation(id)
             }
             try await unit.prepare(
                 foreground: foreground, check: checkBoundary, onPreparation: receipt.recordPreparation,

@@ -261,13 +261,21 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
         services = self.services
 
         async def bound(call: ReadCall, control: Control) -> ApplicationSelection:
-            # pylint: disable-next=protected-access
-            selection, directory = await services._discover(
-                call.request.selector,
-                call.remaining,
-                _control=control,
-                **(dict(accessibility=False) if call.request.view == "image" else {}),
-            )
+            directory = call.request.source_directory
+            if directory is None:
+                # pylint: disable-next=protected-access
+                selection, directory = await services._discover(
+                    call.request.selector,
+                    call.remaining,
+                    _control=control,
+                    **(dict(accessibility=False) if call.request.view == "image" else {}),
+                )
+            else:
+                original = cast("WorkingWindow", call.request.selector)
+                # pylint: disable-next=protected-access
+                selection = services._selection(
+                    original.application, original.name, directory, original.root.root_window, previous=original
+                )
             return ApplicationSelection(
                 call,
                 dict(id=selection.application, displayName=selection.name),

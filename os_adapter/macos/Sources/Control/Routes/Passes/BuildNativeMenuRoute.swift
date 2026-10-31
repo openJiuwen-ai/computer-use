@@ -26,8 +26,7 @@ import ApplicationServices
         if kind == "prepare_receiver" {
             return .prepare {
                 if foreground {
-                    try op.requireForegroundPreparation(
-                        id, hostAllowed: ForegroundAssist.enabled || BackgroundTarget.isExclusive)
+                    try op.requireForegroundPreparation(id)
                 }
                 try await unit.prepare(
                     foreground: foreground, check: checkBoundary, onPreparation: receipt.recordPreparation,

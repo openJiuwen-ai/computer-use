@@ -109,8 +109,7 @@ import ApplicationServices
             input["geometryCurrent"] = "yes"
             let ready = unit.ready(at: point, kind: kind)
             input["pointerRoute"] = ready ? "yes" : "no"
-            var pending = [("receiver", ready ? "yes" : "no")]
-            if BackgroundTarget.isExclusive { pending.append(("foreground", foreground ? "yes" : "no")) }
+            let pending = [("receiver", ready ? "yes" : "no")]
             declare(.pointer(kind), supported: true, readiness: { _ in NativeReadiness(pending) })
         } else if let facts = textFacts, let contract = facts.contract, contract.independent {
             enabled = facts.enabled
@@ -229,7 +228,7 @@ import ApplicationServices
                 } else {
                     try declare(
                         .action(action.name, action.description),
-                        supported: !facts.applicationMenuContext && facts.allowsAction(action.name))
+                        supported: !facts.applicationMenuContext)
                 }
             }
             if op.intent == "click", access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") == nil,

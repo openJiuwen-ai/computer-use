@@ -31,9 +31,7 @@ import ApplicationServices
         try captured?.validateParameters(pointer)
         if kind == "prepare_receiver" {
             return .prepare {
-                if foreground, !BackgroundTarget.isExclusive {
-                    try op.requireForegroundPreparation(id, hostAllowed: ForegroundAssist.enabled)
-                }
+                if foreground { try op.requireForegroundPreparation(id) }
                 if let captured {
                     try await captured.prepare(
                         foreground: foreground, atNative: captured.point(pointer.start!), kind: pointer.kind,

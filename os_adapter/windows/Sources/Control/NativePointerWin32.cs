@@ -48,7 +48,6 @@ namespace ComputerUse.Windows
         }
         readonly NativeReadStore windows;
         readonly NativePointerCaptures captures;
-        readonly string mode;
         sealed class Target
         {
             internal Dictionary<string, object> Binding;
@@ -58,11 +57,10 @@ namespace ComputerUse.Windows
             internal string Kind;
         }
 
-        internal NativeWindowsPointer(NativeReadStore windows, NativePointerCaptures captures, string mode = "shared")
+        internal NativeWindowsPointer(NativeReadStore windows, NativePointerCaptures captures)
         {
             this.windows = windows;
             this.captures = captures;
-            this.mode = mode;
         }
 
         public NativePointerCapture Capture(Dictionary<string, object> target, Request r)
@@ -138,7 +136,7 @@ namespace ComputerUse.Windows
             bool natural =
                 !foregroundReady &&
                 NativePointerClickAdmission.NaturalActivation(
-                    mode, gesture, physicalReady, hit,
+                    gesture, physicalReady, hit,
                     NativePointerClickAdmission.QueueIdle(foregroundKnown, foreground.Capture, foreground.Flags) &&
                         NativePointerClickAdmission.QueueIdle(targetThread != 0 && threadKnown, gui.Capture,
                                                               gui.Flags));
@@ -194,7 +192,7 @@ namespace ComputerUse.Windows
             r.Check();
             // A denied SetForegroundWindow is reported by subsequent readiness
             // observation. Never attach threads, fake Alt, or restore foreground.
-            Native.Foreground(window.Native, true, r, mode == "exclusive",
+            Native.Foreground(window.Native, true, r, true,
                               () =>
                               {
                                   var current = selected.Interaction == null

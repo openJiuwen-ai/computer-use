@@ -100,7 +100,6 @@ namespace ComputerUse.Windows
     internal sealed class NativePointer
     {
         readonly INativePointerProvider provider;
-        readonly bool foregroundAllowed;
         readonly NativePointerClickHistory clicks = new NativePointerClickHistory();
         internal bool SupportsDesktop { get; private set; }
 
@@ -111,11 +110,10 @@ namespace ComputerUse.Windows
             }
         }
 
-        internal NativePointer(INativePointerProvider provider, string mode, bool assist)
+        internal NativePointer(INativePointerProvider provider)
         {
             this.provider = provider;
-            foregroundAllowed = mode == "exclusive" || assist;
-            SupportsDesktop = mode == "exclusive";
+            SupportsDesktop = true;
         }
 
         internal static bool Intent(Dictionary<string, object> intent, Dictionary<string, object> target)
@@ -148,8 +146,6 @@ namespace ComputerUse.Windows
 
             if (target["node"] != null)
                 throw new Failure("invalid_request", "image input cannot select an accessibility element");
-            if (target["surface"] == null && !SupportsDesktop)
-                throw new Failure("mode_unsupported", "desktop pointer input requires exclusive mode");
             string kind = (string)intent["kind"];
             var p = Wire.Object(intent["parameters"]);
             if (kind == "click")
@@ -261,12 +257,8 @@ namespace ComputerUse.Windows
                 Target = new Dictionary<string, object>(target),  Within = (string[])within.Clone(), Pointer = plan
             };
             plan.Occlusion = state.Occlusion;
-            bool semanticOcclusion = plan.Element != null && SupportsDesktop && plan.Gesture.CanActivateWindow &&
-                                     NativePointerClickAdmission.ElementScopeAllowsNatural(within) &&
-                                     state.Occlusion != null && state.Occlusion.TargetCondition != null &&
-                                     !state.Ready && !state.CaptureBlocked;
             bool canPrepare =
-                !state.CaptureBlocked && !state.ForegroundReady && foregroundAllowed && target["surface"] != null;
+                !state.CaptureBlocked && !state.ForegroundReady && target["surface"] != null;
             if (operation.ClickV1)
                 contract.Click = new NativeClickOffer(
                     "windows.sendInput", "pointer", "desktop_pointer",
@@ -279,10 +271,10 @@ namespace ComputerUse.Windows
                     : state.ForegroundReady ? UnavailablePoint(plan)
                                             : "The selected window requires foreground preparation.",
                     !state.Ready && canPrepare ? new[] { "foreground" } : new string[0],
-                    semanticOcclusion ? "default" : "physicalWhenAvailableInExclusive");
+                    "default");
             if (operation.ClickV1)
                 contract.ClickAuthority = new NativeClickPreparationAuthority("windows.sendInput", operation, target,
-                                                                              foregroundAllowed, true);
+                                                                              true);
             operation.Contracts.Add(contract.Id, contract);
             var primitive =
                 Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "pointer", "supported", "yes",
@@ -370,8 +362,6 @@ namespace ComputerUse.Windows
             // native authority checks the real host policy and this route.
             if (!state.ForegroundReady && foreground && contract.Target["surface"] != null)
             {
-                if (!foregroundAllowed)
-                    throw new Failure("mode_unsupported", "host policy does not permit foreground assistance");
                 if (contract.Click == null || contract.Click.RouteFamily != "windows.sendInput" ||
                     !contract.Click.PreparationOptions.Contains("foreground") ||
                     contract.Click.PreparationOptions.Contains("background"))
@@ -612,8 +602,6 @@ namespace ComputerUse.Windows
                     if (!state.Ready && !state.ForegroundReady && (bool)command["foreground"] &&
                         target["surface"] != null)
                     {
-                        if (!foregroundAllowed)
-                            throw new Failure("mode_unsupported", "host policy does not permit foreground assistance");
                         provider.RequireIdle(r);
                         state = Guard(contract, 0, false, r);
                         if (state.CaptureBlocked)

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
     """Explain why the remaining native candidates cannot satisfy the requested input."""
     request = options.eligible.request
-    facts, intent, policy = request.facts, request.intent, request.policy
+    facts, intent = request.facts, request.intent
     if request.needs_editing_evidence:
         refuse(
             "input_unavailable",
@@ -48,7 +48,6 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
         True
         if (
             facts.platform == "windows"
-            and policy.mode == "exclusive"
             and intent.kind == "scroll"
             and isinstance(facts.binding, Binding)
             and facts.binding.node is not None
@@ -66,8 +65,8 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
     refuse(
         "input_unavailable",
         facts,
-        "No confirmed route can perform this intent in the current desktop mode.",
-        "read the current target; foreground assistance or an independent desktop may be required",
+        "No confirmed route can perform this intent on the original target.",
+        "read the current target and its image to inspect the available input scope",
     )
 
 

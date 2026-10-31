@@ -70,7 +70,7 @@ namespace ComputerUse.Windows
                     throw new Failure("invalid_request", "desktop input requires an observed desktop capture");
                 if (desktopKeyboard == null)
                     throw new Failure("mode_unsupported",
-                                      "desktop input requires exclusive mode and a desktop keyboard provider");
+                                      "desktop input requires a desktop keyboard provider");
                 if (!new[] { "key", "insert" }.Contains((string)intent["kind"]))
                     throw new Failure("invalid_request", "desktop keyboard supports key and insert intents");
                 desktopKeyboard.ValidateIntent(intent);
@@ -266,7 +266,8 @@ namespace ComputerUse.Windows
                 if (!semanticOcclusion)
                 {
                     // An original primary Expand cannot silently become raw
-                    // Invoke. Preserve the ordinary physical selection profile.
+                    // Invoke after expansion evidence changes. Require a physical click
+                    // for this inspected mechanism instead of changing its primary action.
                     foreach (var current in currentPointers)
                     {
                         var offer = current.Click;
@@ -274,7 +275,7 @@ namespace ComputerUse.Windows
                             continue;
                         current.Click = new NativeClickOffer(offer.RouteFamily, offer.Interaction, offer.Delivery,
                                                              offer.Admission, offer.Reason, offer.PreparationOptions,
-                                                             "physicalWhenAvailableInExclusive");
+                                                             "physicalRequired");
                     }
                     foreach (var item in Wire.Array(pointerFacts["primitives"]).Select(Wire.Object))
                     {

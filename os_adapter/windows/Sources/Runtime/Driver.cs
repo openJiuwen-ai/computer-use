@@ -42,7 +42,7 @@ namespace ComputerUse.Windows
             this.recycle = recycle;
             this.pointerCheckpoint = pointerCheckpoint;
             this.stopDisplay = stopDisplay;
-            mode = Environment.GetEnvironmentVariable("COMPUTER_USE_DESKTOP") ?? "shared";
+            mode = Environment.GetEnvironmentVariable("COMPUTER_USE_DESKTOP") ?? "exclusive";
         }
 
         void Write(string line)
@@ -182,7 +182,7 @@ namespace ComputerUse.Windows
                         throw new Failure("invalid_request", "id zero is reserved for hello");
                     var options = Wire.Object(p["params"]);
                     Wire.Keys(options, "desktopMode");
-                    if (!(mode == "shared" || mode == "exclusive") || Wire.Str(options, "desktopMode") != mode)
+                    if (mode != "exclusive" || Wire.Str(options, "desktopMode") != mode)
                     {
                         Reply(0, Error("mode_mismatch", "host desktop mode differs from requested mode"));
                         return;

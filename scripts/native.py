@@ -39,8 +39,8 @@ def build_mac_os(root=None):
     root = Path(root) if root else repository_root()
     generate_pointer_assets(root=root)
     native = root / "os_adapter/macos"
-    run("swift", ["build", "-c", "debug"], native)
-    binary = Path(run("swift", ["build", "-c", "debug", "--show-bin-path"], native, True))
+    run("swift", ["build", "-c", "release"], native)
+    binary = Path(run("swift", ["build", "-c", "release", "--show-bin-path"], native, True))
     bundle = native / ".build/ComputerUseDriver.app"
     executable = bundle / "Contents/MacOS/computer-use-driver"
     executable.parent.mkdir(parents=True, exist_ok=True)
@@ -336,8 +336,8 @@ def linux_session_launcher(*, directory=None, env=None):
     if not env.get("DBUS_SESSION_BUS_ADDRESS"):
         raise RuntimeError(("Run in the graphical user's desktop terminal; DBUS_SESSION_BUS_ADDRESS is missing."))
     mode = env.get("COMPUTER_USE_DESKTOP", "exclusive")
-    if mode not in ("shared", "exclusive"):
-        raise ValueError("COMPUTER_USE_DESKTOP must be shared or exclusive.")
+    if mode != "exclusive":
+        raise ValueError("COMPUTER_USE_DESKTOP must be exclusive.")
     directory = Path(directory) if directory else Path.home() / ".local/bin"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -364,7 +364,6 @@ def linux_session_launcher(*, directory=None, env=None):
     values.update(
         XDG_SESSION_TYPE="wayland" if wayland else "x11",
         COMPUTER_USE_DESKTOP=mode,
-        COMPUTER_USE_FOREGROUND_ASSIST="1" if env.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1" else "0",
     )
     command = " ".join(f"{key}={shlex.quote(value)}" for key, value in values.items())
     output = directory / "computer-use-mcp"

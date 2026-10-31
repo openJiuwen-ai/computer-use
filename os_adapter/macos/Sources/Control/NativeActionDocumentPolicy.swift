@@ -2,8 +2,8 @@
 
 import Foundation
 
-/// Native focus reports and system foreground are independent facts. In
-/// exclusive mode a confirmed Web action may open a focus-gated modal picker;
+/// Native focus reports and system foreground are independent facts. A
+/// confirmed Web action may open a focus-gated modal picker;
 /// prepare its exact document, while retaining the original AXPress delivery.
 enum NativeActionDocumentPolicy {
     enum WebArea { case confirmed, absent, unknown }
@@ -17,19 +17,19 @@ enum NativeActionDocumentPolicy {
 
     static func preparation(
         action: String, exactStandardWindow: Bool, otherDocument: Bool, confirmedWebArea: Bool, foreground: Bool,
-        exclusive: Bool, retainedForegroundRequirement: Bool = false
+        retainedForegroundRequirement: Bool = false
     ) -> Preparation {
         guard action == "AXPress", exactStandardWindow else { return Preparation() }
-        let requiresForeground = exclusive && (confirmedWebArea || retainedForegroundRequirement)
+        let requiresForeground = confirmedWebArea || retainedForegroundRequirement
         return Preparation(
             windowSelectionRequired: otherDocument, foregroundRequired: requiresForeground,
             foregroundOnly: requiresForeground && !foreground)
     }
 
     static func foregroundEvidence(
-        action: String, document: DocumentKind, web: WebArea, foreground: Bool, exclusive: Bool
+        action: String, document: DocumentKind, web: WebArea, foreground: Bool
     ) -> NativeClickContract.DocumentForeground {
-        guard action == "AXPress", exclusive else { return .notRequired }
+        guard action == "AXPress" else { return .notRequired }
         switch document {
         case .other: return .notRequired
         case .unknown: return .unconfirmed(ready: foreground)

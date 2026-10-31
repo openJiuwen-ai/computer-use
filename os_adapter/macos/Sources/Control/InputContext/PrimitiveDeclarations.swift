@@ -80,7 +80,7 @@ import ApplicationServices
         }
         primitives.append(
             unit.declaration(
-                id: contract.id, supported: supported, readiness: conditions, exclusive: BackgroundTarget.isExclusive))
+                id: contract.id, supported: supported, readiness: conditions))
     }
 
     func declareClick(_ unit: NativeInputUnit, offer sampled: NativeClickContract) {
@@ -97,9 +97,7 @@ import ApplicationServices
                 && sameProof($0.click?.popupPointer, sampled.popupPointer)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
-        var offer = sampled.retainingDocumentForeground(from: prior?.click)
-        // Legacy click-contract decoders reject even optional unknown fields.
-        if !op.clickPreferenceHints { offer.preferenceHint = nil }
+        let offer = sampled.retainingDocumentForeground(from: prior?.click)
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
             receiver: receiver, basis: basis, unit: unit, click: offer)
@@ -109,8 +107,7 @@ import ApplicationServices
         let condition = offer.preparationOptions == ["foreground"] ? "foreground" : "receiver"
         var wire = unit.declaration(
             id: contract.id, supported: supported,
-            readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]),
-            exclusive: BackgroundTarget.isExclusive)
+            readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]))
         wire["backgroundPreparation"] = offer.preparationOptions.contains("background") ? "yes" : "no"
         wire["click"] = offer.wire
         primitives.append(wire)

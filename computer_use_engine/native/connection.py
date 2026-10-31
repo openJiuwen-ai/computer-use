@@ -37,7 +37,6 @@ from computer_use.protocol.session import (
     failure_error,
 )
 
-
 requestCleanupGraceMs, driverTerminationGraceMs = 750, 1000
 
 _LOG = logging.getLogger(__name__)
@@ -173,7 +172,7 @@ class Connection:
                 kind="connection",
                 sdkVersion=SDK_VERSION,
                 platform=sys.platform,
-                desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "shared"),
+                desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "exclusive"),
                 executable=command,
                 pid=child.pid,
             )

@@ -63,7 +63,8 @@ enum NativePointerReadiness {
 
     static func ready(
         kind: NativePointerIntent.Kind, foreground: Bool, windowKind: WindowKind, focus: WindowFocus,
-        initialFocus: WindowFocus? = nil, backgroundPrepared: Bool, exclusive: Bool
+        initialFocus: WindowFocus? = nil, backgroundPrepared: Bool, backgroundWindowFocused: Bool? = nil,
+        backgroundReportedActive: Bool? = nil
     ) -> Bool {
         if foreground {
             if kind == .scroll { return true }
@@ -81,8 +82,27 @@ enum NativePointerReadiness {
             case .identityConflict: return false
             }
         }
-        return !exclusive && backgroundPrepared && windowKind != .identityConflict
+        guard backgroundPrepared else { return false }
+        switch windowKind {
+        case .identityConflict: return false
+        case .keyRequiring:
+            return backgroundReportedActive == true && focus == .target && backgroundWindowFocused == true
+        case .visualOnly: return kind == .scroll
+        case .otherDeclared: return true
+        }
     }
+}
+
+/// Delivery is explicit and independent of foreground permission or state.
+/// A missing addressed transport can select desktop input only before dispatch.
+enum NativePointerDeliveryPolicy {
+    static func delivery(_ selected: NativeClickDelivery?, windowDirectedAvailable: Bool) -> NativeClickDelivery {
+        selected ?? (windowDirectedAvailable ? .windowDirected : .systemPointer)
+    }
+
+    static func implicitDelivery(kind: NativePointerIntent.Kind, windowDirectedAvailable: Bool, receiverSupported: Bool)
+        -> NativeClickDelivery
+    { delivery(nil, windowDirectedAvailable: windowDirectedAvailable && (kind != .click || receiverSupported)) }
 }
 
 /// One selected native window route. No target search, foreground fallback,
@@ -199,27 +219,31 @@ enum NativePointerReadiness {
         // The declaration class is gesture-local. Rechecking labels for every
         // down/up would add slow provider RPCs to the event cadence. The real
         // object/process/window and physical hit remain checked for every event.
-        let declared = declaredWindow ?? (foreground && kind != .scroll ? windowKind : .visualOnly)
-        let focus = foreground && declared == .keyRequiring ? windowFocus() : .notRequired
+        let declared = declaredWindow ?? (kind != .scroll ? windowKind : .visualOnly)
+        let focus = declared == .keyRequiring ? windowFocus() : .notRequired
         let prepared =
-            !foreground && !BackgroundTarget.isExclusive
+            !foreground
             && BackgroundEvents.pointerPreparationIsCurrent(target, window: window, needsKeyWindow: kind != .scroll)
+        let backgroundFocused =
+            !foreground && declared == .keyRequiring
+            ? nativeWindow.flatMap { AXAccess.read($0, kAXFocusedAttribute).value as? Bool } : nil
         return Readiness(
             ready: NativePointerReadiness.ready(
                 kind: kind, foreground: foreground, windowKind: declared, focus: focus, initialFocus: initialFocus,
-                backgroundPrepared: prepared, exclusive: BackgroundTarget.isExclusive), foreground: foreground,
-            focus: focus, windowKind: declared)
+                backgroundPrepared: prepared, backgroundWindowFocused: backgroundFocused,
+                backgroundReportedActive: reportedActive()), foreground: foreground, focus: focus, windowKind: declared)
     }
 
     private func sampleReadiness(
         at point: CGPoint? = nil, kind: NativePointerIntent.Kind, delivery: NativeClickDelivery? = nil
     ) -> Readiness {
+        let selected = NativePointerDeliveryPolicy.delivery(
+            delivery, windowDirectedAvailable: BackgroundEvents.capabilities.windowDirectedTransport)
         let foregroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let hit = foregroundPID == application.processIdentifier ? inputWindowHit(at: point) : nil
         let foreground = foregroundPID == application.processIdentifier && hit?.windowID == window.id
         var result: Readiness
-        if (delivery == .systemPointer && !foreground) || (delivery == .windowDirected && BackgroundTarget.isExclusive)
-        {
+        if selected == .systemPointer && !foreground {
             result = Readiness(ready: false, foreground: foreground, focus: .notRequired, windowKind: .visualOnly)
         } else {
             result = contentReadiness(foreground: foreground, kind: kind)
@@ -254,8 +278,8 @@ enum NativePointerReadiness {
     func physicalClickSample(at point: CGPoint) -> PhysicalClickSample {
         let value = sampleReadiness(at: point, kind: .click, delivery: .systemPointer)
         return .init(
-            ready: value.ready, foreground: value.foreground, hit: value.hit,
-            windowKind: value.windowKind, focus: value.focus)
+            ready: value.ready, foreground: value.foreground, hit: value.hit, windowKind: value.windowKind,
+            focus: value.focus)
     }
 
     private func diagnoseReadiness(_ value: Readiness, at point: CGPoint, phase: String) {
@@ -274,6 +298,71 @@ enum NativePointerReadiness {
         ])
     }
 
+    func hasAddressedPointerReceiver(at point: CGPoint) throws -> Bool {
+        guard let nativeWindow else { return false }
+        try RequestDiagnostics.checkCancellation()
+        var hit: AXUIElement?
+        let status = AXUIElementCopyElementAtPosition(
+            AXUIElementCreateApplication(window.pid), Float(point.x), Float(point.y), &hit)
+        try RequestDiagnostics.checkCancellation()
+        guard status == .success, let hit, !CFEqual(hit, nativeWindow) else {
+            diagnose([
+                "kind": "pointer_receiver_evidence", "window": window.id, "queryStatus": status.rawValue,
+                "nativeType": "AXUIElement", "supported": false, "reason": "no concrete control at the original point"
+            ])
+            return false
+        }
+        let role = AXAccess.read(hit, kAXRoleAttribute).value as? String
+        var rawActions: CFArray?
+        let actionStatus = AXUIElementCopyActionNames(hit, &rawActions)
+        let actions = actionStatus == .success ? rawActions as? [String] : nil
+        let text = [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role ?? "")
+        let ranged = [kAXSliderRole, kAXIncrementorRole].contains(role ?? "")
+        let evidence = NativeAddressedPointerReceiver(
+            role: role, actions: actions,
+            focusWritable: text && AXAccess.writable(hit, kAXFocusedAttribute).value == true,
+            selectedTextWritable: text && AXAccess.writable(hit, kAXSelectedTextAttribute).value == true,
+            valueWritable: ranged && AXAccess.writable(hit, kAXValueAttribute).value == true)
+        let owner = WindowGeometry.owningWindow(hit, pid: window.pid, in: nativeWindow)
+        let within = owner.map { CFEqual($0, nativeWindow) } == true
+        let supported = evidence.supported && within
+        diagnose([
+            "kind": "pointer_receiver_evidence", "window": window.id, "queryStatus": status.rawValue,
+            "nativeType": "AXUIElement", "role": role as Any? ?? NSNull(), "actions": actions as Any? ?? NSNull(),
+            "actionStatus": actionStatus.rawValue, "sameWindow": within, "supported": supported,
+            "reason": supported ? "concrete control with advertised interaction" : "no addressed interaction capability"
+        ])
+        return supported
+    }
+
+    func resolvedDelivery(_ selected: NativeClickDelivery?, at point: CGPoint, kind: NativePointerIntent.Kind) throws
+        -> NativeClickDelivery
+    {
+        if let selected { return selected }
+        let transport = BackgroundEvents.capabilities.windowDirectedTransport
+        let receiver = try kind != .click || transport && hasAddressedPointerReceiver(at: point)
+        return NativePointerDeliveryPolicy.implicitDelivery(
+            kind: kind, windowDirectedAvailable: transport, receiverSupported: receiver)
+    }
+
+    private func reportedActive() -> Bool? {
+        let root = AXUIElementCreateApplication(window.pid)
+        AXUIElementSetMessagingTimeout(root, 0.1)
+        return AXAccess.read(root, kAXFrontmostAttribute).value as? Bool
+    }
+
+    func backgroundPreparationAvailable(kind: NativePointerIntent.Kind = .click) -> Bool {
+        if target.isForeground || kind == .scroll { return true }
+        switch windowKind {
+        case .keyRequiring, .otherDeclared:
+            // A live internal receiver can be prepared without changing the
+            // system foreground. Dispatch rechecks that receiver independently
+            // of the synthetic transport-preparation record.
+            return true
+        case .visualOnly, .identityConflict: return false
+        }
+    }
+
     func ready(at point: CGPoint? = nil, kind: NativePointerIntent.Kind = .click, delivery: NativeClickDelivery? = nil)
         -> Bool
     { sampleReadiness(at: point, kind: kind, delivery: delivery).ready }
@@ -285,14 +374,15 @@ enum NativePointerReadiness {
     /// A context receipt never authorizes pointer delivery on its own.
     func prepareWindowContext(
         foreground: Bool, atNative point: CGPoint, kind: NativePointerIntent.Kind = .click,
-        check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
-        onCleanupUnknown: @escaping @MainActor () -> Void
+        delivery: NativeClickDelivery? = nil, check: @escaping @MainActor () throws -> Void,
+        onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws -> WindowPreparationOutcome {
         try check()
         try target.validate(input: true)
         try BackgroundTarget.validateReleasedInput()
         try validateWindowIdentity()
-        let initial = sampleReadiness(at: point, kind: kind)
+        let selected = try resolvedDelivery(delivery, at: point, kind: kind)
+        let initial = sampleReadiness(at: point, kind: kind, delivery: selected)
         diagnoseReadiness(initial, at: point, phase: "beforePreparation")
         try check()
         if initial.ready { return .alreadyReady }
@@ -305,6 +395,10 @@ enum NativePointerReadiness {
                 target, window: window.id, pointerAt: kind != .scroll && windowKind == .keyRequiring ? nil : point,
                 onAction: { onPreparation("foreground window activation") }, onCleanupUnknown: onCleanupUnknown)
         } else {
+            guard selected != .systemPointer && backgroundPreparationAvailable(kind: kind) else {
+                throw NativePreparationUnavailable(
+                    description: "the native content receiver needs foreground preparation; no pointer event sent")
+            }
             do {
                 try await NativeFocusPipeline.prepare(
                     target, window: window, nativeWindow: nativeWindow, needsKeyWindow: kind != .scroll,
@@ -322,8 +416,11 @@ enum NativePointerReadiness {
 
     /// QUERY: validate the caller's current point, without another activation,
     /// input event or preparation attempt.
-    func requirePointReadiness(atNative point: CGPoint, kind: NativePointerIntent.Kind = .click) throws {
-        let prepared = sampleReadiness(at: point, kind: kind)
+    func requirePointReadiness(
+        atNative point: CGPoint, kind: NativePointerIntent.Kind = .click, delivery: NativeClickDelivery? = nil
+    ) throws {
+        let selected = try resolvedDelivery(delivery, at: point, kind: kind)
+        let prepared = sampleReadiness(at: point, kind: kind, delivery: selected)
         diagnoseReadiness(prepared, at: point, phase: "afterPreparation")
         guard prepared.ready else {
             throw NativePreparationUnavailable(description: "pointer route is not ready; no pointer event sent")
@@ -333,13 +430,14 @@ enum NativePointerReadiness {
     /// Coordinate input keeps its original point and preparation/query order.
     func prepare(
         foreground: Bool, atNative point: CGPoint, kind: NativePointerIntent.Kind = .click,
-        check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
-        onCleanupUnknown: @escaping @MainActor () -> Void
+        delivery: NativeClickDelivery? = nil, check: @escaping @MainActor () throws -> Void,
+        onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
+        let selected = try resolvedDelivery(delivery, at: point, kind: kind)
         let outcome = try await prepareWindowContext(
-            foreground: foreground, atNative: point, kind: kind, check: check, onPreparation: onPreparation,
-            onCleanupUnknown: onCleanupUnknown)
-        if outcome == .contextPrepared { try requirePointReadiness(atNative: point, kind: kind) }
+            foreground: foreground, atNative: point, kind: kind, delivery: selected, check: check,
+            onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
+        if outcome == .contextPrepared { try requirePointReadiness(atNative: point, kind: kind, delivery: selected) }
     }
 
     func point(_ pixel: CGPoint) throws -> CGPoint {
@@ -386,15 +484,15 @@ enum NativePointerReadiness {
         try target.validate(input: true)
         try BackgroundTarget.validateReleasedInput()
         try validateWindowIdentity()
-        let initial = sampleReadiness(at: start, kind: request.kind, delivery: delivery)
+        let selected = try resolvedDelivery(delivery, at: start, kind: request.kind)
+        let initial = sampleReadiness(at: start, kind: request.kind, delivery: selected)
         try check()
         guard initial.ready else { throw DriverError("pointer route changed before dispatch", code: .inputUnavailable) }
-        // Freeze one route for the entire gesture. A visible foreground target
-        // receives ordinary HID input (including the global pointer position
-        // some toolkits poll). Background windows remain process-addressed;
-        // this branch never activates, retries or changes desktop mode.
+        // Freeze one delivery for the entire gesture. Window-addressed input
+        // remains addressed after activation; foreground state is not authority
+        // to move the user's pointer. Explicit desktop delivery remains global.
         let source = try Input.source()
-        let global = delivery.map { $0 == .systemPointer } ?? (BackgroundTarget.isExclusive || initial.foreground)
+        let global = selected == .systemPointer
         if !global { try BackgroundEvents.requirePointerRoute(window: window) }
         guard let process = NativeProcessIdentity.read(window.pid) else {
             throw DriverError("pointer recipient disappeared", code: .staleTarget)
@@ -479,7 +577,7 @@ enum NativePointerReadiness {
                     foreground: foregroundWindow(at: point), kind: request.kind, declaredWindow: initial.windowKind,
                     initialFocus: initial.focus)
                 try check()
-                guard !BackgroundTarget.isExclusive, current.ready else {
+                guard current.ready else {
                     throw DriverError("background pointer route changed", code: .inputUnavailable)
                 }
             }

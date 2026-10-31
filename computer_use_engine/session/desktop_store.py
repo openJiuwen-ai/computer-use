@@ -74,13 +74,6 @@ class DesktopStore:
                 "stale_target",
                 "Desktop",
             )
-        if state["observation"]["mode"] != "exclusive":
-            raise local_failure(
-                "desktop input requires exclusive mode",
-                "use App/Element operations in shared mode; desktop mode is host configuration",
-                "mode_unsupported",
-                "Desktop",
-            )
         if coordinates:
             if state.get("screenshot") is None:
                 raise local_failure(

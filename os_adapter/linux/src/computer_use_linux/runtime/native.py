@@ -333,11 +333,6 @@ class NativeExecution:
             )
             if not launch and target["capture"] is not None:
                 self.captures.input(target)
-                require(
-                    target["surface"] is not None or self.b.mode == "exclusive",
-                    "Desktop-wide input requires exclusive mode.",
-                    "mode_unsupported",
-                )
             self.expire()
             require(self.current is None, "Another native operation is active.")
             if not launch and target["surface"] is not None:

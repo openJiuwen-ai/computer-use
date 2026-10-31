@@ -8,6 +8,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from computer_use.interaction.read.presentation.policy import SUPPORTING_ACTIONS
+from computer_use.protocol.observation.issues import ReadIssueIndex
+
 from .model import GroupDisclosureRequest
 
 PASSIVE_ROLES = frozenset(
@@ -29,7 +31,7 @@ RECORD_ROLES = frozenset(("row", "list_item"))
 OUTLINE_ROLES = frozenset(("heading", "section", "group", "list", "document"))
 
 
-def source_protections(request: GroupDisclosureRequest, ref: str) -> tuple[str, ...]:
+def source_protections(request: GroupDisclosureRequest, ref: str, issues: ReadIssueIndex) -> tuple[str, ...]:
     """Return explicit reasons a source must remain directly represented in full text."""
     snapshot, interface = request.snapshot, request.interface
     token = snapshot.refs.get(ref)
@@ -111,7 +113,7 @@ def source_protections(request: GroupDisclosureRequest, ref: str) -> tuple[str, 
         reasons.append("additional-native-meaning")
     if any(
         issue.path[:2] == ("nodes", token) and issue.state not in ("absent", "unsupported")
-        for issue in snapshot.native.issues
+        for issue in issues.for_node(token)
     ):
         reasons.append("native-uncertainty")
     if view.get("error") or view.get("invalid") or view.get("blockedBy") or view.get("modified") or view.get("unsaved"):

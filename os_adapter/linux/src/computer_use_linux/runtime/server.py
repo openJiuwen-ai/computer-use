@@ -150,7 +150,7 @@ class Server:
                 fields(raw, ("version", "id", "method", "params"))
                 require(self.backend is None and raw["method"] == "hello", "Expected one hello.")
                 fields(raw["params"], ("desktopMode",))
-                require(raw["params"]["desktopMode"] in ("shared", "exclusive"), "Invalid desktop mode.")
+                require(raw["params"]["desktopMode"] == "exclusive", "Invalid desktop mode.")
                 ctx.check()
                 self.version = raw["version"]
                 self.backend = self.factory(raw["params"]["desktopMode"], self.stopped)

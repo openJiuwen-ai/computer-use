@@ -16,6 +16,8 @@ import ApplicationServices
         NativeElementPointerUnit(application: application, window: window, element: element)
     }
 
+    func backgroundPreparationAvailable() throws -> Bool { try pointer.backgroundPreparationAvailable() }
+
     func readiness() throws -> NativeReadiness {
         if try NativeReceiverSnapshot.read(application: application, window: window, receiverRelation: receiverRelation)
             .receives(element)
@@ -27,7 +29,7 @@ import ApplicationServices
             return NativeReadiness()
         }
         let facts = try pointer.conditions()
-        return facts.geometry ? NativeReadiness([("receiver", "no")]) : NativeReadiness([("geometry", "unknown")])
+        return facts.readiness.awaitingReceiver()
     }
 
     private func selection() -> CFRange? {

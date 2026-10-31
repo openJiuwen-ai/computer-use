@@ -13,9 +13,13 @@ Resolve relative dates and times using the MCP host's Python clock and timezone,
 unless the user specifies another timezone.
 Discover apps, observe the relevant App/Window, and use observed element references
 or screenshot coordinates. Await every SDK operation. Reads present observations
-automatically; use print for other values. Use view='both' when visual information
-is needed. Coordinate spaces belong to the object that supplied the screenshot.
-After an operation, observe the relevant UI to establish its actual effect.
+automatically; use print for other values. Use view='image' for a visual check,
+or view='both' when both the tree and image are needed. Coordinate spaces belong
+to the object that supplied the screenshot.
+After an operation, read the relevant UI immediately to establish its actual effect.
+Wait again when that observation reports loading or an unfinished transition.
+Prefer the relevant window or subtree in the default tree view; request an image
+when visual information is needed.
 dispatched means input was sent; verified describes only the operation's stated
 verification. Neither alone proves that the user's overall task is complete.
 On failure, use the error's effect and current observation to decide the next step.

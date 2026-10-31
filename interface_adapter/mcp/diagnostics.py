@@ -86,7 +86,7 @@ class Journal:
                     sdkVersion=SDK_VERSION,
                     platform=sys.platform,
                     python=sys.version.split()[0],
-                    desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "shared"),
+                    desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "exclusive"),
                 )
             )
         except Exception as error:

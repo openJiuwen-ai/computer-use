@@ -407,7 +407,7 @@ namespace ComputerUse.Windows
                                       "release held input before continuing");
         }
 
-        internal static void Foreground(Window window, bool allowed, Request r, bool exclusiveRecovery = false,
+        internal static void Foreground(Window window, bool allowed, Request r, bool allowRecovery = false,
                                         Action validate = null)
         {
             window.Validate();
@@ -424,8 +424,8 @@ namespace ComputerUse.Windows
             if (!allowed)
                 throw new Failure(
                     "input_unavailable",
-                    "this route needs the target foreground window; strict shared mode did not activate it",
-                    "ask the host to enable COMPUTER_USE_FOREGROUND_ASSIST=1, or use a supported background control action");
+                    "this route needs the target foreground window; foreground preparation was not selected",
+                    "use a supported background control action or select foreground preparation");
             NativeDesktopState.RequireInput();
             Released();
             r.Check();
@@ -456,7 +456,7 @@ namespace ComputerUse.Windows
                 window.Validate();
             }
 
-            if (GetForegroundWindow() != h && exclusiveRecovery && !r.Dispatched)
+            if (GetForegroundWindow() != h && allowRecovery && !r.Dispatched)
                 NativeForegroundRecovery.RestoreBeforeFocus(window, r, validate);
             string focusFailure = null;
             double focusMs = 0;
@@ -472,7 +472,7 @@ namespace ComputerUse.Windows
                 {
                     var currentForeground = GetForegroundWindow();
                     bool recoveringHidden =
-                        exclusiveRecovery && currentForeground != IntPtr.Zero && !IsWindowVisible(currentForeground);
+                        allowRecovery && currentForeground != IntPtr.Zero && !IsWindowVisible(currentForeground);
                     if (!recoveringHidden)
                         UiaElement.FromHandle(h).SetFocus();
                     else
@@ -509,7 +509,7 @@ namespace ComputerUse.Windows
             }
 
             window.Validate();
-            if (GetForegroundWindow() != h && exclusiveRecovery && !r.Dispatched)
+            if (GetForegroundWindow() != h && allowRecovery && !r.Dispatched)
             {
                 try
                 {

@@ -106,34 +106,32 @@ def _copy_collections(value: Any, *, immutable: bool) -> Any:
         return value
     completed: dict[int, Any] = {}
     active: set[int] = set()
-    pending: list[tuple[Any, bool]] = [(value, False)]
+    pending = [(value, category(value), None, None)]
     while pending:
-        current, finish = pending.pop()
+        current, kind, local, children = pending.pop()
         identity = id(current)
         if identity in completed:
             continue
-        kind = category(current)
-        if not finish:
+        if local is None:
             if identity in active:
                 raise ValueError("Captured presentation facts contain a collection cycle")
             active.add(identity)
-            pending.append((current, True))
-            children = current.values() if kind == mapping else current
-            pending.extend((child, False) for child in reversed(tuple(children)) if category(child))
+            local = dict(current) if kind == mapping else list(current)
+            items = local.items() if kind == mapping else enumerate(local)
+            # Atomic values already have their final identity in the shallow
+            # copy. Visit only nested collections, once per original edge.
+            children = [(key, child, child_kind) for key, child in items if (child_kind := category(child))]
+            pending.append((current, kind, local, children))
+            pending.extend((child, child_kind, None, None) for _, child, child_kind in reversed(children))
             continue
-
-        def copied(item: Any) -> Any:
-            return completed[id(item)] if category(item) else item
-
+        for key, child, _ in children:
+            local[key] = completed[id(child)]
         if kind == mapping:
-            mapping_copy = {key: copied(item) for key, item in current.items()}
-            completed[identity] = MappingProxyType(mapping_copy) if immutable else mapping_copy
+            completed[identity] = MappingProxyType(local) if immutable else local
         elif kind == setlike:
-            copied_items = (copied(item) for item in current)
-            completed[identity] = frozenset(copied_items) if immutable else set(copied_items)
+            completed[identity] = frozenset(local) if immutable else set(local)
         else:
-            sequence_copy = [copied(item) for item in current]
-            completed[identity] = tuple(sequence_copy) if immutable else sequence_copy
+            completed[identity] = tuple(local) if immutable else local
         active.remove(identity)
     return completed[id(value)]
 

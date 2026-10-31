@@ -88,16 +88,12 @@ class EligibleRoutes:
 
 @dataclass(frozen=True)
 class RouteOptions:
-    """Candidate preparation modes and the command chosen by route selection.
+    """Eligible routes and the command chosen by route selection.
 
     Attributes:
         eligible: Filtered candidates and their original request.
-        preparation: Candidate command and whether it requires foreground input.
-        property_replacements: Eligible object-property replacement commands.
         selected: One chosen command, or None before a branch selects one.
     """
 
     eligible: EligibleRoutes
-    preparation: tuple[tuple[UnitCommand, bool], ...] = ()
-    property_replacements: tuple[UnitCommand, ...] = ()
     selected: UnitCommand | None = None

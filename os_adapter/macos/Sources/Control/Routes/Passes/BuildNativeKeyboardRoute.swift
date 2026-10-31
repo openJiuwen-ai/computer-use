@@ -42,8 +42,7 @@ import ApplicationServices
                     if try unit.backgroundTextTransportUnavailable(keyboard, textPolicy: textPolicy) {
                         try op.recordBackgroundMechanismUnavailable(id)
                     }
-                    try op.requireForegroundPreparation(
-                        id, hostAllowed: ForegroundAssist.enabled || BackgroundTarget.isExclusive)
+                    try op.requireForegroundPreparation(id)
                 }
                 try await unit.prepare(
                     keyboard, replacement: replacement, foreground: foreground, textPolicy: textPolicy,

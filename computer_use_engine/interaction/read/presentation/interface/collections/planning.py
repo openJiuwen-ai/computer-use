@@ -19,9 +19,10 @@ from computer_use.interaction.read.presentation.interface.collections.model impo
     TablePlan,
     TableRowPlan,
 )
-from computer_use.interaction.read.presentation.interface.collections.sharing import passive_cell_chain, share_prefixes
 from computer_use.interaction.read.presentation.interface.collections.outline import select_outline_layout
+from computer_use.interaction.read.presentation.interface.collections.sharing import passive_cell_chain, share_prefixes
 from computer_use.protocol.observation import NativeNode
+from computer_use.protocol.observation.issues import ReadIssueIndex
 
 
 def _nonnegative(value: object) -> int | None:
@@ -37,6 +38,7 @@ class _Source:
         self.aliases = {token: ref for ref, token in request.refs.items() if counts[token] == 1}
         self.nodes = request.interface.projected_nodes
         self.atoms = request.atoms.atoms
+        self.issues = ReadIssueIndex(request.native.issues)
 
     def native(self, ref: str) -> NativeNode | None:
         token = self.request.refs.get(ref)
@@ -49,9 +51,7 @@ class _Source:
             return False
         path = ("nodes", token, *field)
         return not any(
-            (issue.path[: len(path)] == path or path[: len(issue.path)] == issue.path)
-            and not (issue.path == ("nodes",) and issue.state == "partial")
-            for issue in self.request.native.issues
+            not (issue.path == ("nodes",) and issue.state == "partial") for issue in self.issues.overlapping(path)
         )
 
     def relation(self, ref: str, kind: str, *, allow_prefix: bool = False) -> tuple[str, ...] | None:
@@ -72,10 +72,9 @@ class _Source:
         clean = self.clean(ref, "relations", key)
         if allow_prefix:
             clean = not any(
-                (issue.path[: len(prefix)] == prefix or prefix[: len(issue.path)] == issue.path)
-                and not (issue.path == ("nodes",) and issue.state == "partial")
+                not (issue.path == ("nodes",) and issue.state == "partial")
                 and not (issue.path == prefix and issue.state == "partial")
-                for issue in self.request.native.issues
+                for issue in self.issues.overlapping(prefix)
             )
         if (
             not clean
@@ -153,7 +152,8 @@ class _Source:
             and issue.path[0] == "nodes"
             and issue.path[1] in tokens
             and (len(issue.path) == 2 or issue.path[2] in ("role", "structure", "relations"))
-            for issue in self.request.native.issues
+            for token in tokens
+            for issue in self.issues.for_node(token)
         )
 
 

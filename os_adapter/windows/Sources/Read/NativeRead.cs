@@ -30,7 +30,6 @@ namespace ComputerUse.Windows
     internal sealed class NativeReadBackend : INativeReadBackend, INativeReadPreparation, INativeReadEventBackend
     {
         readonly string session;
-        readonly string mode;
         readonly NativeReadStore store;
         readonly NativeRootProbe rootProbe = new NativeRootProbe();
         readonly NativeCapturedText texts = new NativeCapturedText();
@@ -102,18 +101,17 @@ namespace ComputerUse.Windows
         readonly NativeReadEvents events = new NativeReadEvents();
         List<string> observationNotes;
         readonly Action<string> trace;
-        internal NativeReadBackend(string session, Action<string> trace = null, string mode = "shared",
+        internal NativeReadBackend(string session, Action<string> trace = null,
                                    NativeReadStore retainedStore = null)
         {
             this.session = session;
             this.trace = trace;
-            this.mode = mode;
             store = retainedStore ?? new NativeReadStore();
         }
 
         public bool NeedsPreparation(Dictionary<string, object> target)
         {
-            return mode == "exclusive" && target["surface"] != null;
+            return target["surface"] != null;
         }
 
         public void PrepareRead(Dictionary<string, object> target, Request r, bool activate)
@@ -141,7 +139,7 @@ namespace ComputerUse.Windows
             {
                 try
                 {
-                    Native.Foreground(selected.Native, true, r, mode == "exclusive" && activate,
+                    Native.Foreground(selected.Native, true, r, activate,
                                       () => store.Validate(target, r, true));
                 }
                 catch (Failure error)

@@ -5,14 +5,14 @@ using System;
 namespace ComputerUse.Windows
 {
     // PURE: physical reachability and foreground identity are independent.
-    // The first rollout permits only one requested left click in exclusive
-    // mode, without an additional activation gesture. Other routes stay strict.
+    // Only one requested left click may naturally activate its destination,
+    // without an additional activation gesture. Other routes stay strict.
     internal static class NativePointerClickAdmission
     {
-        internal static bool NaturalActivation(string mode, NativePointerGestureIntent gesture, bool physicalReady,
+        internal static bool NaturalActivation(NativePointerGestureIntent gesture, bool physicalReady,
                                                bool originalRootHit, bool inputIdle)
         {
-            return mode == "exclusive" && gesture != null && gesture.CanActivateWindow && physicalReady &&
+            return gesture != null && gesture.CanActivateWindow && physicalReady &&
                    originalRootHit && inputIdle;
         }
         internal static bool ElementScopeAllowsNatural(string[] within)

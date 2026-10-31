@@ -282,7 +282,7 @@ namespace ComputerUse.Windows
                         selected = selection();
                         if (!selected.Empty)
                             keyboard.SendBatch(
-                                operation, NativeKeys.Chord("BackSpace", "shared"), r, result,
+                                operation, NativeKeys.Chord("BackSpace"), r, result,
                                 () =>
                                 {
                                     var latest = selection();

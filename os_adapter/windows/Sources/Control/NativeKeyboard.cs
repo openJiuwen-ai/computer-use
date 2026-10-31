@@ -36,7 +36,7 @@ namespace ComputerUse.Windows
                                              { "/", 0xBF },
                                              { "`", 0xC0 } };
         // Validate the entire chord before any focus preparation or key down.
-        internal static NativeKeyEvent[] Chord(string key, string mode)
+        internal static NativeKeyEvent[] Chord(string key)
         {
             if (key.Length > 128)
                 throw new Failure("invalid_request", "key chord is too long");
@@ -70,10 +70,6 @@ namespace ComputerUse.Windows
                 modifiers.Add(modifier);
             }
 
-            if (mode == "shared" && (code == 91 || modifiers.Contains(91) ||
-                                     modifiers.Contains(18) && new ushort[] { 9, 27 }.Contains(code) ||
-                                     modifiers.Contains(17) && code == 27))
-                throw new Failure("mode_unsupported", "system-wide shortcut requires exclusive mode");
             return modifiers.Select(m => new NativeKeyEvent(m, false))
                 .Concat(new[] { new NativeKeyEvent(code, false), new NativeKeyEvent(code, true) })
                 .Concat(modifiers.AsEnumerable().Reverse().Select(m => new NativeKeyEvent(m, true)))
@@ -86,8 +82,6 @@ namespace ComputerUse.Windows
     internal sealed class NativeKeyboard
     {
         readonly INativeKeyboardProvider provider;
-        readonly string mode;
-        readonly bool foregroundAllowed;
         readonly INativeKeyboardTextProvider textProvider;
         readonly INativeClipboardProvider clipboard;
         readonly NativePreparePipeline preparationPipeline;
@@ -105,17 +99,12 @@ namespace ComputerUse.Windows
             }
         }
 
-        internal NativeKeyboard(INativeKeyboardProvider provider, string mode, bool foregroundAssist,
-                                INativeClipboardProvider clipboard = null)
+        internal NativeKeyboard(INativeKeyboardProvider provider, INativeClipboardProvider clipboard = null)
         {
-            if (mode != "shared" && mode != "exclusive")
-                throw new ArgumentException("invalid desktop mode");
             this.provider = provider;
-            this.mode = mode;
-            foregroundAllowed = mode == "exclusive" || foregroundAssist;
             textProvider = provider as INativeKeyboardTextProvider;
             this.clipboard = clipboard;
-            preparationPipeline = new NativePreparePipeline(provider, mode, foregroundAllowed, Guard);
+            preparationPipeline = new NativePreparePipeline(provider, Guard);
         }
 
         internal void ValidateIntent(Dictionary<string, object> intent)
@@ -127,7 +116,7 @@ namespace ComputerUse.Windows
             else if (kind == "key")
             {
                 Wire.Keys(p, "key");
-                NativeKeys.Chord(Wire.Str(p, "key"), mode);
+                NativeKeys.Chord(Wire.Str(p, "key"));
             }
             else if (SupportsText && (kind == "insert" || kind == "replace"))
             {
@@ -336,7 +325,7 @@ namespace ComputerUse.Windows
                         NativeTypedText.Send(this, textProvider, operation, contract, r, result, preparation);
                     else
                     {
-                        var events = NativeKeys.Chord((string)Wire.Object(operation.Intent["parameters"])["key"], mode);
+                        var events = NativeKeys.Chord((string)Wire.Object(operation.Intent["parameters"])["key"]);
                         SendBatch(operation, events, r, result,
                                   () =>
                                   {

@@ -17,7 +17,6 @@ namespace ComputerUse.Windows
         readonly NativeReadStore store;
         readonly NativeUiaBoundary boundary;
         readonly NativePointer pointer;
-        readonly string mode;
         readonly INativeCharacterMessagePort characterMessages;
         sealed class Target
         {
@@ -26,13 +25,12 @@ namespace ComputerUse.Windows
             internal Dictionary<string, object> Binding;
             internal string[] Within;
         }
-        internal NativeUiaKeyboard(NativeReadStore store, NativePointer pointer = null, string mode = "shared",
+        internal NativeUiaKeyboard(NativeReadStore store, NativePointer pointer = null,
                                    INativeCharacterMessagePort characterMessages = null)
         {
 
             this.store = store;
             this.pointer = pointer;
-            this.mode = mode;
             this.characterMessages = characterMessages ?? NativeCharacterWin32.Messages;
             boundary = new NativeUiaBoundary(store);
         }
@@ -222,7 +220,7 @@ namespace ComputerUse.Windows
             // This unit is reached only after Python and NativeKeyboard have
             // authorized foreground preparation, before requested input. Use
             // the existing bounded Win32/UIA window activation helper.
-            Native.Foreground(target.Window.Native, true, r, mode == "exclusive", () => ValidateTarget(target, r));
+            Native.Foreground(target.Window.Native, true, r, true, () => ValidateTarget(target, r));
             ValidateTarget(target, r);
         }
 
@@ -239,7 +237,7 @@ namespace ComputerUse.Windows
             RequireIdle(new NativeKeyEvent[0], r);
             ValidateTarget(target, r);
             // SetFocus providers can activate a window. Never call it to probe
-            // an inactive window under strict shared policy.
+            // an inactive window before foreground preparation is selected.
             if (Native.GetForegroundWindow() != target.Window.Native.Handle)
                 throw new Failure("input_unavailable",
                                   "the selected window is no longer foreground; no focus request sent");

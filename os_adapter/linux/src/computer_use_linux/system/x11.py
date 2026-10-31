@@ -26,7 +26,7 @@ class X11:
     notes = []
     _resource_version = _RESOURCE_UNQUERIED
 
-    def __init__(self, mode, retire):
+    def __init__(self, retire):
         if os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
             raise Failure(
                 "This backend currently requires an X11 desktop; XWayland is not a complete desktop route.",
@@ -44,11 +44,10 @@ class X11:
         self.d = display.Display()
         self.screen = self.d.screen()
         self.root = self.screen.root
-        self.mode, self.retire = mode, retire
+        self.retire = retire
         self.keys, self.buttons = set(), set()
         self.watched = set()
         self.window_captures = None
-        self.assist = os.environ.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1"
         self.can_input = self.d.has_extension("XTEST")
         self.root.change_attributes(event_mask=X.SubstructureNotifyMask)
         self.d.sync()
@@ -217,25 +216,11 @@ class X11:
         w = self.validate(instance)
         if not w.mapped:
             raise Failure("Window is not visible; restore it before using visual input.", "input_unavailable")
-        if pointer and self.mode == "shared" and not self.assist:
-            raise Failure(
-                (
-                    "X11 pointer input moves the shared pointer. Use a native element action or "
-                    "authorize foreground "
-                    "assistance."
-                ),
-                "mode_unsupported",
-            )
         if pointer and w.override_redirect:
             # Menus/tooltips are not managed keyboard-focus windows. Pointer
             # routing uses their actual topmost hit target, never keyboard focus.
             return w
         if self.active() != w.key or not self.focus_belongs(w.key):
-            if self.mode != "exclusive" and not self.assist:
-                raise Failure(
-                    "No background keyboard route to this window. Native element text input may still work.",
-                    "mode_unsupported",
-                )
             self.activate(w, ctx)
         self.validate(instance)
         return w
@@ -260,7 +245,7 @@ class X11:
     def expose(self, instance, point, ctx, *, is_reachable=None):
         """Request the selected window's exposure for pointer input, not keys.
 
-        The caller owns mode admission and records the preparation attempt.
+        The caller selects exposure and records the preparation attempt.
         A window can receive pointer input without owning keyboard focus. Its
         current hit route, checked after the activation request, is the relevant
         readiness fact. Capture/element identity and geometry are checked again
@@ -757,7 +742,7 @@ class X11:
             else:
                 self.release(event_progress=event_progress)
 
-    # The legacy pointer adapter forwards the same atomic gesture and validation contract.
+    # Forward the same atomic gesture and validation contract.
     # pylint: disable-next=too-many-arguments
     def pointer(
         self,
@@ -772,12 +757,6 @@ class X11:
         before_dispatch=lambda: None,
         validate_drag=None,
     ):
-        # v3 keeps its historical shared-pointer policy. v5's explicit contract
-        # authorizes the sequence and handles blocked routes before reaching it.
-        if self.mode == "shared" and not self.assist:
-            raise Failure(
-                "Shared X11 visual pointer input requires host foreground-assist authorization.", "mode_unsupported"
-            )
         return self.pointer_sequence(
             kind,
             points,

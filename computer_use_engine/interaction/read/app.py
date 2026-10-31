@@ -199,6 +199,7 @@ class NativeAppReader:
         on_scope: Callable[[RunningApplication | WorkingWindow], None] | None = None,
         view: str = "both",
         overview: bool = True,
+        source_directory: DirectoryFacts | None = None,
     ) -> AppObservation | MenuAppObservation:
         """Read an application through request, acquisition and delivery pipelines.
 
@@ -214,6 +215,7 @@ class NativeAppReader:
             on_scope: Callback that retains the established running/working scope in its
                 existing owner.
             view: Requested observation components: tree, image, or both.
+            source_directory: Directory just resolved for this fixed working window.
         """
         from computer_use.interaction.read.app_read.model import ReadRequest
         from computer_use.interaction.read.pipeline import ApplicationObservationPipeline
@@ -231,6 +233,7 @@ class NativeAppReader:
             on_scope,
             view,
             overview,
+            source_directory,
         )
         return await ApplicationObservationPipeline(self).arun(request)
 

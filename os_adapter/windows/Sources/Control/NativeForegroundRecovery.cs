@@ -9,7 +9,7 @@ using System.Text;
 
 namespace ComputerUse.Windows
 {
-    // A last preparation step for an exclusive desktop, never a replay of the
+    // A last step of selected foreground preparation, never a replay of the
     // requested input. Normal activation must already have failed. The shell
     // owns its menu; only a verified surface opened here receives Escape.
     internal static class NativeForegroundRecovery
@@ -46,9 +46,9 @@ namespace ComputerUse.Windows
             internal abstract void Wait();
         }
 
-        internal static bool Try(bool exclusive, Request r, Host host)
+        internal static bool Try(Request r, Host host)
         {
-            if (!exclusive || r.Dispatched || r.ForegroundRecoveryAttempted)
+            if (r.Dispatched || r.ForegroundRecoveryAttempted)
                 return false;
             r.Check();
             host.Guard(false);
@@ -234,7 +234,7 @@ namespace ComputerUse.Windows
 
         internal static bool Restore(Window target, Request r, Action validate)
         {
-            return Try(true, r, new Live(target, r, validate));
+            return Try(r, new Live(target, r, validate));
         }
 
         internal static bool PreferShell(Surface foreground)
@@ -248,8 +248,8 @@ namespace ComputerUse.Windows
             // UIA SetFocus took two seconds in this measured refusal, even
             // with TransactionTimeout=250. The hidden foreground is never an
             // input recipient. Only the independently verified shell/menu can
-            // receive preparation, under Try's full exclusive/identity guards.
-            return PreferShell(host.Foreground()) && Try(true, r, host);
+            // receive preparation, under the same request/identity guards.
+            return PreferShell(host.Foreground()) && Try(r, host);
         }
 
         sealed class Live : Host

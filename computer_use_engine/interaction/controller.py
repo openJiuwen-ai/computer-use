@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast, overload
 
@@ -67,9 +66,7 @@ class SessionController:
             if port is not None
             else Connection(self.invalidate, protocol_version=NATIVE_PROTOCOL_VERSION)
         )
-        self.port = port or ConnectionPort(
-            self.transport, HostPolicy(desktop_mode(), os.environ.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1")
-        )
+        self.port = port or ConnectionPort(self.transport, HostPolicy(desktop_mode()))
         self.reader, self.desktop_reader = NativeAppReader(self.port), NativeDesktopReader(self.port)
         self.engine, self.pages = Engine(self.port), ContentPages()
         self.pipeline = SessionPipeline(self)

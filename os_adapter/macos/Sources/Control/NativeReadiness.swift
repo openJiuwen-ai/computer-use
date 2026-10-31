@@ -5,13 +5,24 @@
 struct NativeReadiness {
     let state: String
     let pending: [String]
+    /// Preparation admission is independent of current dispatch readiness.
+    let preparationAllowed: Bool
 
-    init(_ conditions: [(String, String)] = []) {
+    init(_ conditions: [(String, String)] = [], preparationAllowed: Bool = true) {
         pending = conditions.filter { $0.1 != "yes" }.map { $0.0 }
         state = conditions.contains { $0.1 == "no" } ? "no" : pending.isEmpty ? "yes" : "unknown"
+        self.preparationAllowed = preparationAllowed
     }
 
     var ready: Bool { state == "yes" }
+
+    /// A usable pointer route admits receiver preparation; it does not prove
+    /// that the control already receives keyboard input.
+    func awaitingReceiver() -> NativeReadiness {
+        NativeReadiness(
+            pending.filter { $0 != "receiver" }.map { ($0, state) } + [("receiver", "no")],
+            preparationAllowed: preparationAllowed)
+    }
 
     /// An unavailable route is readiness evidence; cancellation, expiry and
     /// identity/policy failures are not. Recheck the request after synchronous
@@ -30,6 +41,7 @@ struct NativeReadiness {
 
     func requiringEnabled(_ enabled: Bool?) -> NativeReadiness {
         guard enabled == false else { return self }
-        return NativeReadiness(pending.filter { $0 != "enabled" }.map { ($0, state) } + [("enabled", "no")])
+        return NativeReadiness(
+            pending.filter { $0 != "enabled" }.map { ($0, state) } + [("enabled", "no")], preparationAllowed: false)
     }
 }
