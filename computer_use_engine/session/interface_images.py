@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 from computer_use.diagnostics import local_failure
 from computer_use.protocol.captures import capture_metadata
 from PIL import Image
+from computer_use.session.image_coordinates import ImageCoordinates
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -71,6 +72,7 @@ class InterfaceImage:
         digest: SHA-256 digest of the retained PNG.
         expired: Whether the existing mapping has been invalidated.
         unavailable_mapping: Whether partial pixels lack an overall coordinate map.
+        delivered_coordinates: Actual model-image pixels mapped to this retained canvas.
     """
 
     png: PNG
@@ -82,6 +84,7 @@ class InterfaceImage:
     digest: bytes = b""
     expired: bool = False
     unavailable_mapping: bool = False
+    delivered_coordinates: ImageCoordinates | None = None
 
     def hit(self, point: Point) -> tuple[ImagePiece, Point]:
         if self.unavailable_mapping:
@@ -90,6 +93,8 @@ class InterfaceImage:
                 'read a specific member with app.window(ref).read(view="image")',
                 "snapshot_expired",
             )
+        if self.delivered_coordinates is not None:
+            point = self.delivered_coordinates.source_point(point)
         for piece in reversed(self.pieces):
             x, y, width, height = piece.box
             if x <= point[0] < x + width and y <= point[1] < y + height:

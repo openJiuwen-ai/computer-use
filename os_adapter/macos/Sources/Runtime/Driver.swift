@@ -124,13 +124,13 @@ import CoreGraphics
                 }
                 let params = try object(raw["params"], keys: ["desktopMode"])
                 let requestedMode = try string(params["desktopMode"], label: "desktopMode")
-                let mode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "shared"
-                guard ["shared", "exclusive"].contains(mode), requestedMode == mode else {
+                let mode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "exclusive"
+                guard mode == "exclusive", requestedMode == mode else {
                     reply(
                         id,
                         failure(
                             "mode_mismatch", detail: "requested desktop mode does not match the backend",
-                            next: "configure the SDK and backend for the same shared/exclusive mode"))
+                            next: "configure the SDK and backend for exclusive mode"))
                     return
                 }
                 handshaken = true
@@ -141,11 +141,13 @@ import CoreGraphics
                             "platform": "macos", "desktopMode": mode, "maxTimeoutMs": 120_000,
                             "capabilities": [
                                 "cancel", "requestDedup", "desktopCoordination", "nativeOperations",
-                                "nativeBoundContracts", "nativeUnitReadinessV2", "nativeClickPipelineV1",
-                                "nativeClickPipelineV2", "nativeDirectory", "nativeApplicationRoots",
-                                "nativeMenuActions", "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds",
-                                "nativeDesktopInput", "nativeRelations", "nativeNodePages", "nativeNodeDepthBudget",
-                                "nativeRelationPages", "nativeCapturedText", "nativeRawNodeMetadata",
+                                "nativeInputActivityV1", "nativeBoundContracts", "nativeUnitReadinessV2",
+                                "nativeClickPipelineV1", "nativeClickPipelineV2", "nativeDirectory",
+                                "nativeVisualSurfaceQuery", "nativeSurfaceBatch", "nativeVisualSurfaceBatch",
+                                "nativeApplicationListing", "nativeApplicationRoots", "nativeMenuActions",
+                                "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeDesktopInput",
+                                "nativeRelations", "nativeNodePages", "nativeNodeDepthBudget", "nativeRelationPages",
+                                "nativeCapturedText", "nativeParameterizedText", "nativeRawNodeMetadata",
                                 "nativeAXAttributeQueries", "nativeActionIntents", "nativeWindowScope",
                                 "nativeKeyboardIntents", "nativeTextInput", "nativeActuators", "nativeTextReplacement",
                                 "nativeSelectedText", "nativeEditorPreparation", "nativePointer",

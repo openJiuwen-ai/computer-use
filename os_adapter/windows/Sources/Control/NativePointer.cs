@@ -22,15 +22,31 @@ namespace ComputerUse.Windows
     internal sealed class NativePointerState
     {
         internal object Native;
+        // The actual native mouse recipient, not just its top-level window.
+        internal object Recipient;
         // Actual foreground identity differs from pointer foreground readiness:
         // a nonactivating popup can use its confirmed owner's foreground.
-        internal bool Ready, Foreground, ForegroundReady;
+        internal bool Ready, Foreground, ForegroundReady, CaptureBlocked;
+        // PhysicalReady is the native route before element hit semantics.
+        // NaturalActivation is an admitted inactive single-click route, not
+        // evidence that Windows has activated the target.
+        internal bool PhysicalReady, NaturalActivation;
+        internal NativeClickOcclusion Occlusion;
+    }
+    internal sealed class NativePointerClickTiming
+    {
+        internal int Milliseconds, Width, Height;
+    }
+    internal interface INativePointerClickTimingProvider
+    {
+        NativePointerClickTiming ClickTiming();
     }
 
     internal interface INativePointerProvider
     {
         NativePointerCapture Capture(Dictionary<string, object> target, Request r);
-        NativePointerState Read(Dictionary<string, object> target, NativePointerPoint point, string kind, bool dragging, Request r);
+        NativePointerState Read(Dictionary<string, object> target, NativePointerPoint point,
+                                NativePointerGestureIntent gesture, bool dragging, Request r);
         void RequireIdle(Request r);
         void Activate(NativePointerState state, Request r);
         int Send(NativePointerEvent[] events);
@@ -44,12 +60,14 @@ namespace ComputerUse.Windows
         internal string Layout;
         internal NativeElementHit Hit = new NativeElementHit(NativeElementHitKind.NotSampled);
         internal bool RequiresConfirmedHit;
+        internal bool GeometryDeferred;
     }
 
     internal interface INativeElementPointerProvider
     {
         NativeElementPointerTarget Element(Dictionary<string, object> target, string[] within, Request r);
-        NativePointerState ReadElement(Dictionary<string, object> target, string[] within, NativeElementPointerTarget point, Request r);
+        NativePointerState ReadElement(Dictionary<string, object> target, string[] within,
+                                       NativeElementPointerTarget point, NativePointerGestureIntent gesture, Request r);
     }
 
     internal sealed class NativePointerPlan
@@ -60,9 +78,19 @@ namespace ComputerUse.Windows
         internal string Kind;
         internal uint Down, Up, Wheel;
         internal int Count, Amount;
+        internal object DispatchRecipient;
+        internal bool NaturalActivation;
+        internal NativeClickOcclusion Occlusion;
+        internal NativePointerGestureIntent Gesture
+        {
+            get {
+                return new NativePointerGestureIntent(Kind, Down, Count);
+            }
+        }
         internal NativePointerEvent Move(int index)
         {
-            var p = Element == null ? Capture.Normalize(Points[index]) : NativePointerCapture.Normalize(Points[index], Element.Canvas);
+            var p = Element == null ? Capture.Normalize(Points[index])
+                                    : NativePointerCapture.Normalize(Points[index], Element.Canvas);
             return new NativePointerEvent(0xc001, p.X, p.Y);
         }
     }
@@ -72,39 +100,34 @@ namespace ComputerUse.Windows
     internal sealed class NativePointer
     {
         readonly INativePointerProvider provider;
-        readonly bool foregroundAllowed;
+        readonly NativePointerClickHistory clicks = new NativePointerClickHistory();
         internal bool SupportsDesktop { get; private set; }
 
         internal bool SupportsElements
         {
-            get
-            {
+            get {
                 return provider is INativeElementPointerProvider;
             }
         }
 
-        internal NativePointer(INativePointerProvider provider, string mode, bool assist)
+        internal NativePointer(INativePointerProvider provider)
         {
             this.provider = provider;
-            foregroundAllowed = mode == "exclusive" || assist;
-            SupportsDesktop = mode == "exclusive";
+            SupportsDesktop = true;
         }
 
         internal static bool Intent(Dictionary<string, object> intent, Dictionary<string, object> target)
         {
-            return target != null && target["capture"] != null && new[]
-            {
-                "click",
-                "scroll",
-                "drag"
-            }.Contains((string)intent["kind"]);
+            return target != null && target["capture"] != null &&
+                   new[] { "click", "scroll", "drag" }.Contains((string)intent["kind"]);
         }
 
         internal bool ElementIntent(Dictionary<string, object> intent, Dictionary<string, object> target)
         {
             // Lazy Element queries begin with the fixed window and resolve
             // their node inside that same operation before inspection.
-            return SupportsElements && target["surface"] != null && target["capture"] == null && (string)intent["kind"] == "click";
+            return SupportsElements && target["surface"] != null && target["capture"] == null &&
+                   (string)intent["kind"] == "click";
         }
 
         internal void Validate(Dictionary<string, object> intent, Dictionary<string, object> target)
@@ -113,12 +136,8 @@ namespace ComputerUse.Windows
             {
                 var options = Wire.Object(intent["parameters"]);
                 Wire.Keys(options, "", "button,count");
-                if (options.ContainsKey("button") && !new[]
-                {
-                    "left",
-                    "middle",
-                    "right"
-                }.Contains(Wire.Str(options, "button")))
+                if (options.ContainsKey("button") &&
+                    !new[] { "left", "middle", "right" }.Contains(Wire.Str(options, "button")))
                     throw new Failure("invalid_request", "invalid pointer button");
                 if (options.ContainsKey("count"))
                     Wire.Num(options, "count", 1, 2, true);
@@ -127,19 +146,12 @@ namespace ComputerUse.Windows
 
             if (target["node"] != null)
                 throw new Failure("invalid_request", "image input cannot select an accessibility element");
-            if (target["surface"] == null && !SupportsDesktop)
-                throw new Failure("mode_unsupported", "desktop pointer input requires exclusive mode");
             string kind = (string)intent["kind"];
             var p = Wire.Object(intent["parameters"]);
             if (kind == "click")
             {
                 Wire.Keys(p, "x,y", "button,count");
-                if (p.ContainsKey("button") && !new[]
-                {
-                    "left",
-                    "middle",
-                    "right"
-                }.Contains(Wire.Str(p, "button")))
+                if (p.ContainsKey("button") && !new[] { "left", "middle", "right" }.Contains(Wire.Str(p, "button")))
                     throw new Failure("invalid_request", "invalid pointer button");
                 if (p.ContainsKey("count"))
                     Wire.Num(p, "count", 1, 2, true);
@@ -147,13 +159,7 @@ namespace ComputerUse.Windows
             else if (kind == "scroll")
             {
                 Wire.Keys(p, "x,y,direction,pages");
-                if (!new[]
-                {
-                    "up",
-                    "down",
-                    "left",
-                    "right"
-                }.Contains(Wire.Str(p, "direction")))
+                if (!new[] { "up", "down", "left", "right" }.Contains(Wire.Str(p, "direction")))
                     throw new Failure("invalid_request", "invalid scroll direction");
                 Wire.Num(p, "pages", 0.00001, 100);
             }
@@ -161,19 +167,9 @@ namespace ComputerUse.Windows
                 Wire.Keys(p, "fromX,fromY,toX,toY");
             else
                 throw new Failure("invalid_request", "unsupported pointer intent");
-            foreach (var key in kind == "drag" ? new[]
-            {
-                "fromX",
-                "fromY",
-                "toX",
-                "toY"
-            }
+            foreach (var key in kind == "drag" ? new[] { "fromX", "fromY", "toX", "toY" }
 
-            : new[]
-            {
-                "x",
-                "y"
-            }
+                                               : new[] { "x", "y" }
 
             )
                 Wire.Num(p, key, 0, 4096);
@@ -185,42 +181,44 @@ namespace ComputerUse.Windows
             var image = provider.Capture(target, r);
             var p = Wire.Object(operation.Intent["parameters"]);
             string kind = (string)operation.Intent["kind"];
-            var start = image.Point(Convert.ToDouble(p[kind == "drag" ? "fromX" : "x"]), Convert.ToDouble(p[kind == "drag" ? "fromY" : "y"]));
-            var points = new List<NativePointerPoint>
-            {
-                start
-            };
+            var start = image.Point(Convert.ToDouble(p[kind == "drag" ? "fromX" : "x"]),
+                                    Convert.ToDouble(p[kind == "drag" ? "fromY" : "y"]));
+            var points = new List<NativePointerPoint> { start };
             if (kind == "drag")
             {
                 var end = image.Point(Convert.ToDouble(p["toX"]), Convert.ToDouble(p["toY"]));
                 for (int i = 1; i <= 24; i++)
-                    points.Add(new NativePointerPoint(start.X + (int)Math.Round((end.X - start.X) * i / 24.0), start.Y + (int)Math.Round((end.Y - start.Y) * i / 24.0)));
+                    points.Add(new NativePointerPoint(start.X + (int)Math.Round((end.X - start.X) * i / 24.0),
+                                                      start.Y + (int)Math.Round((end.Y - start.Y) * i / 24.0)));
             }
 
             foreach (var point in points)
                 image.RequirePoint(point); // Validate the complete trajectory before any preparation.
             string button = p.ContainsKey("button") ? (string)p["button"] : "left";
-            var plan = new NativePointerPlan
-            {
-                Capture = image,
-                Points = points.ToArray(),
-                Kind = kind,
-                Down = button == "left" ? 2u : button == "right" ? 8u : 32u,
-                Up = button == "left" ? 4u : button == "right" ? 16u : 64u,
-                Count = p.ContainsKey("count") ? Convert.ToInt32(p["count"]) : 1
-            };
+            var plan = new NativePointerPlan { Capture = image,
+                                               Points = points.ToArray(),
+                                               Kind = kind,
+                                               Down = button == "left"    ? 2u
+                                                      : button == "right" ? 8u
+                                                                          : 32u,
+                                               Up = button == "left"    ? 4u
+                                                    : button == "right" ? 16u
+                                                                        : 64u,
+                                               Count = p.ContainsKey("count") ? Convert.ToInt32(p["count"]) : 1 };
             if (kind == "scroll")
             {
                 string direction = (string)p["direction"];
                 plan.Wheel = direction == "left" || direction == "right" ? 0x1000u : 0x800u;
                 // Keep the existing Windows API's approximate three-detent page.
-                plan.Amount = (int)Math.Round(120 * Math.Max(1, Convert.ToDouble(p["pages"]) * 3)) * (direction == "up" || direction == "right" ? 1 : -1);
+                plan.Amount = (int)Math.Round(120 * Math.Max(1, Convert.ToDouble(p["pages"]) * 3)) *
+                              (direction == "up" || direction == "right" ? 1 : -1);
             }
 
             return plan;
         }
 
-        internal object Inspect(NativeWriteOperation operation, Dictionary<string, object> target, string[] within, Request r)
+        internal object Inspect(NativeWriteOperation operation, Dictionary<string, object> target, string[] within,
+                                Request r)
         {
             NativePointerPlan plan;
             NativePointerState state;
@@ -230,50 +228,78 @@ namespace ComputerUse.Windows
                 var element = ((INativeElementPointerProvider)provider).Element(target, within, r);
                 var options = Wire.Object(operation.Intent["parameters"]);
                 string button = options.ContainsKey("button") ? (string)options["button"] : "left";
-                plan = new NativePointerPlan
-                {
-                    Element = element,
-                    Points = new[]
-                    {
-                        element.Point
-                    },
-                    Kind = "click",
-                    Down = button == "left" ? 2u : button == "right" ? 8u : 32u,
-                    Up = button == "left" ? 4u : button == "right" ? 16u : 64u,
-                    Count = options.ContainsKey("count") ? Convert.ToInt32(options["count"]) : 1
-                };
-                state = ((INativeElementPointerProvider)provider).ReadElement(target, within, element, r);
+                plan = new NativePointerPlan { Element = element,
+                                               Points = new[] { element.Point },
+                                               Kind = "click",
+                                               Down = button == "left"    ? 2u
+                                                      : button == "right" ? 8u
+                                                                          : 32u,
+                                               Up = button == "left"    ? 4u
+                                                    : button == "right" ? 16u
+                                                                        : 64u,
+                                               Count = options.ContainsKey("count") ? Convert.ToInt32(options["count"])
+                                                                                    : 1 };
+                state = ((INativeElementPointerProvider)provider).ReadElement(target, within, element, plan.Gesture, r);
             }
             else
             {
                 if (within.Length != 0 || target["node"] != null)
                     throw new Failure("invalid_request", "image input cannot select element ancestors");
                 plan = Plan(operation, target, r);
-                state = provider.Read(target, plan.Points[0], plan.Kind, false, r);
+                state = provider.Read(target, plan.Points[0], plan.Gesture, false, r);
             }
 
             r.Check();
-            operation.Indicate(plan.Points[0]);
-            var contract = new NativeInputContract
-            {
-                Id = "primitive:" + Guid.NewGuid().ToString("N"),
-                Unit = "pointer_sequence",
-                Supported = true,
-                Target = new Dictionary<string, object>(target),
-                Within = (string[])within.Clone(),
-                Pointer = plan
+            if (plan.Element == null || !plan.Element.GeometryDeferred)
+                operation.Indicate(plan.Points[0]);
+            var contract = new NativeInputContract {
+                Id = "primitive:" + Guid.NewGuid().ToString("N"), Unit = "pointer_sequence",         Supported = true,
+                Target = new Dictionary<string, object>(target),  Within = (string[])within.Clone(), Pointer = plan
             };
+            plan.Occlusion = state.Occlusion;
+            bool canPrepare =
+                !state.CaptureBlocked && !state.ForegroundReady && target["surface"] != null;
             if (operation.ClickV1)
-                contract.Click = new NativeClickOffer("windows.sendInput", "pointer", "desktop_pointer", state.Ready ? "ready" : !state.ForegroundReady && foregroundAllowed && target["surface"] != null ? "preparationRequired" : "unavailable", state.Ready ? null : state.ForegroundReady ? UnavailablePoint(plan) : "The selected window requires foreground preparation.", !state.Ready && !state.ForegroundReady && foregroundAllowed && target["surface"] != null ? new[] { "foreground" } : new string[0], "physicalWhenAvailableInExclusive");
+                contract.Click = new NativeClickOffer(
+                    "windows.sendInput", "pointer", "desktop_pointer",
+                    state.Ready  ? "ready"
+                    : canPrepare ? "preparationRequired"
+                                 : "unavailable",
+                    state.Ready ? null
+                    : state.CaptureBlocked
+                        ? "Another native window owns mouse capture; activation cannot prepare this click."
+                    : state.ForegroundReady ? UnavailablePoint(plan)
+                                            : "The selected window requires foreground preparation.",
+                    !state.Ready && canPrepare ? new[] { "foreground" } : new string[0],
+                    "default");
             if (operation.ClickV1)
-                contract.ClickAuthority = new NativeClickPreparationAuthority("windows.sendInput", operation, target, foregroundAllowed, true);
+                contract.ClickAuthority = new NativeClickPreparationAuthority("windows.sendInput", operation, target,
+                                                                              true);
             operation.Contracts.Add(contract.Id, contract);
-            var primitive = Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "pointer", "supported", "yes", "readiness", state.Ready ? "yes" : "no", "pending", state.Ready ? new string[0] : new[] { state.ForegroundReady ? "receiver" : "foreground" }, "backgroundPreparation", "no");
+            var primitive =
+                Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "pointer", "supported", "yes",
+                         "readiness", state.Ready ? "yes" : "no", "pending",
+                         state.Ready ? new string[0] : new[] { state.ForegroundReady ? "receiver" : "foreground" },
+                         "backgroundPreparation", "no");
             if (contract.Click != null)
                 primitive["click"] = contract.Click.WireValue();
-            var result = Wire.Obj("kind", "inputContext", "binding", new Dictionary<string, object>(target), "observed", "observation:" + Guid.NewGuid().ToString("N"), "targetLabel", plan.Element != null ? "Selected element" : target["surface"] == null ? "Captured desktop" : "Captured window", "identity", "yes", "withinScope", "yes", "enabled", "unknown", "blockedBy", new string[0], "nativeRole", null, "actionsComplete", false, "within", within, "primitives", new[] { primitive }, "input", Wire.Obj("foregroundSurface", state.Foreground ? target["surface"] : null, "keyboardSurface", null, "focusedNode", null, "focusAncestors", new string[0], "editor", null, "editorOwner", null, "selectionKnown", "unknown", "geometryCurrent", "yes", "windowRoute", "unknown", "pointerRoute", state.Ready ? "yes" : "no"));
+            var result = Wire.Obj(
+                "kind", "inputContext", "binding", new Dictionary<string, object>(target), "observed",
+                "observation:" + Guid.NewGuid().ToString("N"), "targetLabel",
+                plan.Element != null        ? "Selected element"
+                : target["surface"] == null ? "Captured desktop"
+                                            : "Captured window",
+                "identity", "yes", "withinScope", "yes", "enabled", "unknown", "blockedBy", new string[0], "nativeRole",
+                null, "actionsComplete", false, "within", within, "primitives", new[] { primitive }, "input",
+                Wire.Obj("foregroundSurface", state.Foreground ? target["surface"] : null, "keyboardSurface", null,
+                         "focusedNode", null, "focusAncestors", new string[0], "editor", null, "editorOwner", null,
+                         "selectionKnown", "unknown", "geometryCurrent",
+                         plan.Element != null && plan.Element.GeometryDeferred ? "no" : "yes", "windowRoute", "unknown",
+                         "pointerRoute", state.Ready ? "yes" : "no"));
             if (!state.Ready && state.ForegroundReady)
-                result["unavailableReason"] = UnavailablePoint(plan, "The captured point cannot currently reach the selected window; inspect its current image and desktop for an obstruction or input capture.");
+                result["unavailableReason"] = UnavailablePoint(
+                    plan,
+                    "The captured point cannot currently reach the selected window; inspect its current image and desktop for an obstruction or input capture.");
             return result;
         }
 
@@ -281,22 +307,35 @@ namespace ComputerUse.Windows
         {
             var plan = contract.Pointer;
             if (plan.Element != null)
-                return ((INativeElementPointerProvider)provider).ReadElement(contract.Target, contract.Within, plan.Element, r);
+                return ((INativeElementPointerProvider)provider)
+                    .ReadElement(contract.Target, contract.Within, plan.Element, plan.Gesture, r);
             if (!ReferenceEquals(provider.Capture(contract.Target, r), plan.Capture))
                 throw new Failure("snapshot_expired", "the original image expired");
-            var state = provider.Read(contract.Target, plan.Points[point], plan.Kind, dragging, r);
+            var state = provider.Read(contract.Target, plan.Points[point], plan.Gesture, dragging, r);
             r.Check();
             return state;
         }
 
         internal static string ClickDetail(NativeInputContract contract)
         {
-            return contract.Pointer.Element == null ? "Pointer click submitted at the original captured coordinate; read to verify its effect." : contract.Pointer.Element.Hit.SubmissionDetail();
+            string detail =
+                contract.Pointer.Element == null
+                    ? "Pointer click submitted at the original captured coordinate; read to verify its effect."
+                    : contract.Pointer.Element.Hit.SubmissionDetail();
+            return contract.Pointer.NaturalActivation
+                       ? detail +
+                             " This requested click used the reachable inactive original window; activation and control effect require read-back."
+                       : detail;
         }
 
-        static string UnavailablePoint(NativePointerPlan plan, string otherwise = "The original target point is obstructed or captured.")
+        static string UnavailablePoint(NativePointerPlan plan,
+                                       string otherwise = "The original target point is obstructed or captured.")
         {
-            return plan.Element != null && plan.Element.Hit.Conflicts ? "The selected point hits another UIA control in the original window; no remaining requested click was sent. Read the window to inspect coverage." : plan.Element != null && plan.Element.RequiresConfirmedHit && !plan.Element.Hit.Confirmed ? "The alternate element point no longer has a confirmed UIA hit; no remaining requested click was sent." : otherwise;
+            return plan.Element != null && plan.Element.Hit.Conflicts
+                       ? "The selected point hits another UIA control in the original window; no remaining requested click was sent. Read the window to inspect coverage."
+                   : plan.Element != null && plan.Element.RequiresConfirmedHit && !plan.Element.Hit.Confirmed
+                       ? "The alternate element point no longer has a confirmed UIA hit; no remaining requested click was sent."
+                       : otherwise;
         }
 
         internal void RefreshClickPoint(NativeInputContract contract, Request r)
@@ -305,32 +344,39 @@ namespace ComputerUse.Windows
                 return; // A capture owns its immutable mapping.
             var current = ((INativeElementPointerProvider)provider).Element(contract.Target, contract.Within, r);
             contract.Pointer.Element = current;
-            contract.Pointer.Points = new[]
-            {
-                current.Point
-            };
+            contract.Pointer.Points = new[] { current.Point };
         }
 
-        internal void PrepareClick(NativeWriteOperation operation, NativeInputContract contract, bool foreground, Request r)
+        internal void PrepareClick(NativeWriteOperation operation, NativeInputContract contract, bool foreground,
+                                   Request r)
         {
             var state = Guard(contract, 0, false, r);
             if (state.Ready)
                 return;
+            if (state.CaptureBlocked)
+                throw new Failure(
+                    "input_unavailable",
+                    "another native window owns mouse capture; no activation or requested click was sent");
             // This system-stream transport has no background preparation. The
             // common selector owns cross-candidate background-first policy;
             // native authority checks the real host policy and this route.
             if (!state.ForegroundReady && foreground && contract.Target["surface"] != null)
             {
-                if (!foregroundAllowed)
-                    throw new Failure("mode_unsupported", "host policy does not permit foreground assistance");
-                if (contract.Click == null || contract.Click.RouteFamily != "windows.sendInput" || !contract.Click.PreparationOptions.Contains("foreground") || contract.Click.PreparationOptions.Contains("background"))
-                    throw new Failure("input_unavailable", "this selected contract has no native authority for foreground preparation");
+                if (contract.Click == null || contract.Click.RouteFamily != "windows.sendInput" ||
+                    !contract.Click.PreparationOptions.Contains("foreground") ||
+                    contract.Click.PreparationOptions.Contains("background"))
+                    throw new Failure("input_unavailable",
+                                      "this selected contract has no native authority for foreground preparation");
                 if (contract.ClickAuthority == null)
                     throw new Failure("invalid_request", "the selected contract has no preparation authority");
                 contract.ClickAuthority.Require(operation, contract);
                 provider.RequireIdle(r);
                 RefreshClickPoint(contract, r);
                 state = Guard(contract, 0, false, r);
+                if (state.CaptureBlocked)
+                    throw new Failure(
+                        "input_unavailable",
+                        "another native window acquired mouse capture; no activation or requested click was sent");
                 if (!state.Ready && !state.ForegroundReady)
                 {
                     var effect = operation.Click.Preparing("foreground");
@@ -346,27 +392,64 @@ namespace ComputerUse.Windows
                         if (state.Ready || Wire.Now >= until)
                             break;
                         r.Wait(20);
-                    }
-                    while (true);
-                    effect.Observation = state.Ready ? "confirmed" : "unavailable";
+                    } while (true);
+                    effect.Observation = state.Foreground ? "confirmed" : "unavailable";
                 }
             }
 
             if (!state.Ready)
-                throw new Failure("input_unavailable", UnavailablePoint(contract.Pointer, "the captured point is not reachable; no requested input sent"));
+                throw new Failure(
+                    "input_unavailable",
+                    UnavailablePoint(contract.Pointer, "the captured point is not reachable; no requested input sent"));
         }
 
         internal void CheckClick(NativeInputContract contract, Request r)
         {
             provider.RequireIdle(r);
-            if (!Guard(contract, 0, false, r).Ready)
-                throw new Failure("input_unavailable", UnavailablePoint(contract.Pointer, "the selected point no longer reaches the original target"));
+            var state = Guard(contract, 0, false, r);
+            if (!state.Ready)
+                throw new Failure(
+                    "input_unavailable",
+                    UnavailablePoint(contract.Pointer, "the selected point no longer reaches the original target"));
+            contract.Pointer.DispatchRecipient = state.Recipient;
+            contract.Pointer.NaturalActivation = state.NaturalActivation;
+        }
+        NativePointerClickTiming ClickTiming()
+        {
+            var source = provider as INativePointerClickTimingProvider;
+            return source == null ? null : source.ClickTiming();
+        }
+        internal void PrepareClickCadence(NativeInputContract contract, Request r)
+        {
+            if (!clicks.HasDown)
+                return;
+            var timing = ClickTiming();
+            if (timing == null)
+                return;
+            var state = Guard(contract, 0, false, r);
+            double remaining =
+                clicks.Remaining(state.Recipient, contract.Pointer.Points[0], contract.Pointer.Down, timing, Wire.Now);
+            if (remaining <= 0)
+                return;
+            // A wait is preparation only: cancellation/deadline here has sent
+            // none of this operation's requested mouse input.
+            double until = Wire.Now + remaining;
+            while (Wire.Now < until)
+                r.Wait((int)Math.Max(1, Math.Min(25, Math.Ceiling(until - Wire.Now))));
+            RefreshClickPoint(contract, r);
         }
 
         internal void SendClick(NativeWriteOperation operation, NativeInputContract contract, Request r)
         {
             var plan = contract.Pointer;
             bool down = false;
+            var timing = ClickTiming();
+            if (clicks.Remaining(plan.DispatchRecipient, plan.Points[0], plan.Down, timing, Wire.Now) > 0)
+                throw new Failure(
+                    "input_unavailable",
+                    "the native click recipient changed during click preparation; no requested input was sent");
+            double firstDown = 0;
+            object firstRecipient = plan.DispatchRecipient;
             operation.Indicate(plan.Points[0], true, plan.Count);
             try
             {
@@ -376,27 +459,37 @@ namespace ComputerUse.Windows
                     {
                         r.Wait(60);
                         CheckClick(contract, r);
+                        if (firstRecipient != null && !Equals(firstRecipient, plan.DispatchRecipient))
+                            throw new Failure(
+                                "input_unavailable",
+                                "the native mouse recipient changed after the first click; the second click was not sent or replayed");
+                        if (timing != null && Wire.Now - firstDown >= timing.Milliseconds)
+                            throw new Failure(
+                                "input_unavailable",
+                                "the first click was submitted but target validation exceeded the double-click interval; the second click was not sent or replayed");
                     }
 
-                    var events = new[]
-                    {
-                        plan.Move(0),
-                        new NativePointerEvent(plan.Down),
-                        new NativePointerEvent(plan.Up)
-                    };
+                    var events =
+                        new[] { plan.Move(0), new NativePointerEvent(plan.Down), new NativePointerEvent(plan.Up) };
                     operation.Click.BeginCall(r, "SendInput", events.Length);
                     bool prior = down;
                     down = true; // An exception can leave any prefix accepted.
                     int sent;
+                    double started = Wire.Now;
+                    if (i == 0)
+                        firstDown = started;
                     try
                     {
                         sent = provider.Send(events);
                     }
                     catch
                     {
+                        clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
                         operation.Click.Unknown();
                         throw;
                     }
+                    if (sent < 0 || sent > events.Length || sent >= 2)
+                        clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
 
                     operation.Click.Returned(sent, events.Length, r);
                     if (sent >= 0 && sent <= events.Length)
@@ -412,7 +505,9 @@ namespace ComputerUse.Windows
                     }
 
                     if (sent != events.Length)
-                        throw new Failure(operation.Click.HasRequestedInput ? "execution_unknown" : "input_unavailable", "SendInput accepted " + sent + "/" + events.Length + " pointer events; input was not replayed");
+                        throw new Failure(operation.Click.HasRequestedInput ? "execution_unknown" : "input_unavailable",
+                                          "SendInput accepted " + sent + "/" + events.Length +
+                                              " pointer events; input was not replayed");
                 }
 
                 operation.Click.Completed();
@@ -437,7 +532,8 @@ namespace ComputerUse.Windows
             }
         }
 
-        void Send(NativeWriteOperation operation, NativePointerPlan plan, NativePointerEvent[] events, Request r, Dictionary<string, object> result, ref bool down)
+        void Send(NativeWriteOperation operation, NativePointerPlan plan, NativePointerEvent[] events, Request r,
+                  Dictionary<string, object> result, ref bool down)
         {
             r.Sending();
             operation.Dispatched = true;
@@ -445,7 +541,19 @@ namespace ComputerUse.Windows
             bool prior = down;
             if (events.Any(e => (e.Flags & plan.Down) != 0))
                 down = true; // A thrown call may have sent its prefix.
-            int sent = provider.Send(events);
+            int sent;
+            try
+            {
+                sent = provider.Send(events);
+            }
+            catch
+            {
+                if (plan.Kind == "click")
+                    clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
+                throw;
+            }
+            if (plan.Kind == "click" && (sent < 0 || sent > events.Length || sent >= 2))
+                clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
             if (sent >= 0 && sent <= events.Length)
             {
                 down = prior;
@@ -459,7 +567,8 @@ namespace ComputerUse.Windows
             }
 
             if (sent != events.Length)
-                throw new Failure("execution_unknown", "SendInput accepted " + sent + "/" + events.Length + " pointer events; input was not replayed");
+                throw new Failure("execution_unknown", "SendInput accepted " + sent + "/" + events.Length +
+                                                           " pointer events; input was not replayed");
         }
 
         internal object Execute(NativeWriteOperation operation, Dictionary<string, object> command, Request r)
@@ -468,10 +577,15 @@ namespace ComputerUse.Windows
             var preparation = new List<string>();
             bool down = false;
             NativeInputContract contract = null;
-            var result = Wire.Obj("target", new Dictionary<string, object>(target), "dispatch", "notDispatched", "detail", "No pointer input dispatched.", "preparation", preparation, "confirmation", "unavailable", "cleanup", "complete", "errorCode", null, "retryReason", null, "context", null);
+            var result =
+                Wire.Obj("target", new Dictionary<string, object>(target), "dispatch", "notDispatched", "detail",
+                         "No pointer input dispatched.", "preparation", preparation, "confirmation", "unavailable",
+                         "cleanup", "complete", "errorCode", null, "retryReason", null, "context", null);
             try
             {
-                if (!operation.Contracts.TryGetValue((string)command["primitiveId"], out contract) || contract.Unit != "pointer_sequence" || contract.Pointer == null || !contract.Supported || !NativeWriteOperation.Same(target, contract.Target))
+                if (!operation.Contracts.TryGetValue((string)command["primitiveId"], out contract) ||
+                    contract.Unit != "pointer_sequence" || contract.Pointer == null || !contract.Supported ||
+                    !NativeWriteOperation.Same(target, contract.Target))
                     throw new Failure("stale_target", "the pointer contract expired or belongs to another image");
                 bool preparing = (string)command["kind"] == "prepare_receiver";
                 if (!preparing && ((string)command["kind"] != "pointer_sequence" || (bool)command["foreground"]))
@@ -481,12 +595,19 @@ namespace ComputerUse.Windows
                 if (preparing)
                 {
                     var state = Guard(contract, 0, false, r);
-                    if (!state.Ready && !state.ForegroundReady && (bool)command["foreground"] && target["surface"] != null)
+                    if (state.CaptureBlocked)
+                        throw new Failure(
+                            "input_unavailable",
+                            "another native window owns mouse capture; no activation or requested click was sent");
+                    if (!state.Ready && !state.ForegroundReady && (bool)command["foreground"] &&
+                        target["surface"] != null)
                     {
-                        if (!foregroundAllowed)
-                            throw new Failure("mode_unsupported", "host policy does not permit foreground assistance");
                         provider.RequireIdle(r);
                         state = Guard(contract, 0, false, r);
+                        if (state.CaptureBlocked)
+                            throw new Failure(
+                                "input_unavailable",
+                                "another native window acquired mouse capture; no activation or requested click was sent");
                         if (!state.Ready && !state.ForegroundReady)
                         {
                             r.Check();
@@ -500,19 +621,37 @@ namespace ComputerUse.Windows
                     }
 
                     if (!state.Ready)
-                        throw new Failure("input_unavailable", UnavailablePoint(plan, "the captured point is not reachable; no requested input sent"));
+                        throw new Failure(
+                            "input_unavailable",
+                            UnavailablePoint(plan, "the captured point is not reachable; no requested input sent"));
                     result["confirmation"] = "confirmed";
                     result["detail"] = "The captured pointer target is reachable.";
                 }
                 else
                 {
-                    provider.RequireIdle(r);
-                    if (!Guard(contract, 0, false, r).Ready)
-                        throw new Failure("input_unavailable", UnavailablePoint(plan, "the captured point no longer reaches the selected window"));
+                    if (plan.Kind == "click")
+                    {
+                        PrepareClickCadence(contract, r);
+                        CheckClick(contract, r);
+                        if (clicks.Remaining(plan.DispatchRecipient, plan.Points[0], plan.Down, ClickTiming(),
+                                             Wire.Now) > 0)
+                            throw new Failure(
+                                "input_unavailable",
+                                "the native click recipient changed during click preparation; no requested input was sent");
+                    }
+                    else
+                    {
+                        provider.RequireIdle(r);
+                        if (!Guard(contract, 0, false, r).Ready)
+                            throw new Failure(
+                                "input_unavailable",
+                                UnavailablePoint(plan, "the captured point no longer reaches the selected window"));
+                    }
                     if (plan.Kind == "drag")
                     {
                         operation.Indicate(plan.Points[0], true, 1, true);
-                        Send(operation, plan, new[] { plan.Move(0), new NativePointerEvent(plan.Down) }, r, result, ref down);
+                        Send(operation, plan, new[] { plan.Move(0), new NativePointerEvent(plan.Down) }, r, result,
+                             ref down);
                         for (int i = 1; i < plan.Points.Length; i++)
                         {
                             r.Wait(12);
@@ -528,37 +667,61 @@ namespace ComputerUse.Windows
                     else if (plan.Kind == "scroll")
                     {
                         operation.Indicate(plan.Points[0]);
-                        Send(operation, plan, new[] { plan.Move(0), new NativePointerEvent(plan.Wheel, data: plan.Amount) }, r, result, ref down);
+                        Send(operation, plan,
+                             new[] { plan.Move(0), new NativePointerEvent(plan.Wheel, data: plan.Amount) }, r, result,
+                             ref down);
                     }
                     else
                     {
                         operation.Indicate(plan.Points[0], true, plan.Count);
+                        var timing = ClickTiming();
+                        double firstDown = Wire.Now;
+                        object firstRecipient = plan.DispatchRecipient;
                         for (int i = 0; i < plan.Count; i++)
                         {
                             if (i > 0)
                             {
                                 r.Wait(60);
-                                provider.RequireIdle(r);
-                                if (!Guard(contract, 0, false, r).Ready)
-                                    throw new Failure("input_unavailable", "the target changed after the first click; remaining click was not sent");
+                                CheckClick(contract, r);
+                                if (firstRecipient != null && !Equals(firstRecipient, plan.DispatchRecipient))
+                                    throw new Failure(
+                                        "input_unavailable",
+                                        "the native mouse recipient changed after the first click; the second click was not sent or replayed");
+                                if (timing != null && Wire.Now - firstDown >= timing.Milliseconds)
+                                    throw new Failure(
+                                        "input_unavailable",
+                                        "the first click was submitted but target validation exceeded the double-click interval; the second click was not sent or replayed");
                             }
+                            if (i == 0)
+                                firstDown = Wire.Now;
 
-                            Send(operation, plan, new[] { plan.Move(0), new NativePointerEvent(plan.Down), new NativePointerEvent(plan.Up) }, r, result, ref down);
+                            Send(operation, plan,
+                                 new[] { plan.Move(0), new NativePointerEvent(plan.Down),
+                                         new NativePointerEvent(plan.Up) },
+                                 r, result, ref down);
                         }
                     }
 
                     result["dispatch"] = "dispatched";
-                    result["detail"] = plan.Element != null ? ClickDetail(contract) : "Pointer sequence sent; read to verify its effect.";
+                    result["detail"] = plan.Element != null ? ClickDetail(contract)
+                                                            : "Pointer sequence sent; read to verify its effect.";
                     r.Check(); // The final click/drop can legitimately destroy its target.
                 }
             }
             catch (Exception error)
             {
-                var failure = error as Failure;
-                result["errorCode"] = failure != null ? failure.Code : operation.Dispatched ? "execution_unknown" : "input_unavailable";
-                result["detail"] = String.IsNullOrWhiteSpace(error.Message) ? "Native pointer operation failed." : error.Message;
+                var desktopCleanup = error as NativeDesktopCleanupFailure;
+                if (desktopCleanup != null)
+                    operation.RetireWorker(desktopCleanup.Reason);
+                var failure = error as Failure ?? (desktopCleanup == null ? null : desktopCleanup.OriginalFailure);
+                result["errorCode"] = failure != null        ? failure.Code
+                                      : operation.Dispatched ? "execution_unknown"
+                                                             : "input_unavailable";
+                result["detail"] =
+                    String.IsNullOrWhiteSpace(error.Message) ? "Native pointer operation failed." : error.Message;
                 if (!operation.Dispatched && (string)result["errorCode"] == "input_unavailable")
-                    result["retryReason"] = (string)command["kind"] == "prepare_receiver" ? "preparationUnavailable" : "routeUnavailable";
+                    result["retryReason"] =
+                        (string)command["kind"] == "prepare_receiver" ? "preparationUnavailable" : "routeUnavailable";
             }
             finally
             {
@@ -583,7 +746,8 @@ namespace ComputerUse.Windows
             {
                 result["retryReason"] = null;
                 result["errorCode"] = result["errorCode"] ?? "execution_unknown";
-                result["detail"] = (string)result["detail"] + " Pointer release was not confirmed; reconnect before more input.";
+                result["detail"] =
+                    (string)result["detail"] + " Pointer release was not confirmed; reconnect before more input.";
             }
 
             return result;

@@ -8,12 +8,44 @@ import ApplicationServices
 /// An observed local popup retains its own context and uses the addressed action.
 extension NativeElementControl {
     struct ActionFacts {
+        enum DocumentEvidence { case standard(NativeDocumentContext), other, unknown }
         let role: String?
         let actions: [NativeAction.Item]?
         let enabled: Bool?
         let applicationMenuContext: Bool
         let foreground: Bool
-        var document: NativeDocumentContext? = nil
+        var focusWritable: Bool = false
+        var documentEvidence = DocumentEvidence.unknown
+        var document: NativeDocumentContext? {
+            if case .standard(let value) = documentEvidence { return value }
+            return nil
+        }
+        var webArea = NativeActionDocumentPolicy.WebArea.unknown
+        /// Borrowed immutable observation constraints, never action authority.
+        var popupContext: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>? = nil
+        /// Current native leaf membership, separate from the observed owner.
+        var popupElementWindowID: UInt32? = nil
+
+        @MainActor func documentPreparation(_ action: String, retainedForegroundRequirement: Bool = false) throws
+            -> NativeActionDocumentPolicy.Preparation
+        {
+            NativeActionDocumentPolicy.preparation(
+                action: action, exactStandardWindow: document != nil,
+                otherDocument: try action == kAXPressAction && document?.focus() == .other,
+                confirmedWebArea: webArea == .confirmed, foreground: foreground,
+                retainedForegroundRequirement: retainedForegroundRequirement)
+        }
+
+        @MainActor func documentForeground(_ action: String) -> NativeClickContract.DocumentForeground {
+            let kind: NativeActionDocumentPolicy.DocumentKind
+            switch documentEvidence {
+            case .standard: kind = .standard
+            case .other: kind = .other
+            case .unknown: kind = .unknown
+            }
+            return NativeActionDocumentPolicy.foregroundEvidence(
+                action: action, document: kind, web: webArea, foreground: foreground)
+        }
     }
 
     func nativeActionFacts(_ ref: String) throws -> ActionFacts {
@@ -27,14 +59,36 @@ extension NativeElementControl {
             role: role, actions: try declaredActions(target.element),
             enabled: (inspection.attribute(target.element, kAXEnabledAttribute) as? NSNumber)?.boolValue,
             applicationMenuContext: [kAXMenuBarRole, kAXMenuBarItemRole].contains(role ?? "")
-                || target.ancestors.contains {
-                    inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole
-                },
-            foreground: BackgroundTarget(target.application).isForeground)
+                || target.ancestors.contains { inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole },
+            foreground: BackgroundTarget(target.application).isForeground,
+            focusWritable: AXAccess.writable(target.element, kAXFocusedAttribute).value == true)
         if let window = target.observedInteractionSurface,
-            inspection.attribute(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
+            let subrole = inspection.attribute(window, kAXSubroleAttribute) as? String, !subrole.isEmpty
         {
-            facts.document = NativeDocumentContext(application: target.application, window: window)
+            if subrole == kAXStandardWindowSubrole {
+                facts.documentEvidence = .standard(
+                    NativeDocumentContext(application: target.application, window: window))
+                if facts.actions?.contains(where: { $0.name == kAXPressAction }) == true {
+                    facts.webArea = try NativeActionDocumentPolicy.classifyWebArea(
+                        element: target.element, window: window, same: { CFEqual($0, $1) },
+                        role: { AXAccess.read($0, kAXRoleAttribute).value as? String },
+                        parent: { AXAccess.element($0, kAXParentAttribute) },
+                        check: RequestDiagnostics.checkCancellation)
+                }
+            } else {
+                facts.documentEvidence = .other
+            }
+        }
+        if let context = target.popupOwner, target.ancestors.count == 2, CFEqual(target.ancestors[0], context.popup),
+            CFEqual(target.ancestors[1], context.list), let observed = target.observedInteractionSurface,
+            CFEqual(observed, context.popup)
+        {
+            facts.popupContext = context
+            if role == "AXStaticText" {
+                try RequestDiagnostics.checkCancellation()
+                facts.popupElementWindowID = BackgroundEvents.nativeWindowID(target.element)
+                try RequestDiagnostics.checkCancellation()
+            }
         }
         return facts
     }
@@ -53,14 +107,6 @@ extension NativeElementControl {
             throw DriverError("the selected native action is no longer declared", code: .inputUnavailable)
         }
         let background = BackgroundTarget(target.application)
-        if action == kAXRaiseAction, !BackgroundTarget.isExclusive, !background.isForeground {
-            throw DriverError("raising a background window requires exclusive mode", code: .modeUnsupported)
-        }
-        if !background.allowsMenuPopup, [kAXPressAction, kAXPickAction].contains(action),
-            inspection.opensMenu(target.element)
-        {
-            throw DriverError("opening an application menu is unavailable in this desktop mode", code: .modeUnsupported)
-        }
         try inspection.requireEnabled(target.element)
         try inspection.validateTargetIdentity(target)
         try background.validate(input: true)

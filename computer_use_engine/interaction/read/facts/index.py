@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from computer_use.protocol.observation import ElementValue, FieldPath, NativeNode, NativeObservation, ReadIssue
+from computer_use.protocol.observation import ElementValue, NativeNode, NativeObservation, ReadIssue
+from computer_use.protocol.observation.issues import ReadIssueIndex as _IssueIndex
 
 
 def data(value: Any) -> Any:
@@ -88,30 +89,6 @@ def node_values(node: NativeNode) -> dict[str, Any]:
     return {name: value for name, (_, value) in node_fields(node).items()}
 
 
-class _IssueIndex:
-    """Resolve restrictions by exact field prefix without rescanning the capture."""
-
-    def __init__(self, issues: Iterable[ReadIssue]) -> None:
-        self.paths: dict[FieldPath, list[tuple[int, ReadIssue]]] = {}
-        self.nodes: dict[str, list[ReadIssue]] = {}
-        for order, issue in enumerate(issues):
-            self.paths.setdefault(issue.path, []).append((order, issue))
-            if len(issue.path) >= 2 and issue.path[0] == "nodes":
-                self.nodes.setdefault(issue.path[1], []).append(issue)
-
-    def applicable(self, path: FieldPath) -> list[ReadIssue]:
-        """Return exact and ancestor restrictions in their original capture order.
-
-        Collection-wide gaps describe missing membership. They do not invalidate
-        facts already acquired from a particular node.
-        """
-        if len(path) < 2:
-            return [issue for _, issue in self.paths.get(path, ())]
-        matching = [item for length in range(2, len(path) + 1) for item in self.paths.get(path[:length], ())]
-        matching.sort(key=lambda item: item[0])
-        return [issue for _, issue in matching]
-
-
 def status_record(issues: list[ReadIssue]) -> dict[str, Any] | None:
     """Retain every applicable restriction, with a compact state for view consumers."""
     if not issues:
@@ -172,7 +149,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
             status = status_record(matching)
             if status is not None:
                 statuses[name] = status
-        for issue in issue_index.nodes.get(token, ()):
+        for issue in issue_index.for_node(token):
             if len(issue.path) > 2 and issue.path[2] == "relations":
                 continue
             path = issue.path[2:]

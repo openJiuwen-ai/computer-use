@@ -113,7 +113,7 @@ class DirectorySelectionPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                     value.read,
                     surfaces_query(
                         value.application["id"],
-                        accessibility=value.call.request.view != "image",
+                        profile=value.call.request.directory_profile,
                         capabilities=services.port.connection.capabilities,
                     ),
                     _control=control,
@@ -219,6 +219,7 @@ class LaunchCoordinator(Pipeline["ApplicationSelection", "ApplicationSelection"]
                 launched=value.launch["dispatch"] == Dispatch.DISPATCHED.value,
                 installation=value.installation,
                 on_scope=value.request.on_scope,
+                profile=value.request.directory_profile,
                 _control=control,
             )
             return replace(value, application=application, directory=directory)
@@ -260,13 +261,21 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
         services = self.services
 
         async def bound(call: ReadCall, control: Control) -> ApplicationSelection:
-            # pylint: disable-next=protected-access
-            selection, directory = await services._discover(
-                call.request.selector,
-                call.remaining,
-                _control=control,
-                **(dict(accessibility=False) if call.request.view == "image" else {}),
-            )
+            directory = call.request.source_directory
+            if directory is None:
+                # pylint: disable-next=protected-access
+                selection, directory = await services._discover(
+                    call.request.selector,
+                    call.remaining,
+                    _control=control,
+                    **(dict(accessibility=False) if call.request.view == "image" else {}),
+                )
+            else:
+                original = cast("WorkingWindow", call.request.selector)
+                # pylint: disable-next=protected-access
+                selection = services._selection(
+                    original.application, original.name, directory, original.root.root_window, previous=original
+                )
             return ApplicationSelection(
                 call,
                 dict(id=selection.application, displayName=selection.name),
@@ -284,6 +293,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                 launched=True,
                 installation=selector.installation,
                 on_scope=call.request.on_scope,
+                profile=call.request.directory_profile,
                 _control=control,
             )
             return ApplicationSelection(call, application, directory)
@@ -312,6 +322,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                             value.call.remaining,
                             _control=control,
                             include_overview=value.request.overview,
+                            profile=value.request.directory_profile,
                         ) from error
                     raise
             elif window is not None:

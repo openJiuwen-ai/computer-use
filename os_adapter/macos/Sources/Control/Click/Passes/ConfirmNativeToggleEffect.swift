@@ -13,13 +13,19 @@ import Foundation
         let deadline = ProcessInfo.processInfo.systemUptime + 0.5
         while true {
             try boundary.checkConditions()
-            if let after = try observation.read(),
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
+            let after = try observation.read()
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
+            if let after,
                 NativeTogglePress.shows(role: observation.role, before: observation.before, after: after)
             {
+                guard ProcessInfo.processInfo.systemUptime + 0.25 < deadline else { return nil }
                 try await Task.sleep(for: .milliseconds(250))
                 try boundary.checkConditions()
+                guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
                 let stable = try observation.read() == after
                 try boundary.checkConditions()
+                guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
                 if stable {
                     return .init(
                         verified: true,

@@ -10,6 +10,7 @@ from computer_use.interaction.read.presentation.accounting.relations import Rela
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
+    from computer_use.interaction.read.presentation.interface.disclosure.groups.model import WindowDisclosureContext
     from computer_use.interaction.read.presentation.records import RenderedTree, SemanticNode, SnapshotFacts
     from computer_use.protocol.records import FactNode, Record
 
@@ -30,12 +31,17 @@ class SnapshotRenderRequest:
         trace: Whether to record per-pass presentation diagnostics for this observation.
         compact: Whether to use compact task-facing text while retaining full source details.
         public_api: Whether continuation hints use the current public element API syntax.
+        share_descriptions: Whether compact whole-view output may share proven empty
+            description fields; element reads retain their local inline fields.
     """
 
     snapshot: SnapshotFacts
     trace: bool = False
     compact: bool = False
     public_api: bool = False
+    share_descriptions: bool = True
+    window_context: WindowDisclosureContext | None = None
+    recovery_prefix_units: int = 0
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,7 @@ class BranchFacts:
             recordStages=self.request.trace,
             compact=self.request.compact,
             publicApi=self.request.public_api,
+            shareDescriptions=self.request.share_descriptions,
         )
 
 

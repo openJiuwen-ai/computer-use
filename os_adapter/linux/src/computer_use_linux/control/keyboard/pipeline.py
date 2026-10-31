@@ -9,8 +9,8 @@ from .passes.prepare_native_receiver import prepare_native_receiver
 
 
 class NativePreparePipeline:
-    def __init__(self, guard, route_key, desktop, target, mode):
-        self.guard, self.route_key, self.desktop, self.target, self.mode = guard, route_key, desktop, target, mode
+    def __init__(self, guard, route_key, desktop, target):
+        self.guard, self.route_key, self.desktop, self.target = guard, route_key, desktop, target
 
     def run(self, operation, contract, foreground, ctx, preparation):
         # NativePreparePipeline: resolve/check -> optional activation -> addressed
@@ -22,7 +22,7 @@ class NativePreparePipeline:
         self.desktop.require_idle_input()
         key = self.route_key(contract["target"], contract["within"], contract["role"], contract.get("selection"))
         r = prepare_foreground(
-            operation, contract, foreground, ctx, preparation, r, key, self.mode, self.desktop, self.guard
+            operation, contract, foreground, ctx, preparation, r, key, self.desktop, self.guard
         )
         prepare_native_receiver(r, ctx, preparation, self.desktop, self.target)
         if observe_preparation(contract, ctx, self.guard):

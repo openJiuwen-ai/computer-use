@@ -41,22 +41,33 @@ import ApplicationServices
 
     static func hint(_ element: AXUIElement) -> WindowSelection.Hint? { hint(element, onWindowsRead: nil) }
 
-    static func hint(_ element: AXUIElement, onWindowsRead: NativeWindowsReadObserver?) -> WindowSelection.Hint? {
+    static func hint(
+        _ element: AXUIElement, onWindowsRead: NativeWindowsReadObserver?, queryTiming: NativeWindowQueryTiming? = nil
+    ) -> WindowSelection.Hint? {
         func attribute(_ key: String) -> CFTypeRef? {
             var value: CFTypeRef?
-            return AXUIElementCopyAttributeValue(element, key as CFString, &value) == .success ? value : nil
+            let status = NativeWindowQueryTiming.measure(queryTiming, "getter.hint", property: key, root: element) {
+                AXUIElementCopyAttributeValue(element, key as CFString, &value)
+            }
+            queryTiming?.status(status, phase: "getter.hint", property: key, root: element)
+            if key == kAXRoleAttribute, status == .success { queryTiming?.root(element, role: value as? String) }
+            return status == .success ? value : nil
         }
         var origin = CGPoint.zero, size = CGSize.zero
         let title = attribute(kAXTitleAttribute) as? String ?? ""
         var number: CGWindowID = 0
-        let id = getNativeWindowID?(element, &number) == AXError.success.rawValue && number != 0 ? number : nil
+        let status = NativeWindowQueryTiming.measure(queryTiming, "getter.hint.nativeID", root: element) {
+            getNativeWindowID?(element, &number)
+        }
+        let id = status == AXError.success.rawValue && number != 0 ? number : nil
+        queryTiming?.root(element, nativeID: id)
         // AXWindows can expose a content element as its top-level surface (for
         // example an inline editor). Its AX frame describes content, not window
         // pixels. Declared roots and popovers may use WindowServer geometry only
         // with an exact native ID; arbitrary controls retain their AX bounds.
         if let id, ![kAXWindowRole, kAXSheetRole].contains(attribute(kAXRoleAttribute) as? String ?? ""),
             (attribute(kAXRoleAttribute) as? String == "AXPopover"
-                || isDeclaredWindowRoot(element, onWindowsRead: onWindowsRead)), let info = WindowServerInfo.window(id)
+                || isDeclaredWindowRoot(element, onWindowsRead: onWindowsRead, queryTiming: queryTiming)), let info = WindowServerInfo.window(id)
         {
             var pid: pid_t = 0
             if AXUIElementGetPid(element, &pid) == .success,
@@ -78,12 +89,17 @@ import ApplicationServices
         return title.isEmpty && id == nil ? nil : WindowSelection.Hint(frame: nil, title: title, id: id)
     }
 
-    static func isDeclaredWindowRoot(_ element: AXUIElement, onWindowsRead: NativeWindowsReadObserver? = nil) -> Bool {
+    static func isDeclaredWindowRoot(
+        _ element: AXUIElement, onWindowsRead: NativeWindowsReadObserver? = nil,
+        queryTiming: NativeWindowQueryTiming? = nil
+    ) -> Bool {
         var pid: pid_t = 0
         guard AXUIElementGetPid(element, &pid) == .success else { return false }
         let root = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(root, 0.1)
-        let read = AXAccess.read(root, kAXWindowsAttribute)
+        let read = NativeWindowQueryTiming.measure(queryTiming, "getter.declaredRoot", property: kAXWindowsAttribute) {
+            AXAccess.read(root, kAXWindowsAttribute)
+        }
         onWindowsRead?(pid, root, read)
         return (read.value as? [AXUIElement])?.contains(where: { CFEqual($0, element) }) == true
     }
@@ -131,31 +147,44 @@ import ApplicationServices
     /// exposes the visible window and forwards the exact same AX children. Keep
     /// service identity for controls/events, but use the confirmed presenter for
     /// window containment, capture and modal boundaries. Never match by pixels.
-    static func presentedWindow(_ element: AXUIElement, pid: pid_t, onWindowsRead: NativeWindowsReadObserver? = nil)
-        -> AXUIElement
+    static func presentedWindow(
+        _ element: AXUIElement, pid: pid_t, onWindowsRead: NativeWindowsReadObserver? = nil,
+        queryTiming: NativeWindowQueryTiming? = nil
+    ) -> AXUIElement
     {
+        func queryRead(_ node: AXUIElement, _ key: String) -> AXRead<CFTypeRef> {
+            NativeWindowQueryTiming.measure(queryTiming, "getter.presentedWindow", property: key) {
+                AXAccess.read(node, key)
+            }
+        }
         guard let service = BackgroundEvents.accessibilityProcessID(element), service != pid,
-            let role = AXAccess.read(element, kAXRoleAttribute).value as? String,
+            let role = queryRead(element, kAXRoleAttribute).value as? String,
             [kAXWindowRole, kAXSheetRole].contains(role)
         else { return element }
         var presenter: pid_t = 0
         guard AXUIElementGetPid(element, &presenter) == .success, presenter == pid else { return element }
         func children(_ node: AXUIElement) -> [AXUIElement]? {
             var count: CFIndex = 0, raw: CFArray?
-            guard AXUIElementGetAttributeValueCount(node, kAXChildrenAttribute as CFString, &count) == .success,
-                count > 0, count <= 64,
-                AXUIElementCopyAttributeValues(node, kAXChildrenAttribute as CFString, 0, count, &raw) == .success,
-                let result = raw as? [AXUIElement], result.count == count
+            let status = NativeWindowQueryTiming.measure(queryTiming, "getter.presentedWindow.count", property: kAXChildrenAttribute) {
+                AXUIElementGetAttributeValueCount(node, kAXChildrenAttribute as CFString, &count)
+            }
+            queryTiming?.status(status, phase: "getter.presentedWindow.count", property: kAXChildrenAttribute)
+            guard status == .success, count > 0, count <= 64 else { return nil }
+            let rangeStatus = NativeWindowQueryTiming.measure(queryTiming, "getter.presentedWindow.range", property: kAXChildrenAttribute) {
+                AXUIElementCopyAttributeValues(node, kAXChildrenAttribute as CFString, 0, count, &raw)
+            }
+            queryTiming?.status(rangeStatus, phase: "getter.presentedWindow.range", property: kAXChildrenAttribute)
+            guard rangeStatus == .success, let result = raw as? [AXUIElement], result.count == count
             else { return nil }
             return result
         }
         let root = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(root, 0.1)
-        let read = AXAccess.read(root, kAXWindowsAttribute)
+        let read = queryRead(root, kAXWindowsAttribute)
         onWindowsRead?(pid, root, read)
         var pending = read.value as? [AXUIElement] ?? []
         for key in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
-            if let raw = AXAccess.read(root, key).value, CFGetTypeID(raw) == AXUIElementGetTypeID() {
+            if let raw = queryRead(root, key).value, CFGetTypeID(raw) == AXUIElementGetTypeID() {
                 pending.append(unsafeDowncast(raw, to: AXUIElement.self))
             }
         }
@@ -167,7 +196,7 @@ import ApplicationServices
             guard !seen.contains(where: { CFEqual($0, candidate) }) else { continue }
             seen.append(candidate)
             AXUIElementSetMessagingTimeout(candidate, 0.05)
-            let candidateRole = AXAccess.read(candidate, kAXRoleAttribute).value as? String
+            let candidateRole = queryRead(candidate, kAXRoleAttribute).value as? String
             guard [kAXWindowRole, kAXSheetRole].contains(candidateRole ?? "") else { continue }
             if candidateRole == role, BackgroundEvents.accessibilityProcessID(candidate) == pid,
                 let id = BackgroundEvents.nativeWindowID(candidate), let info = WindowServerInfo.window(id),
@@ -176,9 +205,9 @@ import ApplicationServices
                 candidates.append(candidate)
             }
             pending +=
-                (AXAccess.read(candidate, "AXSheets").value as? [AXUIElement] ?? [])
+                (queryRead(candidate, "AXSheets").value as? [AXUIElement] ?? [])
                 + (children(candidate) ?? []).filter {
-                    [kAXWindowRole, kAXSheetRole].contains(AXAccess.read($0, kAXRoleAttribute).value as? String ?? "")
+                    [kAXWindowRole, kAXSheetRole].contains(queryRead($0, kAXRoleAttribute).value as? String ?? "")
                 }
         }
         // Incomplete candidate enumeration cannot establish uniqueness.
@@ -211,7 +240,7 @@ import ApplicationServices
     /// application's current keyboard window. Sheets precede their owner document.
     static func owningWindow(
         _ element: AXUIElement, pid: pid_t, within observed: WindowMapping? = nil, in selected: AXUIElement? = nil,
-        onWindowsRead: NativeWindowsReadObserver? = nil
+        onWindowsRead: NativeWindowsReadObserver? = nil, queryTiming: NativeWindowQueryTiming? = nil
     ) -> AXUIElement? {
         let metric = RequestDiagnostics.metrics?.start(.windowMembership)
         defer { metric?.end() }
@@ -222,7 +251,10 @@ import ApplicationServices
         }
         func value(_ element: AXUIElement, _ key: String) -> CFTypeRef? {
             var raw: CFTypeRef?
-            let status = AXUIElementCopyAttributeValue(element, key as CFString, &raw)
+            let status = NativeWindowQueryTiming.measure(queryTiming, "getter.owningWindow", property: key) {
+                AXUIElementCopyAttributeValue(element, key as CFString, &raw)
+            }
+            queryTiming?.status(status, phase: "getter.owningWindow", property: key)
             if key == kAXWindowsAttribute { onWindowsRead?(pid, element, .result(status, raw)) }
             return status == .success ? raw : nil
         }
@@ -245,18 +277,18 @@ import ApplicationServices
         while let node = current, ancestors.count < 32, ProcessInfo.processInfo.systemUptime < deadline {
             guard !ancestors.contains(where: { CFEqual($0, node) }) else { break }
             ancestors.append(node)
-            if isWindow(node) { return presentedWindow(node, pid: pid, onWindowsRead: onWindowsRead) }
+            if isWindow(node) { return presentedWindow(node, pid: pid, onWindowsRead: onWindowsRead, queryTiming: queryTiming) }
             for key in [kAXTopLevelUIElementAttribute, kAXWindowAttribute] {
                 if let owner = native(node, key), isWindow(owner), !links.contains(where: { CFEqual($0, owner) }) {
                     if value(owner, kAXRoleAttribute) as? String == kAXSheetRole {
-                        return presentedWindow(owner, pid: pid, onWindowsRead: onWindowsRead)
+                        return presentedWindow(owner, pid: pid, onWindowsRead: onWindowsRead, queryTiming: queryTiming)
                     }
                     links.append(owner)
                 }
             }
             current = native(node, kAXParentAttribute)
         }
-        if let linked = links.first { return presentedWindow(linked, pid: pid, onWindowsRead: onWindowsRead) }
+        if let linked = links.first { return presentedWindow(linked, pid: pid, onWindowsRead: onWindowsRead, queryTiming: queryTiming) }
         // AXWindows often lists documents but omits attached file panels.
         // Accessory controls can also omit their parent/window links. Resolve
         // the native window catalogue before searching containment, using the
@@ -270,7 +302,7 @@ import ApplicationServices
             }
             var result = [AXUIElement](), seen = [AXUIElement](), cursor = 0
             while cursor < pending.count, seen.count < 32, ProcessInfo.processInfo.systemUptime < deadline {
-                let candidate = presentedWindow(pending[cursor], pid: pid, onWindowsRead: onWindowsRead)
+                let candidate = presentedWindow(pending[cursor], pid: pid, onWindowsRead: onWindowsRead, queryTiming: queryTiming)
                 cursor += 1
                 guard !seen.contains(where: { CFEqual($0, candidate) }) else { continue }
                 seen.append(candidate)
@@ -307,11 +339,16 @@ import ApplicationServices
             ancestors, in: candidates, same: { CFEqual($0, $1) }, isWindow: isWindow,
             children: { node in
                 var raw: CFArray?, count: CFIndex = 0
-                guard AXUIElementGetAttributeValueCount(node, kAXChildrenAttribute as CFString, &count) == .success,
-                    count > 0,
+                let status = NativeWindowQueryTiming.measure(queryTiming, "getter.owningWindow.count", property: kAXChildrenAttribute) {
+                    AXUIElementGetAttributeValueCount(node, kAXChildrenAttribute as CFString, &count)
+                }
+                queryTiming?.status(status, phase: "getter.owningWindow.count", property: kAXChildrenAttribute)
+                guard status == .success, count > 0 else { return [] }
+                let rangeStatus = NativeWindowQueryTiming.measure(queryTiming, "getter.owningWindow.range", property: kAXChildrenAttribute) {
                     AXUIElementCopyAttributeValues(node, kAXChildrenAttribute as CFString, 0, min(count, 64), &raw)
-                        == .success
-                else { return [] }
+                }
+                queryTiming?.status(rangeStatus, phase: "getter.owningWindow.range", property: kAXChildrenAttribute)
+                guard rangeStatus == .success else { return [] }
                 return raw as? [AXUIElement] ?? []
             }, withinBudget: { ProcessInfo.processInfo.systemUptime < deadline })
     }
@@ -340,7 +377,7 @@ import ApplicationServices
 
     static func inputWindow(
         pid: pid_t, preferring expected: WindowMapping? = nil, diagnosticStage: String? = nil,
-        onWindowsRead: NativeWindowsReadObserver? = nil
+        onWindowsRead: NativeWindowsReadObserver? = nil, queryTiming: NativeWindowQueryTiming? = nil
     ) -> AXUIElement? {
         let diagnosticStage = inputDiagnosticsEnabled ? diagnosticStage : nil
         let diagnosticStarted = diagnosticStage == nil ? nil : ProcessInfo.processInfo.systemUptime
@@ -349,11 +386,18 @@ import ApplicationServices
         var evidence = [String: Any]()
         func attribute(_ element: AXUIElement, _ key: String) -> CFTypeRef? {
             var raw: CFTypeRef?
-            return AXUIElementCopyAttributeValue(element, key as CFString, &raw) == .success ? raw : nil
+            let status = NativeWindowQueryTiming.measure(queryTiming, "getter.inputWindow", property: key) {
+                AXUIElementCopyAttributeValue(element, key as CFString, &raw)
+            }
+            queryTiming?.status(status, phase: "getter.inputWindow", property: key)
+            return status == .success ? raw : nil
         }
         func nativeElement(_ element: AXUIElement, _ key: String) -> AXUIElement? {
             var raw: CFTypeRef?
-            let status = AXUIElementCopyAttributeValue(element, key as CFString, &raw)
+            let status = NativeWindowQueryTiming.measure(queryTiming, "getter.inputWindow.link", property: key) {
+                AXUIElementCopyAttributeValue(element, key as CFString, &raw)
+            }
+            queryTiming?.status(status, phase: "getter.inputWindow.link", property: key)
             let isElement = raw.map { CFGetTypeID($0) == AXUIElementGetTypeID() } ?? false
             if diagnosticStage != nil {
                 evidence[key] =
@@ -372,7 +416,7 @@ import ApplicationServices
         // AXFocusedWindow object without any usable capture hint.
         let fallback = [kAXFocusedWindowAttribute, kAXMainWindowAttribute].compactMap { key in
             nativeElement(root, key).map { (key, $0) }
-        }.first { Self.hint($0.1, onWindowsRead: onWindowsRead) != nil }
+        }.first { Self.hint($0.1, onWindowsRead: onWindowsRead, queryTiming: queryTiming) != nil }
         func finish(_ selected: AXUIElement?, source: String) -> AXUIElement? {
             if let diagnosticStage {
                 var fields: [String: Any] = [
@@ -403,7 +447,7 @@ import ApplicationServices
                 var sheets = [AXUIElement]()
                 for child in children
                 where attribute(child, kAXRoleAttribute) as? String == kAXSheetRole
-                    && Self.hint(child, onWindowsRead: onWindowsRead) != nil
+                    && Self.hint(child, onWindowsRead: onWindowsRead, queryTiming: queryTiming) != nil
                     && !sheets.contains(where: { CFEqual($0, child) })
                 { sheets.append(child) }
                 guard sheets.count == 1 else { break }
@@ -424,8 +468,12 @@ import ApplicationServices
         // still look for a different actual owner; a preference never proves
         // focus and must not mask a new popup or another document.
         let owner =
-            owningWindow(focus, pid: pid, within: expected, onWindowsRead: onWindowsRead)
-            ?? (expected == nil ? nil : owningWindow(focus, pid: pid, onWindowsRead: onWindowsRead))
+            NativeWindowQueryTiming.measure(queryTiming, "helper.inputWindow.owningWindow") {
+                owningWindow(focus, pid: pid, within: expected, onWindowsRead: onWindowsRead, queryTiming: queryTiming)
+            }
+            ?? (expected == nil ? nil : NativeWindowQueryTiming.measure(queryTiming, "helper.inputWindow.owningWindowFallback") {
+                owningWindow(focus, pid: pid, onWindowsRead: onWindowsRead, queryTiming: queryTiming)
+            })
         let base = owner ?? fallback?.1
         let selected = attachedSheet(base)
         var source = owner == nil ? fallback?.0 ?? "none" : "AXFocusedUIElement/owning-window"

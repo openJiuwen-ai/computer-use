@@ -14,7 +14,10 @@ import AppKit
         do {
             let plan = try ResolveNativeClickPlanPass.run(
                 command, resolved: resolved, op: operation, step: step, access: access)
-            try await NativeClickPreparationPipeline.run(plan, boundary: boundary, receipt: receipt, evidence: evidence)
+            try await NativeInputActivity.$stage.withValue(.preparation) {
+                try await NativeClickPreparationPipeline.run(
+                    plan, boundary: boundary, receipt: receipt, evidence: evidence)
+            }
             try await DispatchNativeClickPass.run(
                 plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
         } catch {

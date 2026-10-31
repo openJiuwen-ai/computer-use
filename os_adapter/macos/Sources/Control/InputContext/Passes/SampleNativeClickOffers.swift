@@ -19,40 +19,72 @@ import ApplicationServices
             "windowRoute": "unknown", "pointerRoute": "unknown"
         ]
         var enabled: Bool?, foreground = false, role: String?, complete = false, menu = false
-        func pointerOffers(_ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false) throws {
+        func pointerOffers(
+            _ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false, addressedReceiver: Bool? = nil,
+            foregroundHitRequired: Bool = false,
+            qualifyPopup: ((NativePointerUnit.PhysicalClickSample) -> NativePopupPointerQualification?)? = nil
+        ) throws {
             try pointer.validateWindowIdentity()
+            if let qualifyPopup {
+                // The existing point readiness sample retains its physical hit.
+                // No preparation or second directory is needed for this offer.
+                let physical = pointer.physicalClickSample(at: point)
+                try RequestDiagnostics.checkCancellation()
+                let proof = physical.ready ? qualifyPopup(physical) : nil
+                foreground = physical.foreground
+                input["geometryCurrent"] = "yes"
+                input["pointerRoute"] = proof == nil ? "no" : "yes"
+                declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(proof))
+                declarations.declareClick(
+                    .pointer(.click),
+                    offer: .init(
+                        routeFamily: "macos.windowDirected.v1", delivery: .windowDirected, admission: .unavailable,
+                        reason: "This popup choice requires its confirmed foreground pointer point.",
+                        preparationOptions: []))
+                return
+            }
             foreground = pointer.foregroundWindow(at: point)
             input["geometryCurrent"] = "yes"
             var transport = true
             do {
                 try BackgroundEvents.requirePointerRoute(window: pointer.window)
             } catch is NativePreparationUnavailable { transport = false }
-            let directedAvailable = !BackgroundTarget.isExclusive && transport && pointer.canPrepareWindowDirected()
-            let systemReady = pointer.ready(at: point, delivery: .systemPointer)
+            let receiver = try addressedReceiver ?? pointer.hasAddressedPointerReceiver(at: point)
+            let directedAvailable = transport && receiver
+            let backgroundAvailable =
+                directedAvailable && !foregroundHitRequired && pointer.backgroundPreparationAvailable()
+            // The same existing HID readiness query retains its provenance;
+            // do not sample readiness again to manufacture a preference.
+            let physical = pointer.physicalClickSample(at: point)
+            let systemReady = physical.ready
             let directed = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
                 admission: directedAvailable
-                    ? (!exposure && pointer.ready(at: point, delivery: .windowDirected) ? .ready : .preparationRequired)
-                    : .unavailable,
-                reason: BackgroundTarget.isExclusive
-                    ? "Exclusive mode uses desktop mouse input."
-                    : !transport
-                        ? "Window-directed mouse transport is unavailable."
-                        : !directedAvailable
-                            ? "The first mouse-down may only activate this window; foreground preparation is required."
-                            : nil, preparationOptions: directedAvailable ? ["background"] : [])
+                    ? (!exposure && !foregroundHitRequired && pointer.ready(at: point, delivery: .windowDirected)
+                        ? .ready : .preparationRequired) : .unavailable,
+                reason: !transport
+                    ? "Window-directed mouse transport is unavailable."
+                    : !receiver
+                        ? "The point has no specific native receiver for addressed mouse input; the physical pointer route remains available."
+                        : !backgroundAvailable
+                            ? "The native window needs foreground preparation before addressed mouse input." : nil,
+                preparationOptions: directedAvailable
+                    ? (backgroundAvailable ? ["background", "foreground"] : ["foreground"]) : [],
+                backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !backgroundAvailable)
             try RequestDiagnostics.checkCancellation()
             let system = NativeClickContract(
                 routeFamily: "macos.hid.v1", delivery: .systemPointer,
-                admission: systemReady && !exposure ? .ready : .preparationRequired,
-                reason: exposure ? "The original element needs to be scrolled into view."
-                    : systemReady ? nil : "The exact target window needs authorized foreground preparation.",
-                preparationOptions: systemReady ? (exposure ? ["background"] : []) : ["foreground"],
+                admission: systemReady && !exposure && !foregroundHitRequired ? .ready : .preparationRequired,
+                reason: exposure
+                    ? "The original element needs to be scrolled into view."
+                    : foregroundHitRequired
+                        ? "The original element hit must be checked after window preparation."
+                        : systemReady ? nil : "The exact target window needs authorized foreground preparation.",
+                preparationOptions: foregroundHitRequired
+                    ? ["foreground"] : systemReady ? (exposure ? ["background"] : []) : ["foreground"],
                 backgroundFamily: "macos.windowDirected.v1",
-                backgroundUnavailable: !transport || !directedAvailable)
-            for offer in foreground ? [system, directed] : [directed, system] {
-                declarations.declareClick(.pointer(.click), offer: offer)
-            }
+                backgroundUnavailable: !directedAvailable || !backgroundAvailable)
+            for offer in [directed, system] { declarations.declareClick(.pointer(.click), offer: offer) }
             input["pointerRoute"] = systemReady || directed.admission == .ready ? "yes" : "no"
         }
         if plan.query.desktop {
@@ -81,21 +113,29 @@ import ApplicationServices
             complete = facts.actions != nil
             menu = facts.applicationMenuContext
             let applicationRoot = access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") != nil
+            var popupChoice = false
+            if !applicationRoot, !menu, plan.actuator == nil, plan.receiver == nil,
+                NativePopupClickPolicy.permitsIntent(op.request), let context = facts.popupContext
+            {
+                popupChoice = NativePopupClickPolicy.requiresPointer(
+                    context: context, window: context.popup, currentWindowID: facts.popupElementWindowID, role: role,
+                    enabled: facts.enabled, focusWritable: facts.focusWritable, actions: facts.actions,
+                    same: { CFEqual($0, $1) })
+            }
             if plan.actuator == nil {
                 for action in facts.actions ?? [] {
                     let isMenu = applicationRoot
                     // NSMenu can expose a stale disabled bit until its retained
                     // document path is prepared. The menu unit owns that refresh.
-                    let supported =
-                        (isMenu || facts.enabled != false) && (!menu || isMenu)
-                        && (action.name != kAXRaiseAction || BackgroundTarget.isExclusive || foreground)
+                    let supported = (isMenu || facts.enabled != false) && (!menu || isMenu)
                     let family = (isMenu ? "macos.menuAction." : "macos.axAction.") + action.name
                     let readiness =
                         try isMenu
                         ? access.units.menuUnit(binding.wire, within: plan.within).readiness(enabled: enabled)
                         : NativeReadiness()
-                    let documentRequired =
-                        try !isMenu && action.name == kAXPressAction && facts.document?.focus() == .other
+                    let documentPreparation =
+                        try isMenu ? NativeActionDocumentPolicy.Preparation() : facts.documentPreparation(action.name)
+                    let documentRequired = documentPreparation.required
                     let offer = NativeClickContract(
                         routeFamily: family, delivery: .objectAction,
                         admission: !supported
@@ -103,12 +143,15 @@ import ApplicationServices
                             : (isMenu && !readiness.ready) || documentRequired ? .preparationRequired : .ready,
                         reason: supported
                             ? nil : "The selected native action is disabled or unavailable in this scope.",
-                        preparationOptions: isMenu || documentRequired ? ["background", "foreground"] : [],
-                        backgroundFamily: isMenu || documentRequired ? family : nil)
+                        preparationOptions: documentPreparation.foregroundOnly
+                            ? ["foreground"] : isMenu || documentRequired ? ["background", "foreground"] : [],
+                        backgroundFamily: !documentPreparation.foregroundOnly && (isMenu || documentRequired)
+                            ? family : nil, backgroundUnavailable: documentPreparation.foregroundOnly,
+                        documentForeground: isMenu ? .notRequired : facts.documentForeground(action.name))
                     declarations.declareClick(
                         isMenu
                             ? .menuAction(action.name, action.description) : .action(action.name, action.description),
-                        offer: offer)
+                        offer: NativePopupClickPolicy.actionOffer(offer, requiresPointer: popupChoice))
                 }
             }
             if !applicationRoot && !menu {
@@ -126,16 +169,20 @@ import ApplicationServices
                 do {
                     let unit = try access.units.elementPointerUnit(binding.wire, actuator: plan.actuator)
                     if let exposure = try unit.exposure() {
+                        if popupChoice {
+                            throw DriverError(
+                                "the original popup choice must already be visible", code: .inputUnavailable)
+                        }
                         try pointerOffers(
                             NativePointerUnit(
                                 application: unit.application, window: exposure.mapping, nativeWindow: unit.window),
                             at: exposure.point, exposure: true)
                         return NativeSampledInput(
-                            plan: plan, declarations: declarations, enabled: enabled,
-                            foreground: foreground, input: input,
-                            nativeRole: role, actionsComplete: complete, applicationMenu: menu)
+                            plan: plan, declarations: declarations, enabled: enabled, foreground: foreground,
+                            input: input, nativeRole: role, actionsComplete: complete, applicationMenu: menu)
                     }
-                    let sampled = try unit.observedGeometry(allowWindowPreparation: true)
+                    let sampled = try unit.observedGeometry()
+                    input["geometryCurrent"] = "yes"
                     if let hit = sampled.hit {
                         if CFEqual(hit, unit.element) {
                             input["pointerHit"] = binding.node!
@@ -151,14 +198,34 @@ import ApplicationServices
                             }
                         }
                     }
-                    guard let geometry = sampled.geometry else {
+                    guard sampled.dispatchGeometryReady || !popupChoice && sampled.preparation != .unavailable else {
                         throw DriverError(
-                            "the element's center is not confirmed as this native hit target", code: .inputUnavailable)
+                            "the current hit does not confirm the original element and has no window preparation route",
+                            code: .inputUnavailable)
                     }
-                    try pointerOffers(
-                        NativePointerUnit(
-                            application: unit.application, window: geometry.mapping, nativeWindow: unit.window),
-                        at: geometry.point)
+                    let geometry = sampled.geometry
+                    let pointer = NativePointerUnit(
+                        application: unit.application, window: geometry.mapping, nativeWindow: unit.window)
+                    if popupChoice, let context = facts.popupContext {
+                        try pointerOffers(
+                            pointer, at: geometry.point,
+                            qualifyPopup: { physical in
+                                guard let hit = physical.hit else { return nil }
+                                return NativePopupPointerQualification(
+                                    context: context, element: unit.element, pid: unit.application.processIdentifier,
+                                    sample: .init(
+                                        geometry: geometry, hit: sampled.hit, physicalHit: hit,
+                                        foreground: physical.foreground), same: { CFEqual($0, $1) })
+                            })
+                    } else {
+                        try pointerOffers(
+                            pointer, at: geometry.point,
+                            addressedReceiver: plan.actuator == nil && sampled.basis == .exactHit
+                                ? NativeAddressedPointerReceiver(
+                                    role: role, actions: facts.actions?.map { $0.name },
+                                    focusWritable: facts.focusWritable
+                                ).supported : nil, foregroundHitRequired: sampled.preparation == .foreground)
+                    }
                 } catch let error as DriverError where error.code == .inputUnavailable || error.code == .modeUnsupported
                 {
                     // A pointer geometry failure cannot erase an independent

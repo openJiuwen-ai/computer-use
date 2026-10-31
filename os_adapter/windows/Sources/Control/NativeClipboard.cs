@@ -31,9 +31,10 @@ namespace ComputerUse.Windows
 
         IList<NativeClipboardData> Read(Request request);
         INativeClipboardPayload Prepare(IList<NativeClipboardData> entries, Request request);
-        INativeClipboardPayload PrepareText(string text, Request request);
+        INativeClipboardPayload PrepareText(string text, NativePasteConsumer consumer, Request request);
         void Replace(INativeClipboardPayload payload, Action changed, Request request);
-        void Handoff();
+        bool IsCurrentPublication(uint installedVersion);
+        NativePasteHandoff Handoff(Request request);
     }
 
     internal interface INativeClipboardProvider
@@ -58,13 +59,10 @@ namespace ComputerUse.Windows
             // Normalize only the published payload, never captured document
             // text or the original clipboard entries saved for restoration.
             text = text.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
-            return new[]
-            {
-                new NativeClipboardData(13, Encoding.Unicode.GetBytes(text + "\0")),
-                new NativeClipboardData(1, ansi.GetBytes(text + "\0")),
-                new NativeClipboardData(7, oem.GetBytes(text + "\0")),
-                new NativeClipboardData(16, BitConverter.GetBytes(locale))
-            };
+            return new[] { new NativeClipboardData(13, Encoding.Unicode.GetBytes(text + "\0")),
+                           new NativeClipboardData(1, ansi.GetBytes(text + "\0")),
+                           new NativeClipboardData(7, oem.GetBytes(text + "\0")),
+                           new NativeClipboardData(16, BitConverter.GetBytes(locale)) };
         }
     }
 
@@ -73,15 +71,18 @@ namespace ComputerUse.Windows
         readonly INativeClipboardApi api;
         readonly uint initial;
         readonly INativeClipboardPayload original;
+        readonly double deadline;
         uint? owned;
         bool finished;
         bool rolledBack, rollbackFailed;
+        bool handoffCompleted;
         NativeClipboardRestore finishResult;
         internal bool Prepared { get; private set; }
 
         internal NativeClipboardTransaction(INativeClipboardApi api, Request r)
         {
             this.api = api;
+            deadline = r.Deadline;
             try
             {
                 IList<NativeClipboardData> entries;
@@ -95,46 +96,62 @@ namespace ComputerUse.Windows
                     // accept that initial state after successful locked format
                     // enumeration; nonempty data still needs version tracking.
                     if (initial == 0 && entries.Count != 0)
-                        throw new Failure("input_unavailable", "clipboard version is unavailable for existing data; no paste sent");
+                        throw new Failure("input_unavailable",
+                                          "clipboard version is unavailable for existing data; no paste sent");
                 }
 
                 original = api.Prepare(entries, r);
             }
             catch
             {
-                api.Dispose();
+                try
+                {
+                    api.Dispose();
+                }
+                catch (Exception cleanup)
+                {
+                    throw new NativeClipboardCleanupFailure(
+                        "clipboard initialization failed and resource cleanup could not be confirmed: " +
+                        cleanup.Message);
+                }
                 throw;
             }
         }
-
-        internal void Install(string text, Request r, bool finalParagraph = false)
+        internal void Install(string text, Request r, bool finalParagraph = false, NativePasteConsumer consumer = null)
         {
+
             if (Prepared || finished)
                 throw new Failure("stale_target", "clipboard transaction has already been used");
             NativePaste.Validate(text);
             if (finalParagraph && (text.Length == 0 || text[text.Length - 1] != '\r' && text[text.Length - 1] != '\n'))
-                throw new Failure("invalid_request", "a native final paragraph marker requires a trailing text paragraph");
+                throw new Failure("invalid_request",
+                                  "a native final paragraph marker requires a trailing text paragraph");
             // Native rich-text mode consumes one final paragraph as its fragment
             // terminator. Keep Unicode plain-text font binding and the normal
             // paste chord; never import RTF or change the receiver's edit mode.
             // A CRLF suffix also keeps an original lone CR from merging with it.
-            using (var payload = api.PrepareText(finalParagraph ? text + "\r\n" : text, r))
-            using (api.Open(r))
+            using (var payload =
+                       api.PrepareText(finalParagraph ? text + "\r\n" : text, consumer, r)) using (api.Open(r))
             {
                 if (api.Version != initial)
                     throw new Failure("input_unavailable", "clipboard changed before paste; no paste sent");
                 if (initial == 0 && api.Read(r).Count != 0)
-                    throw new Failure("input_unavailable", "the initially empty clipboard now contains data; no paste sent");
+                    throw new Failure("input_unavailable",
+                                      "the initially empty clipboard now contains data; no paste sent");
                 try
                 {
-                    api.Replace(payload, () =>
-                    {
-                        Prepared = true;
-                        r.Effect = true;
-                    }, r);
+                    api.Replace(payload,
+                                () =>
+                                {
+                                    Prepared = true;
+                                    r.Effect = true;
+                                },
+                                r);
                     owned = api.Version;
                     if (owned.Value == 0)
-                        throw new Failure("input_unavailable", "clipboard publication has no trackable version; restored the previous contents without pasting");
+                        throw new Failure(
+                            "input_unavailable",
+                            "clipboard publication has no trackable version; restored the previous contents without pasting");
                 }
                 catch
                 {
@@ -145,9 +162,10 @@ namespace ComputerUse.Windows
                     {
                         try
                         {
-                            api.Replace(original, () =>
-                            {
-                            }, new Request(CancellationToken.None, 400));
+                            api.Replace(original,
+                                        () =>
+                                        {},
+                                        new Request(CancellationToken.None, 400));
                             rolledBack = true;
                         }
                         catch
@@ -167,9 +185,16 @@ namespace ComputerUse.Windows
                 throw new Failure("stale_target", "clipboard payload is not available for this paste");
             using (api.Open(r))
             {
-                if (api.Version != owned.Value)
-                    throw new Failure("input_unavailable", "clipboard changed before the paste chord; no further input sent");
+                if (!api.IsCurrentPublication(owned.Value))
+                    throw new Failure("input_unavailable",
+                                      "clipboard changed before the paste chord; no further input sent");
             }
+        }
+        internal NativePasteHandoff Handoff(Request r)
+        {
+            var delivery = api.Handoff(r);
+            handoffCompleted = true;
+            return delivery;
         }
 
         internal NativeClipboardRestore Finish(bool afterInput)
@@ -178,16 +203,23 @@ namespace ComputerUse.Windows
                 return finishResult;
             finished = true;
             var result = rollbackFailed ? NativeClipboardRestore.Failed : NativeClipboardRestore.Restored;
-            // Cancellation does not shorten the asynchronous handoff or
-            // skip resource cleanup. This is not consumption confirmation.
-            try
+            // A partial chord may have started a paste. Await its evidence once
+            // without re-sending, even when dispatch threw before normal wait.
+            if (Prepared && afterInput && !handoffCompleted)
             {
-                if (Prepared && afterInput)
-                    api.Handoff();
-            }
-            catch
-            {
-                result = NativeClipboardRestore.Failed;
+                try
+                {
+                    Handoff(new Request(CancellationToken.None, Math.Max(1, (int)Math.Min(2500, deadline - Wire.Now))));
+                }
+                catch (Failure error)
+                {
+                    if (error.Code != "cancelled" && error.Code != "deadline_exceeded")
+                        result = NativeClipboardRestore.Failed;
+                }
+                catch
+                {
+                    result = NativeClipboardRestore.Failed;
+                }
             }
 
             try
@@ -198,15 +230,16 @@ namespace ComputerUse.Windows
                     {
                         if (!owned.HasValue)
                             result = NativeClipboardRestore.Failed;
-                        else if (api.Version != owned.Value)
+                        else if (!api.IsCurrentPublication(owned.Value))
                         {
                             if (result != NativeClipboardRestore.Failed)
                                 result = NativeClipboardRestore.OwnershipLost;
                         }
                         else
-                            api.Replace(original, () =>
-                            {
-                            }, new Request(CancellationToken.None, 400));
+                            api.Replace(original,
+                                        () =>
+                                        {},
+                                        new Request(CancellationToken.None, 400));
                     }
                 }
             }

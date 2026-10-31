@@ -12,7 +12,8 @@ namespace ComputerUse.Windows
         readonly INativeCaptureBackend capture;
         readonly Func<object, Dictionary<string, object>> binding;
         readonly Action finish, expire;
-        internal NativeCapturePipeline(INativeReadBackend reader, INativeCaptureBackend capture, Func<object, Dictionary<string, object>> binding, Action finish, Action expire)
+        internal NativeCapturePipeline(INativeReadBackend reader, INativeCaptureBackend capture,
+                                       Func<object, Dictionary<string, object>> binding, Action finish, Action expire)
         {
             this.reader = reader;
             this.capture = capture;
@@ -27,11 +28,17 @@ namespace ComputerUse.Windows
                 throw new Failure("mode_unsupported", "this native driver has no capture provider");
             var scope = ResolveCaptureScopePass.Run(p, binding, state);
             r.Deadline = Math.Min(r.Deadline, state.Deadline);
+            bool cleanupFailure = false;
             try
             {
                 r.Check();
                 PrepareCaptureSurfacePass.Run(scope, r, reader);
                 return CollectPixelsPass.Run(scope, r, capture);
+            }
+            catch (NativeDesktopCleanupFailure)
+            {
+                cleanupFailure = true;
+                throw;
             }
             catch (Failure error)
             {
@@ -39,9 +46,11 @@ namespace ComputerUse.Windows
                     finish();
                 throw;
             }
+            // Defer unsafe expired-lease cleanup until Perform records health.
             finally
             {
-                expire();
+                if (!cleanupFailure)
+                    expire();
             }
         }
     }

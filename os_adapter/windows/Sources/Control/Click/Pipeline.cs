@@ -16,9 +16,13 @@ namespace ComputerUse.Windows
             this.pointer = pointer;
         }
 
-        internal object Execute(NativeWriteOperation operation, Dictionary<string, object> command, Request r, string operationId = null, long? step = null)
+        internal object Execute(NativeWriteOperation operation, Dictionary<string, object> command, Request r,
+                                string operationId = null, long? step = null)
         {
-            var result = Wire.Obj("target", new Dictionary<string, object>(Wire.Object(command["target"])), "dispatch", "notDispatched", "detail", "No requested click dispatched.", "preparation", new string[0], "confirmation", "unavailable", "cleanup", "complete", "errorCode", null, "retryReason", null, "context", null);
+            var result = Wire.Obj("target", new Dictionary<string, object>(Wire.Object(command["target"])), "dispatch",
+                                  "notDispatched", "detail", "No requested click dispatched.", "preparation",
+                                  new string[0], "confirmation", "unavailable", "cleanup", "complete", "errorCode",
+                                  null, "retryReason", null, "context", null);
             var diagnostics = NativeClickDiagnostics.Start(operationId, step, command);
             bool completed = false;
             try
@@ -40,10 +44,12 @@ namespace ComputerUse.Windows
                     operation.Click.StartAttempt();
                     if (contract.Unit == "native_action")
                     {
+                        if (contract.FixedClickChoice)
+                            operation.Click.RequireObservation();
                         // This span includes the existing UIA query/prepare/final
                         // guard/send boundary. Keep those calls adjacent.
-                        using (NativeClickDiagnostics.Measure(diagnostics, "uiaObject"))
-                            result = Wire.Object(objects.Execute(operation, command, r));
+                        using (NativeClickDiagnostics.Measure(diagnostics, "uiaObject")) result =
+                            Wire.Object(objects.Execute(operation, command, r));
                     }
                     else
                     {
@@ -58,6 +64,9 @@ namespace ComputerUse.Windows
                         phase = "sample";
                         using (NativeClickDiagnostics.Measure(diagnostics, "sampleAfterPreparation"))
                             RefreshClickPointPass.Run(contract, pointer, r);
+                        phase = "prepare";
+                        using (NativeClickDiagnostics.Measure(diagnostics, "clickCadence"))
+                            PrepareClickCadencePass.Run(contract, pointer, r);
                         phase = "check";
                         using (NativeClickDiagnostics.Measure(diagnostics, "finalCheck"))
                             CheckClickDispatchPass.Run(contract, pointer, r);
@@ -71,12 +80,19 @@ namespace ComputerUse.Windows
                 {
                     if (operation.Click.CallInFlight)
                         operation.Click.Unknown();
-                    var failure = error as Failure;
-                    result["errorCode"] = failure == null ? operation.Click.HasRequestedInput ? "execution_unknown" : "input_unavailable" : failure.Code;
-                    result["detail"] = String.IsNullOrWhiteSpace(error.Message) ? "Native click failed." : error.Message;
+                    var desktopCleanup = error as NativeDesktopCleanupFailure;
+                    if (desktopCleanup != null)
+                        operation.RetireWorker(desktopCleanup.Reason);
+                    var failure = error as Failure ?? (desktopCleanup == null ? null : desktopCleanup.OriginalFailure);
+                    result["errorCode"] =
+                        failure == null ? operation.Click.HasRequestedInput ? "execution_unknown" : "input_unavailable"
+                                        : failure.Code;
+                    result["detail"] =
+                        String.IsNullOrWhiteSpace(error.Message) ? "Native click failed." : error.Message;
                     if (operation.Click.Preparation.Any(p => p.Observation == "unknown" || p.Cleanup != "complete"))
                         operation.Click.RequireObservation();
-                    if (phase != "dispatch" && !operation.Click.HasRequestedInput && operation.Click.ContinuationCompatible && (string)result["errorCode"] == "input_unavailable")
+                    if (phase != "dispatch" && !operation.Click.HasRequestedInput &&
+                        operation.Click.ContinuationCompatible && (string)result["errorCode"] == "input_unavailable")
                         result["retryReason"] = phase == "prepare" ? "preparationUnavailable" : "routeUnavailable";
                 }
                 finally
@@ -93,7 +109,8 @@ namespace ComputerUse.Windows
                     result["cleanup"] = operation.Cleanup;
                     if (operation.Cleanup != "complete" || !operation.Click.ContinuationCompatible)
                         result["retryReason"] = null;
-                    result["click"] = operation.Click.Evidence(Wire.Object(result["target"]), family, result["retryReason"]);
+                    result["click"] =
+                        operation.Click.Evidence(Wire.Object(result["target"]), family, result["retryReason"]);
                 }
 
                 completed = true;

@@ -45,7 +45,7 @@ import ApplicationServices
     /// checks; the narrow setter port permits a no-desktop ordering regression.
     static func setFocus(
         _ element: AXUIElement, detail: String, check: () throws -> Void, onPreparation: (String) -> Void,
-        set: (AXUIElement, CFString, CFTypeRef) -> AXError = AXMessaging.setAttributeValue
+        set: @MainActor (AXUIElement, CFString, CFTypeRef) -> AXError = AXMessaging.setAttributeValue
     ) throws {
         try check()
         onPreparation(detail)

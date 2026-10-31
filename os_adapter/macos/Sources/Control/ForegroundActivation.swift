@@ -133,8 +133,15 @@ enum ForegroundActivation {
         child.standardOutput = output
         child.standardError = FileHandle.nullDevice
         try check()
+        let activity = NativeInputActivity.begin(
+            device: .focus, transport: .activation, mechanism: "NSRunningApplication.activate", pid: request.pid,
+            stage: .preparation)
+        var invoked: Bool?
+        var accepted: Bool?
+        defer { activity?.returned(nativeInvoked: invoked, accepted: accepted) }
         // A failed spawn proves this adapter made no activation request.
         do { try child.run() } catch {
+            invoked = false
             throw DriverError("could not start foreground activation helper", code: .inputUnavailable)
         }
         diagnose([
@@ -167,11 +174,14 @@ enum ForegroundActivation {
                 guard receipt.accepted == nil, let reason = receipt.reason, !reason.isEmpty else {
                     throw InvalidRequest()
                 }
+                invoked = false
                 throw RejectedActivation(reason: reason)
             }
             guard !receipt.applicationBefore, !receipt.applicationAfter, receipt.accepted != nil, receipt.reason == nil,
                 receipt.targetUnchanged
             else { throw InvalidRequest() }
+            invoked = true
+            accepted = receipt.accepted
             // accepted=false is still a returned native request. Only the
             // parent's current foreground/window readiness decides the effect.
             return receipt

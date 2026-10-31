@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.compression.captions import passive_label
+from computer_use.interaction.read.presentation.compression.descriptions import shared_description
 from computer_use.interaction.read.presentation.compression.policy import (
     layout,
     ordinary_control,
@@ -60,8 +61,9 @@ def member_layout(
         else False
     )
     if matches_node:
-        # A single-column outline/list item's cell is a presentation part,
-        # not a spreadsheet cell. Keep its coordinates/focus as source facts.
+        # Single-column item cells can contribute captions despite their own
+        # coordinates/focus. compact_label separately preserves those fields
+        # when deciding whether to fold the cell.
         # The control-label pass excludes table rows and multi-cell records.
         if any(node.get(key, {}).get("length", 1) != 1 for key in ("rowRange", "columnRange")):
             return False
@@ -156,7 +158,7 @@ def label_parts(state: ProjectionView, edit: ProjectionEditor, node: ViewNode, t
 def compact_label(
     state: ProjectionView, edit: ProjectionEditor, node: ViewNode, target: ViewNode
 ) -> list[ViewNode] | tuple[ViewNode, ...]:
-    """Compact Label.
+    """Fold caption members while retaining independently reported cell facts.
 
     Args:
         state: State owned by this operation or session; local IR does not replace that owner.
@@ -190,6 +192,17 @@ def compact_label(
         and not (node["ref"] == state.context.get("focusedRef") and node.get("focused") is False)
     )
     edit.children(node, [c for child in node["children"] for c in compact_label(state, edit, child, target)])
+    # Detailed output emits residual source fields as supplements. Compact
+    # output needs the cell itself to expose its focus and structural position;
+    # the row's coincident values belong to a different native object.
+    if (
+        state.context.get("compact")
+        and node.get("_factBacked")
+        and node["role"] == "cell"
+        and target["role"] == "row"
+        and (node.get("focused") is True or any(field in node for field in ("rowRange", "columnRange", "index")))
+    ):
+        return [node]
     if member_layout(state, edit, node, target, internal_focus, repeated_selection) and (
         node["ref"] != state.context.get("focusedRef") or internal_focus
     ):
@@ -238,6 +251,7 @@ def compact_input(
             for k, v in node.get("capabilities", {}).items()
         )
         or any(node.get(k) for k in ("actions", "actionsUnavailable", "help", "url"))
+        or any(k in node and not shared_description(node, k) for k in ("valueDescription", "rangeDescription"))
         or any(node.get(k) for k in ("headingLevel", "landmarkType", "localizedLandmarkType", "fullDescription"))
     ):
         return [node]

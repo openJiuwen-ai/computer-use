@@ -5,6 +5,8 @@ import Foundation
 /// Decode once, before native target access. This is wire shape validation;
 /// platform field support and live scope checks stay in the selected collector.
 enum NativeInspectQuery {
+    /// Window facts for pixels are distinct from provider/content discovery.
+    enum SurfaceProfile: Equatable { case accessibility, visual }
     struct ChildrenPage {
         let cursor: String?
         let limit: Int
@@ -119,14 +121,15 @@ enum NativeInspectQuery {
     }
 
     case applications
+    case surfaceBatch(applications: [String], profile: SurfaceProfile)
     case launch
-    case surfaces(application: String)
+    case surfaces(application: String, profile: SurfaceProfile)
     case roots(application: String)
     case inputContext(
         within: [String], actuator: Actuator?, receiver: Receiver?, basis: [Dependency], currentReceiver: Bool)
     case nodes(
         fields: [String], maxNodes: Int, maxDepth: Int, childrenPage: ChildrenPage?, relationPage: RelationPage?,
-        advertisedFields: [String], followRelations: [String])
+        advertisedFields: [String], followRelations: [String], textContent: Bool)
     case relation(property: String, cursor: String?, limit: Int)
     case capturedText(ref: String, offset: Int, length: Int)
 
@@ -146,9 +149,23 @@ enum NativeInspectQuery {
         case "applications":
             _ = try object(raw, keys: ["kind"])
             self = .applications
+        case "surfaceBatch":
+            let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true
+            let p = try object(raw, keys: hasProfile ? ["kind", "applications", "profile"] : ["kind", "applications"])
+            if hasProfile, try string(p["profile"], label: "profile") != "visual" {
+                throw DriverError("unsupported surface profile", code: .invalidRequest)
+            }
+            self = .surfaceBatch(
+                applications: try Self.names(p["applications"], label: "applications", min: 1, max: 64),
+                profile: hasProfile ? .visual : .accessibility)
         case "surfaces":
-            let p = try object(raw, keys: ["kind", "application"])
-            self = .surfaces(application: try string(p["application"], label: "application"))
+            let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true
+            let p = try object(raw, keys: hasProfile ? ["kind", "application", "profile"] : ["kind", "application"])
+            if hasProfile, try string(p["profile"], label: "profile") != "visual" {
+                throw DriverError("unsupported surface profile", code: .invalidRequest)
+            }
+            self = .surfaces(application: try string(p["application"], label: "application"),
+                             profile: hasProfile ? .visual : .accessibility)
         case "roots":
             let p = try object(raw, keys: ["kind", "application"])
             self = .roots(application: try string(p["application"], label: "application"))
@@ -200,12 +217,13 @@ enum NativeInspectQuery {
             let hasRelationPage = (raw as? [String: Any])?.keys.contains("relationPage") == true
             let hasAdvertised = (raw as? [String: Any])?.keys.contains("advertisedFields") == true
             let hasFollow = (raw as? [String: Any])?.keys.contains("followRelations") == true
+            let hasText = (raw as? [String: Any])?.keys.contains("textContent") == true
             let p = try object(
                 raw,
                 keys: Set(
                     ["kind", "fields", "maxNodes", "maxDepth"] + (hasPage ? ["childrenPage"] : [])
                         + (hasAdvertised ? ["advertisedFields"] : []) + (hasRelationPage ? ["relationPage"] : [])
-                        + (hasFollow ? ["followRelations"] : [])))
+                        + (hasFollow ? ["followRelations"] : []) + (hasText ? ["textContent"] : [])))
             let fields = try Self.names(p["fields"], label: "fields", min: 1, max: 128)
             let advertised =
                 hasAdvertised ? try Self.names(p["advertisedFields"], label: "advertisedFields", min: 1, max: 128) : []
@@ -227,7 +245,8 @@ enum NativeInspectQuery {
                 fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: page, relationPage: relationPage,
                 advertisedFields: advertised,
                 followRelations: hasFollow
-                    ? try Self.names(p["followRelations"], label: "followRelations", min: 1, max: 16) : [])
+                    ? try Self.names(p["followRelations"], label: "followRelations", min: 1, max: 16) : [],
+                textContent: hasText ? try boolean(p["textContent"], label: "textContent") : false)
         case "relation":
             let p = try object(raw, keys: ["kind", "property", "cursor", "limit"])
             self = .relation(

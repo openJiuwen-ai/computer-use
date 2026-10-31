@@ -65,13 +65,15 @@ class NativeFactCollectionAdapter(Node["ComponentLease", "SemanticSnapshot"]):
     async def _arun(self, value: ComponentLease, control: Control) -> SemanticSnapshot:
         request, read = value.request, value.read
         limits = request.limits
+        query = read.bounded(max(1, cast("Callable[[], int]", control.remaining)() // 3))
         return await self.reader.collect(
-            read.bounded(max(1, cast("Callable[[], int]", control.remaining)() // 3)),
+            read,
             node=request.target.node,
             fields=limits["fields"],
             max_nodes=limits["max_nodes"],
             max_depth=limits["max_depth"],
             scope_kind="window",
+            query_remaining=query.remaining,
             _control=control,
         )
 

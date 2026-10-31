@@ -29,6 +29,9 @@ ElementSelector: TypeAlias = int | str | ElementPath
 
 
 class Observation(Protocol):
+    async def read_details(
+        self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
+    ) -> "TextPage": ...
     @property
     def text(self) -> str:
         pass

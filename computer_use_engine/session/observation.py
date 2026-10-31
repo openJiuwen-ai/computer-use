@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Protocol
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
 
 from computer_use.identity import FrozenRecord
+from computer_use.session.detail_pages import CapturedDetailPages
 
 _UNSET = object()
 
@@ -21,6 +23,13 @@ class ObservationDocument(Protocol):
         pass
 
 
+@dataclass(frozen=True)
+class CapturedTextDocument:
+    """Already-rendered text retained by a local observation adapter."""
+
+    text: str
+
+
 class LazyObservation(FrozenRecord):
     """Retain a captured document and cache its full text when explicitly requested.
 
@@ -28,7 +37,7 @@ class LazyObservation(FrozenRecord):
     Accessing ``text`` or displaying the result renders only this captured document.
     """
 
-    __slots__ = ("_document", "_rendered_text", "_details_document", "_rendered_details")
+    __slots__ = ("_document", "_rendered_text", "_detail_pages")
 
     def __init__(
         self,
@@ -36,18 +45,18 @@ class LazyObservation(FrozenRecord):
         screenshot: Any = None,
         *,
         details_document: ObservationDocument | None = None,
+        element_details: Callable[[int], ObservationDocument] | None = None,
         overview: Any = _UNSET,
     ) -> None:
         values = dict(text=None, screenshot=screenshot)
-        if details_document is not None:
-            values["details"] = None
         if overview is not _UNSET:
             values["overview"] = overview
         super().__init__(values)
         object.__setattr__(self, "_document", document)
         object.__setattr__(self, "_rendered_text", None)
-        object.__setattr__(self, "_details_document", details_document)
-        object.__setattr__(self, "_rendered_details", None)
+        object.__setattr__(
+            self, "_detail_pages", CapturedDetailPages(details_document or document, element_details=element_details)
+        )
 
     def __getitem__(self, key: str) -> Any:
         if key == "text":
@@ -57,14 +66,24 @@ class LazyObservation(FrozenRecord):
                     raise TypeError("observation document must render text")
                 object.__setattr__(self, "_rendered_text", text)
             return self._rendered_text
-        if key == "details" and self._details_document is not None:
-            if self._rendered_details is None:
-                details = self._details_document.text
-                if not isinstance(details, str):
-                    raise TypeError("observation details must render text")
-                object.__setattr__(self, "_rendered_details", details)
-            return self._rendered_details
         return super().__getitem__(key)
+
+    async def read_details(
+        self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
+    ) -> TextPage:
+        """Page retained native facts and diagnostics from this observation.
+
+        Args:
+            element: Element number in this observation, or None for all captured details.
+                When continuing a cursor, None retains that cursor's element scope.
+            cursor: Continuation from this observation and element scope, or None to restart.
+            length: Maximum Python characters to return, from 1 through 16384.
+
+        Returns:
+            Captured text, its character count, and an optional next cursor. No native
+            read, observation event, or delivery-baseline update occurs.
+        """
+        return self._detail_pages.read(element=element, cursor=cursor, length=length)
 
     def __contains__(self, key: object) -> bool:
         return key in self._data
@@ -84,10 +103,13 @@ def lazy_observation(
     screenshot: Any = None,
     *,
     details_document: ObservationDocument | None = None,
+    element_details: Callable[[int], ObservationDocument] | None = None,
     overview: Any = _UNSET,
 ) -> LazyObservation:
     """Create a public observation without rendering the captured document."""
-    return LazyObservation(document, screenshot, details_document=details_document, overview=overview)
+    return LazyObservation(
+        document, screenshot, details_document=details_document, element_details=element_details, overview=overview
+    )
 
 
 def peek_observation_text(state: Mapping[str, Any]) -> str | None:
@@ -95,3 +117,7 @@ def peek_observation_text(state: Mapping[str, Any]) -> str | None:
     # The pipeline shares retained bindings with their owning service.
     # pylint: disable-next=protected-access
     return state._rendered_text if isinstance(state, LazyObservation) else state.get("text")
+
+
+if TYPE_CHECKING:
+    from computer_use.types import TextPage

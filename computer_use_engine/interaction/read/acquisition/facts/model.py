@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
+    from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
     from computer_use.protocol.observation import NativeObservation
@@ -33,6 +34,9 @@ class FactReadRequest:
             requested.
         relation_page: Continuation of another observed native relation, when requested.
         scope_kind: Original read-scope kind, when specified.
+        query_remaining: Optional tighter allowance for the native query. Returns
+            positive integer milliseconds or raises TimeoutError on expiry.
+            Normalization and its final check retain the enclosing lease deadline.
     """
 
     read: OperationLease[Binding]
@@ -43,6 +47,7 @@ class FactReadRequest:
     children_page: RelationPage | None = None
     relation_page: RelationPage | None = None
     scope_kind: str | None = None
+    query_remaining: Remaining | None = None
 
 
 @dataclass(frozen=True)

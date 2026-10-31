@@ -31,20 +31,13 @@ from computer_use.interaction.write.routes.selection.passes.resolve_action_seman
     stage as resolve_action_semantics,
 )
 from computer_use.interaction.write.routes.selection.passes.return_selected_route import stage as return_selected_route
-from computer_use.interaction.write.routes.selection.passes.select_background_route import (
-    stage as select_background_route,
-)
 from computer_use.interaction.write.routes.selection.passes.select_click_contract import stage as select_click_contract
 from computer_use.interaction.write.routes.selection.passes.select_click_offer import stage as select_click_offer
-from computer_use.interaction.write.routes.selection.passes.select_foreground_route import (
-    stage as select_foreground_route,
-)
-from computer_use.interaction.write.routes.selection.passes.select_property_route import stage as select_property_route
-from computer_use.interaction.write.routes.selection.passes.select_ready_route import stage as select_ready_route
+from computer_use.interaction.write.routes.selection.passes.select_unit_route import stage as select_unit_route
 from computer_use.pipeline import Pipeline, Select, Sequence
 
 if TYPE_CHECKING:
-    from computer_use.interaction.write.routes.selection.model import CandidateSet, RouteHistory, RouteOptions
+    from computer_use.interaction.write.routes.selection.model import CandidateSet, RouteHistory
     from computer_use.native.contracts import Facts, HostPolicy, Intent, UnitCommand
     from computer_use.pipeline.core import Step
 
@@ -75,8 +68,8 @@ class RouteChoicePipeline(Pipeline["SelectionRequest", "UnitCommand"]):
     """Choose an input command or the preparation it requires.
 
     Filter generated candidates using target evidence and route history, then
-    consider ready input, background preparation, value replacement, and authorized
-    foreground preparation in order. Return the selected command or explain why
+    prefer addressed ready input and preparation before taking foreground or
+    occupying the global pointer. Return the selected command or explain why
     these routes are unavailable.
     """
 
@@ -87,20 +80,17 @@ class RouteChoicePipeline(Pipeline["SelectionRequest", "UnitCommand"]):
         chosen = return_selected_route()
         refused = refuse_unavailable_route()
 
-        def choice(name: str, fallback: Step[RouteOptions, UnitCommand]) -> Step[RouteOptions, UnitCommand]:
-            return Select(name=name, selector=has_selected_route(), branches={"selected": chosen, "fallback": fallback})
-
-        foreground = Sequence(
-            name="ForegroundRoutePipeline",
-            steps=[select_foreground_route(), choice("ForegroundOrRefusal", refused)],
-        )
-        property_route = Sequence(
-            name="PropertyRoutePipeline",
-            steps=[select_property_route(), choice("PropertyOrForeground", foreground)],
-        )
-        background = Sequence(
-            name="BackgroundRoutePipeline",
-            steps=[select_background_route(), choice("BackgroundOrProperty", property_route)],
+        unit = Sequence(
+            name="UnitRouteChoicePipeline",
+            steps=[
+                filter_route_history_policy(),
+                select_unit_route(),
+                Select(
+                    name="SelectedUnitOrRefusal",
+                    selector=has_selected_route(),
+                    branches={"selected": chosen, "fallback": refused},
+                ),
+            ],
         )
         return Sequence(
             name="RouteChoicePipeline",
@@ -108,19 +98,9 @@ class RouteChoicePipeline(Pipeline["SelectionRequest", "UnitCommand"]):
                 check_selection_target(),
                 CandidateGenerationPipeline(),
                 Select(
-                    name="ClickOrLegacyRoute",
+                    name="ClickOrUnitRoute",
                     selector=select_click_contract(),
-                    branches={
-                        "click": select_click_offer(),
-                        "legacy": Sequence(
-                            name="LegacyRouteChoicePipeline",
-                            steps=[
-                                filter_route_history_policy(),
-                                select_ready_route(),
-                                choice("ReadyOrPreparation", background),
-                            ],
-                        ),
-                    },
+                    branches={"click": select_click_offer(), "unit": unit},
                 ),
             ],
         )

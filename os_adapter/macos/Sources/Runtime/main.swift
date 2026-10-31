@@ -26,7 +26,7 @@ if CommandLine.arguments.contains("--check-permissions") || CommandLine.argument
 if let metadata = try? JSONSerialization.data(
     withJSONObject: [
         "kind": "backend", "version": "0.0.1",
-        "desktopMode": ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "shared",
+        "desktopMode": ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "exclusive",
         "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]
     ], options: [.sortedKeys]), let line = String(data: metadata, encoding: .utf8)
 {

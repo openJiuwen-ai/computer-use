@@ -3,9 +3,9 @@
 /// Prefer authorized foreground setup before synthetic document activation only
 /// when declared AX selectors have no remaining selection to perform. This is
 /// a preparation choice, not a universal key-window or dispatch prerequisite.
+/// Element-addressed shortcuts still belong to their confirmed window scope.
 enum NativeKeyboardWindowEvidence {
     struct BackgroundSelection {
-        var foregroundAllowed: Bool
         var windowScope: Bool
         var windowCommand: Bool
         var foreground: Bool
@@ -18,11 +18,10 @@ enum NativeKeyboardWindowEvidence {
         var focusedWindowMatches: Bool?
     }
 
-    /// Strict shared input keeps the existing background attempt. Missing
-    /// properties and writable selectors also retain that route. AXFocused
+    /// Missing properties and writable selectors retain the background route. AXFocused
     /// false alone does not prove an application cannot consume a shortcut.
     static func prefersForegroundBeforeSynthetic(_ facts: BackgroundSelection) -> Bool {
-        facts.foregroundAllowed && facts.windowScope && facts.windowCommand && !facts.foreground && facts.standardWindow
+        facts.windowScope && facts.windowCommand && !facts.foreground && facts.standardWindow
             && facts.focused == false && facts.windowFocusWritable == false && facts.appFocusWritable == false
             && facts.main == true && facts.mainWindowMatches == true && facts.focusedWindowMatches == true
     }

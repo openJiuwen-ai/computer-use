@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.app import WorkingWindow
+from computer_use.native.query.directory import SurfaceReadProfile
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
@@ -23,6 +25,12 @@ if TYPE_CHECKING:
 PURE, QUERY, RESOURCE = {Effect.PURE}, {Effect.QUERY}, {Effect.RESOURCE}
 
 
+class ReadComponentKind(Enum):
+    WINDOW = "window"
+    MENU = "menu"
+    IMAGE_UNAVAILABLE = "image_unavailable"
+
+
 @dataclass(frozen=True)
 class ReadRequest:
     """Application read options used to select a working scope and collect its interface.
@@ -31,7 +39,8 @@ class ReadRequest:
         selector: Application name, running application identity, or established working window.
         window: Optional native window selector within the selected application.
         fields: Native fields requested from each collected element.
-        max_nodes: Maximum number of native objects this collection may read.
+        max_nodes: Maximum native objects to collect; None uses the selected
+            window or menu branch's default.
         max_depth: Maximum native relation depth; None uses the existing platform default.
         max_dimension: Maximum image edge length in pixels, preserving aspect ratio.
         timeout_ms: Maximum duration in milliseconds, bounded by the enclosing call deadline.
@@ -41,12 +50,14 @@ class ReadRequest:
             owner.
         view: Requested observation components: tree, image, or both.
         overview: Whether to collect previews of related application windows.
+        source_directory: Fresh directory resolved by the enclosing interface read;
+            acquisition still rechecks scope after collection.
     """
 
     selector: str | RunningApplication | WorkingWindow
     window: str | None = None
     fields: list[str] | None = None
-    max_nodes: int = 1000
+    max_nodes: int | None = None
     max_depth: int | None = None
     max_dimension: int = 2048
     timeout_ms: int = 30000
@@ -55,6 +66,11 @@ class ReadRequest:
     on_scope: Callable[[RunningApplication | WorkingWindow], None] | None = None
     view: str = "both"
     overview: bool = True
+    source_directory: DirectoryFacts | None = None
+
+    @property
+    def directory_profile(self) -> SurfaceReadProfile:
+        return SurfaceReadProfile.VISUAL if self.view == "image" else SurfaceReadProfile.ACCESSIBILITY
 
 
 @dataclass

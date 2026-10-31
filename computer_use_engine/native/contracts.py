@@ -353,7 +353,7 @@ class ClickOffer:
     preference_profile: str = "default"
 
     def wire(self):
-        return dict(
+        value = dict(
             routeFamily=self.route_family,
             interaction=self.interaction,
             delivery=self.delivery,
@@ -362,6 +362,7 @@ class ClickOffer:
             preparationOptions=list(self.preparation_options),
             preferenceProfile=self.preference_profile,
         )
+        return value
 
 
 @dataclass(frozen=True)
@@ -498,18 +499,17 @@ class Facts:
 
 @dataclass(frozen=True)
 class HostPolicy:
-    """Host-selected desktop mode and permission for foreground assistance."""
+    """Complete desktop input authority; preparation and delivery remain route-local."""
 
-    mode: str = "shared"
-    foreground_assist: bool = False
+    mode: str = "exclusive"
 
     def __post_init__(self):
-        if self.mode not in ("shared", "exclusive"):
-            raise ValueError("Unknown desktop mode")
+        if self.mode != "exclusive":
+            raise ValueError("Desktop mode must be exclusive")
 
     @property
     def foreground_allowed(self):
-        return self.mode == "exclusive" or self.foreground_assist
+        return True
 
 
 @dataclass(frozen=True)

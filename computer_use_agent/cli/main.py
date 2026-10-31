@@ -29,7 +29,7 @@ def parser():
     result.add_argument("--model")
     result.add_argument("--provider")
     result.add_argument("--api-base")
-    result.add_argument("--desktop", choices=("shared", "exclusive"), help="Desktop mode for the local MCP server.")
+    result.add_argument("--desktop", choices=("exclusive",), help="Desktop authorization for the local MCP server.")
     result.add_argument("--max-iterations", type=int)
     result.add_argument("--debug", action="store_true")
     return result

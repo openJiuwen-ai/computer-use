@@ -71,12 +71,6 @@ import Carbon
 
     /// Global input deliberately has no AX window-preparation dependency.
     static func requireDesktopInput() throws {
-        guard BackgroundTarget.isExclusive else {
-            throw DriverError(
-                "desktop input requires exclusive mode; shared mode does not permit global input",
-                code: .modeUnsupported,
-                next: "use App/Element operations in shared mode; desktop mode is host configuration")
-        }
         try RequestDiagnostics.checkCancellation()
         try BackgroundTarget.validateDesktop(input: true)
     }

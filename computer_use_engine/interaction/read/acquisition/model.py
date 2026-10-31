@@ -9,6 +9,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
+from computer_use.native.query.directory import SurfaceReadProfile
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
@@ -45,6 +46,7 @@ class ReadPlan:
         applications: Application catalogue captured while resolving the requested scope.
         launch: Original startup receipt; retained even when later observation fails.
         limits: Requested native collection, image, and view limits.
+        profile: Original immutable directory intent used by scope refreshes.
     """
 
     selection: WorkingWindow
@@ -52,6 +54,7 @@ class ReadPlan:
     applications: DirectoryFacts | None
     launch: Mapping[str, Any] | None
     limits: Mapping[str, Any]
+    profile: SurfaceReadProfile
 
 
 @dataclass(frozen=True)

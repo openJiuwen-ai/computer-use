@@ -51,7 +51,10 @@ import ApplicationServices
         return try inputScope(value, canonicalize: canonicalize, observed: observed)
     }
 
-    private func inputScope(_ target: NativeTarget, canonicalize: Bool, observed: NativeApplicationReader.ReadRoot?)
+    private func inputScope(
+        _ target: NativeTarget, canonicalize: Bool, observed: NativeApplicationReader.ReadRoot?,
+        popupOwner: AXUIElement? = nil
+    )
         throws -> NativeInputScope
     {
         var value = target
@@ -103,7 +106,7 @@ import ApplicationServices
         let interactionSurface = observed?.observedInteractionSurface.map {
             WindowGeometry.presentedWindow($0, pid: entry.owner.processIdentifier)
         }
-        let contentRoot = try workingRoot.map { original in
+        let contentRoot = try popupOwner ?? workingRoot.map { original in
             guard let selected = interactionSurface ?? discovered.element else { return original }
             return try NativeWindowBoundary.contentRoot(
                 workingRoot: original, target: selected, same: { CFEqual($0, $1) },
@@ -124,7 +127,7 @@ import ApplicationServices
             entry.owner, nativeWindows: native, contentRoot: contentRoot, purpose: .inputValidation)
         // The hint cannot replace proof that the original App root is live.
         // It may itself be a deep popover omitted by the narrower scan.
-        if let original = workingRoot, let contentRoot, !CFEqual(original, contentRoot),
+        if popupOwner == nil, let original = workingRoot, let contentRoot, !CFEqual(original, contentRoot),
             !windows.contains(where: { $0.ref == root })
         {
             windows = try applications.windows(entry.owner, nativeWindows: native, purpose: .inputValidation)
@@ -179,10 +182,12 @@ import ApplicationServices
                 })
         {
             return NativeInputScope(
-                wire: value.wire, application: entry.owner, window: popup, menuRoot: nil, blocked: blocked)
+                wire: value.wire, application: entry.owner, window: popup, menuRoot: nil, blocked: blocked,
+                windowEvidence: .init(windows: windows))
         }
         return NativeInputScope(
-            wire: value.wire, application: entry.owner, window: nativeWindow, menuRoot: nil, blocked: blocked)
+            wire: value.wire, application: entry.owner, window: nativeWindow, menuRoot: nil, blocked: blocked,
+            windowEvidence: .init(windows: windows))
     }
 
     /// QUERY admission for an already selected, unconstrained local dispatch.
@@ -390,27 +395,23 @@ import ApplicationServices
             // its role, identifier or value. The old registry scope is not
             // evidence of its current input boundary.
             let expected = try scope.requireWindow()
-            guard
-                let actual = WindowGeometry.owningWindow(
-                    read.element, pid: scope.application.processIdentifier, in: expected)
-            else {
-                throw DriverError("native target's current window membership is unavailable", code: .inputUnavailable)
-            }
-            let localMenu =
-                try attachedMenuAction && !CFEqual(actual, expected)
-                && LocalMenuAttachment.confirms(
-                    leaf: read.element, ancestors: read.ancestors, window: expected, same: { CFEqual($0, $1) },
-                    role: { AXAccess.read($0, kAXRoleAttribute).value as? String },
-                    children: { element in
-                        try RequestDiagnostics.checkCancellation()
-                        guard let children = AXAccess.elements(element, kAXChildrenAttribute, limit: 2048) else {
-                            throw DriverError("local menu attachment cannot be confirmed", code: .inputUnavailable)
-                        }
-                        return children
-                    })
-            guard CFEqual(actual, expected) || localMenu else {
-                throw DriverError("native target moved outside its observed interaction surface", code: .staleTarget)
-            }
+            let actual = WindowGeometry.owningWindow(
+                read.element, pid: scope.application.processIdentifier, in: expected)
+            // Local menus can omit AXWindow and sit beyond the bounded generic
+            // window search. An addressed action still has to prove every live
+            // forward edge of its retained menu path; the registry scope alone
+            // never authorizes input, and physical routes cannot use this proof.
+            try NativeInputMembershipBoundary.validate(
+                leaf: read.element, ancestors: read.ancestors, window: expected, currentWindow: actual,
+                attachedMenuAction: attachedMenuAction, same: { CFEqual($0, $1) },
+                role: { AXAccess.read($0, kAXRoleAttribute).value as? String },
+                children: { element in
+                    try RequestDiagnostics.checkCancellation()
+                    guard let children = AXAccess.elements(element, kAXChildrenAttribute, limit: 2048) else {
+                        throw DriverError("local menu attachment cannot be confirmed", code: .inputUnavailable)
+                    }
+                    return children
+                })
         }
         return (value, scope.blocked, node)
     }
@@ -441,6 +442,68 @@ import ApplicationServices
         }
         let value = try target(raw, input: input, attachedMenuAction: attachedMenuAction)
         return (value.wire, value.blocked, value.node)
+    }
+
+    /// Only NativeUnitBoundary's selected original-element HID contract can
+    /// enter here. General target(input:true) keeps its original membership.
+    func popupPointerBoundary(_ raw: Any?, qualification proof: NativePopupPointerQualification) throws -> [String] {
+        let requested = try NativeTarget(raw)
+        try requested.requireSession(session)
+        let read = try applications.readRoot(try string(requested.node, label: "node"))
+        guard read.application.processIdentifier == proof.pid, proof.context.process.pid == proof.pid else {
+            throw DriverError("the popup pointer process changed", code: .staleTarget)
+        }
+        guard let original = read.popupOwner, original.matches(proof.context, same: { CFEqual($0, $1) }),
+            CFEqual(read.element, proof.element)
+        else { throw DriverError("the original popup observation changed", code: .staleTarget) }
+        // One existing scope query, with the original owner as discovery hint.
+        // The same result proves the fixed root and both modal boundaries.
+        let scope = try inputScope(requested, canonicalize: false, observed: read, popupOwner: proof.context.owner)
+        try read.validate()
+        guard scope.blocked.isEmpty else { return scope.blocked }
+        guard let graph = scope.windowEvidence else {
+            throw DriverError("popup owner window evidence unavailable", code: .inputUnavailable)
+        }
+        let unit = NativeElementPointerUnit(
+            application: scope.application, window: try scope.requireWindow(), element: read.element,
+            logicalWindow: read.observedInteractionSurface)
+        let current = WindowGeometry.owningWindow(
+            read.element, pid: unit.application.processIdentifier, in: unit.window)
+        let facts = NativePopupAXFacts(
+            pid: unit.application.processIdentifier, until: RequestDiagnostics.deadline ?? .infinity,
+            check: {
+                try RequestDiagnostics.checkCancellation()
+                if let until = RequestDiagnostics.deadline, ProcessInfo.processInfo.systemUptime >= until {
+                    throw RequestDeadlineExceeded()
+                }
+            }).facts()
+        return try NativePopupPointerBoundary.validate(
+            proof, original: read.popupOwner, leaf: read.element, ancestors: read.ancestors, popup: unit.window,
+            currentOwner: current, facts: facts, sample: { try unit.popupPhysicalSample(proof.geometry) },
+            same: { CFEqual($0, $1) }, ownerBoundary: { popup, owner in
+                return try NativePopupOwnerBoundary.blocked(
+                    popup: popup, owner: owner,
+                    windows: graph.windows.map { .init(ref: $0.ref, element: $0.element, parent: $0.parent, modal: $0.modal) },
+                    same: { CFEqual($0, $1) })
+            })
+    }
+
+    func popupPointerUnit(_ binding: [String: Any], qualification proof: NativePopupPointerQualification) throws
+        -> any NativePopupPointerInput
+    {
+        let target = try NativeTarget(binding)
+        try target.requireSession(session)
+        let read = try applications.readRoot(try string(target.node, label: "node"))
+        guard read.scope == target.surface, read.application.processIdentifier == proof.pid,
+            CFEqual(read.element, proof.element), let observed = read.observedInteractionSurface,
+            CFEqual(observed, proof.context.popup)
+        else { throw DriverError("popup pointer prototype changed", code: .staleTarget) }
+        // Construction follows the production final boundary and grants no
+        // input. Delivery will re-enter that boundary before every OS event.
+        let unit = NativeElementPointerUnit(
+            application: read.application, window: proof.context.popup, element: read.element,
+            logicalWindow: observed)
+        return NativePopupPointerUnit(element: unit, qualification: proof)
     }
 
     func isDesktop(_ binding: [String: Any]) -> Bool { binding["surface"] is NSNull && binding["capture"] is String }
@@ -508,11 +571,12 @@ import ApplicationServices
         let node = try string(binding["node"], label: "node")
         let scrolling = actuator?.relation == "scrollPointer"
         let geometry = scrolling ? actuator!.region! : node
+        let read = try applications.readRoot(geometry)
         return NativeElementPointerUnit(
             application: scope.application, window: try scope.requireWindow(),
-            element: try applications.readRoot(geometry).element,
+            element: read.element,
             member: try actuator.map { try applications.readRoot($0.node).element }, kind: scrolling ? .scroll : .click,
-            logicalWindow: try applications.readRoot(geometry).observedInteractionSurface)
+            logicalWindow: read.observedInteractionSurface)
     }
 
     func menuUnit(_ binding: [String: Any], within: [String] = []) throws -> NativeMenuUnit {

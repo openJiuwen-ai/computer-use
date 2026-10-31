@@ -33,6 +33,7 @@ class ElementPointerSample(NamedTuple):
     frame: Any
     selected: Any
     native: Any
+    hit_ready: bool
 
 
 class NativeElementPointer(NativePointer):
@@ -200,7 +201,13 @@ class NativeElementPointer(NativePointer):
             "input_unavailable",
         )
 
-    def _sample(self, operation, contract, ctx) -> ElementPointerSample:
+    def window_root_hit(self, hit, native):
+        root = native.accessible
+        if root is None:
+            root = self.ax.matching_window(native, self.ax.windows())
+        return hit is not None and root is not None and self.ax.native_key(hit) == self.ax.native_key(root)
+
+    def _sample(self, operation, contract, ctx, *, preparing=False) -> ElementPointerSample:
         read = self.read_target(contract["target"], contract["within"], ctx)
         obj, _, _, role, _, selected, native = read
         require(
@@ -221,8 +228,14 @@ class NativeElementPointer(NativePointer):
         member = self._member(
             operation, contract["target"], contract["within"], selection, ctx, continuing_hit=continuing
         )
-        self.require_member_hit(hit, member)
-        return ElementPointerSample(points, frame, selected, native)
+        exact = self.ax.native_key(hit) == self.ax.native_key(member)
+        if not exact:
+            require(
+                preparing and self.window_root_hit(hit, native),
+                "The current hit does not confirm the selected native pointer target.",
+                "input_unavailable",
+            )
+        return ElementPointerSample(points, frame, selected, native, exact)
 
     def _route(self, selected, point):
         try:
@@ -251,10 +264,12 @@ class NativeElementPointer(NativePointer):
             ):
                 raise
         member = self._member(operation, target, within, selection, ctx) if selection is not None else obj
-        geometry = hit is not None and self.ax.native_key(hit) == self.ax.native_key(member)
-        ready = geometry and self._route(selected, points[0])
+        geometry = points is not None
+        exact = hit is not None and self.ax.native_key(hit) == self.ax.native_key(member)
+        preparable_root = geometry and self.window_root_hit(hit, native) and not native.override_redirect
+        ready = exact and self._route(selected, points[0])
         supported = bool(getattr(self.desktop, "can_input", False)) and (
-            not geometry or ready or not native.override_redirect
+            not exact or ready or not native.override_redirect
         )
         identifier = operation.contract(
             "pointer_sequence",
@@ -267,8 +282,8 @@ class NativeElementPointer(NativePointer):
             gesture=None,
             selection=selection,
         )
-        pending = ([] if enabled else ["enabled"]) + ([] if geometry else ["geometry"])
-        if geometry and not ready:
+        pending = ([] if enabled else ["enabled"]) + ([] if exact or preparable_root else ["geometry"])
+        if (exact or preparable_root) and not ready:
             pending.append("foreground")
         primitive = dict(
             id=identifier,
@@ -303,7 +318,7 @@ class NativeElementPointer(NativePointer):
 
     def guard(self, operation, contract, ctx, *, during_drag=False):
         require(not during_drag, "Element pointer input does not support dragging.", "invalid_request")
-        points, frame, selected, native = self._sample(operation, contract, ctx)
+        points, frame, selected, native, _ = self._sample(operation, contract, ctx)
         self.desktop.require_hit(selected, points[0])
         if contract["gesture"] is None:
             # Inspection/preparation may move this same control. Freeze only at
@@ -315,20 +330,15 @@ class NativeElementPointer(NativePointer):
         return points, selected, native
 
     def click_state(self, operation, contract, ctx) -> PointerRouteState:
-        points, _, selected, native = self._sample(operation, contract, ctx)
-        return PointerRouteState(points, selected, native, self._route(selected, points[0]))
+        points, _, selected, native, exact = self._sample(operation, contract, ctx, preparing=True)
+        return PointerRouteState(points, selected, native, exact and self._route(selected, points[0]))
 
     def prepare(self, operation, contract, foreground, ctx, preparation):
-        points, _, selected, native = self._sample(operation, contract, ctx)
-        if self._route(selected, points[0]):
+        points, _, selected, native, exact = self._sample(operation, contract, ctx, preparing=True)
+        if exact and self._route(selected, points[0]):
             return True
         if not foreground:
             return False
-        require(
-            self.b.mode == "exclusive" or self.desktop.assist,
-            "Host policy does not permit foreground assistance.",
-            "mode_unsupported",
-        )
         require(
             not native.override_redirect,
             "An unmanaged popup cannot be activated to repair a pointer route.",
@@ -339,6 +349,6 @@ class NativeElementPointer(NativePointer):
         self.desktop.activate(native, ctx)
         # Recheck identity, modality, geometry and exact hit after preparation.
         # There is no gesture yet; moving the same control is not a stale image.
-        points, _, selected, _ = self._sample(operation, contract, ctx)
+        points, _, selected, _, _ = self._sample(operation, contract, ctx)
         self.desktop.require_hit(selected, points[0])
         return True

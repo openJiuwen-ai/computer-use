@@ -11,6 +11,11 @@ import AppKit
     }
     private var entries = [String: Entry]()
     private let namespace = UUID().uuidString
+    private let validateOwner: (NSRunningApplication) throws -> Void
+
+    init(validateOwner: @escaping (NSRunningApplication) throws -> Void = { try BackgroundTarget($0).validate() }) {
+        self.validateOwner = validateOwner
+    }
 
     func entry(_ id: String) throws -> Entry {
         guard let entry = entries[id] else {
@@ -21,7 +26,7 @@ import AppKit
                     Windows, use the observed app.window(ref)
                     """)
         }
-        try BackgroundTarget(entry.owner).validate()
+        try validateOwner(entry.owner)
         return entry
     }
 

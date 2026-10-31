@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from computer_use.interaction.read.presentation.content import render_text
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
-from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedSection
+from computer_use.interaction.read.presentation.rendering.document.details import detail_footer, separate_details
+from computer_use.interaction.read.presentation.rendering.document.headers import full_header_text
+from computer_use.interaction.read.presentation.rendering.output import (
+    RenderedDocument,
+    RenderedLiteral,
+    RenderedSection,
+)
 from computer_use.protocol.primitives import trim_start, utf16_length
 
 if TYPE_CHECKING:
@@ -40,7 +46,16 @@ def _section_delta(section: RenderedSection, delta: TreeDelta, missing: tuple[st
         lines.append("Removed element IDs: " + ", ".join(removed))
     if unobserved:
         lines.append("Not observed in this read (not proof of removal): " + ", ".join(unobserved))
+    layout: tuple[tuple[str, str], ...] = ()
     for node in section.nodes:
+        if node.ref in delta.changes or node.ref in delta.context:
+            common = 0
+            for previous, current in zip(layout, node.layout):
+                if previous != current:
+                    break
+                common += 1
+            lines.extend(text for _, text in node.layout[common:])
+            layout = node.layout
         if node.ref in delta.changes:
             lines.append(delta.changes[node.ref] + node.text)
         elif node.ref in delta.context:
@@ -61,6 +76,8 @@ def _tree_delta(rendered: RenderedDocument, delta: TreeDelta, plan: DeltaPlan) -
     for part in rendered.parts:
         if isinstance(part, str):
             parts.append(part)
+        elif isinstance(part, RenderedLiteral):
+            parts.append(part.incremental_text)
         else:
             parts.append(_section_delta(part, delta, missing, plan))
             missing = ()
@@ -91,16 +108,29 @@ def format_document(
     """
     full_parts: list[str] = []
     diff_parts: list[str] = []
+    detail_roots: list[str] = []
     incremental = plan is not None and plan.mode != "full"
-    tree_index = 0
+    directories, payloads = [], []
+    catalogue_sources = set()
     for part in document.parts:
+        if isinstance(part, DisplayTree) and part.details and id(part.prepared) not in catalogue_sources:
+            catalogue_sources.add(id(part.prepared))
+            rendered = snapshots[id(part.prepared)]
+            if directory := rendered.get("capturedContentDirectory"):
+                directories.append(directory)
+                payloads.append(rendered["capturedContentPayload"])
+    tree_index = 0
+    for position, part in enumerate(document.parts):
         if not isinstance(part, DisplayTree):
-            value = render_text(part, snapshots=snapshots)
-            full_parts.append(value)
+            retained, roots = separate_details(part, snapshots)
+            detail_roots.extend(roots)
+            value = render_text(retained, snapshots=snapshots)
+            shortened = full_header_text(document, position, snapshots)
+            full_parts.append(value if shortened is None else shortened)
             diff_parts.append(value)
             continue
         rendered = snapshots[id(part.prepared)]
-        full = rendered["details"] if part.details else rendered["text"]
+        full = rendered.get("detailSupplement", rendered["details"]) if part.details else rendered["text"]
         full_parts.append(_indent(full, part.indent))
         output = getattr(rendered, "document", None)
         matches_incremental = (
@@ -131,8 +161,9 @@ def format_document(
             continue
         diff_parts.append(_tree_delta(output, plan.trees[tree_index], plan))
         tree_index += 1
-    full_text = "".join(full_parts)
+    footer = detail_footer(detail_roots)
+    full_text = ("\n\n".join((*directories, *payloads)) + "\n\n" if directories else "") + "".join(full_parts) + footer
     if not incremental or tree_index != len(plan.trees):
         return full_text
-    diff_text = _header("".join(diff_parts), plan.mode, public_api)
+    diff_text = _header("".join(diff_parts) + footer, plan.mode, public_api)
     return diff_text if utf16_length(diff_text) < utf16_length(full_text) else full_text

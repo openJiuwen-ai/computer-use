@@ -8,8 +8,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.write.routes.policy import route_key
+from computer_use.interaction.write.routes.selection.admission import stage_admission
 from computer_use.interaction.write.routes.selection.model import CandidateSet, EligibleRoutes
-from computer_use.native.contracts import Channel, UnitCommand
+from computer_use.native.contracts import UnitCommand
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:
@@ -30,23 +31,11 @@ def filter_route_history_policy(value: Any) -> EligibleRoutes:
             "native_value_replace",
         ):
             continue  # Readiness alone does not prove editing capability.
-        matches_intent = (
-            True
-            if (
-                intent.kind == "paste"
-                and not request.needs_editing_evidence
-                and primitive.unit == "prepare_receiver"
-                and primitive.channel != Channel.POINTER
-            )
-            else False
-        )
-        if matches_intent:
-            continue
         command = UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver)
         if route_key(command) in attempts.unavailable:
             continue
-        if "enabled" in primitive.pending or "geometry" in primitive.pending:
-            continue  # Coordinate expiry cannot trigger a hidden screenshot.
+        if not stage_admission(primitive).available:
+            continue
         commands.append(command)
     return EligibleRoutes(request, value.primitives, tuple(commands))
 

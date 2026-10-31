@@ -97,7 +97,7 @@ The server uses stdio. For a client that accepts an `mcpServers` configuration, 
 }
 ```
 
-Replace the checkout path with its absolute path on the target computer. `exclusive` allows foreground preparation and desktop-wide input; `shared` keeps input within the selected App or Window. Without an explicit mode, `COMPUTER_USE_DESKTOP` is used, defaulting to `shared`.
+Replace the checkout path with its absolute path on the target computer. `exclusive` is the desktop authorization and the default value of `COMPUTER_USE_DESKTOP`. Operations prefer element or application-directed input and acquire the foreground or use global input only when required by the selected route.
 
 Inside the `computer_use` tool, `computer`, `print()` and `print_image()` are available. Start by discovering application references:
 
@@ -166,7 +166,7 @@ async def main():
 asyncio.run(main())
 ```
 
-The agent operates the local desktop in `exclusive` mode by default. Pass `config=AgentConfig(desktop="shared")` to select shared mode, or configure `AgentConfig.mcp` with `McpConfig` to connect to another MCP host. The async context manager closes the computer-operation session when the conversation ends.
+The agent uses the same background-first execution pipeline with `exclusive` desktop authorization. Configure `AgentConfig.mcp` with `McpConfig` to connect to another MCP host. The async context manager closes the computer-operation session when the conversation ends.
 
 Existing openJiuwen DeepAgent applications can also add the standard tools provided by `ComputerUseToolkit`:
 
@@ -225,7 +225,7 @@ DeepAgent manages model calls, conversation context and the tool loop. The engin
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.
 - **Verifiable receipts**: every action returns `dispatched` / `verified`; failures are structured as `code / effect / next`.
-- **Shared and exclusive desktop modes**: background-window-directed input by default without stealing focus; foreground assistance on demand.
+- **Background-first input**: prefer element and application-directed operations; acquire foreground focus or the global pointer only when the operation requires it.
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.
 

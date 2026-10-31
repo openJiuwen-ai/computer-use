@@ -29,18 +29,7 @@ import ApplicationServices
             throw DriverError("accessibility permission denied", code: .desktopUnavailable)
         }
         try inspection.validateTargetIdentity(target)
-        // Read the current native role/subrole, not an old capability flag.
-        // Reject before window preparation, AX focus, mouse or key dispatch.
-        try validateSharedElementInput(target)
         return target
-    }
-
-    func validateSharedElementInput(_ target: Target) throws {
-        guard !BackgroundTarget.isExclusive else { return }
-        try SharedDesktopPolicy.validateElementInput(
-            role: target.role, subrole: target.identity.attributes[kAXSubroleAttribute],
-            currentRole: inspection.attribute(target.element, kAXRoleAttribute) as? String,
-            currentSubrole: inspection.attribute(target.element, kAXSubroleAttribute) as? String, exclusive: false)
     }
 
     func declaredActions(_ element: AXUIElement) throws -> [NativeAction.Item]? {

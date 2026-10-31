@@ -115,14 +115,14 @@ def route_key(command: UnitCommand) -> RouteKey:
 
 
 def _candidates(facts: Facts, intent: Intent, policy: HostPolicy | None = None) -> list[Primitive]:
-    # Compatibility entry for internal probes; one candidate implementation.
+    # Internal probes reuse the same pure candidate implementation.
     from computer_use.interaction.write.routes.selection.candidates import enumerate_candidates
 
     return list(enumerate_candidates(facts, intent, policy))
 
 
 def validate_target(facts: Facts, policy: HostPolicy) -> None:
-    """Validate target identity, working-window scope, modal state, and desktop-mode bounds."""
+    """Validate target identity, working-window scope, and modal state."""
     installation = isinstance(facts.binding, ApplicationBinding)
     if (
         not installation
@@ -145,18 +145,6 @@ def validate_target(facts: Facts, policy: HostPolicy) -> None:
             "A modal dialog blocks the requested target.",
             "call app.read() to observe the dialog, then use the window or element references returned by that read",
         )
-    matches_installation = (
-        True
-        if (
-            not installation
-            and cast("Binding", facts.binding).instance is None
-            and cast("Binding", facts.binding).root_window is None
-            and policy.mode != "exclusive"
-        )
-        else False
-    )
-    if matches_installation:
-        refuse("mode_unsupported", facts, "Desktop-wide input requires exclusive mode.")
 
 
 def has_independent_text_route(facts: Facts, intent: Intent, attempts: RouteHistory | None = None) -> bool:
@@ -176,11 +164,18 @@ def has_independent_text_route(facts: Facts, intent: Intent, attempts: RouteHist
 
 def has_ready_route(facts: Facts, intent: Intent) -> bool:
     """Check for a ready native route other than property replacement."""
-    return any(p.readiness == Knowledge.YES and p.unit != "native_value_replace" for p in _candidates(facts, intent))
+    from computer_use.interaction.write.routes.selection.admission import stage_admission
+
+    return any(stage_admission(p).ready and p.unit != "native_value_replace" for p in _candidates(facts, intent))
 
 
 def needs_pointer_member(facts: Facts, intent: Intent, attempts: RouteHistory) -> bool:
-    """Check whether every remaining click route requires pointer geometry."""
+    """Check whether remaining click routes need read-only member qualification.
+
+    Integrated click offers express missing evidence in their admission, rather
+    than the legacy pending-geometry condition. Neither form authorizes input;
+    the resolver must still prove the hit's control-part relationship.
+    """
 
     def _iter_p(_source_items: Iterator[Any]) -> Iterator[Any]:
         for p in _source_items:
@@ -191,6 +186,20 @@ def needs_pointer_member(facts: Facts, intent: Intent, attempts: RouteHistory) -
                 yield p
 
     candidates = list(_iter_p(iter(_candidates(facts, intent))))
+    if any(p.click is not None for p in candidates):
+        # Enumeration retains unavailable offers for refusal diagnostics.
+        candidates = [p for p in candidates if p.click is None or p.click.admission != "unavailable"]
+        return (
+            bool(candidates)
+            and intent.kind == "click"
+            and facts.identity == facts.within_scope == Knowledge.YES
+            and facts.enabled != Knowledge.NO
+            and not facts.blocked_by
+            and all(
+                p.unit == "pointer_sequence" and p.click is not None and p.click.admission == "insufficientEvidence"
+                for p in candidates
+            )
+        )
     return any(p.unit == "pointer_sequence" and "geometry" in p.pending for p in candidates) and not any(
         "geometry" not in p.pending for p in candidates
     )

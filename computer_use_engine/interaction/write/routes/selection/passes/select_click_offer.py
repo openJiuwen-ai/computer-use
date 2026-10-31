@@ -7,6 +7,8 @@ from dataclasses import replace
 
 from computer_use.interaction.write.diagnostics import record_click_selection
 from computer_use.interaction.write.routes.policy import refuse, route_key
+from computer_use.interaction.write.routes.selection.admission import stage_admission
+from computer_use.interaction.write.routes.selection.impact import least_disruptive_group
 from computer_use.interaction.write.routes.selection.model import CandidateSet
 from computer_use.native.contracts import ClickSelectionDecision, ClickSelectionExclusion, UnitCommand
 from computer_use.pipeline import Contract, Pass
@@ -14,20 +16,21 @@ from computer_use.pipeline.core import Control
 
 
 def execute(value: CandidateSet, control: Control) -> UnitCommand:
-    """Consider ready, background preparation, then authorized foreground candidates.
+    """Prefer addressed delivery and preparation before occupying the global mouse.
 
     This is the only click selector. Native execution receives a single offer;
     preparation and gesture dispatch are performed in the same native boundary.
     """
     request = value.request
-    facts, intent, history, policy = request.facts, request.intent, request.history, request.policy
+    facts, intent, history = request.facts, request.intent, request.history
     exclusions, ready, background, foreground = [], [], [], []
     selected_ids = {p.id for p in value.primitives}
     for primitive in facts.primitives:
         offer = primitive.click
         if offer is None:
-            raise ValueError("A v1 click inspection mixed legacy and integrated contracts")
+            raise ValueError("A click inspection mixed plain and integrated contracts")
         command = UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver)
+        admission = stage_admission(primitive)
         key = route_key(command)
         refresh = history.click_refresh
         # Foreground preparation may make the retained target ready. The same
@@ -45,7 +48,7 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
         elif refresh is not None and key != refresh:
             if route_key(replace(command, foreground=True)) != refresh:
                 reason = "continuationScope"
-        if reason is None and offer.admission in ("unavailable", "insufficientEvidence"):
+        if reason is None and not admission.available:
             reason = offer.admission + (": " + offer.reason if offer.reason else "")
         if reason is not None:
             exclusions.append(ClickSelectionExclusion(offer.route_family, reason, facts.observed))
@@ -57,16 +60,16 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
             else False
         )
         if matches_refreshed_ready:
-            if offer.admission == "ready":
+            if admission.ready:
                 ready.append(command)
-            elif "background" in offer.preparation_options and key not in history.background_unavailable:
+            elif "background" in admission.preparation and key not in history.background_unavailable:
                 background.append(command)
         foreground_command = replace(command, foreground=True)
         fgkey = route_key(foreground_command)
         matches_offer = (
             True
             if (
-                "foreground" in offer.preparation_options
+                "foreground" in admission.preparation
                 and (fgkey not in history.unavailable or fgkey == refresh)
                 and (history.click_refresh is None or fgkey == history.click_refresh)
             )
@@ -84,12 +87,15 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
         exclusions.append(
             ClickSelectionExclusion(offer.route_family, reason, facts.observed, history.failed_steps.get(key))
         )
-    # Reuse semantic order, but ready input outranks a pending pointer preparation.
+    # Activation and global pointer use are independent effects. A ready HID
+    # click cannot preempt a valid addressed route just because it is ready.
     order = {p.id: index for index, p in enumerate(value.primitives)}
-    choices = ready or background or (foreground if policy.foreground_allowed else [])
+    choices = least_disruptive_group(ready, background, foreground)
     if not choices:
         record_click_selection(control, request, tuple(exclusions), None)
-        detail = facts.unavailable_reason or "No click delivery can satisfy the original target and desktop mode."
+        detail = (
+            facts.unavailable_reason or "No click delivery can satisfy the original target and requested semantics."
+        )
         reasons = dict.fromkeys(
             p.click.reason
             for p in value.primitives

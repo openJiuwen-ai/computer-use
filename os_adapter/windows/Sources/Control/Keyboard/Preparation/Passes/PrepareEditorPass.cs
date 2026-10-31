@@ -6,19 +6,19 @@ using System.Linq;
 
 namespace ComputerUse.Windows
 {
-    // Input/output: bool Run(NativeInputContract contract, NativeKeyboardState state, NativeWriteOperation operation, Request r, List<string> preparation, INativeKeyboardProvider provider, string mode, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard). Borrows only the named native capability.
+    // Input/output: bool Run(NativeInputContract contract, NativeKeyboardState state, NativeWriteOperation operation, Request r, List<string> preparation, INativeKeyboardProvider provider, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard). Borrows only the named native capability.
     // Failures propagate unchanged; this stage never retries or selects a route.
     // State writes: the selected native preparation, request/preparation evidence and returned local records.
     // Failure boundary: original native errors propagate to the owning scope/receipt.
     internal static class PrepareEditorPass
     {
         internal const string Effects = "PREPARE/QUERY";
-        internal static bool Run(NativeInputContract contract, NativeKeyboardState state, NativeWriteOperation operation, Request r, List<string> preparation, INativeKeyboardProvider provider, string mode, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard)
+        internal static bool Run(NativeInputContract contract, NativeKeyboardState state, NativeWriteOperation operation, Request r, List<string> preparation, INativeKeyboardProvider provider, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard)
         {
             var editor = provider as INativeKeyboardEditorPreparation;
             // A replacement explicitly selects the whole editor; insertion and
             // paste must never move an unknown caret by implicitly clicking.
-            if (mode != "exclusive" || editor == null || !state.Foreground || !state.SelectionPreparable || !(contract.Replacement || (string)operation.Intent["kind"] == "focus"))
+            if (editor == null || !state.Foreground || !state.SelectionPreparable || !(contract.Replacement || (string)operation.Intent["kind"] == "focus"))
                 return false;
             editor.PrepareEditor(state, operation, r, preparation);
             double deadline = Math.Min(r.Deadline, Wire.Now + 400);

@@ -85,6 +85,17 @@ import Carbon
     }
 
     func post(_ event: CGEvent, isRelease: Bool, onCleanupUnknown: () -> Void) {
+        let activity: NativeInputActivity.Effect?
+        switch self {
+        case .process: activity = nil  // The final postToPid boundary records this route.
+        case .scopedForegroundHID(let scoped):
+            activity = NativeInputActivity.begin(
+                device: .keyboard, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap",
+                pid: scoped.process.pid, window: scoped.mapping.id, event: event)
+        case .exclusiveDesktop:
+            activity = NativeInputActivity.begin(
+                device: .keyboard, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap", event: event)
+        }
         switch self {
         case .process(let recipient): BackgroundEvents.postKey(event, to: recipient)
         case .scopedForegroundHID(let scoped):
@@ -102,6 +113,7 @@ import Carbon
             event.post(tap: .cghidEventTap)
         case .exclusiveDesktop: event.post(tap: .cghidEventTap)
         }
+        activity?.returned()
     }
 
     /// Release remains the captured process or session; no current-PID retarget.

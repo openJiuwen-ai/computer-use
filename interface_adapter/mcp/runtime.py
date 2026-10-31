@@ -36,11 +36,13 @@ from computer_use.client.images import (
 from computer_use.client.result_presentation import result_receipt, text_source_label
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
 from computer_use.native.preview import latest_preview_sink
-from computer_use.protocol.png import decode_png
+from computer_use.session.detail_pages import CapturedDetailPage, CapturedDetailText
 from computer_use.session.observation import peek_observation_text
 
+from .image_delivery import prepare_image
 from .output import ObservationOutput, ObservationPresenter, OutputBuffer
 from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
+from .worker_lifecycle import READY_ENV
 
 _runs = ContextVar("computer_use_execution", default=None)
 
@@ -113,7 +115,7 @@ class Runtime:
                 run["imageContexts"].set(observation["state"]["screenshot"], True)
 
         def emit_image(png):
-            if not any(image is png for image in run["images"]):
+            if not any(image.source is png for image in run["images"]):
                 self.print_image(png)
 
         run["observations"].flush(emit, emit_image)
@@ -124,7 +126,7 @@ class Runtime:
         if run is None or not run["active"]:
             return
         self.flush_observations(run)
-        self.emit(dict(type="text", text=run["actions"].render(receipt)))
+        self.emit(dict(type="text", text=run["actions"].render(receipt)), True)
 
     def text_page(self, source, page):
         run = _runs.get()
@@ -184,7 +186,7 @@ class Runtime:
         if run is None or not run["active"]:
             return
         if file is not None and file not in (sys.stdout, sys.stderr):
-            _originalPrint(*values, sep=sep, end=end, file=file, flush=flush)
+            _original_print(*values, sep=sep, end=end, file=file, flush=flush)
             return
         if len(values) == 1:
             receipt = result_receipt(values[0])
@@ -206,7 +208,8 @@ class Runtime:
         if end not in (None, "\n"):
             text += end
         self.emit(dict(type="text", text=text), True)
-        observed = run["observations"].printed(text)
+        details = any(isinstance(value, (CapturedDetailPage, CapturedDetailText)) for value in values)
+        observed = None if details else run["observations"].printed(text)
         if observed is not None:
             self.log_observations(run, materializedOnly=True)
         if observed is not None and observed["state"].get("screenshot") is not None:
@@ -215,13 +218,18 @@ class Runtime:
     def print_image(self, png):
         if not isinstance(png, (bytes, bytearray, memoryview)):
             raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
-        data = base64.b64encode(png).decode("ascii")
-        decode_png(data)
+        delivery = prepare_image(png)
+        data = base64.b64encode(delivery.png).decode("ascii")
         run = _runs.get()
-        self.emit(dict(type="text", text=image_label(png, run is not None and run["imageContexts"].has(png))))
+        self.emit(
+            dict(
+                type="text",
+                text=image_label(png, run is not None and run["imageContexts"].has(png), delivery.coordinates),
+            )
+        )
         self.emit(dict(type="image", mimeType="image/png", data=data))
         if run is not None and run["active"]:
-            run["images"].append(png)
+            run["images"].append(delivery)
             self.send(dict(diagnostic=dict(kind="image_output", capture=image_metadata(png)), executionId=run["id"]))
 
     async def finish(self, error: BaseException | None = None):
@@ -250,8 +258,8 @@ class Runtime:
         except Exception as failure:
             if error is None:
                 error = failure
-        for png in run["images"]:
-            image_delivered(png)
+        for delivery in run["images"]:
+            image_delivered(delivery.source, delivery.coordinates)
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())
@@ -340,11 +348,11 @@ class Runtime:
         for computer in self.computers:
             # pylint: disable-next=protected-access
             transport = computer._controller.transport
-            if hasattr(transport, "waitClosed"):
+            if hasattr(transport, "wait_closed"):
                 await transport.wait_closed()
 
 
-_originalPrint = builtins.print
+_original_print = builtins.print
 
 
 class ConsoleWriter(io.TextIOBase):
@@ -366,12 +374,16 @@ async def main():
     from .worker_transport import worker_connection
 
     protocol = consume_protocol()
+    ready_requested = os.environ.pop(READY_ENV, None) == "1"
     reader, writer = await worker_connection()
 
     messages = WorkerMessageWriter(writer, protocol=protocol)
     runtime = Runtime(messages.send)
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
+    if ready_requested:
+        messages.send(dict(ready=True))
+        await writer.drain()
 
     async def stop():
         await runtime.close()

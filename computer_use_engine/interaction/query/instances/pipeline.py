@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.identity import FrozenRecord
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
-from computer_use.native.query.directory import surfaces_query
+from computer_use.identity import FrozenRecord
+from computer_use.native.query.directory import SurfaceReadProfile, surfaces_query
+from computer_use.protocol.session import failure_error
 from computer_use.session.interfaces import ApplicationEntry
 
 from .membership import roots
@@ -25,8 +26,9 @@ if TYPE_CHECKING:
 class ApplicationDiscoveryPipeline:
     """Publish selectable App instances from application and window catalogues.
 
-    Running applications with discovered root windows expand into instance
-    choices; other applications retain an application-level entry. Each choice
+    Drivers declaring nativeApplicationListing publish fresh application entries.
+    The selected App read discovers independent windows. Other drivers retain
+    their existing root-window discovery. Each choice
     receives a public reference used to construct its App handle.
 
     Attributes:
@@ -41,19 +43,49 @@ class ApplicationDiscoveryPipeline:
         """Discover applications and allocate public integer references for their choices."""
         directory = await self.directory.applications()
         result = []
+        running = [app["id"] for app in directory["applications"] if app["isRunning"]]
+        capabilities = self.directory.port.connection.capabilities
+        application_listing = "nativeApplicationListing" in capabilities
+        batch_enabled = "nativeSurfaceBatch" in capabilities and "nativeReadIsolation" not in capabilities
+        # A visual single-query capability does not promise a visual batch.
+        # Keep its established route when only legacy batching is available.
+        batch_enabled = batch_enabled and (
+            "nativeVisualSurfaceQuery" not in capabilities or "nativeVisualSurfaceBatch" in capabilities
+        )
+        batch_entries = {}
         for application in directory["applications"]:
-            if application["isRunning"]:
+            if application["isRunning"] and not application_listing:
                 try:
-                    # The pipeline shares retained bindings with their owning service.
-                    # pylint: disable-next=protected-access
-                    surfaces = await self.directory._query(
-                        surfaces_query(
-                            application["id"],
-                            accessibility=False,
-                            capabilities=self.directory.port.connection.capabilities,
-                        ),
-                        30000,
-                    )
+                    if batch_enabled:
+                        if application["id"] not in batch_entries:
+                            start = running.index(application["id"])
+                            try:
+                                batch = await self.directory.surface_batch(
+                                    running[start : start + 64], profile=SurfaceReadProfile.VISUAL
+                                )
+                            except ComputerUseError as error:
+                                if error.effect != "none":
+                                    raise
+                                # A failed read-only batch returns to the original
+                                # per-application discovery, without changing targets.
+                                batch_enabled = False
+                            else:
+                                batch_entries = {entry["application"]: entry for entry in batch["entries"]}
+                        if batch_enabled:
+                            entry = batch_entries[application["id"]]
+                            if "error" in entry:
+                                raise failure_error("inspect", entry["error"])
+                            surfaces = entry["result"]
+                    if not batch_enabled:
+                        # pylint: disable-next=protected-access
+                        surfaces = await self.directory._query(
+                            surfaces_query(
+                                application["id"],
+                                profile=SurfaceReadProfile.VISUAL,
+                                capabilities=self.directory.port.connection.capabilities,
+                            ),
+                            30000,
+                        )
                 except ComputerUseError as error:
                     if error.effect != "none":
                         raise

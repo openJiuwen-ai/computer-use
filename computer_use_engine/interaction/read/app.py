@@ -40,6 +40,7 @@ from computer_use.interaction.read.presentation.content import (
 )
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.native.contracts import Binding, Dispatch
+from computer_use.native.query.directory import SurfaceReadProfile
 from computer_use.native.scopes import (
     RunningApplication,
     SelectedApplicationWindow,
@@ -189,7 +190,7 @@ class NativeAppReader:
         *,
         window: str | None = None,
         fields: list[str] | None = None,
-        max_nodes: int = 1000,
+        max_nodes: int | None = None,
         max_depth: int | None = None,
         max_dimension: int = 2048,
         timeout_ms: int = 30000,
@@ -198,12 +199,14 @@ class NativeAppReader:
         on_scope: Callable[[RunningApplication | WorkingWindow], None] | None = None,
         view: str = "both",
         overview: bool = True,
+        source_directory: DirectoryFacts | None = None,
     ) -> AppObservation | MenuAppObservation:
         """Read an application through request, acquisition and delivery pipelines.
 
         Args:
             fields: Requested or accounted native fields; unknown fields remain explicit facts.
-            max_nodes: Maximum number of native objects this collection may read.
+            max_nodes: Maximum native objects to collect; None uses the selected
+                window or menu branch's default.
             max_depth: Maximum native relation depth; None uses the existing platform default.
             max_dimension: Maximum image edge length in pixels, preserving aspect ratio.
             timeout_ms: Maximum duration in milliseconds, bounded by the enclosing call deadline.
@@ -212,6 +215,7 @@ class NativeAppReader:
             on_scope: Callback that retains the established running/working scope in its
                 existing owner.
             view: Requested observation components: tree, image, or both.
+            source_directory: Directory just resolved for this fixed working window.
         """
         from computer_use.interaction.read.app_read.model import ReadRequest
         from computer_use.interaction.read.pipeline import ApplicationObservationPipeline
@@ -229,6 +233,7 @@ class NativeAppReader:
             on_scope,
             view,
             overview,
+            source_directory,
         )
         return await ApplicationObservationPipeline(self).arun(request)
 
@@ -243,6 +248,7 @@ class NativeAppReader:
         selection: WorkingWindow | None = None,
         _control: Control | None = None,
         include_overview: bool = True,
+        profile: SurfaceReadProfile = SurfaceReadProfile.ACCESSIBILITY,
     ) -> WindowSelectionRequired:
         """Build a selection response when the read cannot choose one working window.
 
@@ -262,7 +268,7 @@ class NativeAppReader:
 
         control = _control or self.port.calls.control(remaining)
         return await WindowChoicePipeline(self).arun(
-            WindowChoiceRequest(error, application, name, directory, selection, include_overview),
+            WindowChoiceRequest(error, application, name, directory, selection, include_overview, profile),
             control.with_remaining(remaining),
         )
 
@@ -322,7 +328,10 @@ class NativeAppReader:
 
         control = _control or self.port.calls.control(remaining)
         return await WorkingScopeDiscoveryPipeline(self).arun(
-            WorkingScopeRequest(selection, accessibility), control.with_remaining(remaining)
+            WorkingScopeRequest(
+                selection, SurfaceReadProfile.ACCESSIBILITY if accessibility else SurfaceReadProfile.VISUAL
+            ),
+            control.with_remaining(remaining),
         )
 
     async def _startup_directory(
@@ -334,6 +343,7 @@ class NativeAppReader:
         launched: bool,
         installation: str | None = None,
         on_scope: Callable[[RunningApplication | WorkingWindow], None] | None = None,
+        profile: SurfaceReadProfile = SurfaceReadProfile.ACCESSIBILITY,
         _control: Control | None = None,
     ) -> tuple[ApplicationInfo, DirectoryFacts]:
         """Observe the running scope associated with an application startup.
@@ -351,7 +361,7 @@ class NativeAppReader:
 
         control = _control or self.port.calls.control(remaining)
         return await StartupDirectoryPipeline(self).arun(
-            StartupDirectoryState(application, session, launched, installation, on_scope),
+            StartupDirectoryState(application, session, launched, installation, on_scope, profile=profile),
             control.with_remaining(remaining),
         )
 

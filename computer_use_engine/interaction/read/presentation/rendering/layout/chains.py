@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.tree import has_display_value, has_incomplete_children
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
     from computer_use.interaction.read.presentation.records import NodeView
     from computer_use.protocol.records import Record
+
 
 _NODE = re.compile("^(\\t*)([0-9]+) (.+)\\Z")
 _STATES = (
@@ -32,8 +34,18 @@ def group_body(body: str) -> Record | None:
     return dict(states=match[1] or "", common="container" + match[2]) if match else None
 
 
-def compact_tree_chains(lines: list[str], roots: Sequence[NodeView]) -> list[str]:
-    "Pack eligible single-child chains into reversible lines with every reference retained."
+def compact_tree_chains(
+    lines: list[str], roots: Sequence[NodeView], *, selected: Mapping[str, str] | None = None
+) -> list[str]:
+    """Pack source chains while retaining all references and reversible field text.
+
+    Args:
+        lines: Individually rendered source nodes and their attached text.
+        roots: Structured display forest supplying exact containment.
+        selected: Explicit parent-to-child edges for spatial compact layout.
+            None retains the existing diagnostic chain rules. Selected chains
+            keep each complete node body, including distinct states and actions.
+    """
     nodes = {}
 
     def collect(node: NodeView) -> None:
@@ -86,6 +98,8 @@ def compact_tree_chains(lines: list[str], roots: Sequence[NodeView]) -> list[str
             return False
         if has_incomplete_children(child):
             return False
+        if selected is not None:
+            return selected.get(parent["ref"]) == child["ref"]
         a, b = group_body(parent_body), group_body(child_body)
         matches_anonymous = (
             True
@@ -146,13 +160,16 @@ def compact_tree_chains(lines: list[str], roots: Sequence[NodeView]) -> list[str
                 break
             candidate = entries + [next_match]
             groups = [group_body(e[3]) for e in candidate]
-            common = all(anonymous(nodes[e[2]]) for e in candidate) and all(
-                g is not None and groups[0] is not None and g["common"] == groups[0]["common"] for g in groups
+            common = (
+                selected is None
+                and all(anonymous(nodes[e[2]]) for e in candidate)
+                and all(g is not None and groups[0] is not None and g["common"] == groups[0]["common"] for g in groups)
             )
             matches_common = (
                 True
                 if (
-                    not common
+                    selected is None
+                    and not common
                     and len(entries) > 1
                     and all(anonymous(nodes[e[2]]) for e in entries)
                     and all(

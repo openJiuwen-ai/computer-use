@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.presentation.compression.descriptions import folded_source_roles
 from computer_use.interaction.read.presentation.compression.policy import secondary_actions
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.ir import ProjectionEditor
+    from computer_use.interaction.read.presentation.ir import ProjectionEditor, ProjectionView
     from computer_use.interaction.read.presentation.records import NodeView
 
 
@@ -18,7 +19,8 @@ def finalize_sources(view: ProjectionView, edit: ProjectionEditor) -> None:
     """Finalize source destinations and action-accounting evidence for the projection.
 
     Record primary actions omitted from secondary-action display, then resolve transitive fold
-    and elision destinations for the source-provenance ledger.
+    and elision destinations for the source-provenance ledger. Retain exact role fields of
+    sources folded after their empty descriptions obtained a public shared destination.
     """
 
     def actions(node: NodeView) -> None:
@@ -37,7 +39,5 @@ def finalize_sources(view: ProjectionView, edit: ProjectionEditor) -> None:
     for root in view.roots:
         actions(root)
     edit.finalize_folds()
-
-
-if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.ir import ProjectionView
+    for group in folded_source_roles(view):
+        edit.declare_source_roles(group)

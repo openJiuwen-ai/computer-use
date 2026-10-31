@@ -20,9 +20,24 @@ EXPANSIONS = {
         "Runtime/Resources",
         "Runtime/NativeWriteOperation.cs",
     ),
-    "NativeExecution.cs": ("Contracts", "Control/Object", "Control/Click", "Runtime/NativeWriteOperation.cs"),
-    "NativeKeyboard.cs": ("Contracts", "Control/Keyboard/Preparation"),
-    "NativePointer.cs": ("Control/NativeElementHit.cs",),
+    "NativeExecution.cs": (
+        "Contracts",
+        "Control/Object",
+        "Control/Click",
+        "Control/SelectionInsert",
+        "Runtime/NativeWriteOperation.cs",
+    ),
+    "NativeKeyboard.cs": (
+        "Contracts",
+        "Control/Keyboard/Preparation",
+        "Control/Keyboard/TextDispatch",
+        "Control/Keyboard/CharacterDispatch",
+    ),
+    "NativePointer.cs": (
+        "Control/NativeElementHit.cs",
+        "Control/NativePointerClickAdmission.cs",
+        "Contracts/NativePointerGesture.cs",
+    ),
 }
 
 

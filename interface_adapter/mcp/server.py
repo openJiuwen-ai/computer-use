@@ -14,6 +14,7 @@ from computer_use.diagnostics import SDK_VERSION
 from computer_use.native.preview import latest_preview_sink
 from computer_use.protocol.primitives import trim
 from computer_use.protocol.schema import obj, string
+from computer_use.protocol.session import desktop_mode
 
 from mcp import types
 from mcp.server.lowlevel import Server
@@ -231,12 +232,11 @@ async def main():
 
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Computer Use stdio MCP host")
-    parser.add_argument(
-        "--desktop", choices=("shared", "exclusive"), help="Override COMPUTER_USE_DESKTOP for this MCP process"
-    )
+    parser.add_argument("--desktop", choices=("exclusive",), help="Desktop authorization for this MCP process")
     args = parser.parse_args(argv)
     if args.desktop is not None:
         os.environ["COMPUTER_USE_DESKTOP"] = args.desktop
+    desktop_mode()
     asyncio.run(main())
 
 

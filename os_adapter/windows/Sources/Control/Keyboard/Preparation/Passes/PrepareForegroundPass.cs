@@ -6,21 +6,19 @@ using System.Linq;
 
 namespace ComputerUse.Windows
 {
-    // Input/output: NativeKeyboardState Run(NativeInputContract contract, bool foreground, NativeKeyboardState state, Request r, List<string> preparation, INativeKeyboardProvider provider, bool foregroundAllowed, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard). Borrows only the named native capability.
+    // Input/output: NativeKeyboardState Run(NativeInputContract contract, bool foreground, NativeKeyboardState state, Request r, List<string> preparation, INativeKeyboardProvider provider, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard). Borrows only the named native capability.
     // Failures propagate unchanged; this stage never retries or selects a route.
     // State writes: the selected native preparation, request/preparation evidence and returned local records.
     // Failure boundary: original native errors propagate to the owning scope/receipt.
     internal static class PrepareForegroundPass
     {
         internal const string Effects = "PREPARE/QUERY";
-        internal static NativeKeyboardState Run(NativeInputContract contract, bool foreground, NativeKeyboardState state, Request r, List<string> preparation, INativeKeyboardProvider provider, bool foregroundAllowed, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard)
+        internal static NativeKeyboardState Run(NativeInputContract contract, bool foreground, NativeKeyboardState state, Request r, List<string> preparation, INativeKeyboardProvider provider, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard)
         {
             if (!state.Foreground)
             {
                 if (!foreground)
                     return null;
-                if (!foregroundAllowed)
-                    throw new Failure("mode_unsupported", "host policy does not permit foreground assistance");
                 provider.RequireIdle(new NativeKeyEvent[0], r);
                 r.Check();
                 preparation.Add("foreground");

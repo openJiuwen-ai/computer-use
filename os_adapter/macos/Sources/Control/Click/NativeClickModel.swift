@@ -9,6 +9,7 @@ import ApplicationServices
     case menu(NativeMenuUnit, node: String, name: String, description: String?)
     case captured(NativePointerUnit)
     case element(NativeElementPointerUnit)
+    case popupPointer(any NativePopupPointerInput)
     case desktop(NativeDesktopUnit)
 }
 
@@ -21,7 +22,7 @@ import ApplicationServices
     let within: [String]
     let step: Int64
     var document: NativeDocumentContext? = nil
-    var documentPreparationRequired = false
+    var documentPreparation = NativeActionDocumentPolicy.Preparation()
 }
 
 @MainActor struct NativeClickWindowPreparation {

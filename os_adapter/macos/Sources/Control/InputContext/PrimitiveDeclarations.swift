@@ -80,15 +80,24 @@ import ApplicationServices
         }
         primitives.append(
             unit.declaration(
-                id: contract.id, supported: supported, readiness: conditions, exclusive: BackgroundTarget.isExclusive))
+                id: contract.id, supported: supported, readiness: conditions))
     }
 
-    func declareClick(_ unit: NativeInputUnit, offer: NativeClickContract) {
+    func declareClick(_ unit: NativeInputUnit, offer sampled: NativeClickContract) {
+        func sameProof(_ old: NativePopupPointerQualification?, _ new: NativePopupPointerQualification?) -> Bool {
+            switch (old, new) {
+            case (nil, nil): return true
+            case (let a?, let b?): return a.matches(b, same: { CFEqual($0, $1) })
+            default: return false
+            }
+        }
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
-                && $0.unit == unit && $0.click?.routeFamily == offer.routeFamily
+                && $0.unit == unit && $0.click?.routeFamily == sampled.routeFamily
+                && sameProof($0.click?.popupPointer, sampled.popupPointer)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
+        let offer = sampled.retainingDocumentForeground(from: prior?.click)
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
             receiver: receiver, basis: basis, unit: unit, click: offer)
@@ -98,8 +107,7 @@ import ApplicationServices
         let condition = offer.preparationOptions == ["foreground"] ? "foreground" : "receiver"
         var wire = unit.declaration(
             id: contract.id, supported: supported,
-            readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]),
-            exclusive: BackgroundTarget.isExclusive)
+            readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]))
         wire["backgroundPreparation"] = offer.preparationOptions.contains("background") ? "yes" : "no"
         wire["click"] = offer.wire
         primitives.append(wire)

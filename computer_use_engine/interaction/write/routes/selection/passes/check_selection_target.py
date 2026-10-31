@@ -21,7 +21,7 @@ def check_selection_target(request: SelectionRequest) -> SelectionRequest:
 
 
 def execute(value: SelectionRequest, control: Control) -> SelectionRequest:
-    """Validate the target identity, input scope, modal state, and desktop-mode bounds."""
+    """Validate the target identity, input scope, and modal state."""
     return check_selection_target(value)
 
 

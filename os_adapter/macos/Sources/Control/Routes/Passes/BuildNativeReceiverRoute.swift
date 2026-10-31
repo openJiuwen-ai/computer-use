@@ -34,8 +34,7 @@ import ApplicationServices
             receiverRelation: selected.receiverRelation, cellEditor: selected.cellEditor)
         return .prepare {
             if foreground {
-                try op.requireForegroundPreparation(
-                    id, hostAllowed: ForegroundAssist.enabled || BackgroundTarget.isExclusive)
+                try op.requireForegroundPreparation(id)
             }
             try await unit.prepare(
                 foreground: foreground, check: { try unit.validate(receiverContract, check: checkBoundary) },

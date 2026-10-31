@@ -13,14 +13,18 @@ import ApplicationServices
         defer { metric?.end() }
         func actionBoundary() throws {
             try boundary.checkConditions()
-            if let document = plan.document,
-                try
-                    (!NativeDocumentContext.permitsDispatch(
-                        document.focus(), prepared: plan.documentPreparationRequired)
-                    || (plan.documentPreparationRequired && !BackgroundTarget(document.application).isForeground))
-            {
-                throw NativePreparationUnavailable(
-                    description: "document context changed before AXPress; no requested action was sent")
+            if let document = plan.document {
+                let focus = try document.focus()
+                let foreground = BackgroundTarget(document.application).isForeground
+                guard
+                    NativeDocumentContext.permitsDispatch(
+                        focus, prepared: plan.documentPreparation.windowSelectionRequired),
+                    !plan.documentPreparation.windowSelectionRequired || foreground,
+                    NativeActionDocumentPolicy.permitsForeground(plan.documentPreparation, foreground: foreground)
+                else {
+                    throw NativePreparationUnavailable(
+                        description: "document context changed before AXPress; no requested action was sent")
+                }
             }
             try boundary.beforeDispatch()
             evidence.markCall("nativeAction")
@@ -64,6 +68,10 @@ import ApplicationServices
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery)
+        case .popupPointer(let unit):
+            try await unit.deliver(
+                plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
+                onCleanupUnknown: receipt.recordCleanupUnknown)
         case .desktop(let unit):
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,

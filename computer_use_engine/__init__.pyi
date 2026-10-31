@@ -57,7 +57,7 @@ class Computer:
     async def scroll(self, direction: Direction, *, at: Point, pages: float = 1) -> ActionResult: ...
     async def drag(self, start: Point, end: Point) -> ActionResult: ...
 
-    # 向当前桌面接收者输入；所有 Computer 写操作要求 exclusive。
+    # 向当前桌面接收者输入；桌面坐标操作使用全局输入路线。
     async def type_text(self, text: str) -> ActionResult: ...
     async def press_key(self, key: str) -> ActionResult: ...
 
@@ -106,6 +106,9 @@ class Element:
 
 # 以下是只读返回数据，不是模型需要创建的操作对象。
 class Observation:
+    async def read_details(
+        self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
+    ) -> TextPage: ...
     text: str
     screenshot: bytearray | None
 

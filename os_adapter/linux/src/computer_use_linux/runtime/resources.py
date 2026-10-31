@@ -61,7 +61,7 @@ def check_permissions(version=6):
     try:
         from computer_use_linux.runtime.native_backend import NativeBackend as Backend
 
-        backend = Backend("shared", threading.Event())
+        backend = Backend("exclusive", threading.Event())
         status["sessionType"] = backend.desktop.session_type
         status["details"].extend(backend.desktop.notes)
         backend.ensure_unlocked()
@@ -95,12 +95,12 @@ def check_permissions(version=6):
         status["ready"] = status["accessibility"] or status["screenCapture"]
         status["details"].append(
             "ready describes available observation resources only; input reports "
-            "the native event route, not delivery to a specific control or permission to use every desktop mode."
+            "the native event route, not delivery to a specific control."
         )
         if not status["accessibility"]:
             status["details"].append(
                 "No accessibility tree is available; use observed window/desktop images "
-                "only where the selected mode supports visual input."
+                "when capture and native input are available."
             )
         if not status["input"]:
             status["details"].append(

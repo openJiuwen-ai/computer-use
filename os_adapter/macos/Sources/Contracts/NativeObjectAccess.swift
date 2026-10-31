@@ -8,7 +8,7 @@ import ApplicationServices
     func nativeFacts(
         _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage?, relationPage: NativeInspectQuery.RelationPage?,
-        advertisedFields: [String], followRelations: [String]
+        advertisedFields: [String], followRelations: [String], textContent: Bool
     ) throws -> [String: Any]
     func nativeRelation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws
         -> [String: Any]

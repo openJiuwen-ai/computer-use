@@ -9,6 +9,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from computer_use.errors import ComputerUseError
+from computer_use.native.query.directory import SurfaceReadProfile
 from computer_use.interaction.read.acquisition.choices.pipeline import WindowChoiceServiceNode
 from computer_use.interaction.read.acquisition.components.model import ComponentRequest
 from computer_use.interaction.read.acquisition.components.pipeline import ComponentPipeline
@@ -255,6 +256,7 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                     selection=plan.selection,
                     _control=control,
                     include_overview=plan.limits.get("overview", True),
+                    profile=plan.profile,
                 ) from error
             gaps = (
                 tuple(
@@ -288,7 +290,7 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
             _, directory = await services._discover(
                 state.plan.selection,
                 cast("Callable[[], int]", control.remaining),
-                accessibility=state.plan.limits.get("view") != "image"
+                accessibility=state.plan.profile is SurfaceReadProfile.ACCESSIBILITY
                 and "nativeReadIsolation" not in services.port.connection.capabilities,
                 _control=control,
             )

@@ -94,13 +94,32 @@ def _window_shell(observation: NativeObservation) -> bool:
         return False
     if nodes[root].control_value is not None and nodes[root].control_value.value not in (None, ""):
         return False
+    # A window can expose its body directly through a document range even
+    # when its native child collection is empty. That text is positive content,
+    # independent of the window title and any separate control value.
+    if nodes[root].text is not None and nodes[root].text.content not in (None, ""):
+        return False
+    # Relation coverage and label availability use different state rules. Index
+    # their exact source paths once before inspecting every node and relation.
+    limited_relations: set[tuple[str | int, ...]] = set()
+    unavailable_labels: set[str | int] = set()
+    label_fields = {"name", "description", "help", "placeholder", "url", "control_value", "text"}
+    for issue in observation.issues:
+        path = issue.path
+        if len(path) >= 4 and path[0] == "nodes" and path[2] == "relations" and issue.state != "absent":
+            limited_relations.add(path[:4])
+        if (
+            len(path) > 2
+            and path[0] == "nodes"
+            and path[2] in label_fields
+            and issue.state not in ("absent", "unsupported")
+        ):
+            unavailable_labels.add(path[1])
     children, titles, external = {}, set(), set()
     for key, node in nodes.items():
         for record_key, relation in node.relations.items():
             prefix = ("nodes", key, "relations", record_key)
-            limited = any(
-                issue.path[: len(prefix)] == prefix and issue.state not in ("absent",) for issue in observation.issues
-            )
+            limited = prefix in limited_relations
             if relation.kind in ("parent", "window"):
                 external.update(relation.targets)
             matches_key = (
@@ -157,14 +176,7 @@ def _window_shell(observation: NativeObservation) -> bool:
             return False
         if node.actions is None or any(action.kind not in support for action in node.actions):
             return False
-        label_fields = {"name", "description", "help", "placeholder", "url", "control_value", "text"}
-        if any(
-            issue.path[:2] == ("nodes", key)
-            and len(issue.path) > 2
-            and issue.path[2] in label_fields
-            and issue.state not in ("absent", "unsupported")
-            for issue in observation.issues
-        ):
+        if key in unavailable_labels:
             return False
     return True
 

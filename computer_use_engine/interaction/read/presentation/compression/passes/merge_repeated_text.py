@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.compression.captions import passive_caption
+from computer_use.interaction.read.presentation.compression.evidence import complete_destination
 from computer_use.interaction.read.presentation.compression.policy import CONTROLS, REGIONS, sources
 from computer_use.interaction.read.presentation.policy import editing
 from computer_use.interaction.read.presentation.tree import VALUE_PREVIEW_LIMIT, has_incomplete_children
@@ -30,6 +31,7 @@ def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: Vie
     if (
         node["role"] not in REGIONS | CONTROLS | {"heading", "staticText"}
         or node.get("preserveGroup")
+        and not state.context.get("compact")
         or has_incomplete_children(node)
     ):
         return [node]
@@ -39,6 +41,10 @@ def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: Vie
     # later passes safely propagate the same textSources through another fold.
     destinations = {}
     for field in ("name", "description", "value"):
+        # A retained parent boundary does not make its own complete label
+        # distinct from an identical passive child. Its other facts stay put.
+        if node.get("preserveGroup") and not complete_destination(state, node, field):
+            continue
         # A checkbox's native "1" may render as "on"; a heading's numeric
         # value is its level. Neither is a duplicate textual caption.
         if field == "value" and (node.get("valueIsNumber") or node["role"] in ("checkBox", "switch", "radioButton")):

@@ -98,12 +98,14 @@ class AgentElementReadPipeline:
 
     async def run(self, ui: UIHandle, snapshot: ElementSnapshot, cursor: str | None) -> Observation:
         tree, fresh = await self.collect(ui, snapshot, cursor)
-        prepared = self.preparation.run(SnapshotRenderRequest(tree, compact=True, public_api=True))
+        prepared = self.preparation.run(
+            SnapshotRenderRequest(tree, compact=True, public_api=True, share_descriptions=False)
+        )
         document = DisplayDocument.join(
             (
                 template("Element {0}:", fresh["source"]["ref"]),
                 "Tree: full",
-                tree_document(self.controller, snapshot["binding"], tree, prepared=prepared, details=True),
+                tree_document(self.controller, snapshot["binding"], tree, prepared=prepared),
             )
         )
         return publish(

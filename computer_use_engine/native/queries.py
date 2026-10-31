@@ -31,6 +31,7 @@ class NativeNodeQuery:
         follow_relations: Optional native relationships to collect alongside children.
         focused_fields: Optional fields restricted to focused native objects.
         primary_fields: Optional fields restricted to primary text objects.
+        text_content: Optional negotiated, read-only capture of independent native text.
     """
 
     fields: Iterable[str]
@@ -42,3 +43,4 @@ class NativeNodeQuery:
     follow_relations: Iterable[str] | None = None
     focused_fields: Iterable[str] | None = None
     primary_fields: Iterable[str] | None = None
+    text_content: bool | None = None

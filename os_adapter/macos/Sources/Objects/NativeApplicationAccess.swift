@@ -12,11 +12,11 @@ import ApplicationServices
     private let reader: NativeApplicationReader
     private let control: NativeElementControl
     private let facts: NativeFactCollector
-    init() {
+    init(windowQuery: NativeWindowQueryAPI? = nil) {
         let registry = ApplicationElements()
         let inspection = NativeElementInspection(registry: registry)
         self.registry = registry
-        self.reader = NativeApplicationReader(registry: registry, inspection: inspection)
+        self.reader = NativeApplicationReader(registry: registry, inspection: inspection, query: windowQuery)
         self.control = NativeElementControl(registry: registry, inspection: inspection)
         self.facts = NativeFactCollector(registry: registry, inspection: inspection)
     }
@@ -44,11 +44,12 @@ import ApplicationServices
     func nativeFacts(
         _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
-        advertisedFields: [String] = [], followRelations: [String] = []
+        advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false
     ) throws -> [String: Any] {
         try facts.collect(
             ref, session: session, fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: childrenPage,
-            relationPage: relationPage, advertisedFields: advertisedFields, followRelations: followRelations)
+            relationPage: relationPage, advertisedFields: advertisedFields, followRelations: followRelations,
+            textContent: textContent)
     }
 
     func nativeReadTarget(_ ref: String) throws -> ApplicationElements.Target { try facts.readTarget(ref) }
@@ -67,15 +68,25 @@ import ApplicationServices
 
     func windows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
-        purpose: NativeWindowQueryPurpose = .observation, reportIssue: ((String) -> Void)? = nil
+        purpose: NativeWindowQueryPurpose = .observation, profile: NativeInspectQuery.SurfaceProfile = .accessibility,
+        modalHints: [NativeApplicationReader.ModalHint] = [], reportIssue: ((String) -> Void)? = nil
     ) throws -> [Window] {
         return try reader.windows(
-            app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose, reportIssue: reportIssue)
+            app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose, profile: profile,
+            modalHints: modalHints, reportIssue: reportIssue)
     }
 
     func keyboardBoundary(_ app: NSRunningApplication, contentRoot: AXUIElement) throws
         -> NativeKeyboardBoundaryProjection<AXUIElement>
     { try reader.keyboardBoundary(app, contentRoot: contentRoot) }
+
+    func inputBoundary(
+        _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window], contentRoot: AXUIElement?,
+        required: [AXUIElement], modalHints: [NativeApplicationReader.ModalHint] = []
+    ) throws -> NativeApplicationReader.InputBoundary {
+        try reader.inputBoundary(app, nativeWindows: nativeWindows, contentRoot: contentRoot, required: required,
+                                 modalHints: modalHints)
+    }
 
     func knownWindowReference(_ element: AXUIElement, app: NSRunningApplication, process: NativeProcessIdentity)
         -> String?
@@ -91,12 +102,7 @@ import ApplicationServices
     /// Read the current native focus against this exact catalogue. Titles,
     /// z-order and the app's main window cannot substitute for AXFocusedWindow.
     func focusedWindow(_ app: NSRunningApplication, windows: [Window]) -> String? {
-        guard AXIsProcessTrusted() else { return nil }
-        let root = AXUIElementCreateApplication(app.processIdentifier)
-        AXMessaging.configure(root)
-        guard let focused = AXAccess.element(root, kAXFocusedWindowAttribute) else { return nil }
-        let matches = windows.filter { CFEqual($0.element, focused) }
-        return matches.count == 1 ? matches[0].ref : nil
+        reader.focusedWindow(app, windows: windows)
     }
 
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts {

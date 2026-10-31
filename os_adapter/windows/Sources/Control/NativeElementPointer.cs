@@ -15,31 +15,55 @@ namespace ComputerUse.Windows
         {
             return a.X == b.X && a.Y == b.Y && a.NativeWidth == b.NativeWidth && a.NativeHeight == b.NativeHeight;
         }
+        void ElementEnabled(NativeNodeRecord node, Request r)
+        {
 
+            bool? enabled = NativeUiaBoundary.Property(node.Element, AutomationElement.IsEnabledProperty, r) as bool ? ;
+            if (enabled != true)
+                throw new Failure("input_unavailable",
+                                  enabled == false ? "the selected element is disabled"
+                                                   : "the selected element's enabled state could not be confirmed");
+        }
         NativeCaptureGeometry ElementBounds(NativeNodeRecord node, Request r)
         {
-            bool? enabled = NativeUiaBoundary.Property(node.Element, AutomationElement.IsEnabledProperty, r) as bool? ;
-            if (enabled != true)
-                throw new Failure("input_unavailable", enabled == false ? "the selected element is disabled" : "the selected element's enabled state could not be confirmed");
-            bool? offscreen = NativeUiaBoundary.Property(node.Element, AutomationElement.IsOffscreenProperty, r) as bool? ;
+            ElementEnabled(node, r);
+            bool? offscreen =
+                NativeUiaBoundary.Property(node.Element, AutomationElement.IsOffscreenProperty, r) as bool ? ;
             if (offscreen != false)
-                throw new Failure("input_unavailable", offscreen == true ? "the selected element is off screen" : "the selected element's on-screen location could not be confirmed");
+                throw new Failure("input_unavailable",
+                                  offscreen == true
+                                      ? "the selected element is off screen"
+                                      : "the selected element's on-screen location could not be confirmed");
             object value = NativeUiaBoundary.Property(node.Element, AutomationElement.BoundingRectangleProperty, r);
             if (!(value is Rect))
                 throw new Failure("input_unavailable", "the selected element has no current visible bounds");
             var box = (Rect)value;
-            if (box.IsEmpty || Double.IsNaN(box.X) || Double.IsNaN(box.Y) || Double.IsInfinity(box.X) || Double.IsInfinity(box.Y) || Double.IsNaN(box.Width) || Double.IsNaN(box.Height) || Double.IsInfinity(box.Width) || Double.IsInfinity(box.Height) || box.Width < 1 || box.Height < 1 || box.Width > 32768 || box.Height > 32768 || Math.Abs(box.X) > 100000 || Math.Abs(box.Y) > 100000)
+            if (box.IsEmpty || Double.IsNaN(box.X) || Double.IsNaN(box.Y) || Double.IsInfinity(box.X) ||
+                Double.IsInfinity(box.Y) || Double.IsNaN(box.Width) || Double.IsNaN(box.Height) ||
+                Double.IsInfinity(box.Width) || Double.IsInfinity(box.Height) || box.Width < 1 || box.Height < 1 ||
+                box.Width > 32768 || box.Height > 32768 || Math.Abs(box.X) > 100000 || Math.Abs(box.Y) > 100000)
                 throw new Failure("input_unavailable", "the selected element has no finite visible bounds");
-            return new NativeCaptureGeometry((int)Math.Ceiling(box.X), (int)Math.Ceiling(box.Y), (int)Math.Floor(box.Width), (int)Math.Floor(box.Height), 1);
+            return new NativeCaptureGeometry((int)Math.Ceiling(box.X), (int)Math.Ceiling(box.Y),
+                                             (int)Math.Floor(box.Width), (int)Math.Floor(box.Height), 1);
         }
 
         public NativeElementPointerTarget Element(Dictionary<string, object> target, string[] within, Request r)
         {
             var window = new NativeUiaBoundary(windows).Validate(target, within, r);
             var node = windows.Node((string)target["node"], (string)target["surface"], r);
+            if (Native.IsWindowVisible(window.Native.Handle) && Native.IsIconic(window.Native.Handle))
+            {
+                // A query advertises a pending physical route without restoring
+                // anything. Only selected foreground preparation may restore;
+                // that phase must resolve this same retained element anew.
+                ElementEnabled(node, r);
+                NativeUiaBoundary.SameWindow(window, new NativeUiaBoundary(windows).Validate(target, within, r), r);
+                return new NativeElementPointerTarget { Native = window, GeometryDeferred = true };
+            }
             var bounds = ElementBounds(node, r);
             var rectangle = Native.Bounds(window.Native.Handle);
-            var windowBounds = new NativeCaptureGeometry(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, 1);
+            var windowBounds =
+                new NativeCaptureGeometry(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, 1);
             var layout = new NativePointerLayout();
             // UIA clickable points are physical screen pixels. A provider may
             // decline one; the visible intersection's center remains a candidate
@@ -57,54 +81,66 @@ namespace ComputerUse.Windows
                 point = new NativePointerPoint(-100001, -100001);
             }
 
-            if (!NativePointerCapture.Contains(bounds, point) || !NativePointerCapture.Contains(windowBounds, point) || !layout.Displays.Any(d => NativePointerCapture.Contains(d, point)))
+            if (!NativePointerCapture.Contains(bounds, point) || !NativePointerCapture.Contains(windowBounds, point) ||
+                !layout.Displays.Any(d => NativePointerCapture.Contains(d, point)))
             {
-                var visible = layout.Displays.Select(d => RectangleIntersection(bounds, windowBounds, d)).FirstOrDefault(b => b != null);
+                var visible = layout.Displays.Select(d => RectangleIntersection(bounds, windowBounds, d))
+                                  .FirstOrDefault(b => b != null);
                 if (visible == null)
-                    throw new Failure("input_unavailable", "the selected element has no visible point inside its working window and displays");
-                point = new NativePointerPoint(visible.X + visible.NativeWidth / 2, visible.Y + visible.NativeHeight / 2);
+                    throw new Failure(
+                        "input_unavailable",
+                        "the selected element has no visible point inside its working window and displays");
+                point =
+                    new NativePointerPoint(visible.X + visible.NativeWidth / 2, visible.Y + visible.NativeHeight / 2);
             }
 
             // Resolve a covered provider point before the gesture freezes it.
             // Unknown/coarse hits retain the original candidate; only a known
             // conflict triggers bounded read-only alternatives with exact hits.
             double until = Math.Min(r.Deadline, Wire.Now + 150);
-            var choice = NativeElementHit.SelectPoint(point, NativeElementHit.Alternatives(point, layout.Displays.Select(d => RectangleIntersection(bounds, windowBounds, d))), candidate => ElementHit(node, candidate, r), () =>
-            {
-                r.Check();
-                return Wire.Now < until;
-            });
+            var choice = NativeElementHit.SelectPoint(
+                point,
+                NativeElementHit.Alternatives(
+                    point, layout.Displays.Select(d => RectangleIntersection(bounds, windowBounds, d))),
+                candidate => ElementHit(node, candidate, r),
+                () =>
+                {
+                    r.Check();
+                    return Wire.Now < until;
+                });
             NativeUiaBoundary.SameWindow(window, new NativeUiaBoundary(windows).Validate(target, within, r), r);
-            return new NativeElementPointerTarget
-            {
-                Native = window,
-                Point = choice.Point,
-                Hit = choice.Hit,
-                RequiresConfirmedHit = choice.RequiresConfirmed,
-                Bounds = bounds,
-                WindowBounds = windowBounds,
-                Canvas = layout.Canvas,
-                Layout = layout.Signature
+            return new NativeElementPointerTarget {
+                Native = window,        Point = choice.Point,
+                Hit = choice.Hit,       RequiresConfirmedHit = choice.RequiresConfirmed,
+                Bounds = bounds,        WindowBounds = windowBounds,
+                Canvas = layout.Canvas, Layout = layout.Signature
             };
         }
 
-        static NativeCaptureGeometry RectangleIntersection(NativeCaptureGeometry a, NativeCaptureGeometry b, NativeCaptureGeometry c)
+        static NativeCaptureGeometry RectangleIntersection(NativeCaptureGeometry a, NativeCaptureGeometry b,
+                                                           NativeCaptureGeometry c)
         {
             int left = Math.Max(a.X, Math.Max(b.X, c.X)), top = Math.Max(a.Y, Math.Max(b.Y, c.Y));
             int right = Math.Min(a.X + a.NativeWidth, Math.Min(b.X + b.NativeWidth, c.X + c.NativeWidth));
             int bottom = Math.Min(a.Y + a.NativeHeight, Math.Min(b.Y + b.NativeHeight, c.Y + c.NativeHeight));
-            return right <= left || bottom <= top ? null : new NativeCaptureGeometry(left, top, right - left, bottom - top, 1);
+            return right <= left || bottom <= top ? null
+                                                  : new NativeCaptureGeometry(left, top, right - left, bottom - top, 1);
         }
 
         NativeElementHit ElementHit(NativeNodeRecord node, NativePointerPoint point, Request r)
         {
             try
             {
-                return NativeElementHit.Observe(node.Element, node.Runtime, () => UiaElement.FromPoint(point), NativeReadStore.Runtime, UiaClient.Parent, value => windows.Within(value, node.Window, r), value =>
-                {
-                    var role = NativeUiaBoundary.Property(value, AutomationElement.ControlTypeProperty, r) as ControlType;
-                    return role != null && NativeElementHit.IndependentControl(role.ProgrammaticName);
-                }, r.Check);
+                return NativeElementHit.Observe(
+                    node.Element, node.Runtime, () => UiaElement.FromPoint(point), NativeReadStore.Runtime,
+                    UiaClient.Parent, value => windows.Within(value, node.Window, r),
+                    value =>
+                    {
+                        var role =
+                            NativeUiaBoundary.Property(value, AutomationElement.ControlTypeProperty, r) as ControlType;
+                        return role != null && NativeElementHit.IndependentControl(role.ProgrammaticName);
+                    },
+                    r.Check);
             }
             catch (ElementNotAvailableException error)
             {
@@ -120,7 +156,8 @@ namespace ComputerUse.Windows
             }
         }
 
-        IntPtr PointerWindow(NativeNodeRecord node, NativeWindowRecord interaction, IntPtr hit, NativePointerPoint point, Request r)
+        IntPtr PointerWindow(NativeNodeRecord node, NativeWindowRecord interaction, IntPtr hit,
+                             NativePointerPoint point, Request r)
         {
             IntPtr root = interaction.Native.Handle;
             if (Native.Inside(root, hit))
@@ -142,7 +179,8 @@ namespace ComputerUse.Windows
                 // and the native host of that UIA provider together. PID alone
                 // or a popup title cannot establish this relation.
                 object process = NativeUiaBoundary.Property(node.Element, AutomationElement.ProcessIdProperty, r);
-                if (process is int && (uint)(int)process == Native.PID(recipient) && ElementHit(node, point, r).Confirmed)
+                if (process is int && (uint)(int)process == Native.PID(recipient) &&
+                    ElementHit(node, point, r).Confirmed)
                     return recipient;
             }
 
@@ -158,74 +196,143 @@ namespace ComputerUse.Windows
 
             return IntPtr.Zero;
         }
-
-        bool NativeRoute(NativeNodeRecord node, NativeWindowRecord interaction, NativePointerPoint point, Request r, out bool active, out bool foregroundReady)
+        NativePointerState NativeRoute(NativeNodeRecord node, NativeWindowRecord interaction, NativePointerPoint point,
+                                       NativePointerGestureIntent gesture, bool allowNatural, Request r)
         {
+
             IntPtr main = interaction.Native.Handle;
-            IntPtr recipient = PointerWindow(node, interaction, Native.WindowFromPoint(new Native.POINT { X = point.X, Y = point.Y }), point, r);
+            IntPtr destination = Native.WindowFromPoint(new Native.POINT { X = point.X, Y = point.Y });
+            IntPtr recipient = PointerWindow(node, interaction, destination, point, r);
             IntPtr foreground = Native.GetForegroundWindow();
-            active = foreground == main || recipient != IntPtr.Zero && foreground == recipient;
-            foregroundReady = active || Native.PointerForeground(main, foreground);
-            var gui = new Native.GUI
+            bool active = foreground == main || recipient != IntPtr.Zero && foreground == recipient;
+            bool foregroundReady = active || Native.PointerForeground(main, foreground);
+            var gui = new Native.GUI { Size = Marshal.SizeOf(typeof(Native.GUI)) };
+            bool known = Native.GetGUIThreadInfo(0, ref gui);
+            bool belongs = gui.Capture == IntPtr.Zero || Native.Inside(main, gui.Capture) ||
+                           recipient != IntPtr.Zero && Native.Inside(recipient, gui.Capture);
+            bool sibling =
+                known && NativeElementCapturePolicy.KnownSibling(main, destination, gui.Capture, Native.Inside);
+            bool capture = known && belongs && !sibling;
+            bool physicalReady = recipient != IntPtr.Zero && capture;
+            bool natural = false;
+            // Ordinary routes keep their original query order. Additional
+            // root/target-queue evidence belongs only to this selected permit.
+            if (allowNatural && !foregroundReady && gesture.CanActivateWindow && physicalReady &&
+                recipient == main)
             {
-                Size = Marshal.SizeOf(typeof(Native.GUI))
+                bool originalRootHit = Native.Inside(main, destination);
+                if (originalRootHit)
+                {
+                    uint pid;
+                    uint targetThread = Native.GetWindowThreadProcessId(main, out pid);
+                    var targetGui = new Native.GUI { Size = Marshal.SizeOf(typeof(Native.GUI)) };
+                    // Thread zero means the foreground queue in this API; it
+                    // is not evidence about the retained target's queue.
+                    bool targetKnown = targetThread != 0 && Native.GetGUIThreadInfo(targetThread, ref targetGui);
+                    bool idle = NativePointerClickAdmission.QueueIdle(known, gui.Capture, gui.Flags) &&
+                                NativePointerClickAdmission.QueueIdle(targetKnown, targetGui.Capture, targetGui.Flags);
+                    natural = NativePointerClickAdmission.NaturalActivation(
+                        gesture, physicalReady, originalRootHit,
+                        idle && Native.IsWindowVisible(main) && !Native.IsIconic(main) &&
+                            Native.IsWindowEnabled(main) && Native.Interactive());
+                }
+            }
+            if (known && gui.Capture != IntPtr.Zero)
+                destination = gui.Capture;
+            return new NativePointerState {
+                Ready = physicalReady && foregroundReady,
+                PhysicalReady = physicalReady,
+                NaturalActivation = natural,
+                Foreground = active,
+                ForegroundReady = foregroundReady,
+                Recipient = destination,
+                CaptureBlocked = known && gui.Capture != IntPtr.Zero && (!belongs || sibling),
+                Occlusion = allowNatural && gesture.CanActivateWindow
+                                ? ReadOcclusion(interaction.Native, point, known, gui, physicalReady, r)
+                                : null
             };
-            bool capture = Native.GetGUIThreadInfo(0, ref gui) && (gui.Capture == IntPtr.Zero || recipient != IntPtr.Zero && (Native.Inside(recipient, gui.Capture) || Native.Inside(main, gui.Capture)));
-            return recipient != IntPtr.Zero && foregroundReady && capture;
         }
 
-        public NativePointerState ReadElement(Dictionary<string, object> target, string[] within, NativeElementPointerTarget selected, Request r)
+        public NativePointerState ReadElement(Dictionary<string, object> target, string[] within,
+                                              NativeElementPointerTarget selected, NativePointerGestureIntent gesture,
+                                              Request r)
         {
             var boundary = new NativeUiaBoundary(windows);
             var window = boundary.Validate(target, within, r);
             NativeUiaBoundary.SameWindow((NativeWindowRecord)selected.Native, window, r);
             var node = windows.Node((string)target["node"], (string)target["surface"], r);
+            if (selected.GeometryDeferred)
+            {
+                ElementEnabled(node, r);
+                IntPtr host = windows.NativeHandle(node.Element, r);
+                var gui = new Native.GUI { Size = Marshal.SizeOf(typeof(Native.GUI)) };
+                bool captured =
+                    Native.GetGUIThreadInfo(0, ref gui) && gui.Capture != IntPtr.Zero &&
+                    (!Native.Inside(window.Native.Handle, gui.Capture) ||
+                     NativeElementCapturePolicy.KnownSibling(window.Native.Handle, host, gui.Capture, Native.Inside));
+                NativeUiaBoundary.SameWindow(window, boundary.Validate(target, within, r), r);
+                windows.Node(node.Id, node.Surface, r);
+                return new NativePointerState { Native = new Target { Binding = new Dictionary<string, object>(target),
+                                                                      Within = (string[])within.Clone(),
+                                                                      Interaction = window, Kind = "click" },
+                                                Ready = false, ForegroundReady = false,
+                                                Foreground = Native.GetForegroundWindow() == window.Native.Handle,
+                                                CaptureBlocked = captured };
+            }
             var rectangle = Native.Bounds(window.Native.Handle);
-            if (!SameBox(ElementBounds(node, r), selected.Bounds) || !SameBox(new NativeCaptureGeometry(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, 1), selected.WindowBounds) || new NativePointerLayout().Signature != selected.Layout)
-                throw new Failure("input_unavailable", "the selected element or window moved during pointer preparation; no remaining click was sent");
+            if (!SameBox(ElementBounds(node, r), selected.Bounds) ||
+                !SameBox(new NativeCaptureGeometry(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, 1),
+                         selected.WindowBounds) ||
+                new NativePointerLayout().Signature != selected.Layout)
+                throw new Failure(
+                    "input_unavailable",
+                    "the selected element or window moved during pointer preparation; no remaining click was sent");
             IntPtr handle = window.Native.Handle;
-            bool active, foregroundReady;
-            bool nativeReady = NativeRoute(node, window, selected.Point, r, out active, out foregroundReady);
-            selected.Hit = nativeReady ? ElementHit(node, selected.Point, r) : new NativeElementHit(NativeElementHitKind.NotSampled);
+            var route = NativeRoute(node, window, selected.Point, gesture,
+                                    NativePointerClickAdmission.ElementScopeAllowsNatural(within), r);
+            selected.Hit = route.Ready || route.NaturalActivation
+                               ? ElementHit(node, selected.Point, r)
+                               : new NativeElementHit(NativeElementHitKind.NotSampled);
             // Some providers hit-test the underlying page instead of their
             // same-HWND floating controls. Physical clicks use the live visible
             // geometry and native window route; an incomplete UIA hit is kept
             // as uncertainty in the receipt. A foreign HWND still requires the
             // explicit popup relation checks in PointerWindow, never PID alone.
             // A confirmed same-window conflict is not missing provider data.
-            bool ready = selected.Hit.Ready(nativeReady, selected.RequiresConfirmedHit);
+            bool ready = NativePointerClickAdmission.ElementReady(route, selected.Hit, selected.RequiresConfirmedHit);
             NativeUiaBoundary.SameWindow(window, boundary.Validate(target, within, r), r);
             windows.Node(node.Id, node.Surface, r);
             rectangle = Native.Bounds(handle);
-            if (!SameBox(ElementBounds(node, r), selected.Bounds) || !SameBox(new NativeCaptureGeometry(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, 1), selected.WindowBounds))
-                throw new Failure("input_unavailable", "the selected element or window moved during final pointer validation; no remaining click was sent");
+            if (!SameBox(ElementBounds(node, r), selected.Bounds) ||
+                !SameBox(new NativeCaptureGeometry(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, 1),
+                         selected.WindowBounds))
+                throw new Failure(
+                    "input_unavailable",
+                    "the selected element or window moved during final pointer validation; no remaining click was sent");
             // Provider callbacks can change the foreground/capture after the
             // UIA hit query. Verify native routing last, immediately before SendInput.
             // Refresh foreground readiness independently even when an earlier
             // hit was blocked; it decides whether activation could help.
-            bool finalRoute = NativeRoute(node, window, selected.Point, r, out active, out foregroundReady);
-            ready = ready && finalRoute && Native.IsWindowVisible(handle) && !Native.IsIconic(handle);
+            route = NativeRoute(node, window, selected.Point, gesture,
+                                NativePointerClickAdmission.ElementScopeAllowsNatural(within), r);
+            ready = ready &&
+                    NativePointerClickAdmission.ElementReady(route, selected.Hit, selected.RequiresConfirmedHit) &&
+                    Native.IsWindowVisible(handle) && !Native.IsIconic(handle);
             if (ready)
             {
                 NativeInputAccess.RequireForeground();
                 NativeInputAccess.RequireWindow(handle);
+                if (route.NaturalActivation)
+                    NativeInputAccess.RequireWindow((IntPtr)route.Recipient);
             }
 
             r.Check();
-            return new NativePointerState
-            {
-                Ready = ready,
-                Foreground = active,
-                ForegroundReady = foregroundReady,
-                Native = new Target
-                {
-                    Binding = new Dictionary<string, object>(target),
-                    Within = (string[])within.Clone(),
-                    Interaction = window,
-                    Point = selected.Point,
-                    Kind = "click"
-                }
-            };
+            route.Ready = ready;
+            route.NaturalActivation = ready && route.NaturalActivation;
+            route.Native =
+                new Target { Binding = new Dictionary<string, object>(target), Within = (string[])within.Clone(),
+                             Interaction = window, Point = selected.Point, Kind = "click" };
+            return route;
         }
     }
 }

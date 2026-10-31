@@ -12,7 +12,7 @@ import ApplicationServices
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickPreparation)
         defer { metric?.end() }
-        if let document = plan.document, plan.documentPreparationRequired {
+        if let document = plan.document, plan.documentPreparation.required {
             if !BackgroundTarget(document.application).isForeground {
                 // AXMain/AXFocusedWindow can change while the native document
                 // responder remains inactive. Do not dispatch a hollow press.
@@ -27,8 +27,11 @@ import ApplicationServices
                 try await PrepareActionDocumentForegroundPass.run(
                     document, boundary: boundary, receipt: receipt, evidence: evidence)
             }
-            try PrepareActionDocumentContextPass.run(document, boundary: boundary, receipt: receipt, evidence: evidence)
-            try await ConfirmActionDocumentContextPass.run(document, boundary: boundary, evidence: evidence)
+            if plan.documentPreparation.windowSelectionRequired {
+                try PrepareActionDocumentContextPass.run(
+                    document, boundary: boundary, receipt: receipt, evidence: evidence)
+                try await ConfirmActionDocumentContextPass.run(document, boundary: boundary, evidence: evidence)
+            }
         }
         if case .menu(let unit, _, _, _) = plan.target {
             let foreground = plan.command.foreground && !BackgroundTarget(unit.application).isForeground
@@ -42,9 +45,13 @@ import ApplicationServices
         }
         if let preparation = try SampleNativeClickPreparationPass.run(plan, boundary: boundary), preparation.needed {
             switch plan.offer.delivery {
+            case .windowDirected where plan.command.foreground:
+                try AuthorizeNativeClickForegroundPass.run(plan)
+                try await PrepareNativeClickForegroundPass.run(
+                    preparation, boundary: boundary, receipt: receipt, evidence: evidence)
             case .windowDirected:
                 let pointer = preparation.pointer
-                try pointer.requireWindowDirectedPreparation()
+                try pointer.validateWindowIdentity()
                 do {
                     let outcome = try await NativeFocusPipeline.prepare(
                         BackgroundTarget(pointer.application), window: pointer.window,

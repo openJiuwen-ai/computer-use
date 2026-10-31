@@ -1,16 +1,18 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"Full text rendering, with separate source-aware projection and line layout."
+
 from __future__ import annotations
 
 import math
 import re
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
 
 import regex
 from computer_use.interaction.read.facts.groups import reference_set
-from computer_use.interaction.read.presentation.accounting.fields import RenderedFields, RenderedResult
+from computer_use.interaction.read.presentation.accounting.fields import RenderedFields, RenderedResult, SourceEmission
 from computer_use.interaction.read.presentation.actions.layout import action_fields
 from computer_use.interaction.read.presentation.compact import (
     display_actions,
@@ -19,33 +21,55 @@ from computer_use.interaction.read.presentation.compact import (
     display_url,
     unexpanded_menu,
 )
+from computer_use.interaction.read.presentation.compression.descriptions import (
+    description_declaration,
+    shared_description,
+)
+from computer_use.interaction.read.presentation.compression.evidence import CompressionEvidence
 from computer_use.interaction.read.presentation.compression.policy import secondary_actions
 from computer_use.interaction.read.presentation.compression.projection import projectTree
+from computer_use.interaction.read.presentation.fallback import literal
 from computer_use.interaction.read.presentation.formatting import json_string, number_string
-
-# Compatibility for historical callers.
+from computer_use.interaction.read.presentation.interface.atoms.semantics import (
+    CONVENTIONAL,
+    STANDARD_CLICK,
+    select_role,
+    select_states,
+)
+from computer_use.interaction.read.presentation.ir import FactKey
+from computer_use.interaction.read.presentation.rendering.layout.child_coverage import capture_child_hint
 from computer_use.interaction.read.presentation.rendering.layout.empty_values import (
     compact_empty_values,
 )
-from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
+from computer_use.interaction.read.presentation.rendering.layout.model import (
+    ChildCoverageHint,
+    LayoutFrame,
+    UnexpandedMenuSummary,
+)
 from computer_use.interaction.read.presentation.rendering.layout.pipeline import LayoutPipeline
+from computer_use.interaction.read.presentation.rendering.multiline_values import compact_multiline_value
+from computer_use.interaction.read.presentation.rendering.native_urls import (
+    EmittedCaption,
+    NativeUrlPlan,
+    emitted_caption,
+    select_deferred_native_urls,
+)
 from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedNode, RenderedSection
 from computer_use.interaction.read.presentation.tree import (
-    VALUE_PREVIEW_LIMIT,
     carries_value,
-    disclosure,
     has_display_value,
     has_text_selection,
     is_active_modal,
     is_dialog,
-    is_hidden,
     is_window,
     selected_text_descendants,
     unique,
     value_label,
+    VALUE_PREVIEW_LIMIT,
 )
 from computer_use.protocol.primitives import trim, utf16_length
 
+# Compatibility for historical callers.
 __all__ = [
     "CONVENTIONAL",
     "STANDARD_CLICK",
@@ -63,33 +87,37 @@ __all__ = [
     "shortened",
 ]
 
-"Full text rendering, with separate source-aware projection and line layout."
-
-
 if TYPE_CHECKING:
-    from typing import Sequence
+    from collections.abc import Mapping
+    from typing import Any, Iterable, Sequence
 
+    from computer_use.interaction.read.presentation.actions.control_raises import ControlRaise
+    from computer_use.interaction.read.presentation.actions.menu_mechanisms import MenuMechanism
+    from computer_use.interaction.read.presentation.interface.disclosure.model import DisclosurePlan
     from computer_use.interaction.read.presentation.ir import ProjectionResult
     from computer_use.interaction.read.presentation.records import NodeView, RenderedTree, SemanticNode
+    from computer_use.interaction.read.presentation.rendering.native_descriptions import (
+        NativeDescriptionField,
+        NativeRoleAlias,
+    )
+    from computer_use.interaction.read.presentation.rendering.native_urls import NativeUrlSource
+    from computer_use.interaction.read.presentation.selection_summary import SelectionSummaryPlan
     from computer_use.protocol.records import Record
 
+# Compatibility for historical callers.
 
-CONVENTIONAL = {
-    "button",
-    "popUpButton",
-    "menuButton",
-    "checkBox",
-    "radioButton",
-    "switch",
-    "link",
-    "closeButton",
-    "zoomButton",
-    "minimizeButton",
-    "textField",
-    "textArea",
-    "comboBox",
-}
-STANDARD_CLICK = CONVENTIONAL | {"menuItem", "menuBarItem"}
+
+@dataclass(frozen=True)
+class _NativeUrlSlot:
+    """A generated field slot used to reassemble one node after peer comparison."""
+
+    line: int
+    base: str
+    fields: tuple[str, ...]
+    slot: int
+    separator: str
+    state_at: int
+    state_flags: str
 
 
 def shortened(value: str, limit: float) -> Record:
@@ -149,6 +177,11 @@ def field(text: str) -> str:
     )
 
 
+def short_unexpanded_menu_summary(menus: Mapping[int, Sequence[str]]) -> str | None:
+    """Name the exact unopened menu sources; their direct counts stay in details."""
+    return "Menus unexpanded: " + reference_set(ref for refs in menus.values() for ref in refs) + "."
+
+
 def bounded(text: str, limit: int) -> str:
     part = shortened(text, limit)
     return f"{part['head']}\n[… {part['omitted']} characters omitted …]\n{part['tail']}" if part["omitted"] else text
@@ -164,29 +197,16 @@ def preview(text: str, name: str, limit: float) -> str:
 
 
 def role(node: NodeView) -> str:
-    "Format the observed role description with dialog, popover, row, and container labels."
-    if is_dialog(node) and node["role"] != "sheet":
-        return "dialog"
-    if node.get("subrole") == "popover":
-        return "popover"
-    description = node.get("roleDescription")
-    if node["role"] == "row" and (not description or description in ("row", "outline row", "外框行")):
-        return "row"
-    if node["role"] == "group" and (not description or description in ("group", "组")):
-        return "container"
-    return field(description) if description else re.sub("([a-z])([A-Z])", "\\1 \\2", node["role"]).lower()
+    """Format the observed role description with dialog, popover, row, and container labels."""
+    selected = select_role(node)
+    return field(selected.label) if selected.source_description else selected.label
 
 
 def partial(node: NodeView) -> None | str:
     "Describe incomplete child collection using its observed counts and stop reason."
     read = node.get("childrenRead", len(node.get("native", node)["children"]))
     reason = node.get("partialReason")
-    matches_reason = (
-        True
-        if reason is None and node["role"] != "application" and "childCount" in node and read < node["childCount"]
-        else False
-    )
-    if matches_reason:
+    if reason is None and node["role"] != "application" and "childCount" in node and read < node["childCount"]:
         reason = "children not fully read"
     if reason is None:
         return None
@@ -204,11 +224,21 @@ def partial(node: NodeView) -> None | str:
     return f"partial: {field(reason)}; total unknown"
 
 
-def rendered_actions(node: NodeView, compact: bool = False) -> list[Any]:
-    "Format secondary-action labels and include native names when labels are ambiguous."
+def rendered_actions(
+    node: NodeView,
+    compact: bool = False,
+    *,
+    menu_mechanisms: tuple[MenuMechanism, ...] = (),
+    control_raises: tuple[ControlRaise, ...] = (),
+) -> list[Any]:
+    """Format secondary-action labels and include native names when labels are ambiguous."""
     result = []
     actions = secondary_actions(node)
-    for action in display_actions(node, actions) if compact else actions:
+    for action in (
+        display_actions(node, actions, menu_mechanisms=menu_mechanisms, control_raises=control_raises)
+        if compact
+        else actions
+    ):
         label = action.get("description") or action["name"]
         ambiguous = any(
             other["name"] != action["name"] and (other["name"] == label or other.get("description") == label)
@@ -227,16 +257,52 @@ def render_projection(root: SemanticNode, context: Record | None, projection: Pr
     return draft.finalize(draft.lines, list(draft.records))
 
 
-def render_projection_lines(root: SemanticNode, context: Record, projection: ProjectionResult) -> LayoutFrame:
+def render_projection_lines(
+    root: SemanticNode,
+    context: Record,
+    projection: ProjectionResult,
+    *,
+    selection_summaries: SelectionSummaryPlan | None = None,
+    defer_identifiers: bool = False,
+    native_url_sources: Mapping[str, NativeUrlSource] | None = None,
+    native_description_fields: Mapping[FactKey, NativeDescriptionField] | None = None,
+    native_role_aliases: Mapping[str, NativeRoleAlias] | None = None,
+    menu_mechanisms: tuple[MenuMechanism, ...] = (),
+    control_raises: tuple[ControlRaise, ...] = (),
+    compact_multiline_values: bool = False,
+    concise_menu_summary: bool = False,
+    disclosure_plan: DisclosurePlan | None = None,
+) -> LayoutFrame:
     """Render an already-compressed forest without recapturing or recompressing.
 
     Args:
         root: Root of the requested semantic view; native bindings remain separate.
         projection: Source-preserving presentation result and its provenance ledger.
+        selection_summaries: Exact statements the enclosing snapshot assembly will publish.
+            Without this delivery promise, node selection ranges remain inline.
+        defer_identifiers: The enclosing snapshot assembly retains independent identifier
+            fields in captured details. Caption and summary fallbacks remain unchanged.
+        native_url_sources: Same-capture URL evidence supplied only when snapshot assembly
+            retains exact native-field details. Standalone rendering keeps URL fields.
+        native_description_fields: Complete original fields whose diagnostic-only output
+            is retained by enclosing snapshot details. Standalone formatting keeps it inline.
+        native_role_aliases: Exact generic role spellings backed by complete original
+            descriptions and their same-capture native-detail destinations.
+        menu_mechanisms: Exact standard menu action occurrences retained by the enclosing
+            snapshot's supporting-action details. Standalone formatting keeps these labels.
+        compact_multiline_values: Whether complete, unpreviewed whole-view values may use
+            a shorter JSON scalar instead of their paragraph block.
+        control_raises: Exact standard atomic-control Raise occurrences retained by the
+            enclosing snapshot's action details. Window and viewport Raise stays inline.
+        concise_menu_summary: Keep unopened menu references in whole-view output while
+            retaining their direct native child counts in the captured details.
+        disclosure_plan: Exact passive-field excerpts selected before final text formatting.
     """
     context = {} if context is None else context
     compact = bool(context.get("compact"))
-    detail_hint = "read this element for native facts" if context.get("publicApi") else "see details"
+    menu_mechanisms = menu_mechanisms if compact and not context.get("subtreeRef") else ()
+    control_raises = control_raises if compact and not context.get("subtreeRef") else ()
+    detail_hint = ""  # One captured-details entry is emitted by the document footer.
     coverage = RenderedFields(projection) if context.get("recordFields") else None
 
     def record(node: NodeView, *fields: str, kind: str = "display", target: str | None = None) -> None:
@@ -244,8 +310,42 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             for field_name in fields:
                 coverage.record(node, field_name, kind=kind, target=target)
 
+    deferred_native_fields: dict[FactKey, Record] = {}
+    disclosed_fields: dict[tuple[str, str], Record] = {}
+
+    def defer_fields(facts: Iterable[FactKey]) -> bool:
+        selected = tuple(facts)
+        if (
+            not compact
+            or context.get("subtreeRef")
+            or not native_description_fields
+            or not selected
+            or any(fact not in native_description_fields for fact in selected)
+        ):
+            return False
+        for fact in selected:
+            deferred_native_fields[fact] = native_description_fields[fact].destination()
+        return True
+
     focused_ref = context.get("focusedRef")
     roots = projection["roots"]
+    index_values: set[int] = set()
+    has_table_coordinates = False
+    if compact and not context.get("subtreeRef"):
+        pending: list[NodeView] = list(roots)
+        while pending:
+            node = pending.pop()
+            if "index" in node:
+                index_values.add(node["index"])
+            has_table_coordinates |= any(node.get(key, {}).get("length", 0) > 0 for key in ("rowRange", "columnRange"))
+            pending.extend(node["children"])
+    index_basis = "Index is 0-based."
+    if has_table_coordinates:
+        index_basis += " Row/Column are 1-based."
+    # Distinct values remain distinct even when identical leaves share a line.
+    # Keep the convention with this section so full and diff remain self-contained.
+    index_count = len(index_values)
+    share_index_basis = index_count >= 3 and index_count * len(" (0-based)") > len(index_basis) + 1
     part_actions = {}
     if context.get("nativeFacts"):
         # Folding a caption changes presentation, never its action target.
@@ -259,6 +359,15 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
     collapsed_menus = {}
     inline_children = set()
     display_nodes: list[RenderedNode] = []
+    child_hints: list[ChildCoverageHint] = []
+    node_line_ranges: dict[str, tuple[int, int]] = {}
+    node_prefixes: dict[str, str] = {}
+    node_action_lines: dict[str, tuple[str, str]] = {}
+    captions: dict[str, list[EmittedCaption]] = {}
+    visible_nodes: dict[str, NodeView] = {}
+    visible_parents: dict[str, str | None] = {}
+    # Keep producer-owned field slots; omission never searches or edits application text.
+    url_slots: dict[str, _NativeUrlSlot] = {}
 
     def visit(
         node: NodeView,
@@ -267,6 +376,7 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
         shared_help: str | None = None,
         in_menu: bool = False,
         parent_ref: str | None = None,
+        layout: tuple[tuple[str, str], ...] = (),
     ) -> None:
         """Visit.
 
@@ -275,11 +385,50 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             depth: Current relation/traversal depth within the existing bound.
         """
         nonlocal selected_descendants
+        visible_nodes[node["ref"]], visible_parents[node["ref"]] = node, parent_ref
+        caption_emission_start = len(coverage.source_emissions) if coverage is not None else 0
         parent_blocked = [] if parent_blocked is None else parent_blocked
         in_menu = in_menu or node["role"] in ("menu", "menuBar", "menuItem", "menuBarItem")
-        indent, states, omissions = "\t" * depth, [], []
-        line = f"{node['ref']} {role(node)}"
-        if is_dialog(node) and node["role"] != "sheet" or node.get("subrole") == "popover":
+        indent, states, omissions = "\t" * (depth + len(layout)), [], []
+        role_label = role(node)
+        alias = native_role_aliases.get(node["ref"]) if native_role_aliases else None
+        aliased = (
+            alias is not None
+            and not is_dialog(node)
+            and node.get("subrole") != "popover"
+            and node["role"] == alias.role
+            and node.get("subrole") == alias.subrole
+            and node.get("roleDescription") == alias.description.value
+            and defer_fields((alias.fact,))
+        )
+        if aliased and alias is not None:
+            role_label = alias.label
+        line = f"{node['ref']} {role_label}"
+        show_value = (
+            carries_value(node["native"])
+            or (node["ref"] == focused_ref and "value" in node)
+            or (
+                has_display_value(node["native"])
+                and node.get("value") != node.get("name")
+                and node.get("value") != node.get("description")
+            )
+        )
+        binary = node["role"] in ("checkBox", "switch", "radioButton")
+        value = node.get("value")
+        if binary and (node.get("valueIsNumber") or value in ("true", "false")):
+            value = {"0": "off", "1": "on", "true": "on", "false": "off"}.get(value, value)
+        if aliased and alias is not None:
+            record(node, "role")
+            if alias.subrole is not None:
+                record(node, "subrole")
+            if coverage is not None:
+                # Role fields are immutable source facts, outside text-caption
+                # provenance. Record their actual alias destinations explicitly.
+                coverage.source_emissions.extend(
+                    SourceEmission(FactKey(node["ref"], attribute), node[attribute], node["ref"], attribute, "display")
+                    for attribute in (("role", "subrole") if alias.subrole is not None else ("role",))
+                )
+        elif is_dialog(node) and node["role"] != "sheet" or node.get("subrole") == "popover":
             record(node, "subrole")
         elif node.get("roleDescription"):
             record(node, "roleDescription")
@@ -292,115 +441,38 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             and caps.get("click") == "unknown"
             and not node.get("blockedBy")
         )
-        if node.get("enabled") is False:
-            states.append("reported disabled" if deferred_click else "disabled")
-            record(node, "enabled")
-        if node.get("selected"):
-            states.append("selected")
-            record(node, "selected")
-        if node.get("toggleState") in ("on", "off", "mixed"):
-            states.append(node["toggleState"])
-            record(node, "toggleState")
-        if node.get("busy") is True:
-            states.append("busy")
-            record(node, "busy")
-        if node.get("headingLevel"):
-            states.append("heading level " + str(node["headingLevel"]))
-            record(node, "headingLevel")
-        if node.get("landmarkType"):
-            states.append(node["landmarkType"] + " landmark")
-            record(node, "landmarkType")
-        if caps is not None:
-            matches_caps = (
-                True
-                if (
-                    caps["click"] == "available"
-                    and not node.get("selectable")
-                    and (not compact or node["role"] not in STANDARD_CLICK)
-                )
-                else False
-            )
-            if matches_caps:
-                states.append("clickable")
-            matches_node = (
-                True
-                if (
-                    node.get("selectable")
-                    and node.get("enabled") is not False
-                    and not node.get("selected")
-                    and caps["click"] != "unavailable"
-                )
-                else False
-            )
-            if matches_node:
-                states.append("selectable")
-            if caps["typeText"] == "available":
-                states.append("text-input")
-            elif caps["replaceText"] == "available":
-                states.append("replace-only")
-            if caps["replaceText"] != caps["typeText"] and caps["replaceText"] != "available":
-                states.append("replace " + caps["replaceText"])
-            matches_conventional = (
-                True
-                if (
-                    caps["focus"] == "available"
-                    and caps["typeText"] != "available"
-                    and node["role"] not in CONVENTIONAL
-                    and not node.get("selectable")
-                    and (not compact or node["role"] not in ("group", "webArea"))
-                )
-                else False
-            )
-            if matches_conventional:
-                states.append("focusable")
-        else:
-            if node.get("selectable"):
-                if not node.get("selected"):
-                    states.append("selectable")
-            elif node.get("pressable") and node["role"] not in CONVENTIONAL:
-                states.append("clickable")
-            matches_conventional_condition = (
-                True
-                if (
-                    node.get("focusable")
-                    and node["role"] not in CONVENTIONAL
-                    and not node.get("selectable")
-                    and (not compact or node["role"] not in ("group", "webArea"))
-                )
-                else False
-            )
-            if matches_conventional_condition:
-                states.append("focusable")
-        if node.get("submenu"):
-            states.append("submenu")
-        expanded = disclosure(node)
-        if expanded is not None:
-            states.append("expanded" if expanded else "collapsed")
-            record(node, "expanded" if "expanded" in node else "disclosing")
-        if node["ref"] == focused_ref:
-            states.append("focused")
-        elif node.get("focused"):
-            states.append("reports focus")
-            record(node, "focused")
-        if node.get("modal"):
-            states.append("modal")
-            record(node, "modal")
-        elif node.get("modal") is False and is_dialog(node):
-            states.append("non-modal")
-            record(node, "modal")
-        if is_hidden(node):
-            states.append("hidden")
-            record(node, "visible")
-            record(node, "showing")
+        selected_states = select_states(node, compact=compact, focused_ref=focused_ref)
+        states = [label for label, _ in selected_states.labels]
+        # These are the original formatter's recorded state fields. Capability
+        # decisions remain structured evidence without changing legacy accounting.
+        recorded_state_fields = {
+            "enabled",
+            "selected",
+            "toggleState",
+            "busy",
+            "headingLevel",
+            "landmarkType",
+            "expanded",
+            "disclosing",
+            "focused",
+            "modal",
+            "visible",
+            "showing",
+        }
+        for _, attributes in selected_states.labels:
+            for attribute in attributes:
+                if attribute in recorded_state_fields:
+                    record(node, attribute)
+        for attribute in selected_states.equivalent_fields:
+            record(node, attribute, kind="equivalent")
         if (
             node["ref"] == focused_ref
             and not has_text_selection(node)
             and node["role"] not in ("application", "window")
         ):
             selected_descendants = selected_text_descendants(node)
-            if selected_descendants:
-                states.append("contains selected text")
         state_flags = " (" + ", ".join(states) + ")" if states else ""
+        node_prefixes[node["ref"]] = role_label + state_flags
         line += state_flags
 
         def display(value: str, name: str, limit: float = math.inf, attribute: str | None = None) -> str:
@@ -411,12 +483,22 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                     operation.
                 attribute: Native/display field name recorded by the provenance ledger.
             """
-            if compact:
-                encoded = display_embedded(value, field, hint=detail_hint)
-                if encoded is not None:
-                    # No full-value claim: accounting keeps the exact field under
-                    # its source reference in details, including folded captions.
-                    return encoded
+            excerpt = disclosure_plan.get(node["ref"], attribute) if disclosure_plan is not None and attribute else None
+            if excerpt is not None and excerpt.source.value == value:
+                record(node, attribute, kind="continuation")
+                disclosed_fields[(node["ref"], attribute)] = {
+                    "ref": node["ref"],
+                    "field": excerpt.source.native_field,
+                    "attribute": attribute,
+                    "value": excerpt.source.value,
+                    "ranges": [(fragment.start, fragment.end) for fragment in excerpt.fragments],
+                }
+                parts = " … ".join(field(fragment.text) for fragment in excerpt.fragments)
+                return parts + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; read_details(element={node['ref']})]"
+            if compact and (encoded := display_embedded(value, field, hint=detail_hint)) is not None:
+                # No full-value claim: accounting keeps the exact field under
+                # its source reference in details, including folded captions.
+                return encoded
             part = shortened(value, limit)
             if part["omitted"]:
                 omissions.append(f"Omitted: {part['omitted']} characters ({name})")
@@ -424,9 +506,22 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                 record(node, attribute)
             return field(part["head"] + part["tail"])
 
+        def caption(attribute: str, text: str) -> str:
+            if native_url_sources is not None and coverage is not None:
+                captions.setdefault(node["ref"], []).append(
+                    emitted_caption(
+                        projection, node, attribute, text, coverage.source_emissions[caption_emission_start:]
+                    )
+                )
+            return text
+
         if node.get("name"):
-            line += " " + display(node["name"], "Name", attribute="name")
+            line += " " + caption("name", display(node["name"], "Name", attribute="name"))
         fields = []
+        if node.get("spatialPosition"):
+            fields.append("Position: " + node["spatialPosition"])
+        if node.get("visualLabelRef"):
+            fields.append("Visual label: element " + node["visualLabelRef"])
         # Table coordinates are native index ranges, not spreadsheet addresses.
         # Display positive spans using human row/column numbers; retain empty
         # ranges explicitly rather than inventing a position or merged cell.
@@ -454,7 +549,7 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                 fields.append(label + ": " + str(node[key]))
                 record(node, key)
         if "index" in node:
-            fields.append("Index (0-based): " + str(node["index"]))
+            fields.append(("Index: " if share_index_basis else "Index (0-based): ") + str(node["index"]))
             record(node, "index")
         if deferred_click:
             fields.append("Click: unknown (rechecked on click)")
@@ -491,38 +586,74 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             fields.append("Focus flag: false")
             record(node, "focused")
         if node.get("description") and node["description"] != node.get("name"):
-            fields.append("Description: " + display(node["description"], "Description", attribute="description"))
+            fields.append(
+                "Description: "
+                + caption("description", display(node["description"], "Description", attribute="description"))
+            )
         if node.get("fullDescription"):
             fields.append(
                 "Full description: " + display(node["fullDescription"], "Full description", attribute="fullDescription")
             )
+        for attribute, label in (("valueDescription", "Value description"), ("rangeDescription", "Range description")):
+            if (
+                attribute in node
+                and not shared_description(node, attribute)
+                and not defer_fields((FactKey(node["ref"], attribute),))
+            ):
+                fields.append(label + ": " + display(node[attribute], label, attribute=attribute))
         if node.get("localizedLandmarkType"):
             fields.append(
                 "Landmark: " + display(node["localizedLandmarkType"], "Landmark", attribute="localizedLandmarkType")
             )
-        show_value = (
-            carries_value(node["native"])
-            or (node["ref"] == focused_ref and "value" in node)
-            or (
-                has_display_value(node["native"])
-                and node.get("value") != node.get("name")
-                and node.get("value") != node.get("description")
-            )
-        )
-        binary = node["role"] in ("checkBox", "switch", "radioButton")
-        value = node.get("value")
-        if binary and (node.get("valueIsNumber") or value in ("true", "false")):
-            value = {"0": "off", "1": "on", "true": "on", "false": "off"}.get(value, value)
         value_parts = shortened(node.get("value", ""), VALUE_PREVIEW_LIMIT)
+        value_excerpt = disclosure_plan.get(node["ref"], "value") if disclosure_plan is not None else None
+        if value_excerpt is not None and value_excerpt.source.value != value:
+            value_excerpt = None
         embedded_value = (
             display_embedded(value, field, hint=detail_hint) if compact and isinstance(value, str) else None
         )
         block_value = (
             show_value
             and "value" in node
+            and value_excerpt is None
             and embedded_value is None
             and (any(c in node["value"] for c in "\r\n") or value_parts["omitted"] > 0)
         )
+        compact_value = None
+        if (
+            block_value
+            and compact_multiline_values
+            and compact
+            and context.get("publicApi")
+            and context.get("shareDescriptions")
+            and not context.get("subtreeRef")
+            and not value_parts["omitted"]
+        ):
+            source = projection.provenance.get((node["ref"], "value"))
+            evidence = projection.source.context.get("compressionEvidence")
+            complete_value = (
+                isinstance(evidence, CompressionEvidence)
+                and source is not None
+                and bool(source.parts)
+                and all(
+                    part.facts and all((fact.source, fact.attribute) in evidence.complete_text for fact in part.facts)
+                    for part in source.parts
+                )
+            )
+            if complete_value:
+                natural_text = node["role"] == "staticText" and not node.get("name") and not node.get("description")
+                # Later fields have not been assembled yet. The two-byte separator
+                # bounds their cost; a lone Value can cost one byte less.
+                prefix = ", " + ("" if natural_text else value_label(node) + ": ")
+                compact_value = compact_multiline_value(
+                    value,
+                    label=value_label(node),
+                    indent=indent,
+                    inline_prefix=prefix,
+                    quote=quoted,
+                    format_field=field,
+                )
+                block_value = compact_value is None
         if show_value and not block_value:
             natural_text = (
                 compact
@@ -531,35 +662,54 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                 and not node.get("description")
                 and value is not None
             )
-            fields.append(
-                ("" if natural_text else value_label(node) + ": ")
-                + ("<unavailable>" if value is None else embedded_value or field(value))
+            value_text = (
+                "<unavailable>"
+                if value is None
+                else display(value, "Value", attribute="value")
+                if value_excerpt is not None
+                else compact_value or embedded_value or field(value)
             )
-            if embedded_value is None:
+            fields.append(("" if natural_text else value_label(node) + ": ") + value_text)
+            if embedded_value is None and value_excerpt is None:
                 record(node, "value")
+            caption("value", value_text)
         if node.get("labelTargets"):
             fields.append("Labels for: " + ", ".join(node["labelTargets"]))
         if node.get("incompleteLabelRelation"):
             fields.append("Label relation: partly outside this observation or unavailable")
         selection_range = display_selection(node) if compact else node.get("selectionRange")
+        summarized = False
         if selection_range is not None:
-            fields.append(
-                (f"Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}")
+            summarized = (
+                compact and selection_summaries is not None and selection_summaries.covers(node["ref"], selection_range)
             )
-            record(node, "selectionRange")
+            if not summarized:
+                fields.append(
+                    f"Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}"
+                )
+            record(node, "selectionRange", kind="text-selection-summary" if summarized else "display")
         if "shortcut" in node:
             fields.append("Shortcut: " + display(node["shortcut"], "Shortcut"))
         if "menuMark" in node:
             fields.append("Mark: " + (display(node["menuMark"], "Mark") if node["menuMark"] else "<none>"))
-        # The public read_text continuation reads Value, not SelectedText. An
+        # The public readText continuation reads Value, not SelectedText. An
         # acquired selection cannot be shortened without another valid entry.
-        selected_parts = shortened(node.get("selectedText", ""), math.inf if coverage is not None else 200)
-        if node.get("selectedText") and not selected_parts["omitted"]:
-            fields.append("Selected text: " + field(node["selectedText"]))
-            record(node, "selectedText")
-        fields.extend(
-            action_fields(node, part_actions.get(node["ref"], []), lambda source: rendered_actions(source, compact))
+        selectedText = node.get("selectedText")
+        selected_parts = shortened(
+            selectedText if selectedText is not None else "", math.inf if coverage is not None else 200
         )
+        if selectedText is not None and not selected_parts["omitted"]:
+            fields.append("Selected text: " + field(selectedText))
+            record(node, "selectedText")
+        action_start = len(fields)
+        own_action_fields = action_fields(
+            node,
+            part_actions.get(node["ref"], []),
+            lambda source: rendered_actions(
+                source, compact, menu_mechanisms=menu_mechanisms, control_raises=control_raises
+            ),
+        )
+        fields.extend(own_action_fields)
         if node.get("actionsUnavailable"):
             fields.append("Secondary Actions: <unavailable>")
         if node.get("help") and node["help"] not in (
@@ -581,12 +731,14 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             if not compact or display_embedded(child_help, field, hint=detail_hint) is None:
                 for child in node["children"]:
                     record(child, "help", kind="equivalent", target=node["ref"])
+        url_slot = None
         if node.get("url") and node["url"] not in (
             node.get("name"),
             node.get("description"),
             node.get("value"),
             node.get("help"),
         ):
+            url_slot = len(fields)
             fields.append(
                 "URL: "
                 + (
@@ -595,31 +747,39 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                     else display(node["url"], "URL", attribute="url")
                 )
             )
-        matches_node_condition = (
-            True
-            if (
-                node.get("identifier")
-                and not node.get("name")
-                and not node.get("description")
-                and not (node["role"] == "staticText" and node.get("value"))
-            )
-            else False
-        )
-        if matches_node_condition:
-            identifier = node["identifier"]
-            if compact and utf16_length(identifier) > 120:
-                # The full identifier stays unaccounted here, so native fact
-                # accounting retains it verbatim in this capture's details.
-                fields.append(
-                    "ID: " + field(identifier[:24] + "…" + identifier[-80:]) + " [ID shortened; " + detail_hint + "]"
-                )
-            else:
-                fields.append("ID: " + display(identifier, "ID", attribute="identifier"))
+        if "documentUrl" in node:
+            fields.append("Document: " + field(node["documentUrl"]))
+            record(node, "documentUrl")
+        if "documentReports" in node:
+            fields.append("Document reports (unresolved): " + literal(node["documentReports"]))
+            record(node, "documentReports")
+        if node.get("identifier") and not defer_identifiers:
+            # Standalone formatters have no captured-detail delivery contract.
+            fields.append("ID: " + field(node["identifier"]))
+            record(node, "identifier")
         if node.get("blockedBy") and ",".join(node["blockedBy"]) != ",".join(parent_blocked):
             fields.append("Blocked by: " + ", ".join(node["blockedBy"]))
+        field_base = line
+        field_separator = ", " if node.get("name") else " "
         if fields:
-            line += (", " if node.get("name") else " ") + ", ".join(fields)
+            line += field_separator + ", ".join(fields)
+        if len(own_action_fields) == 1 and not part_actions.get(node["ref"]):
+            without = fields[:action_start] + fields[action_start + 1 :]
+            node_action_lines[node["ref"]] = (
+                line,
+                field_base + (field_separator + ", ".join(without) if without else ""),
+            )
         line_start = len(lines_value)
+        if compact and native_url_sources is not None and coverage is not None and url_slot is not None:
+            url_slots[node["ref"]] = _NativeUrlSlot(
+                line_start,
+                field_base,
+                tuple(fields),
+                url_slot,
+                field_separator,
+                len(f"{node['ref']} {role_label}"),
+                state_flags,
+            )
         hints: list[str] = []
 
         def hint(text: str) -> None:
@@ -628,6 +788,27 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
 
         lines_value.append(indent + line)
         refs_value.append(node["ref"])
+        for group in node.get("sharedDescriptions", ()):
+            if defer_fields(group.facts):
+                continue
+            hint(indent + "\t" + description_declaration(group))
+            for fact in group.facts:
+                record(projection["nativeNodes"][fact.source], fact.attribute, kind="shared", target=group.scope)
+        for group in node.get("sourceRoles", ()):
+            if defer_fields(group.facts):
+                continue
+            label = "Native role description" if group.attribute == "roleDescription" else "Native role"
+            hint(
+                indent
+                + "\t"
+                + label
+                + " [elements "
+                + reference_set(fact.source for fact in group.facts)
+                + "]: "
+                + quoted(group.value)
+            )
+            for fact in group.facts:
+                record(projection["nativeNodes"][fact.source], fact.attribute, kind="shared", target=group.scope)
         partial_info = partial(node)
         deferred_menu = compact and unexpanded_menu(node)
         if deferred_menu:
@@ -639,7 +820,7 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                 child_coverage = f"{end - start}/{node['childCount']} read" + (f", offset {start}" if start else "")
                 if "nextChildOffset" in node:
                     child_coverage += "; partial; " + (
-                        "continue using the returned cursor"
+                        "cursor below"
                         if context.get("publicApi")
                         else (f'app.element({quoted(node["ref"])}).read({{"offset": {node["nextChildOffset"]}}})')
                     )
@@ -647,23 +828,22 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                 elif end == node["childCount"]:
                     child_coverage += "; end of direct children"
                 else:
-                    child_coverage += "; partial (" + detail_hint + ")"
+                    child_coverage += "; partial; read()" if context.get("publicApi") else "; partial"
                 hint(f"{indent}\tChildren: {child_coverage}")
+                if context.get("publicApi"):
+                    coverage_hint = capture_child_hint(node, projection.source, len(lines_value) - 1, hints[-1])
+                    if coverage_hint is not None:
+                        child_hints.append(coverage_hint)
             else:
                 hint(indent + "\tChildren: " + partial_info)
-        matches_compact = (
-            True
-            if (
-                compact
-                and not partial_info
-                and not deferred_menu
-                and "childrenStart" in node
-                and "childrenEnd" in node
-                and node["childrenEnd"] == node.get("childCount")
-            )
-            else False
-        )
-        if matches_compact:
+        if (
+            compact
+            and not partial_info
+            and not deferred_menu
+            and "childrenStart" in node
+            and "childrenEnd" in node
+            and node["childrenEnd"] == node.get("childCount")
+        ):
             hint(
                 (f"{indent}\tChildren: offsets {node['childrenStart']}–{node['childrenEnd']}; end of direct children.")
             )
@@ -705,18 +885,12 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                     f"}})"
                 )
             )
-        else:
-            matches_partial_info = (
-                True
-                if partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu
-                else False
+        elif partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
+            hint(
+                f"{indent}\tInspect subtree: (await app.element({node['ref']})).read()"
+                if context.get("publicApi")
+                else f"{indent}\tInspect subtree: element({quoted(node['ref'])}).read()"
             )
-            if matches_partial_info:
-                hint(
-                    f"{indent}\tInspect subtree: (await app.element({node['ref']})).read()"
-                    if context.get("publicApi")
-                    else f"{indent}\tInspect subtree: element({quoted(node['ref'])}).read()"
-                )
         for omission in omissions:
             hint(indent + "\t" + omission)
 
@@ -726,7 +900,7 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
 
             def body(value: str) -> None:
                 # Display provider paragraph separators without changing the
-                # captured source, UTF-16 offsets or read_text pagination.
+                # captured source, UTF-16 offsets or readText pagination.
                 lines_value.extend(indent + "\t| " + field(p) for p in re.split("\\r\\n|\\r|\\n", value))
 
             body(part["head"])
@@ -744,14 +918,25 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                 if "readableTextRefs" not in context or node["ref"] in context["readableTextRefs"]
                 else "; full captured value unavailable"
             )
+            value_start = len(lines_value)
             text_block(value_label(node), value_parts, continuation)
             record(node, "value", kind="continuation" if value_parts["omitted"] else "display")
+            caption("value", "\n".join(text[len(indent) + 1 :] for text in lines_value[value_start:]))
         for attribute, label in (
             ("documentText", "Document text"),
             ("controlValue", "Control value"),
             ("rangeValue", "Range value"),
         ):
             if attribute not in node:
+                continue
+            if (
+                attribute in node.get("_numericValueAliases", ())
+                and node[attribute] == node.get("value")
+                and show_value
+                and not value_parts["omitted"]
+                and embedded_value is None
+            ):
+                record(node, attribute, kind="equivalent")
                 continue
             if node[attribute] == node.get("value") and {attribute, "value"} <= set(
                 node.get("_completeTextValues", ())
@@ -761,7 +946,7 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
                 continue
             part = shortened(node[attribute], VALUE_PREVIEW_LIMIT)
             if any(c in node[attribute] for c in "\r\n") or part["omitted"]:
-                text_block(label, part, "; " + detail_hint)
+                text_block(label, part)
             else:
                 lines_value.append(indent + "\t" + label + ": " + field(node[attribute]))
             record(node, attribute, kind="continuation" if part["omitted"] else "display")
@@ -775,24 +960,24 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
         focus = (
             node["ref"]
             + " "
-            + role(node)
+            + role_label
             + ((", " + preview(label, "Name", 120) if focus_name["omitted"] else " " + field(label)) if label else "")
         )
         if show_value:
             focus += ", " + preview(value, value_label(node), 200) if value is not None else ", Value: <unavailable>"
-        if selection_range is not None:
+        if selection_range is not None and not summarized:
             focus += (
                 f", Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}"
             )
-        if node.get("selectedText"):
-            focus += ", " + preview(node["selectedText"], "Selected text", 200)
+        if selectedText is not None:
+            focus += ", " + preview(selectedText, "Selected text", 200)
         focus_labels[node["ref"]] = focus
         summary_name = label or node.get("value") or node.get("identifier") or ""
         short = shortened(summary_name, 80)
         summary_labels[node["ref"]] = (
             node["ref"]
             + " "
-            + role(node)
+            + role_label
             + (" " + field(short["head"] + ("…" if short["omitted"] else "") + short["tail"]) if summary_name else "")
             + (" (preview; see tree)" if short["omitted"] else "")
         )
@@ -801,37 +986,43 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
         if node.get("focused"):
             reported_focus.append(node["ref"])
         labels_value[node["ref"]] = node.get("name") or node.get("description") or node.get("value") or node["role"]
-        has_caption_context = (
-            True
-            if (
-                node["role"] in ("group", "cell")
-                and not node.get("name")
-                and not node.get("description")
-                and len(node["children"]) > 1
-                and any(child["role"] in ("staticText", "heading") for child in node["children"])
-            )
-            else False
-        )
-        if has_caption_context:
+        if (
+            node["role"] in ("group", "cell")
+            and not node.get("name")
+            and not node.get("description")
+            and len(node["children"]) > 1
+            and any(child["role"] in ("staticText", "heading") for child in node["children"])
+        ):
             context_refs[node["ref"]] = unique(
                 context_refs.get(node["ref"], []) + [child["ref"] for child in node["children"]]
             )
         for target in node.get("labelTargets", []):
             context_refs.setdefault(target, []).append(node["ref"])
-        state_at = len(f"{node['ref']} {role(node)}")
+        state_at = len(f"{node['ref']} {role_label}")
         display_nodes.append(
             RenderedNode(
                 node["ref"],
                 parent_ref,
                 depth,
                 "\n".join(lines_value[line_start:]),
-                indent + line[:state_at] + line[slice(state_at + len(state_flags), None)],
+                indent + line[:state_at] + line[state_at + len(state_flags) :],
                 tuple(hints),
                 partial=bool(partial_info and not deferred_menu),
+                layout=layout,
             )
         )
+        node_line_ranges[node["ref"]] = (line_start, len(lines_value))
+        groups = {ref: group for group in node.get("layoutGroups", ()) for ref in group["members"]}
         for child in node["children"]:
-            visit(child, depth + 1, node.get("blockedBy"), child_help, in_menu, node["ref"])
+            child_layout = layout
+            if child["ref"] in groups:
+                group = groups[child["ref"]]
+                heading = "\t" * (depth + 1 + len(layout)) + "Visual row:"
+                key = node["ref"] + ":row:" + group["members"][0]
+                child_layout = (*layout, (key, heading))
+                if child["ref"] == group["members"][0]:
+                    lines_value.append(heading)
+            visit(child, depth + 1, node.get("blockedBy"), child_help, in_menu, node["ref"], child_layout)
 
     if "app" in context:
         windows = [node for node in roots if is_window(node)]
@@ -874,17 +1065,58 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             lines_value.append("Interaction: " + "; ".join(interactions))
         if title_omission:
             lines_value.append(title_omission)
+    if share_index_basis:
+        lines_value.append(index_basis)
     tree_start = len(lines_value)
     for node in roots:
         visit(node, 0)
+    url_plan = (
+        select_deferred_native_urls(
+            native_url_sources,
+            visible_nodes,
+            visible_parents,
+            {ref: tuple(items) for ref, items in captions.items()},
+            tuple(url_slots),
+        )
+        if native_url_sources
+        else NativeUrlPlan()
+    )
+    deferred_urls = url_plan.destinations
+    if deferred_urls:
+        from dataclasses import replace
+
+        record_indexes = {record.ref: index for index, record in enumerate(display_nodes)}
+        for destination in deferred_urls:
+            ref = destination["ref"]
+            node_action_lines.pop(ref, None)
+            item = url_slots[ref]
+            retained = item.fields[: item.slot] + item.fields[item.slot + 1 :]
+            line = item.base + (item.separator + ", ".join(retained) if retained else "")
+            old = display_nodes[record_indexes[ref]]
+            indent = lines_value[item.line][: len(lines_value[item.line]) - len(lines_value[item.line].lstrip("\t"))]
+            lines_value[item.line] = indent + line
+            display_nodes[record_indexes[ref]] = replace(
+                old,
+                text="\n".join((lines_value[item.line], *old.text.split("\n")[1:])),
+                content=indent + line[: item.state_at] + line[item.state_at + len(item.state_flags) :],
+            )
     tree_end = len(lines_value)
+    unexpanded_menus: tuple[UnexpandedMenuSummary, ...] = ()
     if collapsed_menus:
+        short_summary = short_unexpanded_menu_summary(collapsed_menus) if concise_menu_summary else None
         lines_value.append(
-            "Menu contents not expanded: "
+            short_summary
+            if short_summary is not None
+            else "Menus unexpanded: "
             + "; ".join(
                 reference_set(items) + " (0/" + str(count) + " children)" for count, items in collapsed_menus.items()
             )
-            + ". Use app.element(ref).read() to inspect a menu."
+            + "."
+        )
+        unexpanded_menus = (
+            UnexpandedMenuSummary(
+                tuple((ref, count) for count, items in collapsed_menus.items() for ref in items), lines_value[-1]
+            ),
         )
         inline_children.update(ref for items in collapsed_menus.values() for ref in items)
     if "app" in context:
@@ -963,7 +1195,13 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
         if focused_ref is not None and focused_ref in focus_labels:
             summary = "\nReported focus: " + summary_labels[focused_ref]
             range_ = projection["nativeNodes"].get(focused_ref, {}).get("selectionRange")
-            if range_ is not None:
+            summarized_focus = (
+                compact
+                and range_ is not None
+                and selection_summaries is not None
+                and selection_summaries.covers(focused_ref, range_)
+            )
+            if range_ is not None and not summarized_focus:
                 summary += (
                     f"; text selection: empty at UTF-16 offset {number_string(range_['location'])}"
                     if range_["length"] == 0
@@ -991,17 +1229,13 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
             )
         elif reported_focus:
             lines_value.append("\nReported focus: unavailable.")
-
-        def _iter_source(_source_items: Iterator[Any]) -> Iterator[Any]:
-            for source, owner in _source_items:
-                if (
-                    source != focused_ref
-                    and projection["nativeNodes"].get(source, {}).get("focused")
-                    and owner in focus_labels
-                ):
-                    yield "inside " + owner
-
-        internal = list(_iter_source(iter(projection["foldedInto"].items())))
+        internal = [
+            "inside " + owner
+            for source, owner in projection["foldedInto"].items()
+            if source != focused_ref
+            and projection["nativeNodes"].get(source, {}).get("focused")
+            and owner in focus_labels
+        ]
         others = unique([ref for ref in reported_focus if ref != focused_ref] + internal)
         if others:
             lines_value.append(
@@ -1035,14 +1269,38 @@ def render_projection_lines(root: SemanticNode, context: Record, projection: Pro
         )
         if compact:
             result["inlineChildRefs"] = sorted(inline_children)
+            result["childCoverageRefs"] = tuple(hint.ref for hint in child_hints)
         if context.get("recordStages"):
             result["layoutStages"] = layout_stages
         if coverage is not None:
             result["fieldCoverage"] = coverage.entries
+        if deferred_native_fields:
+            result["deferredNativeFields"] = tuple(deferred_native_fields.values())
+        if disclosed_fields:
+            result["disclosedTextFields"] = tuple(disclosed_fields.values())
+        if menu_mechanisms:
+            result["deferredMenuActions"] = tuple(asdict(item) for item in menu_mechanisms)
+        if control_raises:
+            result["deferredControlRaises"] = tuple(asdict(item) for item in control_raises)
+        if deferred_urls:
+            result["deferredNativeUrls"] = deferred_urls
+            result["deferredNativeUrlPeers"] = url_plan.peer_groups
         return (
             RenderedResult(result, coverage.source_emissions, coverage.source_input, document=document)
             if coverage is not None
             else RenderedResult(result, document=document)
         )
 
-    return LayoutFrame(lines_value, roots, context, field, finalize=finalize)
+    return LayoutFrame(
+        lines_value,
+        roots,
+        context,
+        field,
+        finalize=finalize,
+        child_hints=tuple(child_hints),
+        rendered_nodes=tuple(display_nodes),
+        node_line_ranges=node_line_ranges,
+        node_prefixes=node_prefixes,
+        unexpanded_menus=unexpanded_menus,
+        node_action_lines=node_action_lines,
+    )

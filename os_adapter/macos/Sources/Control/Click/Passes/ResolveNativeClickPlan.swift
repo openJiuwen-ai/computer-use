@@ -49,7 +49,12 @@ import ApplicationServices
                 unit: command.kind, kind: "click", parameters: op.request.parameters, foreground: false,
                 element: !capture)
             pointer = request
-            if capture {
+            if let qualification = offer.popupPointer {
+                guard !capture, contract.actuator == nil, offer.delivery == .systemPointer, !command.foreground,
+                    NativePopupClickPolicy.permitsIntent(op.request)
+                else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
+                target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))
+            } else if capture {
                 let unit = NativePointerUnit(capture: try access.captures.input(command.target).entry)
                 try unit.validateParameters(request)
                 target = .captured(unit)
@@ -75,8 +80,14 @@ import ApplicationServices
             target: target, offer: offer, pointer: pointer, command: command, operation: op, within: contract.within,
             step: step)
         if case .action(let node, let name, _) = target, name == kAXPressAction {
-            plan.document = try access.objects.nativeActionFacts(node).document
-            plan.documentPreparationRequired = try plan.document?.focus() == .other
+            let facts = try access.objects.nativeActionFacts(node)
+            guard !offer.documentForegroundRequired || facts.document != nil else {
+                throw NativePreparationUnavailable(
+                    description: "the original Web action's exact document is unavailable; AXPress was not sent")
+            }
+            plan.document = facts.document
+            plan.documentPreparation = try facts.documentPreparation(
+                name, retainedForegroundRequirement: offer.documentForegroundRequired)
         }
         return plan
     }

@@ -6,13 +6,12 @@
 import json
 import math
 
-from computer_use.protocol.primitives import required_item
-
 from .action_context import decode_action_context
 from .captures import capture_metadata, decode_capture, decode_stamp
 from .desktop import decode_desktop_observation
 from .directory import _application, decode_directory
 from .observation.adapters import validate_driver_payload
+from .primitives import required_item
 from .schema import array, boolean, enum, identity, number, obj, string, union, unknown
 from .text import decode_text_page
 
@@ -85,7 +84,7 @@ click_offer = obj(
         admission=enum("ready", "preparationRequired", "unavailable", "insufficientEvidence"),
         reason=string().nullable(),
         preparationOptions=array(enum("background", "foreground"), max=2),
-        preferenceProfile=enum("default", "physicalWhenAvailableInExclusive"),
+        preferenceProfile=enum("default", "physicalRequired"),
     )
 )
 click_dispatch = enum("notDispatched", "dispatched", "partial", "unknown")
@@ -175,7 +174,12 @@ unit_contracts = {
 
 _intent = obj(dict(kind=enum("read", *intent_kinds), parameters=unknown()))
 _begin = obj(
-    dict(mode=enum("read", "write"), target=operation_target, intent=_intent, clickContract=enum("v1", "v2").optional())
+    dict(
+        mode=enum("read", "write"),
+        target=operation_target,
+        intent=_intent,
+        clickContract=enum("v1", "v2").optional(),
+    )
 )
 _unit_command = obj(
     dict(kind=enum(*unit_contracts), primitiveId=identity, target=operation_target, foreground=boolean())
@@ -274,7 +278,17 @@ def decode_selection_basis(value):
 _inspect_queries = {
     "launch": obj(dict(kind=enum("launch"))),
     "applications": obj(dict(kind=enum("applications"))),
-    "surfaces": obj(dict(kind=enum("surfaces"), application=identity, includeAccessibility=boolean().optional())),
+    "surfaceBatch": obj(
+        dict(kind=enum("surfaceBatch"), applications=array(identity, min=1, max=64), profile=enum("visual").optional())
+    ),
+    "surfaces": obj(
+        dict(
+            kind=enum("surfaces"),
+            application=identity,
+            includeAccessibility=boolean().optional(),
+            profile=enum("visual").optional(),
+        )
+    ),
     "roots": obj(dict(kind=enum("roots"), application=identity)),
     "inputContext": obj(
         dict(
@@ -291,6 +305,7 @@ _inspect_queries = {
             kind=enum("nodes"),
             fields=array(identity, min=1, max=128),
             advertisedFields=array(identity, min=1, max=128).optional(),
+            textContent=boolean().optional(),
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),
             primaryFields=array(enum("Text.LineRanges"), min=1, max=1).optional(),
@@ -321,6 +336,8 @@ def decode_inspect_query(value):
     if not isinstance(value, dict) or not isinstance(value.get("kind"), str) or value["kind"] not in _inspect_queries:
         raise ValueError("protocol: unknown native inspection query")
     result = _inspect_queries[value["kind"]].parse(value)
+    if "profile" in result and "includeAccessibility" in result:
+        raise ValueError("protocol: surface profile and legacy accessibility flag cannot be combined")
     if "currentReceiver" in result and (
         result["currentReceiver"] is not True or any(key in result for key in ("actuator", "receiver", "basis"))
     ):
@@ -361,7 +378,7 @@ def decode_inspect_query(value):
         and selected["node"] in (selected["region"], selected["bar"])
     ):
         raise ValueError("protocol: a page button must be distinct from its region and bar")
-    for key in ("within", "fields", "followRelations"):
+    for key in ("within", "fields", "followRelations", "applications"):
         if key in result and len(set(result[key])) != len(result[key]):
             raise ValueError("protocol: duplicate native query " + key)
     return result
@@ -556,7 +573,7 @@ _desktop_capture = obj(
 )
 
 
-def decode_execution_result(method, value):
+def decode_execution_result(method, value, *, retain_observation=False):
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "readChange":
         result = _read_change.parse(value)
         if len(set(result["events"])) != len(result["events"]) or (result["reason"] == "event") != bool(
@@ -585,9 +602,17 @@ def decode_execution_result(method, value):
         if p["unit"] != "launch_application":
             raise ValueError("protocol: inconsistent application launch contract")
         return result
-    if method == "inspect" and isinstance(value, dict) and value.get("kind") in ("applications", "surfaces", "roots"):
+    if (
+        method == "inspect"
+        and isinstance(value, dict)
+        and value.get("kind") in ("applications", "surfaces", "roots", "surfaceBatch")
+    ):
         return decode_directory(value)
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "observation":
+        if retain_observation:
+            from .observation.adapters.wire import DecodedDriverObservation
+
+            return DecodedDriverObservation(value)
         validate_driver_payload(value)
         return value
     result = _schemas[method].parse(value)
