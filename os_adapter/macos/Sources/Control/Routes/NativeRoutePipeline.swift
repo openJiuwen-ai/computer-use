@@ -16,7 +16,7 @@ import ApplicationServices
         case .selection:
             throw DriverError("native selection requires the negotiated click pipeline", code: .invalidRequest)
         case .action(let name, let description):
-            return try BuildNativeActionRoutePass.run(context, name: name, description: description)
+            return try NativeObjectActionPipeline.select(context, name: name, description: description)
         case .menuAction(let name, let description):
             return try BuildNativeMenuRoutePass.run(context, name: name, description: description)
         case .textValue(let valueContract):

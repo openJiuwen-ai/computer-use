@@ -502,6 +502,13 @@ import ApplicationServices
             applicationMenuContext: false, foreground: true, focusWritable: true, documentEvidence: .other,
             popupContext: scopes.stamp, popupElementWindowID: scopes.ids["E"])
     }
+    func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts {
+        preconditionFailure("unselected explicit action route")
+    }
+    func executeNativeExplicitAction(
+        _ ref: String, request: String, action: String, onDispatch: @MainActor () throws -> Void,
+        onReturned: @MainActor () -> Void
+    ) throws { preconditionFailure("unselected explicit action route") }
     func executeNativeAction(
         _ ref: String, action: String, description: String?, onDispatch: @MainActor () throws -> Void,
         onReturned: @MainActor () -> Void

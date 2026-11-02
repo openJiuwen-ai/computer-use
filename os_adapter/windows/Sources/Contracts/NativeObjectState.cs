@@ -17,5 +17,6 @@ namespace ComputerUse.Windows
         internal bool? CollapsedExpansion;
         internal bool ActionsComplete;
         internal string[] Actions = new string[0];
+        internal NativeExactActionEvidence ExactAction;
     }
 }

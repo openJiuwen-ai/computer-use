@@ -2,8 +2,9 @@
 
 import Foundation
 
-/// Evidence that an observed native object still represents the same target.
-/// Mutable input values, selection, enabled state and window titles are not identity.
+/// Native constraints on the retained object in its original working scope.
+/// Display text, values, selection and enabled state may change on that object;
+/// its reference does not promise an immutable, unobservable business meaning.
 struct ElementIdentity: Equatable {
     struct Facts {
         var values: [String: String] = [:]
@@ -17,36 +18,11 @@ struct ElementIdentity: Equatable {
     // These are native, advertised positions, not labels or a parsed A1 name.
     static let positionKeys: Set<String> = ["AXRowIndexRange", "AXColumnIndexRange"]
     static let keys =
-        ["AXRole", "AXSubrole", "AXIdentifier", "AXURL", "AXTitle", "AXDescription", "AXDocument"]
+        ["AXRole", "AXSubrole", "AXIdentifier", "AXURL", "AXDocument"]
         + positionKeys.sorted()
-    private static let labelledRoles: Set<String> = [
-        "AXButton", "AXMenuItem", "AXMenuBarItem", "AXCheckBox", "AXRadioButton", "AXLink", "AXRow"
-    ]
 
-    init(
-        role: String, subrole: String?, identifier: String?, url: String?, title: String?, description: String?,
-        document: String? = nil
-    ) {
-        var attributes = role.isEmpty ? [:] : ["AXRole": role]
-        for (key, value) in [
-            ("AXSubrole", subrole), ("AXIdentifier", identifier), ("AXURL", url), ("AXDocument", document)
-        ] { if let value, !value.isEmpty { attributes[key] = value } }
-        // A reused command/record with a different label is a different action.
-        // Editor text can legitimately change during this observation's lifetime.
-        if Self.labelledRoles.contains(role) {
-            for (key, value) in [("AXTitle", title), ("AXDescription", description)] {
-                if let value, !value.isEmpty { attributes[key] = value }
-            }
-        }
-        self.attributes = attributes
-        self.absent = []  // Optional arguments do not establish native absence.
-    }
-
-    init(facts: Facts, roleHint: String? = nil) {
-        var keys = Set(Self.keys)
-        if !Self.labelledRoles.contains(facts.values["AXRole"] ?? roleHint ?? "") {
-            keys.subtract(["AXTitle", "AXDescription"])
-        }
+    init(facts: Facts) {
+        let keys = Set(Self.keys)
         attributes = facts.values.filter { keys.contains($0.key) && !$0.value.isEmpty }
         absent = facts.absent.union(facts.values.filter { $0.value.isEmpty }.map(\.key)).intersection(keys)
     }

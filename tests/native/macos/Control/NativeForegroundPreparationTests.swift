@@ -40,22 +40,11 @@ import Foundation
         }
         expectRefusal(.invalidRequest) { try operation.requireForegroundPreparation("keyboard") }
         let ordinary = NativeActionDocumentPolicy.preparation(
-            action: "AXPress", exactStandardWindow: true, otherDocument: false, confirmedWebArea: false,
-            foreground: false)
+            action: "AXPress", exactStandardWindow: true, otherDocument: false)
         precondition(!ordinary.required, "foreground permission does not request activation of an ordinary action")
-        let web = NativeActionDocumentPolicy.preparation(
-            action: "AXPress", exactStandardWindow: true, otherDocument: false, confirmedWebArea: true,
-            foreground: false)
-        precondition(web.foregroundOnly, "a proven focus-gated action retains its actual preparation requirement")
-        let previous = NativeClickContract(
-            routeFamily: "web", delivery: .objectAction, admission: .preparationRequired, reason: nil,
-            preparationOptions: ["foreground"], backgroundUnavailable: true, documentForeground: .required(ready: false)
-        )
-        let refreshed = NativeClickContract(
-            routeFamily: "web", delivery: .objectAction, admission: .ready, reason: nil, preparationOptions: [],
-            documentForeground: .unconfirmed(ready: false)
-        ).retainingDocumentForeground(from: previous)
-        precondition(refreshed.backgroundUnavailable && refreshed.preparationOptions == ["foreground"])
+        let other = NativeActionDocumentPolicy.preparation(
+            action: "AXPress", exactStandardWindow: true, otherDocument: true)
+        precondition(other.windowSelectionRequired, "a confirmed other document still requires exact window selection")
         print("PASS foreground preparation requires original-scope pre-dispatch evidence")
     }
 }

@@ -45,4 +45,38 @@ import ApplicationServices
             return NativeAction.Item(name: name, description: description as String?)
         }
     }
+
+    /// An explicit name needs only its own declaration. Localized aliases
+    /// additionally need a complete, bounded description catalogue.
+    func explicitAction(_ element: AXUIElement, request: String) throws -> NativeAction.Item? {
+        try RequestDiagnostics.checkCancellation()
+        var raw: CFArray?
+        let status = AXUIElementCopyActionNames(element, &raw)
+        let names = status == .success ? raw as? [String] : nil
+        let resolved = try NativeAction.resolveExplicit(
+            request: request, names: names,
+            description: { name in
+                var description: CFString?
+                let status = AXUIElementCopyActionDescription(element, name as CFString, &description)
+                try RequestDiagnostics.checkCancellation()
+                return status == .success ? description as String? : nil
+            }, check: RequestDiagnostics.checkCancellation)
+        try RequestDiagnostics.checkCancellation()
+        switch resolved {
+        case .selected(let action): return action
+        case .absent: return nil
+        case .ambiguous:
+            throw DriverError("the explicit native action is ambiguous; no requested action sent", code: .ambiguousTarget)
+        case .namesUnavailable:
+            throw DriverError("native action names are unavailable; no requested action sent", code: .observationIncomplete)
+        case .descriptionsUnavailable:
+            throw DriverError(
+                "localized action descriptions are incomplete; a unique alias cannot be confirmed",
+                code: .observationIncomplete)
+        case .descriptionBudgetExceeded:
+            throw DriverError(
+                "localized action alias exceeds the description budget; use the exact native action name",
+                code: .observationIncomplete)
+        }
+    }
 }

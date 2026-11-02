@@ -12,6 +12,16 @@ import ApplicationServices
 
     func validate(_ mapping: WindowMapping) throws { try observation.validate(mapping) }
 
+    func validateInputScope() throws { try observation.validateObservation() }
+
+    func inputMapping(_ mapping: WindowMapping) throws -> WindowMapping { try observation.inputMapping(mapping) }
+
+    @discardableResult func validateInputGeometry(
+        _ mapping: WindowMapping, continuingDrag: Bool = false
+    ) throws -> WindowMapping {
+        try observation.validateGeometry(mapping, continuingDrag: continuingDrag)
+    }
+
     func captureWindow(
         _ app: NSRunningApplication, target: AXUIElement? = nil, nativeTarget: WindowMapping? = nil,
         maxDimension: Int? = nil

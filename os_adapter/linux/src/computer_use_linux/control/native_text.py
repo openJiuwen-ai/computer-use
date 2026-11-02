@@ -100,7 +100,7 @@ class NativeText:
         pending = [] if enabled else ["enabled"]
         if supported and kind == "insert":
             try:
-                codec = text_codec(self.ax, obj)
+                codec = text_codec(self.ax, obj, text=operation.intent["parameters"]["text"])
                 codec.insertion_length(operation.intent["parameters"]["text"])
             except (Failure, self.ax.glib.Error):
                 ctx.check()

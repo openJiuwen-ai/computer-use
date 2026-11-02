@@ -13,19 +13,18 @@ import ApplicationServices
         defer { metric?.end() }
         func actionBoundary() throws {
             try boundary.checkConditions()
-            if let document = plan.document {
-                let focus = try document.focus()
-                let foreground = BackgroundTarget(document.application).isForeground
-                guard
-                    NativeDocumentContext.permitsDispatch(
-                        focus, prepared: plan.documentPreparation.windowSelectionRequired),
-                    !plan.documentPreparation.windowSelectionRequired || foreground,
-                    NativeActionDocumentPolicy.permitsForeground(plan.documentPreparation, foreground: foreground)
-                else {
-                    throw NativePreparationUnavailable(
-                        description: "document context changed before AXPress; no requested action was sent")
+            var retained = plan.actionDocument
+            if retained == nil, let scope = plan.documentScope, case .action(let node, let name, _) = plan.target,
+                name == kAXPressAction
+            {
+                retained = try plan.operation.actionDocuments.context(scope) {
+                    try objects.nativeActionFacts(node).document
                 }
             }
+            try NativeActionDocumentPolicy.checkDispatch(
+                retained?.unit ?? plan.document,
+                required: plan.documentPreparation.windowSelectionRequired || retained?.selectionRequired == true,
+                retained: retained)
             try boundary.beforeDispatch()
             evidence.markCall("nativeAction")
         }

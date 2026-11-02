@@ -194,9 +194,16 @@ namespace ComputerUse.Windows
             }
             if (target["node"] == null)
                 throw new Failure("invalid_request", "object input needs an observed native element");
+            string explicitAction = (string)operation.Intent["kind"] == "action"
+                                        ? (string)Wire.Object(operation.Intent["parameters"])["action"] : null;
+            var exactProvider = explicitAction == null ? null : provider as INativeExactActionObjectProvider;
+            var valueProvider = (string)operation.Intent["kind"] == "replace"
+                                    ? provider as INativeValueReplacementObjectProvider : null;
             var clickProvider = operation.ClickV1 ? provider as INativeClickObjectProvider : null;
             var state =
-                clickProvider == null ? provider.Read(target, within, r) : clickProvider.ReadClick(target, within, r);
+                valueProvider != null ? valueProvider.ReadValueReplacement(target, within, r)
+                : exactProvider != null ? exactProvider.ReadAction(target, within, explicitAction, r)
+                : clickProvider == null ? provider.Read(target, within, r) : clickProvider.ReadClick(target, within, r);
             r.Check();
             Dictionary<string, object> pointerFacts = null;
             string pointerUnavailable = null;
@@ -295,7 +302,8 @@ namespace ComputerUse.Windows
                                                          Within = (string[])within.Clone(),
                                                          Unit = unit,
                                                          Action = action,
-                                                         Role = state.Role };
+                                                         Role = state.Role,
+                                                         ExplicitAction = kind == "action" };
                 contract.FixedClickChoice =
                     operation.ClickV1 && semanticOcclusion &&
                     (primaryExpansion ? action == "ExpandCollapse.Expand" : action == "Invoke.Invoke");
@@ -307,12 +315,13 @@ namespace ComputerUse.Windows
                                               current.Pointer.Occlusion.TargetCondition != null)
                             .Pointer.Occlusion.TargetCondition;
                 operation.Contracts.Add(contract.Id, contract);
+                bool permitted = NativeObjectActionPermission.Allows(state.Enabled, contract);
                 var item = Wire.Obj("id", contract.Id, "unit", unit, "channel", "object", "supported",
                                     supported == true    ? "yes"
                                     : supported == false ? "no"
                                                          : "unknown",
-                                    "readiness", supported == true && state.Enabled == true ? "yes" : "no", "pending",
-                                    state.Enabled == true ? new string[0] : new[] { "enabled" },
+                                    "readiness", supported == true && permitted ? "yes" : "no", "pending",
+                                    permitted ? new string[0] : new[] { "enabled" },
                                     "backgroundPreparation", "no");
                 if (action != null)
                     item["action"] = Wire.Obj("name", action, "description", action);
@@ -333,6 +342,12 @@ namespace ComputerUse.Windows
             };
             if (kind == "replace")
                 declare("native_text_edit", null, state.Replaceable);
+            else if (exactProvider != null)
+            {
+                if (state.ExactAction == null || state.ExactAction.Name != explicitAction)
+                    throw new Failure("input_unavailable", "the requested exact UIA action evidence was not returned");
+                declare("native_action", explicitAction, state.ExactAction.Available);
+            }
             else if (state.ActionsComplete)
                 foreach (string action in state.Actions)
                     declare("native_action", action, true);

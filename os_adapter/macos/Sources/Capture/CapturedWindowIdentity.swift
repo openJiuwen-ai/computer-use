@@ -28,11 +28,35 @@ import ApplicationServices
     }
 
     func validate(_ mapping: WindowGeometry.WindowMapping) throws {
+        try validateObservation()
+        guard try currentMapping(mapping).frame == mapping.frame else {
+            throw ObservationChanged("window disappeared or geometry changed; read the app again")
+        }
+    }
+
+    /// QUERY: retain the image's pixel extent, resolving only the current
+    /// translation of this same window. Capture-time validation stays strict.
+    func inputMapping(_ mapping: WindowGeometry.WindowMapping) throws -> WindowGeometry.WindowMapping {
+        try validateObservation()
+        return try NativeCapturedPointerPlan.resolve(original: mapping, current: currentMapping(mapping)).mapping
+    }
+
+    /// The surrounding boundary owns document/scope validation. Before down,
+    /// keep the resolved frame; during its held drag, retain identity and return
+    /// the current origin solely for window-local event addressing.
+    @discardableResult func validateGeometry(
+        _ mapping: WindowGeometry.WindowMapping, continuingDrag: Bool = false
+    ) throws -> WindowGeometry.WindowMapping {
+        let current = try currentMapping(mapping)
+        try NativeCapturedPointerPlan(mapping: mapping).requireCurrent(current, continuingDrag: continuingDrag)
+        return current
+    }
+
+    private func currentMapping(_ mapping: WindowGeometry.WindowMapping) throws -> WindowGeometry.WindowMapping {
         let metric = RequestDiagnostics.metrics?.start(.windowValidation)
         defer { metric?.end() }
-        try validateObservation()
         guard let window = WindowServerInfo.window(mapping.id),
-            (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == mapping.pid
+            let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid == mapping.pid
         else { throw ObservationChanged("window disappeared or owner changed; read the app again") }
         NativePointerTiming.record("captureGeometrySample", metadata: {
             ["window": mapping.id, "targetPID": mapping.pid,
@@ -40,7 +64,11 @@ import ApplicationServices
              "sampledBounds": window[kCGWindowBounds as String] as Any? ?? NSNull()]
         })
         guard let rawBounds = window[kCGWindowBounds as String] as? [String: Any],
-            let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary), bounds == mapping.frame
+            let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary),
+            [bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy(\.isFinite),
+            bounds.width > 0, bounds.height > 0
         else { throw ObservationChanged("window disappeared or geometry changed; read the app again") }
+        return .init(
+            id: mapping.id, pid: pid, frame: bounds, title: mapping.title, width: mapping.width, height: mapping.height)
     }
 }

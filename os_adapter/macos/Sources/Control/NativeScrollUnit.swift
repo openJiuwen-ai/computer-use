@@ -121,7 +121,10 @@ import ApplicationServices
             throw DriverError(
                 "the selected page button is no longer in the selected scroll bar", code: .inputUnavailable)
         }
-        for control in [requested, region, bar, button] {
+        // The requested content identifies the viewport; the selected region,
+        // bar and page button own the scrolling operation. A disabled content
+        // item remains an identity/containment anchor, not an extra permission.
+        for control in [region, bar, button] {
             if try read(control, kAXEnabledAttribute) as? Bool == false {
                 throw DriverError("the selected scrolling control is disabled", code: .inputUnavailable)
             }

@@ -35,6 +35,7 @@ namespace ComputerUse.Windows
     // Uses HWND identity and physical screen geometry. No UIA traversal,
     // legacy input strategy, clipboard or synthetic keyboard focus is involved.
     internal sealed partial class NativeWindowsPointer : INativePointerProvider,
+                                                         INativeCapturedPointerProvider,
                                                          INativeElementPointerProvider,
                                                          INativePointerClickTimingProvider
     {
@@ -71,6 +72,12 @@ namespace ComputerUse.Windows
         public NativePointerState Read(Dictionary<string, object> target, NativePointerPoint point,
                                        NativePointerGestureIntent gesture, bool dragging, Request r)
         {
+            return ReadCaptured(target, point, gesture, dragging, null, r);
+        }
+        public NativePointerState ReadCaptured(Dictionary<string, object> target, NativePointerPoint point,
+                                               NativePointerGestureIntent gesture, bool dragging,
+                                               NativeCapturedWindowFrame frozenWindow, Request r)
+        {
             string kind = gesture.Kind;
 
             r.Check();
@@ -86,7 +93,10 @@ namespace ComputerUse.Windows
                 }
 
             var image = captures.Get(target);
-            image.RequirePoint(point);
+            if (frozenWindow == null && target["surface"] != null)
+                image.RequireCapturedPoint(point);
+            else
+                image.RequirePoint(point);
             if (new NativePointerLayout().Signature != image.Layout)
                 throw new Failure("snapshot_expired", "display layout changed; read and view a new image");
             var window = windows.Validate(target, r);
@@ -101,7 +111,8 @@ namespace ComputerUse.Windows
                     desktopRecipient = desktopInput.Capture;
                 NativeInputAccess.RequireWindow(desktopRecipient);
                 return new NativePointerState { Ready = true, PhysicalReady = true, Foreground = true,
-                                                ForegroundReady = true, Recipient = desktopRecipient };
+                                                ForegroundReady = true, Recipient = desktopRecipient,
+                                                ProjectedPoint = point };
             }
 
             IntPtr handle = window.Native.Handle;
@@ -114,13 +125,12 @@ namespace ComputerUse.Windows
             bool threadKnown = Native.GetGUIThreadInfo(targetThread, ref gui);
             bool ownedGrab = threadKnown && Native.Inside(handle, gui.Capture);
             Rectangle bounds = Native.Bounds(handle);
-            bool sameBounds = bounds.X == image.WindowBounds.X && bounds.Y == image.WindowBounds.Y &&
-                              bounds.Width == image.WindowBounds.NativeWidth &&
-                              bounds.Height == image.WindowBounds.NativeHeight;
+            var currentWindow = new NativeCapturedWindowFrame(bounds.X, bounds.Y, bounds.Width, bounds.Height);
             // A window move/resize may be the drag's intended effect. Continue
             // its original absolute path only under that window's actual grab.
-            if (!sameBounds && !(dragging && ownedGrab))
-                throw new Failure("snapshot_expired", "captured window geometry changed; read and view a new image");
+            NativeCapturedPointerFrame.RequireWindow(image, frozenWindow, currentWindow, dragging && ownedGrab);
+            if (frozenWindow == null)
+                point = NativeCapturedPointerFrame.Project(image, currentWindow, point);
             var foreground = new Native.GUI { Size = Marshal.SizeOf(typeof(Native.GUI)) };
             bool foregroundKnown = Native.GetGUIThreadInfo(0, ref foreground);
             IntPtr hitWindow = Native.WindowFromPoint(new Native.POINT { X = point.X, Y = point.Y });
@@ -160,6 +170,8 @@ namespace ComputerUse.Windows
             r.Check();
             return new NativePointerState {
                 Native = new Target { Binding = new Dictionary<string, object>(target), Point = point, Kind = kind },
+                CurrentWindowBounds = currentWindow,
+                ProjectedPoint = point,
                 Ready = route,
                 PhysicalReady = physicalReady,
                 NaturalActivation = natural && route,

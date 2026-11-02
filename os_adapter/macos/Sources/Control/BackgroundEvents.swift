@@ -195,6 +195,11 @@ import ApplicationServices
             && SyntheticFocusCoordinator.shared.isCurrent(target, window: window, needsKeyWindow: needsKeyWindow)
     }
 
+    /// Window-local event coordinates are separate from the fixed screen path.
+    static func pointerLocation(_ point: CGPoint, window: WindowGeometry.WindowMapping) -> CGPoint {
+        CGPoint(x: point.x - window.frame.minX, y: point.y - window.frame.minY)
+    }
+
     @MainActor static func post(
         _ event: CGEvent, window: WindowGeometry.WindowMapping, point: CGPoint? = nil, clickGroup: Int64 = 0
     ) {
@@ -206,7 +211,8 @@ import ApplicationServices
             setField!(event, 92, Int64(window.id))
             setField!(event, 7, 3)  // window-routed mouse subtype
             setField!(event, 58, clickGroup)
-            setLocation!(event, point.x - window.frame.minX, point.y - window.frame.minY)
+            let local = pointerLocation(point, window: window)
+            setLocation!(event, local.x, local.y)
         }
         // One delivery, never duplicate through a second route after an uncertain result.
         let activity = NativeInputActivity.begin(

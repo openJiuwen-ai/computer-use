@@ -21,8 +21,11 @@ import ApplicationServices
     let operation: NativeOperation
     let within: [String]
     let step: Int64
-    var document: NativeDocumentContext? = nil
+    var document: (any NativeActionDocumentInput)? = nil
     var documentPreparation = NativeActionDocumentPolicy.Preparation()
+    var actionDocument: NativeActionDocumentContract? = nil
+    var documentScope: NativeActionDocumentContexts.Scope? = nil
+    var actionContext: (any NativeApplicationContextInput)? = nil
 }
 
 @MainActor struct NativeClickWindowPreparation {

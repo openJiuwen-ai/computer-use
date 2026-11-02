@@ -15,6 +15,7 @@ import ApplicationServices
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any]
     func registerNativeRoot(_ element: AXUIElement, app: NSRunningApplication, scope: String) throws -> String
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts
+    func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts
     func nativeSelectionContract(_ ref: String) throws -> NativeRowSelection.Contract?
     func nativeTextValueFacts(_ ref: String) throws -> NativeElementControl.TextValueFacts
 }
@@ -23,6 +24,10 @@ import ApplicationServices
 @MainActor protocol NativeControlObjectAccess: AnyObject {
     func retainNode(_ ref: String) -> (() -> Void)?
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts
+    func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts
+    func executeNativeExplicitAction(
+        _ ref: String, request: String, action: String, onDispatch: @MainActor () throws -> Void,
+        onReturned: @MainActor () -> Void) throws
     func executeNativeAction(
         _ ref: String, action: String, description: String?, onDispatch: @MainActor () throws -> Void,
         onReturned: @MainActor () -> Void) throws

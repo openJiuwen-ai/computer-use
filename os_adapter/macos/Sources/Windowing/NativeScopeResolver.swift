@@ -325,7 +325,12 @@ import ApplicationServices
                     throw DriverError("selected scrolling object is blocked by a modal", code: .blockedByModal)
                 }
                 let element = try applications.readRoot(ref).element
-                if AXAccess.read(element, kAXEnabledAttribute).value as? Bool == false {
+                // The content owner only locates this viewport. Permission
+                // belongs to the selected wheel region and hit; owner aliases
+                // of either receiver are therefore still checked here.
+                if (ref == region || ref == actuator.node),
+                    AXAccess.read(element, kAXEnabledAttribute).value as? Bool == false
+                {
                     throw DriverError("selected scrolling object is disabled", code: .inputUnavailable)
                 }
                 objects[ref] = element
@@ -433,7 +438,7 @@ import ApplicationServices
                 try desktopUnit(value).check()
                 return (value, [], nil)
             }
-            let visual = try captures.input(value)
+            let visual = try captures.inputScope(value)
             return (value, visual.blocked, nil)
         }
         if (raw as? [String: Any])?["node"] is NSNull {
@@ -526,6 +531,19 @@ import ApplicationServices
         return NativeReceiverRelation(
             editor: try applications.readRoot(editor).element,
             related: try applications.readRoot(receiver.reference).element, selection: receiver)
+    }
+
+    func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)? {
+        guard action == kAXPressAction else { return nil }
+        let scope = try inputScope(binding)
+        guard NativeObjectActionPolicy.applicationContextEligible(
+            action: action, hasWindow: scope.window != nil, applicationMenu: scope.menuRoot != nil)
+        else { return nil }
+        // The original registry/provider attachment establishes this host;
+        // AppKit target/action activity is not specific to Web content or role.
+        let node = try string(binding["node"], label: "node")
+        _ = try applications.readRoot(node)
+        return NativeApplicationContextUnit(application: scope.application)
     }
 
     func keyboardUnit(

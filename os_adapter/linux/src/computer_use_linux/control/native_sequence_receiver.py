@@ -77,7 +77,11 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                             current, path = self.obj, self.parent_keys
                         else:
                             recipients.hint = None
-                            current, path = self.discover(probe=True, subtree=obj if pointer_focused else None)
+                            current, path = self.discover(
+                                probe=True,
+                                subtree=obj if pointer_focused else None,
+                                terminal=self.text_receiver_terminal,
+                            )
                         key = self._key(obj)
                         require(
                             current is not None or key == self._key(root),
@@ -95,7 +99,7 @@ class NativeSequenceReceiver(NativeFocusDiscovery):
                             else:
                                 self.source = "specified"
                     else:
-                        self.obj, self.parent_keys = self.discover()
+                        self.obj, self.parent_keys = self.discover(terminal=self.text_receiver_terminal)
             except (Failure, self.ax.glib.Error) as error:
                 recipients.hint = None
                 ctx.check()  # The request deadline/cancellation is never optional.

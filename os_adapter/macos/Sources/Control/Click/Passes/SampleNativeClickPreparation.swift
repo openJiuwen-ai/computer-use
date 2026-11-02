@@ -14,8 +14,8 @@ import ApplicationServices
         let pointer: NativePointerUnit, point: CGPoint
         switch plan.target {
         case .captured(let unit):
-            pointer = unit
-            point = try unit.point(plan.pointer!.start!)
+            pointer = try unit.resolvingCaptureTranslation()
+            point = try pointer.point(plan.pointer!.start!)
         case .element(let unit):
             if !afterPreparation, let exposure = try unit.exposure() {
                 pointer = NativePointerUnit(

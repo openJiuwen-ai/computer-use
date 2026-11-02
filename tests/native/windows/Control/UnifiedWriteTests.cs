@@ -8,7 +8,7 @@ namespace ComputerUse.Windows
 {
 internal static class UnifiedWriteTests
 {
-    sealed class Provider : INativeKeyboardProvider, INativeKeyboardEditorPreparation
+    sealed class Provider : INativeKeyboardProvider, INativeKeyboardEditorPreparation, INativeKeyboardTextProvider
     {
         internal NativeKeyboardState State =
             new NativeKeyboardState { Enabled = true, Focusable = true, WindowRoute = true };
@@ -43,6 +43,28 @@ internal static class UnifiedWriteTests
             Effects.Add("editor");
             State.Focused = EditorWorks;
             State.TextSelection = EditorWorks;
+        }
+        public INativeKeyboardSequence BeginSequence(NativeKeyboardState state, Request request)
+        {
+            throw new Exception("Preparation must not begin requested text dispatch");
+        }
+        public NativeTextSelection Selection(NativeKeyboardState state, Request request)
+        {
+            throw new Exception("Preparation must not inspect requested replacement selection");
+        }
+        public void SelectAll(NativeKeyboardState state, Request request)
+        {
+            throw new Exception("Preparation must not select requested replacement text");
+        }
+    }
+
+    sealed class UnusedClipboard : INativeClipboardProvider
+    {
+        internal int Saves;
+        public NativeClipboardTransaction Save(Request request)
+        {
+            Saves++;
+            throw new Exception("Receiver preparation must not change the clipboard");
         }
     }
 
@@ -147,6 +169,54 @@ internal static class UnifiedWriteTests
         return pipeline.Run(contract, foreground, request, new List<string>(), "text", operation);
     }
 
+    static void CheckEditorPreparationAdmission(string kind, bool allowed)
+    {
+        var provider = new Provider();
+        provider.State.Role = "ControlType.ComboBox";
+        provider.State.Foreground = provider.State.SelectionPreparable = true;
+        provider.State.Focusable = false;
+        provider.State.TextWritable = true;
+        var clipboard = new UnusedClipboard();
+        var engine = new NativeExecution(new ExpansionObjects(), keyboard: new NativeKeyboard(provider, clipboard));
+        var target = Wire.Obj("session", "session", "instance", "instance", "rootWindow", "window", "surface",
+                              "surface", "node", "combo", "capture", null);
+        var intent = Wire.Obj("kind", kind, "parameters", kind == "focus" ? Wire.Obj() : Wire.Obj("text", "text"));
+        var operation = new NativeWriteOperation(target, intent);
+        var request = new Request(CancellationToken.None, 2000);
+        engine.Validate(intent, target);
+        var facts = Wire.Object(engine.Inspect(operation, target, new string[0], request));
+        Dictionary<string, object> primitive = null;
+        foreach (var raw in Wire.Array(facts["primitives"]))
+        {
+            var item = Wire.Object(raw);
+            if ((string)item["unit"] == (kind == "focus" ? "prepare_receiver"
+                                        : kind == "paste" ? "clipboard_paste" : "key_sequence"))
+                primitive = item;
+        }
+        Check(primitive != null, "Inspection must retain the original keyboard preparation contract");
+        Check((string)primitive["supported"] == (allowed ? "yes" : "no"),
+              kind + ": only focus and replacement may admit a nonfocusable internal-editor preparation");
+        Check(!allowed || (string)primitive["backgroundPreparation"] == "yes",
+              "An already foreground internal editor must advertise preparation without activation");
+        Check(provider.Effects.Count == 0, "Inspection must not prepare or click the editor");
+        var result = Wire.Object(engine.Execute(operation,
+            Wire.Obj("kind", "prepare_receiver", "primitiveId", primitive["id"], "target", target,
+                     "foreground", false), request));
+        Check((string)result["dispatch"] == "notDispatched" && !operation.Dispatched,
+              "Receiver preparation must not dispatch requested text, paste or keys");
+        Check(clipboard.Saves == 0, "Receiver preparation must leave the clipboard untouched");
+        if (allowed)
+        {
+            Check(result["errorCode"] == null && (string)result["confirmation"] == "confirmed",
+                  "The inspected nonfocusable editor contract must reach its selected preparation");
+            Check(String.Join(",", provider.Effects) == "editor",
+                  "Nonfocusable editor preparation must click once without activation or native focus");
+        }
+        else
+            Check(result["errorCode"] != null && provider.Effects.Count == 0,
+                  "Insertion and paste must not implicitly click to relocate an unknown caret");
+    }
+
     static void Main()
     {
         var ready = new Provider();
@@ -190,6 +260,11 @@ internal static class UnifiedWriteTests
             Check(error.Code == "execution_unknown", "Uncertain editor click must not become undispatched");
             Check(String.Join(",", unresolved.Effects) == "editor", "Uncertain editor click must not replay");
         }
+
+        CheckEditorPreparationAdmission("focus", true);
+        CheckEditorPreparationAdmission("replace", true);
+        CheckEditorPreparationAdmission("insert", false);
+        CheckEditorPreparationAdmission("paste", false);
 
         Check(NativeKeys.Chord("super").Length == 2, "Complete input route includes system keys");
         Check(NativeKeys.Chord("alt+Tab").Length == 4, "Complete input route includes system shortcuts");

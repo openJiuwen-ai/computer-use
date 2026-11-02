@@ -39,38 +39,42 @@ def refuse(
     raise ComputerUseError(dict(code=code, effect="none", target=facts.target_label, detail=detail, next=next_step))
 
 
+ReceiverPair = tuple[SelectedActuator | None, SelectedReceiver | None]
+
+
+def preparation_pair_available(command: UnitCommand, history: RouteHistory) -> bool:
+    """Bound new preparation recipients without restricting ready input routes."""
+    pair = command.actuator, command.receiver
+    return pair in history.preparation_pairs or len(history.preparation_pairs) < 2
+
+
 @dataclass
 class Attempts:
-    """Route history and receiver-stability budget owned by one write call.
+    """Route history and preparation-recipient allowance owned by one write call.
 
     Attributes:
         unavailable: Semantic routes that failed before dispatch and are excluded thereafter.
         background_unavailable: Routes whose background preparation failed.
-        prepared: Route and foreground-mode pairs already prepared.
+        prepared: Route/mode preparation attempts consumed, including unsuccessful attempts.
         precondition_changes: Consumed pre-dispatch precondition-change allowance.
-        actuators: Distinct selected actuator/receiver pairs observed during the write.
+        actuators: Distinct selected actuator/receiver pairs observed during the write, for diagnostics.
+        preparation_pairs: Pairs whose selected native preparation has started in this write.
     """
 
     unavailable: set["RouteKey"] = field(default_factory=set)
     background_unavailable: set["RouteKey"] = field(default_factory=set)
     prepared: set[tuple["RouteKey", bool]] = field(default_factory=set)
     precondition_changes: int = 0
-    actuators: set[tuple[SelectedActuator | None, SelectedReceiver | None]] = field(default_factory=set)
+    actuators: set[ReceiverPair] = field(default_factory=set)
+    preparation_pairs: set[ReceiverPair] = field(default_factory=set)
     click_refresh: RouteKey | None = None
     failed_steps: dict[RouteKey, int] = field(default_factory=dict)
 
     def observe(self, facts: Facts) -> None:
-        """Record the actuator/receiver pair and bound editor churn during one write."""
-        # Preparation can replace a field editor, but an endless stream of new
-        # native objects cannot keep granting fresh preparation attempts.
+        """Record fresh receiver evidence without imposing a preparation prerequisite."""
+        # A newly resolved editor may already own a ready native mutation. The
+        # finite preparation allowance is consumed only by a selected command.
         self.actuators.add((facts.actuator, facts.receiver))
-        if len(self.actuators) > 2:
-            refuse(
-                "input_unavailable",
-                facts,
-                "The selected receiver kept changing during this operation.",
-                "read the original target after its editor settles",
-            )
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,38 @@ def has_ready_route(facts: Facts, intent: Intent) -> bool:
     from computer_use.interaction.write.routes.selection.admission import stage_admission
 
     return any(stage_admission(p).ready and p.unit != "native_value_replace" for p in _candidates(facts, intent))
+
+
+def selects_ready_value_replacement(
+    facts: Facts,
+    intent: Intent,
+    policy: HostPolicy,
+    attempts: RouteHistory,
+    *,
+    needs_editing_evidence: bool = False,
+) -> bool:
+    """Use the real pure strategy before making editor discovery a prerequisite.
+
+    A whole-value contract addresses the original object. Skipping its editor
+    query must not accidentally authorize a preferred contextual keyboard route.
+    """
+    if intent.kind != "replace" or facts.actuator is not None or facts.receiver is not None:
+        return False
+    from computer_use.interaction.write.routes.selection.admission import stage_admission
+    from computer_use.interaction.write.routes.selection.model import CandidateSet, SelectionRequest
+    from computer_use.interaction.write.routes.selection.unit_choice import eligible_unit_routes, select_unit_route
+
+    request = SelectionRequest(facts, intent, policy, attempts, needs_editing_evidence)
+    candidates = CandidateSet(request, tuple(_candidates(facts, intent, policy)))
+    command = select_unit_route(eligible_unit_routes(candidates)).selected
+    return bool(
+        command is not None
+        and command.primitive.unit == "native_value_replace"
+        and command.primitive.channel == Channel.OBJECT
+        and stage_admission(command.primitive).ready
+        and not command.prepare
+        and not command.foreground
+    )
 
 
 def needs_pointer_member(facts: Facts, intent: Intent, attempts: RouteHistory) -> bool:

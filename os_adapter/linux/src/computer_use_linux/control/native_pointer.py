@@ -47,6 +47,13 @@ class PointerRouteState(NamedTuple):
     ready: bool
 
 
+class PointerGesture(NamedTuple):
+    """One delivery-time origin and absolute trajectory, owned by this operation."""
+
+    points: tuple[tuple[float, float], ...]
+    window_rect: tuple | None
+
+
 class NativePointer:
     def __init__(self, backend, store, directory, captures):
         self.b, self.store, self.directory, self.captures = backend, store, directory, captures
@@ -79,25 +86,28 @@ class NativePointer:
         require(native.mapped, "The captured window is not visible.", "input_unavailable")
         return image, selected, native
 
-    def geometry(self, operation, target, ctx):
+    @staticmethod
+    def local_points(intent):
+        p = intent["parameters"]
+        return ((p["fromX"], p["fromY"]), (p["toX"], p["toY"])) if intent["kind"] == "drag" else ((p["x"], p["y"]),)
+
+    def geometry(self, operation, target, ctx, *, local_points=None):
         require(
             getattr(self.desktop, "can_input", False),
             "This desktop has no native pointer event route.",
             "mode_unsupported",
         )
         image, selected, native = self.image(target, ctx)
-        p = operation.intent["parameters"]
-        pairs = (
-            ((p["fromX"], p["fromY"]), (p["toX"], p["toY"]))
-            if operation.intent["kind"] == "drag"
-            else ((p["x"], p["y"]),)
+        points = self.desktop.points(
+            image.capture,
+            self.local_points(operation.intent) if local_points is None else local_points,
+            current=native,
         )
-        points = tuple(self.desktop.point(image.capture, x, y) for x, y in pairs)
         self.desktop.pointer_preflight(operation.intent["kind"], points, **self.options(operation.intent))
         return points, selected, native
 
-    def route(self, operation, target, ctx) -> PointerRouteState:
-        points, selected, native = self.geometry(operation, target, ctx)
+    def route(self, operation, target, ctx, *, local_points=None) -> PointerRouteState:
+        points, selected, native = self.geometry(operation, target, ctx, local_points=local_points)
         available = True
         if selected is not None:
             try:
@@ -112,10 +122,17 @@ class NativePointer:
 
     def inspect(self, operation, target, within, ctx):
         require(not within and target["node"] is None, "Image input cannot select an accessibility ancestor.")
-        points, selected, native, ready = self.route(operation, target, ctx)
+        _, selected, native, ready = self.route(operation, target, ctx)
         operation.bind(target, within, self.store)
         supported = ready or native is not None and not native.override_redirect
-        identifier = operation.contract("pointer_sequence", target, (), points=points, supported=supported)
+        identifier = operation.contract(
+            "pointer_sequence",
+            target,
+            (),
+            localPoints=self.local_points(operation.intent),
+            gesture=None,
+            supported=supported,
+        )
         primitive = dict(
             id=identifier,
             unit="pointer_sequence",
@@ -133,26 +150,35 @@ class NativePointer:
     def guard(self, operation, contract, ctx, *, during_drag=False):
         if during_drag:
             _, selected, native = self.image(contract["target"], ctx, during_drag=True)
-            points = contract["points"]
+            points = contract["gesture"].points
             # Moving/resizing this window can be the requested drag's effect.
             # Continue its original absolute trajectory under the native grab;
             # never recompute it from the now changed image geometry.
             self.desktop.pointer_preflight(operation.intent["kind"], points, **self.options(operation.intent))
         else:
-            points, selected, native = self.geometry(operation, contract["target"], ctx)
-            require(points == contract["points"], "The original image coordinates changed.", "stale_target")
+            points, selected, native = self.geometry(
+                operation, contract["target"], ctx, local_points=contract["localPoints"]
+            )
+            gesture = PointerGesture(points, tuple(native.rect) if native is not None else None)
+            require(
+                contract["gesture"] is None or gesture == contract["gesture"],
+                "The window moved after the pointer gesture was frozen.",
+                "stale_target",
+            )
         if selected is not None and not during_drag:
             self.desktop.require_hit(selected, points[0])
+        if not during_drag and contract["gesture"] is None:
+            contract["gesture"] = gesture
         return points, selected, native
 
     def click_state(self, operation, contract, ctx) -> PointerRouteState:
-        points, selected, native, ready = self.route(operation, contract["target"], ctx)
-        require(points == contract["points"], "The original image coordinates changed.", "stale_target")
+        points, selected, native, ready = self.route(
+            operation, contract["target"], ctx, local_points=contract["localPoints"]
+        )
         return PointerRouteState(points, selected, native, ready)
 
     def prepare(self, operation, contract, foreground, ctx, preparation):
-        points, selected, native, ready = self.route(operation, contract["target"], ctx)
-        require(points == contract["points"], "The original image coordinates changed.", "stale_target")
+        _, _, native, ready = self.route(operation, contract["target"], ctx, local_points=contract["localPoints"])
         if ready:
             return True
         if not foreground:
@@ -165,7 +191,8 @@ class NativePointer:
         self.desktop.require_idle_input()
         preparation.append("foreground")
         self.desktop.activate(native, ctx)
-        self.guard(operation, contract, ctx)
+        points, selected, _ = self.geometry(operation, contract["target"], ctx, local_points=contract["localPoints"])
+        self.desktop.require_hit(selected, points[0])
         return True
 
     def execute(self, operation, command, ctx):
@@ -193,13 +220,17 @@ class NativePointer:
                     error_code, retry = "input_unavailable", "preparationUnavailable"
                     detail = "The selected point is covered; no requested pointer input was sent."
             else:
-                points, _, _ = self.guard(operation, contract, ctx)
-                if desktop_target:
-                    expected_keyboard = (
-                        self.captures.input(contract["target"]).keyboard
-                        if operation.intent["kind"] == "scroll"
-                        else self.captures.pointer_destination(contract["target"], points[0], ctx)
-                    )
+
+                def freeze_points():
+                    nonlocal expected_keyboard
+                    points, _, _ = self.guard(operation, contract, ctx)
+                    if desktop_target:
+                        expected_keyboard = (
+                            self.captures.input(contract["target"]).keyboard
+                            if operation.intent["kind"] == "scroll"
+                            else self.captures.pointer_destination(contract["target"], points[0], ctx)
+                        )
+                    return points
 
                 def barrier():
                     nonlocal dispatch
@@ -210,7 +241,7 @@ class NativePointer:
 
                 self.desktop.pointer_sequence(
                     operation.intent["kind"],
-                    points,
+                    (),  # The sequencer resolves the entire gesture after idle-input admission.
                     ctx,
                     **self.options(operation.intent),
                     callbacks=PointerCallbacks(
@@ -218,6 +249,7 @@ class NativePointer:
                         validate=lambda: self.guard(operation, contract, ctx),
                         validate_drag=lambda: self.guard(operation, contract, ctx, during_drag=True),
                         scroll_step_complete=scroll_step_complete,
+                        freeze_points=freeze_points,
                     ),
                 )
                 dispatch, detail = "dispatched", "Pointer sequence sent; read to verify its effect."

@@ -35,9 +35,9 @@ enum NativeInputUnit: Equatable {
             var action = ["name": name]
             if let description { action["description"] = description }
             wire["action"] = action
-            if case .menuAction = self {
-                wire["backgroundPreparation"] = readiness.pending.contains("receiver") ? "yes" : "no"
-            }
+            // Object AXPress may need the original window's responder context,
+            // not a text editor or a keyboard receiver.
+            wire["backgroundPreparation"] = readiness.pending.contains("receiver") ? "yes" : "no"
         case .textValue(let contract): wire["unit"] = contract.unit
         case .selectedText, .receiverContext:
             if case .selectedText = self {

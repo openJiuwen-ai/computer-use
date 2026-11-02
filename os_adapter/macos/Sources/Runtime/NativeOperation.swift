@@ -31,6 +31,9 @@ import Foundation
     private var inputReferences = [String: () -> Void]()
     private var unavailableBackgroundPreparation = Set<String>()
     private var confirmedPreparation = Set<String>()
+    /// The operation owns original document evidence independently of the
+    /// currently declared AX capability list.
+    let actionDocuments = NativeActionDocumentContexts()
     private struct ClickAuthority {
         let target: [String: Any]
         let within: [String]
@@ -327,6 +330,7 @@ import Foundation
     private func close() {
         guard !busy, state != .closed else { return }
         state = .closed
+        actionDocuments.clear()
         timer?.cancel()
         timer = nil
         let notify = onClose

@@ -91,8 +91,8 @@ import ApplicationServices
             + target.context.map { context in context.native.element.map { check($0, context.identity) } ?? .unavailable
             }
         if checks.contains(.changed) {
-            // Do not revive a handle if a recycled native object's old label
-            // later reappears. Re-observation establishes a new lifetime.
+            // Do not revive a handle after a known identity/structural
+            // contradiction. Re-observation establishes a new lifetime.
             registry.invalidate { $0.scope == target.scope && CFEqual($0.element, target.element) }
             throw DriverError("element identity or document context changed; read its window again", code: .staleTarget)
         }

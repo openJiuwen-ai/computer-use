@@ -13,7 +13,12 @@ from computer_use.interaction.write.resolution.checks import parts
 from computer_use.interaction.write.resolution.focus_member import FocusMemberQuery
 from computer_use.interaction.write.resolution.focus_scope import FocusScopeQuery
 from computer_use.interaction.write.resolution.virtual_focus import VirtualFocusQuery
-from computer_use.interaction.write.routes.policy import has_independent_text_route, has_ready_route, validate_target
+from computer_use.interaction.write.routes.policy import (
+    has_independent_text_route,
+    has_ready_route,
+    selects_ready_value_replacement,
+    validate_target,
+)
 from computer_use.pipeline import Contract, Effect, Pass
 
 if TYPE_CHECKING:
@@ -44,6 +49,13 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
                 and (facts.input.focused_node is not None)
                 and (not has_ready_route(facts, intent))
                 and (not has_independent_text_route(facts, intent, frame.request.history))
+                and not selects_ready_value_replacement(
+                    facts,
+                    intent,
+                    native.policy,
+                    frame.request.history,
+                    needs_editing_evidence=frame.needs_editing_evidence,
+                )
             )
             else False
         )

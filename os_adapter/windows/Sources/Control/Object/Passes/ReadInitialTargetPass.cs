@@ -16,7 +16,7 @@ namespace ComputerUse.Windows
         internal static NativeObjectState Run(ObjectDispatchPlan plan, Request r, INativeObjectProvider provider)
         {
             var state = NativeObjectChecks.ReadForContract(plan, r, provider);
-            NativeObjectChecks.CheckState(state, plan.Contract);
+            NativeObjectChecks.CheckState(state, plan.Contract, plan.Evidence);
             return state;
         }
     }

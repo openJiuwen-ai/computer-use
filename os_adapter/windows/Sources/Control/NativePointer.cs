@@ -32,6 +32,10 @@ namespace ComputerUse.Windows
         // evidence that Windows has activated the target.
         internal bool PhysicalReady, NaturalActivation;
         internal NativeClickOcclusion Occlusion;
+        // Read-only geometry for a candidate capture projection. Only the
+        // selected execution freezes it; these facts grant no later authority.
+        internal NativeCapturedWindowFrame CurrentWindowBounds;
+        internal NativePointerPoint? ProjectedPoint;
     }
     internal sealed class NativePointerClickTiming
     {
@@ -50,6 +54,15 @@ namespace ComputerUse.Windows
         void RequireIdle(Request r);
         void Activate(NativePointerState state, Request r);
         int Send(NativePointerEvent[] events);
+    }
+
+    internal interface INativeCapturedPointerProvider
+    {
+        // A null frame permits read-only projection during preparation. Once
+        // frozen, the supplied full-window frame is a check, never a new delta.
+        NativePointerState ReadCaptured(Dictionary<string, object> target, NativePointerPoint point,
+                                        NativePointerGestureIntent gesture, bool dragging,
+                                        NativeCapturedWindowFrame frozenWindow, Request request);
     }
 
     internal sealed class NativeElementPointerTarget
@@ -73,6 +86,7 @@ namespace ComputerUse.Windows
     internal sealed class NativePointerPlan
     {
         internal NativePointerCapture Capture;
+        internal NativeCapturedPointerFrame CapturedFrame;
         internal NativeElementPointerTarget Element;
         internal NativePointerPoint[] Points;
         internal string Kind;
@@ -81,6 +95,11 @@ namespace ComputerUse.Windows
         internal object DispatchRecipient;
         internal bool NaturalActivation;
         internal NativeClickOcclusion Occlusion;
+        internal int PointCount { get { return CapturedFrame == null ? Points.Length : CapturedFrame.Count; } }
+        internal NativePointerPoint Point(int index)
+        {
+            return CapturedFrame == null ? Points[index] : CapturedFrame.Point(index);
+        }
         internal NativePointerGestureIntent Gesture
         {
             get {
@@ -89,8 +108,8 @@ namespace ComputerUse.Windows
         }
         internal NativePointerEvent Move(int index)
         {
-            var p = Element == null ? Capture.Normalize(Points[index])
-                                    : NativePointerCapture.Normalize(Points[index], Element.Canvas);
+            var p = Element == null ? Capture.Normalize(Point(index))
+                                    : NativePointerCapture.Normalize(Point(index), Element.Canvas);
             return new NativePointerEvent(0xc001, p.X, p.Y);
         }
     }
@@ -193,7 +212,7 @@ namespace ComputerUse.Windows
             }
 
             foreach (var point in points)
-                image.RequirePoint(point); // Validate the complete trajectory before any preparation.
+                image.RequireCapturedPoint(point); // Local image bounds; current projection is checked below.
             string button = p.ContainsKey("button") ? (string)p["button"] : "left";
             var plan = new NativePointerPlan { Capture = image,
                                                Points = points.ToArray(),
@@ -246,12 +265,12 @@ namespace ComputerUse.Windows
                 if (within.Length != 0 || target["node"] != null)
                     throw new Failure("invalid_request", "image input cannot select element ancestors");
                 plan = Plan(operation, target, r);
-                state = provider.Read(target, plan.Points[0], plan.Gesture, false, r);
+                state = ReadCaptured(target, plan, 0, false, r);
             }
 
             r.Check();
             if (plan.Element == null || !plan.Element.GeometryDeferred)
-                operation.Indicate(plan.Points[0]);
+                operation.Indicate(state.ProjectedPoint ?? plan.Point(0));
             var contract = new NativeInputContract {
                 Id = "primitive:" + Guid.NewGuid().ToString("N"), Unit = "pointer_sequence",         Supported = true,
                 Target = new Dictionary<string, object>(target),  Within = (string[])within.Clone(), Pointer = plan
@@ -311,9 +330,46 @@ namespace ComputerUse.Windows
                     .ReadElement(contract.Target, contract.Within, plan.Element, plan.Gesture, r);
             if (!ReferenceEquals(provider.Capture(contract.Target, r), plan.Capture))
                 throw new Failure("snapshot_expired", "the original image expired");
-            var state = provider.Read(contract.Target, plan.Points[point], plan.Gesture, dragging, r);
+            var state = ReadCaptured(contract.Target, plan, point, dragging, r);
             r.Check();
             return state;
+        }
+
+        NativePointerState ReadCaptured(Dictionary<string, object> target, NativePointerPlan plan, int point,
+                                        bool dragging, Request request)
+        {
+            var captured = provider as INativeCapturedPointerProvider;
+            var state = captured == null
+                ? provider.Read(target, plan.Point(point), plan.Gesture, dragging, request)
+                : captured.ReadCaptured(target, plan.Point(point), plan.Gesture, dragging,
+                                        plan.CapturedFrame == null ? null : plan.CapturedFrame.WindowBounds, request);
+            if (plan.CapturedFrame == null)
+            {
+                var window = captured == null ? NativeCapturedWindowFrame.From(plan.Capture.WindowBounds)
+                                               : state.CurrentWindowBounds;
+                if (target["surface"] != null && window == null)
+                    throw new Failure("input_unavailable", "the original window frame could not be confirmed");
+                // Validate every current projected point before preparation,
+                // then validate again when freezing before the first event.
+                foreach (var original in plan.Points)
+                    NativeCapturedPointerFrame.Project(plan.Capture, window, original);
+            }
+            return state;
+        }
+
+        internal void FreezeCapturedFrame(NativeInputContract contract, Request request)
+        {
+            var plan = contract.Pointer;
+            if (plan.Element != null || plan.CapturedFrame != null)
+                return;
+            var state = Guard(contract, 0, false, request);
+            if (!state.Ready)
+                throw new Failure("input_unavailable", "the captured point is not ready for its frozen trajectory");
+            var window = provider is INativeCapturedPointerProvider
+                             ? state.CurrentWindowBounds : NativeCapturedWindowFrame.From(plan.Capture.WindowBounds);
+            if (contract.Target["surface"] != null && window == null)
+                throw new Failure("input_unavailable", "the original window frame could not be confirmed");
+            plan.CapturedFrame = new NativeCapturedPointerFrame(plan.Capture, window, plan.Points);
         }
 
         internal static string ClickDetail(NativeInputContract contract)
@@ -341,7 +397,7 @@ namespace ComputerUse.Windows
         internal void RefreshClickPoint(NativeInputContract contract, Request r)
         {
             if (contract.Pointer.Element == null)
-                return; // A capture owns its immutable mapping.
+                return; // The capture is immutable; selected dispatch freezes its own projection later.
             var current = ((INativeElementPointerProvider)provider).Element(contract.Target, contract.Within, r);
             contract.Pointer.Element = current;
             contract.Pointer.Points = new[] { current.Point };
@@ -428,7 +484,8 @@ namespace ComputerUse.Windows
                 return;
             var state = Guard(contract, 0, false, r);
             double remaining =
-                clicks.Remaining(state.Recipient, contract.Pointer.Points[0], contract.Pointer.Down, timing, Wire.Now);
+                clicks.Remaining(state.Recipient, state.ProjectedPoint ?? contract.Pointer.Point(0),
+                                 contract.Pointer.Down, timing, Wire.Now);
             if (remaining <= 0)
                 return;
             // A wait is preparation only: cancellation/deadline here has sent
@@ -444,13 +501,13 @@ namespace ComputerUse.Windows
             var plan = contract.Pointer;
             bool down = false;
             var timing = ClickTiming();
-            if (clicks.Remaining(plan.DispatchRecipient, plan.Points[0], plan.Down, timing, Wire.Now) > 0)
+            if (clicks.Remaining(plan.DispatchRecipient, plan.Point(0), plan.Down, timing, Wire.Now) > 0)
                 throw new Failure(
                     "input_unavailable",
                     "the native click recipient changed during click preparation; no requested input was sent");
             double firstDown = 0;
             object firstRecipient = plan.DispatchRecipient;
-            operation.Indicate(plan.Points[0], true, plan.Count);
+            operation.Indicate(plan.Point(0), true, plan.Count);
             try
             {
                 for (int i = 0; i < plan.Count; i++)
@@ -484,12 +541,12 @@ namespace ComputerUse.Windows
                     }
                     catch
                     {
-                        clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
+                        clicks.Record(plan.DispatchRecipient, plan.Point(0), plan.Down, Wire.Now);
                         operation.Click.Unknown();
                         throw;
                     }
                     if (sent < 0 || sent > events.Length || sent >= 2)
-                        clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
+                        clicks.Record(plan.DispatchRecipient, plan.Point(0), plan.Down, Wire.Now);
 
                     operation.Click.Returned(sent, events.Length, r);
                     if (sent >= 0 && sent <= events.Length)
@@ -549,11 +606,11 @@ namespace ComputerUse.Windows
             catch
             {
                 if (plan.Kind == "click")
-                    clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
+                    clicks.Record(plan.DispatchRecipient, plan.Point(0), plan.Down, Wire.Now);
                 throw;
             }
             if (plan.Kind == "click" && (sent < 0 || sent > events.Length || sent >= 2))
-                clicks.Record(plan.DispatchRecipient, plan.Points[0], plan.Down, Wire.Now);
+                clicks.Record(plan.DispatchRecipient, plan.Point(0), plan.Down, Wire.Now);
             if (sent >= 0 && sent <= events.Length)
             {
                 down = prior;
@@ -632,8 +689,9 @@ namespace ComputerUse.Windows
                     if (plan.Kind == "click")
                     {
                         PrepareClickCadence(contract, r);
+                        FreezeCapturedFrame(contract, r);
                         CheckClick(contract, r);
-                        if (clicks.Remaining(plan.DispatchRecipient, plan.Points[0], plan.Down, ClickTiming(),
+                        if (clicks.Remaining(plan.DispatchRecipient, plan.Point(0), plan.Down, ClickTiming(),
                                              Wire.Now) > 0)
                             throw new Failure(
                                 "input_unavailable",
@@ -642,6 +700,7 @@ namespace ComputerUse.Windows
                     else
                     {
                         provider.RequireIdle(r);
+                        FreezeCapturedFrame(contract, r);
                         if (!Guard(contract, 0, false, r).Ready)
                             throw new Failure(
                                 "input_unavailable",
@@ -649,31 +708,31 @@ namespace ComputerUse.Windows
                     }
                     if (plan.Kind == "drag")
                     {
-                        operation.Indicate(plan.Points[0], true, 1, true);
+                        operation.Indicate(plan.Point(0), true, 1, true);
                         Send(operation, plan, new[] { plan.Move(0), new NativePointerEvent(plan.Down) }, r, result,
                              ref down);
-                        for (int i = 1; i < plan.Points.Length; i++)
+                        for (int i = 1; i < plan.PointCount; i++)
                         {
                             r.Wait(12);
                             if (!Guard(contract, i, true, r).Ready)
                                 throw new Failure("input_unavailable", "the original window lost the drag receiver");
-                            operation.Indicate(plan.Points[i], dragging: true);
+                            operation.Indicate(plan.Point(i), dragging: true);
                             Send(operation, plan, new[] { plan.Move(i) }, r, result, ref down);
                         }
 
                         Send(operation, plan, new[] { new NativePointerEvent(plan.Up) }, r, result, ref down);
-                        operation.Indicate(plan.Points[plan.Points.Length - 1]);
+                        operation.Indicate(plan.Point(plan.PointCount - 1));
                     }
                     else if (plan.Kind == "scroll")
                     {
-                        operation.Indicate(plan.Points[0]);
+                        operation.Indicate(plan.Point(0));
                         Send(operation, plan,
                              new[] { plan.Move(0), new NativePointerEvent(plan.Wheel, data: plan.Amount) }, r, result,
                              ref down);
                     }
                     else
                     {
-                        operation.Indicate(plan.Points[0], true, plan.Count);
+                        operation.Indicate(plan.Point(0), true, plan.Count);
                         var timing = ClickTiming();
                         double firstDown = Wire.Now;
                         object firstRecipient = plan.DispatchRecipient;

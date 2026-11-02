@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.write.resolution.text_evidence import owner_editing_role
 from computer_use.native.contracts import Actuator
 from computer_use.native.query.graph import UNKNOWN, NativeGraph
 from computer_use.native.semantics import (
@@ -121,6 +122,9 @@ class ReceiverQuery(NativeGraph):
         await self._node(owner, depth=0)
         role = await self._role(owner)
         values = await self._control_values(owner)
+        declared = owner_editing_role(role, values, platform=self.platform)
+        if declared is not None:
+            role = declared
         direct = editing_evidence(role, values, platform=self.platform)
         owns_editor = composite_editor_owner(role, values, platform=self.platform)
         matches_require_editable = (
@@ -151,7 +155,9 @@ class ReceiverQuery(NativeGraph):
         # Rich documents retain their own boundary; their nested inputs are
         # independent controls, not the document's internal editor.
         reverse = None
-        if direct_editor(role, values, platform=self.platform):
+        if direct_editor(role, values, platform=self.platform) or (
+            role == "unknown" and focused == owner and direct is True
+        ):
             if role in SCALAR_EDITORS:
                 reverse = await self._focused_receiver(focused)
             else:

@@ -128,9 +128,13 @@ async def operations(directory, recorder):
             (directory / "before.txt").write_text(observation.text)
             button = await app.element("Count action")
             popup = await app.element("Test choices")
+            # Local application activity can change during addressed preparation.
+            # Compare the real system foreground immediately around the action.
+            before_action = await state(directory)
+            (directory / "action-before.json").write_text(json.dumps(before_action, ensure_ascii=False, indent=2))
             await recorder.action("independent native action", button.perform_action("AXPress"))
             current = await wait_state(directory, lambda v: v["buttonClicks"] == 1)
-            assert current["active"] == initial["active"]
+            assert current["frontmostPID"] == before_action["frontmostPID"]
             field = await app.element("Primary input")
             await recorder.action("element insertion", field.type_text("one"))
             await wait_state(directory, lambda v: v["field"] == "one")

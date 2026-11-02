@@ -11,6 +11,22 @@ namespace ComputerUse.Windows
         internal static NativeObjectState ReadForContract(ObjectDispatchPlan plan, Request r,
                                                           INativeObjectProvider provider)
         {
+            if (plan.Evidence == NativeObjectEvidenceRequirement.ValueReplacement)
+            {
+                var value = provider as INativeValueReplacementObjectProvider;
+                if (plan.Unit != "native_text_edit" || plan.Contract.SelectionInsert != null || value == null)
+                    throw new Failure("invalid_request", "the whole-value query belongs only to its selected replacement unit");
+                return value.ReadValueReplacement(plan.Target, plan.Contract.Within, r);
+            }
+            var exact = provider as INativeExactActionObjectProvider;
+            if (plan.Evidence == NativeObjectEvidenceRequirement.ExactAction && exact != null &&
+                !plan.Contract.FixedClickChoice && !plan.Contract.RequireCollapsedExpansion)
+            {
+                var exactState = exact.ReadAction(plan.Target, plan.Contract.Within, plan.Contract.Action, r);
+                if (plan.Contract.ClickTargetCondition != null)
+                    plan.Contract.ClickTargetCondition.Require(r);
+                return exactState;
+            }
             if (!plan.Contract.RequireCollapsedExpansion)
             {
                 var ordinary = provider.Read(plan.Target, plan.Contract.Within, r);
@@ -29,8 +45,26 @@ namespace ComputerUse.Windows
                 plan.Contract.ClickTargetCondition.Require(r);
             return state;
         }
-        internal static void CheckState(NativeObjectState state, NativeInputContract contract)
+        internal static void CheckState(NativeObjectState state, NativeInputContract contract,
+                                        NativeObjectEvidenceRequirement evidence = NativeObjectEvidenceRequirement.SemanticSnapshot)
         {
+            if (evidence == NativeObjectEvidenceRequirement.ValueReplacement)
+            {
+                if (contract.Unit != "native_text_edit" || contract.SelectionInsert != null ||
+                    state.Enabled != true || state.Replaceable != true)
+                    throw new Failure("input_unavailable", "the original ValuePattern is not confirmed enabled and writable");
+                return;
+            }
+            if (evidence == NativeObjectEvidenceRequirement.ExactAction)
+            {
+                if (contract.Unit != "native_action" || contract.FixedClickChoice || contract.RequireCollapsedExpansion ||
+                    state.ExactAction == null || !NativeObjectActionPermission.Allows(state.Enabled, contract) ||
+                    state.ExactAction.Name != contract.Action ||
+                    !state.ExactAction.Available)
+                    throw new Failure("input_unavailable",
+                                      "the selected exact UIA action is not confirmed available with its required permission");
+                return;
+            }
             if (contract.FixedClickChoice && contract.Unit == "native_action" && contract.Action == "Invoke.Invoke" &&
                 state.Actions.Contains("ExpandCollapse.Expand"))
                 throw new Failure(
@@ -42,7 +76,7 @@ namespace ComputerUse.Windows
                 throw new Failure(
                     "input_unavailable",
                     "the selected Expand control is no longer confirmed collapsed; no requested action was sent");
-            if (state.Enabled != true || state.Role != contract.Role)
+            if (!NativeObjectActionPermission.Allows(state.Enabled, contract) || state.Role != contract.Role)
                 throw new Failure("input_unavailable", "the selected control's enabled state or role changed");
             if (contract.Unit == "native_action" &&
                     (!state.ActionsComplete || state.Actions.Count(x => x == contract.Action) != 1) ||

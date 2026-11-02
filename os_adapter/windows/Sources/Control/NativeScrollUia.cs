@@ -17,7 +17,8 @@ namespace ComputerUse.Windows
             boundary = new NativeUiaBoundary(store);
         }
 
-        public NativeScrollState Read(Dictionary<string, object> target, string[] within, string direction, Request r)
+        public NativeScrollState Read(Dictionary<string, object> target, string[] within, string direction,
+                                      bool needsPosition, Request r)
         {
             boundary.Validate(target, within, r);
             var element = store.Node((string)target["node"], (string)target["surface"], r).Element;
@@ -37,9 +38,11 @@ namespace ComputerUse.Windows
             {
                 var current = (UIA.IUIAutomationScrollPattern)raw;
                 bool horizontal = direction == "left" || direction == "right";
-                state.Scrollable = (horizontal ? current.CurrentHorizontallyScrollable : current.CurrentVerticallyScrollable) != 0;
-                state.Percent = horizontal ? current.CurrentHorizontalScrollPercent : current.CurrentVerticalScrollPercent;
-                state.ViewSize = horizontal ? current.CurrentHorizontalViewSize : current.CurrentVerticalViewSize;
+                NativeScrollPatternObservation.Read(
+                    state, needsPosition,
+                    () => (horizontal ? current.CurrentHorizontallyScrollable : current.CurrentVerticallyScrollable) != 0,
+                    () => horizontal ? current.CurrentHorizontalScrollPercent : current.CurrentVerticalScrollPercent,
+                    () => horizontal ? current.CurrentHorizontalViewSize : current.CurrentVerticalViewSize);
             }
 
             // No HWND focus, parent substitution or input-queue requirement.

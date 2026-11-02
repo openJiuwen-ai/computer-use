@@ -6,7 +6,7 @@
 from dataclasses import replace
 
 from computer_use.interaction.write.diagnostics import record_click_selection
-from computer_use.interaction.write.routes.policy import refuse, route_key
+from computer_use.interaction.write.routes.policy import preparation_pair_available, refuse, route_key
 from computer_use.interaction.write.routes.selection.admission import stage_admission
 from computer_use.interaction.write.routes.selection.impact import least_disruptive_group
 from computer_use.interaction.write.routes.selection.model import CandidateSet
@@ -50,6 +50,8 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
                 reason = "continuationScope"
         if reason is None and not admission.available:
             reason = offer.admission + (": " + offer.reason if offer.reason else "")
+        if reason is None and not admission.ready and not preparation_pair_available(command, history):
+            reason = "receiverPreparationAllowance"
         if reason is not None:
             exclusions.append(ClickSelectionExclusion(offer.route_family, reason, facts.observed))
             continue

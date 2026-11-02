@@ -8,30 +8,35 @@ import ApplicationServices
 @MainActor enum NativeClickPreparationPipeline {
     static func run(
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
-        evidence: NativeClickEvidence
+        evidence: NativeClickEvidence, objects: any NativeControlObjectAccess
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickPreparation)
         defer { metric?.end() }
-        if let document = plan.document, plan.documentPreparation.required {
-            if !BackgroundTarget(document.application).isForeground {
-                // AXMain/AXFocusedWindow can change while the native document
-                // responder remains inactive. Do not dispatch a hollow press.
-                guard plan.command.foreground else {
-                    throw NativePreparationUnavailable(
-                        description: """
-                            background document selection cannot establish the native command receiver; \
-                            AXPress was not sent
-                            """)
+        func checkDocumentAction() throws {
+            try boundary.checkConditions()
+            if case .action(let node, let name, let description) = plan.target {
+                let facts = try objects.nativeActionFacts(node)
+                guard NativeAction.matches(facts.actions, name: name, description: description) else {
+                    throw DriverError("the selected action changed during document preparation", code: .staleTarget)
                 }
-                try AuthorizeNativeClickForegroundPass.run(plan)
-                try await PrepareActionDocumentForegroundPass.run(
-                    document, boundary: boundary, receipt: receipt, evidence: evidence)
             }
-            if plan.documentPreparation.windowSelectionRequired {
-                try PrepareActionDocumentContextPass.run(
-                    document, boundary: boundary, receipt: receipt, evidence: evidence)
-                try await ConfirmActionDocumentContextPass.run(document, boundary: boundary, evidence: evidence)
-            }
+            try boundary.checkConditions()
+        }
+        if let context = plan.actionContext {
+            try await PrepareNativeActionContextPass.run(
+                context, plan: plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: objects)
+        }
+        // Local application activity can restore another key/main document.
+        // Record it before the shared document preparation checks current focus.
+        if let retained = plan.actionDocument { try retained.observe() }
+        if let document = plan.document,
+            plan.documentPreparation.windowSelectionRequired || plan.actionDocument?.selectionRequired == true
+        {
+            try await NativeDocumentActionPreparationPipeline.run(
+                document, foreground: plan.command.foreground,
+                authorizeForeground: { try AuthorizeNativeClickForegroundPass.run(plan) }, check: checkDocumentAction,
+                onPreparation: receipt.recordPreparation, onCleanupUnknown: receipt.recordCleanupUnknown,
+                onNativePreparation: evidence.record, onWait: evidence.recordWait)
         }
         if case .menu(let unit, _, _, _) = plan.target {
             let foreground = plan.command.foreground && !BackgroundTarget(unit.application).isForeground

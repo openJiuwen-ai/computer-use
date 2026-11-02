@@ -2,69 +2,30 @@
 
 import Foundation
 
-/// Native focus reports and system foreground are independent facts. A
-/// confirmed Web action may open a focus-gated modal picker;
-/// prepare its exact document, while retaining the original AXPress delivery.
+/// Keep exact document selection independent from system foreground and from
+/// optional process-local activity. Web membership is not an activation requirement.
 enum NativeActionDocumentPolicy {
-    enum WebArea { case confirmed, absent, unknown }
-    enum DocumentKind { case standard, other, unknown }
     struct Preparation: Equatable {
         var windowSelectionRequired = false
-        var foregroundRequired = false
-        var foregroundOnly = false
-        var required: Bool { windowSelectionRequired || foregroundOnly }
+        var required: Bool { windowSelectionRequired }
     }
 
-    static func preparation(
-        action: String, exactStandardWindow: Bool, otherDocument: Bool, confirmedWebArea: Bool, foreground: Bool,
-        retainedForegroundRequirement: Bool = false
-    ) -> Preparation {
+    static func preparation(action: String, exactStandardWindow: Bool, otherDocument: Bool) -> Preparation {
         guard action == "AXPress", exactStandardWindow else { return Preparation() }
-        let requiresForeground = confirmedWebArea || retainedForegroundRequirement
-        return Preparation(
-            windowSelectionRequired: otherDocument, foregroundRequired: requiresForeground,
-            foregroundOnly: requiresForeground && !foreground)
+        return Preparation(windowSelectionRequired: otherDocument)
     }
 
-    static func foregroundEvidence(
-        action: String, document: DocumentKind, web: WebArea, foreground: Bool
-    ) -> NativeClickContract.DocumentForeground {
-        guard action == "AXPress" else { return .notRequired }
-        switch document {
-        case .other: return .notRequired
-        case .unknown: return .unconfirmed(ready: foreground)
-        case .standard:
-            switch web {
-            case .confirmed: return .required(ready: foreground)
-            case .absent: return .notRequired
-            case .unknown: return .unconfirmed(ready: foreground)
-            }
+    @MainActor static func checkDispatch(
+        _ document: (any NativeActionDocumentInput)?, required: Bool, retained: NativeActionDocumentContract? = nil
+    ) throws {
+        guard let document else { return }
+        let focus = try retained?.observe() ?? document.focus()
+        guard NativeDocumentContext.permitsDispatch(focus, prepared: required || retained?.selectionRequired == true)
+        else {
+            // A changed receiver is not evidence that background selection
+            // was attempted and unavailable. It cannot authorize foreground.
+            throw NativeSelectionBasis.Changed()
         }
     }
 
-    /// Only a live parent chain reaching the original window proves this
-    /// scope. Missing reads, another surface, cycles and a depth limit do not.
-    static func classifyWebArea<Element>(
-        element: Element, window: Element, same: (Element, Element) -> Bool, role: (Element) throws -> String?,
-        parent: (Element) throws -> Element?, check: () throws -> Void
-    ) rethrows -> WebArea {
-        var current = element, visited = [Element](), web = false
-        for _ in 0..<32 {
-            try check()
-            if same(current, window) { return web ? .confirmed : .absent }
-            guard !visited.contains(where: { same($0, current) }), let value = try role(current) else {
-                return .unknown
-            }
-            if ["AXWindow", "AXSheet", "AXDrawer", "AXPopover", "AXApplication"].contains(value) { return .unknown }
-            web = web || value == "AXWebArea"
-            visited.append(current)
-            guard let next = try parent(current) else { return .unknown }
-            current = next
-        }
-        return .unknown
-    }
-
-    static func permitsForeground(_ preparation: Preparation, foreground: Bool) -> Bool {
-        !preparation.foregroundRequired || foreground
-    }
 }

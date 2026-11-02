@@ -109,6 +109,10 @@ import ApplicationServices
         try control.nativeActionFacts(ref)
     }
 
+    func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts {
+        try control.nativeActionFacts(ref, explicitRequest: request)
+    }
+
     func nativeSelectionContract(_ ref: String) throws -> NativeRowSelection.Contract? {
         try control.nativeSelectionContract(ref)
     }
@@ -126,6 +130,15 @@ import ApplicationServices
     ) throws {
         try control.executeNativeAction(
             ref, action: action, description: description, onDispatch: onDispatch, onReturned: onReturned)
+    }
+
+    func executeNativeExplicitAction(
+        _ ref: String, request: String, action: String, onDispatch: @MainActor () throws -> Void,
+        onReturned: @MainActor () -> Void
+    ) throws {
+        try control.executeNativeAction(
+            ref, action: action, description: nil, explicitRequest: request,
+            onDispatch: onDispatch, onReturned: onReturned)
     }
 
     func nativeTextValueFacts(_ ref: String) throws -> NativeElementControl.TextValueFacts {

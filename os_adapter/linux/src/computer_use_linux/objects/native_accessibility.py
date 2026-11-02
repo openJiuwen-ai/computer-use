@@ -149,9 +149,9 @@ class NativeAccessibility:
                 else:
                     self.focus_events.pop(key, None)
                     if self.focus_lost is not None:
-                        # Forget optional discovery context conservatively;
-                        # never query ancestry from a native event callback.
-                        self.focus_lost()
+                        # The owner compares retained native identity; no
+                        # ancestry/provider queries belong in this callback.
+                        self.focus_lost(obj)
             if kind == "window:destroy":
                 self.dead[self.native_key(obj)] = obj
                 self.focus_events.pop(self.native_key(obj), None)

@@ -35,6 +35,7 @@ EXPANSIONS = {
     ),
     "NativePointer.cs": (
         "Control/NativeElementHit.cs",
+        "Control/NativeCapturedPointerFrame.cs",
         "Control/NativePointerClickAdmission.cs",
         "Contracts/NativePointerGesture.cs",
     ),

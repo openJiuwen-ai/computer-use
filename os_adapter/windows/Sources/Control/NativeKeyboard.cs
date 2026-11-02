@@ -166,7 +166,12 @@ namespace ComputerUse.Windows
             bool replacement = (string)operation.Intent["kind"] == "replace";
             var state = ReadInsertState(operation.AppInsertPin, target, within, r, text);
             r.Check();
-            bool supported = target["node"] == null || state.Focusable == true || state.Focused;
+            // Focus and whole-control replacement may prepare a confirmed
+            // internal editor even when its owner cannot take native focus.
+            // Insertion/paste must not gain an implicit caret-relocating click.
+            bool editorPreparable = provider is INativeKeyboardEditorPreparation && state.SelectionPreparable &&
+                                    (replacement || (string)operation.Intent["kind"] == "focus");
+            bool supported = target["node"] == null || state.Focusable == true || state.Focused || editorPreparable;
             if (text)
                 supported = supported && (target["node"] == null || state.TextWritable == true);
             if (replacement)
@@ -203,7 +208,8 @@ namespace ComputerUse.Windows
                 new[] { Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "keyboard", "supported",
                                  supported ? "yes" : "no", "readiness",
                                  supported && Ready(state, replacement) ? "yes" : "no", "pending", pending,
-                                 "backgroundPreparation", state.Foreground && state.Focusable == true ? "yes" : "no") },
+                                 "backgroundPreparation",
+                                 state.Foreground && (state.Focusable == true || editorPreparable) ? "yes" : "no") },
                 "input",
                 Wire.Obj("foregroundSurface", state.Foreground ? target["surface"] : null, "keyboardSurface",
                          state.WindowRoute ? target["surface"] : null, "focusedNode",

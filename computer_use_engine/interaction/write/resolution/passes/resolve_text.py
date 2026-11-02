@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.write.model import ResolutionFrame
 from computer_use.interaction.write.resolution.checks import parts, require_actuators
 from computer_use.interaction.write.resolution.receiver import ReceiverQuery
-from computer_use.interaction.write.routes.policy import has_independent_text_route, validate_target
+from computer_use.interaction.write.routes.policy import has_independent_text_route, route_key, validate_target
+from computer_use.native.contracts import Knowledge, UnitCommand
 from computer_use.pipeline import Contract, Effect, Pass
 
 if TYPE_CHECKING:
@@ -36,6 +37,20 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         if not facts.binding.same_target(target):
             raise ValueError("Native receiver inspection returned a different target")
         validate_target(facts, native.policy)
+        if intent.kind in ("key", "focus") and facts.actuator is None and facts.receiver is None:
+            unit = "key_sequence" if intent.kind == "key" else "prepare_receiver"
+            if any(
+                primitive.unit == unit
+                and primitive.supported == Knowledge.YES
+                and primitive.readiness == Knowledge.YES
+                and not primitive.pending
+                and route_key(UnitCommand(primitive, target, intent)) not in frame.request.history.unavailable
+                for primitive in facts.primitives
+            ):
+                # The native contract already addresses this exact recipient.
+                # Unrelated child-tree completeness is not a prerequisite for
+                # keys or focus confirmation. Text input still resolves editors.
+                return replace(frame, facts=facts)
         # Native insertion may address the object and its own known selection
         # directly. Do not require an unrelated keyboard/editor tree for that
         # contract. Candidate filtering preserves paste/key/focus semantics.

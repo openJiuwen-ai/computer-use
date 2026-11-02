@@ -30,6 +30,18 @@ import ApplicationServices
             mapping.id == other.mapping.id && mapping.pid == other.mapping.pid && mapping.frame == other.mapping.frame
                 && frame == other.frame && point == other.point
         }
+
+        /// A live exact hit can retain the original dispatch point through an
+        /// element layout change. The window coordinate transform stays fixed;
+        /// geometry-only fallbacks and qualified popup proofs remain stricter.
+        func permitsFrozenDispatch(
+            from original: Geometry, basis: NativeElementHitSelection.Basis, requiresExactGeometry: Bool
+        ) -> Bool {
+            guard basis != .rejected, mapping.id == original.mapping.id, mapping.pid == original.mapping.pid,
+                mapping.frame == original.mapping.frame, point == original.point, visible.contains(point)
+            else { return false }
+            return frame == original.frame || !requiresExactGeometry && basis == .exactHit
+        }
     }
 
     struct Observation {
@@ -160,6 +172,16 @@ import ApplicationServices
                     }
                 } else {
                     relation = nil
+                }
+                if expand, candidate.source == .center, relation == .otherControl, let current = hit,
+                    try NativeQtInlineListHitEvidence.sample(
+                        target: member ?? element, hit: current, window: window, pid: application.processIdentifier,
+                        windowID: mapping.id, at: candidate.point)
+                {
+                    // Keep the actual mismatching AX hit in the observation.
+                    // This distinct basis records fresh provider stacking proof;
+                    // it is not an exact AX hit or ordinary geometry fallback.
+                    relation = .providerStackedTarget
                 }
                 var systemStatus: AXError?, systemWindow = false, coarseForeground = false
                 var systemRelation: String?, systemHitPID: pid_t?
@@ -333,7 +355,10 @@ import ApplicationServices
         // Once a gesture has selected a point, validate that same point. Never
         // move a second down to a newly discovered candidate after input began.
         let sampled = try sample(frozen: selected)
-        guard sampled.accepted, sampled.geometry.same(as: selected) else {
+        guard sampled.geometry.permitsFrozenDispatch(
+            from: selected, basis: sampled.selection.basis,
+            requiresExactGeometry: frozenGeometry != nil || kind != .click)
+        else {
             throw DriverError("element pointer geometry changed during the sequence", code: .inputUnavailable)
         }
     }

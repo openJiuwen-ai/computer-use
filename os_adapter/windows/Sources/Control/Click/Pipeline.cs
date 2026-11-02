@@ -67,6 +67,9 @@ namespace ComputerUse.Windows
                         phase = "prepare";
                         using (NativeClickDiagnostics.Measure(diagnostics, "clickCadence"))
                             PrepareClickCadencePass.Run(contract, pointer, r);
+                        phase = "sample";
+                        using (NativeClickDiagnostics.Measure(diagnostics, "freezeCapturedFrame"))
+                            FreezeCapturedPointerFramePass.Run(contract, pointer, r);
                         phase = "check";
                         using (NativeClickDiagnostics.Measure(diagnostics, "finalCheck"))
                             CheckClickDispatchPass.Run(contract, pointer, r);

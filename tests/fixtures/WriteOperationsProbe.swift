@@ -71,7 +71,9 @@ import CryptoKit
         guard let window else { return }
         let first = window.firstResponder
         var value: [String: Any] = [
-            "pid": getpid(), "active": NSApp.isActive, "field": field.stringValue, "other": other.stringValue,
+            "pid": getpid(), "active": NSApp.isActive,
+            "frontmostPID": NSWorkspace.shared.frontmostApplication?.processIdentifier as Any? ?? NSNull(),
+            "field": field.stringValue, "other": other.stringValue,
             "keyWindow": window.isKeyWindow, "mainWindow": window.isMainWindow,
             "keys": (NSApp as? WriteProbeApplication)?.keys ?? [],
             "editor": editor.string, "pastes": editor.pasted, "buttonClicks": buttonClicks, "menuOpens": menuOpens,

@@ -14,7 +14,8 @@ namespace ComputerUse.Windows
     {
         internal const string Effects = "PURE";
         internal static ObjectDispatchPlan Run(NativeWriteOperation operation, Dictionary<string, object> command,
-                                               Dictionary<string, object> target, string unit, string id)
+                                               Dictionary<string, object> target, string unit, string id,
+                                               INativeObjectProvider provider)
         {
             NativeInputContract contract;
             if (!operation.Contracts.TryGetValue(id, out contract) || contract.Unit != unit ||
@@ -36,7 +37,16 @@ namespace ComputerUse.Windows
                 text = (string)Wire.Object(operation.Intent["parameters"])["text"];
             else
                 throw new Failure("invalid_request", "the native unit cannot implement this intent");
-            return new ObjectDispatchPlan(contract, target, unit, text);
+            // Explicit actions and whole-value replacement already fix their
+            // mutation semantics. Click/menu choices retain their semantic
+            // snapshot even when a narrow object query is available.
+            var evidence = kind == "action" && unit == "native_action" && provider is INativeExactActionObjectProvider
+                               ? NativeObjectEvidenceRequirement.ExactAction
+                           : kind == "replace" && unit == "native_text_edit" &&
+                                     provider is INativeValueReplacementObjectProvider
+                               ? NativeObjectEvidenceRequirement.ValueReplacement
+                               : NativeObjectEvidenceRequirement.SemanticSnapshot;
+            return new ObjectDispatchPlan(contract, target, unit, text, evidence);
         }
     }
 }

@@ -259,8 +259,8 @@ class X11:
             self.validate(instance)
             if is_reachable is not None:
                 # Element geometry may legitimately move during preparation.
-                # The caller resamples the same binding; capture routes instead
-                # retain their original coordinates and reject geometry drift.
+                # Capture routes retain the original PNG offsets and size,
+                # resolving only client-origin translation before delivery.
                 if is_reachable():
                     return
                 ctx.pause()
@@ -482,15 +482,30 @@ class X11:
             capture["stopReasons"] = notes
         return capture, (x, y, native_width / image.width, native_height / image.height)
 
-    def point(self, capture, x, y):
+    def points(self, capture, pairs, *, current=None):
+        """Map original PNG pixels using one current client-window sample.
+
+        The capture's size and pixel scale stay fixed. Translation is resolved
+        before delivery; the caller freezes and guards the resulting gesture.
+        """
         if not capture.image:
             raise Failure("No captured image establishes these coordinates.", "stale_target")
-        if not (0 <= x < capture.image["width"] and 0 <= y < capture.image["height"]):
-            raise Failure("Coordinates are outside the captured image.", "invalid_request")
+        for x, y in pairs:
+            if not (0 <= x < capture.image["width"] and 0 <= y < capture.image["height"]):
+                raise Failure("Coordinates are outside the captured image.", "invalid_request")
+        ox, oy, sx, sy = capture.transform
         if capture.instance:
-            current = self.validate(capture.instance)
-            if current.rect != capture.window.rect:
-                raise Failure("Window geometry changed since capture.", "stale_target")
+            current = self.validate(capture.instance) if current is None else current
+            require(
+                capture.instance.alive
+                and (current.key, current.pid, current.process_start)
+                == (capture.window.key, capture.window.pid, capture.window.process_start),
+                "The original captured window identity changed.",
+                "stale_target",
+            )
+            if current.rect[2:] != capture.window.rect[2:]:
+                raise Failure("Window size changed since capture.", "stale_target")
+            ox, oy = current.rect[:2]
         else:
             geom = self.root.get_geometry()
             if (geom.width, geom.height) != (
@@ -498,8 +513,10 @@ class X11:
                 round(capture.image["height"] * capture.transform[3]),
             ):
                 raise Failure("Desktop geometry changed since capture.", "stale_target")
-        ox, oy, sx, sy = capture.transform
-        return round(ox + x * sx), round(oy + y * sy)
+        return tuple((round(ox + x * sx), round(oy + y * sy)) for x, y in pairs)
+
+    def point(self, capture, x, y):
+        return self.points(capture, ((x, y),))[0]
 
     def _event(self, kind, detail=0, x=0, y=0):
         from Xlib.ext import xtest
@@ -688,14 +705,26 @@ class X11:
         drag button is down, validate_drag checks its continuing scope without
         requiring the original hit/layout: X11's implicit grab routes the gesture.
         Releases are cleanup and never depend on a surviving target or request.
+        freeze_points, when supplied, resolves the whole gesture once; later
+        validation never supplies replacement coordinates to the event plan.
         """
         callbacks = PointerCallbacks() if callbacks is None else callbacks
         validate, before_dispatch = callbacks.validate, callbacks.before_dispatch
         validate_drag, scroll_step_complete = callbacks.validate_drag, callbacks.scroll_step_complete
         event_progress = callbacks.event_progress
-        plan = self.pointer_preflight(kind, points, button, count, direction, pages)
+        # Existing callers already supply fixed points. Capture routes resolve
+        # all local offsets together after preparation/idle admission, before
+        # building the single plan that every event in this train consumes.
+        plan = (
+            self.pointer_preflight(kind, points, button, count, direction, pages)
+            if callbacks.freeze_points is None
+            else None
+        )
         ctx.check()
         self.require_idle_input()
+        if callbacks.freeze_points is not None:
+            points = callbacks.freeze_points()
+            plan = self.pointer_preflight(kind, points, button, count, direction, pages)
         validate()
         ctx.check()
         number = plan["button"]

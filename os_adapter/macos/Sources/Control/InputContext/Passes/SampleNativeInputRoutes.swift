@@ -100,7 +100,7 @@ import ApplicationServices
             let readiness = try recordPointer(access.units.elementPointerUnit(binding.wire, actuator: actuator))
             declare(.pointer(.click), supported: true, readiness: { _ in readiness })
         } else if binding.wire["capture"] is String, let kind = NativePointerIntent.Kind(rawValue: op.intent) {
-            let unit = NativePointerUnit(capture: try access.captures.input(binding.wire).entry)
+            let unit = NativePointerUnit(capture: try access.captures.input(binding.wire))
             let request = try NativePointerIntent(
                 unit: "pointer_sequence", kind: op.intent, parameters: op.request.parameters, foreground: false)
             let point = try unit.point(request.start!)
@@ -214,21 +214,33 @@ import ApplicationServices
                 }
             }
         } else if let node = binding.node {
-            let facts = try access.objects.nativeActionFacts(node)
+            let facts: NativeElementControl.ActionFacts
+            if op.intent == "action" {
+                let request = try NativeObjectIntent(
+                    unit: "native_action", kind: "action", parameters: op.request.parameters)
+                facts = try access.objects.nativeExplicitActionFacts(node, request: request.value!)
+            } else {
+                facts = try access.objects.nativeActionFacts(node)
+            }
             enabled = facts.enabled
             foreground = facts.foreground
             applicationMenu = facts.applicationMenuContext
             nativeRole = facts.role.flatMap { $0.isEmpty ? nil : $0 }
-            actionsComplete = facts.actions != nil
+            actionsComplete = op.intent != "action" && facts.actions != nil
             for action in facts.actions ?? [] {
                 if access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") != nil {
                     let readiness = try access.units.menuUnit(binding.wire).readiness(enabled: facts.enabled)
                     declare(
                         .menuAction(action.name, action.description), supported: true, readiness: { _ in readiness })
                 } else {
-                    try declare(
-                        .action(action.name, action.description),
-                        supported: !facts.applicationMenuContext)
+                    let unit = NativeInputUnit.action(action.name, action.description)
+                    let document = try declarations.actionDocument(for: unit, facts: facts)
+                    try declarations.declare(
+                        unit, supported: !facts.applicationMenuContext, enabled: enabled, actionDocument: document
+                    ) { _ in
+                        guard let document, document.selectionRequired else { return NativeReadiness() }
+                        return try NativeReadiness([("receiver", document.observe() == .target ? "yes" : "unknown")])
+                    }
                 }
             }
             if op.intent == "click", access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") == nil,

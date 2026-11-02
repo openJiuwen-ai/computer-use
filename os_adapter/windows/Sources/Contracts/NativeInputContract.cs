@@ -10,6 +10,7 @@ namespace ComputerUse.Windows
     {
         internal string Id, Unit, Action, Role;
         internal bool Supported, Text, Replacement;
+        internal bool ExplicitAction;
         internal bool FixedClickChoice;
         internal bool RequireCollapsedExpansion;
         internal NativeClickTargetCondition ClickTargetCondition;

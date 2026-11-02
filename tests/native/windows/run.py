@@ -69,24 +69,28 @@ def main():
         return output
 
     compile_target("computer-use-driver", ["/target:exe", "/platform:x64"])
-    tests = compile_target(
-        "UnifiedWriteTests",
-        ["/target:exe", "/platform:anycpu", "/main:ComputerUse.Windows.UnifiedWriteTests"],
-        [Path(__file__).parent / "Control/UnifiedWriteTests.cs"],
-    )
-    if args.dotnet:
-        tests.with_suffix(".runtimeconfig.json").write_text(
-            json.dumps(
-                dict(
-                    runtimeOptions=dict(
-                        tfm=f"net{args.runtime_version.rsplit('.', 1)[0]}",
-                        framework=dict(name="Microsoft.NETCore.App", version=args.runtime_version),
-                    )
-                )
-            ),
-            encoding="utf-8",
+    for group in (
+        "UnifiedWriteTests", "NativeScrollTests", "NativeExplicitActionTests", "NativeCapturedPointerTests",
+        "NativeValueReplacementTests",
+    ):
+        tests = compile_target(
+            group,
+            ["/target:exe", "/platform:anycpu", f"/main:ComputerUse.Windows.{group}"],
+            [Path(__file__).parent / f"Control/{group}.cs"],
         )
-    subprocess.run(([str(args.dotnet)] if args.dotnet else []) + [str(tests)], check=True)
+        if args.dotnet:
+            tests.with_suffix(".runtimeconfig.json").write_text(
+                json.dumps(
+                    dict(
+                        runtimeOptions=dict(
+                            tfm=f"net{args.runtime_version.rsplit('.', 1)[0]}",
+                            framework=dict(name="Microsoft.NETCore.App", version=args.runtime_version),
+                        )
+                    )
+                ),
+                encoding="utf-8",
+            )
+        subprocess.run(([str(args.dotnet)] if args.dotnet else []) + [str(tests)], check=True)
 
 
 if __name__ == "__main__":

@@ -18,3 +18,4 @@ class PointerCallbacks:
     validate_drag: Callable[[], None] | None = None
     scroll_step_complete: Callable[[], None] = _noop
     event_progress: Callable[..., None] | None = None
+    freeze_points: Callable[[], tuple[tuple[float, float], ...]] | None = None

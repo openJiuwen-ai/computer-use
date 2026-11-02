@@ -10,11 +10,24 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+LOG = logging.getLogger(__name__)
 GROUPS = (
     "NativeInspectQuery",
     "NativePopupChoiceBoundary",
+    "NativeToggleClickPolicy",
     "NativePopupAXFacts",
     "NativeReplacementReceiver",
+    "NativePointerFocusSelection",
+    "NativeScrollOwnerPermission",
+    "NativeElementPointerContinuity",
+    "NativeQtInlineListHit",
+    "NativeCapturedPointerPlan",
+    "NativeCapturedPointerSequence",
+    "NativeExplicitActionSelection",
+    "NativeApplicationContext",
+    "NativeFocusComposition",
+    "NativeActionDocument",
+    "NativeLocalActivationLease",
     "NativeWindowQueryTiming",
     "NativeUnifiedPointerPolicy",
     "NativeForegroundPreparation",
@@ -23,6 +36,7 @@ GROUPS = (
     "NativeKeyboardEndpoint",
     "NativeKeyboardRecipient",
     "NativeWriteStage",
+    "NativeElementIdentity",
 )
 
 
@@ -42,7 +56,7 @@ def main():
         if len(tests) != 1:
             raise ValueError(f"Expected one test source for {name}, got {len(tests)}")
         binary = output / (name + "Tests")
-        logging.info("Building and running %s", name)
+        LOG.info("Building and running %s", name)
         subprocess.run(
             ["swiftc", "-swift-version", "6", "-parse-as-library", *sources, str(tests[0]), "-o", str(binary)],
             cwd=ROOT,

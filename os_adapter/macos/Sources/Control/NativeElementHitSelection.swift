@@ -7,7 +7,7 @@ import ApplicationServices
 /// facts. A messaging failure is neither an empty point nor window occlusion.
 struct NativeElementHitEvidence {
     enum Relation: String {
-        case target, windowRoot, coarseAncestorWindow, otherWindow, otherControl, unknownOwner
+        case target, providerStackedTarget, windowRoot, coarseAncestorWindow, otherWindow, otherControl, unknownOwner
         case noElement, unsupported, queryFailed
     }
     let status: AXError
@@ -27,7 +27,7 @@ struct NativeElementHitEvidence {
     var permitsBackgroundGeometry: Bool {
         switch relation {
         case .otherWindow, .noElement, .unsupported, .queryFailed: return true
-        case .target, .windowRoot, .coarseAncestorWindow, .otherControl, .unknownOwner: return false
+        case .target, .providerStackedTarget, .windowRoot, .coarseAncestorWindow, .otherControl, .unknownOwner: return false
         }
     }
 }
@@ -44,7 +44,7 @@ enum NativeElementHitSelection {
         // later frozen-point checks. Only additional candidate queries are short.
         var queryTimeout: Float? { source == .center ? nil : 0.05 }
     }
-    enum Basis: String { case exactHit, coarseAncestorGeometry, backgroundGeometry, rejected }
+    enum Basis: String { case exactHit, providerStackingGeometry, coarseAncestorGeometry, backgroundGeometry, rejected }
     enum Preparation { case geometryReady, foreground, unavailable }
     struct Observation<Hit> {
         let evidence: NativeElementHitEvidence
@@ -128,13 +128,16 @@ enum NativeElementHitSelection {
             let basis: Basis =
                 observation.evidence.relation == .target
                 ? .exactHit
-                : (observation.evidence.relation == .coarseAncestorWindow && observation.foreground
+                : (observation.evidence.relation == .providerStackedTarget
+                    ? .providerStackingGeometry
+                    : observation.evidence.relation == .coarseAncestorWindow && observation.foreground
                     && candidate.permitsGeometryFallback
                     ? .coarseAncestorGeometry
                     : (!observation.foreground && candidate.permitsGeometryFallback
                         && observation.evidence.permitsBackgroundGeometry ? .backgroundGeometry : .rejected))
             let result = Selection(candidate: candidate, observation: observation, basis: basis)
             if basis == .exactHit { return result }
+            if basis == .providerStackingGeometry { return result }
             if basis == .coarseAncestorGeometry { coarse = result }
             if basis == .backgroundGeometry { fallback = result }
             if preparation(result) == .foreground, preparable == nil || candidate.source == .center {

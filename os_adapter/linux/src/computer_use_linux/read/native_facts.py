@@ -387,12 +387,67 @@ class NativeFacts:
             actions=self.actions(reference.obj, cache),
         )
 
-    def action_catalogue(self, obj, ctx):
+    def action_catalogue(self, obj, ctx, *, descriptions=True):
         """The same raw action facts for a read batch or an input contract."""
         self.until = min(time.monotonic() + 5, ctx.deadline - 0.1)
-        return self.actions(obj, {})
+        return self.actions(obj, {}, descriptions=descriptions)
 
-    def actions(self, obj, cache):
+    def _action_description(self, obj, index, budget):
+        item = {}
+        try:
+            description = self.call("Action", "get_action_description", obj, index)
+            if description is None:
+                item["descriptionStatus"] = failure_status(FieldUnavailable("absent", raw_result=None))
+            elif not isinstance(description, str):
+                raise FieldUnavailable(
+                    "error", "Native action description returned a different type.", raw_result=description
+                )
+            elif len(description) > min(STRING_LIMIT, budget):
+                item.update(
+                    description=description[: min(STRING_LIMIT, budget)],
+                    descriptionStatus=dict(
+                        state="truncated", detail="Action description exceeds this collection budget."
+                    ),
+                )
+            else:
+                item["description"] = description
+        except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
+            item["descriptionStatus"] = failure_status(error)
+        return item
+
+    def action_descriptions(self, obj, catalogue):
+        """Complete a names-only query within its original collection budget.
+
+        Keep the native index/name pairs fixed while acquiring optional text.
+        A description request cannot use a partial or reindexed catalogue.
+        """
+        if catalogue["state"] != "complete":
+            return catalogue
+        items = [{"name": item["name"]} for item in catalogue["items"]]
+        budget = 65536
+        try:
+            for index, item in enumerate(items):
+                if self.call("Action", "get_action_name", obj, index) != item["name"]:
+                    raise FieldUnavailable("partial", "Action indices changed before reading descriptions.")
+                description = self._action_description(obj, index, budget)
+                if self.call("Action", "get_action_name", obj, index) != item["name"]:
+                    raise FieldUnavailable("partial", "Action indices changed while reading descriptions.")
+                item.update(description)
+                budget -= len(item.get("description", ""))
+            after = self.call("Action", "get_n_actions", obj)
+            if type(after) is not int or after != catalogue["total"]:
+                raise FieldUnavailable("partial", "Action count changed while reading descriptions.")
+            return {"state": "complete", "items": items, "total": catalogue["total"]}
+        except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
+            status = failure_status(error)
+            return {
+                "state": "partial",
+                "items": items,
+                "total": catalogue["total"],
+                "detail": status.get("detail", status["state"]),
+            }
+
+    def actions(self, obj, cache, *, descriptions=True):
         items, total, description_budget = [], None, 65536
         try:
             self.check()
@@ -411,27 +466,14 @@ class NativeFacts:
                         "error", "Native action has no usable exact name.", raw_result=dict(index=index, name=name)
                     )
                 item = dict(name=name)
-                try:
-                    description = self.call("Action", "get_action_description", obj, index)
-                    if description is None:
-                        item["descriptionStatus"] = failure_status(FieldUnavailable("absent", raw_result=None))
-                    elif not isinstance(description, str):
-                        raise FieldUnavailable(
-                            "error", "Native action description returned a different type.", raw_result=description
-                        )
-                    elif len(description) > min(STRING_LIMIT, description_budget):
-                        item.update(
-                            description=description[: min(STRING_LIMIT, description_budget)],
-                            descriptionStatus=dict(
-                                state="truncated", detail="Action description exceeds this collection budget."
-                            ),
-                        )
-                    else:
-                        item["description"] = description
+                if descriptions:
+                    item.update(self._action_description(obj, index, description_budget))
                     description_budget -= len(item.get("description", ""))
-                except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
-                    item["descriptionStatus"] = failure_status(error)
                 items.append(item)
+            if not descriptions:
+                after = self.call("Action", "get_n_actions", obj)
+                if type(after) is not int or after != total:
+                    raise FieldUnavailable("partial", "Action count changed while collecting names.")
             return dict(state="complete" if len(items) == total else "partial", items=items, total=total)
         except (FieldUnavailable, Failure, self.ax.glib.Error) as error:
             status = failure_status(error)

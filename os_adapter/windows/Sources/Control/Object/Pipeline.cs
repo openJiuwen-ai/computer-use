@@ -25,7 +25,7 @@ namespace ComputerUse.Windows
                          "cleanup", "complete", "errorCode", null, "retryReason", null, "context", null);
             try
             {
-                var plan = ResolveNativeTargetPass.Run(operation, command, target, unit, id);
+                var plan = ResolveNativeTargetPass.Run(operation, command, target, unit, id, provider);
                 if (plan.Contract.SelectionInsert != null)
                 {
                     NativeSelectionInsertPipeline.Run(plan.Contract.SelectionInsert, plan.Text, operation, r, result);

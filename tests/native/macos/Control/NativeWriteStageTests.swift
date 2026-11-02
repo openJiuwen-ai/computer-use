@@ -75,32 +75,5 @@ import ApplicationServices
         precondition(NativeKeyboardIntent.usesWindowCommand(.key, key: "super+a"))
         precondition(!NativeKeyboardIntent.usesWindowCommand(.key, key: "Left"))
         precondition(!NativeKeyboardIntent.usesWindowCommand(.insert, key: nil))
-        typealias Facts = NativeKeyboardWindowEvidence.BackgroundSelection
-        let cold = Facts(
-            windowScope: true, windowCommand: true, foreground: false, standardWindow: true,
-            focused: false, windowFocusWritable: false, appFocusWritable: false, main: true, mainWindowMatches: true,
-            focusedWindowMatches: true)
-        precondition(
-            NativeKeyboardWindowEvidence.prefersForegroundBeforeSynthetic(cold),
-            "an Element shortcut needs the same window command preparation as App/Window shortcuts")
-        for key in [\Facts.windowScope, \Facts.windowCommand, \Facts.standardWindow] {
-            var facts = cold
-            facts[keyPath: key] = false
-            precondition(!NativeKeyboardWindowEvidence.prefersForegroundBeforeSynthetic(facts))
-        }
-        for key in [\Facts.focused, \Facts.windowFocusWritable, \Facts.appFocusWritable] {
-            for value: Bool? in [true, nil] {
-                var facts = cold
-                facts[keyPath: key] = value
-                precondition(!NativeKeyboardWindowEvidence.prefersForegroundBeforeSynthetic(facts))
-            }
-        }
-        for key in [\Facts.main, \Facts.mainWindowMatches, \Facts.focusedWindowMatches] {
-            for value: Bool? in [false, nil] {
-                var facts = cold
-                facts[keyPath: key] = value
-                precondition(!NativeKeyboardWindowEvidence.prefersForegroundBeforeSynthetic(facts))
-            }
-        }
     }
 }

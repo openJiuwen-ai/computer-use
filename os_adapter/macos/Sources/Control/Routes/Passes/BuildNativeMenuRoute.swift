@@ -40,8 +40,16 @@ import ApplicationServices
                 throw DriverError(
                     "document menu validation has not been prepared in this operation", code: .inputUnavailable)
             }
-            let facts = try context.access.objects.nativeActionFacts(node)
-            guard NativeAction.matches(facts.actions, name: name, description: description) else {
+            let facts: NativeElementControl.ActionFacts
+            let matches: Bool
+            if request.kind == "action" {
+                facts = try context.access.objects.nativeExplicitActionFacts(node, request: request.value!)
+                matches = facts.actions?.count == 1 && facts.actions?.first?.name == name
+            } else {
+                facts = try context.access.objects.nativeActionFacts(node)
+                matches = NativeAction.matches(facts.actions, name: name, description: description)
+            }
+            guard matches else {
                 throw DriverError("the selected menu action declaration changed", code: .inputUnavailable)
             }
             try await unit.perform(

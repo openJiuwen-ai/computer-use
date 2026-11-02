@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOG = logging.getLogger(__name__)
 
 
-def build_fixture(directory, bundle_id, name="SearchInputProbe"):
+def build_fixture(directory, bundle_id, name="SearchInputProbe", *, arguments=()):
     app = directory / (name + ".app")
     binary = app / ("Contents/MacOS/" + name)
     binary.parent.mkdir(parents=True)
@@ -56,7 +56,7 @@ def build_fixture(directory, bundle_id, name="SearchInputProbe"):
         check=True,
     )
     subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
-    subprocess.run(["open", "-g", str(app)], check=True)
+    subprocess.run(["open", "-g", str(app), *(["--args", *arguments] if arguments else [])], check=True)
 
 
 async def state(directory):

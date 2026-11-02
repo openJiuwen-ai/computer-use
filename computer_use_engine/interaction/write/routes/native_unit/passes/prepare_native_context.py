@@ -24,6 +24,7 @@ def create(
 ) -> Callable[[NativeInvocation, Control], Awaitable[AttemptOutcome]]:
     async def prepare_native_context(invocation: NativeInvocation, control: Control) -> AttemptOutcome:
         """Send the selected receiver-preparation unit with the shared invocation budget."""
+        state.reserve_preparation(invocation.unit.command, invocation.unit.plan.resolved.target.facts)
         return await send_native_unit(invocation, native, state)
 
     return prepare_native_context

@@ -16,7 +16,7 @@ import AppKit
                 command, resolved: resolved, op: operation, step: step, access: access)
             try await NativeInputActivity.$stage.withValue(.preparation) {
                 try await NativeClickPreparationPipeline.run(
-                    plan, boundary: boundary, receipt: receipt, evidence: evidence)
+                    plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
             }
             try await DispatchNativeClickPass.run(
                 plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)

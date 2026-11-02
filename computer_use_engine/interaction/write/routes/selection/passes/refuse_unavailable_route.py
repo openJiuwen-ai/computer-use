@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.write.routes.policy import refuse
+from computer_use.interaction.write.routes.policy import preparation_pair_available, refuse
+from computer_use.interaction.write.routes.selection.admission import stage_admission
 from computer_use.interaction.write.routes.selection.model import RouteOptions
 from computer_use.native.contracts import Binding, Knowledge, UnitCommand
 from computer_use.pipeline import Contract, Pass
@@ -20,6 +21,20 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
     """Explain why the remaining native candidates cannot satisfy the requested input."""
     request = options.eligible.request
     facts, intent = request.facts, request.intent
+    candidates = options.eligible.candidates
+    if any(
+        stage_admission(primitive).preparation
+        and not preparation_pair_available(
+            UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver), request.history
+        )
+        for primitive in candidates
+    ):
+        refuse(
+            "input_unavailable",
+            facts,
+            "The selected receiver still needs preparation after the receiver preparation allowance was consumed.",
+            "read the original target after its editor settles",
+        )
     if request.needs_editing_evidence:
         refuse(
             "input_unavailable",
@@ -27,7 +42,6 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
             "The selected control has no confirmed text-editing capability or remaining preparation route.",
             "read the intended control or its window; focus alone does not authorize text input",
         )
-    candidates = options.eligible.candidates
     if candidates and all("enabled" in p.pending for p in candidates):
         refuse(
             "input_unavailable",

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.write.model import AttemptOutcome, AttemptView, ResolutionMemory
-from computer_use.interaction.write.routes.policy import Attempts, route_key
+from computer_use.interaction.write.routes.policy import Attempts, preparation_pair_available, route_key
 from computer_use.native.contracts import ClickSelectionDecision, Confirmation, Dispatch, StepResult
 from computer_use.protocol.primitives import required_item
 
@@ -128,8 +128,39 @@ class WriteRunState:
             a.precondition_changes,
             a.click_refresh,
             a.failed_steps,
+            frozenset(a.preparation_pairs),
         )
         return ProgressView(history, self.dispatched, tuple(self.preparation), self.last_route_failure)
+
+    def reserve_preparation(self, command: UnitCommand, facts: Facts) -> None:
+        """Consume one recipient allowance before its selected native preparation starts.
+
+        Background/foreground and unit-specific attempts on the same pair keep
+        their existing route history. A new observation alone consumes nothing,
+        and a ready dispatch does not require another preparation allowance.
+        """
+        if not command.prepare and not (
+            command.primitive.click is not None and command.primitive.click.admission == "preparationRequired"
+        ):
+            return
+        if self.dispatched != Dispatch.NOT_DISPATCHED:
+            raise failure(
+                "execution_unknown",
+                facts.target_label,
+                "Requested input may already have been dispatched; no further preparation was started.",
+                self.dispatched,
+                self.preparation,
+            )
+        if not preparation_pair_available(command, self.attempts):
+            raise failure(
+                "input_unavailable",
+                facts.target_label,
+                "The selected receiver still needs preparation after the receiver preparation allowance was consumed.",
+                self.dispatched,
+                self.preparation,
+                next_step="read the original target after its editor settles",
+            )
+        self.attempts.preparation_pairs.add((command.actuator, command.receiver))
 
     def consume(self, outcome: AttemptOutcome, decision: WriteDecision) -> None:
         """Apply a Gate decision to route history and propagate its terminal error."""
@@ -171,7 +202,11 @@ class WriteRunState:
             self.attempts.prepared.add((route, command.foreground))
             if decision.action == "preparation_unavailable":
                 self.last_route_failure = cast("StepResult", outcome.step)
-                (self.attempts.unavailable if command.foreground else self.attempts.background_unavailable).add(route)
+                # A refused preparation mode is already consumed above. It
+                # does not make this dispatch route unavailable if a different
+                # native unit later establishes the same receiver.
+                if not command.foreground:
+                    self.attempts.background_unavailable.add(route)
         elif decision.action == "route_unavailable":
             self.last_route_failure = cast("StepResult", outcome.step)
             self.attempts.unavailable.add(route_key(command))
@@ -284,4 +319,4 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
 
 
 if TYPE_CHECKING:
-    from computer_use.native.contracts import UnitCommand
+    from computer_use.native.contracts import Facts, UnitCommand

@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Mechanism regressions for addressed-first input with independent activation."""
@@ -181,6 +180,40 @@ async def test_uncertain_addressed_click_never_replays_globally(dispatch):
         with pytest.raises(ComputerUseError):
             await operation
     assert len(port.commands) == 1 and port.commands[0].primitive == directed
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("dispatch", [Dispatch.DISPATCHED, Dispatch.PARTIAL, Dispatch.UNKNOWN])
+async def test_disabled_action_with_document_preparation_keeps_click_atomic_without_replay(dispatch):
+    action = replace(
+        click_route("object_action", "preparationRequired", ("background", "foreground")),
+        background_preparation=Knowledge.YES,
+    )
+    pointer = click_route("desktop_pointer")
+    receipt = ClickReceipt(
+        (),
+        ClickTransportEvidence(call_entered=True, call_returned=True),
+        ClickContinuation("sameCandidateRefresh", TARGET, action.click.route_family),
+    )
+    port = RecordingPort(
+        [facts(action, pointer, enabled=Knowledge.NO)],
+        [StepResult(TARGET, dispatch, "native document preparation and one action attempt", click=receipt)],
+    )
+
+    operation = Engine(port).execute(CLICK, TARGET)
+    if dispatch == Dispatch.DISPATCHED:
+        assert (await operation)["status"] == "dispatched"
+    else:
+        with pytest.raises(ComputerUseError):
+            await operation
+
+    # Raw enabled=false cannot erase an explicit native preparation offer.
+    # Possible requested input still prevents both refresh and pointer fallback.
+    assert len(port.commands) == 1 and port.inspections == 1
+    command = port.commands[0]
+    assert command.primitive == action and command.target == TARGET and command.intent == CLICK
+    assert not command.prepare and not command.foreground
+    assert port.finished == ["operation"]
 
 
 @pytest.mark.parametrize("admission", ["unavailable", "insufficientEvidence"])

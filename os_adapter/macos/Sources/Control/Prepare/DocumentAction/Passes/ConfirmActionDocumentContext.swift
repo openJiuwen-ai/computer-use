@@ -1,21 +1,19 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-import AppKit
-
 /// QUERY: require observed exact document context before the single AXPress.
 @MainActor enum ConfirmActionDocumentContextPass {
-    static func run(_ unit: NativeDocumentContext, boundary: NativeUnitBoundary, evidence: NativeClickEvidence)
-        async throws
-    {
+    static func run(
+        _ unit: any NativeActionDocumentInput, check: () throws -> Void, onWait: (NativePreparationWait) -> Void
+    ) async throws {
         for attempt in 0..<12 {
-            try boundary.checkConditions()
+            try check()
             if try unit.focus() == .target {
-                evidence.recordWait(.satisfied)
+                onWait(.satisfied)
                 return
             }
             if attempt < 11 { try await Task.sleep(for: .milliseconds(25)) }
         }
-        evidence.recordWait(.exhausted)
+        onWait(.exhausted)
         throw NativePreparationUnavailable(
             description: "the exact document context remains unconfirmed; AXPress was not sent")
     }

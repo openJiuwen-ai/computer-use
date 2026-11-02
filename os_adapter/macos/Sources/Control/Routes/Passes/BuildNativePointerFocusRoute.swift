@@ -16,7 +16,9 @@ import ApplicationServices
         let receipt = context.receipt
         let checkBoundary = context.boundary.checkConditions
 
-        guard kind == "prepare_receiver", ["focus", "insert", "replace", "paste"].contains(intentKind) else {
+        guard kind == "prepare_receiver", let intent = NativeKeyboardIntent.Kind(rawValue: intentKind),
+            [.focus, .insert, .replace, .paste].contains(intent)
+        else {
             throw DriverError("pointer focus is preparation only", code: .invalidRequest)
         }
         let selected = try context.access.units.selectedTextUnit(
@@ -30,7 +32,7 @@ import ApplicationServices
                 try op.requireForegroundPreparation(id)
             }
             try await unit.prepare(
-                foreground: foreground, check: checkBoundary, onPreparation: receipt.recordPreparation,
+                intent: intent, foreground: foreground, check: checkBoundary, onPreparation: receipt.recordPreparation,
                 onCleanupUnknown: receipt.recordCleanupUnknown)
             receipt.detail = "Editor pointer focus prepared; no requested text or key was sent."
             receipt.confirmation = "confirmed"

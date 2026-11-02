@@ -112,22 +112,36 @@ enum NativePointerDeliveryPolicy {
     let window: WindowGeometry.WindowMapping
     let nativeWindow: AXUIElement?
     private let observedWindowAttributes: [String: AXRead<CFTypeRef>]?
+    private let capturedImage: NativeCapture.Entry?
     private var target: BackgroundTarget { BackgroundTarget(application) }
 
     init(
         application: NSRunningApplication, window: WindowGeometry.WindowMapping, nativeWindow: AXUIElement? = nil,
-        observedWindowAttributes: [String: AXRead<CFTypeRef>]? = nil
+        observedWindowAttributes: [String: AXRead<CFTypeRef>]? = nil,
+        capturedImage: NativeCapture.Entry? = nil
     ) {
         self.application = application
         self.window = window
         self.nativeWindow = nativeWindow
         self.observedWindowAttributes = observedWindowAttributes
+        self.capturedImage = capturedImage
     }
 
-    init(capture: NativeCapture.Entry) {
+    init(capture: NativeCapture.Input) {
         self.init(
-            application: capture.surface.native?.application ?? capture.surface.owner, window: capture.mapping,
-            nativeWindow: capture.surface.element, observedWindowAttributes: capture.windowAttributes)
+            application: capture.entry.surface.native?.application ?? capture.entry.surface.owner,
+            window: capture.mapping, nativeWindow: capture.entry.surface.element,
+            observedWindowAttributes: capture.entry.windowAttributes, capturedImage: capture.entry)
+    }
+
+    /// QUERY: a new snapshot for an input that has not begun. The retained
+    /// capture's pixel basis and native identity are never changed.
+    func resolvingCaptureTranslation() throws -> Self {
+        guard let capturedImage else { return self }
+        let current = try capturedImage.screen.inputMapping(capturedImage.mapping)
+        return Self(
+            application: application, window: current, nativeWindow: nativeWindow,
+            observedWindowAttributes: observedWindowAttributes, capturedImage: capturedImage)
     }
 
     func foregroundWindow(at point: CGPoint? = nil) -> Bool {
@@ -218,7 +232,8 @@ enum NativePointerDeliveryPolicy {
     ) -> Readiness {
         // The declaration class is gesture-local. Rechecking labels for every
         // down/up would add slow provider RPCs to the event cadence. The real
-        // object/process/window and physical hit remain checked for every event.
+        // object/process/window remain checked throughout. A held capture drag
+        // continues its original receiver instead of repeating initial hit tests.
         let declared = declaredWindow ?? (kind != .scroll ? windowKind : .visualOnly)
         let focus = declared == .keyRequiring ? windowFocus() : .notRequired
         let prepared =
@@ -441,12 +456,26 @@ enum NativePointerDeliveryPolicy {
     }
 
     func point(_ pixel: CGPoint) throws -> CGPoint {
-        guard pixel.x >= 0, pixel.y >= 0, pixel.x < Double(window.width), pixel.y < Double(window.height) else {
-            throw DriverError("pointer coordinates are outside the retained window image", code: .invalidRequest)
+        try NativeCapturedPointerPlan(mapping: window).point(pixel)
+    }
+
+    func prepareCaptured(
+        _ request: NativePointerIntent, foreground: Bool, check: @escaping @MainActor () throws -> Void,
+        onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
+    ) async throws {
+        try check()
+        let current = try resolvingCaptureTranslation()
+        try current.validateParameters(request)
+        let point = try current.point(request.start!)
+        let delivery = try current.resolvedDelivery(nil, at: point, kind: request.kind)
+        let outcome = try await current.prepareWindowContext(
+            foreground: foreground, atNative: point, kind: request.kind, delivery: delivery,
+            check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
+        if outcome == .contextPrepared {
+            let prepared = try resolvingCaptureTranslation()
+            try prepared.requirePointReadiness(
+                atNative: prepared.point(request.start!), kind: request.kind, delivery: delivery)
         }
-        return CGPoint(
-            x: window.frame.minX + pixel.x * window.frame.width / Double(window.width),
-            y: window.frame.minY + pixel.y * window.frame.height / Double(window.height))
     }
 
     func validateParameters(_ request: NativePointerIntent) throws {
@@ -467,9 +496,16 @@ enum NativePointerDeliveryPolicy {
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
         onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
     ) async throws {
-        try validateParameters(request)
-        try await deliver(
-            request, from: point(request.start!), to: request.end.map(point), viewport: window.frame.size, check: check,
+        try check()
+        let current = try resolvingCaptureTranslation()
+        try current.validateParameters(request)
+        func sampleGeometry(_ continuingDrag: Bool) throws -> WindowGeometry.WindowMapping {
+            guard let image = current.capturedImage else { return current.window }
+            return try image.screen.validateInputGeometry(current.window, continuingDrag: continuingDrag)
+        }
+        try await current.deliver(
+            request, from: current.point(request.start!), to: request.end.map(current.point),
+            viewport: current.window.frame.size, check: check, captureGeometry: sampleGeometry,
             onDispatch: onDispatch, onPosted: onPosted, onCleanupUnknown: onCleanupUnknown, delivery: delivery)
     }
 
@@ -477,7 +513,9 @@ enum NativePointerDeliveryPolicy {
     /// resolved Element. Both use this exact event route and paired cleanup.
     func deliver(
         _ request: NativePointerIntent, from start: CGPoint, to end: CGPoint?, viewport: CGSize,
-        check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void, onPosted: () -> Void,
+        check: @escaping @MainActor () throws -> Void,
+        captureGeometry: (@MainActor (Bool) throws -> WindowGeometry.WindowMapping)? = nil,
+        onDispatch: () throws -> Void, onPosted: () -> Void,
         onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
     ) async throws {
         try check()
@@ -493,6 +531,10 @@ enum NativePointerDeliveryPolicy {
         // to move the user's pointer. Explicit desktop delivery remains global.
         let source = try Input.source()
         let global = selected == .systemPointer
+        let capturedDrag = capturedImage != nil && request.kind == .drag
+        // Only event addressing follows the live window origin. The sequence
+        // below was built from the one frozen screen start/end and viewport.
+        var eventWindow = window
         if !global { try BackgroundEvents.requirePointerRoute(window: window) }
         guard let process = NativeProcessIdentity.read(window.pid) else {
             throw DriverError("pointer recipient disappeared", code: .staleTarget)
@@ -514,7 +556,7 @@ enum NativePointerDeliveryPolicy {
         }
         func post(_ event: CGEvent, point: CGPoint) {
             AgentPointer.current?.move(
-                to: point, window: window,
+                to: point, window: eventWindow,
                 pulse: request.kind == .click
                     && [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type), count: request.count,
                 dragging: request.kind == .drag ? event.type != .leftMouseUp : nil)
@@ -526,7 +568,7 @@ enum NativePointerDeliveryPolicy {
                 event.post(tap: .cghidEventTap)
                 activity?.returned()
             } else {
-                BackgroundEvents.post(event, window: window, point: point, clickGroup: sequence.group)
+                BackgroundEvents.post(event, window: eventWindow, point: point, clickGroup: sequence.group)
             }
         }
         func validate(_ point: CGPoint, held: Bool) throws {
@@ -535,9 +577,17 @@ enum NativePointerDeliveryPolicy {
             guard NativeProcessIdentity.read(window.pid) == process else {
                 throw DriverError("pointer recipient changed", code: .staleTarget)
             }
+            let continuingDrag = capturedDrag && held
+            if let captureGeometry { eventWindow = try captureGeometry(continuingDrag) }
             let button: CGMouseButton =
                 request.button == "right" ? .right : request.button == "middle" ? .center : .left
             try BackgroundTarget.validateReleasedInput(allowing: global && held ? button : nil)
+            if continuingDrag {
+                // The original down fixed this drag's receiving window. Scope,
+                // document/modal, process and live window identity were checked
+                // above; z-order at a later path point is not a new down target.
+                return
+            }
             if global {
                 guard target.isForeground else {
                     throw DriverError(
@@ -582,9 +632,21 @@ enum NativePointerDeliveryPolicy {
                 }
             }
         }
+        func canRelease() -> Bool {
+            if capturedDrag, !global, let captureGeometry,
+                let current = try? captureGeometry(true)
+            {
+                // The last drag may itself have moved the window. This cleanup
+                // query cannot adopt a different window/owner. If it is gone,
+                // retain the last confirmed local origin and original route;
+                // ordinary scope/readiness failures must not strand the up.
+                eventWindow = current
+            }
+            return global || NativeProcessIdentity.read(window.pid) == process
+        }
         try await sequence.deliver(
             entry: entry, check: validate, post: post,
-            canRelease: { global || NativeProcessIdentity.read(window.pid) == process }, skipped: onCleanupUnknown,
+            canRelease: canRelease, skipped: onCleanupUnknown,
             onDispatch: onDispatch, onPosted: onPosted)
     }
 }

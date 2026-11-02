@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.write.routes.policy import refuse
@@ -15,16 +14,7 @@ from computer_use.native.semantics import action_for_intent
 from computer_use.protocol.execution import unit_contracts
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from computer_use.native.contracts import Facts, HostPolicy, Intent, Primitive
-
-
-_DATETIME_LITERAL = re.compile(
-    r"(?:[0-9]{1,4}([/.-])[0-9]{1,2}\1[0-9]{1,4}"
-    r"(?: [0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)?"
-    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"
-)
 
 
 def _element_intent(request: SelectionRequest, kind: str, *, platform: str | None = None) -> bool:
@@ -43,25 +33,6 @@ def _physical_click_required(primitive: Primitive) -> bool:
         and primitive.click is not None
         and primitive.click.admission in ("ready", "preparationRequired")
         and primitive.click.preference_profile == "physicalRequired"
-    )
-
-
-def _contextual_replacement(request: SelectionRequest, candidates: Sequence[Primitive]) -> bool:
-    """Keep editor callbacks and segmented-date semantics on the offered keyboard route."""
-    if not _element_intent(request, "replace", platform="windows"):
-        return False
-    facts = request.facts
-    if facts.native_role == "ControlType.ComboBox":
-        has_editor = facts.input.editor_owner == cast("Binding", facts.binding).node and facts.input.editor is not None
-        if not has_editor and not any(p.unit == "key_sequence" and "selection" in p.pending for p in candidates):
-            return False
-    elif facts.native_role == "ControlType.Spinner":
-        if not _DATETIME_LITERAL.fullmatch(request.intent.parameters.get("text", "")):
-            return False
-    else:
-        return False
-    return any(
-        p.unit == "key_sequence" and p.supported == Knowledge.YES and "enabled" not in p.pending for p in candidates
     )
 
 
@@ -152,12 +123,6 @@ def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     if intent.kind == "paste":
         candidates = [p for p in candidates if p.unit in ("clipboard_paste", "prepare_receiver")]
     if intent.kind == "key":
-        candidates = [p for p in candidates if p.unit == "key_sequence"]
-    if _contextual_replacement(request, candidates):
-        # A composite editor or selectable date/time spinner can drive normal
-        # editing semantics, including segmented dates whose Value setter
-        # accepts a string without applying it. Choose before any mutation;
-        # never replay an object replacement through keys after dispatch.
         candidates = [p for p in candidates if p.unit == "key_sequence"]
     return CandidateSet(request, tuple(candidates))
 

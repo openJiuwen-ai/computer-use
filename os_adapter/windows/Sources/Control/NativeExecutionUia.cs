@@ -236,6 +236,8 @@ namespace ComputerUse.Windows
         }
     }
     internal sealed partial class NativeUiaObjects : INativeObjectProvider,
+                                                     INativeExactActionObjectProvider,
+                                                     INativeValueReplacementObjectProvider,
                                                      INativeClickObjectProvider,
                                                      INativeExpansionObjectProvider
     {
@@ -303,6 +305,55 @@ namespace ComputerUse.Windows
         public NativeObjectState Read(Dictionary<string, object> target, string[] within, Request r)
         {
             return ReadState(target, within, r, false);
+        }
+
+        public NativeObjectState ReadAction(Dictionary<string, object> target, string[] within, string action,
+                                           Request r)
+        {
+            var window = store.Validate(target, r);
+            if (window == null || target["node"] == null)
+                throw new Failure("invalid_request", "object input needs an observed native element");
+            var element = store.Node((string)target["node"], (string)target["surface"], r).Element;
+            return NativeExactActionObservation.Read(
+                element, action,
+                () => NativeUiaBoundary.Property(element, AutomationElement.IsEnabledProperty, r) as bool?,
+                () =>
+                {
+                    AutomationPattern type;
+                    object pattern;
+                    return NativeUiaActions.Patterns.TryGetValue(action, out type) &&
+                           element.TryGetCurrentPattern(type, out pattern);
+                },
+                () => boundary.Validate(target, within, r), r);
+        }
+
+        public NativeObjectState ReadValueReplacement(Dictionary<string, object> target, string[] within, Request r)
+        {
+            var window = store.Validate(target, r);
+            if (window == null || target["node"] == null)
+                throw new Failure("invalid_request", "object replacement needs an observed native element");
+            var element = store.Node((string)target["node"], (string)target["surface"], r).Element;
+            var state = new NativeObjectState {
+                Native = element,
+                Enabled = NativeObjectValueObservation.Property(
+                    () => NativeUiaBoundary.Property(element, AutomationElement.IsEnabledProperty, r), r) as bool?
+            };
+            object raw = null;
+            bool? available = NativeObjectValueObservation.Property(
+                () => element.TryGetCurrentPattern(ValuePattern.Pattern, out raw), r) as bool?;
+            state.Replaceable = available == false ? (bool?)false : null;
+            if (available == true)
+            {
+                var value = (UIA.IUIAutomationValuePattern)raw;
+                NativeObjectValueObservation.Read(
+                    state, () => value.CurrentIsReadOnly != 0,
+                    () => NativeUiaBoundary.Property(element, AutomationElement.IsPasswordProperty, r),
+                    () => value.CurrentValue, r);
+            }
+            // Capability and optional-value getters may execute provider code.
+            // They cannot renew or replace the retained object/window/scope.
+            boundary.Validate(target, within, r);
+            return state;
         }
 
         public NativeObjectState ReadClick(Dictionary<string, object> target, string[] within, Request r)

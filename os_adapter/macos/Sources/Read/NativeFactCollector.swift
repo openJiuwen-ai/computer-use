@@ -87,7 +87,7 @@ import ApplicationServices
             registry.invalidate { $0.scope == scope && CFEqual($0.element, element) }
             throw DriverError("native node no longer exists", code: .staleTarget)
         }
-        let identity = ElementIdentity(facts: read.value ?? .init(), roleHint: previous?.role)
+        let identity = ElementIdentity(facts: read.value ?? .init())
         let role = identity.attributes["AXRole"] ?? ""
         let provider = inspection.providerFacts(element, app: app)
         var target = Target(

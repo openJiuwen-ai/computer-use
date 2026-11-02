@@ -100,7 +100,7 @@ import ApplicationServices
                     routeFamily: "macos.hid.desktop.v1", delivery: .systemPointer, admission: .ready, reason: nil,
                     preparationOptions: []))
         } else if binding.wire["capture"] is String {
-            let pointer = NativePointerUnit(capture: try access.captures.input(binding.wire).entry)
+            let pointer = NativePointerUnit(capture: try access.captures.input(binding.wire))
             let request = try NativePointerIntent(
                 unit: "pointer_sequence", kind: "click", parameters: op.request.parameters, foreground: false)
             try pointer.validateParameters(request)
@@ -125,17 +125,23 @@ import ApplicationServices
             if plan.actuator == nil {
                 for action in facts.actions ?? [] {
                     let isMenu = applicationRoot
-                    // NSMenu can expose a stale disabled bit until its retained
-                    // document path is prepared. The menu unit owns that refresh.
-                    let supported = (isMenu || facts.enabled != false) && (!menu || isMenu)
                     let family = (isMenu ? "macos.menuAction." : "macos.axAction.") + action.name
                     let readiness =
                         try isMenu
                         ? access.units.menuUnit(binding.wire, within: plan.within).readiness(enabled: enabled)
                         : NativeReadiness()
-                    let documentPreparation =
-                        try isMenu ? NativeActionDocumentPolicy.Preparation() : facts.documentPreparation(action.name)
-                    let documentRequired = documentPreparation.required
+                    let actionUnit = NativeInputUnit.action(action.name, action.description)
+                    let document = try isMenu ? nil : declarations.actionDocument(for: actionUnit, facts: facts)
+                    let documentRequired: Bool
+                    if let document, document.selectionRequired {
+                        documentRequired = try document.observe() != .target
+                    } else {
+                        documentRequired = false
+                    }
+                    // Menu validation and ordinary controls can depend on the
+                    // selected document. Admit only that independent preparation;
+                    // the addressed action still checks fresh enabled at dispatch.
+                    let supported = (isMenu || documentRequired || facts.enabled != false) && (!menu || isMenu)
                     let offer = NativeClickContract(
                         routeFamily: family, delivery: .objectAction,
                         admission: !supported
@@ -143,15 +149,16 @@ import ApplicationServices
                             : (isMenu && !readiness.ready) || documentRequired ? .preparationRequired : .ready,
                         reason: supported
                             ? nil : "The selected native action is disabled or unavailable in this scope.",
-                        preparationOptions: documentPreparation.foregroundOnly
-                            ? ["foreground"] : isMenu || documentRequired ? ["background", "foreground"] : [],
-                        backgroundFamily: !documentPreparation.foregroundOnly && (isMenu || documentRequired)
-                            ? family : nil, backgroundUnavailable: documentPreparation.foregroundOnly,
-                        documentForeground: isMenu ? .notRequired : facts.documentForeground(action.name))
+                        preparationOptions: isMenu || documentRequired ? ["background", "foreground"] : [],
+                        backgroundFamily: isMenu || documentRequired ? family : nil)
                     declarations.declareClick(
                         isMenu
                             ? .menuAction(action.name, action.description) : .action(action.name, action.description),
-                        offer: NativePopupClickPolicy.actionOffer(offer, requiresPointer: popupChoice))
+                        offer: NativePopupClickPolicy.actionOffer(
+                            NativeToggleClickPolicy.actionOffer(
+                                offer, action: action.name, stateOnlyPress: facts.stateOnlyPress),
+                            requiresPointer: popupChoice),
+                        actionDocument: document)
                 }
             }
             if !applicationRoot && !menu {

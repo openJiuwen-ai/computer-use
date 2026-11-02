@@ -16,7 +16,8 @@ namespace ComputerUse.Windows
 
     internal interface INativeScrollProvider
     {
-        NativeScrollState Read(Dictionary<string, object> target, string[] within, string direction, Request request);
+        NativeScrollState Read(Dictionary<string, object> target, string[] within, string direction,
+                               bool needsPosition, Request request);
         Action Prepare(NativeScrollState state, string direction, double pages, Request request);
     }
 
@@ -61,9 +62,10 @@ namespace ComputerUse.Windows
             if (target["node"] == null || target["capture"] != null)
                 throw new Failure("invalid_request", "native scrolling needs an observed scrolling element");
             var p = Wire.Object(operation.Intent["parameters"]);
-            var state = provider.Read(target, within, (string)p["direction"], r);
+            bool needsPosition = Convert.ToDouble(p["pages"]) % 1 != 0;
+            var state = provider.Read(target, within, (string)p["direction"], needsPosition, r);
             bool available = state.Scrollable == true;
-            if (available && Convert.ToDouble(p["pages"]) % 1 != 0)
+            if (available && needsPosition)
             {
                 try
                 {
@@ -135,13 +137,16 @@ namespace ComputerUse.Windows
                 remaining = Convert.ToDouble(p["pages"]);
                 while (remaining > 0)
                 {
-                    var state = provider.Read(target, contract.Within, direction, r);
-                    Check(state, contract);
                     double amount = Math.Min(1, remaining);
+                    bool needsPosition = amount != 1;
+                    var state = provider.Read(target, contract.Within, direction, needsPosition, r);
+                    Check(state, contract);
                     var mutate = provider.Prepare(state, direction, amount, r);
                     // A pattern getter can execute provider code. Recheck the
                     // exact target/scope before every page, including page two.
-                    Check(provider.Read(target, contract.Within, direction, r), contract);
+                    // This final guard consumes capability/boundary facts, not
+                    // position metrics already consumed by the prepared recipe.
+                    Check(provider.Read(target, contract.Within, direction, false, r), contract);
                     r.Sending();
                     operation.Dispatched = true;
                     result["dispatch"] = "unknown";

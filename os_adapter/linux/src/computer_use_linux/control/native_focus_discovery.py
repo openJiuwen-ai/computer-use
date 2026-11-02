@@ -22,6 +22,7 @@ class NativeFocusConflict(Failure):
 
 class NativeFocusDiscovery:
     SEARCH_NODES = 1024
+    _TEXT_RECEIVER_ROLES = frozenset(("entry", "text", "password text"))
 
     def __init__(self, ax, root, ctx):
         self.ax, self.root, self.ctx = ax, root, ctx
@@ -60,6 +61,38 @@ class NativeFocusDiscovery:
 
     def is_focused(self, obj):
         return self._states(obj).contains(self.ax.atspi.StateType.FOCUSED)
+
+    def text_receiver_terminal(self, obj):
+        """Recognize the focused text control itself, not a focus container.
+
+        AT-SPI FOCUSED identifies the keyboard receiver and EDITABLE describes
+        this object's contents. Its ordinary text/annotation descendants are
+        not a prerequisite for capturing that receiver. Document/composite
+        roles and MANAGES_DESCENDANTS scopes still require refinement; an
+        active descendant is not interchangeable with direct keyboard focus.
+        """
+        try:
+            if self._call("get_role_name", obj) not in self._TEXT_RECEIVER_ROLES:
+                return False
+            interfaces = self._call("get_interfaces", obj)
+            if not isinstance(interfaces, (list, tuple)) or not any(
+                interface in interfaces for interface in ("Text", "EditableText")
+            ):
+                return False
+            states = self._states(obj)
+        except self.ax.glib.Error:
+            # Missing optional endpoint evidence retains the bounded discovery
+            # route; it never grants a receiver or suppresses request expiry.
+            self.ctx.check()
+            return False
+        flags = self.ax.atspi.StateType
+        read_only = getattr(flags, "READ_ONLY", None)
+        return (
+            states.contains(flags.FOCUSED)
+            and states.contains(flags.EDITABLE)
+            and not states.contains(flags.MANAGES_DESCENDANTS)
+            and (read_only is None or not states.contains(read_only))
+        )
 
     def _path(self, obj):
         root_key = self._key(self.root)
@@ -191,7 +224,8 @@ class NativeFocusDiscovery:
                     if terminal is not None and terminal(obj):
                         # A query may have enough evidence at this focused
                         # object. Its descendants are not completeness gates.
-                        # Continuous-input callers retain the default search.
+                        # Retain every already known focused candidate when
+                        # checking uniqueness, including descendant editors.
                         return self._unique(candidates)
                     if self.source == "tree" and key not in narrowed:
                         # Find the focused descendant as screen readers do,

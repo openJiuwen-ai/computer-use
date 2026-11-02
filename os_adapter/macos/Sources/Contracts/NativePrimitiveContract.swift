@@ -12,4 +12,7 @@ struct NativePrimitiveContract {
     let basis: [NativeInspectQuery.Dependency]
     let unit: NativeInputUnit
     var click: NativeClickContract? = nil
+    /// Once another document is known, a later unavailable focus read cannot
+    /// erase the original window's responder-context requirement.
+    var actionDocument: NativeActionDocumentContract? = nil
 }

@@ -55,7 +55,7 @@ import ApplicationServices
                 else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
                 target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))
             } else if capture {
-                let unit = NativePointerUnit(capture: try access.captures.input(command.target).entry)
+                let unit = NativePointerUnit(capture: try access.captures.input(command.target))
                 try unit.validateParameters(request)
                 target = .captured(unit)
             } else {
@@ -81,13 +81,18 @@ import ApplicationServices
             step: step)
         if case .action(let node, let name, _) = target, name == kAXPressAction {
             let facts = try access.objects.nativeActionFacts(node)
-            guard !offer.documentForegroundRequired || facts.document != nil else {
-                throw NativePreparationUnavailable(
-                    description: "the original Web action's exact document is unavailable; AXPress was not sent")
-            }
-            plan.document = facts.document
-            plan.documentPreparation = try facts.documentPreparation(
-                name, retainedForegroundRequirement: offer.documentForegroundRequired)
+            let documentScope = NativeActionDocumentContexts.Scope(
+                node: node, surface: try string(resolved.binding.wire["surface"], label: "surface"),
+                within: contract.within, actuator: contract.actuator, receiver: contract.receiver)
+            plan.documentScope = documentScope
+            plan.actionDocument =
+                contract.actionDocument ?? op.actionDocuments.context(documentScope, observed: facts.document)
+            try plan.actionDocument?.observe()
+            plan.document = plan.actionDocument?.unit ?? facts.document
+            plan.documentPreparation =
+                try plan.actionDocument.map { .init(windowSelectionRequired: $0.selectionRequired) }
+                ?? facts.documentPreparation(name)
+            plan.actionContext = try access.units.actionContextUnit(command.target, action: name)
         }
         return plan
     }
