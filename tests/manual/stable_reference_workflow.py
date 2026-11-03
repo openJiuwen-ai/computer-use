@@ -220,9 +220,10 @@ async def verify(folder, fixture, helper, bundle, options):
             case["ax_changed"] = await probe.sample()
             case.update(before=before, changed=changed)
             if reread:
-                observation = await asyncio.to_thread(app.read, view="tree")
+                observation = await asyncio.to_thread(app.read, view="tree", full=True)
                 (folder / (name + "-intermediate.txt")).write_text(observation.text)
                 case["ax_after_sdk_read"] = await probe.sample()
+                case["ref_after_read"] = target_ref(observation.text)
             outcome = await observe_result(lambda: (app.element(ref) if use_ref else held).click())
             after = await state(folder)
             case.update(outcome=outcome, after=after)
@@ -234,7 +235,12 @@ async def verify(folder, fixture, helper, bundle, options):
                     and after["callbackGenerations"][-1] == before["generation"]
                     and case["ax_changed"]["sameButton"] is True
                     and case["ax_changed"]["originalButton"]["AXRole"]["status"] == 0
+                    and (not reread or case["ref_after_read"] == ref)
                 )
+                if mutation == "state":
+                    case["passed"] &= all(
+                        changed[key] != before[key] for key in ("buttonTitle", "buttonFrame", "windowFrame")
+                    )
             else:
                 error = outcome.get("error", {})
                 case["passed"] = (
@@ -249,6 +255,55 @@ async def verify(folder, fixture, helper, bundle, options):
         finally:
             await asyncio.to_thread(computer.close)
             computer = None
+            if mutation == "state":
+                await command(folder, "reset-state")
+
+    async def temporarily_disabled_case():
+        """A readiness refusal must not destroy a handle that becomes ready again."""
+        nonlocal computer
+        computer = new_computer()
+        case = {"name": "disabled-then-enabled-without-reread", "passed": False}
+        report["cases"].append(case)
+        try:
+            app = computer.app(bundle)
+            first = await asyncio.to_thread(app.read, view="tree", full=True)
+            ref = target_ref(first.text)
+            held = await asyncio.to_thread(app.element, ref)
+            case["ax_before"] = await probe.sample(capture=True)
+            before = await state(folder)
+            disabled = await command(folder, "disable")
+            case["ax_disabled"] = await probe.sample()
+            refused = await observe_result(held.click)
+            after_refusal = await state(folder)
+            enabled = await command(folder, "enable")
+            case["ax_enabled"] = await probe.sample()
+            # Reuse the original public object directly: no lookup or explicit
+            # read can hide an erroneously retired native action identity.
+            recovered = await observe_result(held.click)
+            after = await state(folder)
+            case.update(
+                before=before, disabled=disabled, refused=refused, after_refusal=after_refusal,
+                enabled=enabled, recovered=recovered, after=after,
+            )
+            error = refused.get("error", {})
+            case["passed"] = (
+                disabled["buttonEnabled"] is False
+                and enabled["buttonEnabled"] is True
+                and error.get("effect") == "none"
+                and error.get("code") != "stale_target"
+                and after_refusal["clicks"] == before["clicks"]
+                and "receipt" in recovered
+                and after["clicks"] == before["clicks"] + 1
+                and after["callbackGenerations"][-1] == before["generation"]
+                and case["ax_disabled"]["sameButton"] is True
+                and case["ax_enabled"]["sameButton"] is True
+            )
+        except (AssertionError, ComputerUseError, RuntimeError, ValueError) as error:
+            case["exception"] = repr(error)
+        finally:
+            await asyncio.to_thread(computer.close)
+            computer = None
+            await command(folder, "reset-state")
 
     try:
         assert Path(computer_use.__file__).resolve().is_relative_to(ROOT), computer_use.__file__
@@ -268,6 +323,9 @@ async def verify(folder, fixture, helper, bundle, options):
         await sdk_case("layout-metadata-no-read", "metadata")
         await sdk_case("layout-replaced-no-read", "rewrap", use_ref=True)
         await sdk_case("layout-replaced-after-read", "rewrap", reread=True)
+        await sdk_case("label-and-geometry-no-read", "state", use_ref=True)
+        await sdk_case("label-and-geometry-after-read", "state", reread=True)
+        await temporarily_disabled_case()
         await sdk_case("physical-reattachment-invalidates-ax", "physical-reattach", should_survive=False)
         await sdk_case("element-removed", "replace-button", should_survive=False)
         await sdk_case("window-reopened", "reopen-window", should_survive=False)

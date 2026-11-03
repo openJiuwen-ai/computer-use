@@ -216,7 +216,9 @@ class InstanceState:
     def retire(self, identity: WindowIdentity) -> None:
         """Consume explicit fixed-window invalidation without guessing from errors."""
         self.evidence[identity] = WindowEvidence(identity, Knowledge.NO, WindowLifetime.RETIRED)
-        self.members.pop(identity.window, None)
+        current = self.members.get(identity.window)
+        if current is not None and WindowIdentity.of(current) == identity:
+            self.members.pop(identity.window, None)
         self.release_retired_content({identity})
 
     def release_retired_content(self, identities: set[WindowIdentity]) -> None:

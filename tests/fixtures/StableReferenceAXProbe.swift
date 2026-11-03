@@ -30,8 +30,7 @@ import Foundation
             if seen.contains(where: { CFEqual($0, node) }) { continue }
             seen.append(node)
             if string(node, kAXRoleAttribute) == kAXButtonRole,
-               string(node, kAXTitleAttribute) == "Retained button"
-                   || string(node, kAXDescriptionAttribute) == "Retained button" { return node }
+               string(node, kAXIdentifierAttribute) == "stable-button" { return node }
             queue += elements(node, kAXChildrenAttribute)
         }
         return nil
@@ -51,9 +50,11 @@ import Foundation
     static func facts(_ element: AXUIElement?) -> [String: Any] {
         guard let element else { return ["available": false] }
         var result: [String: Any] = ["available": true, "cfHash": CFHash(element)]
-        for key in [kAXRoleAttribute, kAXIdentifierAttribute, kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute] {
+        for key in [kAXRoleAttribute, kAXIdentifierAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
+                    kAXValueAttribute, kAXEnabledAttribute] {
             let (status, raw) = read(element, key)
-            result[key] = ["status": status.rawValue, "value": raw as? String ?? NSNull()] as [String: Any]
+            result[key] = ["status": status.rawValue, "value": (raw as? String) as Any? ??
+                          (raw as? NSNumber) as Any? ?? NSNull()] as [String: Any]
         }
         return result
     }

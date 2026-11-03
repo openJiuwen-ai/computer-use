@@ -34,7 +34,7 @@ import ApplicationServices
         return (identity, identity != nil)
     }
 
-    func validateTargetProvider(_ target: Target) throws {
+    private func validateTargetProvider(_ target: Target) throws {
         var pid: pid_t = 0
         let status = AXUIElementGetPid(target.element, &pid)
         guard status == .success else {
@@ -95,7 +95,15 @@ import ApplicationServices
     func validateTargetIdentity(_ target: Target) throws {
         let metric = RequestDiagnostics.metrics?.start(.targetValidation)
         defer { metric?.end() }
-        try validateTargetProvider(target)
+        do {
+            try validateTargetProvider(target)
+        } catch let error as DriverError where error.code == .staleTarget {
+            // A confirmed provider/leaf lifetime conflict has the same one-way
+            // retirement semantics as an identity-field conflict below.
+            // Incomplete provider evidence deliberately leaves the handle live.
+            registry.invalidate { $0.scope == target.scope && CFEqual($0.element, target.element) }
+            throw error
+        }
         func check(_ element: AXUIElement, _ identity: ElementIdentity, subject: String, isTarget: Bool)
             -> (state: ElementIdentity.Check, detail: String)
         {
