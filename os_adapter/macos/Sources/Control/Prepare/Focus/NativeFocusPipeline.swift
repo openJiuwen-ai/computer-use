@@ -35,7 +35,7 @@ import ApplicationServices
                 }, applicationContext: PrepareFocusApplicationContextPass.run, sample: SampleFocusStatePass.run,
                 notify: PrepareSyntheticApplicationPass.run, selectWindow: PrepareTargetWindowPass.run,
                 settle: { _ in try await Task.sleep(for: .milliseconds(30)) }, confirm: ConfirmFocusPreparationPass.run,
-                finishPreparation: { _ in await NativeBackgroundPreparationScope.current?.finish() ?? false })
+                finishPreparation: { _ in try await NativeBackgroundPreparationScope.current?.finish() ?? false })
           )
         }
     }
@@ -56,7 +56,7 @@ import ApplicationServices
         if plan.notify || plan.selectWindow { try await stages.settle(request) }
         // Foreground restitution belongs before confirmation/input. Its real
         // deactivation may change the key/main receiver and invalidate receipts.
-        let restored = await stages.finishPreparation(request)
+        let restored = try await stages.finishPreparation(request)
         try stages.confirm(request)
         return NativeFocusOutcome(
             initial: state, final: observeOutcome || restored ? try stages.sample(request) : state, waitEnd: .notNeeded)

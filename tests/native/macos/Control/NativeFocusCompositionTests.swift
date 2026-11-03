@@ -10,6 +10,7 @@ import ApplicationServices
         try await stoppedScopeDoesNotPrepareWindow()
         try await nonKeyPanelAndCallbacks()
         try await restoredStatePrecedesConfirmation()
+        try await unsettledRestorationStopsBeforeConfirmation()
         print("PASS application activity precedes fresh native window planning without new readiness gates")
     }
 
@@ -21,6 +22,18 @@ import ApplicationServices
         precondition(probe.trace.last == "sample", "restoration requires fresh final facts even without verbose evidence")
         precondition(outcome.final.focusedWindow == 9 && !outcome.final.foreground)
         precondition(probe.samples == 2)
+    }
+
+    @MainActor static func unsettledRestorationStopsBeforeConfirmation() async throws {
+        let probe = FocusCompositionProbe(mode: .restoreOther)
+        probe.restorationUnsettled = true
+        do {
+            _ = try await probe.run()
+            preconditionFailure("unsettled foreground return must not publish ready preparation")
+        } catch let failure as DriverError {
+            precondition(failure.code == .executionUnknown && failure.effect == .possible)
+        }
+        precondition(probe.confirms == 0)
     }
 
     @MainActor static func activityPrecedesWindowPlan() async throws {
@@ -152,6 +165,7 @@ import ApplicationServices
     var failAfterPost = false
     var reportCleanupUnknown = false
     var returnForeground = false
+    var restorationUnsettled = false
     var trace = [String](), legacy = [String](), effects = [String]()
     var effectWindows = [UInt32?](), forwardedNeedsKey = [Bool](), rememberedNeedsKey = [Bool]()
     var applicationCalls = 0, posts = 0, samples = 0, notifications = 0, selections = 0
@@ -289,6 +303,7 @@ import ApplicationServices
                 self.rememberedNeedsKey.append($0.needsKeyWindow)
                 if self.reportCleanupUnknown { $0.onCleanupUnknown() }
             }, finishPreparation: { _ in
+                try NativeBackgroundPreparationScope.requireSettledActivation(self.restorationUnsettled)
                 guard self.returnForeground else { return false }
                 self.trace.append("restore")
                 self.foregroundPID = self.pid + 1

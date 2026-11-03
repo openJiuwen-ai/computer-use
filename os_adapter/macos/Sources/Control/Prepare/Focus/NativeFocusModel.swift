@@ -44,5 +44,5 @@ struct NativeFocusPlan {
     let selectWindow: @MainActor (NativeFocusRequest) throws -> Void
     let settle: @MainActor (NativeFocusRequest) async throws -> Void
     let confirm: @MainActor (NativeFocusRequest) throws -> Void
-    var finishPreparation: @MainActor (NativeFocusRequest) async -> Bool = { _ in false }
+    var finishPreparation: @MainActor (NativeFocusRequest) async throws -> Bool = { _ in false }
 }

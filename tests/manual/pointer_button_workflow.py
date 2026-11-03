@@ -90,12 +90,27 @@ async def verify(folder, selected, driver_option, *, weak_ax=False):
         assert initial["weakAX"] == weak_ax
         report["initial"] = initial
         app = computer.app(bundle)
+        await snapshot(app, folder, "app-directory")
+        # App observes all its windows and need not have a selected root. Bind
+        # the disposable fixture's published document once; its sharing panel
+        # and current global focus cannot choose the coordinate destination.
+        directory = app._instance.directory
+        originals = [
+            item for item in directory["surfaces"]
+            if item["nativeWindow"] and item["title"] == "Pointer button probe"
+        ]
+        assert len(originals) == 1, directory
+        original = originals[0]
+        refs = [int(ref) for ref, key in app._instance.windows.items() if key == original["window"]]
+        assert len(refs) == 1, (original, app._instance.windows)
+        window = app.window(refs[0])
+        report["selected_window"] = {"ref": refs[0], "directory_entry": original}
         for case in selected:
-            await snapshot(app, folder, f"{case}-before")
+            await snapshot(window, folder, f"{case}-before")
             before = await state(folder)
             assert not any(before["heldButtons"].values()), before["heldButtons"]
-            image = app._image
-            root = computer._controller.state(app).selection.root
+            image = window._image
+            root = computer._controller.state(window).selection.root
             pieces = [p for p in image.pieces if p.image.target.surface == root.surface]
             assert len(pieces) == 1, "Expected one original root screenshot piece"
             piece = pieces[0]
@@ -111,7 +126,7 @@ async def verify(folder, selected, driver_option, *, weak_ax=False):
             start, started = len(events), time.monotonic()
             receipt, caught = None, None
             try:
-                receipt = await asyncio.to_thread(app.click, ClickOption(button=button, count=count), at=point)
+                receipt = await asyncio.to_thread(window.click, ClickOption(button=button, count=count), at=point)
                 row["receipt"] = dict(receipt)
             except ComputerUseError as error:
                 caught = error
@@ -187,7 +202,7 @@ async def verify(folder, selected, driver_option, *, weak_ax=False):
             assert any(e.stage == "input" for e in mouse), impact
             assert all(attempt.cleanup == "complete" for attempt in impact.attempts), impact
             row["foreground_changed"] = after["frontmostPID"] != before["frontmostPID"]
-            await snapshot(app, folder, f"{case}-after")
+            await snapshot(window, folder, f"{case}-after")
             row["passed"] = True
         report["passed"] = True
     except BaseException as error:

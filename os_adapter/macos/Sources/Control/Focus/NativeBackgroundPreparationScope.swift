@@ -26,6 +26,7 @@ import ApplicationServices
     private var touched = false
     private var finished = false
     private var restored = false
+    private var activationUnsettled = false
     private let check: @MainActor () throws -> Void
     private let onPreparation: @MainActor (String) -> Void
     private let onCleanupUnknown: @MainActor () -> Void
@@ -75,8 +76,11 @@ import ApplicationServices
             activity: Self.activity(), externalActivation: externalActivation)
     }
 
-    @discardableResult func finish() async -> Bool {
-        guard !finished else { return restored }
+    @discardableResult func finish() async throws -> Bool {
+        if finished {
+            try requireSettledActivation()
+            return restored
+        }
         finished = true
         defer { stopObserving() }
         guard let original, let target else {
@@ -106,10 +110,25 @@ import ApplicationServices
                 // leave a false pending click effect when the user takes over.
                 if receipt.invoked { onPreparation(detail) }
                 return receipt.invoked
-            }, wait: { try await Task.sleep(for: .milliseconds(10)) })
+            }, wait: { try await Task.sleep(for: .milliseconds(25)) },
+            onUnsettled: { self.activationUnsettled = true })
         recordOutcome(outcome)
         restored = outcome == .restored
+        try requireSettledActivation()
         return restored
+    }
+
+    private func requireSettledActivation() throws {
+        try Self.requireSettledActivation(activationUnsettled)
+    }
+
+    static func requireSettledActivation(_ unsettled: Bool) throws {
+        guard !unsettled else {
+            throw DriverError(
+                "foreground return may still be pending; requested input was not sent",
+                code: .executionUnknown, effect: .possible,
+                next: "observe the original target; do not replay an unconfirmed activation")
+        }
     }
 
     private func recordOutcome(_ outcome: Outcome) {
@@ -132,7 +151,7 @@ import ApplicationServices
     static func restore(
         originalPID: pid_t, targetPID: pid_t, touched: Bool, initialActivity: [UInt32],
         sample: () -> State, check: () throws -> Void, activate: () async throws -> Bool,
-        wait: () async throws -> Void
+        wait: () async throws -> Void, onUnsettled: () -> Void = {}
     ) async -> Outcome {
         guard touched, originalPID != targetPID else { return .notNeeded }
         let initial = sample()
@@ -142,27 +161,57 @@ import ApplicationServices
         if initial.foregroundPID == originalPID { return .notNeeded }
         guard initial.foregroundPID != nil else { return .unknown }
         guard ownsForeground(initial, targetPID: targetPID, initialActivity: initialActivity) else { return .ownershipLost }
+        var activationMayBePending = false
+        func finish(_ outcome: Outcome, current: State) -> Outcome {
+            if activationMayBePending && !(current.originalCurrent && current.foregroundPID == originalPID) {
+                onUnsettled()
+            }
+            return outcome
+        }
         do {
             try check()
             guard ownsForeground(sample(), targetPID: targetPID, initialActivity: initialActivity) else {
                 return .ownershipLost
             }
-            guard try await activate() else { return .failed }
-            for attempt in 0..<12 {
+            // From entry until a definite not-invoked result, the asynchronous
+            // helper may have queued activation even if its receipt is lost.
+            activationMayBePending = true
+            do {
+                guard try await activate() else { return .failed }
+            } catch let failure as DriverError where failure.effect == nil
+                && [.inputUnavailable, .staleTarget].contains(failure.code)
+            {
+                activationMayBePending = false
+                return finish(.unknown, current: sample())
+            } catch {
+                // A lost helper receipt does not prove failure or withdrawal.
+                // Give its queued request the same bounded observation as a
+                // returned invocation. Cancellation/deadline is rechecked below.
+            }
+            // Shared check enforces the original request deadline. This local
+            // bound gives an accepted asynchronous request time to settle, but
+            // cannot extend the public call or start a later recovery watcher.
+            for attempt in 0..<40 {
                 try check()
                 let current = sample()
                 NativeInputActivity.current?.recordForegroundObservation(current.foregroundPID)
-                guard current.originalCurrent, current.targetCurrent else { return .unavailable }
-                guard !current.externalActivation, current.activity == initialActivity else { return .ownershipLost }
+                guard current.originalCurrent, current.targetCurrent else { return finish(.unavailable, current: current) }
+                guard !current.externalActivation, current.activity == initialActivity else {
+                    return finish(.ownershipLost, current: current)
+                }
                 if current.foregroundPID == originalPID { return .restored }
-                guard current.foregroundPID == targetPID else { return .ownershipLost }
-                if attempt < 11 { try await wait() }
+                guard current.foregroundPID == targetPID else { return finish(.ownershipLost, current: current) }
+                if attempt < 39 { try await wait() }
             }
-            return .unknown
+            return finish(.unknown, current: sample())
         } catch {
+            // A check after dispatch can fail because the original target was
+            // closed or the task cancelled. Neither withdraws queued activation.
             let current = sample()
-            if current.externalActivation || current.activity != initialActivity { return .ownershipLost }
-            return .unknown
+            if current.externalActivation || current.activity != initialActivity {
+                return finish(.ownershipLost, current: current)
+            }
+            return finish(.unknown, current: current)
         }
     }
 
@@ -178,10 +227,13 @@ import ApplicationServices
         return try await $current.withValue(scope) {
             do {
                 let result = try await body()
-                await scope.finish()
+                try await scope.finish()
                 return result
             } catch {
-                await scope.finish()
+                // Keep a pending restoration's effect classification even if
+                // the original preparation also failed. No requested input has
+                // happened inside this scope.
+                try await scope.finish()
                 throw error
             }
         }
