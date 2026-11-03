@@ -130,8 +130,9 @@ SDK 接口是同步的：每个操作返回结果或抛出异常后，再执行�
 观察目标尚未明确时仍返回窗口选择信息，不以此许可猜选目标。其他平台暂不支持该准备能力。
 
 写入在执行结果之外附带有界的相关观察，可读取 `result.observation`、`result.observation_status`
-和 `result.observation_error`；观察缺失不表示输入没有发送。`effect="partial"` 或 `"possible"`
-的 `ComputerUseError` 在原会话仍可观察时也附带这些字段，原错误与效果保持不变，SDK 不会重放不确定的输入。
+和 `result.observation_error`；观察缺失不表示输入没有发送。目标失效、目标信息暂时无法确认、模态阻挡，
+以及 `effect="partial"` 或 `"possible"` 的 `ComputerUseError`，在原会话仍可观察时也附带这些字段。
+可直接使用错误附带的当前观察决定下一步；原错误与效果保持不变，SDK 不会重放不确定的输入。
 
 #### Python SDK
 
@@ -167,6 +168,13 @@ with Computer() as computer:  # 仍优先选择机制合格的低干扰路线。
 固定 Window 保留自己的观察和图像绑定；已确认的模态弹窗可作为该 Window 已交付的输入上下文。
 `choices` 中的每项是 `WindowInfo`，包含可交给 `computer.window(id)` 的 `id` 和描述性 `title`。
 写后观察可以展示新发现的窗口，不改绑已有 Window、Element 或截图目标。
+
+macOS 的存续元素引用不因无关布局包装变化、局部观察或其他引用的缓存压力而失效；必要的操作条件由 SDK 更新。
+元素真正结束、窗口关闭后重开或真实文档归属改变时，旧引用仍会拒绝输入，并附带可取得的相关观察。
+`app.element(ref)`／`window.element(ref)` 可取回本应用已经发布的引用；构造句柄不声明目标仍存续或已获操作资格。
+实际读取和写入均检查原窗口范围与生命周期，失败写入可在同一次调用中返回当前观察。
+操作身份与历史文字缓存独立：大内容缓存可以回收，最小引用元数据保留至明确退休或会话结束。
+本轮原生引用稳定性改进及真实 SDK／MCP 验收限于 macOS；Windows／Linux 的对应原生实现与验收列为后续工作。
 
 SDK 返回原始截图及对应像素坐标。MCP 交付缩图时，自动输出、`print(obs)` 和 `print(obs.text)` 中的
 桌面尺寸、显示器及窗口矩形同步使用交付图坐标，输入按实际编码尺寸逐轴映射回原图。

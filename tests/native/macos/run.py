@@ -44,6 +44,7 @@ GROUPS = (
     "NativeKeyboardRecipient",
     "NativeWriteStage",
     "NativeElementIdentity",
+    "NativeReferenceLifetime",
 )
 
 

@@ -34,25 +34,25 @@ import ApplicationServices
         return (identity, identity != nil)
     }
 
-    func validateTargetProvider(_ target: Target) throws {
+    private func validateTargetProvider(_ target: Target) throws {
         var pid: pid_t = 0
         let status = AXUIElementGetPid(target.element, &pid)
         guard status == .success else {
             throw DriverError(
-                "element provider identity is unavailable; no input was dispatched",
-                code: status == .invalidUIElement ? .staleTarget : .inputUnavailable)
+                "element provider identity is unavailable (AX status \(status.rawValue)); no input was dispatched",
+                code: status == .invalidUIElement ? .staleTarget : .observationIncomplete)
         }
         if pid == target.application.processIdentifier, target.provider == nil { return }
         guard let provider = target.provider else {
             throw DriverError(
                 "element provider identity cannot be confirmed",
-                code: target.providerKnown ? .staleTarget : .inputUnavailable)
+                code: target.providerKnown ? .staleTarget : .observationIncomplete)
         }
         guard provider.pid == pid else { throw DriverError("element provider changed", code: .staleTarget) }
         guard let current = NativeProcessIdentity.read(pid) else {
             throw DriverError(
                 "element provider lifetime cannot be read",
-                code: NativeProcessIdentity.isGone(pid) ? .staleTarget : .inputUnavailable)
+                code: NativeProcessIdentity.isGone(pid) ? .staleTarget : .observationIncomplete)
         }
         guard current == provider else { throw DriverError("element provider lifetime changed", code: .staleTarget) }
         guard
@@ -65,42 +65,90 @@ import ApplicationServices
                 target.element, pid: target.application.processIdentifier, in: window)
         else {
             throw DriverError(
-                "element provider attachment to its observed window is unavailable", code: .inputUnavailable)
+                "element provider attachment to its observed window is unavailable", code: .observationIncomplete)
         }
         guard CFEqual(current, window) else {
             throw DriverError("element provider moved to another window", code: .staleTarget)
         }
     }
 
+    /// An invalid ancestor proxy does not prove the retained leaf was destroyed.
+    /// Keep the reference while reporting incomplete boundary evidence; a known
+    /// document/record contradiction is different and may retire that binding.
+    nonisolated static func identityCheck(
+        _ identity: ElementIdentity, evidence: AXRead<ElementIdentity.Facts>, isTarget: Bool
+    ) -> (state: ElementIdentity.Check, detail: String) {
+        switch evidence {
+        case .invalid:
+            return (isTarget ? .changed : .unavailable, "AX status \(AXError.invalidUIElement.rawValue)")
+        case .unavailable(let error):
+            return (.unavailable, "AX status \(error.rawValue)")
+        case .unsupported:
+            return (.unavailable, "identity query unsupported")
+        case .value(let facts):
+            let state = identity.check(facts)
+            let fields = state == .changed ? identity.changedFields(in: facts) : identity.unavailableFields(in: facts)
+            return (state, "fields=\(fields.joined(separator: ","))")
+        }
+    }
+
     func validateTargetIdentity(_ target: Target) throws {
         let metric = RequestDiagnostics.metrics?.start(.targetValidation)
         defer { metric?.end() }
-        try validateTargetProvider(target)
-        func check(_ element: AXUIElement, _ identity: ElementIdentity) -> ElementIdentity.Check {
+        do {
+            try validateTargetProvider(target)
+        } catch let error as DriverError where error.code == .staleTarget {
+            // A confirmed provider/leaf lifetime conflict has the same one-way
+            // retirement semantics as an identity-field conflict below.
+            // Incomplete provider evidence deliberately leaves the handle live.
+            registry.invalidate { $0.scope == target.scope && CFEqual($0.element, target.element) }
+            throw error
+        }
+        func check(_ element: AXUIElement, _ identity: ElementIdentity, subject: String, isTarget: Bool)
+            -> (state: ElementIdentity.Check, detail: String)
+        {
             let evidence = AXIdentity.read(element, keys: identity.attributes.keys.sorted())
-            if case .invalid = evidence { return .changed }
-            let result = identity.check(evidence.value ?? .init())
-            if result != .matched {
-                diagnose(
-                    "identity evidence \(result): expected role=\(identity.attributes[kAXRoleAttribute] ?? "unknown")")
+            let result = Self.identityCheck(identity, evidence: evidence, isTarget: isTarget)
+            let detail = "\(subject) role=\(identity.attributes[kAXRoleAttribute] ?? "unknown") \(result.detail)"
+            if result.state != .matched {
+                diagnose(["event": "element_identity_check", "subject": subject,
+                          "state": String(describing: result.state), "scope": target.scope, "detail": detail])
             }
-            return result
+            return (result.state, detail)
         }
         let checks =
-            [check(target.element, target.identity)]
-            + target.context.map { context in context.native.element.map { check($0, context.identity) } ?? .unavailable
+            [check(target.element, target.identity, subject: "element", isTarget: true)]
+            + ApplicationElements.boundaryContext(target.context).enumerated().map { index, context in
+                if context.identity.attributes[kAXRoleAttribute] == kAXWindowRole {
+                    // The input scope checks the original physical window and
+                    // membership. Do not let a dead AXWindow proxy invalidate a
+                    // live leaf. A declared document constraint still applies,
+                    // sampled from the leaf's current window where available.
+                    guard context.identity.attributes[kAXDocumentAttribute] != nil else {
+                        return (.matched, "context[\(index)] window lifetime is checked by the input scope")
+                    }
+                    let current = AXAccess.element(target.element, kAXWindowAttribute) ?? context.native.element
+                    return current.map {
+                        check($0, context.identity, subject: "context[\(index)] current window document", isTarget: false)
+                    } ?? (.unavailable, "context[\(index)] window document cannot be obtained")
+                }
+                return context.native.element.map {
+                    check($0, context.identity, subject: "context[\(index)]", isTarget: false)
+                } ?? (.unavailable, "context[\(index)] has no native reference")
             }
-        if checks.contains(.changed) {
+        if let changed = checks.first(where: { $0.state == .changed }) {
             // Do not revive a handle after a known identity/structural
             // contradiction. Re-observation establishes a new lifetime.
             registry.invalidate { $0.scope == target.scope && CFEqual($0.element, target.element) }
-            throw DriverError("element identity or document context changed; read its window again", code: .staleTarget)
-        }
-        if checks.contains(.unavailable) {
             throw DriverError(
-                "element identity or document context is temporarily unconfirmed; no input was dispatched",
-                code: .inputUnavailable,
-                next: "read the target again; its retained reference has not been rebound or retired")
+                "element identity boundary changed: \(changed.detail); the original reference was retired",
+                code: .staleTarget)
+        }
+        if let unavailable = checks.first(where: { $0.state == .unavailable }) {
+            throw DriverError(
+                "element identity boundary is temporarily unconfirmed: \(unavailable.detail); the reference is retained",
+                code: .observationIncomplete,
+                next: "use the attached observation; the retained target has not been replaced or retired")
         }
     }
 

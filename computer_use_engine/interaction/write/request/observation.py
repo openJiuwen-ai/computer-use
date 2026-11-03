@@ -12,16 +12,18 @@ from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord
-from computer_use.interaction.requests import ExecuteAction
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
-from computer_use.session.interfaces import WindowIdentity
+from computer_use.interaction.requests import ExecuteAction
 from computer_use.interaction.write.request.model import ObservedAction
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
+from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
 
 POSTWRITE_OBSERVATION_MS = 5000
+WRITE_WITH_OBSERVATION_MS = 30000
+TARGET_OBSERVATION_ERRORS = frozenset({"stale_target", "observation_incomplete", "blocked_by_modal"})
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
@@ -47,6 +49,12 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         )
 
     async def _arun(self, request: ExecuteAction, control: Control) -> ObservedAction:
+        # A new read claim must not grant a new deadline after a failed write.
+        # limit() also covers element scope refresh before native admission.
+        with self.controller.port.calls.limit(WRITE_WITH_OBSERVATION_MS):
+            return await self.run_observed(request, control)
+
+    async def run_observed(self, request: ExecuteAction, control: Control) -> ObservedAction:
         session_identity = self.controller.transport.session_identity
         instance = getattr(request.owner, "_instance", None)
         prior = getattr(instance, "directory", None)
@@ -64,7 +72,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         try:
             receipt = await self.body.arun(request, control)
         except ComputerUseError as error:
-            if error.effect not in ("partial", "possible"):
+            if error.effect not in ("partial", "possible") and error.code not in TARGET_OBSERVATION_ERRORS:
                 raise
             # This is still the original exception, not a fabricated successful
             # receipt. Preparation/dispatch evidence and its original cause stay
@@ -78,6 +86,11 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
+            if error.code in TARGET_OBSERVATION_ERRORS and outcome.observation_status in ("available", "partial"):
+                error.next = (
+                    "Use the attached current observation to decide the next action; "
+                    "this command was not replayed and its original target was not rebound."
+                )
             if outcome.observation_error is not None:
                 from computer_use.session.events import action_observation_completed
 

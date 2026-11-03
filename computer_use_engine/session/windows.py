@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Canonical window references and application catalogues for one SDK session."""
@@ -27,8 +26,7 @@ class WindowEntry:
 class WindowReferences:
     """Publish one stable reference per native window lifetime, never per label."""
 
-    def __init__(self, capacity=16384):
-        self.capacity = capacity
+    def __init__(self):
         self._next = 0
         self._entries = OrderedDict()
         self._aliases = {}
@@ -80,13 +78,6 @@ class WindowReferences:
                 self._entries[ref] = entry
             self._entries.move_to_end(ref)
             aliases[str(ref)] = item["window"]
-            while len(self._entries) > self.capacity:
-                expired_ref, expired = self._entries.popitem(last=False)
-                for variant in self._variants.pop(expired_ref).values():
-                    self._aliases.pop(variant.key, None)
-                physical_key = (expired.session, expired.identity.window)
-                if self._physical.get(physical_key) == expired_ref:
-                    self._physical.pop(physical_key, None)
         return aliases
 
     def _retired(self, entry):
@@ -149,4 +140,4 @@ class WindowReferences:
     def choices(self, directory, name=""):
         aliases = self.register_directory(directory, name)
         items = {item["window"]: item for item in directory["surfaces"]}
-        return [FrozenRecord(dict(id=int(ref), title=items[key]["title"])) for ref, key in aliases.items()]
+        return [FrozenRecord({"id": int(ref), "title": items[key]["title"]}) for ref, key in aliases.items()]

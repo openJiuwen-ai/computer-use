@@ -41,36 +41,54 @@ import ApplicationServices
     /// endpoint keeps its separate identity/owning-window checks.
     func readTarget(_ ref: String) throws -> Target {
         guard let target = registry.target(ref) else { throw DriverError("native node expired", code: .staleTarget) }
-        try Self.validateRetainedTarget(target)
+        try validateRetainedTarget(target)
         return target
     }
 
-    static func validateRetainedTarget(_ target: Target) throws {
-        guard target.application.launchDate == target.launched else {
-            throw DriverError("native node expired", code: .staleTarget)
+    nonisolated static func launchDateCheck(expected: Date?, current: Date?) -> ElementIdentity.Check {
+        // Missing historical metadata is not a lifetime constraint. The same
+        // retained application still receives its existing live process checks.
+        guard let expected else { return .matched }
+        guard let current else { return .unavailable }
+        return expected == current ? .matched : .changed
+    }
+
+    private func validateRetainedTarget(_ target: Target) throws {
+        func ended(_ message: String) -> DriverError {
+            registry.invalidate { $0.scope == target.scope && CFEqual($0.element, target.element) }
+            return DriverError(message, code: .staleTarget)
         }
+        switch Self.launchDateCheck(expected: target.launched, current: target.application.launchDate) {
+        case .matched: break
+        case .changed: throw ended("native node application lifetime changed")
+        case .unavailable:
+            throw DriverError(
+                "native node application lifetime metadata is temporarily unconfirmed", code: .observationIncomplete)
+        }
+        // Registration/readiness failures are not necessarily lifetime proof.
+        // Only the concrete leaf/provider contradictions below retire a node.
         try BackgroundTarget(target.application).validate()
         var pid: pid_t = 0
         let status = AXUIElementGetPid(target.element, &pid)
         guard status == .success else {
+            if status == .invalidUIElement { throw ended("native node no longer exists") }
             throw DriverError(
-                "native node provider identity is unavailable",
-                code: status == .invalidUIElement ? .staleTarget : .observationIncomplete)
+                "native node provider identity is unavailable", code: .observationIncomplete)
         }
         if let provider = target.provider {
-            guard pid == provider.pid else { throw DriverError("native node provider changed", code: .staleTarget) }
+            guard pid == provider.pid else { throw ended("native node provider changed") }
             guard let current = NativeProcessIdentity.read(pid) else {
+                if NativeProcessIdentity.isGone(pid) { throw ended("native node provider lifetime ended") }
                 throw DriverError(
-                    "native node provider lifetime is unavailable",
-                    code: NativeProcessIdentity.isGone(pid) ? .staleTarget : .observationIncomplete)
+                    "native node provider lifetime is unavailable", code: .observationIncomplete)
             }
             guard current == provider else {
-                throw DriverError("native node provider lifetime changed", code: .staleTarget)
+                throw ended("native node provider lifetime changed")
             }
         } else if pid != target.application.processIdentifier {
+            if target.providerKnown { throw ended("native node provider changed") }
             throw DriverError(
-                "native node provider was not confirmed for this scope",
-                code: target.providerKnown ? .staleTarget : .observationIncomplete)
+                "native node provider was not confirmed for this scope", code: .observationIncomplete)
         }
     }
 
@@ -95,6 +113,7 @@ import ApplicationServices
             provider: provider.identity, providerKnown: provider.known,
             ancestors: parent.map { $0.ancestors + [$0.element] } ?? [],
             context: parent.map(ApplicationElements.childContext) ?? [])
+        target.contextComplete = parent?.contextComplete ?? (role == kAXWindowRole)
         target.popupOwner = parent?.popupOwner
         if role == kAXListRole, let parent, parent.role == kAXWindowRole,
             parent.identity.attributes[kAXSubroleAttribute] == "AXDialog", let budget = diagnosticBudget,
@@ -161,7 +180,10 @@ import ApplicationServices
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
         advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false
     ) throws -> [String: Any] {
-        let root = try readTarget(ref)
+        var root = try readTarget(ref)
+        // Only the path traversed in this collection is complete. Historical
+        // ancestors on a subtree root do not prove omitted owners disappeared.
+        root.contextComplete = root.role == kAXWindowRole
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 5)
         // Settable is a distinct native query, not an AX attribute name. Keep
@@ -650,7 +672,8 @@ import ApplicationServices
 
     func relation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws -> [String: Any]
     {
-        let root = try readTarget(ref)
+        var root = try readTarget(ref)
+        root.contextComplete = root.role == kAXWindowRole
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 5)
         AXMessaging.configure(root.element)

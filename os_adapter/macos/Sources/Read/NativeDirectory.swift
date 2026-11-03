@@ -44,14 +44,12 @@ import ApplicationServices
     }
     private let windowServices: WindowServices
     private var surfaces = [String: Surface]()
-    private var order = [String]()
     struct ApplicationRoot {
         let owner: NSRunningApplication
         let element: AXUIElement
         let scope: String
     }
     private var applicationRoots = [String: ApplicationRoot]()
-    private var rootOrder = [String]()
     private struct InstallationEntry {
         let name: String
         let identity: NativeInstallation?
@@ -138,9 +136,6 @@ import ApplicationServices
                 let node = try state.applications.registerNativeRoot(menu, app: app, scope: scope)
                 let instance = state.appSelections.get(owner: app, root: nil)
                 applicationRoots[scope] = ApplicationRoot(owner: app, element: menu, scope: scope)
-                rootOrder.removeAll { $0 == scope }
-                rootOrder.append(scope)
-                while rootOrder.count > 1024 { applicationRoots.removeValue(forKey: rootOrder.removeFirst()) }
                 roots.append(["kind": "menuBar", "instance": instance.id, "surface": scope, "node": node])
             case .unsupported, .unavailable(.noValue): break
             default: reasons.append("application menu root could not be read")
@@ -375,7 +370,7 @@ import ApplicationServices
         })
     }
 
-    private func modalPresence(
+    private func nativePresence(
         _ expected: NativeApplicationReader.ModalIdentity.Native, current: [NativeWindows.Window]
     ) -> (presence: NativeApplicationReader.ModalPresence, onScreen: Bool?) {
         if let window = current.first(where: { $0.mapping.id == expected.id }) {
@@ -402,7 +397,7 @@ import ApplicationServices
         var hints: [NativeApplicationReader.ModalHint] = try surfaces.values.filter { $0.owner.isEqual(owner) }.compactMap { surface in
             guard case .retainedModal(let identity)? = surface.queryHint else { return nil }
             try RequestDiagnostics.checkCancellation()
-            let state = identity.native.map { modalPresence($0, current: native) }
+            let state = identity.native.map { nativePresence($0, current: native) }
             return .init(identity: identity, nativePresence: state?.presence, nativeOnScreen: state?.onScreen)
         }
         // A retained CG window can outlive its modal presentation. Query raw
@@ -449,9 +444,26 @@ import ApplicationServices
             surface.queryHint = previous.queryHint
         }
         surfaces[surface.scope] = surface
-        order.removeAll { $0 == surface.scope }
-        order.append(surface.scope)
-        while order.count > 1024 { surfaces.removeValue(forKey: order.removeFirst()) }
+    }
+
+    /// Reuse the exact WindowServer/process lifetime proof used for modal
+    /// hints. A filtered catalogue, hidden window or unknown AX provider cannot
+    /// retire an identity. AX-only unknown surfaces remain until session end.
+    private func releaseEndedScopes(owner: NSRunningApplication, native: [NativeWindows.Window]) {
+        let ended = surfaces.values.filter { surface in
+            if surface.owner.isTerminated && windowServices.isGone(surface.owner.processIdentifier) { return true }
+            guard surface.owner.isEqual(owner), let window = surface.native else { return false }
+            return nativePresence(.init(id: window.mapping.id, process: window.process), current: native).presence == .ended
+        }
+        for surface in ended {
+            state.applications.retireScope(owner: surface.owner, scope: surface.scope)
+            surfaces.removeValue(forKey: surface.scope)
+        }
+        for (scope, root) in applicationRoots
+            where root.owner.isTerminated && windowServices.isGone(root.owner.processIdentifier) {
+            state.applications.retireScope(owner: root.owner, scope: scope)
+            applicationRoots.removeValue(forKey: scope)
+        }
     }
     private func result(_ kind: String, began: Int64, reasons: [String]) -> [String: Any] {
         [
@@ -518,6 +530,9 @@ import ApplicationServices
             ]
         }
         let native = windowServices.listIfAvailable(app)
+        // Exact presence checks preserve identities even when this projection
+        // omitted their windows. No tree traversal is added to this cleanup.
+        releaseEndedScopes(owner: app, native: native ?? [])
         if native == nil {
             reasons.append("WindowServer catalogue unavailable")
             rootDiscoveryComplete = false
