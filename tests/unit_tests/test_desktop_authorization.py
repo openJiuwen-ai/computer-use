@@ -3,7 +3,6 @@
 
 """Full input is available by default without changing low-impact route priority."""
 
-import asyncio
 from dataclasses import replace
 from unittest.mock import Mock
 
@@ -26,12 +25,11 @@ from computer_use_agent.config import AgentConfig
 
 
 def test_sdk_default_allows_global_input_and_preserves_explicit_opt_out():
-    computer = Computer()
-    assert computer._controller.port.policy.allow_global_input is True
-    assert computer._controller.transport.allow_global_input is True
-    restricted = Computer(allow_global_input=False)
-    assert restricted._controller.port.policy.allow_global_input is False
-    assert restricted._controller.transport.allow_global_input is False
+    with Computer() as computer, Computer(allow_global_input=False) as restricted:
+        assert computer._controller.port.policy.allow_global_input is True
+        assert computer._controller.transport.allow_global_input is True
+        assert restricted._controller.port.policy.allow_global_input is False
+        assert restricted._controller.transport.allow_global_input is False
     assert public_error_code("permission_required") == "permission_required"
 
 
@@ -148,7 +146,7 @@ def test_desktop_capture_without_mode_delivers_lazy_text_and_details(captured):
     observation = lazy_observation(document)
     # Both fields render the actual retained desktop document. An eagerly
     # decoded protocol object alone did not catch the removed-mode lookup.
-    details = asyncio.run(observation.read_details(length=16384))
+    details = observation.read_details(length=16384)
     assert details.next is None and details.text.endswith(observation.text)
     assert observation.text.startswith("Desktop: full view\n")
     assert '"Owned document" (10, 20, 30, 40) computer.window(11); application: computer.app(7)' in observation.text

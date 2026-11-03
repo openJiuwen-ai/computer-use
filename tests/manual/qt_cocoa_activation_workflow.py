@@ -106,7 +106,7 @@ async def verify(folder, python, *, allow_global_input=False, variant="standard"
 
         set_diagnostic_handler(record)
         try:
-            before_apps = await computer.list_apps()
+            before_apps = await asyncio.to_thread(computer.list_apps)
             previous_running = {choice.id for choice in before_apps if choice.is_running}
             report["application_choices_before_launch"] = before_apps
             child = await asyncio.create_subprocess_exec(
@@ -129,25 +129,27 @@ async def verify(folder, python, *, allow_global_input=False, variant="standard"
             assert initial["variant"] == variant, initial
             report["initial"] = initial
             # Identity selection uses only published public application choices.
-            choices = await computer.list_apps()
+            choices = await asyncio.to_thread(computer.list_apps)
             report["application_choices"] = choices
             matching = [choice for choice in choices if choice.is_running and choice.id not in previous_running]
             assert len(matching) == 1, [dict(choice) for choice in choices]
             app = computer.app(matching[0].id)
             report["selected_application"] = dict(matching[0])
-            observation = await app.read(view="both")
+            observation = await asyncio.to_thread(app.read, view="both")
             assert title in observation.text, "New application must expose the owned fixture window before input"
             save_observation(folder, "before", observation)
 
             async def activate(route, field, label):
-                element = await app.element(label)
+                element = await asyncio.to_thread(app.element, label)
                 before = await state(folder, process=child)
                 assert before["forms"][route]["checked"][field] is False, before
                 start, first_event = time.monotonic(), len(events)
                 command = {"route": route, "field": field, "label": label, "before": before}
                 report["commands"].append(command)
                 try:
-                    result = await (element.click() if route == "normal" else element.perform_action("AXPress"))
+                    result = await asyncio.to_thread(
+                        lambda: element.click() if route == "normal" else element.perform_action("AXPress")
+                    )
                     command["result"] = result
                 except Exception as error:
                     command["error"] = {"type": type(error).__name__, "detail": str(error)}
@@ -179,10 +181,14 @@ async def verify(folder, python, *, allow_global_input=False, variant="standard"
                     matches = counts["clicked"] == 1 and after["forms"][route]["model"][field] is True
                     command["activation_semantics_match"] = matches
                     if not matches:
-                        report["semantic_failures"].append({
-                            "route": route, "field": field, "clicked": counts["clicked"],
-                            "model": after["forms"][route]["model"][field],
-                        })
+                        report["semantic_failures"].append(
+                            {
+                                "route": route,
+                                "field": field,
+                                "clicked": counts["clicked"],
+                                "model": after["forms"][route]["model"][field],
+                            }
+                        )
                         # Diagnostic continuation uses different controls. It
                         # never retries the failed click or changes its score.
                         if not collect_semantic_failures:
@@ -199,8 +205,8 @@ async def verify(folder, python, *, allow_global_input=False, variant="standard"
                 await activate(route, "recording", label + " checkbox")
                 await activate(route, "muted", label + " radio on")
             before_save = await state(folder, process=child)
-            save_button = await app.element("Save and reopen")
-            result = await save_button.click()
+            save_button = await asyncio.to_thread(app.element, "Save and reopen")
+            result = await asyncio.to_thread(save_button.click)
             report["save_result"] = result
             current = await state(
                 folder, lambda value: value["save_clicks"] == 1 and value["generation"] == 2, process=child
@@ -236,8 +242,7 @@ async def verify(folder, python, *, allow_global_input=False, variant="standard"
             raise
         finally:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             finally:
                 set_diagnostic_handler(None)
                 try:
@@ -263,11 +268,13 @@ def main():
     parser.add_argument("--allow-global-input", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument(
-        "--variant", default="standard",
+        "--variant",
+        default="standard",
         choices=("standard", "custom-classes", "custom-names", "custom-classes-names"),
     )
     parser.add_argument(
-        "--collect-semantic-failures", action="store_true",
+        "--collect-semantic-failures",
+        action="store_true",
         help="Record normal-click semantic failures, inspect independent controls and saved state, then fail",
     )
     args = parser.parse_args()
@@ -276,10 +283,15 @@ def main():
     folder = args.output or Path(tempfile.mkdtemp(prefix="qt-cocoa-activation-", dir=ROOT / ".artifacts"))
     folder.mkdir(parents=True, exist_ok=True)
     try:
-        asyncio.run(verify(
-            folder.resolve(), args.python.absolute(), allow_global_input=args.allow_global_input,
-            variant=args.variant, collect_semantic_failures=args.collect_semantic_failures,
-        ))
+        asyncio.run(
+            verify(
+                folder.resolve(),
+                args.python.absolute(),
+                allow_global_input=args.allow_global_input,
+                variant=args.variant,
+                collect_semantic_failures=args.collect_semantic_failures,
+            )
+        )
     finally:
         LOG.info("Qt Cocoa activation evidence: %s", folder)
 

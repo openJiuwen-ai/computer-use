@@ -46,9 +46,7 @@ def write_json(path, value):
 def exclude_selected_text(binding, records):
     """Patch only this process and this original target's insertion candidates."""
     candidates = importlib.import_module("computer_use.interaction.write.routes.selection.candidates")
-    entry = importlib.import_module(
-        "computer_use.interaction.write.routes.selection.passes.enumerate_intent_units"
-    )
+    entry = importlib.import_module("computer_use.interaction.write.routes.selection.passes.enumerate_intent_units")
     original, original_entry = candidates.enumerate_intent_units, entry.enumerate_intent_units
     original_phases = candidates.CANDIDATE_PHASES
 
@@ -58,13 +56,17 @@ def exclude_selected_text(binding, records):
             return value
         assert request.policy is None or request.policy.allow_global_input is False
         kept = tuple(item for item in value.primitives if item.unit != "native_text_edit")
-        records.append({
-            "origin": origin, "intent": request.intent.kind, "binding": asdict(binding),
-            "needs_editing_evidence": request.needs_editing_evidence,
-            "before": [asdict(item) for item in value.primitives],
-            "excluded": [asdict(item) for item in value.primitives if item.unit == "native_text_edit"],
-            "after": [asdict(item) for item in kept],
-        })
+        records.append(
+            {
+                "origin": origin,
+                "intent": request.intent.kind,
+                "binding": asdict(binding),
+                "needs_editing_evidence": request.needs_editing_evidence,
+                "before": [asdict(item) for item in value.primitives],
+                "excluded": [asdict(item) for item in value.primitives if item.unit == "native_text_edit"],
+                "after": [asdict(item) for item in kept],
+            }
+        )
         return replace(value, primitives=kept)
 
     def direct(request):
@@ -94,29 +96,42 @@ async def verify(folder, app_path, *, foreground_diagnostic=False):
     manifest = {
         str(path.relative_to(ROOT)): sha(path)
         for directory, pattern in (
-            ("computer_use_engine", "*.py"), ("os_adapter/macos/Sources", "*.swift"),
+            ("computer_use_engine", "*.py"),
+            ("os_adapter/macos/Sources", "*.swift"),
         )
         for path in sorted((ROOT / directory).rglob(pattern))
     }
     for relative in (
-        "tests/fixtures/WKWebTextProbe.swift", "tests/manual/web_text_keyboard_diagnostic.py",
-        "tests/manual/web_text_workflow.py", "tests/manual/keyboard_window_command_workflow.py",
-        "tests/manual/qt_cocoa_activation_workflow.py", "tests/manual/artifact_json.py",
+        "tests/fixtures/WKWebTextProbe.swift",
+        "tests/manual/web_text_keyboard_diagnostic.py",
+        "tests/manual/web_text_workflow.py",
+        "tests/manual/keyboard_window_command_workflow.py",
+        "tests/manual/qt_cocoa_activation_workflow.py",
+        "tests/manual/artifact_json.py",
     ):
         manifest[relative] = sha(ROOT / relative)
     write_json(folder / "source-manifest.json", manifest)
     report = {
-        "diagnostic_only": True, "public_default_acceptance": False,
+        "diagnostic_only": True,
+        "public_default_acceptance": False,
         "diagnostic_change": "Exclude native_text_edit only for this original binding's insert candidates",
-        "allow_global_input": False, "foreground_diagnostic": foreground_diagnostic,
+        "allow_global_input": False,
+        "foreground_diagnostic": foreground_diagnostic,
         "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-        "sdk": computer_use.__file__, "sdk_python": sys.executable,
-        "driver": str(driver), "driver_sha256": sha(driver), "fixture_sha256": sha(binary),
-        "window_title": title, "filtered_candidates": [], "commands": [],
-        "passed": False, "outcome": "incomplete",
+        "sdk": computer_use.__file__,
+        "sdk_python": sys.executable,
+        "driver": str(driver),
+        "driver_sha256": sha(driver),
+        "fixture_sha256": sha(binary),
+        "window_title": title,
+        "filtered_candidates": [],
+        "commands": [],
+        "passed": False,
+        "outcome": "incomplete",
     }
     computer, child, events = Computer(allow_global_input=False), None, []
     with (folder / "fixture-stderr.log").open("w") as errors, (folder / "diagnostics.jsonl").open("w") as journal:
+
         def record(event):
             events.append(event)
             journal.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
@@ -124,38 +139,48 @@ async def verify(folder, app_path, *, foreground_diagnostic=False):
 
         def activities():
             return [
-                event["value"] for event in events
-                if event.get("kind") == "backend_diagnostic" and isinstance(event.get("value"), dict)
+                event["value"]
+                for event in events
+                if event.get("kind") == "backend_diagnostic"
+                and isinstance(event.get("value"), dict)
                 and event["value"].get("kind") == "input_activity"
             ]
 
         set_diagnostic_handler(record)
         try:
-            previous = {choice.id for choice in await computer.list_apps() if choice.is_running}
+            previous = {choice.id for choice in await asyncio.to_thread(computer.list_apps) if choice.is_running}
             child = await asyncio.create_subprocess_exec(
-                str(binary), "--output", str(folder), "--title", title, cwd=ROOT,
-                stdin=asyncio.subprocess.DEVNULL, stdout=errors, stderr=errors,
+                str(binary),
+                "--output",
+                str(folder),
+                "--title",
+                title,
+                cwd=ROOT,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=errors,
+                stderr=errors,
             )
             initial = await state(
-                folder, lambda value: value["visible"] and value["page"].get("ready"),
-                process=child, seconds=15,
+                folder,
+                lambda value: value["visible"] and value["page"].get("ready"),
+                process=child,
+                seconds=15,
             )
             report["initial"] = initial
             assert initial["pid"] == child.pid and initial["page"]["value"] == "", initial
             assert_original_document(initial, initial)
-            choices = await computer.list_apps()
+            choices = await asyncio.to_thread(computer.list_apps)
             matching = [
-                item for item in choices
-                if item.is_running and item.id not in previous and item.display_name == NAME
+                item for item in choices if item.is_running and item.id not in previous and item.display_name == NAME
             ]
             assert len(matching) == 1, [dict(item) for item in choices if item.id not in previous]
             app = computer.app(matching[0].id)
             report["selected_application"] = dict(matching[0])
-            observation = await app.read(view="both", allow_foreground=foreground_diagnostic)
+            observation = await asyncio.to_thread(app.read, view="both", allow_foreground=foreground_diagnostic)
             assert title in observation.text
             save_observation(folder, "before", observation)
             report["setup_observation_preparation"] = observation.preparation
-            field = await app.element("Web callback input")
+            field = await asyncio.to_thread(app.element, "Web callback input")
             binding = field._snapshot["binding"]  # Identity restriction for the diagnostic patch only.
             report["original_binding"] = asdict(binding)
             command = {"name": "insert", "before": await state(folder, process=child)}
@@ -163,14 +188,16 @@ async def verify(folder, app_path, *, foreground_diagnostic=False):
             started = time.monotonic()
             try:
                 with exclude_selected_text(binding, report["filtered_candidates"]):
-                    result = await field.type_text(INSERTED)
+                    result = await asyncio.to_thread(field.type_text, INSERTED)
                 command["result"] = result
                 assert result.status in ("dispatched", "verified"), result
                 save_observation(folder, "insert", result.observation)
             except Exception as error:
                 command["error"] = {
-                    "type": type(error).__name__, "code": getattr(error, "code", None),
-                    "detail": str(error), "effect": getattr(error, "effect", None),
+                    "type": type(error).__name__,
+                    "code": getattr(error, "code", None),
+                    "detail": str(error),
+                    "effect": getattr(error, "effect", None),
                     "impact": getattr(error, "impact", None),
                     "observation_status": getattr(error, "observation_status", None),
                 }
@@ -179,34 +206,37 @@ async def verify(folder, app_path, *, foreground_diagnostic=False):
                 command["elapsed_seconds"] = time.monotonic() - started
                 command["returned_state"] = await state(folder, process=child)
             current = await state(
-                folder, lambda value: input_effect(value, command["before"], INSERTED), process=child,
+                folder,
+                lambda value: input_effect(value, command["before"], INSERTED),
+                process=child,
             )
             command["after"] = current
             assert_original_document(current, initial)
             assert current["page"]["submissions"] == [] and current["page"]["savedModel"] == ""
             assert any(item["excluded"] for item in report["filtered_candidates"]), "No candidate was excluded"
             assert not any(
-                item.get("transport") == "globalHID" and item.get("phase") == "willCall"
-                for item in activities()
+                item.get("transport") == "globalHID" and item.get("phase") == "willCall" for item in activities()
             )
             report["passed"], report["outcome"] = True, "diagnostic_insert_passed"
         except Exception as error:
             report["error"] = {
-                "type": type(error).__name__, "code": getattr(error, "code", None),
-                "detail": str(error), "effect": getattr(error, "effect", None),
+                "type": type(error).__name__,
+                "code": getattr(error, "code", None),
+                "detail": str(error),
+                "effect": getattr(error, "effect", None),
             }
-            report["outcome"] = "permission_required" if getattr(error, "code", None) == "permission_required" else "failed"
+            report["outcome"] = (
+                "permission_required" if getattr(error, "code", None) == "permission_required" else "failed"
+            )
             raise
         finally:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             finally:
                 set_diagnostic_handler(None)
                 report["native_activity"] = activities()
                 report["unexpected_global_input"] = any(
-                    item.get("transport") == "globalHID" and item.get("phase") == "willCall"
-                    for item in activities()
+                    item.get("transport") == "globalHID" and item.get("phase") == "willCall" for item in activities()
                 )
                 if child is not None:
                     try:
@@ -239,7 +269,9 @@ def main():
         parser.error("This fixture requires macOS WebKit")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     (ROOT / ".artifacts").mkdir(exist_ok=True)
-    folder = (args.output or Path(tempfile.mkdtemp(prefix="web-keyboard-diagnostic-", dir=ROOT / ".artifacts"))).resolve()
+    folder = (
+        args.output or Path(tempfile.mkdtemp(prefix="web-keyboard-diagnostic-", dir=ROOT / ".artifacts"))
+    ).resolve()
     folder.mkdir(parents=True, exist_ok=True)
     try:
         app = build_owned(folder, "local.computer-use.web-text." + uuid4().hex, NAME)

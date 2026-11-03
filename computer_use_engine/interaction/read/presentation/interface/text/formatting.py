@@ -248,7 +248,7 @@ class InterfaceWriter:
                 count += "; cursor below"
             result.append("Children: " + count)
             if coverage.next_offset is None:
-                result.append(f"Inspect subtree: (await app.element({atom.ref})).read()")
+                result.append(f"Inspect subtree: app.element({atom.ref}).read()")
         result.extend("Omitted: " + field(item) for item in coverage.omissions)
         return tuple(result)
 

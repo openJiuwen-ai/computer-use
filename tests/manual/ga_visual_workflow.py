@@ -66,7 +66,7 @@ async def verify(folder, case, prepare):
     try:
         app = computer.app(bundle)
         before = await state(folder)
-        observation = await app.read(view="both")
+        observation = await asyncio.to_thread(app.read, view="both")
         (folder / "default.txt").write_text(observation.text)
         (folder / "default.png").write_bytes(observation.screenshot)
         after_default = await state(folder)
@@ -76,7 +76,7 @@ async def verify(folder, case, prepare):
             assert "Count action" not in observation.text, observation.text
 
         if prepare:
-            prepared = await app.read(view="both", allow_foreground=True)
+            prepared = await asyncio.to_thread(app.read, view="both", allow_foreground=True)
             (folder / "prepared.txt").write_text(prepared.text)
             (folder / "prepared.png").write_bytes(prepared.screenshot)
             assert prepared.preparation, "Explicit preparation effects must be available"
@@ -109,7 +109,7 @@ async def verify(folder, case, prepare):
             assert (await state(folder))["translated"]
 
         start = time.monotonic()
-        result = await app.click(at=point)
+        result = await asyncio.to_thread(app.click, at=point)
         report["command_elapsed_seconds"] = time.monotonic() - start
         report["receipt"] = {k: v for k, v in dict(result).items() if k != "observation"}
         for _ in range(40):
@@ -150,8 +150,7 @@ async def verify(folder, case, prepare):
         (folder / "result.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
         )
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         try:

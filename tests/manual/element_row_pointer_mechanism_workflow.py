@@ -61,15 +61,22 @@ def build_probe(folder):
         result = subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT)
     if result.returncode:
         raise RuntimeError(f"Native probe compile failed ({result.returncode}); see {folder / 'build.log'}")
-    (folder / "build-result.json").write_text(json.dumps({
-        "binary": str(binary), "sha256": digest(binary),
-        "scope": "standalone diagnostic; unchanged production sources except replacement main",
-    }, indent=2) + "\n")
+    (folder / "build-result.json").write_text(
+        json.dumps(
+            {
+                "binary": str(binary),
+                "sha256": digest(binary),
+                "scope": "standalone diagnostic; unchanged production sources except replacement main",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     return binary
 
 
 async def observe(app, folder, name):
-    observation = await app.read(view="both", full=True)
+    observation = await asyncio.to_thread(app.read, view="both", full=True)
     (folder / f"{name}.txt").write_text(observation.text)
     if observation.screenshot:
         (folder / f"{name}.png").write_bytes(observation.screenshot)
@@ -83,14 +90,20 @@ async def verify(folder, binary, driver_option):
     computer._controller.transport.driver = {"command": str(driver), "args": []}
     journal = (folder / "sdk-diagnostics.jsonl").open("w")
     report = {
-        "passed": False, "scope": "primitive_diagnostic_not_sdk_acceptance", "allow_global_input": False,
-        "sdk": computer_use.__file__, "selection_driver": str(driver), "selection_driver_sha256": digest(driver),
-        "probe": str(binary), "probe_sha256": digest(binary),
+        "passed": False,
+        "scope": "primitive_diagnostic_not_sdk_acceptance",
+        "allow_global_input": False,
+        "sdk": computer_use.__file__,
+        "selection_driver": str(driver),
+        "selection_driver_sha256": digest(driver),
+        "probe": str(binary),
+        "probe_sha256": digest(binary),
         "probe_source_manifest": str(binary.parent / "source-manifest.json"),
         "fixture_source_sha256": digest(ROOT / "tests/fixtures/RowSelectionProbe.swift"),
         "runner_source_sha256": digest(Path(__file__)),
         "row_workflow_source_sha256": digest(ROOT / "tests/manual/row_selection_workflow.py"),
-        "public_selection_calls": 0, "native_pointer_calls": 0,
+        "public_selection_calls": 0,
+        "native_pointer_calls": 0,
     }
     initial = None
 
@@ -107,9 +120,9 @@ async def verify(folder, binary, driver_option):
         app = computer.app(bundle)
         observed = await observe(app, folder, "before")
         ref, report["row_selection_source"] = beta_row_reference(observed.text)
-        row = await app.element(ref)
+        row = await asyncio.to_thread(app.element, ref)
         report["public_selection_calls"] += 1
-        receipt = await row.click()
+        receipt = await asyncio.to_thread(row.click)
         report["selection_receipt"] = dict(receipt)
         before = await wait_state(folder, lambda value: value["selected"] == [1])
         report["before_probe"] = before
@@ -125,8 +138,17 @@ async def verify(folder, binary, driver_option):
         # probe retains the exact ordinary AXRow inside the original AX window.
         output = folder / "native.json"
         command = [
-            str(binary), "--pid", str(before["pid"]), "--window", str(before["window"]), "--bundle", bundle,
-            "--row-index", "1", "--output", str(output),
+            str(binary),
+            "--pid",
+            str(before["pid"]),
+            "--window",
+            str(before["window"]),
+            "--bundle",
+            bundle,
+            "--row-index",
+            "1",
+            "--output",
+            str(output),
         ]
         report["command"] = command
         report["native_pointer_calls"] += 1
@@ -139,10 +161,13 @@ async def verify(folder, binary, driver_option):
         native = json.loads(output.read_text())
         report["native"] = native
         if native["passed"]:
-            after = await wait_state(folder, lambda value: (
-                len(value["mouseDowns"]) > len(before["mouseDowns"])
-                and len(value["mouseTracking"]) >= len(before["mouseTracking"]) + 2
-            ))
+            after = await wait_state(
+                folder,
+                lambda value: (
+                    len(value["mouseDowns"]) > len(before["mouseDowns"])
+                    and len(value["mouseTracking"]) >= len(before["mouseTracking"]) + 2
+                ),
+            )
         else:
             await asyncio.sleep(0.15)
             after = await state(folder)
@@ -179,8 +204,7 @@ async def verify(folder, binary, driver_option):
         raise
     finally:
         try:
-            computer._controller.transport.close()
-            await computer._controller.transport.wait_closed()
+            await asyncio.to_thread(computer.close)
         finally:
             set_diagnostic_handler(None)
             journal.close()

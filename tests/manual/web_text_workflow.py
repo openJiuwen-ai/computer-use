@@ -60,18 +60,27 @@ async def verify(folder, app_path, *, allow_global_input=False, foreground_diagn
         for path in sorted((ROOT / directory).rglob(pattern))
     }
     for relative in (
-        "tests/fixtures/WKWebTextProbe.swift", "tests/manual/web_text_workflow.py",
-        "tests/manual/keyboard_window_command_workflow.py", "tests/manual/qt_cocoa_activation_workflow.py",
+        "tests/fixtures/WKWebTextProbe.swift",
+        "tests/manual/web_text_workflow.py",
+        "tests/manual/keyboard_window_command_workflow.py",
+        "tests/manual/qt_cocoa_activation_workflow.py",
     ):
         manifest[relative] = sha(ROOT / relative)
     (folder / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     report = {
         "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-        "sdk": computer_use.__file__, "sdk_python": sys.executable,
-        "driver": str(driver), "driver_sha256": sha(driver), "fixture_sha256": sha(binary),
-        "allow_global_input": allow_global_input, "window_title": title,
-        "diagnostic_only": foreground_diagnostic, "foreground_diagnostic": foreground_diagnostic,
-        "commands": [], "passed": False, "outcome": "incomplete",
+        "sdk": computer_use.__file__,
+        "sdk_python": sys.executable,
+        "driver": str(driver),
+        "driver_sha256": sha(driver),
+        "fixture_sha256": sha(binary),
+        "allow_global_input": allow_global_input,
+        "window_title": title,
+        "diagnostic_only": foreground_diagnostic,
+        "foreground_diagnostic": foreground_diagnostic,
+        "commands": [],
+        "passed": False,
+        "outcome": "incomplete",
     }
     computer = Computer(allow_global_input=allow_global_input)
     child = None
@@ -85,9 +94,12 @@ async def verify(folder, app_path, *, allow_global_input=False, foreground_diagn
 
         def effects(start=0):
             return [
-                event["value"] for event in events[start:]
-                if event.get("kind") == "backend_diagnostic" and isinstance(event.get("value"), dict)
-                and event["value"].get("kind") == "input_activity" and event["value"].get("phase") == "willCall"
+                event["value"]
+                for event in events[start:]
+                if event.get("kind") == "backend_diagnostic"
+                and isinstance(event.get("value"), dict)
+                and event["value"].get("kind") == "input_activity"
+                and event["value"].get("phase") == "willCall"
             ]
 
         async def invoke(name, call):
@@ -95,15 +107,17 @@ async def verify(folder, app_path, *, allow_global_input=False, foreground_diagn
             report["commands"].append(command)
             started, event_start = time.monotonic(), len(events)
             try:
-                result = await call()
+                result = await asyncio.to_thread(call)
                 command["result"] = result
                 assert result.status in ("dispatched", "verified"), result
                 save_observation(folder, name, result.observation)
                 return command
             except Exception as error:
                 command["error"] = {
-                    "type": type(error).__name__, "code": getattr(error, "code", None),
-                    "detail": str(error), "effect": getattr(error, "effect", None),
+                    "type": type(error).__name__,
+                    "code": getattr(error, "code", None),
+                    "detail": str(error),
+                    "effect": getattr(error, "effect", None),
                     "impact": getattr(error, "impact", None),
                 }
                 raise
@@ -114,40 +128,53 @@ async def verify(folder, app_path, *, allow_global_input=False, foreground_diagn
 
         set_diagnostic_handler(record)
         try:
-            before_apps = await computer.list_apps()
+            before_apps = await asyncio.to_thread(computer.list_apps)
             previous = {choice.id for choice in before_apps if choice.is_running}
             report["application_choices_before_launch"] = before_apps
             child = await asyncio.create_subprocess_exec(
-                str(binary), "--output", str(folder), "--title", title,
-                cwd=ROOT, stdin=asyncio.subprocess.DEVNULL, stdout=errors, stderr=errors,
+                str(binary),
+                "--output",
+                str(folder),
+                "--title",
+                title,
+                cwd=ROOT,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=errors,
+                stderr=errors,
             )
             initial = await state(
-                folder, lambda value: value["visible"] and value["page"].get("ready"), process=child, seconds=15,
+                folder,
+                lambda value: value["visible"] and value["page"].get("ready"),
+                process=child,
+                seconds=15,
             )
             report["initial"] = initial
             assert initial["pid"] == child.pid and initial["page"]["value"] == "", initial
             assert_original_document(initial, initial)
-            choices = await computer.list_apps()
+            choices = await asyncio.to_thread(computer.list_apps)
             report["application_choices"] = choices
             matching = [
-                choice for choice in choices
+                choice
+                for choice in choices
                 if choice.is_running and choice.id not in previous and choice.display_name == NAME
             ]
             assert len(matching) == 1, [dict(choice) for choice in choices if choice.id not in previous]
             app = computer.app(matching[0].id)
             report["selected_application"] = dict(matching[0])
-            observation = await app.read(view="both", allow_foreground=foreground_diagnostic)
+            observation = await asyncio.to_thread(app.read, view="both", allow_foreground=foreground_diagnostic)
             assert title in observation.text, "The published application must contain this owned fixture window"
             report["setup_observation_preparation"] = observation.preparation
             report["before_input"] = await state(folder, process=child)
             save_observation(folder, "before", observation)
-            field = await app.element("Web callback input")
+            field = await asyncio.to_thread(app.element, "Web callback input")
             report["element_resolved_once"] = True
 
             for name, expected, replace in (("insert", INSERTED, False), ("replace", REPLACED, True)):
                 command = await invoke(name, lambda: field.type_text(expected, replace=replace))
                 current = await state(
-                    folder, lambda value: input_effect(value, command["before"], expected), process=child,
+                    folder,
+                    lambda value: input_effect(value, command["before"], expected),
+                    process=child,
                 )
                 command["after"] = current
                 assert_original_document(current, initial)
@@ -164,7 +191,9 @@ async def verify(folder, app_path, *, allow_global_input=False, foreground_diagn
             assert page["changeEvents"], "The final edit must reach the DOM change consumer"
             assert page["changeEvents"][-1]["value"] == REPLACED, page
             submission = page["submissions"][0]
-            assert all(submission[key] == REPLACED for key in ("value", "draftModel", "committedModel", "savedModel")), page
+            assert all(
+                submission[key] == REPLACED for key in ("value", "draftModel", "committedModel", "savedModel")
+            ), page
             assert submission["documentID"] == initial["documentID"], page
             enter = [event for event in page["keyEvents"] if event["type"] == "keydown" and event["key"] == "Enter"]
             assert len(enter) == 1, "The explicit Return must be delivered once to the original input"
@@ -172,15 +201,18 @@ async def verify(folder, app_path, *, allow_global_input=False, foreground_diagn
             report["passed"], report["outcome"] = True, "passed"
         except Exception as error:
             report["error"] = {
-                "type": type(error).__name__, "code": getattr(error, "code", None),
-                "detail": str(error), "effect": getattr(error, "effect", None),
+                "type": type(error).__name__,
+                "code": getattr(error, "code", None),
+                "detail": str(error),
+                "effect": getattr(error, "effect", None),
             }
-            report["outcome"] = "permission_required" if getattr(error, "code", None) == "permission_required" else "failed"
+            report["outcome"] = (
+                "permission_required" if getattr(error, "code", None) == "permission_required" else "failed"
+            )
             raise
         finally:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             finally:
                 set_diagnostic_handler(None)
                 report["native_effects"] = effects()
@@ -213,7 +245,8 @@ def main():
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--allow-global-input", action="store_true")
     parser.add_argument(
-        "--foreground-diagnostic", action="store_true",
+        "--foreground-diagnostic",
+        action="store_true",
         help="Permit the initial observation to activate the owned window; diagnostic only, not default-chain acceptance",
     )
     parser.add_argument("--output", type=Path)
@@ -229,10 +262,14 @@ def main():
         if args.build_only:
             LOG.info("Built without launching: %s", app)
         else:
-            asyncio.run(verify(
-                folder, app, allow_global_input=args.allow_global_input,
-                foreground_diagnostic=args.foreground_diagnostic,
-            ))
+            asyncio.run(
+                verify(
+                    folder,
+                    app,
+                    allow_global_input=args.allow_global_input,
+                    foreground_diagnostic=args.foreground_diagnostic,
+                )
+            )
     finally:
         LOG.info("Web text evidence: %s", folder)
 

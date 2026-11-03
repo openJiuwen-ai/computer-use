@@ -91,7 +91,7 @@ async def verify(directory, include_panel, *, allow_global_input=False):
 
     async def input_action(name, operation):
         start = len(events)
-        receipt = await operation
+        receipt = await asyncio.to_thread(operation)
         effects = [
             e["value"]
             for e in events[start:]
@@ -119,31 +119,34 @@ async def verify(directory, include_panel, *, allow_global_input=False):
     set_diagnostic_handler(record)
     try:
         app = computer.app(bundle_id)
-        observation = await app.read()
-        field = await app.element(search_ref(observation.text))
-        await input_action("cold element insertion", field.type_text("one"))
+        observation = await asyncio.to_thread(app.read)
+        field = await asyncio.to_thread(app.element, search_ref(observation.text))
+        await input_action("cold element insertion", lambda: field.type_text("one"))
         await assert_search("one")
-        await input_action("move caret", field.press_key("Left"))
-        await input_action("insert at caret", field.type_text("X"))
+        await input_action("move caret", lambda: field.press_key("Left"))
+        await input_action("insert at caret", lambda: field.type_text("X"))
         await assert_search("onXe")
-        await input_action("replace text", field.type_text("精确 query", replace=True))
+        await input_action("replace text", lambda: field.type_text("精确 query", replace=True))
         await assert_search("精确 query")
         if include_panel:
-            original = await captured_interface_metadata(observation)
-            await (await app.element("Open test panel")).click()
-            observation = await app.read()
-            catalogue = await captured_interface_metadata(observation)
+            original = captured_interface_metadata(observation)
+            await asyncio.to_thread((await asyncio.to_thread(app.element, "Open test panel")).click)
+            observation = await asyncio.to_thread(app.read)
+            catalogue = captured_interface_metadata(observation)
             current = catalogue["current"]
-            assert current is not None and current != original["current"], ("The file panel was not discovered", catalogue)
+            assert current is not None and current != original["current"], (
+                "The file panel was not discovered",
+                catalogue,
+            )
             panel = app.window(current)
-            observation = await panel.read()
-            field = await panel.element(search_ref(observation.text))
-            await input_action("hosted panel insertion", field.type_text("WorkSwarm"))
-            if "Value: WorkSwarm" not in (await field.read()).text:
+            observation = await asyncio.to_thread(panel.read)
+            field = await asyncio.to_thread(panel.element, search_ref(observation.text))
+            await input_action("hosted panel insertion", lambda: field.type_text("WorkSwarm"))
+            if "Value: WorkSwarm" not in (await asyncio.to_thread(field.read)).text:
                 raise AssertionError("The hosted search field did not receive the query")
-            await input_action("hosted panel replacement", field.type_text("Terminal", replace=True))
-            await input_action("window receiver insertion", panel.type_text(" app"))
-            if "Value: Terminal app" not in (await field.read()).text:
+            await input_action("hosted panel replacement", lambda: field.type_text("Terminal", replace=True))
+            await input_action("window receiver insertion", lambda: panel.type_text(" app"))
+            if "Value: Terminal app" not in (await asyncio.to_thread(field.read)).text:
                 raise AssertionError("The hosted search field did not receive the replacement and suffix")
         driver = Path(native_driver()["command"])
         report = {
@@ -153,11 +156,12 @@ async def verify(directory, include_panel, *, allow_global_input=False):
             "global_input_allowed": allow_global_input,
             "actions": actions,
         }
-        (directory / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (directory / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
         LOG.info("Verified %d input actions: %s", len(actions), directory / "result.json")
     finally:
-        computer._controller.transport.close()  # Standalone source-driver test owns this session.
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         os.kill(initial["pid"], signal.SIGTERM)

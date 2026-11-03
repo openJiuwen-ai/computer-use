@@ -52,9 +52,12 @@ def build(folder, identity):
 
 def input_calls(events):
     return [
-        event["value"] for event in events
-        if event.get("kind") == "backend_diagnostic" and isinstance(event.get("value"), dict)
-        and event["value"].get("kind") == "input_activity" and event["value"].get("phase") == "willCall"
+        event["value"]
+        for event in events
+        if event.get("kind") == "backend_diagnostic"
+        and isinstance(event.get("value"), dict)
+        and event["value"].get("kind") == "input_activity"
+        and event["value"].get("phase") == "willCall"
     ]
 
 
@@ -64,10 +67,22 @@ def launches(events):
 
 def error_record(error):
     if isinstance(error, ComputerUseError):
-        return {name: getattr(error, name) for name in (
-            "code", "effect", "target", "detail", "next", "impact", "observation", "observation_status",
-            "observation_error", "window_lifecycle", "choices",
-        )}
+        return {
+            name: getattr(error, name)
+            for name in (
+                "code",
+                "effect",
+                "target",
+                "detail",
+                "next",
+                "impact",
+                "observation",
+                "observation_status",
+                "observation_error",
+                "window_lifecycle",
+                "choices",
+            )
+        }
     return {"type": type(error).__name__, "detail": str(error)}
 
 
@@ -81,16 +96,21 @@ async def verify(folder, options):
     identity = uuid.uuid4().hex
     driver = Path(options.driver or native_driver()["command"]).resolve()
     sources = [
-        Path(__file__).resolve(), ROOT / "tests/fixtures/CommandIdentityProbe.swift",
+        Path(__file__).resolve(),
+        ROOT / "tests/fixtures/CommandIdentityProbe.swift",
         ROOT / "tests/manual/keyboard_window_command_workflow.py",
         ROOT / "os_adapter/macos/Sources/Windowing/ApplicationCatalog.swift",
         ROOT / "os_adapter/macos/Sources/Control/NativeLaunchUnit.swift",
         ROOT / "computer_use_engine/interaction/read/app_read/pipeline.py",
     ]
     report = {
-        "sdk": computer_use.__file__, "driver": str(driver), "driver_sha256": digest(driver),
+        "sdk": computer_use.__file__,
+        "driver": str(driver),
+        "driver_sha256": digest(driver),
         "source_sha256": {str(path): digest(path) for path in sources},
-        "allow_global_input": False, "build_only": options.build_only, "passed": False,
+        "allow_global_input": False,
+        "build_only": options.build_only,
+        "passed": False,
     }
     computer, initial, link = None, None, None
     applications = Path.home() / "Applications"
@@ -122,7 +142,7 @@ async def verify(folder, options):
         report["installation_link"] = str(link)
         computer = Computer(allow_global_input=False)
         computer._controller.transport.driver = {"command": str(driver), "args": []}
-        choices = await computer.list_apps()
+        choices = await asyncio.to_thread(computer.list_apps)
         matching = [choice for choice in choices if choice.display_name == display_name]
         report["installation_choices"] = matching
         assert len(matching) == 1 and not matching[0].is_running, matching
@@ -132,7 +152,7 @@ async def verify(folder, options):
         # This first public read is the only operation allowed to start the app.
         app = computer.app(matching[0].id)
         start = len(events)
-        first = await app.read(view="both", full=True)
+        first = await asyncio.to_thread(app.read, view="both", full=True)
         await save_observation(folder, "first-read", first)
         initial = await state(folder)
         report["first_state"] = initial
@@ -142,16 +162,16 @@ async def verify(folder, options):
         assert "Launch:" in first.text and "Command identity probe" in first.text
         assert first.screenshot is not None and initial["count"] == 0
         assert await asyncio.to_thread(owned_processes, executable) == [initial["pid"]]
-        button = await app.element([{"identifier": "command-control"}])
+        button = await asyncio.to_thread(app.element, [{"identifier": "command-control"}])
 
         start = len(events)
-        repeated = await app.read(view="both")
+        repeated = await asyncio.to_thread(app.read, view="both")
         await save_observation(folder, "second-read", repeated)
         unchanged = await state(folder)
         assert unchanged["pid"] == initial["pid"] and unchanged["buttonObjectID"] == initial["buttonObjectID"]
         assert unchanged["count"] == 0 and not input_calls(events[start:]), "Repeated read must remain observational"
         report["second_read_state"] = unchanged
-        report["click"] = dict(await button.click())
+        report["click"] = dict(await asyncio.to_thread(button.click))
         after = await state(folder, lambda value: value["count"] == 1)
         report["after_click"] = after
         assert after["pid"] == initial["pid"] and after["buttonObjectID"] == initial["buttonObjectID"]
@@ -164,7 +184,7 @@ async def verify(folder, options):
         assert report["retire_fixture"]["outcome"] == "terminated", report["retire_fixture"]
         start = len(events)
         try:
-            ended = await app.read(view="tree")
+            ended = await asyncio.to_thread(app.read, view="tree")
         except ComputerUseError as error:
             report["ended_read"] = error_record(error)
             assert error.code == "stale_target" and error.effect == "none", report["ended_read"]
@@ -179,8 +199,7 @@ async def verify(folder, options):
     finally:
         if computer is not None:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             except (OSError, RuntimeError) as error:
                 report["transport_cleanup_error"] = str(error)
         report["cleanup"] = await cleanup_fixture("owned-app", folder, NAME, initial["pid"] if initial else None)
@@ -199,7 +218,9 @@ async def verify(folder, options):
         set_diagnostic_handler(None)
         journal.close()
         report["source_drift"] = [str(path) for path in sources if digest(path) != report["source_sha256"][str(path)]]
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
 
 
 def main():

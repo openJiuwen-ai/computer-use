@@ -381,7 +381,7 @@ class AgentInterfacePipeline:
         if not isinstance(target, (str, list)):
             raise local_failure(
                 "element expects an integer, exact name, or path",
-                "use await ui.element(target); bool and floating references are invalid",
+                "use ui.element(target); bool and floating references are invalid",
             )
         try:
             path = element_path([target] if isinstance(target, str) else target)

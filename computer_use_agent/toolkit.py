@@ -65,7 +65,7 @@ class ComputerUseToolkit:
                 description=DESCRIPTION,
                 properties={
                     "title": {"type": "string", "description": "Describe this call's intent in the user's language."},
-                    "code": {"type": "string", "description": "Python code with top-level await."},
+                    "code": {"type": "string", "description": "Synchronous Python code. SDK calls return results directly."},
                 },
                 required=["code"],
             ),

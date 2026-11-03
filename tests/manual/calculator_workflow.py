@@ -23,29 +23,29 @@ async def main():
     computer = Computer()
     started = monotonic()
     try:
-        apps = await computer.list_apps()
+        apps = await asyncio.to_thread(computer.list_apps)
         candidates = [app for app in apps if app.display_name.split(" — ", 1)[0] in ("Calculator", "计算器")]
         if len(candidates) != 1:
             raise RuntimeError(f"Expected one calculator instance, found {len(candidates)}")
         app = computer.app(candidates[0].id)
-        await app.read(view="tree")
+        await asyncio.to_thread(app.read, view="tree")
         window = app.window(0)
-        initial = str(await window.read(view="tree"))
+        initial = str(await asyncio.to_thread(window.read, view="tree"))
         clear = next((name for name in ("全部清除", "清除", "All Clear", "Clear") if name in initial), None)
         if clear is None:
             raise RuntimeError("No observed clear control")
-        await (await window.element(clear)).click()
-        before = str(await window.read(view="tree"))
+        await asyncio.to_thread((await asyncio.to_thread(window.element, clear)).click)
+        before = str(await asyncio.to_thread(window.read, view="tree"))
         if not re.search(r"(?:文本|text) [\u200e\u200f]*0(?:\n|$)", before):
             raise AssertionError("Calculator did not clear to zero")
-        seven = await window.element("7")
-        result = await seven.click()
-        after = str(await window.read(view="tree"))
+        seven = await asyncio.to_thread(window.element, "7")
+        result = await asyncio.to_thread(seven.click)
+        after = str(await asyncio.to_thread(window.read, view="tree"))
         if not re.search(r"(?:文本|text) [\u200e\u200f]*7(?:\n|$)", after):
             raise AssertionError("Calculator did not display seven")
         clear = next(name for name in ("全部清除", "清除", "All Clear", "Clear") if name in after)
-        await (await window.element(clear)).click()
-        final = str(await window.read(view="tree"))
+        await asyncio.to_thread((await asyncio.to_thread(window.element, clear)).click)
+        final = str(await asyncio.to_thread(window.read, view="tree"))
         if not re.search(r"(?:文本|text) [\u200e\u200f]*0(?:\n|$)", final):
             raise AssertionError("Calculator did not return to zero")
         report = dict(
@@ -61,7 +61,7 @@ async def main():
         Path(sys.argv[1]).write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact))
         sys.stdout.write("Calculator workflow passed: 0 → 7 → 0\n")
     finally:
-        computer._controller.transport.close()
+        await asyncio.to_thread(computer.close)
 
 
 if __name__ == "__main__":

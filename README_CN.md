@@ -115,13 +115,15 @@ uv run --no-dev --extra mcp computer-use-mcp
 `computer_use` 工具中已提供 `computer`、`print()` 和 `print_image()`。可以先查询应用引用：
 
 ```python
-print(await computer.list_apps())
+print(computer.list_apps())
 ```
 
-通过 `computer.app(id)` 选择应用，用 `await app.read(view="both")` 观察界面，再用 `await app.element(name_or_path)` 定位控件后执行操作。
+SDK 接口是同步的：每个操作返回结果或抛出异常后，再执行下一条语句。
+通过 `computer.app(id)` 选择应用，用 `app.read(view="both")` 观察界面，再用 `app.element(name_or_path)` 定位控件。
+目标已经明确时可以直接链式操作，例如 `app.element("保存").click()`。
 
 读取默认不为刷新画面而激活或提升窗口。在 macOS 上，调用方可显式使用
-`await app.read(view="both", allow_foreground=True)`，允许 SDK 在已确认的原窗口范围内准备观察；
+`app.read(view="both", allow_foreground=True)`，允许 SDK 在已确认的原窗口范围内准备观察；
 `Window.read()` 同样支持该选项。
 这可能改变焦点和窗口层次，但不注入全局鼠标或键盘、不自动切回其他应用。
 结果的 `preparation` 和文字说明保留实际请求；置前与截图成功都不证明应用已完成重绘。
@@ -136,19 +138,18 @@ print(await computer.list_apps())
 将以下示例保存为 `list_apps.py`，通过 `uv run --no-dev python list_apps.py` 运行：
 
 ```python
-import asyncio
-
 from computer_use import Computer
 
 
-async def main():
-    computer = Computer()  # 仍优先选择机制合格的低干扰路线。
-    for app in await computer.list_apps():
+with Computer() as computer:  # 仍优先选择机制合格的低干扰路线。
+    for app in computer.list_apps():
         print(app.id, app.display_name, app.is_running)
-
-
-asyncio.run(main())
 ```
+
+`Computer.close()` 释放会话持有的驱动资源，上下文管理器在退出时自动调用它。
+公开 SDK 方法均直接同步调用，包括 `Observation.read_details()`。
+嵌入已有 asyncio 或 GUI 应用时，在工作线程中运行阻塞的电脑操作代码，使宿主保持响应；
+内部驱动通信、进度和清理仍使用异步执行。
 
 `allow_global_input` 是严格的布尔型会话选项，默认 `True`，允许使用全局鼠标／键盘路线，
 但不会把它们排到合格的低干扰路线之前，也不授予 macOS 系统权限。

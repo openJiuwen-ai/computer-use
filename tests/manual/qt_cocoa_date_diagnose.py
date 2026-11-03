@@ -52,15 +52,20 @@ def delivered_text_point(window, native_point):
     point = canvas
     if image.delivered_coordinates is not None:
         mapping = image.delivered_coordinates
-        point = tuple(v * delivered / retained for v, delivered, retained in zip(
-            canvas, mapping.delivered_size, mapping.source_size
-        ))
+        point = tuple(
+            v * delivered / retained
+            for v, delivered, retained in zip(canvas, mapping.delivered_size, mapping.source_size)
+        )
     hit, mapped = image.hit(point)
     assert hit is piece and all(abs(left - right) < 1e-6 for left, right in zip(mapped, source))
     return point, {
-        "native_point": native_point, "to_native": list(piece.image.coordinates["toNative"]),
-        "capture_pixels": [metadata["width"], metadata["height"]], "capture_point": source,
-        "piece_box": piece.box, "canvas_point": canvas, "delivered_point": point,
+        "native_point": native_point,
+        "to_native": list(piece.image.coordinates["toNative"]),
+        "capture_pixels": [metadata["width"], metadata["height"]],
+        "capture_point": source,
+        "piece_box": piece.box,
+        "canvas_point": canvas,
+        "delivered_point": point,
     }
 
 
@@ -106,28 +111,41 @@ async def diagnose(folder, python, mechanism, ax_probe):
 
         set_diagnostic_handler(record)
         try:
-            previous = {choice.id for choice in await computer.list_apps() if choice.is_running}
+            previous = {choice.id for choice in await asyncio.to_thread(computer.list_apps) if choice.is_running}
             child = await asyncio.create_subprocess_exec(
-                str(python), str(FIXTURE), "--output", str(folder), "--title", title,
+                str(python),
+                str(FIXTURE),
+                "--output",
+                str(folder),
+                "--title",
+                title,
                 *(["--normal-show"] if mechanism == "normal-show" else []),
-                cwd=ROOT, env={**os.environ, "QT_QPA_PLATFORM": "cocoa"},
-                stdin=asyncio.subprocess.DEVNULL, stdout=errors, stderr=errors,
+                cwd=ROOT,
+                env={**os.environ, "QT_QPA_PLATFORM": "cocoa"},
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=errors,
+                stderr=errors,
             )
             report["initial"] = await state(folder, lambda value: value["visible"], process=child, seconds=10)
-            choices = await computer.list_apps()
+            choices = await asyncio.to_thread(computer.list_apps)
             matching = [choice for choice in choices if choice.is_running and choice.id not in previous]
             assert len(matching) == 1, [dict(choice) for choice in choices]
             report["selected_application"] = dict(matching[0])
             app = computer.app(matching[0].id)
-            observation = await app.read(view="both")
+            observation = await asyncio.to_thread(app.read, view="both")
             assert title in observation.text, "Only the owned diagnostic window may receive input"
             save_observation(folder, "before", observation)
-            field = await app.element("Meeting date")
+            field = await asyncio.to_thread(app.element, "Meeting date")
 
             if mechanism in ("ax-bounds", "text-point-click"):
                 probe = await asyncio.create_subprocess_exec(
-                    str(ax_probe), "--pid", str(child.pid), "--window-title", title,
-                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    str(ax_probe),
+                    "--pid",
+                    str(child.pid),
+                    "--window-title",
+                    title,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
                 try:
@@ -139,7 +157,8 @@ async def diagnose(folder, python, mechanism, ax_probe):
                 (folder / "native-ax-bounds.json").write_bytes(output)
                 (folder / "native-ax-bounds.stderr").write_bytes(error)
                 report["native_ax_probe"] = {
-                    "returncode": probe.returncode, "stderr": error.decode(errors="replace"),
+                    "returncode": probe.returncode,
+                    "stderr": error.decode(errors="replace"),
                     "result": json.loads(output) if output.strip() else None,
                 }
                 if mechanism == "ax-bounds":
@@ -151,14 +170,16 @@ async def diagnose(folder, python, mechanism, ax_probe):
                 report["steps"].append(item)
                 start = time.monotonic()
                 try:
-                    result = await call()
+                    result = await asyncio.to_thread(call)
                     item["result"] = result
                     save_observation(folder, name, result.observation)
                     return True
                 except Exception as error:
                     item["error"] = {
-                        "type": type(error).__name__, "detail": str(error),
-                        "code": getattr(error, "code", None), "effect": getattr(error, "effect", None),
+                        "type": type(error).__name__,
+                        "detail": str(error),
+                        "code": getattr(error, "code", None),
+                        "effect": getattr(error, "effect", None),
                         "impact": getattr(error, "impact", None),
                     }
                     return False
@@ -171,12 +192,12 @@ async def diagnose(folder, python, mechanism, ax_probe):
             if mechanism == "element-click" and not await step("click", field.click):
                 return
             if mechanism == "text-point-click":
-                catalogue = await captured_interface_metadata(observation)
+                catalogue = captured_interface_metadata(observation)
                 candidates = [item for item in catalogue["windows"] if item["title"] == title]
                 assert len(candidates) == 1, catalogue
                 reference = candidates[0]["ref"]
                 window = app.window(reference)
-                image_observation = await window.read(view="image")
+                image_observation = await asyncio.to_thread(window.read, view="image")
                 assert image_observation.screenshot, "Coordinate input requires delivered window pixels"
                 save_observation(folder, "text-point-window-before", image_observation)
                 oracle = (await state(folder, process=child))["text_geometry"]
@@ -215,16 +236,17 @@ async def diagnose(folder, python, mechanism, ax_probe):
                 if child is not None and child.returncode is None:
                     report["final"] = await state(folder, process=child)
                 report["native_effects"] = [
-                    event["value"] for event in events
-                    if event.get("kind") == "backend_diagnostic" and isinstance(event.get("value"), dict)
+                    event["value"]
+                    for event in events
+                    if event.get("kind") == "backend_diagnostic"
+                    and isinstance(event.get("value"), dict)
                     and event["value"].get("kind") == "input_activity"
                     and event["value"].get("phase") == "willCall"
                 ]
                 assert not any(event.get("transport") == "globalHID" for event in report["native_effects"])
             finally:
                 try:
-                    computer._controller.transport.close()
-                    await computer._controller.transport.wait_closed()
+                    await asyncio.to_thread(computer.close)
                 finally:
                     set_diagnostic_handler(None)
                     if child is not None:
@@ -245,7 +267,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python", type=Path, default=DEFAULT_PYTHON)
     parser.add_argument(
-        "--mechanism", choices=("baseline", "normal-show", "element-click", "ax-bounds", "text-point-click"),
+        "--mechanism",
+        choices=("baseline", "normal-show", "element-click", "ax-bounds", "text-point-click"),
         required=True,
     )
     parser.add_argument("--ax-probe", type=Path, default=DEFAULT_AX_PROBE)

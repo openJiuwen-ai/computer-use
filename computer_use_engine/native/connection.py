@@ -307,7 +307,7 @@ class Connection:
 
     async def request(self, method, params, options=None):
         if self._requesting:
-            raise local_failure("another system call is in progress", "await it before starting the next")
+            raise local_failure("another system call is in progress", "wait for it to finish before starting the next")
         self._requesting = True
         try:
             return await self._request(method, params, options.get("timeoutMs") if options is not None else None)
@@ -345,7 +345,7 @@ class Connection:
                 "unsupported native protocol-6 method", "use the native operation protocol", "invalid_request", method
             )
         if self._pending is not None or self._waiting_for_exit:
-            raise local_failure("another system call is in progress", "await it before starting the next")
+            raise local_failure("another system call is in progress", "wait for it to finish before starting the next")
         if method == "begin":
             try:
                 params = decode_begin(params)

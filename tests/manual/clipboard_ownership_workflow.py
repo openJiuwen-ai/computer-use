@@ -38,7 +38,7 @@ LOG = logging.getLogger(__name__)
 
 
 async def snapshot(ui, folder, name):
-    observation = await ui.read(view="both")
+    observation = await asyncio.to_thread(ui.read, view="both")
     (folder / f"{name}.txt").write_text(observation.text)
     assert observation.screenshot, "Expected an observed fixture window"
     (folder / f"{name}.png").write_bytes(observation.screenshot)
@@ -99,7 +99,7 @@ async def verify(folder, driver_option):
         report["initial"] = initial
         app = computer.app(bundle)
         await snapshot(app, folder, "before")
-        editor = await app.element("Ownership paste editor")
+        editor = await asyncio.to_thread(app.element, "Ownership paste editor")
         before = await state(folder)
         report["before"] = before
         original = before["clipboardSnapshot"]
@@ -113,12 +113,15 @@ async def verify(folder, driver_option):
         receipt, caught = None, None
         report["request"]["caller_invocations"] = 1
         try:
-            receipt = await editor.paste(payload)
+            receipt = await asyncio.to_thread(editor.paste, payload)
             report["receipt"] = dict(receipt)
         except ComputerUseError as error:
             caught = error
             report["error"] = {
-                "code": error.code, "effect": error.effect, "detail": error.detail, "impact": error.impact
+                "code": error.code,
+                "effect": error.effect,
+                "detail": error.detail,
+                "impact": error.impact,
             }
         report["seconds"] = time.monotonic() - started
         # Observations only: never retry the paste or repair its effects here.
@@ -132,8 +135,10 @@ async def verify(folder, driver_option):
         after = await state(folder)
         report["after"] = after
         report["input_activity"] = [
-            item["value"] for item in events[start:]
-            if item.get("kind") == "backend_diagnostic" and isinstance(item.get("value"), dict)
+            item["value"]
+            for item in events[start:]
+            if item.get("kind") == "backend_diagnostic"
+            and isinstance(item.get("value"), dict)
             and item["value"].get("kind") == "input_activity"
         ]
         if caught is not None:
@@ -147,10 +152,17 @@ async def verify(folder, driver_option):
         assert after["clipboardMatchesNewOwner"], after
         assert after["clipboardChangeCount"] == callback["generationAfterWrite"], after
         assert after["clipboardDigest"] != before["clipboardDigest"], after
-        for name in ("guardText", "guardPasteCallbacks", "guardTextChanges", "guardMouseCallbacks", "cursor", "heldButtons"):
+        for name in (
+            "guardText",
+            "guardPasteCallbacks",
+            "guardTextChanges",
+            "guardMouseCallbacks",
+            "cursor",
+            "heldButtons",
+        ):
             assert after[name] == before[name], (name, before[name], after[name])
         assert before["cursor"] is not None, "Missing system cursor evidence cannot prove preservation"
-        input_delta = after["inputEvents"][len(before["inputEvents"]):]
+        input_delta = after["inputEvents"][len(before["inputEvents"]) :]
         report["input_event_delta"] = input_delta
         assert not any(event["kind"] == "mouse" for event in input_delta), input_delta
         key_down = [event for event in input_delta if event["type"] == 10]
@@ -170,11 +182,17 @@ async def verify(folder, driver_option):
         invoked = [effect for effect in effects if effect.state != "notInvoked"]
         assert not any(effect.transport == "globalHID" for effect in invoked), impact
         keyboard = [effect for effect in invoked if effect.device == "keyboard"]
-        assert keyboard and all(effect.transport == "process" and effect.state == "invoked" for effect in keyboard), impact
+        assert keyboard and all(effect.transport == "process" and effect.state == "invoked" for effect in keyboard), (
+            impact
+        )
         clipboard = [effect for effect in invoked if effect.device == "clipboard"]
-        assert clipboard and all(effect.stage == "preparation" and effect.state == "invoked" for effect in clipboard), impact
+        assert clipboard and all(effect.stage == "preparation" and effect.state == "invoked" for effect in clipboard), (
+            impact
+        )
         assert all(attempt.cleanup == "complete" for attempt in impact.attempts), impact
-        sent = [attempt for attempt in impact.attempts if not attempt.preparation_only and attempt.dispatch == "dispatched"]
+        sent = [
+            attempt for attempt in impact.attempts if not attempt.preparation_only and attempt.dispatch == "dispatched"
+        ]
         assert len(sent) == 1 and sent[0].route == "clipboard_paste", impact
         assert not any(attempt.dispatch in ("partial", "unknown") for attempt in impact.attempts), impact
         report["foreground_changed"] = after["frontmostPID"] != before["frontmostPID"]
@@ -209,9 +227,8 @@ async def verify(folder, driver_option):
                     json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
                 )
             finally:
-                computer._controller.transport.close()
                 try:
-                    await computer._controller.transport.wait_closed()
+                    await asyncio.to_thread(computer.close)
                 finally:
                     set_diagnostic_handler(None)
                     journal.close()

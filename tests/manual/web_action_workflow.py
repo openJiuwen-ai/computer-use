@@ -196,7 +196,7 @@ async def verify(directory, bundle, options, sentinel_app):
         computer = Computer(allow_global_input=options.allow_global_input)
         computer._controller.transport.driver = {"command": str(driver), "args": []}
         app = computer.app(bundle)
-        observation = await app.read(view="tree")
+        observation = await asyncio.to_thread(app.read, view="tree")
         (directory / "before-tree.txt").write_text(observation.text)
         if options.state == "foreground":
             await command(directory, "foreground")
@@ -216,11 +216,11 @@ async def verify(directory, bundle, options, sentinel_app):
             identifier, matched_line = file_reference(observation.text)
             result["target_lookup"] = {"source": "before-tree.txt", "published_ref": identifier, "line": matched_line}
         identifier = int(identifier) if str(identifier).isdecimal() else identifier
-        target = await app.element(identifier)
+        target = await asyncio.to_thread(app.element, identifier)
         start = len(events)
         if options.preparation == "element-focus":
             result["stage"] = "element_focus_preparation"
-            result["focus_receipt"] = dict(await target.focus())
+            result["focus_receipt"] = dict(await asyncio.to_thread(target.focus))
             result["after_focus"] = await state(directory)
             result["after_focus_timestamp"] = timestamp()
             if options.state == "background":
@@ -229,7 +229,11 @@ async def verify(directory, bundle, options, sentinel_app):
         result["stage"] = "dispatch"
         result["dispatch_started_at"] = timestamp()
         try:
-            receipt = await target.click() if options.operation == "click" else await target.perform_action("AXPress")
+            receipt = (
+                await asyncio.to_thread(target.click)
+                if options.operation == "click"
+                else await asyncio.to_thread(target.perform_action, "AXPress")
+            )
             result["receipt"] = dict(receipt)
         except ComputerUseError as error:
             result["error"] = {"type": type(error).__name__, "message": str(error)}
@@ -247,7 +251,7 @@ async def verify(directory, bundle, options, sentinel_app):
             and item["value"].get("kind") == "input_activity"
             and item["value"].get("phase") == "willCall"
         ]
-        observation = await app.read(view="tree")
+        observation = await asyncio.to_thread(app.read, view="tree")
         (directory / "after-tree.txt").write_text(observation.text)
         result["after_observation"] = await state(directory)
         result["after_observation_timestamp"] = timestamp()
@@ -277,8 +281,7 @@ async def verify(directory, bundle, options, sentinel_app):
         cleanup = []
         try:
             if computer is not None:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
         except (RuntimeError, OSError) as error:
             cleanup.append({"component": "transport", "error": str(error)})
         set_diagnostic_handler(None)
@@ -298,7 +301,9 @@ async def verify(directory, bundle, options, sentinel_app):
             except OSError as error:
                 cleanup.append({"component": label, "pid": owned["pid"], "error": str(error)})
         result["cleanup"] = cleanup
-        (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (directory / "result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
 
 
 def main():
@@ -309,7 +314,9 @@ def main():
     parser.add_argument("--state", choices=["background", "foreground"], default="background")
     parser.add_argument("--element", help="Observed SDK reference or exact label override")
     parser.add_argument("--driver", type=Path, help="Native driver for an isolated before/after comparison")
-    parser.add_argument("--allow-global-input", action="store_true", help="Explicitly authorize global input for this run")
+    parser.add_argument(
+        "--allow-global-input", action="store_true", help="Explicitly authorize global input for this run"
+    )
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--launch-only", action="store_true")
     parser.add_argument("--retain", action="store_true")

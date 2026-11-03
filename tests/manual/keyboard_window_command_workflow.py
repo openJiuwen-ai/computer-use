@@ -183,8 +183,7 @@ def menu_read_evidence(diagnostics, before, after):
 
 
 async def close_and_observe(computer, directory, before):
-    computer._controller.transport.close()
-    await computer._controller.transport.wait_closed()
+    await asyncio.to_thread(computer.close)
     samples = []
     for _ in range(40):
         current = await state(directory)
@@ -255,21 +254,21 @@ async def verify(folder, options):
         computer = Computer(allow_global_input=options.allow_global_input)
         computer._controller.transport.driver = {"command": str(driver), "args": []}
         app = computer.app(bundle)
-        prepared = await app.read(view="tree", allow_foreground=True)
+        prepared = await asyncio.to_thread(app.read, view="tree", allow_foreground=True)
         report["setup_target_preparation"] = prepared.preparation
         await wait_state(folder, lambda value: value["active"] and value["frontmostPID"] == value["pid"])
         before_default_read = await state(folder)
         default_read_start = len(diagnostics)
-        (folder / "before.txt").write_text((await app.read(view="tree")).text)
+        (folder / "before.txt").write_text((await asyncio.to_thread(app.read, view="tree")).text)
         report["default_read"] = menu_read_evidence(
             diagnostics[default_read_start:], before_default_read, await state(folder)
         )
         if options.operation == "menu":
             before_menu_read = await state(folder)
             menu_read_start = len(diagnostics)
-            menu = await app.read(menu_path=["Commands"])
+            menu = await asyncio.to_thread(app.read, menu_path=["Commands"])
             (folder / "menu-before.txt").write_text(menu.text)
-            target = await app.element("Count document command")
+            target = await asyncio.to_thread(app.element, "Count document command")
             after_menu_read = await state(folder)
             report["menu_read"] = menu_read_evidence(diagnostics[menu_read_start:], before_menu_read, after_menu_read)
             report["menu_validation_limit"] = (
@@ -278,13 +277,13 @@ async def verify(folder, options):
             )
             report["menu_element_binding"] = asdict(target._snapshot["binding"])
         else:
-            target = app if options.scope == "app" else await app.element("Shortcut input")
+            target = app if options.scope == "app" else await asyncio.to_thread(app.element, "Shortcut input")
         report["root_binding"] = asdict(computer._controller.state(app).selection.root)
         if options.scope == "element":
             report["element_binding"] = asdict(target._snapshot["binding"])
         await launch(sentinel_app)
         sentinel = await state(sentinel_folder)
-        prepared = await computer.app(bundle + ".sentinel").read(view="tree", allow_foreground=True)
+        prepared = await asyncio.to_thread(computer.app(bundle + ".sentinel").read, view="tree", allow_foreground=True)
         report["setup_sentinel_preparation"] = prepared.preparation
         report["sentinel_before"] = await wait_state(
             sentinel_folder, lambda value: value["active"] and value["frontmostPID"] == value["pid"]
@@ -322,7 +321,9 @@ async def verify(folder, options):
         action_start = len(diagnostics)
         try:
             report["receipt"] = dict(
-                await target.click() if options.operation == "menu" else await target.press_key(key)
+                await asyncio.to_thread(target.click)
+                if options.operation == "menu"
+                else await asyncio.to_thread(target.press_key, key)
             )
         except ComputerUseError as error:
             report["error"] = {"code": error.code, "effect": error.effect, "detail": error.detail}
@@ -389,7 +390,7 @@ async def verify(folder, options):
                         for dispatch in command_input
                     )
                 )
-        (folder / "after.txt").write_text((await app.read(view="tree")).text)
+        (folder / "after.txt").write_text((await asyncio.to_thread(app.read, view="tree")).text)
         report["session_cleanup"] = await close_and_observe(computer, folder, await state(folder))
         computer = None
         report["sentinel_after_close"] = await wait_state(
@@ -423,8 +424,7 @@ async def verify(folder, options):
         raise
     finally:
         if computer is not None:
-            computer._controller.transport.close()
-            await computer._controller.transport.wait_closed()
+            await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         report["native_input"] = native_input(diagnostics)
         report["cleanup"] = [

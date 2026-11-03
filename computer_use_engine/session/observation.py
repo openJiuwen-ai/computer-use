@@ -83,9 +83,7 @@ class LazyObservation(FrozenRecord):
             return self._rendered_text
         return super().__getitem__(key)
 
-    async def read_details(
-        self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
-    ) -> TextPage:
+    def read_details(self, *, element: int | None = None, cursor: str | None = None, length: int = 4096) -> TextPage:
         """Page retained native facts and diagnostics from this observation.
 
         Args:

@@ -76,7 +76,7 @@ async def verify(folder, python, *, allow_global_input=False, only=None, normal_
 
         set_diagnostic_handler(record)
         try:
-            before_apps = await computer.list_apps()
+            before_apps = await asyncio.to_thread(computer.list_apps)
             previous_running = {choice.id for choice in before_apps if choice.is_running}
             report["application_choices_before_launch"] = before_apps
             child = await asyncio.create_subprocess_exec(
@@ -96,16 +96,16 @@ async def verify(folder, python, *, allow_global_input=False, only=None, normal_
             initial = await state(folder, lambda value: value["visible"], process=child, seconds=10)
             assert initial["pid"] == child.pid and initial["platform"] == "cocoa", initial
             report["initial"] = initial
-            choices = await computer.list_apps()
+            choices = await asyncio.to_thread(computer.list_apps)
             report["application_choices"] = choices
             matching = [choice for choice in choices if choice.is_running and choice.id not in previous_running]
             assert len(matching) == 1, [dict(choice) for choice in choices]
             app = computer.app(matching[0].id)
             report["selected_application"] = dict(matching[0])
-            observation = await app.read(view="both")
+            observation = await asyncio.to_thread(app.read, view="both")
             assert title in observation.text, "New application must expose the owned fixture before input"
             save_observation(folder, "before", observation)
-            field = await app.element("Meeting date")
+            field = await asyncio.to_thread(app.element, "Meeting date")
             report["element_resolved_once"] = True
 
             async def configure(section):
@@ -129,7 +129,7 @@ async def verify(folder, python, *, allow_global_input=False, only=None, normal_
             async def invoke(command, call):
                 start, event_start = time.monotonic(), len(events)
                 try:
-                    result = await call()
+                    result = await asyncio.to_thread(call)
                     command["result"] = result
                     assert result.status in ("dispatched", "verified"), result
                     assert result.observation is not None, result
@@ -210,8 +210,7 @@ async def verify(folder, python, *, allow_global_input=False, only=None, normal_
             raise
         finally:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             finally:
                 set_diagnostic_handler(None)
                 try:
@@ -236,7 +235,8 @@ def main():
     parser.add_argument("--python", type=Path, default=DEFAULT_PYTHON)
     parser.add_argument("--allow-global-input", action="store_true")
     parser.add_argument(
-        "--normal-show", action="store_true",
+        "--normal-show",
+        action="store_true",
         help="Use normal Qt window activation to isolate replacement from nonactivating-window preparation",
     )
     parser.add_argument("--output", type=Path)

@@ -74,7 +74,8 @@ async def verify(folder, expect_replace_blocked, driver=None):
         ROOT / "tests/fixtures/NativePointerFocusProbe.swift",
     ]
     report = {
-        "sdk": computer_use.__file__, "driver": str(driver),
+        "sdk": computer_use.__file__,
+        "driver": str(driver),
         "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
         "source_sha256": {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources},
         "python_progress": {
@@ -83,9 +84,11 @@ async def verify(folder, expect_replace_blocked, driver=None):
         },
         "window_directed_transport_check": {
             "symbols": ["CGEventSetWindowLocation", "SLEventSetIntegerValueField"],
-            "available": True, "scope": "transport capability only; receiver and delivery remain live checks",
+            "available": True,
+            "scope": "transport capability only; receiver and delivery remain live checks",
         },
-        "expect_replace_blocked": expect_replace_blocked, "actions": actions,
+        "expect_replace_blocked": expect_replace_blocked,
+        "actions": actions,
     }
     set_diagnostic_handler(record)
     try:
@@ -94,28 +97,31 @@ async def verify(folder, expect_replace_blocked, driver=None):
             command = uuid.uuid4().hex
             (folder / "command.json").write_text(json.dumps({"id": command}))
             before = await wait_state(folder, lambda value: value["lastCommand"] == command)
-            await app.read()
-            field = await app.element("Pointer focus input")
+            await asyncio.to_thread(app.read)
+            field = await asyncio.to_thread(app.element, "Pointer focus input")
             start = len(events)
             error = None
             try:
                 if name == "replace":
-                    receipt = dict(await field.type_text("replacement", replace=True))
+                    receipt = dict(await asyncio.to_thread(field.type_text, "replacement", replace=True))
                 elif name == "insert":
-                    receipt = dict(await field.type_text("I"))
+                    receipt = dict(await asyncio.to_thread(field.type_text, "I"))
                 elif name == "paste":
-                    receipt = dict(await field.paste("P"))
+                    receipt = dict(await asyncio.to_thread(field.paste, "P"))
                 else:
-                    receipt = dict(await field.focus())
+                    receipt = dict(await asyncio.to_thread(field.focus))
             except ComputerUseError as caught:
                 error = caught
                 receipt = {"code": caught.code, "effect": caught.effect, "detail": caught.detail}
             await asyncio.sleep(0.1)
             after = await state(folder)
             effects = [
-                e["value"] for e in events[start:]
-                if e.get("kind") == "backend_diagnostic" and isinstance(e.get("value"), dict)
-                and e["value"].get("kind") == "input_activity" and e["value"].get("phase") == "willCall"
+                e["value"]
+                for e in events[start:]
+                if e.get("kind") == "backend_diagnostic"
+                and isinstance(e.get("value"), dict)
+                and e["value"].get("kind") == "input_activity"
+                and e["value"].get("phase") == "willCall"
             ]
             mouse = [effect for effect in effects if effect["device"] == "mouse"]
             actions.append({"name": name, "before": before, "result": receipt, "after": after, "effects": effects})
@@ -130,10 +136,14 @@ async def verify(folder, expect_replace_blocked, driver=None):
             elif name == "focus":
                 keyboard = [effect for effect in effects if effect["device"] == "keyboard"]
                 selection_setters = [
-                    effect for effect in effects
+                    effect
+                    for effect in effects
                     if effect["transport"] == "accessibility"
-                    and effect["mechanism"] in {
-                        "AXSelectedTextRange", "AXSelectedTextRanges", "AXSelectedTextMarkerRange",
+                    and effect["mechanism"]
+                    in {
+                        "AXSelectedTextRange",
+                        "AXSelectedTextRanges",
+                        "AXSelectedTextMarkerRange",
                     }
                 ]
                 assert error is None and receipt["status"] == "verified", actions[-1]
@@ -151,9 +161,10 @@ async def verify(folder, expect_replace_blocked, driver=None):
                 assert after["selectCommands"] == 0 and after["textCallbacks"] == 0, actions[-1]
         report["passed"] = True
     finally:
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         os.kill(initial["pid"], signal.SIGTERM)
@@ -162,7 +173,8 @@ async def verify(folder, expect_replace_blocked, driver=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--expect-replace-blocked", action="store_true",
+        "--expect-replace-blocked",
+        action="store_true",
         help="Expect the original failure only with corresponding baseline Python history and native driver",
     )
     parser.add_argument("--driver", type=Path, help="Use this retained native driver binary")

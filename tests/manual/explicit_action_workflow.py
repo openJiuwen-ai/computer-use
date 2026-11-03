@@ -198,9 +198,9 @@ async def verify(folder, baseline, driver=None, cases=None):
                 "standard_vanishes": "standard_stable",
             }.get(case, case)
             await command(mode=mode)
-            observation = await app.read()
+            observation = await asyncio.to_thread(app.read)
             (folder / (case + "-before.txt")).write_text(observation.text)
-            target = await app.element("Explicit action target")
+            target = await asyncio.to_thread(app.element, "Explicit action target")
             before = await state(folder)
             assert not before["performed"] and before["inOriginalWindow"] and not before["sheetAttached"], before
             pending_mutation = {
@@ -224,13 +224,18 @@ async def verify(folder, baseline, driver=None, cases=None):
             error = None
             try:
                 receipt = dict(
-                    await target.click() if case == "press_duplicate" else await target.perform_action(action_name)
+                    await asyncio.to_thread(target.click)
+                    if case == "press_duplicate"
+                    else await asyncio.to_thread(target.perform_action, action_name)
                 )
             except ComputerUseError as caught:
                 error = caught
                 receipt = {
-                    "code": caught.code, "effect": caught.effect, "detail": caught.detail,
-                    "impact": caught.impact, "observation": caught.observation,
+                    "code": caught.code,
+                    "effect": caught.effect,
+                    "detail": caught.detail,
+                    "impact": caught.impact,
+                    "observation": caught.observation,
                     "observation_status": caught.observation_status,
                     "observation_error": caught.observation_error,
                     "window_lifecycle": caught.window_lifecycle,
@@ -385,8 +390,7 @@ async def verify(folder, baseline, driver=None, cases=None):
         (folder / "result.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
         )
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         os.kill(initial["pid"], signal.SIGTERM)

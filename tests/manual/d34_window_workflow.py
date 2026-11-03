@@ -253,7 +253,7 @@ def assert_window_image(observation, doc):
     }
 
 
-def desktop_point(text, png, ref, doc):
+def desktop_point(text, png, ref, doc, pointer_hit, fixture_pid):
     """Use only actually emitted PNG geometry and public catalogue coordinates."""
     dimensions = png_size(png)
     header = re.search(r"(?m)^Screenshot: desktop (\d+)x(\d+) px; origin=top-left$", text)
@@ -273,9 +273,20 @@ def desktop_point(text, png, ref, doc):
     _, _, native_width, native_height = doc["frame"]
     point = x + doc["countPoint"][0] * width / native_width, y + doc["countPoint"][1] * height / native_height
     assert 0 <= point[0] < dimensions[0] and 0 <= point[1] < dimensions[1], point
-    for _, (ox, oy, ow, oh), other in windows[:index]:
-        assert not (ox <= point[0] < ox + ow and oy <= point[1] < oy + oh), ("Owned point covered", other)
-    return point, {"png_size": dimensions, "window": line, "point": point}
+    overlapping = [
+        other for _, (ox, oy, ow, oh), other in windows[:index] if ox <= point[0] < ox + ow and oy <= point[1] < oy + oh
+    ]
+    # Catalogue rectangles include transparent, mouse-ignoring overlays. Use
+    # independent live system hit evidence, never an application-name exception.
+    assert pointer_hit["window"] == doc["window"], ("Owned point covered", overlapping, pointer_hit)
+    assert pointer_hit["axStatus"] == 0 and pointer_hit["axPID"] == fixture_pid, pointer_hit
+    return point, {
+        "png_size": dimensions,
+        "window": line,
+        "point": point,
+        "overlapping_catalogue_rows": overlapping,
+        "system_hit": pointer_hit,
+    }
 
 
 async def verify(folder, options, fixture, bundle):
@@ -309,13 +320,13 @@ async def verify(folder, options, fixture, bundle):
 
     async def action(label, operation, predicate):
         before = await state(folder)
-        receipt = await operation
+        receipt = await asyncio.to_thread(operation)
         current = await effect(folder, predicate)
         report["actions"].append({"label": label, "receipt": dict(receipt), "before": before, "after": current})
         return receipt
 
     async def read(label, ui, **kwargs):
-        observation = await ui.read(**kwargs)
+        observation = await asyncio.to_thread(ui.read, **kwargs)
         save_observation(folder, label, observation)
         return observation
 
@@ -331,7 +342,7 @@ async def verify(folder, options, fixture, bundle):
         await command(folder, "focus", "A")
         computer = new_computer()
         set_diagnostic_handler(diagnostic)
-        apps = await computer.list_apps()
+        apps = await asyncio.to_thread(computer.list_apps)
         choices = [app for app in apps if app.display_name == NAME and app.is_running]
         assert len(choices) == 1, [(app.id, app.display_name) for app in apps]
         selector_app, numeric_app = computer.app(bundle), computer.app(choices[0].id)
@@ -375,20 +386,20 @@ async def verify(folder, options, fixture, bundle):
         report["checks"].append("same-title windows: desktop, selector App, numeric App share refs and fixed targets")
         a_ref, a = named["A"]
         b_ref, b = named["B"]
-        a_field = await a.element([{"identifier": "d34-input-A"}])
+        a_field = await asyncio.to_thread(a.element, [{"identifier": "d34-input-A"}])
         await command(folder, "focus", "A")
         await read("06-delivered-A", selector_app, view="tree")
         await command(folder, "focus", "B")
         await action(
             "App context stays A after external focus B",
-            selector_app.type_text("Pinned-A"),
+            lambda: selector_app.type_text("Pinned-A"),
             lambda value: value["documents"]["A"]["field"] == "Pinned-A" and value["documents"]["B"]["field"] == "",
         )
         await command(folder, "focus", "B")
         await read("07-delivered-B", selector_app, view="tree")
         await action(
             "old element stays A after App observes B",
-            a_field.type_text("Original-A", replace=True),
+            lambda: a_field.type_text("Original-A", replace=True),
             lambda value: value["documents"]["A"]["field"] == "Original-A" and value["documents"]["B"]["field"] == "",
         )
         a_image = await read("08-retained-A-image", a, view="both")
@@ -398,11 +409,14 @@ async def verify(folder, options, fixture, bundle):
         point = window_point(a_image, (await state(folder))["documents"]["A"])
         await action(
             "fixed Window screenshot remains A",
-            a.click(at=point),
+            lambda: a.click(at=point),
             lambda value: value["documents"]["A"]["count"] == 1 and value["documents"]["B"]["count"] == 0,
         )
-        opener = await a.element("Open independent window")
-        opened = await action("open untitled independent window", opener.click(), lambda value: value["opens"] == 1)
+        opened = await action(
+            "open untitled independent window",
+            lambda: a.element("Open independent window").click(),
+            lambda value: value["opens"] == 1,
+        )
         assert opened.observation is not None and "Child input" in opened.observation.text, opened
         save_observation(folder, "10-post-open", opened.observation)
         assert opened.observation.screenshot is not None, (
@@ -417,7 +431,7 @@ async def verify(folder, options, fixture, bundle):
         child_point = window_point(opened.observation, (await state(folder))["documents"]["Child"])
         await action(
             "original selector App uses newly delivered Child image without another read",
-            selector_app.click(at=child_point),
+            lambda: selector_app.click(at=child_point),
             lambda value: (
                 value["documents"]["Child"]["count"] == 1
                 and value["documents"]["A"]["count"] == 1
@@ -425,10 +439,10 @@ async def verify(folder, options, fixture, bundle):
             ),
         )
         # The next model operation can address the delivered new window directly.
-        child_field = await selector_app.element([{"identifier": "d34-input-Child"}])
+        child_field = await asyncio.to_thread(selector_app.element, [{"identifier": "d34-input-Child"}])
         await action(
             "post-action Child element available",
-            child_field.type_text("Child-value", replace=True),
+            lambda: child_field.type_text("Child-value", replace=True),
             lambda value: value["documents"]["Child"]["field"] == "Child-value",
         )
         child = computer.window(child_ref)
@@ -436,10 +450,10 @@ async def verify(folder, options, fixture, bundle):
         child_image = await read("12-child", child, view="both")
         assert "Document Child" in child_image.text
         report["image_markers"].append(assert_window_image(child_image, (await state(folder))["documents"]["Child"]))
-        closer = await a.element("Close this window")
+        closer = await asyncio.to_thread(a.element, "Close this window")
         closed = await action(
             "close original while other windows survive",
-            closer.click(),
+            lambda: closer.click(),
             lambda value: value["documents"]["A"]["closed"],
         )
         report["closed_receipt"] = dict(closed)
@@ -450,7 +464,7 @@ async def verify(folder, options, fixture, bundle):
             ("closed screenshot", lambda: a.click(at=point)),
         ):
             try:
-                result = await operation()
+                result = await asyncio.to_thread(operation)
             except ComputerUseError as error:
                 assert error.code == "stale_target" and error.effect == "none", error
                 report["checks"].append({label: error_evidence(error)})
@@ -459,9 +473,9 @@ async def verify(folder, options, fixture, bundle):
         survivors = await read("13-surviving-App", selector_app, view="tree")
         assert {b_ref, child_ref} <= refs(survivors.text) and a_ref not in refs(survivors.text), survivors.text
         await command(folder, "focus", "B")
-        sheet_button = await b.element("Open sheet")
+        sheet_button = await asyncio.to_thread(b.element, "Open sheet")
         sheet_receipt = await action(
-            "open confirmed sheet", sheet_button.click(), lambda value: value["sheetOwner"] == "B"
+            "open confirmed sheet", lambda: sheet_button.click(), lambda value: value["sheetOwner"] == "B"
         )
         assert sheet_receipt.observation is not None and "Sheet input" in sheet_receipt.observation.text, sheet_receipt
         save_observation(folder, "14-sheet", sheet_receipt.observation)
@@ -476,24 +490,24 @@ async def verify(folder, options, fixture, bundle):
         assert "Child input" in unrelated_app_read.text, unrelated_app_read.text
         await action(
             "fixed B keyboard retains its delivered sheet after App observes Child",
-            b.type_text("Pinned-Sheet"),
+            lambda: b.type_text("Pinned-Sheet"),
             lambda value: (
                 value["documents"]["Sheet"]["field"] == "Pinned-Sheet"
                 and value["documents"]["B"]["field"] == ""
                 and value["documents"]["Child"]["field"] == "Child-value"
             ),
         )
-        sheet_field = await sheet.element([{"identifier": "d34-input-Sheet"}])
+        sheet_field = await asyncio.to_thread(sheet.element, [{"identifier": "d34-input-Sheet"}])
         await action(
             "sheet exact input",
-            sheet_field.type_text("Sheet-value", replace=True),
+            lambda: sheet_field.type_text("Sheet-value", replace=True),
             lambda value: value["documents"]["Sheet"]["field"] == "Sheet-value",
         )
-        dismiss = await b.element("Dismiss sheet")
-        await action("dismiss sheet", dismiss.click(), lambda value: value["sheetOwner"] is None)
+        dismiss = await asyncio.to_thread(b.element, "Dismiss sheet")
+        await action("dismiss sheet", lambda: dismiss.click(), lambda value: value["sheetOwner"] is None)
         await action(
             "original B continues after its scoped sheet dismissal without an extra read",
-            b.type_text("B-after-sheet"),
+            lambda: b.type_text("B-after-sheet"),
             lambda value: (
                 value["documents"]["B"]["field"] == "B-after-sheet"
                 and value["documents"]["Sheet"]["field"] == "Sheet-value"
@@ -510,15 +524,15 @@ async def verify(folder, options, fixture, bundle):
         weak_image = await read("17-weak-image", weak, view="both")
         report["image_markers"].append(assert_window_image(weak_image, (await state(folder))["documents"]["Weak"]))
         assert "Weak input" not in weak_image.text, "Fixture did not actually suppress AX children"
+        weak_point = window_point(weak_image, (await state(folder))["documents"]["Weak"])
         await action(
             "weak AX window screenshot click",
-            weak.click(at=window_point(weak_image, (await state(folder))["documents"]["Weak"])),
+            lambda: weak.click(at=weak_point),
             lambda value: value["documents"]["Weak"]["count"] == 1,
         )
         report["checks"].append("weak AX retained a selectable untitled window, screenshot and coordinate input")
         # End direct SDK use before installing MCP's process-global delivery guard.
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         computer = None
         runtime = Runtime(diagnostic, computer_factory=new_computer)
         execution = 0
@@ -547,7 +561,7 @@ async def verify(folder, options, fixture, bundle):
             return text, images
 
         # The fresh MCP session discovers its own IDs. No private ref registry is used.
-        desktop_text, images = await mcp("18-mcp-desktop", "shot = await computer.read(view='both')")
+        desktop_text, images = await mcp("18-mcp-desktop", "shot = computer.read(view='both')")
         assert len(images) == 1, len(images)
         fixture_rows = [line for line in desktop_text.splitlines() if f'"{NAME}" — <untitled>' in line]
         # Weak was explicitly made frontmost above; catalogue preserves front-to-back order.
@@ -555,7 +569,7 @@ async def verify(folder, options, fixture, bundle):
         mcp_weak_ref = next(iter(refs(fixture_rows[0])))
         report["mcp_identity"] = {"Weak": mcp_weak_ref}
         public_text, window_images = await mcp(
-            "19-mcp-window", f"weak = computer.window({mcp_weak_ref})\nweak_shot = await weak.read(view='both')"
+            "19-mcp-window", f"weak = computer.window({mcp_weak_ref})\nweak_shot = weak.read(view='both')"
         )
         assert "Weak input" not in public_text and "Document Child" not in public_text, public_text
         assert len(window_images) == 1, len(window_images)
@@ -568,7 +582,7 @@ async def verify(folder, options, fixture, bundle):
         # receive resized text and coordinates, for both automatic and explicit output.
         desktop_text, images = await mcp(
             "20-mcp-desktop-delivered",
-            "shot = await computer.read(view='both')\nprint(shot.text)\nprint_image(shot.screenshot)",
+            "shot = computer.read(view='both')\nprint(shot.text)\nprint_image(shot.screenshot)",
         )
         assert len(images) == 1, len(images)
         raw_dimensions = png_size(runtime.task_namespace["shot"].screenshot)
@@ -578,10 +592,12 @@ async def verify(folder, options, fixture, bundle):
             raw_dimensions,
             delivered_dimensions,
         )
-        current = await state(folder)
-        point, geometry = desktop_point(desktop_text, images[0], mcp_weak_ref, current["documents"]["Weak"])
+        current = await command(folder, "pointer-check", "Weak")
+        point, geometry = desktop_point(
+            desktop_text, images[0], mcp_weak_ref, current["documents"]["Weak"], current["pointerHit"], current["pid"]
+        )
         report["mcp_geometry"] = {"raw": raw_dimensions, "delivered": delivered_dimensions, **geometry}
-        await mcp("21-mcp-desktop-click", f"receipt = await computer.click(at={point!r})")
+        await mcp("21-mcp-desktop-click", f"receipt = computer.click(at={point!r})")
         final = await effect(folder, lambda value: value["documents"]["Weak"]["count"] == 2)
         assert final["documents"]["A"]["count"] == 1 and final["documents"]["B"]["count"] == 0, final
         assert final["documents"]["Child"]["count"] == 1, final
@@ -613,8 +629,7 @@ async def verify(folder, options, fixture, bundle):
         if runtime is not None:
             await runtime.close()
         if computer is not None:
-            computer._controller.transport.close()
-            await computer._controller.transport.wait_closed()
+            await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         if initial is not None:

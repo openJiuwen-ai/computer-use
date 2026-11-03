@@ -52,10 +52,22 @@ def write_json(path, value):
 
 def failure(error):
     if isinstance(error, ComputerUseError):
-        return {key: getattr(error, key) for key in (
-            "code", "effect", "target", "detail", "next", "impact", "observation",
-            "observation_status", "observation_error", "window_lifecycle", "choices",
-        )}
+        return {
+            key: getattr(error, key)
+            for key in (
+                "code",
+                "effect",
+                "target",
+                "detail",
+                "next",
+                "impact",
+                "observation",
+                "observation_status",
+                "observation_error",
+                "window_lifecycle",
+                "choices",
+            )
+        }
     return {"type": type(error).__name__, "detail": str(error)}
 
 
@@ -64,7 +76,7 @@ async def captured_header(observation):
     content, cursor = "", None
     prefix = "Captured interface metadata: "
     for _ in range(16):
-        page = await observation.read_details(cursor=cursor, length=16384)
+        page = await asyncio.to_thread(observation.read_details, cursor=cursor, length=16384)
         content += page.text
         if prefix in content:
             try:
@@ -89,14 +101,14 @@ def own_window(windows, filename):
 
 async def select_owned_window(app, filename, folder, report):
     for attempt in range(8):
-        observation = await app.read(view="tree", full=True)
+        observation = await asyncio.to_thread(app.read, view="tree", full=True)
         (folder / f"selection-{attempt}.txt").write_text(observation.text)
         header = await captured_header(observation)
         if header is not None:
             selected = own_window(header["windows"], filename)
             if selected is not None:
                 window = app.window(selected["ref"])
-                observed = await window.read(view="tree", full=True)
+                observed = await asyncio.to_thread(window.read, view="tree", full=True)
                 selected_header = await captured_header(observed)
                 if selected_header is None or selected_header["scope"] != "window":
                     raise RuntimeError("Owned Window read did not retain captured scope metadata; no input sent")
@@ -106,8 +118,10 @@ async def select_owned_window(app, filename, folder, report):
                 if confirmed is None or confirmed["ref"] != selected["ref"]:
                     raise RuntimeError("Owned Window identity/title was not confirmed; no input sent")
                 report["window_proof"] = {
-                    "title": selected["title"], "window_ref": selected["ref"],
-                    "application": header["application"], "source": "captured public interface metadata",
+                    "title": selected["title"],
+                    "window_ref": selected["ref"],
+                    "application": header["application"],
+                    "source": "captured public interface metadata",
                 }
                 return window, observed
         await asyncio.sleep(0.25)
@@ -116,7 +130,9 @@ async def select_owned_window(app, filename, folder, report):
 
 async def run(options, folder):
     if os.environ.get("PYTHONPATH") or os.environ.get("PYTHONHOME"):
-        raise RuntimeError("Run with env -u PYTHONPATH -u PYTHONHOME so SDK child processes also use the installed package")
+        raise RuntimeError(
+            "Run with env -u PYTHONPATH -u PYTHONHOME so SDK child processes also use the installed package"
+        )
     sdk_file = Path(computer_use.__file__).resolve()
     if checkout_root() is not None or "site-packages" not in sdk_file.parts:
         raise RuntimeError(f"This harness requires an installed SDK, not an editable checkout: {sdk_file}")
@@ -135,12 +151,19 @@ async def run(options, folder):
     journal = (folder / "diagnostics.jsonl").open("w", encoding="utf-8")
     manifest = sdk_file.parent / "_resources/manifest.json"
     report = {
-        "passed": False, "sdk": str(sdk_file), "interpreter": sys.executable,
-        "driver": str(driver), "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
+        "passed": False,
+        "sdk": str(sdk_file),
+        "interpreter": sys.executable,
+        "driver": str(driver),
+        "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
         "native_resource_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        "allow_global_input": False, "owned_file": str(filename), "seed": seed,
-        "replacement": replacement, "expected_saved_text": expected, "actions": [],
+        "allow_global_input": False,
+        "owned_file": str(filename),
+        "seed": seed,
+        "replacement": replacement,
+        "expected_saved_text": expected,
+        "actions": [],
         "cleanup": "no app-wide cleanup; only close the proven owned root after verified save",
     }
 
@@ -153,7 +176,7 @@ async def run(options, folder):
         report["actions"].append(entry)
         start = time.monotonic()
         try:
-            receipt = await operation
+            receipt = await asyncio.to_thread(operation)
             entry["receipt"] = receipt
             return receipt
         except BaseException as error:
@@ -164,7 +187,7 @@ async def run(options, folder):
 
     set_diagnostic_handler(record)
     try:
-        before = await computer.list_apps()
+        before = await asyncio.to_thread(computer.list_apps)
         report["apps_before"] = before
         await asyncio.to_thread(
             subprocess.run, ["open", "-g", "-a", str(TEXTEDIT), str(filename)], check=True, timeout=15
@@ -173,14 +196,16 @@ async def run(options, folder):
         before_ids = {item.id for item in before if item.is_running}
         selected = None
         for _ in range(12):
-            apps = await computer.list_apps()
+            apps = await asyncio.to_thread(computer.list_apps)
             report["apps_after_open"] = apps
             named = [item for item in apps if item.is_running and item.display_name == options.app_name]
             new = [item for item in apps if item.is_running and item.id not in before_ids]
             candidates = named if named else new
             if len(candidates) == 1:
                 selected = candidates[0]
-                report["application_choice_basis"] = "exact published display name" if named else "unique new running app"
+                report["application_choice_basis"] = (
+                    "exact published display name" if named else "unique new running app"
+                )
                 break
             await asyncio.sleep(0.25)
         if selected is None:
@@ -191,21 +216,21 @@ async def run(options, folder):
         close_refs = [int(match[1]) for line in observation.text.splitlines() if (match := CLOSE.match(line))]
         if len(close_refs) != 1:
             raise RuntimeError("A unique close-button reference was not observed in the owned root; no input sent")
-        close_button = await window.element(close_refs[0])
-        field = await window.element([{"role": "textArea"}])
-        initial = await field.read_text(length=4096)
+        close_button = await asyncio.to_thread(window.element, close_refs[0])
+        field = await asyncio.to_thread(window.element, [{"role": "textArea"}])
+        initial = await asyncio.to_thread(field.read_text, length=4096)
         report["body_before"] = initial
         if initial.text != seed or initial.next is not None:
             raise RuntimeError("The observed body does not exactly match the owned-file seed; no input sent")
         # Deliberately no model-side focus, read, lookup or receiver preparation
         # between replacement and Return on the same retained Element.
-        await action("replace", field.type_text(replacement, replace=True))
-        await action("same_element_return", field.press_key("Return"))
-        current = await field.read_text(length=4096)
+        await action("replace", lambda: field.type_text(replacement, replace=True))
+        await action("same_element_return", lambda: field.press_key("Return"))
+        current = await asyncio.to_thread(field.read_text, length=4096)
         report["body_after_return"] = current
         if current.text != expected or current.next is not None:
             raise RuntimeError("The retained body's exact replacement + Return effect was not confirmed")
-        await action("same_element_save", field.press_key("super+s"))
+        await action("same_element_save", lambda: field.press_key("super+s"))
         for _ in range(50):
             saved = filename.read_text(encoding="utf-8")
             if saved == expected:
@@ -215,13 +240,13 @@ async def run(options, folder):
         if saved != expected:
             raise RuntimeError("The owned file did not contain the exact expected saved text; do not close or replay")
         report["save_verified"] = True
-        receipt = await action("close_owned_root", close_button.click())
+        receipt = await action("close_owned_root", lambda: close_button.click())
         closed = receipt.window_lifecycle == "closed"
         for attempt in range(4):
             if closed:
                 break
             try:
-                remaining = await window.read(view="tree")
+                remaining = await asyncio.to_thread(window.read, view="tree")
                 (folder / f"after-close-{attempt}.txt").write_text(remaining.text)
             except ComputerUseError as error:
                 report["after_close_read_error"] = failure(error)
@@ -229,7 +254,8 @@ async def run(options, folder):
                 # Accept only the SDK's explicit complete-directory absence
                 # evidence; unknown lifecycle stays a failed acceptance.
                 closed = (
-                    error.code == "stale_target" and error.effect == "none"
+                    error.code == "stale_target"
+                    and error.effect == "none"
                     and "fixed working window is absent from the complete current directory" in error.detail
                 )
                 break
@@ -248,8 +274,7 @@ async def run(options, folder):
             write_json(folder / "result.json", report)
         finally:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             finally:
                 set_diagnostic_handler(None)
                 journal.close()
@@ -257,7 +282,9 @@ async def run(options, folder):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app-name", default="TextEdit", help="Exact list_apps display name; used only to inspect roots")
+    parser.add_argument(
+        "--app-name", default="TextEdit", help="Exact list_apps display name; used only to inspect roots"
+    )
     options = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     folder = Path(tempfile.mkdtemp(prefix="textedit-sdk-", dir=ROOT / ".artifacts"))

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from computer_use.client.computer import computer_for_controller
+from computer_use.client.execution import execution_scope
 from computer_use.client.host import (
     set_action_handler,
     set_diagnostic_handler,
@@ -37,8 +38,9 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.previous_delivery = images_state._delivery_required
         self.events = []
         self.runtime = Runtime(self.events.append)
-        self.controller, self.app = setup()
-        self.window = computer_for_controller(self.controller).window(ref(self.app, "a"))
+        with execution_scope(self.runtime.executor):
+            self.controller, self.app = setup()
+            self.window = computer_for_controller(self.controller).window(ref(self.app, "a"))
         self.alias = self.window._app
         self.assertIsNot(self.alias, self.app)
         self.assertIs(self.alias._instance, self.app._instance)
@@ -49,10 +51,10 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             app=self.app,
             alias=self.alias,
             window=self.window,
-            observe=self.observe,
-            capture=self.capture,
-            click=self.click,
-            publish_text=lambda ui: publish(self.controller, ui, "Text only", None),
+            observe=lambda *args: self.runtime.executor.call(self.observe, *args),
+            capture=lambda *args: self.runtime.executor.call(self.capture, *args),
+            click=lambda ui: self.runtime.executor.run(lambda: self.click(ui)),
+            publish_text=lambda ui: self.runtime.executor.call(publish, self.controller, ui, "Text only", None),
         )
 
     async def asyncTearDown(self):
@@ -152,11 +154,11 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_pending_sample_does_not_revoke_delivered_image_or_grant_new_coordinates(self):
         await self.execute("old = observe(app, 'a')")
         first = self.app._instance.delivered_image
-        await self.execute("pending = capture(alias, 'b')\nawait click(app)")
+        await self.execute("pending = capture(alias, 'b')\nclick(app)")
         self.assertIs(self.app._instance.delivered_image, first)
         self.assertEqual(self.last_target(), first.pieces[0].image.target)
         # Even explicit image output only commits when the tool call finishes.
-        await self.execute("print_image(pending.png)\nawait click(app)")
+        await self.execute("print_image(pending.png)\nclick(app)")
         self.assertEqual(self.last_target(), first.pieces[0].image.target)
         second = self.alias._image
         self.assertIs(self.app._instance.delivered_image, second)

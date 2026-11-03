@@ -77,11 +77,14 @@ async def verify(folder, expect_expand_blocked, driver=None, modes=None):
         Path(__file__).resolve(),
     ]
     report = {
-        "sdk": computer_use.__file__, "driver": str(driver),
+        "sdk": computer_use.__file__,
+        "driver": str(driver),
         "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
         "source_sha256": {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources},
         "window_directed_transport_symbols_available": True,
-        "expect_expand_blocked": expect_expand_blocked, "actions": actions, "global_mouse": global_mouse,
+        "expect_expand_blocked": expect_expand_blocked,
+        "actions": actions,
+        "global_mouse": global_mouse,
     }
     set_diagnostic_handler(record)
     try:
@@ -91,22 +94,25 @@ async def verify(folder, expect_expand_blocked, driver=None, modes=None):
             (folder / "command.json").write_text(json.dumps({"id": command, "mode": mode}))
             before = await wait_state(folder, lambda value: value["lastCommand"] == command)
             assert before["downs"] == before["ups"] == 0 and not before["changed"], before
-            observation = await app.read()
+            observation = await asyncio.to_thread(app.read)
             (folder / (mode + "-before.txt")).write_text(observation.text)
-            target = await app.element("Hover target")
+            target = await asyncio.to_thread(app.element, "Hover target")
             start = len(events)
             error = None
             try:
-                receipt = dict(await target.click())
+                receipt = dict(await asyncio.to_thread(target.click))
             except ComputerUseError as caught:
                 error = caught
                 receipt = {"code": caught.code, "effect": caught.effect, "detail": caught.detail}
             await asyncio.sleep(0.15)
             after = await state(folder)
             effects = [
-                e["value"] for e in events[start:]
-                if e.get("kind") == "backend_diagnostic" and isinstance(e.get("value"), dict)
-                and e["value"].get("kind") == "input_activity" and e["value"].get("phase") == "willCall"
+                e["value"]
+                for e in events[start:]
+                if e.get("kind") == "backend_diagnostic"
+                and isinstance(e.get("value"), dict)
+                and e["value"].get("kind") == "input_activity"
+                and e["value"].get("phase") == "willCall"
             ]
             mouse = [effect for effect in effects if effect["device"] == "mouse"]
             action = {"mode": mode, "before": before, "result": receipt, "after": after, "effects": effects}
@@ -131,9 +137,10 @@ async def verify(folder, expect_expand_blocked, driver=None, modes=None):
                 assert after["changed"] and after["viewHitIsDecoy"] and after["axHitIsDecoy"], action
         report["passed"] = True
     finally:
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         os.kill(initial["pid"], signal.SIGTERM)

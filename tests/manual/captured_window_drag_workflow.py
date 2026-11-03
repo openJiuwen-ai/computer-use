@@ -95,7 +95,7 @@ async def command(folder, kind):
 
 async def snapshot(ui, folder, name, *, allow_foreground=False):
     options = {"allow_foreground": True} if allow_foreground else {}
-    observation = await ui.read(view="both", **options)
+    observation = await asyncio.to_thread(ui.read, view="both", **options)
     (folder / (name + ".txt")).write_text(observation.text)
     if observation.screenshot is not None:
         (folder / (name + ".png")).write_bytes(observation.screenshot)
@@ -235,7 +235,7 @@ async def verify(folder, options):
         action_start = len(events)
         result["setup_diagnostic_count"] = action_start
         try:
-            result["receipt"] = dict(await ui.drag(start, end))
+            result["receipt"] = dict(await asyncio.to_thread(ui.drag, start, end))
         except ComputerUseError as error:
             result["error"] = {"code": error.code, "effect": error.effect, "detail": error.detail}
         result["returned_at"] = timestamp()
@@ -284,9 +284,10 @@ async def verify(folder, options):
             for name, digest in result["source_sha256"].items()
             if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
         ]
-        (folder / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        (folder / "result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         if initial is not None:
@@ -297,7 +298,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--driver", type=Path)
     parser.add_argument("--route", choices=("captured", "desktop"), default="captured")
-    parser.add_argument("--allow-global-input", action="store_true", help="Explicitly authorize global input for this run")
+    parser.add_argument(
+        "--allow-global-input", action="store_true", help="Explicitly authorize global input for this run"
+    )
     parser.add_argument("--custom-handle", action="store_true")
     parser.add_argument("--expect", choices=("observe", "complete", "interrupted"), default="observe")
     options = parser.parse_args()

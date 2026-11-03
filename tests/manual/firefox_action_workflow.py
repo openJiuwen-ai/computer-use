@@ -99,7 +99,7 @@ def picker_visible(text):
 
 async def outcome(operation):
     try:
-        return {"receipt": dict(await operation), "returned_at": timestamp()}
+        return {"receipt": dict(await asyncio.to_thread(operation)), "returned_at": timestamp()}
     except ComputerUseError as error:
         return {
             "error": {"code": error.code, "effect": error.effect, "detail": error.detail},
@@ -108,7 +108,7 @@ async def outcome(operation):
 
 
 async def observe(app, folder, name):
-    observation = await app.read(view="both", full=True)
+    observation = await asyncio.to_thread(app.read, view="both", full=True)
     (folder / (name + ".txt")).write_text(observation.text)
     if observation.screenshot is not None:
         (folder / (name + ".png")).write_bytes(observation.screenshot)
@@ -180,7 +180,7 @@ async def verify(folder, options):
                 if attempt == 39 or firefox.poll() is not None:
                     raise
                 await asyncio.sleep(0.25)
-        target = await app.element(chosen)
+        target = await asyncio.to_thread(app.element, chosen)
         result["target"] = {"reference": chosen, "line": line, "binding": asdict(target._snapshot["binding"])}
         result["downloads_before"] = original_download
         sentinel_folder = folder / "sentinel"
@@ -200,14 +200,16 @@ async def verify(folder, options):
         result["before"] = {"time": timestamp(), "sentinel": before}
         result["setup_ready"] = True
         if options.operation == "focus-action":
-            result["focus"] = {"started_at": timestamp(), **await outcome(target.focus())}
+            result["focus"] = {"started_at": timestamp(), **await outcome(lambda: target.focus())}
             result["after_focus"] = {"time": timestamp(), "sentinel": await state(sentinel_folder)}
             result["focus"]["foreground_changed"] = (
                 before["frontmostPID"] != result["after_focus"]["sentinel"]["frontmostPID"]
             )
         result["action"] = {
             "started_at": timestamp(),
-            **await outcome(target.click() if options.operation == "click" else target.perform_action("AXPress")),
+            **await outcome(
+                lambda: target.click() if options.operation == "click" else target.perform_action("AXPress")
+            ),
         }
         for name, delay in (("early", 0.15), ("late", 1.0)):
             await asyncio.sleep(delay)
@@ -222,7 +224,7 @@ async def verify(folder, options):
             cancel, cancel_line = button_reference(text, "Cancel")
             result["cancel"] = {
                 "observed_line": cancel_line,
-                **await outcome((await app.element(cancel)).perform_action("AXPress")),
+                **await outcome(lambda: app.element(cancel).perform_action("AXPress")),
             }
         text = await observe(app, folder, "after-cancel")
         assert not picker_visible(text), "The owned picker remains open; no cancellation is replayed"
@@ -239,8 +241,7 @@ async def verify(folder, options):
         cleanup = []
         if computer is not None:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             except (OSError, RuntimeError) as error:
                 cleanup.append({"component": "transport", "error": str(error)})
         for label, pid in (
@@ -266,7 +267,9 @@ async def verify(folder, options):
         set_diagnostic_handler(None)
         console.close()
         journal.close()
-        (folder / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
 
 
 def main():

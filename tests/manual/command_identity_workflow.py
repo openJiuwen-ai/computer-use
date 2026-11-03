@@ -102,7 +102,7 @@ async def command(folder, kind, **parameters):
 
 async def outcome(operation):
     try:
-        return {"receipt": dict(await operation)}
+        return {"receipt": dict(await asyncio.to_thread(operation))}
     except ComputerUseError as error:
         return {"error": {"code": error.code, "effect": error.effect, "detail": error.detail}}
 
@@ -138,9 +138,9 @@ async def case(folder, bundle, driver, probe, name, *, label_policy, compatible,
     result = {"name": name, "before": before}
     try:
         app = computer.app(bundle)
-        observation = await app.read()
+        observation = await asyncio.to_thread(app.read)
         (folder / (name + "-before.txt")).write_text(observation.text)
-        button = await app.element([{"identifier": "command-control"}])
+        button = await asyncio.to_thread(app.element, [{"identifier": "command-control"}])
         binding = asdict(button._snapshot["binding"])
         result["binding"] = binding
         result["ax_before"] = await probe.sample(capture=True)
@@ -152,7 +152,7 @@ async def case(folder, bundle, driver, probe, name, *, label_policy, compatible,
             if mutation == "replace":
                 changed = await state(folder, lambda value: not value["oldButtonAlive"])
             result["changed"] = changed
-        first = await outcome(button.click())
+        first = await outcome(lambda: button.click())
         await asyncio.sleep(0.1)
         after = await state(folder)
         raw_after = await probe.sample()
@@ -177,9 +177,9 @@ async def case(folder, bundle, driver, probe, name, *, label_policy, compatible,
         else:
             assert "receipt" in first and after["count"] == 1, (first, after)
         if read_first:
-            observation = await app.read()
+            observation = await asyncio.to_thread(app.read)
             (folder / (name + "-after-first.txt")).write_text(observation.text)
-        second = await outcome(button.click())
+        second = await outcome(lambda: button.click())
         await asyncio.sleep(0.1)
         final = await state(folder)
         raw_final = await probe.sample()
@@ -193,8 +193,7 @@ async def case(folder, bundle, driver, probe, name, *, label_policy, compatible,
         result.update(second=second, final=final, ax_final=raw_final, binding_after=asdict(button._snapshot["binding"]))
         return result
     finally:
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
 
 
 async def verify(folder, bundle, app, helper, driver, expect_compatible):
@@ -266,7 +265,9 @@ async def verify(folder, bundle, app, helper, driver, expect_compatible):
             for name, digest in report["source_sha256"].items()
             if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
         ]
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
         set_diagnostic_handler(None)
         journal.close()
         await probe.close()

@@ -105,10 +105,7 @@ def desktop_points(observation, current, names):
     (px, py, pw, ph), line = windows[owned_index]
     qx, qy, qw, qh = current["frameQuartz"]
     assert qw > 0 and qh > 0
-    points = {
-        name: (px + (current[name][0] - qx) * pw / qw, py + (current[name][1] - qy) * ph / qh)
-        for name in names
-    }
+    points = {name: (px + (current[name][0] - qx) * pw / qw, py + (current[name][1] - qy) * ph / qh) for name in names}
     # One convex captured display must contain every endpoint. This also proves
     # that a straight drag path stays out of uncaptured display gaps.
     assert any(all(contains(rect, point) for point in points.values()) for rect in captured), (points, captured)
@@ -117,12 +114,18 @@ def desktop_points(observation, current, names):
     # DesktopCapture and the public renderer preserve this catalogue order.
     # A foreground app alone does not prove its point is above an overlay.
     for rect, other_line in windows[:owned_index]:
-        assert not any(contains(rect, point) for point in points.values()), ("Owned point is covered", other_line, points)
+        assert not any(contains(rect, point) for point in points.values()), (
+            "Owned point is covered",
+            other_line,
+            points,
+        )
         if len(points) == 2:
             start, end = points.values()
             assert not segment_intersects(rect, start, end), ("Owned drag path crosses a covering window", other_line)
     return points, {
-        "png_size": dimensions, "published_window": line, "frameQuartz": current["frameQuartz"],
+        "png_size": dimensions,
+        "published_window": line,
+        "frameQuartz": current["frameQuartz"],
         "windows_above_owned": [other_line for _, other_line in windows[:owned_index]],
     }
 
@@ -139,10 +142,22 @@ def require_global_impact(receipt, device):
 
 def failure(error):
     if isinstance(error, ComputerUseError):
-        return {name: getattr(error, name) for name in (
-            "code", "effect", "target", "detail", "next", "impact", "observation", "observation_status",
-            "observation_error", "window_lifecycle", "choices",
-        )}
+        return {
+            name: getattr(error, name)
+            for name in (
+                "code",
+                "effect",
+                "target",
+                "detail",
+                "next",
+                "impact",
+                "observation",
+                "observation_status",
+                "observation_error",
+                "window_lifecycle",
+                "choices",
+            )
+        }
     return {"type": type(error).__name__, "detail": str(error)}
 
 
@@ -172,15 +187,21 @@ async def verify(folder, options):
     bundle = "local.computer-use.desktop-public." + uuid.uuid4().hex
     driver = Path(options.driver or native_driver()["command"]).resolve()
     sources = [
-        Path(__file__).resolve(), Path(computer_use.__file__), ROOT / "tests/fixtures/DesktopPublicInputProbe.swift",
+        Path(__file__).resolve(),
+        Path(computer_use.__file__),
+        ROOT / "tests/fixtures/DesktopPublicInputProbe.swift",
         ROOT / "computer_use_engine/interaction/agent/pipeline.py",
         ROOT / "computer_use_engine/interaction/read/presentation/rendering/desktop.py",
         ROOT / "os_adapter/macos/Sources/Control/NativeDesktopUnit.swift",
     ]
     report = {
-        "sdk": computer_use.__file__, "driver": str(driver), "driver_sha256": digest(driver),
+        "sdk": computer_use.__file__,
+        "driver": str(driver),
+        "driver_sha256": digest(driver),
         "source_sha256": {str(path): digest(path) for path in sources},
-        "allow_global_input": True, "actions": [], "passed": False,
+        "allow_global_input": True,
+        "actions": [],
+        "passed": False,
     }
     computer, initial = None, None
     journal = (folder / "diagnostics.jsonl").open("w", encoding="utf-8")
@@ -200,11 +221,11 @@ async def verify(folder, options):
             computer._controller.transport.driver = {"command": str(driver), "args": []}
         # Explicitly establish the owned foreground before desktop input begins.
         # This setup does not click, type, or use a hidden global-input workaround.
-        prepared = await computer.app(bundle).read(view="tree", allow_foreground=True)
+        prepared = await asyncio.to_thread(computer.app(bundle).read, view="tree", allow_foreground=True)
         report["setup_preparation"] = prepared.preparation
         await await_effect(folder, lambda value: value["frontmostPID"] == initial["pid"] and value["active"])
         current = await ready_state(folder, initial)
-        observation = await computer.read(view="image")
+        observation = await asyncio.to_thread(computer.read, view="image")
         (folder / "desktop-before.txt").write_text(observation.text)
         assert observation.screenshot is not None
         (folder / "desktop-before.png").write_bytes(observation.screenshot)
@@ -216,7 +237,7 @@ async def verify(folder, options):
             report["actions"].append(row)
             started = time.monotonic()
             try:
-                receipt = await operation()
+                receipt = await asyncio.to_thread(operation)
                 row["receipt"] = dict(receipt)
                 row["after"] = await await_effect(folder, predicate)
                 require_global_impact(receipt, device)
@@ -240,30 +261,69 @@ async def verify(folder, options):
 
         points, evidence = desktop_points(observation, current, ("fieldPointQuartz",))
         report["field_mapping"] = evidence
-        await execute("desktop field click", lambda: computer.click(at=points["fieldPointQuartz"]), "mouse",
-                      lambda value: value["fieldFocused"] and value["field"] == "")
-        await execute("desktop insert desk", lambda: computer.type_text("desk"), "keyboard",
-                      lambda value: value["field"] == "desk", field=True)
-        await execute("desktop Left", lambda: computer.press_key("Left"), "keyboard",
-                      lambda value: value["selection"] == {"location": 3, "length": 0}, field=True)
-        await execute("desktop insert at moved caret", lambda: computer.type_text("X"), "keyboard",
-                      lambda value: value["field"] == "desXk", field=True)
-        submitted = await execute("desktop Return", lambda: computer.press_key("Return"), "keyboard",
-                                 lambda value: value["submissions"] == 1 and value["result"] == "Submitted: desXk", field=True)
+        await execute(
+            "desktop field click",
+            lambda: computer.click(at=points["fieldPointQuartz"]),
+            "mouse",
+            lambda value: value["fieldFocused"] and value["field"] == "",
+        )
+        await execute(
+            "desktop insert desk",
+            lambda: computer.type_text("desk"),
+            "keyboard",
+            lambda value: value["field"] == "desk",
+            field=True,
+        )
+        await execute(
+            "desktop Left",
+            lambda: computer.press_key("Left"),
+            "keyboard",
+            lambda value: value["selection"] == {"location": 3, "length": 0},
+            field=True,
+        )
+        await execute(
+            "desktop insert at moved caret",
+            lambda: computer.type_text("X"),
+            "keyboard",
+            lambda value: value["field"] == "desXk",
+            field=True,
+        )
+        submitted = await execute(
+            "desktop Return",
+            lambda: computer.press_key("Return"),
+            "keyboard",
+            lambda value: value["submissions"] == 1 and value["result"] == "Submitted: desXk",
+            field=True,
+        )
         for code in (123, 36):
             events = [event for event in submitted["keys"] if event["code"] == code]
-            assert [event["type"] for event in events] == [10, 11] and all(event["window"] == initial["window"] for event in events), events
+            assert [event["type"] for event in events] == [10, 11] and all(
+                event["window"] == initial["window"] for event in events
+            ), events
         current = await ready_state(folder, initial)
         points, evidence = desktop_points(observation, current, ("scrollPointQuartz",))
         report["scroll_mapping"] = evidence
-        await execute("desktop wheel", lambda: computer.scroll("down", at=points["scrollPointQuartz"], pages=0.5), "mouse",
-                      lambda value: value["scrollY"] > current["scrollY"] + 10)
+        await execute(
+            "desktop wheel",
+            lambda: computer.scroll("down", at=points["scrollPointQuartz"], pages=0.5),
+            "mouse",
+            lambda value: value["scrollY"] > current["scrollY"] + 10,
+        )
         current = await ready_state(folder, initial)
         points, evidence = desktop_points(observation, current, ("dragStartQuartz", "dragEndQuartz"))
         report["drag_mapping"] = evidence
-        final = await execute("desktop marker drag", lambda: computer.drag(points["dragStartQuartz"], points["dragEndQuartz"]), "mouse",
-                              lambda value: value["dragDowns"] == 1 and value["dragMoves"] > 0 and value["dragUps"] == 1
-                              and abs(value["marker"][0] - 240) < 3 and abs(value["marker"][1] - 65) < 3)
+        final = await execute(
+            "desktop marker drag",
+            lambda: computer.drag(points["dragStartQuartz"], points["dragEndQuartz"]),
+            "mouse",
+            lambda value: (
+                value["dragDowns"] == 1
+                and value["dragMoves"] > 0
+                and value["dragUps"] == 1
+                and abs(value["marker"][0] - 240) < 3
+                and abs(value["marker"][1] - 65) < 3
+            ),
+        )
         assert final["field"] == "desXk" and final["submissions"] == 1 and final["guard"] == initial["guard"]
         report["final"] = final
         report["passed"] = True
@@ -273,15 +333,18 @@ async def verify(folder, options):
     finally:
         if computer is not None:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             except (OSError, RuntimeError) as error:
                 report["transport_cleanup_error"] = str(error)
-        report["cleanup"] = await cleanup_fixture("owned-desktop-target", folder, NAME, initial["pid"] if initial else None)
+        report["cleanup"] = await cleanup_fixture(
+            "owned-desktop-target", folder, NAME, initial["pid"] if initial else None
+        )
         set_diagnostic_handler(None)
         journal.close()
         report["source_drift"] = [str(path) for path in sources if digest(path) != report["source_sha256"][str(path)]]
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
 
 
 def main():

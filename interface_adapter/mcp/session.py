@@ -68,7 +68,7 @@ class ExecutionSession:
                 ("Native cleanup is still pending. Call computer_use_reset before continuing; no code was executed.")
             )
         if self._pending is not None or self._starting:
-            return execution_error("Another call is running; await it before starting the next.")
+            return execution_error("Another call is running; wait for it to finish before starting the next.")
         if signal is not None and signal.is_set():
             return execution_error("Call cancelled before execution.")
         self._starting = True

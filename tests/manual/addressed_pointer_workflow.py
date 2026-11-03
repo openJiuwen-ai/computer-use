@@ -32,15 +32,17 @@ async def main():
     try:
         current = await wait_state(directory, lambda value: "buttonPoint" in value)
         app = computer.app(bundle)
-        observation = await app.read(view="both")
+        observation = await asyncio.to_thread(app.read, view="both")
         (directory / "before.png").write_bytes(observation.screenshot)
-        await recorder.action("addressed coordinate button", app.click(at=tuple(current["buttonPoint"])), mouse=True)
+        await recorder.action(
+            "addressed coordinate button", lambda: app.click(at=tuple(current["buttonPoint"])), mouse=True
+        )
         current = await wait_state(directory, lambda value: value["buttonClicks"] == 1)
         assert current["other"] == initial["other"]
         effects = recorder.actions[-1]["effects"]
         mouse = [effect for effect in effects if effect["device"] == "mouse"]
         assert mouse and all(effect["transport"] == "process" for effect in mouse)
-        image = await app.read(view="image")
+        image = await asyncio.to_thread(app.read, view="image")
         (directory / "after.png").write_bytes(image.screenshot)
         driver = Path(native_driver()["command"])
         (directory / "result.json").write_text(
@@ -59,8 +61,7 @@ async def main():
         )
         logging.info("Verified addressed pointer callback: %s", directory / "result.json")
     finally:
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         recorder.journal.close()
         os.kill(initial["pid"], signal.SIGTERM)

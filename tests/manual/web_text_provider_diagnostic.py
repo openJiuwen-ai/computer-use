@@ -47,25 +47,33 @@ async def verify(folder, app_path, probe):
     title = "CU Web Provider " + uuid4().hex[:12]
     binary = app_path / "Contents/MacOS" / NAME
     paths = (
-        "tests/fixtures/WKWebTextProbe.swift", "tests/fixtures/WebTextProviderProbe.swift",
-        "tests/manual/web_text_provider_diagnostic.py", "tests/manual/web_text_workflow.py",
-        "tests/manual/keyboard_window_command_workflow.py", "tests/manual/qt_cocoa_activation_workflow.py",
+        "tests/fixtures/WKWebTextProbe.swift",
+        "tests/fixtures/WebTextProviderProbe.swift",
+        "tests/manual/web_text_provider_diagnostic.py",
+        "tests/manual/web_text_workflow.py",
+        "tests/manual/keyboard_window_command_workflow.py",
+        "tests/manual/qt_cocoa_activation_workflow.py",
         "os_adapter/macos/Sources/Windowing/NativeProcessIdentity.swift",
     )
     manifest = {name: sha(ROOT / name) for name in paths}
-    manifest.update({
-        str(path.relative_to(ROOT)): sha(path)
-        for path in sorted((ROOT / "computer_use_engine").rglob("*.py"))
-    })
+    manifest.update(
+        {str(path.relative_to(ROOT)): sha(path) for path in sorted((ROOT / "computer_use_engine").rglob("*.py"))}
+    )
     write_json(folder / "source-manifest.json", manifest)
     driver = Path(native_driver()["command"])
     report = {
-        "diagnostic_only": True, "read_only_provider_inspection": True,
-        "allow_global_input": False, "sdk": computer_use.__file__,
-        "driver": str(driver), "driver_sha256": sha(driver),
+        "diagnostic_only": True,
+        "read_only_provider_inspection": True,
+        "allow_global_input": False,
+        "sdk": computer_use.__file__,
+        "driver": str(driver),
+        "driver_sha256": sha(driver),
         "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-        "probe": str(probe), "probe_sha256": sha(probe),
-        "fixture": str(binary), "fixture_sha256": sha(binary), "window_title": title,
+        "probe": str(probe),
+        "probe_sha256": sha(probe),
+        "fixture": str(binary),
+        "fixture_sha256": sha(binary),
+        "window_title": title,
         "passed": False,
     }
     for name in ("source-manifest.json", "build-command.json", "build-result.json"):
@@ -79,6 +87,7 @@ async def verify(folder, app_path, probe):
         (folder / "probe.log").open("w") as probe_log,
         (folder / "diagnostics.jsonl").open("w") as journal,
     ):
+
         def record(event):
             events.append(event)
             journal.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
@@ -86,29 +95,42 @@ async def verify(folder, app_path, probe):
 
         def activities():
             return [
-                event["value"] for event in events
-                if event.get("kind") == "backend_diagnostic" and isinstance(event.get("value"), dict)
+                event["value"]
+                for event in events
+                if event.get("kind") == "backend_diagnostic"
+                and isinstance(event.get("value"), dict)
                 and event["value"].get("kind") == "input_activity"
             ]
 
         set_diagnostic_handler(record)
         try:
             child = await asyncio.create_subprocess_exec(
-                str(binary), "--output", str(folder), "--title", title, cwd=ROOT,
-                stdin=asyncio.subprocess.DEVNULL, stdout=errors, stderr=errors,
+                str(binary),
+                "--output",
+                str(folder),
+                "--title",
+                title,
+                cwd=ROOT,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=errors,
+                stderr=errors,
             )
             initial = await state(
-                folder, lambda value: value["visible"] and value["page"].get("ready"),
-                process=child, seconds=15,
+                folder,
+                lambda value: value["visible"] and value["page"].get("ready"),
+                process=child,
+                seconds=15,
             )
             report["before"] = initial
             assert initial["pid"] == child.pid and initial["title"] == title
             assert initial["bundleID"].startswith("local.computer-use.web-text.")
             assert_original_document(initial, initial)
-            observation = await computer.app(initial["bundleID"]).read(view="tree")
+            observation = await asyncio.to_thread(computer.app(initial["bundleID"]).read, view="tree")
             (folder / "sdk-read.txt").write_text(observation.text)
             report["sdk_read"] = {
-                "view": "tree", "allow_foreground": False, "calls": 1,
+                "view": "tree",
+                "allow_foreground": False,
+                "calls": 1,
                 "preparation": observation.preparation,
                 "title_observed": title in observation.text,
                 "field_observed": "Web callback input" in observation.text,
@@ -122,7 +144,11 @@ async def verify(folder, app_path, probe):
             command = [str(probe), "--pid", str(child.pid), "--title", title, "--output", str(folder / "provider.json")]
             report["probe_command"] = command
             helper = await asyncio.create_subprocess_exec(
-                *command, cwd=ROOT, stdin=asyncio.subprocess.DEVNULL, stdout=probe_log, stderr=probe_log,
+                *command,
+                cwd=ROOT,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=probe_log,
+                stderr=probe_log,
             )
             report["probe_exit_code"] = await asyncio.wait_for(helper.wait(), 30)
             if (folder / "provider.json").exists():
@@ -150,8 +176,7 @@ async def verify(folder, app_path, probe):
                 report["final_evidence_error"] = str(error)
             finally:
                 try:
-                    computer._controller.transport.close()
-                    await computer._controller.transport.wait_closed()
+                    await asyncio.to_thread(computer.close)
                 finally:
                     set_diagnostic_handler(None)
                     report["native_activity"] = activities()
@@ -162,7 +187,9 @@ async def verify(folder, app_path, probe):
                         await terminate(child)
                         report["probe_terminated"] = helper is None or helper.returncode is not None
                         report["fixture_terminated"] = child is None or child.returncode is not None
-                        report["source_drift"] = [name for name, digest in manifest.items() if sha(ROOT / name) != digest]
+                        report["source_drift"] = [
+                            name for name, digest in manifest.items() if sha(ROOT / name) != digest
+                        ]
                         if report["source_drift"] or not report["zero_input_activity"]:
                             report["passed"] = False
                         write_json(folder / "result.json", report)
@@ -180,7 +207,9 @@ def main():
         parser.error("--probe must name the independently compiled read-only helper")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     (ROOT / ".artifacts").mkdir(exist_ok=True)
-    folder = (args.output or Path(tempfile.mkdtemp(prefix="web-provider-diagnostic-", dir=ROOT / ".artifacts"))).resolve()
+    folder = (
+        args.output or Path(tempfile.mkdtemp(prefix="web-provider-diagnostic-", dir=ROOT / ".artifacts"))
+    ).resolve()
     folder.mkdir(parents=True, exist_ok=True)
     try:
         app = build_owned(folder, "local.computer-use.web-text." + uuid4().hex, NAME)

@@ -68,8 +68,11 @@ async def verify(folder, driver_option, require_background):
     computer._controller.transport.driver = {"command": str(driver), "args": []}
     initial, events = None, []
     report = {
-        "passed": False, "allow_global_input": False, "require_background": require_background,
-        "sdk": computer_use.__file__, "driver": str(driver),
+        "passed": False,
+        "allow_global_input": False,
+        "require_background": require_background,
+        "sdk": computer_use.__file__,
+        "driver": str(driver),
         "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
         "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "commands": [],
@@ -80,8 +83,10 @@ async def verify(folder, driver_option, require_background):
         for path in sorted((ROOT / directory).rglob(pattern))
     }
     for path in (
-        Path(__file__), ROOT / "tests/fixtures/AppKitToggleActivationProbe.swift",
-        ROOT / "tests/manual/input_receiver_workflow.py", ROOT / "tests/manual/qt_cocoa_activation_workflow.py",
+        Path(__file__),
+        ROOT / "tests/fixtures/AppKitToggleActivationProbe.swift",
+        ROOT / "tests/manual/input_receiver_workflow.py",
+        ROOT / "tests/manual/qt_cocoa_activation_workflow.py",
     ):
         sources[str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     (folder / "source-manifest.json").write_text(json.dumps(sources, indent=2) + "\n")
@@ -98,7 +103,7 @@ async def verify(folder, driver_option, require_background):
         initial = await state(folder)
         report["initial"] = initial
         app = computer.app(bundle)
-        observation = await app.read(view="both")
+        observation = await asyncio.to_thread(app.read, view="both")
         assert initial["title"] in observation.text
         save_observation(folder, "before", observation)
 
@@ -109,7 +114,7 @@ async def verify(folder, driver_option, require_background):
             report["commands"].append(row)
             started, first_event = time.monotonic(), len(events)
             try:
-                receipt = await operation()
+                receipt = await asyncio.to_thread(operation)
                 row["receipt"] = receipt
                 await wait_state(folder, expected)
                 await asyncio.sleep(0.15)
@@ -130,18 +135,21 @@ async def verify(folder, driver_option, require_background):
             finally:
                 row["seconds"] = time.monotonic() - started
                 row["native_effects"] = [
-                    event["value"] for event in events[first_event:]
-                    if event.get("kind") == "backend_diagnostic" and isinstance(event.get("value"), dict)
+                    event["value"]
+                    for event in events[first_event:]
+                    if event.get("kind") == "backend_diagnostic"
+                    and isinstance(event.get("value"), dict)
                     and event["value"].get("kind") == "input_activity"
                     and event["value"].get("phase") == "willCall"
                 ]
 
         for route, label in (("normal", "Normal click"), ("explicit", "Explicit action")):
             for field, suffix in (("recording", "switch"), ("muted", "radio on")):
-                element = await app.element(label + " " + suffix)
+                element = await asyncio.to_thread(app.element, label + " " + suffix)
                 operation = element.click if route == "normal" else lambda: element.perform_action("AXPress")
                 before, after = await command(
-                    route + "-" + field, operation,
+                    route + "-" + field,
+                    operation,
                     lambda value: value["forms"][route]["counts"][field] >= 1,
                 )
                 form = after["forms"][route]
@@ -152,11 +160,15 @@ async def verify(folder, driver_option, require_background):
                     for other_field in ("recording", "muted"):
                         if (other_route, other_field) != (route, field):
                             for key in ("checked", "model", "counts"):
-                                assert after["forms"][other_route][key][other_field] == before["forms"][other_route][key][other_field]
+                                assert (
+                                    after["forms"][other_route][key][other_field]
+                                    == before["forms"][other_route][key][other_field]
+                                )
                 assert all(name == "NSButton" for name in form["classes"].values()), form["classes"]
-        save = await app.element("Save and reopen")
+        save = await asyncio.to_thread(app.element, "Save and reopen")
         before, final = await command(
-            "save-and-reopen", save.click,
+            "save-and-reopen",
+            save.click,
             lambda value: value["saveClicks"] == 1 and value["generation"] == 2,
         )
         report["final"] = final
@@ -178,8 +190,7 @@ async def verify(folder, driver_option, require_background):
         try:
             if initial is not None:
                 report["final_state"] = await state(folder)
-            computer._controller.transport.close()
-            await computer._controller.transport.wait_closed()
+            await asyncio.to_thread(computer.close)
         finally:
             set_diagnostic_handler(None)
             journal.close()

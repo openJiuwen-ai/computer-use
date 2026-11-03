@@ -124,7 +124,7 @@ async def configure(folder, *, derived=True, publishing="record"):
 
 async def outcome(operation):
     try:
-        return {"receipt": dict(await operation)}
+        return {"receipt": dict(await asyncio.to_thread(operation))}
     except ComputerUseError as error:
         return {"error": {"code": error.code, "effect": error.effect, "detail": error.detail}}
 
@@ -154,9 +154,9 @@ class AXProbe:
 
 async def retained_field(computer, bundle, folder, name):
     app = computer.app(bundle)
-    observation = await app.read()
+    observation = await asyncio.to_thread(app.read)
     (folder / (name + "-before.txt")).write_text(observation.text)
-    field = await app.element([{"identifier": "row-field-control"}])
+    field = await asyncio.to_thread(app.element, [{"identifier": "row-field-control"}])
     return app, field
 
 
@@ -175,7 +175,7 @@ async def replacement_return_case(folder, bundle, report, *, driver, long_text=F
             values.append("Ab🙂" * 400)
         for index, value in enumerate(values):
             started = time.monotonic()
-            replacement = await outcome(field.type_text(value, replace=True))
+            replacement = await outcome(lambda: field.type_text(value, replace=True))
             elapsed = time.monotonic() - started
             after_replace = await state(folder)
             item = {
@@ -195,7 +195,7 @@ async def replacement_return_case(folder, bundle, report, *, driver, long_text=F
             # oracle. A lost-editing-callback negative needs a separate model.
             # No new lookup, focus, read or system recipe between the two commands.
             started = time.monotonic()
-            submitted = await outcome(field.press_key("Return"))
+            submitted = await outcome(lambda: field.press_key("Return"))
             item.update(submit=submitted, submit_seconds=time.monotonic() - started)
             assert "receipt" in submitted, item
             final = await wait_state(folder, lambda current, expected=index + 1: current["returnKeys"] == expected)
@@ -212,8 +212,7 @@ async def replacement_return_case(folder, bundle, report, *, driver, long_text=F
         case["oracle_passed"] = True
     finally:
         case["final"] = await state(folder)
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
 
 
 async def text_case(folder, bundle, probe, journal, name, *, derived, expect_rejection, driver):
@@ -223,20 +222,20 @@ async def text_case(folder, bundle, probe, journal, name, *, derived, expect_rej
         app, field = await retained_field(computer, bundle, folder, name)
         binding = asdict(field._snapshot["binding"])
         raw_before = await probe.sample(capture=True)
-        first = await outcome(field.type_text("abcd"))
+        first = await outcome(lambda: field.type_text("abcd"))
         await asyncio.sleep(0.1)
         after = await state(folder)
         raw_after = await probe.sample()
         # Keep using the original Element after reconciliation, not a fresh ref.
-        observation = await app.read()
+        observation = await asyncio.to_thread(app.read)
         (folder / (name + "-after-input.txt")).write_text(observation.text)
         assert asdict(field._snapshot["binding"]) == binding
         raw_after_read = await probe.sample()
-        tab = await outcome(field.press_key("Tab"))
+        tab = await outcome(lambda: field.press_key("Tab"))
         await asyncio.sleep(0.05)
         after_tab = await state(folder)
         await command(folder, "focus")
-        following = await outcome(field.type_text("Z"))
+        following = await outcome(lambda: field.type_text("Z"))
         await asyncio.sleep(0.05)
         final = await state(folder)
         assert before["dataKey"] == final["dataKey"] == "A"
@@ -274,8 +273,7 @@ async def text_case(folder, bundle, probe, journal, name, *, derived, expect_rej
         }
     finally:
         journal.flush()
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
 
 
 async def guard_case(folder, bundle, probe, name, *, mutation, driver):
@@ -291,7 +289,7 @@ async def guard_case(folder, bundle, probe, name, *, mutation, driver):
             changed = await command(folder, "cell_position", rowIndex=1)
         else:
             changed = await command(folder, "reuse", dataKey="B", value="other-record")
-        action = await outcome(field.type_text("X"))
+        action = await outcome(lambda: field.type_text("X"))
         await asyncio.sleep(0.1)
         after = await state(folder)
         raw_after = await probe.sample()
@@ -318,8 +316,7 @@ async def guard_case(folder, bundle, probe, name, *, mutation, driver):
             "ax_after": raw_after,
         }
     finally:
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
 
 
 async def presentation_case(folder, bundle, probe, name, *, reuse, expect_rejection, driver):
@@ -333,7 +330,7 @@ async def presentation_case(folder, bundle, probe, name, *, reuse, expect_reject
             if reuse
             else await command(folder, "description", text="Updated row presentation before input")
         )
-        action = await outcome(field.type_text("X"))
+        action = await outcome(lambda: field.type_text("X"))
         await asyncio.sleep(0.1)
         after = await state(folder)
         raw_after = await probe.sample()
@@ -365,8 +362,7 @@ async def presentation_case(folder, bundle, probe, name, *, reuse, expect_reject
             "ax_after": raw_after,
         }
     finally:
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
 
 
 async def verify(folder, bundle, app, helper, expect_rejection, driver=None, *, text_chain_only=False, long_text=False):
@@ -466,7 +462,9 @@ async def verify(folder, bundle, app, helper, expect_rejection, driver=None, *, 
             for name, digest in report["source_sha256"].items()
             if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
         ]
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
         set_diagnostic_handler(None)
         journal.close()
         await probe.close()

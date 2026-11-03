@@ -889,7 +889,7 @@ def render_projection_lines(
             )
         elif partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
             hint(
-                f"{indent}\tInspect subtree: (await app.element({node['ref']})).read()"
+                f"{indent}\tInspect subtree: app.element({node['ref']}).read()"
                 if context.get("publicApi")
                 else f"{indent}\tInspect subtree: element({quoted(node['ref'])}).read()"
             )
@@ -913,7 +913,7 @@ def render_projection_lines(
         if block_value:
             continuation = (
                 (
-                    f"; use (await app.element({node['ref']})).read_text()"
+                    f"; use app.element({node['ref']}).read_text()"
                     if context.get("publicApi")
                     else f"; use element({quoted(node['ref'])}).read_text()"
                 )

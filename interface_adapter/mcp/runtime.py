@@ -4,12 +4,10 @@
 """Worker-process entry point: persistent Python execution embedding the computer_use SDK."""
 
 import argparse
-import ast
 import asyncio
 import base64
 import builtins
 import hashlib
-import inspect
 import io
 import os
 import pprint
@@ -19,6 +17,7 @@ from collections import deque
 from contextvars import ContextVar
 
 from computer_use import Computer
+from computer_use.client.execution import ExecutionCancellation, SessionExecutor, execution_scope
 from computer_use.client.host import (
     set_action_handler,
     set_diagnostic_handler,
@@ -60,9 +59,11 @@ _runs = ContextVar("computer_use_execution", default=None)
 class Runtime:
     def __init__(self, send, computer_factory=Computer):
         self.send, self.computer_factory = send, computer_factory
+        self.executor = SessionExecutor(loop=asyncio.get_running_loop())
         self.presenter = ObservationPresenter()
         self.command_runs = {}
-        self.computers = []
+        self.executions = set()
+        self.closed = False
         require_image_delivery()
         set_execution_guard(self.guard)
         set_diagnostic_handler(self.diagnostic)
@@ -75,7 +76,8 @@ class Runtime:
                 self.send(dict(preview=event))
 
             set_preview_handler(latest_preview_sink(preview))
-        self.task_namespace = self.namespace()
+        with execution_scope(self.executor):
+            self.task_namespace = self.namespace()
 
     @staticmethod
     def guard():
@@ -83,7 +85,7 @@ class Runtime:
         if run is None or not run["active"] or run["phase"] != "code":
             raise RuntimeError(
                 "Computer operation belongs to an ended tool execution. Effect: no command "
-                "sent. Next: await every operation within a current tool call; do not use "
+                "sent. Next: execute operations within a current tool call; do not use "
                 "background timers for input."
             )
         pending = asyncio.get_running_loop().create_future()
@@ -97,6 +99,8 @@ class Runtime:
         return done
 
     def diagnostic(self, event):
+        if not self.executor.is_owner:
+            return self.executor.call(self.diagnostic, event)
         run = _runs.get()
         execution_id = run["id"] if run is not None else None
         trace = event.get("traceId")
@@ -112,6 +116,8 @@ class Runtime:
         self.send(dict(diagnostic=event, **({"executionId": execution_id} if execution_id is not None else {})))
 
     def emit(self, block, merge_text=False):
+        if not self.executor.is_owner:
+            return self.executor.call(self.emit, block, merge_text)
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -133,6 +139,8 @@ class Runtime:
         self.log_observations(run)
 
     def action(self, receipt):
+        if not self.executor.is_owner:
+            return self.executor.call(self.action, receipt)
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -140,6 +148,8 @@ class Runtime:
         self.emit(dict(type="text", text=run["actions"].render(receipt)), True)
 
     def text_page(self, source, page):
+        if not self.executor.is_owner:
+            return self.executor.call(self.text_page, source, page)
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -148,6 +158,8 @@ class Runtime:
         run["textPages"].set(page, True)
 
     def observation(self, event):
+        if not self.executor.is_owner:
+            return self.executor.call(self.observation, event)
         run = _runs.get()
         if event["kind"] in ("invalidate", "discard-pending"):
             if event["kind"] == "invalidate":
@@ -244,6 +256,8 @@ class Runtime:
         return presented
 
     def print(self, *values, sep=" ", end="\n", file=None, flush=False):
+        if not self.executor.is_owner:
+            return self.executor.call(self.print, *values, sep=sep, end=end, file=file, flush=flush)
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -301,6 +315,8 @@ class Runtime:
             run["imageContexts"].set(observed["state"]["screenshot"], True)
 
     def print_image(self, png):
+        if not self.executor.is_owner:
+            return self.executor.call(self.print_image, png)
         if not isinstance(png, (bytes, bytearray, memoryview)):
             raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
         delivery = self.prepared_image(png)
@@ -326,8 +342,7 @@ class Runtime:
             if error is None:
                 error: BaseException | None = RuntimeError(
                     (
-                        "Computer operations were not awaited. Pending operations "
-                        "finished before "
+                        "Computer operations outlived their script. Pending operations finished before "
                         "this result; inspect their receipts and observations before "
                         "continuing."
                     )
@@ -374,7 +389,6 @@ class Runtime:
 
     def namespace(self):
         computer = self.computer_factory()
-        self.computers.append(computer)
         return dict(
             __name__="__computer_use__",
             __builtins__=builtins,
@@ -383,7 +397,59 @@ class Runtime:
             print_image=self.print_image,
         )
 
+    def evaluate(self, compiled, run):
+        """Run ordinary synchronous Python away from the event-loop owner.
+
+        The trace only interrupts model-code frames; SDK/backend finally blocks
+        retain their own cancellation and cleanup responsibilities. The parent
+        worker supervisor still owns termination of uninterruptible native code.
+        """
+        cancellation = run["cancellation"]
+
+        def trace(frame, event, argument):
+            if frame.f_code.co_filename != "computer-use-agent.py":
+                return None
+            if cancellation.cancelled.is_set():
+                raise _ExecutionCancelled("Tool execution cancelled; no further statements were run.")
+            return trace
+
+        previous = sys.gettrace()
+        with execution_scope(self.executor, cancellation):
+            sys.settrace(trace)
+            try:
+                run["evaluationStarted"] = True
+                exec(compiled, self.task_namespace, self.task_namespace)  # noqa: S102
+            finally:
+                sys.settrace(previous)
+
+    async def cancel_worker(self, worker, cancellation):
+        cancellation.cancel()
+
+        async def settle():
+            await self.executor.drain(cancellation)
+            try:
+                await worker
+            except BaseException:
+                # The original cancellation remains the public outcome. The
+                # native operation has already retained its own effect receipt.
+                pass
+
+        settling = asyncio.create_task(settle())
+        while not settling.done():
+            try:
+                await asyncio.shield(settling)
+            except asyncio.CancelledError:
+                # Repeated stop requests cannot abandon cleanup or the worker.
+                continue
+        await settling
+
     async def execute(self, message):
+        if self.closed:
+            result = dict(content=[dict(type="text", text="Execution runtime is closed.")], isError=True)
+            self.send(result)
+            return result
+        execution = asyncio.current_task()
+        self.executions.add(execution)
         code, id_, history = message["code"], message["executionId"], message["history"]
         if history["resetText"]:
             self.presenter.invalidate()
@@ -404,45 +470,48 @@ class Runtime:
             preparedImages={},
             presentations={},
             deliveredObservations=[],
+            cancellation=ExecutionCancellation(),
         )
         token = _runs.set(run)
         try:
             try:
-                namespace = self.task_namespace
                 compiled = compile(
                     code + "\n",
                     "computer-use-agent.py",
                     "exec",
-                    flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
                     dont_inherit=True,
                 )
-                run["evaluationStarted"] = True
-                # The MCP operation explicitly runs agent-supplied Python; eval
-                # retains the coroutine produced by top-level await in exec code.
-                evaluated = eval(compiled, namespace, namespace)  # noqa: S307
-                if inspect.isawaitable(evaluated):
-                    await evaluated
+                worker = asyncio.create_task(asyncio.to_thread(self.evaluate, compiled, run))
+                try:
+                    # Cancelling the waiting task cannot abandon the executing
+                    # thread. First stop SDK admission, then settle native work
+                    # and the script before publishing a result.
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    await self.cancel_worker(worker, run["cancellation"])
+                    raise
             except BaseException as error:
                 return await self.finish(error)
             return await self.finish()
         finally:
             _runs.reset(token)
+            self.executions.discard(execution)
 
     async def close(self):
-        for computer in self.computers:
-            # The pipeline shares retained bindings with their owning service.
-            # pylint: disable-next=protected-access
-            transport = computer._controller.transport
-            if hasattr(transport, "close"):
-                transport.close()
-        for computer in self.computers:
-            # pylint: disable-next=protected-access
-            transport = computer._controller.transport
-            if hasattr(transport, "wait_closed"):
-                await transport.wait_closed()
+        self.closed = True
+        active = [task for task in self.executions if task is not asyncio.current_task()]
+        for task in active:
+            task.cancel()
+        if active:
+            await asyncio.gather(*active, return_exceptions=True)
+        await self.executor.aclose()
 
 
 _original_print = builtins.print
+
+
+class _ExecutionCancelled(BaseException):
+    """Stop remaining model statements without being caught as an SDK error."""
 
 
 class ConsoleWriter(io.TextIOBase):

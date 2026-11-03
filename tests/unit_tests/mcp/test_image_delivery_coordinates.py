@@ -74,8 +74,8 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.source = Record()
         self.store = DesktopStore(DesktopImageAccess(register_image, image_delivery_epoch, image_delivery_required))
         self.runtime.task_namespace.update(
-            map_point=lambda x, y: self.store.map_parameters("click", dict(x=x, y=y)),
-            assert_unseen=self.assert_unseen,
+            map_point=lambda x, y: self.runtime.executor.call(self.store.map_parameters, "click", dict(x=x, y=y)),
+            assert_unseen=lambda: self.runtime.executor.call(self.assert_unseen),
         )
 
     async def asyncTearDown(self):
@@ -112,7 +112,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
             )
             return state
 
-        self.runtime.task_namespace["read"] = publish
+        self.runtime.task_namespace["read"] = lambda: self.runtime.executor.call(publish)
         return facts, document, state
 
     def assert_unseen(self):

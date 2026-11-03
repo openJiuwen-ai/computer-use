@@ -1,6 +1,7 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import AppKit
+import ApplicationServices
 
 @MainActor final class D34HiddenContent: NSView {
     override nonisolated func accessibilityChildren() -> [Any]? { [] }
@@ -42,6 +43,7 @@ import AppKit
     var commandError: String?
     var opens = 0
     var sheetOwner: String?
+    var pointerHit = [String: Any]()
 
     func document(_ sender: NSView) -> D34Document? {
         documents.values.first { $0.window === sender.window }
@@ -163,6 +165,7 @@ import AppKit
         let flags = CGEventSource.flagsState(.combinedSessionState)
         let value: [String: Any] = [
             "pid": getpid(), "sequence": commandSequence, "commandError": commandError as Any? ?? NSNull(),
+            "pointerHit": pointerHit,
             "opens": opens, "sheetOwner": sheetOwner as Any? ?? NSNull(), "documents": states,
             "keyWindow": NSApp.keyWindow?.windowNumber ?? -1,
             "frontmostPID": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1,
@@ -185,6 +188,18 @@ import AppKit
         commandError = nil
         let name = command["name"] as? String ?? "A"
         switch command["action"] as? String {
+        case "pointer-check":
+            if let doc = documents[name], !doc.closed {
+                let point = doc.window.convertPoint(toScreen: doc.countButton.convert(
+                    NSPoint(x: doc.countButton.bounds.midX, y: doc.countButton.bounds.midY), to: nil))
+                var element: AXUIElement?
+                let status = AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x),
+                    Float(NSScreen.screens[0].frame.maxY - point.y), &element)
+                var pid: pid_t = -1
+                if let element { AXUIElementGetPid(element, &pid) }
+                pointerHit = ["window": NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0),
+                    "axPID": pid, "axStatus": status.rawValue, "point": [point.x, point.y]]
+            } else { commandError = "no live pointer target" }
         case "focus":
             if let doc = documents[name], !doc.closed { show(doc) } else { commandError = "no live document" }
         case "close": documents[name]?.window.close()

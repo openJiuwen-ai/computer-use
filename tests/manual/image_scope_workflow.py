@@ -48,7 +48,7 @@ async def verify(folder, change, driver=None):
     set_diagnostic_handler(record)
     try:
         app = computer.app(bundle)
-        observation = await app.read(view="both")
+        observation = await asyncio.to_thread(app.read, view="both")
         (folder / "before.txt").write_text(observation.text)
         (folder / "before.png").write_bytes(observation.screenshot)
         image = app._image
@@ -74,7 +74,7 @@ async def verify(folder, change, driver=None):
             await asyncio.sleep(0.05)
         else:
             raise AssertionError("Auxiliary panel did not change")
-        receipt = dict(await app.click(at=point))
+        receipt = dict(await asyncio.to_thread(app.click, at=point))
         for _ in range(100):
             current = await state(folder)
             if current["clicks"] == 1:
@@ -89,8 +89,7 @@ async def verify(folder, change, driver=None):
     finally:
         report["final"] = await state(folder)
         (folder / "result.json").write_text(json.dumps(report, indent=2, default=encode_artifact) + "\n")
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         os.kill(initial["pid"], signal.SIGTERM)

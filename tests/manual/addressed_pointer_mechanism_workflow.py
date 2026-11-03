@@ -40,8 +40,7 @@ def build_probe(folder):
     """Freeze source files before an isolated compile; do not touch native .build."""
     folder.mkdir(parents=True, exist_ok=True)
     sources = [
-        path for path in sorted((ROOT / "os_adapter/macos/Sources").rglob("*.swift"))
-        if path.name != "main.swift"
+        path for path in sorted((ROOT / "os_adapter/macos/Sources").rglob("*.swift")) if path.name != "main.swift"
     ]
     sources.append(PROBE_SOURCE)
     manifest, copies = {}, []
@@ -55,7 +54,8 @@ def build_probe(folder):
         copies.append(str(copy))
     for source in sources:
         assert manifest[str(source.relative_to(ROOT))] == hashlib.sha256(source.read_bytes()).hexdigest(), (
-            "Native source changed during probe snapshot; build from a stable checkout", source
+            "Native source changed during probe snapshot; build from a stable checkout",
+            source,
         )
     binary = folder / "AddressedPointerMechanismProbe"
     command = ["swiftc", "-swift-version", "6", "-parse-as-library", *copies, "-o", str(binary)]
@@ -65,10 +65,17 @@ def build_probe(folder):
         result = subprocess.run(command, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT)
     if result.returncode:
         raise RuntimeError(f"Native probe compile failed ({result.returncode}); see {folder / 'build.log'}")
-    (folder / "build-result.json").write_text(json.dumps({
-        "binary": str(binary), "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-        "scope": "standalone diagnostic; unchanged production sources except replacement main",
-    }, indent=2) + "\n")
+    (folder / "build-result.json").write_text(
+        json.dumps(
+            {
+                "binary": str(binary),
+                "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                "scope": "standalone diagnostic; unchanged production sources except replacement main",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     return binary
 
 
@@ -109,7 +116,9 @@ async def verify(folder, selected, preparation, binary, driver_option):
         "probe": str(binary),
         "probe_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
         "probe_source_manifest": str(binary.parent / "source-manifest.json"),
-        "fixture_source_sha256": hashlib.sha256((ROOT / "tests/fixtures/PointerButtonProbe.swift").read_bytes()).hexdigest(),
+        "fixture_source_sha256": hashlib.sha256(
+            (ROOT / "tests/fixtures/PointerButtonProbe.swift").read_bytes()
+        ).hexdigest(),
         "runner_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "cases": [],
     }
@@ -148,14 +157,39 @@ async def verify(folder, selected, preparation, binary, driver_option):
             button, count = CASES[case]
             output = folder / f"{case}-native.json"
             command = [
-                str(binary), "--pid", str(before["pid"]), "--window", str(before["window"]), "--bundle", bundle,
-                "--x", str(local_point[0]), "--y", str(local_point[1]),
-                "--width", str(before["width"]), "--height", str(before["height"]),
-                "--button", button, "--count", str(count), "--preparation", preparation, "--output", str(output),
+                str(binary),
+                "--pid",
+                str(before["pid"]),
+                "--window",
+                str(before["window"]),
+                "--bundle",
+                bundle,
+                "--x",
+                str(local_point[0]),
+                "--y",
+                str(local_point[1]),
+                "--width",
+                str(before["width"]),
+                "--height",
+                str(before["height"]),
+                "--button",
+                button,
+                "--count",
+                str(count),
+                "--preparation",
+                preparation,
+                "--output",
+                str(output),
             ]
             row = {
-                "case": case, "before": before, "image_point": image_point, "window_local_point": local_point,
-                "button": button, "count": count, "caller_invocations": 1, "command": command,
+                "case": case,
+                "before": before,
+                "image_point": image_point,
+                "window_local_point": local_point,
+                "button": button,
+                "count": count,
+                "caller_invocations": 1,
+                "command": command,
             }
             report["cases"].append(row)
             started = time.monotonic()
@@ -177,7 +211,7 @@ async def verify(folder, selected, preparation, binary, driver_option):
             await asyncio.sleep(0.15)
             after = await state(folder)
             row["after"] = after
-            callbacks = after["callbacks"][len(before["callbacks"]):]
+            callbacks = after["callbacks"][len(before["callbacks"]) :]
             row["callback_delta"] = callbacks
             assert termination is None and returncode == 0 and native["passed"], native
             assert native["selected_delivery"] == "surface_pointer" and native["global_input_allowed"] is False
@@ -186,15 +220,24 @@ async def verify(folder, selected, preparation, binary, driver_option):
             assert receiver["role"] == "AXGroup" and receiver["sameWindow"] is True, receiver
             assert receiver["queryStatus"] == 0 and receiver["actions"] == [], receiver
             assert native["dispatch"] == "dispatched" and native["cleanup"] == "complete", native
-            assert [(c["callback"], c["button"], c["clickCount"]) for c in callbacks] == expected_callbacks(button, count)
+            assert [(c["callback"], c["button"], c["clickCount"]) for c in callbacks] == expected_callbacks(
+                button, count
+            )
             assert all(c["window"] == before["window"] for c in callbacks), callbacks
-            input_delta = after["inputEvents"][len(before["inputEvents"]):]
+            input_delta = after["inputEvents"][len(before["inputEvents"]) :]
             row["event_delta"] = input_delta
             assert len(input_delta) == 2 * count and all(e["kind"] == "mouse" for e in input_delta), input_delta
             assert [(e["button"], e["clickCount"]) for e in input_delta] == [
                 (number, click) for _, number, click in expected_callbacks(button, count)
             ], input_delta
-            for name in ("guardCallbacks", "guardText", "cursor", "heldButtons", "clipboardDigest", "clipboardChangeCount"):
+            for name in (
+                "guardCallbacks",
+                "guardText",
+                "cursor",
+                "heldButtons",
+                "clipboardDigest",
+                "clipboardChangeCount",
+            ):
                 assert after[name] == before[name], (name, before[name], after[name])
             assert before["cursor"] is not None
             impact = native["impact"]
@@ -219,9 +262,8 @@ async def verify(folder, selected, preparation, binary, driver_option):
                 json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
             )
         finally:
-            computer._controller.transport.close()
             try:
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             finally:
                 set_diagnostic_handler(None)
                 journal.close()

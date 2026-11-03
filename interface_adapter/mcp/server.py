@@ -23,13 +23,14 @@ from .history import HISTORY_KEY, history_request
 from .session import ExecutionSession
 
 DESCRIPTION = (
-    "Execute Python with top-level await in a persistent Computer Use session on "
+    "Execute synchronous Python in a persistent Computer Use session on "
     "the MCP host. App selectors and file paths refer to that computer. "
     "Preloaded: computer, print(*values), print_image(PNG bytes). Follow the "
-    "Computer → App/Window → Element SDK. Variables survive calls. "
+    "Computer → App/Window → Element SDK. SDK methods return results directly; "
+    "call them without await, including app.element(name).click(). Variables survive calls. "
     "Prefer one computer_use call for multiple operations whose targets and steps are "
-    "already confirmed and require no intermediate observation. Execute them sequentially, "
-    "awaiting each operation. Use the related observation returned after each action to assess its effect; "
+    "already confirmed and require no intermediate observation. Each operation finishes or "
+    "raises before the next statement runs. Use the related observation returned after each action to assess its effect; "
     "read again when more or newer evidence is needed. "
     "Stop and observe before continuing if an operation fails, the state needed for the "
     "next operation is uncertain, or the next decision requires fresh UI evidence. "

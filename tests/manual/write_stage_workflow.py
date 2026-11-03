@@ -52,7 +52,7 @@ class Recorder:
     async def action(self, name, operation, *, refusal=False, mouse=False):
         start = len(self.events)
         try:
-            result = dict(await operation)
+            result = dict(await asyncio.to_thread(operation))
         except ComputerUseError as error:
             result = {"code": error.code, "effect": error.effect, "detail": error.detail}
             if not refusal or error.effect != "none":
@@ -97,22 +97,22 @@ async def coarse_pointer(directory, recorder, *, allow_global_input=False):
         computer = Computer(allow_global_input=allow_global_input)
         try:
             app = computer.app(bundle_id)
-            observation = await app.read()
-            option = await app.element(observed_ref(observation, "text 45 minutes"))
-            await recorder.action("coarse hit prepare then click", option.click(), mouse=True)
+            observation = await asyncio.to_thread(app.read)
+            option = await asyncio.to_thread(app.element, observed_ref(observation, "text 45 minutes"))
+            await recorder.action("coarse hit prepare then click", lambda: option.click(), mouse=True)
             mouse = [e for e in recorder.actions[-1]["effects"] if e["device"] == "mouse"]
             assert [(e["eventType"], e["stage"]) for e in mouse if e["eventType"] in (1, 2)] == [
-                (1, "input"), (2, "cleanup"),
+                (1, "input"),
+                (2, "cleanup"),
             ]
             await wait_state(directory, lambda v: v["optionClicks"] == 1 and v["guardClicks"] == 0)
             (directory / "command.json").write_text(json.dumps({"id": uuid.uuid4().hex, "kind": "sibling"}))
             await wait_state(directory, lambda v: v["mode"] == "sibling")
-            await recorder.action("known sibling hit", option.click(), refusal=True)
+            await recorder.action("known sibling hit", lambda: option.click(), refusal=True)
             current = await state(directory)
             assert current["optionClicks"] == 1 and current["guardClicks"] == 0
         finally:
-            computer._controller.transport.close()
-            await computer._controller.transport.wait_closed()
+            await asyncio.to_thread(computer.close)
     finally:
         os.kill(initial["pid"], signal.SIGTERM)
 
@@ -125,69 +125,68 @@ async def operations(directory, recorder, *, allow_global_input=False):
     computer = Computer(allow_global_input=allow_global_input)
     try:
         app = computer.app(bundle_id)
-        observation = await app.read()
+        observation = await asyncio.to_thread(app.read)
         (directory / "before.txt").write_text(observation.text)
-        button = await app.element("Count action")
-        popup = await app.element("Test choices")
+        button = await asyncio.to_thread(app.element, "Count action")
+        popup = await asyncio.to_thread(app.element, "Test choices")
         # Local application activity can change during addressed preparation.
         # Compare the real system foreground immediately around the action.
         before_action = await state(directory)
         (directory / "action-before.json").write_text(json.dumps(before_action, ensure_ascii=False, indent=2))
-        await recorder.action("independent native action", button.perform_action("AXPress"))
+        await recorder.action("independent native action", lambda: button.perform_action("AXPress"))
         current = await wait_state(directory, lambda v: v["buttonClicks"] == 1)
         assert current["frontmostPID"] == before_action["frontmostPID"]
-        field = await app.element("Primary input")
-        await recorder.action("element insertion", field.type_text("one"))
+        field = await asyncio.to_thread(app.element, "Primary input")
+        await recorder.action("element insertion", lambda: field.type_text("one"))
         await wait_state(directory, lambda v: v["field"] == "one")
-        await recorder.action("element caret key", field.press_key("Left"))
-        await recorder.action("insert at current caret", field.type_text("X"))
+        await recorder.action("element caret key", lambda: field.press_key("Left"))
+        await recorder.action("insert at current caret", lambda: field.type_text("X"))
         await wait_state(directory, lambda v: v["field"] == "onXe")
-        await recorder.action("element replacement", field.type_text("精确 input", replace=True))
+        await recorder.action("element replacement", lambda: field.type_text("精确 input", replace=True))
         await wait_state(directory, lambda v: v["field"] == "精确 input")
-        editor = await app.element("Paste editor")
-        await recorder.action("explicit element focus", editor.focus())
+        editor = await asyncio.to_thread(app.element, "Paste editor")
+        await recorder.action("explicit element focus", lambda: editor.focus())
         current = await wait_state(directory, lambda v: v["editorFocused"])
         clipboard_before = current["clipboardDigest"]
-        await recorder.action("element paste", editor.paste("paste 精确"))
+        await recorder.action("element paste", lambda: editor.paste("paste 精确"))
         await wait_state(
             directory,
             lambda v: v["editor"] == "paste 精确" and v["pastes"] == 1 and v["clipboardDigest"] == clipboard_before,
         )
-        await recorder.action("window current receiver insertion", app.type_text(" suffix"))
+        await recorder.action("window current receiver insertion", lambda: app.type_text(" suffix"))
         await wait_state(directory, lambda v: v["editor"] == "paste 精确 suffix")
-        await recorder.action("semantic element click", button.click())
+        await recorder.action("semantic element click", lambda: button.click())
         await wait_state(directory, lambda v: v["buttonClicks"] == 2)
-        area = await app.element("Test scroll area")
-        await recorder.action("element scroll", area.scroll("down", pages=0.5), mouse=True)
+        area = await asyncio.to_thread(app.element, "Test scroll area")
+        await recorder.action("element scroll", lambda: area.scroll("down", pages=0.5), mouse=True)
         current = await wait_state(directory, lambda v: v["scrollY"] > 10)
         old_offset = current["scrollY"]
         window = app.window(0)
-        image = await window.read(view="image")
+        image = await asyncio.to_thread(window.read, view="image")
         (directory / "scroll-before.png").write_bytes(image.screenshot)
         await recorder.action(
-            "coordinate wheel", window.scroll("down", at=tuple(current["scrollPoint"]), pages=0.5), mouse=True
+            "coordinate wheel", lambda: window.scroll("down", at=tuple(current["scrollPoint"]), pages=0.5), mouse=True
         )
         await wait_state(directory, lambda v: v["scrollY"] > old_offset + 10)
-        image = await window.read(view="image")
+        image = await asyncio.to_thread(window.read, view="image")
         (directory / "drag-before.png").write_bytes(image.screenshot)
         current = await state(directory)
         await recorder.action(
-            "coordinate drag", window.drag(tuple(current["dragStart"]), tuple(current["dragEnd"])), mouse=True
+            "coordinate drag", lambda: window.drag(tuple(current["dragStart"]), tuple(current["dragEnd"])), mouse=True
         )
         await wait_state(directory, lambda v: v["dragDowns"] == 1 and v["dragMoves"] > 0 and v["dragUps"] == 1)
-        await recorder.action("open menu", popup.open_menu())
+        await recorder.action("open menu", lambda: popup.open_menu())
         await wait_state(directory, lambda v: v["menuOpens"] == 1)
-        observation = await app.read()
+        observation = await asyncio.to_thread(app.read)
         (directory / "menu.txt").write_text(observation.text)
-        choice = await app.element(observed_ref(observation, "menu item Second choice.*"))
-        await recorder.action("choose menu item", choice.click(), mouse=True)
+        choice = await asyncio.to_thread(app.element, observed_ref(observation, "menu item Second choice.*"))
+        await recorder.action("choose menu item", lambda: choice.click(), mouse=True)
         await wait_state(directory, lambda v: v["menuChoice"] == "Second choice")
         current = await state(directory)
         assert current["other"] == "unchanged"
         (directory / "final.json").write_text(json.dumps(current, ensure_ascii=False, indent=2))
     finally:
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         os.kill(initial["pid"], signal.SIGTERM)
 
 

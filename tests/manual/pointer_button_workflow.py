@@ -35,7 +35,7 @@ CASES = {"left": ("left", 1), "right": ("right", 1), "middle": ("middle", 1), "d
 
 
 async def snapshot(ui, folder, name):
-    observation = await ui.read(view="both")
+    observation = await asyncio.to_thread(ui.read, view="both")
     (folder / f"{name}.txt").write_text(observation.text)
     assert observation.screenshot, "Coordinate input requires delivered pixels"
     (folder / f"{name}.png").write_bytes(observation.screenshot)
@@ -108,12 +108,15 @@ async def verify(folder, selected, driver_option):
             start, started = len(events), time.monotonic()
             receipt, caught = None, None
             try:
-                receipt = await app.click(ClickOption(button=button, count=count), at=point)
+                receipt = await asyncio.to_thread(app.click, ClickOption(button=button, count=count), at=point)
                 row["receipt"] = dict(receipt)
             except ComputerUseError as error:
                 caught = error
                 row["error"] = {
-                    "code": error.code, "effect": error.effect, "detail": error.detail, "impact": error.impact
+                    "code": error.code,
+                    "effect": error.effect,
+                    "detail": error.detail,
+                    "impact": error.impact,
                 }
             row["seconds"] = time.monotonic() - started
             # Waiting only observes the fixture; it never resends the action.
@@ -127,22 +130,33 @@ async def verify(folder, selected, driver_option):
             after = await state(folder)
             row["after"] = after
             row["input_activity"] = [
-                item["value"] for item in events[start:]
-                if item.get("kind") == "backend_diagnostic" and isinstance(item.get("value"), dict)
+                item["value"]
+                for item in events[start:]
+                if item.get("kind") == "backend_diagnostic"
+                and isinstance(item.get("value"), dict)
                 and item["value"].get("kind") == "input_activity"
             ]
             if caught is not None:
                 raise caught
-            callbacks = after["callbacks"][len(before["callbacks"]):]
+            callbacks = after["callbacks"][len(before["callbacks"]) :]
             row["callback_delta"] = callbacks
-            assert [(c["callback"], c["button"], c["clickCount"]) for c in callbacks] == expected_callbacks(button, count)
+            assert [(c["callback"], c["button"], c["clickCount"]) for c in callbacks] == expected_callbacks(
+                button, count
+            )
             assert all(c["window"] == before["window"] for c in callbacks), callbacks
-            event_delta = after["inputEvents"][len(before["inputEvents"]):]
+            event_delta = after["inputEvents"][len(before["inputEvents"]) :]
             assert len(event_delta) == 2 * count and all(e["kind"] == "mouse" for e in event_delta), event_delta
             assert [(e["button"], e["clickCount"]) for e in event_delta] == [
                 (number, click) for _, number, click in expected_callbacks(button, count)
             ], event_delta
-            for name in ("guardCallbacks", "guardText", "cursor", "heldButtons", "clipboardDigest", "clipboardChangeCount"):
+            for name in (
+                "guardCallbacks",
+                "guardText",
+                "cursor",
+                "heldButtons",
+                "clipboardDigest",
+                "clipboardChangeCount",
+            ):
                 assert after[name] == before[name], (name, before[name], after[name])
             assert before["cursor"] is not None, "Missing system cursor evidence cannot prove preservation"
             impact = receipt.impact
@@ -169,8 +183,7 @@ async def verify(folder, selected, driver_option):
         (folder / "result.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
         )
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         if initial is not None:

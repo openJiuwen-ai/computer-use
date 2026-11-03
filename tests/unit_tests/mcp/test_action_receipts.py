@@ -5,6 +5,7 @@
 
 import re
 import unittest
+from functools import partial
 from types import SimpleNamespace
 
 from computer_use.client.host import (
@@ -29,13 +30,14 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = Runtime(self.events.append)
         self.runtime.task_namespace.update(
             receipts=[dict(target="Fixture", status="dispatched", detail="Outcome unconfirmed.") for _ in range(150)],
-            emit_receipt=self.runtime.action,
-            emit_image=lambda: self.runtime.emit(
+            emit_receipt=partial(self.runtime.executor.call, self.runtime.action),
+            emit_image=lambda: self.runtime.executor.call(
+                self.runtime.emit,
                 dict(
                     type="image",
                     mimeType="image/png",
                     data="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j7l0AAAAASUVORK5CYII=",
-                )
+                ),
             ),
         )
 
@@ -97,7 +99,7 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.task_namespace.update(
             receipt=receipt,
             outcome=outcome,
-            materialize=action_result,
+            materialize=partial(self.runtime.executor.call, action_result),
         )
         result = await self.execute("emit_receipt(receipt)\nresult = materialize(receipt, observation=outcome)")
         self.assertFalse(result.get("isError"), result)
@@ -143,7 +145,9 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         failure.observation_error = dict(
             code="observation_timeout", detail="Read budget expired.", next="Do not replay."
         )
-        self.runtime.task_namespace.update(failure=failure, publish_gap=action_observation_completed)
+        self.runtime.task_namespace.update(
+            failure=failure, publish_gap=partial(self.runtime.executor.call, action_observation_completed)
+        )
         result = await self.execute("publish_gap(failure)\nraise failure")
         self.assertTrue(result.get("isError"), result)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")

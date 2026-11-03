@@ -117,13 +117,15 @@ Replace the checkout path with its absolute path on the target computer. Global 
 Inside the `computer_use` tool, `computer`, `print()` and `print_image()` are available. Start by discovering application references:
 
 ```python
-print(await computer.list_apps())
+print(computer.list_apps())
 ```
 
-Select an application with `computer.app(id)`, observe it with `await app.read(view="both")`, and resolve a control with `await app.element(name_or_path)` before operating it.
+The SDK is synchronous: each operation returns its result or raises before the next statement runs.
+Select an application with `computer.app(id)`, observe it with `app.read(view="both")`, and resolve a control with
+`app.element(name_or_path)`. A confirmed target can be used directly, for example `app.element("Save").click()`.
 
 Reads do not activate or raise windows to refresh pixels by default. On macOS,
-`await app.read(view="both", allow_foreground=True)` explicitly allows preparation of the confirmed original window;
+`app.read(view="both", allow_foreground=True)` explicitly allows preparation of the confirmed original window;
 the same option is available on `Window.read()`.
 This may change focus and stacking, but sends no global mouse/keyboard input and does not switch back afterward.
 The observation's `preparation` record and text retain the requests made; activation and capture do not prove application redraw.
@@ -141,19 +143,18 @@ can still be observed. Its original error and effect remain unchanged; the SDK d
 Save this example as `list_apps.py` and run it with `uv run --no-dev python list_apps.py`:
 
 ```python
-import asyncio
-
 from computer_use import Computer
 
 
-async def main():
-    computer = Computer()  # Qualified low-impact routes remain preferred.
-    for app in await computer.list_apps():
+with Computer() as computer:  # Qualified low-impact routes remain preferred.
+    for app in computer.list_apps():
         print(app.id, app.display_name, app.is_running)
-
-
-asyncio.run(main())
 ```
+
+`Computer.close()` releases the session's driver resources; the context manager calls it on exit.
+The public SDK uses ordinary synchronous calls, including `Observation.read_details()`.
+When embedding it in an asyncio or GUI application, run the blocking computer-operation code in a worker thread
+so the host remains responsive. Internal driver communication, progress and cleanup continue asynchronously.
 
 `allow_global_input` is a strict boolean session option, defaulting to `True`.
 It permits global mouse/keyboard routes without promoting them above qualified

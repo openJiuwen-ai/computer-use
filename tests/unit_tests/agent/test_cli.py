@@ -197,7 +197,7 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
 
     if os.name != "posix":
         pytest.skip("This test sends POSIX process signals.")
-    server = model_server([tool_call("await __import__('asyncio').sleep(60)")])
+    server = model_server([tool_call("import time\nwhile True:\n    time.sleep(0.01)")])
     path = tmp_path / "model.json"
     path.write_text(
         json.dumps(

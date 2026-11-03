@@ -109,8 +109,13 @@ async def measure(args):
     environment = {**os.environ, "COMPUTER_USE_LOG_DIR": str(output / "mcp-logs")}
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "computer_use_mcp", "--allow-global-input" if args.allow_global_input else "--no-allow-global-input"],
-        cwd=str(args.repository), env=environment
+        args=[
+            "-m",
+            "computer_use_mcp",
+            "--allow-global-input" if args.allow_global_input else "--no-allow-global-input",
+        ],
+        cwd=str(args.repository),
+        env=environment,
     )
     try:
         with (output / "stderr.log").open("w") as errors:
@@ -118,55 +123,54 @@ async def measure(args):
                 async with ClientSession(*streams) as session:
                     await session.initialize()
                     try:
-                        await invoke(session, "startup", f"print(await computer.{names['list']}())")
+                        await invoke(session, "startup", f"print(computer.{names['list']}())")
                         for _ in range(args.iterations):
-                            await invoke(session, "list_apps", f"print(await computer.{names['list']}())")
+                            await invoke(session, "list_apps", f"print(computer.{names['list']}())")
                         await invoke(
                             session,
                             "fixture_discovery",
-                            'base = computer.app("OperationLatencyProbe")\ndiscovery = await base.read()\ndiscovery',
+                            'base = computer.app("OperationLatencyProbe")\ndiscovery = base.read()\ndiscovery',
                         )
                         await invoke(
                             session,
                             "fixture_bind",
-                            "import json\n" + inspect.getsource(captured_interface_metadata)
-                            + "\ncatalogue = await captured_interface_metadata(discovery)\n"
+                            "import json\n"
+                            + inspect.getsource(captured_interface_metadata)
+                            + "\ncatalogue = captured_interface_metadata(discovery)\n"
                             "targets = [item for item in catalogue['windows'] if item['title'] == 'Discovery document A']\n"
                             "assert len(targets) == 1, catalogue\n"
-                            "probe = base.window(targets[0]['ref'])\nawait probe.read()\n"
-                            "field = await probe.element('Document input')\nbutton = await probe.element('Mark document')",
+                            "probe = base.window(targets[0]['ref'])\nprobe.read()\n"
+                            "field = probe.element('Document input')\nbutton = probe.element('Mark document')",
                         )
                         for index in range(args.iterations):
-                            await invoke(session, "fixture_tree", "await probe.read()")
-                            await invoke(session, "fixture_both", "await probe.read(view='both')")
-                            await invoke(session, "element_click", "await button.click()")
+                            await invoke(session, "fixture_tree", "probe.read()")
+                            await invoke(session, "fixture_both", "probe.read(view='both')")
+                            await invoke(session, "element_click", "button.click()")
                             await state_at(output, lambda state: state["documents"]["A"]["clicks"] == index + 1)
                             value = f"latency {index} 测试"
-                            await invoke(
-                                session, "element_replace", f"await field.{names['text']}({value!r}, replace=True)"
-                            )
+                            await invoke(session, "element_replace", f"field.{names['text']}({value!r}, replace=True)")
                             await state_at(output, lambda state: state["documents"]["A"]["value"] == value)
-                            await invoke(session, "element_key", f"await field.{names['key']}('End')")
-                            await invoke(session, "element_insert", f"await field.{names['text']}('x')")
+                            await invoke(session, "element_key", f"field.{names['key']}('End')")
+                            await invoke(session, "element_insert", f"field.{names['text']}('x')")
                             await state_at(output, lambda state: state["documents"]["A"]["value"] == value + "x")
                             assert (await state_at(output, lambda _: True))["documents"]["B"]["value"] == "original B"
                         if args.system_settings:
                             await invoke(
                                 session,
                                 "settings_discovery",
-                                'settings = computer.app("系统设置")\nsettings_discovery = await settings.read()\nsettings_discovery',
+                                'settings = computer.app("系统设置")\nsettings_discovery = settings.read()\nsettings_discovery',
                             )
                             await invoke(
                                 session,
                                 "settings_bind",
-                                "catalogue = await captured_interface_metadata(settings_discovery)\n"
+                                "catalogue = captured_interface_metadata(settings_discovery)\n"
                                 "target = catalogue['current']\n"
                                 "assert target is not None, catalogue\n"
                                 "settings = settings.window(target)",
                             )
                             for _ in range(args.iterations):
-                                await invoke(session, "settings_tree", "await settings.read()")
-                                await invoke(session, "settings_both", "await settings.read(view='both')")
+                                await invoke(session, "settings_tree", "settings.read()")
+                                await invoke(session, "settings_both", "settings.read(view='both')")
                         report["passed"] = True
                     finally:
                         reset = await session.call_tool("computer_use_reset", arguments={})

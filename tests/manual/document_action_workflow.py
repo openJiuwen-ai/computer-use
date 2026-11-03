@@ -95,7 +95,7 @@ def window_ready(value, index):
 
 
 async def snapshot(app, folder, name):
-    observation = await app.read(view="both", full=True)
+    observation = await asyncio.to_thread(app.read, view="both", full=True)
     (folder / (name + ".txt")).write_text(observation.text)
     if observation.screenshot is not None:
         (folder / (name + ".png")).write_bytes(observation.screenshot)
@@ -237,9 +237,9 @@ async def verify(folder, options):
         computer = Computer(allow_global_input=options.allow_global_input)
         computer._controller.transport.driver = {"command": str(driver), "args": []}
         app = computer.app(bundle)
-        chooser = await app.read(view="tree")
+        chooser = await asyncio.to_thread(app.read, view="tree")
         (folder / "app-choices.txt").write_text(chooser.text)
-        catalogue = await captured_interface_metadata(chooser)
+        catalogue = captured_interface_metadata(chooser)
         candidates = [item for item in catalogue["windows"] if item["title"] == "Document context A"]
         report["target_choices"] = candidates
         assert len(candidates) == 1, report["target_choices"]
@@ -248,12 +248,12 @@ async def verify(folder, options):
         # A background launch cannot assume AppKit will honor self-activation.
         # Explicit observation preparation sets up only this known A window;
         # the measured action starts after B/sentinel replaces that context.
-        prepared = await target_window.read(view="tree", allow_foreground=True)
+        prepared = await asyncio.to_thread(target_window.read, view="tree", allow_foreground=True)
         report["setup_target_preparation"] = prepared.preparation
         await command(folder, "front-target")
         await wait_for(folder, lambda value: window_ready(value, 0))
         observation = await snapshot(app, folder, "a-observed")
-        delivered = await captured_interface_metadata(observation)
+        delivered = captured_interface_metadata(observation)
         assert delivered["scope"] == "application" and delivered["current"] == target_ref, delivered
         ui = app
         if options.operation == "coordinate":
@@ -263,7 +263,7 @@ async def verify(folder, options):
             root = computer._controller.state(ui).selection.root
             report["target_binding"] = asdict(root)
         else:
-            target = await app.element([{"identifier": "document-" + options.receiver + "-A"}])
+            target = await asyncio.to_thread(app.element, [{"identifier": "document-" + options.receiver + "-A"}])
             report["target_binding"] = asdict(target._snapshot["binding"])
         report["target_before_switch"] = await state(folder)
         if options.operation == "coordinate":
@@ -278,7 +278,9 @@ async def verify(folder, options):
             if await launch.wait():
                 raise RuntimeError("The owned foreground sentinel failed to launch")
             sentinel = await state(sentinel_folder)
-            prepared = await computer.app(bundle + ".sentinel").read(view="tree", allow_foreground=True)
+            prepared = await asyncio.to_thread(
+                computer.app(bundle + ".sentinel").read, view="tree", allow_foreground=True
+            )
             report["setup_sentinel_preparation"] = prepared.preparation
             report["sentinel_before"] = await wait_for(
                 sentinel_folder, lambda value: value["active"] and value["frontmostPID"] == value["pid"]
@@ -298,16 +300,19 @@ async def verify(folder, options):
         report["requested_actions"] += 1
         try:
             if options.operation == "coordinate":
-                result = await ui.click(at=tuple(report["coordinate"]["point"]))
+                result = await asyncio.to_thread(ui.click, at=tuple(report["coordinate"]["point"]))
             elif options.operation == "click":
-                result = await target.click()
+                result = await asyncio.to_thread(target.click)
             else:
-                result = await target.perform_action("AXPress")
+                result = await asyncio.to_thread(target.perform_action, "AXPress")
             report["receipt"] = dict(result)
         except ComputerUseError as error:
             report["error"] = {
-                "code": error.code, "effect": error.effect, "detail": error.detail,
-                "impact": error.impact, "observation": error.observation,
+                "code": error.code,
+                "effect": error.effect,
+                "detail": error.detail,
+                "impact": error.impact,
+                "observation": error.observation,
                 "observation_status": error.observation_status,
                 "observation_error": error.observation_error,
                 "window_lifecycle": error.window_lifecycle,
@@ -383,8 +388,7 @@ async def verify(folder, options):
             assert "error" in report and "receipt" not in report, report
             assert report["callback_delta"] == [0, 0], report["callback_delta"]
             assert not any(
-                event.get("stage") == "input" and event.get("phase") == "willCall"
-                for event in report["native_input"]
+                event.get("stage") == "input" and event.get("phase") == "willCall" for event in report["native_input"]
             ), report["native_input"]
         elif options.expect != "observe":
             assert report["application_effect"] == options.expect + "-window", report["application_effect"]
@@ -397,8 +401,7 @@ async def verify(folder, options):
         cleanup = []
         if computer is not None:
             try:
-                computer._controller.transport.close()
-                await computer._controller.transport.wait_closed()
+                await asyncio.to_thread(computer.close)
             except (OSError, RuntimeError) as error:
                 cleanup.append({"component": "transport", "error": str(error)})
         if options.state == "background":
@@ -418,7 +421,9 @@ async def verify(folder, options):
         ]
         set_diagnostic_handler(None)
         journal.close()
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
 
 
 def main():
@@ -431,7 +436,9 @@ def main():
     parser.add_argument("--state", choices=("foreground", "background"), default="foreground")
     parser.add_argument("--expect", choices=("observe", "target", "other", "refused"), default="observe")
     parser.add_argument("--driver", type=Path)
-    parser.add_argument("--allow-global-input", action="store_true", help="Explicitly authorize global input for this run")
+    parser.add_argument(
+        "--allow-global-input", action="store_true", help="Explicitly authorize global input for this run"
+    )
     options = parser.parse_args()
     if options.keep_target_disabled and not options.enable_on_main:
         parser.error("--keep-target-disabled requires --enable-on-main")

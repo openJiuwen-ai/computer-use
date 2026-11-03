@@ -16,12 +16,12 @@ from collections.abc import Mapping
 from PIL import Image
 
 
-async def captured_interface_metadata(observation):
+def captured_interface_metadata(observation):
     """Read one observation's retained window catalogue without another UI read."""
     prefix = "Captured interface metadata: "
     content, cursor = "", None
     for _ in range(16):
-        page = await observation.read_details(cursor=cursor, length=16384)
+        page = observation.read_details(cursor=cursor, length=16384)
         content += page.text
         if prefix in content:
             try:
