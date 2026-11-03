@@ -30,13 +30,30 @@ from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.paths import native_driver
 from input_receiver_workflow import build_fixture
 from qt_cocoa_activation_workflow import ROOT, save_observation, sha, state
-from vscode_quickopen_continuity_workflow import owned_window_ref
+from vscode_quickopen_continuity_workflow import observed_value, owned_window_ref
 
 LOG = logging.getLogger(__name__)
 
 
 def hour_menu_visible(text):
     return len(set(re.findall(r"(?<!\d)(?:[01]\d|2[0-3]):(?:00|15|30|45)(?!\d)", text))) >= 8
+
+
+def duration_choice_ref(text, label):
+    matches = []
+    for line in text.splitlines():
+        for part in line.split(" | "):
+            match = re.match(r"\s*(\d+)\s+Index:\s*\d+,\s*(.*?)\s*$", part)
+            if match and match[2] == label:
+                matches.append(int(match[1]))
+    assert len(matches) == 1, ("Expected one actually delivered duration option", label, matches)
+    return matches[0]
+
+
+def duration_value_ref(text):
+    refs = re.findall(r"(?m)^\s*\d+\s+时长:\s*(\d+)\s+(?:文本栏|text field)\s+\(disabled\)\s+Value:", text)
+    assert len(refs) == 1, ("Expected one disabled duration value field in the actual form", refs)
+    return int(refs[0])
 
 
 async def verify(folder, until, duration_label):
@@ -180,16 +197,23 @@ async def verify(folder, until, duration_label):
             await invoke("duration-open", duration.click)
             opened = await read("duration-opened")
             assert duration_label in opened.text, "Requested duration is absent; inspect saved tree before choosing"
-            await external_click("duration-external-click", lambda text: duration_label in text and "30分钟" in text)
+            menu = await external_click(
+                "duration-external-click", lambda text: duration_choice_ref(text, duration_label) is not None
+            )
             report["completed_stage"] = "duration-menu"
             if until == "duration-menu":
                 report["passed"] = True
                 return
-            choice = await asyncio.to_thread(app.element, duration_label)
+            option_ref = duration_choice_ref(menu.text, duration_label)
+            report["duration_option"] = {"reference": option_ref, "label": duration_label}
+            choice = await asyncio.to_thread(app.element, option_ref)
             await invoke("duration-select", choice.click)
-            selected = await asyncio.to_thread(duration.read)
-            save_observation(folder, "duration-value", selected)
-            assert duration_label in selected.text, selected.text
+            selected = await asyncio.to_thread(draft.read, view="both", full=True)
+            save_observation(folder, "duration-value-form", selected)
+            value_ref = duration_value_ref(selected.text)
+            value = observed_value(selected.text, value_ref)
+            report["duration_actual_value"] = {"reference": value_ref, "actual": value, "expected": duration_label}
+            assert value == duration_label, report["duration_actual_value"]
             report["completed_stage"] = "complete"
             report["passed"] = True
         except Exception as error:
