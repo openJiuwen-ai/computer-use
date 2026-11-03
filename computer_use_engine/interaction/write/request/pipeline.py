@@ -18,6 +18,7 @@ from computer_use.interaction.write.request.passes.materialize_action_result imp
 from computer_use.interaction.write.request.passes.prepare_write_scope import stage as prepare_write_scope
 from computer_use.interaction.write.request.passes.publish_action_event import stage as publish_action_event
 from computer_use.interaction.write.request.passes.select_write_scope import stage as select_write_scope
+from computer_use.interaction.write.request.passes.validate_element_scope import stage as validate_element_scope
 from computer_use.interaction.write.request.passes.validate_write_binding import stage as validate_write_binding
 from computer_use.pipeline import Contract, Effect, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
@@ -166,7 +167,11 @@ class ControllerWritePipeline(HostOperation):
                                 controller,
                                 Sequence(
                                     name="PrepareAndWrite",
-                                    steps=[prepare_write_scope(state_of=controller.state), dispatch],
+                                    steps=[
+                                        validate_element_scope(controller=controller),
+                                        prepare_write_scope(state_of=controller.state),
+                                        dispatch,
+                                    ],
                                 ),
                             ),
                             publish_action_event(),

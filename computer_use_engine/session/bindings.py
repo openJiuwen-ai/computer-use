@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Native per-handle state and the references owned by each observed source.
@@ -7,8 +6,10 @@ This store never discovers windows, chooses a current modal or constructs public
 App wrappers. The interaction controller performs that work and records results.
 """
 
-from ..identity import WeakIdentityMap
+from collections import OrderedDict
+
 from ..diagnostics import local_failure
+from ..identity import WeakIdentityMap
 from ..native.contracts import Binding
 from .state import AppState
 
@@ -16,6 +17,7 @@ from .state import AppState
 class SessionBindings:
     def __init__(self):
         self._states = WeakIdentityMap()
+        self._content = WeakIdentityMap()
 
     def register(self, owner, scope):
         self._states.set(owner, scope.get("_nativeState") or AppState(scope["selector"]))
@@ -29,9 +31,9 @@ class SessionBindings:
     def scope(self, owner):
         state = self.state(owner)
         # Clearing a cache must not change an already-bound App into a lookup.
-        return dict(
-            selector=state.selection.root if state.selection is not None else state.application or state.selector
-        )
+        return {
+            "selector": state.selection.root if state.selection is not None else state.application or state.selector
+        }
 
     @staticmethod
     def validate_element(target, session):
@@ -42,8 +44,22 @@ class SessionBindings:
                 "stale_target",
             )
 
-    @staticmethod
-    def remember(state, snapshots):
+    def remember(self, state, snapshots):
+        """Keep action bindings for the session; bound only captured content.
+
+        Element.read/read_text refresh their own data, while previously created
+        Element objects keep their immutable snapshot. Dropping a historical
+        text capture must never make an otherwise live display reference unknown.
+        """
         state.refs.update(snapshots)
-        while len(state.refs) > 8192:
-            state.refs.popitem(last=False)
+        content = self._content.get(state.refs)
+        if content is None:
+            content = OrderedDict()
+            self._content.set(state.refs, content)
+        for ref in snapshots:
+            content[ref] = None
+            content.move_to_end(ref)
+        while len(content) > 8192:
+            ref, _ = content.popitem(last=False)
+            if ref in state.refs:
+                state.refs[ref] = dict(state.refs[ref], text=None, children=None)

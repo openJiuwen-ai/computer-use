@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Application references, instance membership, and public window handles."""
@@ -17,8 +16,8 @@ from computer_use.native.contracts import Knowledge
 from computer_use.native.scopes import WorkingWindow
 
 if TYPE_CHECKING:
-    from computer_use.session.interface_images import InterfaceImage
     from computer_use.protocol.records import NativeDirectory, Record, SurfaceInfo
+    from computer_use.session.interface_images import InterfaceImage
 
 
 @dataclass(frozen=True)
@@ -36,10 +35,10 @@ class ApplicationEntry:
 
 
 class ApplicationReferences:
-    """Assign session-scoped application numbers and retain recent choices."""
+    """Assign stable session-scoped application numbers, independently of caches."""
 
-    def __init__(self, capacity=8192):
-        self.capacity, self._next = capacity, 0
+    def __init__(self):
+        self._next = 0
         self._entries, self._aliases = OrderedDict(), {}
 
     def publish(self, entry):
@@ -51,9 +50,6 @@ class ApplicationReferences:
             self._aliases[key] = ref
         self._entries[ref] = entry
         self._entries.move_to_end(ref)
-        while len(self._entries) > self.capacity:
-            old, expired = self._entries.popitem(last=False)
-            self._aliases.pop(expired.key, None)
         return ref
 
     def resolve(self, ref, session):
@@ -71,7 +67,7 @@ class SurfaceOwner:
     """Register a member surface's private read and input scope with the session."""
 
     def __init__(self, controller, state):
-        controller.register(self, dict(selector=state.selector, _nativeState=state))
+        controller.register(self, {"selector": state.selector, "_nativeState": state})
 
 
 @dataclass(frozen=True)
@@ -186,6 +182,7 @@ class InstanceState:
         """
         current = {item.identity: item for item in facts.windows}
         by_window = {item.identity.window: item.identity for item in facts.windows}
+        retired = set()
         for identity, previous in tuple(self.evidence.items()):
             if previous.lifetime is WindowLifetime.RETIRED:
                 continue
@@ -193,6 +190,7 @@ class InstanceState:
                 self.evidence[identity] = WindowEvidence(identity, current[identity].membership)
             elif identity.window in by_window or facts.complete:
                 self.evidence[identity] = WindowEvidence(identity, Knowledge.NO, WindowLifetime.RETIRED)
+                retired.add(identity)
             else:
                 self.evidence[identity] = WindowEvidence(identity, Knowledge.UNKNOWN)
         for identity, item in current.items():
@@ -213,11 +211,33 @@ class InstanceState:
                     yield (item["window"], item)
 
         self.members = dict(_iter_item(iter(directory["surfaces"])))
+        self.release_retired_content(retired)
 
     def retire(self, identity: WindowIdentity) -> None:
         """Consume explicit fixed-window invalidation without guessing from errors."""
         self.evidence[identity] = WindowEvidence(identity, Knowledge.NO, WindowLifetime.RETIRED)
         self.members.pop(identity.window, None)
+        self.release_retired_content({identity})
+
+    def release_retired_content(self, identities: set[WindowIdentity]) -> None:
+        """Release payloads after authoritative retirement, retaining error provenance.
+
+        Previously held Elements own their old snapshots. Keep minimal numbered
+        bindings so a later action can explain the ended window and return the
+        current observation instead of failing with an unknown integer.
+        """
+        if not identities:
+            return
+        for ref, snapshot in self.refs.items():
+            binding = snapshot.get("binding")
+            identity = snapshot.get("window_identity")
+            if identity is None and binding is not None:
+                identity = WindowIdentity(binding.root_window, binding.surface, binding.instance)
+            if identity in identities or snapshot.get("menu_window_identity") in identities:
+                self.refs[ref] = dict(snapshot, text=None, children=None)
+        for identity in identities:
+            self.window_images.pop(identity, None)
+            self.window_image_generations.pop(identity, None)
 
     def unconfirm(self, identity: WindowIdentity | None = None) -> None:
         """Suspend current membership after an incomplete fixed-root observation."""

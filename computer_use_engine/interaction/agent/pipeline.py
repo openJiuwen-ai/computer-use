@@ -376,7 +376,7 @@ class AgentInterfacePipeline:
                     "read this App/Window and use an integer element number",
                     "stale_target",
                 ) from None
-            self.validate_snapshot(ui, snapshot, allow_unknown=True)
+            self.validate_reference_owner(ui, snapshot)
             return snapshot
         if not isinstance(target, (str, list)):
             raise local_failure(
@@ -473,6 +473,30 @@ class AgentInterfacePipeline:
         self.validate_snapshot(ui, snapshot)
         return snapshot
 
+    def validate_reference_owner(self, ui: UIHandle, snapshot: ElementSnapshot) -> None:
+        """Retrieve a known handle without claiming its target is still alive.
+
+        Retained application/window provenance authorizes handle construction,
+        not input. The write/read boundary checks current lifetime and scope;
+        a failed write can then return the current related observation.
+        """
+        target = snapshot["binding"]
+        self.controller.validate_element(target)
+        instance = ui._instance
+        if instance.session is not None and instance.session != target.session:
+            raise local_failure("element belongs to another session", "obtain a current App", "stale_target")
+        identity = snapshot.get("window_identity")
+        evidence = instance.surface_evidence(target.surface, identity)
+        fixed = getattr(ui, "_window_identity", None)
+        if evidence is not None and (
+            ui._anchor is None
+            or fixed is not None and evidence.identity == WindowIdentity(ui._anchor, fixed.surface, fixed.instance)
+        ):
+            return
+        # Descendant and application-menu references still need their original
+        # scope relation; do not grant one merely because a number is known.
+        self.validate_snapshot(ui, snapshot, allow_unknown=True)
+
     @staticmethod
     def keyboard_context(ui: UIHandle, *, require_observed: bool = True) -> Binding:
         """Pin explicit Window or the last application context actually delivered."""
@@ -535,11 +559,6 @@ class AgentInterfacePipeline:
         Returns:
             Execution outcome reported by the session's write branch.
         """
-        self.validate_snapshot(ui, snapshot, allow_unknown=True)
-        # pylint: disable-next=protected-access
-        if ui._instance.session is not None:
-            await refresh(self.controller, ui)
-        self.validate_snapshot(ui, snapshot)
         if snapshot.get("container") and intent == "replace":
             raise local_failure(
                 "full replacement requires a concrete input control, not a container",
@@ -551,7 +570,10 @@ class AgentInterfacePipeline:
             and not (intent in ("insert", "paste") and parameters.get("text") == "")
         )
         return await self.write.arun(
-            ExecuteAction(ui, Intent(intent, parameters), snapshot["binding"], forward_current=bool(forward)), control
+            ExecuteAction(
+                ui, Intent(intent, parameters), snapshot["binding"], forward_current=bool(forward), snapshot=snapshot
+            ),
+            control,
         )
 
     async def pointer(

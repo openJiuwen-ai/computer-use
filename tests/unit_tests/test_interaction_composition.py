@@ -17,6 +17,7 @@ from computer_use.interaction.agent.requests import ActOnElement, ResolveElement
 from computer_use.interaction.query.pipeline import FindElementPipeline
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.native.contracts import Binding, Intent, Knowledge
+from computer_use.native.lifecycle import CallLifecycle
 from computer_use.pipeline import Control, Pipeline, Repeat, Scope, Select, Sequence
 from computer_use.session.events import set_action_handler, set_observation_handler
 from computer_use.session.interface_images import signature
@@ -31,8 +32,8 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
     def setUp(self):
         port = SimpleNamespace(
             connection=SimpleNamespace(session="test", capabilities=(), session_identity=(1, "test")),
-            calls=SimpleNamespace(retired=False),
         )
+        port.calls = CallLifecycle(port)
         self.controller = session_controller(port)
         self.target = Binding("test", "app", "window", "surface", "node")
         self.snapshot = {"binding": self.target}
@@ -264,6 +265,23 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             self.assertEqual(query_control.call_id, "public-call")
             self.assertEqual(query_control.path.count("SessionPipeline"), 1)
             self.assertIn("AgentInterface", query_control.path)
+
+    async def test_write_boundary_limits_native_claims_and_releases_budget_after_failure(self):
+        failure = local_failure("not dispatched", "choose a supported operation", "unsupported_operation")
+
+        async def execute(*_args, **_kwargs):
+            with self.controller.port.calls.claim(120000) as remaining:
+                self.assertGreater(remaining(), 0)
+                self.assertLessEqual(remaining(), 30000)
+            raise failure
+
+        self.engine.side_effect = execute
+        with self.assertRaises(ComputerUseError) as caught:
+            await self.controller.run(ActOnElement(self.ui, self.snapshot, "click", {}))
+        self.assertIs(caught.exception, failure)
+        self.assertIsNone(self.controller.port.calls._limit)
+        self.assertFalse(self.controller.port.calls.busy)
+        self.engine.assert_awaited_once()
 
     def test_composition_graph_is_acyclic_and_shares_execution_nodes(self):
         pipeline = self.controller.pipeline

@@ -12,6 +12,7 @@ from .agent.requests import INTERFACE_REQUESTS
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import ElementPath as LookupPath
+    from computer_use.interaction.records import ElementSnapshot
     from computer_use.native.contracts import Intent, OperationTarget
 
 
@@ -45,6 +46,7 @@ class ExecuteAction:
         query_timeout_ms: Lookup wait limit in milliseconds within the call budget.
         app_keyboard: Treat keyboard input as addressed to the App's current receiver.
         forward_current: Forward container input to its current receiver.
+        snapshot: Original element provenance for write-time scope validation.
     """
 
     owner: object | None
@@ -54,6 +56,7 @@ class ExecuteAction:
     query_timeout_ms: int = 0
     app_keyboard: bool = False
     forward_current: bool = False
+    snapshot: ElementSnapshot | None = None
 
 
 REQUEST_TYPES = INTERFACE_REQUESTS + (FindElement, ExecuteAction)

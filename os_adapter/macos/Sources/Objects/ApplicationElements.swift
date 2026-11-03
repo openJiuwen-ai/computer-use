@@ -20,6 +20,9 @@ import ApplicationServices
         // before using an ancestor as a control's interaction owner.
         var ancestors: [AXUIElement] = []
         var context: [Context] = []
+        // True only for this observation's AXChildren traversal starting at a
+        // window. A retained/partial ancestor list is not removal evidence.
+        var contextComplete = false
         var popupOwner: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>? = nil
         // Input ownership follows this exact registered target lifetime. A new
         // observation can refine it, but cannot transfer an editor to a new cell.
@@ -31,7 +34,15 @@ import ApplicationServices
         var observedInteractionSurface: AXUIElement? {
             let roles = [kAXWindowRole, kAXSheetRole, "AXPopover"]
             if roles.contains(identity.attributes[kAXRoleAttribute] ?? "") { return element }
-            return context.last { roles.contains($0.identity.attributes[kAXRoleAttribute] ?? "") }?.native.element
+            // A qualified popup's recorded attachment is a distinct input
+            // mechanism, not the generic physical-window lifetime check.
+            if let popupOwner { return popupOwner.popup }
+            // The fixed physical window is resolved by NativeScopeResolver.
+            // Only a nested logical surface needs this additional anchor;
+            // keeping an old AXWindow proxy here duplicates its lifetime gate.
+            return context.last {
+                [kAXSheetRole, "AXPopover"].contains($0.identity.attributes[kAXRoleAttribute] ?? "")
+            }?.native.element
         }
     }
     struct Identity: Hashable {
@@ -89,19 +100,24 @@ import ApplicationServices
     nonisolated private static func reconcile(
         _ previous: Evidence, _ previousTarget: Target, _ next: Evidence, _ newTarget: Target
     ) -> (Evidence, Target)? {
-        guard let identity = previous.identity.refining(with: next.identity),
-            previous.context.count == next.context.count
-        else { return nil }
-        var contexts = [Context]()
-        for (old, new) in zip(previous.context, next.context) {
-            guard old.native == new.native, let identity = old.identity.refining(with: new.identity) else { return nil }
-            contexts.append(Context(native: new.native, identity: identity))
+        guard let identity = previous.identity.refining(with: next.identity) else {
+            diagnose(["event": "element_identity_reconcile", "subject": "element", "scope": previousTarget.scope,
+                      "fields": previous.identity.changedFields(in: .init(values: next.identity.attributes, absent: next.identity.absent))])
+            return nil
         }
+        guard let contexts = reconcileContext(previous.context, next.context, completePath: newTarget.contextComplete)
+        else { return nil }
         let oldKnown = previous.providerKnown || previous.provider != nil
         let newKnown = next.providerKnown || next.provider != nil
-        guard !oldKnown || !newKnown || previous.provider == next.provider else { return nil }
+        guard !oldKnown || !newKnown || previous.provider == next.provider else {
+            diagnose(["event": "element_identity_reconcile", "subject": "provider", "scope": previousTarget.scope])
+            return nil
+        }
         let provider = newKnown ? next.provider : previous.provider
         var target = newTarget
+        if Self.boundaryContext(next.context).count < Self.boundaryContext(previous.context).count {
+            target.ancestors = previousTarget.ancestors
+        }
         // A later observation may create a new lifetime, never fill an old
         // reference with newly discovered ownership or change its old owner.
         if let nextOwner = newTarget.popupOwner {
@@ -119,6 +135,62 @@ import ApplicationServices
             Evidence(identity: identity, provider: provider, context: contexts, providerKnown: target.providerKnown),
             target
         )
+    }
+
+    /// Only ownership evidence propagates into descendant lifetimes. This
+    /// projection is shared by observation reconciliation and final validation;
+    /// a named layout wrapper must not disappear from one and survive in the other.
+    nonisolated static func boundaryContext(_ context: [Context]) -> [Context] {
+        var inMenu = false
+        return context.compactMap { item in
+            inMenu = inMenu || item.identity.attributes["AXRole"] == "AXMenuBar"
+            guard let identity = item.identity.inheritedBoundary(inMenu: inMenu) else { return nil }
+            return Context(native: item.native, identity: identity)
+        }
+    }
+
+    /// A partial traversal may omit old evidence; omission is not a different
+    /// owner. Refine matching boundaries and retain omitted constraints. Only
+    /// a complete path can prove that the original boundary was removed; a
+    /// different native owner in partial evidence may be another nested owner.
+    nonisolated static func reconcileContext(
+        _ previous: [Context], _ next: [Context], completePath: Bool = false
+    ) -> [Context]? {
+        var merged = boundaryContext(previous)
+        let currentPath = boundaryContext(next)
+        if completePath {
+            // Unlike a partial subtree, a path actually traversed from the
+            // fixed window supplies evidence of removal. This also catches a
+            // document owner replaced by a different role, without treating
+            // extra nested owners or layout wrappers as contradictions.
+            for old in merged where old.identity.attributes["AXRole"] != "AXWindow" {
+                guard currentPath.contains(where: { $0.native == old.native }) else {
+                    diagnose(["event": "element_identity_reconcile", "subject": "context",
+                              "role": old.identity.attributes["AXRole"] ?? "unknown",
+                              "reason": "ownership boundary removed from complete observed path"])
+                    return nil
+                }
+            }
+        }
+        for current in currentPath {
+            let physicalWindow = current.identity.attributes["AXRole"] == "AXWindow"
+            if let index = merged.firstIndex(where: {
+                $0.native == current.native || physicalWindow && $0.identity.attributes["AXRole"] == "AXWindow"
+            }) {
+                // This reconciliation is only called for the same native leaf
+                // key and fixed scope. WindowRegistry/NativeScopeResolver own
+                // the physical window lifetime; its AX proxy may be refreshed.
+                guard let identity = merged[index].identity.refining(with: current.identity) else {
+                    diagnose(["event": "element_identity_reconcile", "subject": "context", "role": current.identity.attributes["AXRole"] ?? "unknown",
+                              "fields": merged[index].identity.changedFields(in: .init(values: current.identity.attributes, absent: current.identity.absent))])
+                    return nil
+                }
+                merged[index] = Context(native: current.native, identity: identity)
+            } else {
+                merged.append(current)
+            }
+        }
+        return merged
     }
 
     func invalidate(pid: pid_t, scope: String? = nil) {
@@ -165,23 +237,12 @@ import ApplicationServices
     func observed(_ key: Identity) -> (id: String, value: Target)? { elements.observed(key) }
     func retain(_ ref: String) -> (() -> Void)? { elements.retain(ref) }
     static func childContext(_ target: Target) -> [Context] {
-        let menu =
-            target.role == kAXMenuBarRole
-            || target.context.contains { $0.identity.attributes[kAXRoleAttribute] == kAXMenuBarRole }
-        let boundary =
-            [kAXWindowRole, kAXSheetRole, kAXRowRole].contains(target.role)
-            || (menu && [kAXMenuBarRole, kAXMenuBarItemRole, kAXMenuRole, kAXMenuItemRole].contains(target.role))
-            || target.identity.attributes.keys.contains {
-                [kAXIdentifierAttribute, kAXURLAttribute, kAXDocumentAttribute].contains($0)
-            } || target.identity.attributes.keys.contains(where: ElementIdentity.positionKeys.contains)
-        return target.context
-            + (boundary
-                ? [
-                    Context(
-                        native: Identity(
-                            pid: target.application.processIdentifier, launched: target.launched,
-                            element: target.element), identity: target.identity)
-                ] : [])
+        boundaryContext(target.context + [
+            Context(
+                native: Identity(
+                    pid: target.application.processIdentifier, launched: target.launched,
+                    element: target.element), identity: target.identity)
+        ])
     }
     func bind(_ lifetime: String, text: String?) -> String? { elements.bind(lifetime, text: text) }
     func invalidate(where predicate: (Target) -> Bool) { elements.invalidate(where: predicate) }
