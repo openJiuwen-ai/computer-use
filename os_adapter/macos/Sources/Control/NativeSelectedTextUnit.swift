@@ -16,13 +16,14 @@ import ApplicationServices
     var receiverRelation: NativeReceiverRelation? = nil
     var cellEditor: NativeCellEditorHandoff? = nil
 
-    func contract(replace: Bool) -> Contract? {
-        try? qualifiedContract(replace: replace)
+    func contract(replace: Bool) throws -> Contract? {
+        do { return try qualifiedContract(replace: replace) }
+        catch is NativeRouteUnavailable { return nil }
     }
 
     private func qualifiedContract(
         replace: Bool, expected: Contract? = nil
-    ) throws(NativeRouteUnavailable) -> Contract? {
+    ) throws -> Contract? {
         guard let role = AXAccess.read(element, kAXRoleAttribute).value as? String, !role.isEmpty,
             AXAccess.read(element, "AXEditable").value as? Bool != false,
             AXAccess.writable(element, kAXSelectedTextAttribute).value == true,
@@ -34,6 +35,11 @@ import ApplicationServices
         // Offering a ready numeric SelectedText setter would bypass that plan
         // before its Command-key window route has been prepared.
         if replace, NativeReplacementUnit(element: element).contract() == .selectAll { return nil }
+        if let excluded = try NativeSelectedTextProviderQualification.sampleChromiumWeb(element: element) {
+            diagnose(excluded.diagnostic)
+            throw NativeRouteUnavailable(
+                description: "the original Chromium Web provider does not handle AXSelectedText content edits")
+        }
         if let excluded = NativeSelectedTextProviderQualification.sample(
             element: element, presenterPID: application.processIdentifier)
         {

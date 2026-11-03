@@ -49,9 +49,77 @@ import ApplicationServices
         unrelatedAndUnknownProvidersKeepTheirCandidates()
         providerChangesCannotInheritAnExclusion()
         redundantBundleMetadataDoesNotReplaceExecutableEvidence()
+        try chromiumWebDelegateIsDistinctFromViews()
+        relatedEditorRemainsAKeyboardReceiver()
         try qualificationRefreshPrecedesPreparation()
         try onlyPreInputRouteRefusalsPermitContinuation()
-        print("PASS selected-text provider qualification preserves unrelated providers and fresh process identity")
+        print("PASS selected-text implementation qualification preserves native Views and related keyboard receivers")
+    }
+
+    static func chromiumWebDelegateIsDistinctFromViews() throws {
+        struct Node {
+            var role: String?
+            var providerID: String?
+            var actualPID: pid_t? = 100
+            var parent: Int?
+        }
+        let baseline = [
+            1: Node(role: "AXTextField", providerID: "402", parent: 2),
+            2: Node(role: "AXGroup", providerID: "396", parent: 3),
+            3: Node(role: "AXWebArea", providerID: "12", parent: 4),
+            4: Node(role: "AXWindow", providerID: nil, parent: nil)
+        ]
+        func prove(_ nodes: [Int: Node]) -> Qualification.ChromiumWebProof? {
+            Qualification.chromiumWebImplementation(
+                element: 1, same: ==, role: { nodes[$0]?.role },
+                providerNodeID: { nodes[$0]?.providerID }, actualPID: { nodes[$0]?.actualPID },
+                parent: { nodes[$0]?.parent }, check: {})
+        }
+        let proof = prove(baseline)
+        precondition(proof?.elementNodeID == 402 && proof?.webAreaNodeID == 12 && proof?.actualPID == 100)
+        // Native Views controls also expose ChromeAXNodeId, but their delegate
+        // implements ReplaceSelectedText. Web ancestry is part of this proof.
+        var nativeViews = baseline
+        nativeViews[3]?.role = "AXGroup"
+        precondition(prove(nativeViews) == nil)
+        var unknown = baseline
+        unknown[1]?.providerID = nil
+        precondition(prove(unknown) == nil, "WebKit/Firefox/native Web ancestry alone cannot exclude their setter")
+        unknown = baseline; unknown[3]?.providerID = nil
+        precondition(prove(unknown) == nil)
+        unknown = baseline; unknown[3]?.actualPID = 101
+        precondition(prove(unknown) == nil, "a different process's WebArea cannot qualify this element")
+        unknown = baseline; unknown[2]?.parent = 1
+        precondition(prove(unknown) == nil, "cyclic ancestry is unknown")
+        unknown = baseline; unknown[2]?.parent = nil
+        precondition(prove(unknown) == nil)
+        unknown = baseline; unknown[2]?.role = "AXWindow"
+        precondition(prove(unknown) == nil, "do not cross a native window boundary to borrow a Web provider")
+        for value in ["", "-1", "0", "402x", "2147483648"] {
+            unknown = baseline; unknown[1]?.providerID = value
+            precondition(prove(unknown) == nil)
+        }
+        struct Cancelled: Error {}
+        do {
+            _ = try Qualification.chromiumWebImplementation(
+                element: 1, same: ==, role: { baseline[$0]?.role },
+                providerNodeID: { baseline[$0]?.providerID }, actualPID: { baseline[$0]?.actualPID },
+                parent: { baseline[$0]?.parent }, check: { throw Cancelled() })
+            preconditionFailure("provider qualification swallowed cancellation")
+        } catch is Cancelled { }
+    }
+
+    @MainActor static func relatedEditorRemainsAKeyboardReceiver() {
+        let editor = AXUIElementCreateApplication(1_000_001)
+        let activeDescendant = AXUIElementCreateApplication(1_000_002)
+        let unrelated = AXUIElementCreateApplication(1_000_003)
+        let current = NativeReceiverSnapshot(
+            windowRoute: "yes", focus: activeDescendant, ancestors: [], foreground: false, relatedEditor: editor)
+        precondition(current.receiver(editor) == "yes", "provider qualification must not remove ARIA text ownership")
+        precondition(current.receiver(unrelated) == "no")
+        precondition(!NativeKeyboardInterpreterEvidence.needsTextTransport(kind: "paste", text: "path"))
+        precondition(!NativeKeyboardInterpreterEvidence.needsTextTransport(kind: "key", text: "Return"))
+        precondition(NativeKeyboardInterpreterEvidence.needsTextTransport(kind: "replace", text: "path"))
     }
 
     @MainActor static func qualificationRefreshPrecedesPreparation() throws {

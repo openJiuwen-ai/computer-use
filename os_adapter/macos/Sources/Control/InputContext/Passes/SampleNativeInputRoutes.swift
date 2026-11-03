@@ -179,7 +179,7 @@ import ApplicationServices
                 let edit = NativeSelectedTextUnit(
                     application: unit.application, window: unit.window, element: element,
                     receiverRelation: unit.receiverRelation, cellEditor: unit.cellEditor)
-                if kind != .paste, let contract = edit.contract(replace: kind == .replace) {
+                if kind != .paste, let contract = try edit.contract(replace: kind == .replace) {
                     try declare(.selectedText(contract), supported: true) { _ in try edit.readiness(contract) }
                 } else {
                     let receiver = NativeReceiverPreparation(

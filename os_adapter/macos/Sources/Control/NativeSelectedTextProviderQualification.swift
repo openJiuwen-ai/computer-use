@@ -5,9 +5,11 @@ import ApplicationServices
 
 /// QUERY-only qualification of one provider's SelectedText content setter.
 /// WebKit's remote text wrapper declares SelectedText writable but forwards it
-/// to an empty implementation (WebKit-7624.4.5.11.1 / .12.1). Other providers,
-/// including Firefox and Chromium, implement real selected-text editing.
-/// No WebArea/marker heuristic or host application name grants this exclusion.
+/// to an empty implementation (WebKit-7624.4.5.11.1 / .12.1). Chromium's Cocoa
+/// wrapper similarly exposes a setter whose BrowserAccessibility delegate does
+/// not handle kReplaceSelectedText; its native Views textfield does handle it.
+/// Each exclusion therefore identifies the actual implementation, not merely
+/// a WebArea, writable attribute, focus report, or host application name.
 enum NativeSelectedTextProviderQualification {
     static let webContentIdentifier = "com.apple.WebKit.WebContent"
 
@@ -43,6 +45,66 @@ enum NativeSelectedTextProviderQualification {
                 "providerVersion": system.version as Any? ?? NSNull()
             ]
         }
+    }
+
+    struct ChromiumWebProof {
+        let actualPID: pid_t
+        let elementNodeID: Int32
+        let webAreaNodeID: Int32
+
+        var diagnostic: [String: Any] {
+            [
+                "kind": "selected_text_candidate_excluded", "attribute": "AXSelectedText",
+                "reason": "chromium_web_delegate_unhandled_replace_selected_text", "actualPID": actualPID,
+                "elementProviderNodeID": elementNodeID, "webAreaProviderNodeID": webAreaNodeID,
+                "reviewedSourceVersion": "150.0.7871.250"
+            ]
+        }
+    }
+
+    /// Chromium 150.0.7871.250: AXPlatformNodeCocoa's SelectedText setter emits
+    /// kReplaceSelectedText, but BrowserAccessibility::AccessibilityPerformAction
+    /// falls through to false. Views Textfield handles this action, so a Chrome
+    /// node ID alone is insufficient: prove this exact node's WebArea ancestry.
+    /// Unknown ancestry preserves the candidate; it is not a general Web gate.
+    static func chromiumWebImplementation<Node>(
+        element: Node, same: (Node, Node) -> Bool, role: (Node) -> String?,
+        providerNodeID: (Node) -> String?, actualPID: (Node) -> pid_t?, parent: (Node) -> Node?,
+        check: () throws -> Void
+    ) rethrows -> ChromiumWebProof? {
+        func nodeID(_ node: Node) -> Int32? {
+            guard let value = providerNodeID(node), !value.isEmpty, value.utf8.count <= 10,
+                value.utf8.allSatisfy({ (48...57).contains($0) }), let number = Int32(value), number > 0
+            else { return nil }
+            return number
+        }
+        try check()
+        guard let elementID = nodeID(element), let pid = actualPID(element), pid > 0 else { return nil }
+        var current = element, seen = [Node]()
+        for _ in 0..<24 {
+            try check()
+            guard !seen.contains(where: { same($0, current) }), let currentRole = role(current) else { return nil }
+            seen.append(current)
+            if currentRole == "AXWebArea" {
+                guard !same(current, element), actualPID(current) == pid, let areaID = nodeID(current),
+                    areaID != elementID
+                else { return nil }
+                return ChromiumWebProof(actualPID: pid, elementNodeID: elementID, webAreaNodeID: areaID)
+            }
+            if ["AXWindow", "AXSheet", "AXApplication"].contains(currentRole) { return nil }
+            guard let next = parent(current) else { return nil }
+            current = next
+        }
+        return nil
+    }
+
+    @MainActor static func sampleChromiumWeb(element: AXUIElement) throws -> ChromiumWebProof? {
+        try chromiumWebImplementation(
+            element: element, same: { CFEqual($0, $1) },
+            role: { AXAccess.read($0, kAXRoleAttribute).value as? String },
+            providerNodeID: { AXAccess.read($0, "ChromeAXNodeId").value as? String },
+            actualPID: BackgroundEvents.accessibilityProcessID,
+            parent: { AXAccess.element($0, kAXParentAttribute) }, check: RequestDiagnostics.checkCancellation)
     }
 
     /// Paths here have already been canonicalized by the query adapter. A
