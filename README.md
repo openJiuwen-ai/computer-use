@@ -47,8 +47,19 @@ Install Python 3.12 or later and `uv`, then clone the repository and install its
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync
+uv sync --no-dev
 ```
+
+This installs the standalone SDK without MCP or model dependencies. MCP and the
+reference Agent have separate `mcp` and `agent` extras; the Agent extra includes
+its MCP connection dependency. For development, plain `uv sync` also installs
+the test, lint and build tools, including MCP for integration tests.
+
+To install a built wheel in another virtual environment, use
+`uv pip install /absolute/path/to/computer_use_toolkit-0.0.1-py3-none-any.whl`.
+The wheel includes native source resources; run `computer-use-build` and
+`computer-use-permissions` in that environment on the target computer before
+using the SDK. Native builds write to a versioned user-owned runtime directory.
 
 Prepare the native dependencies on the computer whose desktop you will operate:
 
@@ -67,19 +78,23 @@ sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
 Build or prepare the native backend, then check desktop access:
 
 ```bash
-uv run computer-use-build
-uv run computer-use-permissions
+uv run --no-dev computer-use-build
+uv run --no-dev computer-use-permissions
 ```
 
-On macOS, use `uv run computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch MCP.
+On macOS, use `uv run --no-dev computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
 
 ### Option 1: integrate the engine
 
 #### MCP
 
 ```bash
-uv run computer-use-mcp --desktop exclusive
+uv run --no-dev --extra mcp computer-use-mcp
 ```
+
+For a wheel installation, install the same wheel with its `mcp` extra, for example
+`uv pip install '/absolute/path/to/computer_use_toolkit-0.0.1-py3-none-any.whl[mcp]'`,
+then run `computer-use-mcp` from that environment.
 
 The server uses stdio. For a client that accepts an `mcpServers` configuration, use:
 
@@ -90,14 +105,14 @@ The server uses stdio. For a client that accepts an `mcpServers` configuration, 
       "command": "uv",
       "args": [
         "--directory", "/absolute/path/to/computer-use",
-        "run", "computer-use-mcp", "--desktop", "exclusive"
+        "run", "--no-dev", "--extra", "mcp", "computer-use-mcp"
       ]
     }
   }
 }
 ```
 
-Replace the checkout path with its absolute path on the target computer. `exclusive` is the desktop authorization and the default value of `COMPUTER_USE_DESKTOP`. Operations prefer element or application-directed input and acquire the foreground or use global input only when required by the selected route.
+Replace the checkout path with its absolute path on the target computer. Global mouse and keyboard input is available by default; qualified element or application-directed routes remain preferred. Each action records the selected route's declared need for global input separately from its actual effects. To explicitly restrict a session to non-global input, pass `--no-allow-global-input`. System permissions must still be available on the target computer.
 
 Inside the `computer_use` tool, `computer`, `print()` and `print_image()` are available. Start by discovering application references:
 
@@ -107,9 +122,23 @@ print(await computer.list_apps())
 
 Select an application with `computer.app(id)`, observe it with `await app.read(view="both")`, and resolve a control with `await app.element(name_or_path)` before operating it.
 
+Reads do not activate or raise windows to refresh pixels by default. On macOS,
+`await app.read(view="both", allow_foreground=True)` explicitly allows preparation of the confirmed original window;
+the same option is available on `Window.read()`.
+This may change focus and stacking, but sends no global mouse/keyboard input and does not switch back afterward.
+The observation's `preparation` record and text retain the requests made; activation and capture do not prove application redraw.
+An unresolved observation target still returns window choices instead of using this permission to guess a target.
+Other platforms do not yet implement this preparation capability.
+
+Writes include a bounded related observation independently of their execution result.
+Inspect `result.observation`, `result.observation_status`, and `result.observation_error`;
+a missing observation does not mean the input was not sent. A `ComputerUseError` with
+`effect="partial"` or `"possible"` also retains these fields when the original session
+can still be observed. Its original error and effect remain unchanged; the SDK does not replay uncertain input.
+
 #### Python SDK
 
-Save this example as `list_apps.py` and run it with `uv run python list_apps.py`:
+Save this example as `list_apps.py` and run it with `uv run --no-dev python list_apps.py`:
 
 ```python
 import asyncio
@@ -118,7 +147,7 @@ from computer_use import Computer
 
 
 async def main():
-    computer = Computer()
+    computer = Computer()  # Qualified low-impact routes remain preferred.
     for app in await computer.list_apps():
         print(app.id, app.display_name, app.is_running)
 
@@ -126,13 +155,69 @@ async def main():
 asyncio.run(main())
 ```
 
+`allow_global_input` is a strict boolean session option, defaulting to `True`.
+It permits global mouse/keyboard routes without promoting them above qualified
+lower-impact routes, and does not grant macOS system permissions. An explicit
+`Computer(allow_global_input=False)` restricts global input; directed operations
+may still activate their original window and change keyboard focus. Under that
+explicit restriction, an operation with no permitted route reports `permission_required`.
+
+`App` identifies an application scope; `list_apps()` lists applications. App and
+desktop observations publish window references. Use `computer.window(ref)` to
+select a specific window directly, or `app.window(ref)` to select the same window
+while also checking application ownership. Neither selection activates a window.
+Window references are shared across desktop, App and post-action observations;
+titles and positions are descriptions, not target identities.
+
+A `Window` remains bound to that window. Closing it invalidates its old handles
+and captures; the App can still discover other windows. Element operations keep
+their original control binding, and coordinates use the image actually delivered
+for the operation. App-level keyboard input uses the latest explicitly delivered
+input context, not whichever window happens to have focus when the call executes.
+Handles for the same App share the actually delivered lookup scope, keyboard
+context and image; undisclosed samples do not replace them. Fixed Windows retain
+their own observations and images, including a delivered, confirmed modal input context.
+The SDK handles target preparation; a genuinely ambiguous context returns window
+choices. Each `choices` entry is a `WindowInfo` with an `id` accepted by
+`computer.window(id)` and a descriptive `title`. Post-action observation may show
+a newly discovered window without rebinding existing Window, Element or screenshot targets.
+
+The SDK returns source screenshots and their original pixel coordinates. When MCP
+resizes an image, automatic output, `print(obs)` and `print(obs.text)` project desktop,
+display and window geometry into the delivered image; input maps back using each
+axis's actual encoded size. Arbitrary PIL crops do not acquire an input mapping,
+and manually assembled strings are not reinterpreted as observation objects.
+
+Execution and observation have separate results. `status` reports dispatch or
+available verification, not completion of the application's business operation.
+`observation_status` is `available`, `partial`, `unavailable`, or `not_requested`.
+`window_lifecycle` is `observed`, `closed`, `unknown`, or `not_applicable`; absence
+of pixels alone does not prove closure. When the original window is gone, related
+observations can still provide current window choices. Existing Window and Element
+handles do not switch to those alternatives. `observation_error.session_usable` tells the caller whether
+the original session remains usable; it is not permission to replay uncertain input.
+
+`ActionResult.impact` and `ComputerUseError.impact` expose read-only execution
+evidence. `global_input_allowed` records the session grant. Each `attempts` item
+separates `declared_global_input` and `preparation_potential` from dispatch,
+cleanup, and `actual` native evidence. `actual.effects` groups calls by stage,
+device, transport, mechanism, and invocation state; it is not a per-keystroke log
+or proof that the app consumed the input. `foreground_changed` and
+`clipboard_restoration` retain their known or unknown outcomes.
+Missing `impact`/`actual` or partial `actual.coverage` means evidence is unavailable
+or incomplete, not that nothing happened. Even complete coverage describes only
+that native execution step; it excludes separate reads, later session cleanup,
+and the application's asynchronous consequences.
+
 ### Option 2: integrate DeepAgent
 
 Use Python 3.12 or 3.13 and install the agent dependencies:
 
 ```bash
-uv sync --extra agent
+uv sync --no-dev --extra agent
 ```
+
+For a wheel installation, select the `agent` extra instead; it includes MCP.
 
 Configure a model that supports tool calls and image input using openJiuwen's `ModelClientConfig` and `ModelRequestConfig`. The example reads the provider, endpoint, credentials and model name from `MODEL_PROVIDER`, `API_BASE`, `API_KEY` and `MODEL_NAME`.
 
@@ -166,7 +251,7 @@ async def main():
 asyncio.run(main())
 ```
 
-The agent uses the same background-first execution pipeline with `exclusive` desktop authorization. Configure `AgentConfig.mcp` with `McpConfig` to connect to another MCP host. The async context manager closes the computer-operation session when the conversation ends.
+The agent uses the same low-impact-first execution pipeline. `AgentConfig.allow_global_input` defaults to `True` for its local MCP session; an explicit `False` is forwarded as a restriction. Configure `AgentConfig.mcp` with `McpConfig` to connect to another MCP host. The async context manager closes the computer-operation session when the conversation ends.
 
 Existing openJiuwen DeepAgent applications can also add the standard tools provided by `ComputerUseToolkit`:
 
@@ -217,14 +302,14 @@ flowchart TD
     OS --> Desktop["Desktop applications"]
 ```
 
-DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App / Window → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. Agents read the UI again to confirm task results after receiving `dispatched` or `verified` receipts.
+DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App / Window → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. A completed action returns its `dispatched` or `verified` receipt and a bounded related observation. Agents use that observation, and further reads when needed, to judge task results. Failure of the related read does not erase or replay the action.
 
 ## Features
 
 - **DeepAgent integration**: standard openJiuwen invocation, streaming and Runner integration, with computer-operation tools reusable in existing DeepAgent applications.
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.
-- **Verifiable receipts**: every action returns `dispatched` / `verified`; failures are structured as `code / effect / next`.
+- **Verifiable receipts**: actions retain `dispatched` / `verified` independently of `observation_status` and `observation_error`. Input failures are structured as `code / effect / next`. `unsupported_operation` means the required capability or operation is unavailable; `permission_required` identifies a missing input grant.
 - **Background-first input**: prefer element and application-directed operations; acquire foreground focus or the global pointer only when the operation requires it.
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.
@@ -256,7 +341,7 @@ computer-use/
 - [DeepAgent integration](computer_use_agent/agent.py): agent construction, standard invocation and conversation lifecycle.
 - [DeepAgent tools](computer_use_agent/toolkit.py): tools for existing openJiuwen applications.
 - [SDK API reference](computer_use_engine/__init__.pyi): public interfaces and parameter types for `Computer`, `App`, `Window` and `Element`.
-- [MCP server](interface_adapter/mcp/server.py): tool schemas, execution instructions and desktop-mode arguments.
+- [MCP server](interface_adapter/mcp/server.py): tool schemas, execution instructions and global-input authorization.
 - [Native setup commands](scripts/native.py): platform builds, permission checks and Linux session setup.
 - [Direct conversation](computer_use_agent/cli/main.py): CLI options and interactive commands.
 

@@ -60,7 +60,7 @@ class InterfacePointerPipeline:
         validate_session(self.controller, ui)
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
-        image = ui._image
+        image = ui._image if ui._anchor is not None else ui._instance.delivered_image
         if image is None or image.expired or hashlib.sha256(image.png).digest() != image.digest:
             raise local_failure(
                 "this UI has no current image mapping",
@@ -79,8 +79,8 @@ class InterfacePointerPipeline:
         if any(other.window != piece.window for other, point in mapped):
             raise local_failure(
                 "a UI drag must start and end in one captured member window",
-                "use an authorized exclusive desktop image for a cross-window drag",
-                "mode_unsupported",
+                "use a desktop image with explicit global input permission for a cross-window drag",
+                "unsupported_operation",
             )
         # This gesture addresses a retained image, not provider controls. Query
         # fresh window/membership facts; native dispatch still validates the

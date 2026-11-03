@@ -95,7 +95,7 @@ def test_available_background_route_precedes_activation_of_another_route():
 @pytest.mark.parametrize("admission", ["unavailable", "insufficientEvidence"])
 def test_unavailable_addressed_route_does_not_block_global_mouse(admission):
     directed, pointer = click_route("surface_pointer", admission), click_route("desktop_pointer")
-    assert choose(facts(directed, pointer), CLICK, HostPolicy(), Attempts()).primitive == pointer
+    assert choose(facts(directed, pointer), CLICK, HostPolicy(allow_global_input=True), Attempts()).primitive == pointer
 
 
 def test_failed_addressed_route_allows_global_mouse_only_before_dispatch():
@@ -105,7 +105,7 @@ def test_failed_addressed_route_allows_global_mouse_only_before_dispatch():
     )
     attempts = Attempts()
     attempts.unavailable.add(route_key(UnitCommand(directed, TARGET, CLICK)))
-    assert choose(facts(directed, pointer), CLICK, HostPolicy(), attempts).primitive == pointer
+    assert choose(facts(directed, pointer), CLICK, HostPolicy(allow_global_input=True), attempts).primitive == pointer
 
 
 @pytest.mark.parametrize(
@@ -130,7 +130,7 @@ def test_frontmost_global_pointer_does_not_override_semantic_action(platform, ro
 
 def test_native_mechanism_can_require_pointer_before_any_action_is_dispatched():
     native, pointer = click_route("object_action"), click_route("desktop_pointer", profile="physicalRequired")
-    assert choose(facts(native, pointer), CLICK, HostPolicy(), Attempts()).primitive == pointer
+    assert choose(facts(native, pointer), CLICK, HostPolicy(allow_global_input=True), Attempts()).primitive == pointer
     explicit = Intent("action", {"action": "AXPress"})
     assert choose(facts(native, pointer), explicit, HostPolicy(), Attempts()).primitive == native
 
@@ -141,7 +141,7 @@ def test_native_mechanism_can_require_pointer_before_any_action_is_dispatched():
 )
 def test_mouse_specific_requests_retain_pointer_semantics(parameters):
     native, pointer = click_route("object_action"), click_route("desktop_pointer")
-    selected = choose(facts(native, pointer), Intent("click", parameters), HostPolicy(), Attempts())
+    selected = choose(facts(native, pointer), Intent("click", parameters), HostPolicy(allow_global_input=True), Attempts())
     assert selected.primitive == pointer
 
 
@@ -155,6 +155,7 @@ def test_editor_preparation_precedes_ready_pointer_focus(foreground):
         Knowledge.NO,
         ("foreground",) if foreground else ("receiver",),
         Knowledge.NO if foreground else Knowledge.YES,
+        global_input=Knowledge.NO,
     )
     pointer = Primitive("mouse", "prepare_receiver", Channel.POINTER, Knowledge.YES, Knowledge.YES)
     selected = choose(facts(pointer, editor), Intent("focus", {}), HostPolicy(), Attempts())

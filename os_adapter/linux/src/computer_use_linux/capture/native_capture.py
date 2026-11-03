@@ -61,7 +61,7 @@ class NativeCapture:
         require(
             getattr(self.b.desktop, "can_capture", False),
             "This desktop has no native pixel capture route.",
-            "mode_unsupported",
+            "unsupported_operation",
         )
         ctx.check()
         self.b.ensure_unlocked()
@@ -149,7 +149,6 @@ class NativeCapture:
         ctx.check()
         # One X screen is a unified canvas, not a claimed physical monitor.
         observation = dict(
-            mode=self.b.mode,
             canvas=dict(width=width, height=height),
             frontmost=frontmost,
             displays=[dict(name="X11 screen", rect=dict(x=0, y=0, width=width, height=height), captured=True)],

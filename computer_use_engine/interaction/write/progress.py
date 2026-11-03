@@ -9,9 +9,9 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal, cast
 
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.write.model import AttemptOutcome, AttemptView, ResolutionMemory
+from computer_use.interaction.write.model import AttemptOutcome, AttemptView, RecordedStep, ResolutionMemory
 from computer_use.interaction.write.routes.policy import Attempts, preparation_pair_available, route_key
-from computer_use.native.contracts import ClickSelectionDecision, Confirmation, Dispatch, StepResult
+from computer_use.native.contracts import Cleanup, ClickSelectionDecision, Confirmation, Dispatch, StepResult
 from computer_use.protocol.primitives import required_item
 
 if TYPE_CHECKING:
@@ -76,6 +76,8 @@ class ProgressView:
     dispatched: Dispatch
     preparation: tuple[str, ...]
     last_route_failure: StepResult | None
+    native_mutation_possible: bool = False
+    requested_input_possible: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,7 +103,7 @@ class WriteRunState:
 
     Attributes:
         attempts: Mutable route history shared across resolution and selection attempts.
-        steps: Native unit receipts in execution order.
+        steps: Attempted native commands and their receipts in execution order.
         preparation: Preparation effects accumulated from native receipts.
         dispatched: Furthest known input dispatch progress.
         memory: Resolution evidence retained between attempts.
@@ -110,7 +112,7 @@ class WriteRunState:
     """
 
     attempts: Attempts = field(default_factory=Attempts)
-    steps: list[StepResult] = field(default_factory=list)
+    steps: list[RecordedStep] = field(default_factory=list)
     preparation: list[str] = field(default_factory=list)
     dispatched: Dispatch = Dispatch.NOT_DISPATCHED
     memory: ResolutionMemory = field(default_factory=ResolutionMemory)
@@ -130,7 +132,24 @@ class WriteRunState:
             a.failed_steps,
             frozenset(a.preparation_pairs),
         )
-        return ProgressView(history, self.dispatched, tuple(self.preparation), self.last_route_failure)
+        return ProgressView(
+            history,
+            self.dispatched,
+            tuple(self.preparation),
+            self.last_route_failure,
+            self.native_mutation_possible,
+            self.requested_input_possible,
+        )
+
+    @property
+    def native_mutation_possible(self) -> bool:
+        """Derive effects from the same recorded receipts, without another history."""
+        return any(step.receipt is not None and _receipt_has_native_mutation(step.receipt) for step in self.steps)
+
+    @property
+    def requested_input_possible(self) -> bool:
+        """Explicit requested-input evidence is distinct from context preparation."""
+        return any(step.receipt is not None and _receipt_has_requested_input(step.receipt) for step in self.steps)
 
     def reserve_preparation(self, command: UnitCommand, facts: Facts) -> None:
         """Consume one recipient allowance before its selected native preparation starts.
@@ -193,6 +212,9 @@ class WriteRunState:
             self.attempts.precondition_changes += 1
             self.attempts.prepared = {p for p in self.attempts.prepared if p[0] != route}
             self.attempts.background_unavailable.discard(route)
+        elif decision.action == "route_unavailable":
+            self.last_route_failure = cast("StepResult", outcome.step)
+            self.attempts.unavailable.add(route_key(command))
         elif (
             command is not None
             and command.prepare
@@ -207,11 +229,49 @@ class WriteRunState:
                 # native unit later establishes the same receiver.
                 if not command.foreground:
                     self.attempts.background_unavailable.add(route)
-        elif decision.action == "route_unavailable":
-            self.last_route_failure = cast("StepResult", outcome.step)
-            self.attempts.unavailable.add(route_key(command))
         if decision.error is not None:
             raise decision.error
+
+
+def _receipt_has_native_mutation(step: StepResult) -> bool:
+    """Retain explicit effects even if a receipt omits a preparation label."""
+    impact = step.impact
+    return impact is not None and (
+        any(effect.state != "notInvoked" for effect in impact.effects)
+        or impact.foreground_changed.value == "yes"
+        or impact.clipboard_restoration in ("restored", "ownershipLost", "failed")
+        or impact.omitted_effects > 0
+    )
+
+
+def _effect_free_route_refusal(step: StepResult, progress: ProgressView) -> bool:
+    """Late permission discovery has the stricter no-effects continuation contract."""
+    return (
+        step.retry_reason == "routeUnavailable"
+        and step.dispatch == progress.dispatched == Dispatch.NOT_DISPATCHED
+        and step.cleanup == Cleanup.COMPLETE
+        and not step.preparation
+        and not progress.preparation
+        and not progress.native_mutation_possible
+        and not _receipt_has_native_mutation(step)
+    )
+
+
+def _receipt_has_requested_input(step: StepResult) -> bool:
+    return step.impact is not None and any(
+        effect.stage == "input" and effect.state != "notInvoked" for effect in step.impact.effects
+    )
+
+
+def _route_refusal_permits_recovery(step: StepResult, progress: ProgressView) -> bool:
+    """Original-target preparation may continue; requested input cannot replay."""
+    return (
+        step.retry_reason == "routeUnavailable"
+        and step.dispatch == progress.dispatched == Dispatch.NOT_DISPATCHED
+        and step.cleanup == Cleanup.COMPLETE
+        and not progress.requested_input_possible
+        and not _receipt_has_requested_input(step)
+    )
 
 
 def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> WriteDecision:
@@ -257,6 +317,35 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
                     progress.preparation,
                 ),
             )
+    if command.primitive.click is None and step.error_code == "permission_required":
+        # A late transport qualification can discover HID in a previously
+        # unknown candidate. Only a completely effect-free native refusal can
+        # close that candidate and preserve an independent permitted route.
+        if _effect_free_route_refusal(step, progress):
+            return WriteDecision("next_route", action="route_unavailable")
+        return WriteDecision(
+            "stop",
+            error=failure(
+                step.error_code,
+                facts.target_label,
+                step.detail,
+                progress.dispatched,
+                progress.preparation,
+                next_step="obtain permission from the caller before creating a session with allow_global_input=True",
+            ),
+        )
+    if command.prepare and (progress.requested_input_possible or _receipt_has_requested_input(step)):
+        return WriteDecision(
+            "stop",
+            error=failure(
+                "execution_unknown",
+                facts.target_label,
+                "Native preparation reported possible requested input; no further input was sent.",
+                progress.dispatched,
+                progress.preparation,
+                minimum_effect="possible",
+            ),
+        )
     if (
         command.primitive.click is None
         and step.dispatch == Dispatch.NOT_DISPATCHED
@@ -268,6 +357,8 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
         if step.dispatch != Dispatch.NOT_DISPATCHED:
             return WriteDecision("stop", error=ValueError("Preparation unexpectedly dispatched the requested input"))
         if step.error_code is not None:
+            if step.error_code == "input_unavailable" and _route_refusal_permits_recovery(step, progress):
+                return WriteDecision("next_route", action="route_unavailable")
             if step.retry_reason == "preparationUnavailable":
                 return WriteDecision("next_route", action="preparation_unavailable")
             return WriteDecision(
@@ -283,7 +374,7 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
             return WriteDecision("complete", receipt=receipt)
         return WriteDecision("reinspect")
     if step.dispatch in (Dispatch.UNKNOWN, Dispatch.PARTIAL) or step.error_code is not None:
-        if step.dispatch == Dispatch.NOT_DISPATCHED and step.retry_reason == "routeUnavailable":
+        if _route_refusal_permits_recovery(step, progress):
             return WriteDecision("next_route", action="route_unavailable")
         return WriteDecision(
             "stop",

@@ -16,6 +16,28 @@ import ApplicationServices
     /// Only the selected qualified-popup adapter sets this. Ordinary pointers
     /// retain their existing fresh gesture geometry and exposure preparation.
     var frozenGeometry: Geometry? = nil
+    var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
+
+    func requiring(_ requirement: NativePointerReadiness.Requirement) -> Self {
+        var unit = self
+        unit.pointerRequirement = requirement
+        return unit
+    }
+
+    /// Preparation, refreshed geometry and dispatch consume the same selected
+    /// requirement. New local window units cannot silently restore the default.
+    func pointerUnit(mapping: WindowGeometry.WindowMapping) -> NativePointerUnit {
+        NativePointerUnit(
+            application: application, window: mapping, nativeWindow: window, pointerRequirement: pointerRequirement)
+    }
+
+    static func allowsDispatchBasis(
+        _ basis: NativeElementHitSelection.Basis, requirement: NativePointerReadiness.Requirement,
+        exactOriginalHit: Bool, hasMember: Bool
+    ) -> Bool {
+        guard requirement == .foregroundWindowPoint else { return basis != .rejected }
+        return basis == .exactHit && exactOriginalHit && !hasMember
+    }
 
     struct Geometry {
         let mapping: WindowGeometry.WindowMapping
@@ -58,6 +80,12 @@ import ApplicationServices
         var hit: AXUIElement? { selection.observation.hit }
         var accepted: Bool { selection.basis != .rejected }
         var preparation: NativeElementHitSelection.Preparation { NativeElementHitSelection.preparation(selection) }
+    }
+
+    private func allowsDispatch(_ sampled: Sample) -> Bool {
+        Self.allowsDispatchBasis(
+            sampled.selection.basis, requirement: pointerRequirement,
+            exactOriginalHit: sampled.hit.map { CFEqual($0, element) } == true, hasMember: member != nil)
     }
 
     private func activationPoint() -> CGPoint? {
@@ -126,7 +154,7 @@ import ApplicationServices
             candidates = NativeElementHitSelection.candidates(
                 bounds: visible, activationPoint: expand ? activationPoint() : nil, expand: expand)
         }
-        let pointer = NativePointerUnit(application: application, window: mapping, nativeWindow: window)
+        let pointer = pointerUnit(mapping: mapping)
         let root = AXUIElementCreateApplication(application.processIdentifier)
         var boundedRoot: AXUIElement?
         var observations = [[String: Any]]()
@@ -275,7 +303,7 @@ import ApplicationServices
         // A distinct member is selected by the Python semantic resolver and
         // guarded by its native fact dependencies. This unit never searches
         // children or accepts a hit merely because it lies in the rectangle.
-        guard sampled.accepted else {
+        guard allowsDispatch(sampled) else {
             throw DriverError(
                 "no sampled pointer point belongs to this native target or its available window route",
                 code: .inputUnavailable)
@@ -287,8 +315,7 @@ import ApplicationServices
     /// the same element hit and independent physical-window readers as delivery.
     func popupPhysicalSample(_ frozen: Geometry) throws -> NativePopupPointerSample<AXUIElement> {
         let sampled = try sample(frozen: frozen)
-        let pointer = NativePointerUnit(
-            application: application, window: sampled.geometry.mapping, nativeWindow: window)
+        let pointer = pointerUnit(mapping: sampled.geometry.mapping)
         let physical = pointer.physicalClickSample(at: frozen.point)
         return .init(
             geometry: sampled.geometry, hit: sampled.selection.basis == .exactHit ? sampled.hit : nil,
@@ -320,8 +347,7 @@ import ApplicationServices
     func backgroundPreparationAvailable() throws -> Bool {
         let sampled = try sample()
         guard sampled.preparation != .foreground else { return false }
-        let pointer = NativePointerUnit(
-            application: application, window: sampled.geometry.mapping, nativeWindow: window)
+        let pointer = pointerUnit(mapping: sampled.geometry.mapping)
         let delivery = try pointer.resolvedDelivery(nil, at: sampled.geometry.point, kind: kind)
         return delivery == .systemPointer
             ? pointer.foregroundWindow(at: sampled.geometry.point) : pointer.backgroundPreparationAvailable(kind: kind)
@@ -332,11 +358,10 @@ import ApplicationServices
     ) {
         let sampled: Sample
         do { sampled = try sample() } catch let error as DriverError
-            where error.code == .inputUnavailable || error.code == .modeUnsupported
+            where error.code == .inputUnavailable || error.code == .unsupportedOperation
         { return (NativeReadiness([("geometry", "unknown")]), false, false, false, nil) }
-        let pointer = NativePointerUnit(
-            application: application, window: sampled.geometry.mapping, nativeWindow: window)
-        if !sampled.accepted {
+        let pointer = pointerUnit(mapping: sampled.geometry.mapping)
+        if !allowsDispatch(sampled) {
             let preparable = sampled.preparation == .foreground
             let readiness = NativeReadiness(
                 [(preparable ? "foreground" : "receiver", "no")], preparationAllowed: preparable)
@@ -355,7 +380,7 @@ import ApplicationServices
         // Once a gesture has selected a point, validate that same point. Never
         // move a second down to a newly discovered candidate after input began.
         let sampled = try sample(frozen: selected)
-        guard sampled.geometry.permitsFrozenDispatch(
+        guard allowsDispatch(sampled), sampled.geometry.permitsFrozenDispatch(
             from: selected, basis: sampled.selection.basis,
             requiresExactGeometry: frozenGeometry != nil || kind != .click)
         else {
@@ -398,7 +423,7 @@ import ApplicationServices
         }
         // Occlusion and ordinary preparation use the same exact-window
         // contract, including explicit key preparation for standard documents.
-        let pointer = NativePointerUnit(application: application, window: selected.mapping, nativeWindow: window)
+        let pointer = pointerUnit(mapping: selected.mapping)
         let delivery = try pointer.resolvedDelivery(nil, at: selected.point, kind: kind)
         do {
             let outcome = try await pointer.prepareWindowContext(
@@ -428,8 +453,7 @@ import ApplicationServices
             if outcome == .contextPrepared || !current.same(as: selected) {
                 // The public AX fallback also binds its retained frame, so a
                 // new point must use the refreshed mapping of this exact window.
-                let refreshed = NativePointerUnit(
-                    application: application, window: current.mapping, nativeWindow: window)
+                let refreshed = pointerUnit(mapping: current.mapping)
                 try refreshed.requirePointReadiness(atNative: current.point, kind: kind, delivery: delivery)
             }
         } catch {
@@ -459,7 +483,7 @@ import ApplicationServices
         }
         try check()
         let selected = try geometry()
-        let pointer = NativePointerUnit(application: application, window: selected.mapping, nativeWindow: window)
+        let pointer = pointerUnit(mapping: selected.mapping)
         try await pointer.deliver(
             request, from: selected.point, to: nil, viewport: selected.visible.size,
             check: { try validate(selected, check: check) }, onDispatch: onDispatch, onPosted: onPosted,

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from computer_use.interaction.requests import ExecuteAction
 
@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import OperationTarget
     from computer_use.session.state import AppState
+    from computer_use.protocol.records import Record
+    from computer_use.types import WindowInfo, Observation, ObservationError
 
 
 @dataclass(frozen=True)
@@ -31,3 +33,15 @@ class ActionPlan:
     reconcile: bool = False
     remaining: Remaining | None = None
     target: OperationTarget | None = None
+
+
+@dataclass(frozen=True)
+class ObservedAction:
+    """Keep the authoritative write receipt separate from its optional read result."""
+
+    receipt: Record | None
+    observation: Observation | None = None
+    observation_status: Literal["available", "partial", "unavailable", "not_requested"] = "unavailable"
+    observation_error: ObservationError | None = None
+    window_lifecycle: Literal["observed", "closed", "unknown", "not_applicable"] = "unknown"
+    choices: tuple[WindowInfo, ...] = ()

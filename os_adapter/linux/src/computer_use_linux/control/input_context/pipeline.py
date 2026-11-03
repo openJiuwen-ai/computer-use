@@ -24,7 +24,7 @@ class NativeInputContextPipeline:
         require(scope.operation.writable, "A read operation cannot select an input contract.")
         if scope.request.get("currentReceiver") is True:
             require(
-                self.current_receiver is not None, "Current receiver observation is unavailable.", "mode_unsupported"
+                self.current_receiver is not None, "Current receiver observation is unavailable.", "unsupported_operation"
             )
             return collect_current_receiver(scope, ctx, self.current_receiver)
         unit = select_context_unit(scope, self.units, self.capabilities)

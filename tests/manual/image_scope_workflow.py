@@ -13,6 +13,8 @@ import signal
 import tempfile
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
@@ -86,7 +88,7 @@ async def verify(folder, change, driver=None):
         raise
     finally:
         report["final"] = await state(folder)
-        (folder / "result.json").write_text(json.dumps(report, indent=2) + "\n")
+        (folder / "result.json").write_text(json.dumps(report, indent=2, default=encode_artifact) + "\n")
         computer._controller.transport.close()
         await computer._controller.transport.wait_closed()
         set_diagnostic_handler(None)

@@ -44,8 +44,12 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
         original = asyncio.create_subprocess_exec
 
         async def spawn(*args, **kwargs):
-            if args[-2:] == ("-m", "computer_use_mcp.runtime") and os.environ.get("MCP_FIXTURE_FAULT"):
-                args = (*args[:-2], str(FIXTURE), "--worker")
+            runtime = next(
+                (i for i in range(len(args) - 1) if args[i:i + 2] == ("-m", "computer_use_mcp.runtime")),
+                None,
+            )
+            if runtime is not None and os.environ.get("MCP_FIXTURE_FAULT"):
+                args = (*args[:runtime], str(FIXTURE), "--worker", *args[runtime + 2:])
             child = await original(*args, **kwargs)
             self.children.append(child)
             return child

@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Human intent: a desktop, an application instance, a window, or a control."""
+"""Human intent: a desktop, an application, a window, or a control."""
 
 from __future__ import annotations
 
@@ -58,10 +58,12 @@ def _key(key):
 
 
 class Computer:
-    def __init__(self):
+    def __init__(self, *, allow_global_input=True):
+        """Create a session with full input capability and low-interference route preference."""
         from .factory import session_controller
 
-        self._controller, self._apps = session_controller(), weakref.WeakValueDictionary()
+        self._controller = session_controller(allow_global_input=allow_global_input)
+        self._apps = weakref.WeakValueDictionary()
 
     def app(self, selector):
         # Exact types preserve scalar validation and identity contracts.
@@ -87,6 +89,11 @@ class Computer:
             app = App(self._controller, scope, _internal=True)
             self._apps[key] = app
         return app
+
+    def window(self, ref):
+        """Select a published concrete Window without changing desktop focus."""
+        parameters.reference(ref, "window reference")
+        return self._controller.interfaces.window(None, ref)
 
     async def list_apps(self):
         """Return application choices with id, display_name, and is_running fields."""
@@ -136,10 +143,14 @@ class Computer:
 class UI:
     def __init__(self, controller=None, scope=None, *, _internal=False):
         if not _internal:
-            raise TypeError("Use Computer.app() or App.window(); UI is not directly constructible")
+            raise TypeError("Use Computer.app(), Computer.window(), or App.window(); UI is not directly constructible")
         self._controller = controller
         self._lookup_scopes = ()
         self._menu_only = False
+        self._context = None
+        self._input_context = None
+        self._lookup_context = None
+        self._delivered_generation = 0
         controller.register(self, scope)
 
     async def element(self, target, *, timeout_ms=3000):
@@ -152,9 +163,11 @@ class UI:
         snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms)))
         return Element(self._controller, self, snapshot, _internal=True)
 
-    async def read(self, *, view="tree", full=False, menu_path=None):
+    async def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False):
         parameters.view(view, full, menu_path)
-        return await operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path)))
+        if type(allow_foreground) is not bool:
+            raise local_failure("allow_foreground must be a boolean", "omit it for observation without activation")
+        return await operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground)))
 
     async def click(self, options=None, *, at):
         click, at = parameters.click(options), parameters.point(at)
@@ -191,7 +204,12 @@ class App(UI):
         super().__init__(controller, scope, _internal=_internal)
         from computer_use.session.interfaces import InstanceState
 
-        self._instance = InstanceState(scope["selector"])
+        running = controller.state(self).running
+        self._instance = (
+            controller.interfaces.windows.application(running.session, running.application, running.name)
+            if running is not None
+            else InstanceState(scope["selector"])
+        )
         self._anchor, self._image = None, None
         handle_created(self, dict(kind="App", controller=controller, selector=scope["selector"]))
 

@@ -4,7 +4,7 @@
 """Verify focused text editing and hosted file-panel input with the source driver.
 
 Run after computer-use-build: uv run python tests/manual/input_receiver_workflow.py --panel
-The desktop uses the unified background-first pipeline with exclusive authorization.
+The desktop uses the unified background-first pipeline; global input is opt-in.
 """
 
 import argparse
@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 
 import computer_use
+from artifact_json import captured_interface_metadata, encode_artifact
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.paths import native_driver
@@ -75,12 +76,12 @@ def search_ref(text):
     return int(matches[0])
 
 
-async def verify(directory, include_panel):
+async def verify(directory, include_panel, *, allow_global_input=False):
     bundle_id = "local.computer-use.input-receiver." + uuid.uuid4().hex
     build_fixture(directory, bundle_id)
     initial = await state(directory)
     events, actions = [], []
-    computer = Computer()
+    computer = Computer(allow_global_input=allow_global_input)
     journal = (directory / "diagnostics.jsonl").open("w", encoding="utf-8")
 
     def record(value):
@@ -128,12 +129,13 @@ async def verify(directory, include_panel):
         await input_action("replace text", field.type_text("精确 query", replace=True))
         await assert_search("精确 query")
         if include_panel:
+            original = await captured_interface_metadata(observation)
             await (await app.element("Open test panel")).click()
             observation = await app.read()
-            match = re.search(r"(?m)^Window (\d+):.*\(current", observation.text)
-            if not match:
-                raise AssertionError("The modal file panel was not discovered")
-            panel = app.window(int(match[1]))
+            catalogue = await captured_interface_metadata(observation)
+            current = catalogue["current"]
+            assert current is not None and current != original["current"], ("The file panel was not discovered", catalogue)
+            panel = app.window(current)
             observation = await panel.read()
             field = await panel.element(search_ref(observation.text))
             await input_action("hosted panel insertion", field.type_text("WorkSwarm"))
@@ -148,10 +150,10 @@ async def verify(directory, include_panel):
             "sdk": computer_use.__file__,
             "driver": str(driver),
             "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
-            "mode": os.environ.get("COMPUTER_USE_DESKTOP", "exclusive"),
+            "global_input_allowed": allow_global_input,
             "actions": actions,
         }
-        (directory / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        (directory / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
         LOG.info("Verified %d input actions: %s", len(actions), directory / "result.json")
     finally:
         computer._controller.transport.close()  # Standalone source-driver test owns this session.
@@ -164,12 +166,13 @@ async def verify(directory, include_panel):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--panel", action="store_true")
+    parser.add_argument("--allow-global-input", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     output = ROOT / ".artifacts"
     output.mkdir(exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix="input-receiver-", dir=output))
-    asyncio.run(verify(directory, args.panel))
+    asyncio.run(verify(directory, args.panel, allow_global_input=args.allow_global_input))
 
 
 if __name__ == "__main__":

@@ -12,13 +12,11 @@ import ApplicationServices
         return try await op.execute(step: step, payload: payload) {
             let activity = NativeInputActivity(
                 operation: op.token, step: step, command: command.kind, intent: op.request.kind, target: command.target,
-                mode: BackgroundTarget.desktopMode)
+                globalInputAllowed: NativeInputAuthorization.globalInputAllowed)
             return await NativeInputActivity.$current.withValue(activity) {
-                let result = await DispatchNativeLaunchPass.run(op, command: command, access: access)
-                activity.finish(
-                    dispatch: result["dispatch"] as? String ?? "unknown",
-                    cleanup: result["cleanup"] as? String ?? "unknown")
-                return result
+                let receipt = await DispatchNativeLaunchPass.run(op, command: command, access: access)
+                receipt.impact = activity.finish(dispatch: receipt.dispatch, cleanup: receipt.cleanup)
+                return receipt.wire
             }
         }
     }

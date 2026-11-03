@@ -40,6 +40,7 @@ class AppState:
     observation: object | None = None
     query_target: Binding | None = None
     query_scope_kind: str | None = None
+    menu_window_identity: WindowIdentity | None = None
     directory: DirectoryFacts | None = None
     refs: OrderedDict[str, Record] = field(default_factory=OrderedDict)
     windows: dict[str, str] = field(default_factory=dict)
@@ -58,6 +59,7 @@ class AppState:
 
 
 if TYPE_CHECKING:
+    from computer_use.session.interfaces import WindowIdentity
     from computer_use.session.image_coordinates import ImageCoordinates
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
     from computer_use.protocol.records import Record

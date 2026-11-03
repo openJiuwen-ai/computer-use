@@ -34,8 +34,7 @@ def record_click_selection(
                 attempt=control.attempt,
                 observed=request.facts.observed,
                 target=asdict(request.facts.binding),
-                mode=request.policy.mode,
-                foregroundAllowed=request.policy.foreground_allowed,
+                globalInputAllowed=request.policy.allow_global_input,
                 selected=None
                 if selected is None
                 else dict(

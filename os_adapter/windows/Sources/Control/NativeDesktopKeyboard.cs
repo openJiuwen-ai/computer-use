@@ -7,14 +7,15 @@ using System.Runtime.InteropServices;
 
 namespace ComputerUse.Windows
 {
-    // Explicit exclusive-desktop input follows the real foreground queue. It
+    // Explicit authorized desktop input follows the real foreground queue. It
     // does not infer an Element, activate a window, or query an application's
     // UIA provider. Addressed App/Element operations retain their own contracts.
-    internal sealed class NativeDesktopKeyboard : INativeKeyboardProvider,
+    internal sealed class NativeDesktopKeyboard : INativeKeyboardProvider, INativeGlobalKeyboardAuthority,
                                                   INativeKeyboardTextProvider,
                                                   INativePasteConsumerProvider
     {
         readonly NativePointerCaptures captures;
+        readonly bool globalInputAllowed;
         sealed class Receiver
         {
             internal IntPtr Window, Focus;
@@ -22,9 +23,10 @@ namespace ComputerUse.Windows
             internal long Generation;
         }
 
-        internal NativeDesktopKeyboard(NativePointerCaptures captures)
+        internal NativeDesktopKeyboard(NativePointerCaptures captures, bool allowGlobalInput = false)
         {
             this.captures = captures;
+            globalInputAllowed = allowGlobalInput;
         }
 
         static void Check(Request r)
@@ -42,6 +44,7 @@ namespace ComputerUse.Windows
         public NativeKeyboardState Read(Dictionary<string, object> target, string[] within, Request r,
                                         bool text = false)
         {
+            NativeGlobalInput.Require(globalInputAllowed);
             Check(r);
             if (target["surface"] != null || target["node"] != null || within.Length != 0)
                 throw new Failure("invalid_request", "desktop keyboard cannot address a window or element");
@@ -65,6 +68,7 @@ namespace ComputerUse.Windows
 
         public void RequireIdle(NativeKeyEvent[] events, Request r)
         {
+            NativeGlobalInput.Require(globalInputAllowed);
             Check(r);
             Native.Released();
             foreach (ushort key in events.Where(e => !e.Up && !e.Unicode).Select(e => e.Code).Distinct())
@@ -85,10 +89,15 @@ namespace ComputerUse.Windows
             throw new Failure("invalid_request", "desktop input has no addressed element to focus");
         }
 
+        public void RequireGlobalInput()
+        {
+            NativeGlobalInput.Require(globalInputAllowed);
+        }
+
         public int Send(NativeKeyEvent[] events)
         {
             var inputs = events.Select(e => Native.Key(e.Code, e.Up, e.Unicode, e.Extended)).ToArray();
-            return (int)Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.INPUT)));
+            return (int)Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.INPUT)), globalInputAllowed);
         }
 
         sealed class Sequence : INativeKeyboardSequence

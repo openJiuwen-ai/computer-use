@@ -30,9 +30,12 @@ from computer_use.native.contracts import (
     Dispatch,
     Facts,
     HostPolicy,
+    InputEffect,
     InputContext,
     Knowledge,
     OpenedOperation,
+    NativeImpact,
+    PreparationImpact,
     Primitive,
     StepResult,
 )
@@ -146,6 +149,18 @@ def decode_click_receipt(value):
             transport["expected"],
         ),
         ClickContinuation(continuation["kind"], decode_binding(continuation["target"]), continuation["routeFamily"]),
+    )
+
+
+def decode_native_impact(value):
+    if value is None:
+        return None
+    return NativeImpact(
+        value["coverage"],
+        tuple(InputEffect(**item) for item in value["effects"]),
+        Knowledge(value["foregroundChanged"]),
+        value["clipboardRestoration"],
+        value.get("omittedEffects", 0),
     )
 
 
@@ -282,7 +297,7 @@ class ConnectionPort:
                 raise local_failure(
                     "backend does not provide nativeCurrentReceiver",
                     "update the driver before querying current receiver evidence",
-                    "mode_unsupported",
+                    "unsupported_operation",
                     "inspect",
                 )
             query["currentReceiver"] = True
@@ -302,7 +317,7 @@ class ConnectionPort:
                 raise local_failure(
                     "backend does not provide nativeControlParts",
                     "update the driver before selecting a pointer control member",
-                    "mode_unsupported",
+                    "unsupported_operation",
                     "inspect",
                 )
             if actuator.relation == "scrollPointer":
@@ -310,7 +325,7 @@ class ConnectionPort:
                     raise local_failure(
                         "backend does not provide nativeElementScroll",
                         "update the driver before selecting an element wheel route",
-                        "mode_unsupported",
+                        "unsupported_operation",
                         "inspect",
                     )
                 if not basis:
@@ -319,7 +334,7 @@ class ConnectionPort:
                     raise local_failure(
                         "backend does not provide nativeScrollContentPath",
                         "update the driver before selecting moving scroll content",
-                        "mode_unsupported",
+                        "unsupported_operation",
                         "inspect",
                     )
             query["actuator"] = actuator.wire()
@@ -335,7 +350,7 @@ class ConnectionPort:
                 raise local_failure(
                     "backend does not provide " + capability,
                     "update the driver before selecting a related receiver",
-                    "mode_unsupported",
+                    "unsupported_operation",
                     "inspect",
                 )
             query["receiver"] = receiver.wire()
@@ -344,7 +359,7 @@ class ConnectionPort:
                 raise local_failure(
                     "backend does not provide nativeSelectionBasis",
                     "update the driver before selecting a composed input target",
-                    "mode_unsupported",
+                    "unsupported_operation",
                     "inspect",
                 )
             query["basis"] = [entry.wire() for entry in basis]
@@ -380,6 +395,11 @@ class ConnectionPort:
                 action=p.get("action", {}).get("name"),
                 action_description=p.get("action", {}).get("description"),
                 click=decode_click_offer(p.get("click")),
+                global_input=Knowledge(p.get("globalInput", "unknown")),
+                preparation_impact=(
+                    PreparationImpact(**{key: Knowledge(item) for key, item in p["preparationImpact"].items()})
+                    if "preparationImpact" in p else None
+                ),
             )
             for p in value["primitives"]
         )
@@ -712,6 +732,17 @@ class ConnectionPort:
             raise ValueError("Native text page changed its requested range or budget")
         return page
 
+    async def prepare_observation(self, operation, target, timeout_ms):
+        self._check(operation)
+        value = await self.connection.request(
+            "prepareObservation",
+            dict(operation=operation, target=encode_fields(target, _BINDING)),
+            dict(timeoutMs=timeout_ms),
+        )
+        if decode_binding(value["binding"]) != target:
+            raise ValueError("Observation preparation changed its original window")
+        return value
+
     async def capture(self, operation, target, max_dimension, timeout_ms, *, kind="window"):
         self._check(operation)
         value = await self.connection.request(
@@ -726,8 +757,6 @@ class ConnectionPort:
             raise ValueError("Native capture changed its requested kind or scope")
         if kind == "desktop":
             dimensions = value["observation"]["canvas"]
-            if value["observation"]["mode"] != self.policy.mode:
-                raise ValueError("Native desktop capture changed its negotiated mode")
         else:
             dimensions = capture_metadata(value["image"])
         if max(dimensions["width"], dimensions["height"]) > max_dimension:
@@ -760,7 +789,7 @@ class ConnectionPort:
             raise local_failure(
                 "backend does not provide nativeTextReplacement",
                 "update the driver before selecting a contextual replacement unit",
-                "mode_unsupported",
+                "unsupported_operation",
                 "execute",
             )
         if (
@@ -771,7 +800,7 @@ class ConnectionPort:
             raise local_failure(
                 "backend does not provide nativeElementPointer",
                 "update the driver before selecting an element pointer unit",
-                "mode_unsupported",
+                "unsupported_operation",
                 "execute",
             )
         if (
@@ -782,7 +811,7 @@ class ConnectionPort:
             raise local_failure(
                 "backend does not provide nativeControlParts",
                 "update the driver before selecting a pointer control member",
-                "mode_unsupported",
+                "unsupported_operation",
                 "execute",
             )
         if (
@@ -793,7 +822,7 @@ class ConnectionPort:
             raise local_failure(
                 "backend does not provide nativeElementScroll",
                 "update the driver before selecting an element wheel route",
-                "mode_unsupported",
+                "unsupported_operation",
                 "execute",
             )
         invalid_command = (
@@ -810,7 +839,7 @@ class ConnectionPort:
             raise local_failure(
                 "backend does not provide nativeScrollContentPath",
                 "update the driver before selecting moving scroll content",
-                "mode_unsupported",
+                "unsupported_operation",
                 "execute",
             )
         wire = dict(
@@ -860,6 +889,7 @@ class ConnectionPort:
             value["context"],
             value.get("application"),
             decode_click_receipt(value.get("click")),
+            decode_native_impact(value.get("impact")),
         )
 
     async def finish(self, operation):

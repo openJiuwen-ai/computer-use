@@ -16,6 +16,8 @@ import ApplicationServices
         var activation = 0
         var trusted = true
         var declared = [AXUIElement]()
+        var declarationUnavailable = false
+        var unavailableChildren = Set<CFHashCode>()
         var ids = [CFHashCode: CGWindowID]()
         var focused: AXUIElement?
         var nativeAvailable = true
@@ -48,7 +50,8 @@ import ApplicationServices
             }
             services.owner = { _ in }
             services.process = { _ in self.process }
-            services.info = { id in [kCGWindowOwnerPID as String: self.app.processIdentifier, kCGWindowNumber as String: id] }
+            services.info = { id in self.nativeIDs.contains(id)
+                ? [kCGWindowOwnerPID as String: self.app.processIdentifier, kCGWindowNumber as String: id] : nil }
             services.role = { self.value($0, kAXRoleAttribute) as? String }
             return NativeDirectory(state: state, session: "visual-scene", windowServices: services)
         }()
@@ -88,7 +91,7 @@ import ApplicationServices
                 content.append("declared control presentation." + key)
             }
             if CFEqual(node, application) {
-                if key == kAXWindowsAttribute { return declared as CFArray }
+                if key == kAXWindowsAttribute { return declarationUnavailable ? nil : declared as CFArray }
                 if key == kAXFocusedWindowAttribute || key == kAXMainWindowAttribute { return focused }
                 if key == kAXFocusedUIElementAttribute { content.append("AXFocusedUIElement"); return cell }
             }
@@ -109,6 +112,7 @@ import ApplicationServices
             api.nativeID = { self.ids[CFHash($0)] }
             api.hint = { node, _ in self.ids[CFHash(node)].map { .init(frame: CGRect(x: 10, y: 10, width: 500, height: 400), title: "", id: $0) } }
             api.relations.count = { node, _ in
+                if self.unavailableChildren.contains(CFHash(node)) { return (.cannotComplete, 0) }
                 if CFEqual(node, self.files) { self.content.append("file-list.AXChildren poison"); return (.cannotComplete, 0) }
                 return (.success, self.children[CFHash(node)]?.count ?? 0)
             }
@@ -151,11 +155,108 @@ import ApplicationServices
         precondition(row["parentState"] as? String == "none", "fresh application parent was lost")
         precondition((result?["provider"] as? [String: Any])?["status"] as? String == "notRequested")
         try visualWindowFacts()
+        try rootCoverageIsIndependentOfDescendantGaps()
         try nativeOnlyRefreshRetainsBinding()
         try declaredControlRootDoesNotOpenItsContents()
         try legacyContentPositiveControl()
         try visualBatchesRetainProfileFailuresAndDeadline()
+        try desktopAndApplicationShareNativeIdentity()
+        confirmedHelperMembershipDoesNotGuessByPath()
         print("NativeVisualDirectoryTests passed")
+    }
+
+    @MainActor static func confirmedHelperMembershipDoesNotGuessByPath() {
+        let ownership = NativeProcessOwnership()
+        let owner = NativeProcessIdentity(pid: 101, parent: 1, seconds: 10, microseconds: 0,
+            executable: "/Example.app/Contents/MacOS/main")
+        let helper = NativeProcessIdentity(pid: 102, parent: owner.pid, seconds: 20, microseconds: 0,
+            executable: "/Example.app/Contents/Frameworks/helper")
+        let unrelated = NativeProcessIdentity(pid: 103, parent: 1, seconds: 20, microseconds: 0,
+            executable: helper.executable)
+        let outside = NativeProcessIdentity(pid: 104, parent: owner.pid, seconds: 20, microseconds: 0,
+            executable: "/Another.app/Contents/MacOS/helper")
+        var processes = [owner.pid: owner, helper.pid: helper, unrelated.pid: unrelated, outside.pid: outside]
+        let bundle = URL(fileURLWithPath: "/Example.app")
+        precondition(ownership.belongs(helper, to: owner, bundle: bundle, read: { processes[$0] }))
+        precondition(!ownership.belongs(unrelated, to: owner, bundle: bundle, read: { processes[$0] }),
+            "same executable path alone established helper ownership")
+        precondition(!ownership.belongs(outside, to: owner, bundle: bundle, read: { processes[$0] }),
+            "ancestry alone merged an unrelated application")
+        processes[owner.pid] = .init(pid: owner.pid, parent: 1, seconds: 30, microseconds: 0,
+            executable: owner.executable)
+        precondition(!ownership.belongs(helper, to: owner, bundle: bundle, read: { processes[$0] }),
+            "a replacement owner inherited an earlier process membership claim")
+    }
+
+    @MainActor static func desktopAndApplicationShareNativeIdentity() throws {
+        let scene = Scene()
+        scene.trusted = false
+        let native = scene.windows()[0]
+        let desktop = scene.directory.retainDesktopWindow(native, owner: scene.app)
+        precondition(scene.content.isEmpty && scene.activation == 0,
+            "desktop identity registration read AX or initialized a provider")
+        precondition(desktop["parentState"] as? String == "unknown" && desktop["node"] is NSNull)
+        let application = try scene.collect()["surfaces"] as! [[String: Any]]
+        for key in ["window", "surface", "instance"] {
+            precondition(application[0][key] as? String == desktop[key] as? String,
+                "desktop and application allocated different native identities")
+        }
+        let moved = NativeWindows.Window(application: scene.app, process: native.process,
+            mapping: .init(id: native.mapping.id, pid: native.process.pid,
+                frame: CGRect(x: 200, y: 300, width: 700, height: 500), title: "Renamed", width: 700, height: 500),
+            onScreen: true)
+        let again = scene.directory.retainDesktopWindow(moved, owner: scene.app)
+        for key in ["window", "surface", "instance"] {
+            precondition(again[key] as? String == desktop[key] as? String, "title/movement changed identity")
+        }
+        let selected = try scene.directory.windowScope(instance: desktop["instance"] as! String,
+            root: desktop["window"] as? String, surface: desktop["surface"] as! String)
+        precondition(selected.surface.native?.mapping.frame == moved.mapping.frame,
+            "native mapping did not refresh independently from identity")
+        scene.nativeIDs = [381]
+        let replacement = scene.directory.retainDesktopWindow(scene.windows()[0], owner: scene.app)
+        precondition(replacement["window"] as? String != desktop["window"] as? String)
+        do {
+            _ = try scene.directory.windowScope(instance: desktop["instance"] as! String,
+                root: desktop["window"] as? String, surface: desktop["surface"] as! String)
+            preconditionFailure("closed desktop window retargeted to another application window")
+        } catch let error as DriverError { precondition(error.code == .staleTarget) }
+        _ = try scene.directory.windowScope(instance: replacement["instance"] as! String,
+            root: replacement["window"] as? String, surface: replacement["surface"] as! String)
+        let newProcess = NativeProcessIdentity(pid: native.process.pid, parent: native.process.parent,
+            seconds: native.process.seconds + 1, microseconds: native.process.microseconds,
+            executable: native.process.executable)
+        let reincarnated = NativeWindows.Window(application: scene.app, process: newProcess,
+            mapping: native.mapping, onScreen: true)
+        let changed = scene.directory.retainDesktopWindow(reincarnated, owner: scene.app)
+        precondition(changed["window"] as? String != desktop["window"] as? String,
+            "a replacement process revived the prior native reference")
+    }
+
+    @MainActor static func rootCoverageIsIndependentOfDescendantGaps() throws {
+        let scene = Scene()
+        let complete = try scene.collect()
+        precondition(complete["rootDiscoveryComplete"] as? Bool == true)
+        scene.unavailableChildren.insert(CFHash(scene.window))
+        let partial = try scene.collect()
+        precondition(!(partial["stopReasons"] as! [String]).isEmpty, "lost descendant failure diagnostics")
+        precondition(partial["rootDiscoveryComplete"] as? Bool == true,
+            "attached-child failure vetoed complete independent-root discovery")
+        scene.declarationUnavailable = true
+        let rootsUnknown = try scene.collect()
+        precondition(rootsUnknown["rootDiscoveryComplete"] as? Bool == false,
+            "AXWindows failure claimed independent roots were complete")
+        precondition(!(rootsUnknown["surfaces"] as! [[String: Any]]).isEmpty,
+            "unknown root coverage erased addressable windows")
+        let unparented = Scene()
+        unparented.declared.append(unparented.node(kAXWindowRole))
+        let unknownParent = try unparented.collect()
+        precondition(unknownParent["rootDiscoveryComplete"] as? Bool == false,
+            "unknown parent relationship claimed complete roots")
+        let noTrust = Scene()
+        noTrust.trusted = false
+        let permissionUnknown = try noTrust.collect()
+        precondition(permissionUnknown["rootDiscoveryComplete"] as? Bool == false)
     }
 
 

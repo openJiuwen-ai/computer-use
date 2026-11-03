@@ -30,6 +30,20 @@ class CapturedTextDocument:
     text: str
 
 
+class CapturedObservationText(str):
+    """Full source text with its immutable capture for host-side presentation.
+
+    Ordinary SDK text remains in source pixels. A host resizing the associated
+    PNG can render the captured document into that delivery space without
+    parsing strings or changing the retained facts and input identity.
+    """
+
+    def __new__(cls, text: str, observation: LazyObservation):
+        value = super().__new__(cls, text)
+        value.observation = observation
+        return value
+
+
 class LazyObservation(FrozenRecord):
     """Retain a captured document and cache its full text when explicitly requested.
 
@@ -47,8 +61,9 @@ class LazyObservation(FrozenRecord):
         details_document: ObservationDocument | None = None,
         element_details: Callable[[int], ObservationDocument] | None = None,
         overview: Any = _UNSET,
+        preparation: Mapping[str, Any] | None = None,
     ) -> None:
-        values = dict(text=None, screenshot=screenshot)
+        values = dict(text=None, screenshot=screenshot, preparation=preparation)
         if overview is not _UNSET:
             values["overview"] = overview
         super().__init__(values)
@@ -64,7 +79,7 @@ class LazyObservation(FrozenRecord):
                 text = self._document.text
                 if not isinstance(text, str):
                     raise TypeError("observation document must render text")
-                object.__setattr__(self, "_rendered_text", text)
+                object.__setattr__(self, "_rendered_text", CapturedObservationText(text, self))
             return self._rendered_text
         return super().__getitem__(key)
 
@@ -105,10 +120,16 @@ def lazy_observation(
     details_document: ObservationDocument | None = None,
     element_details: Callable[[int], ObservationDocument] | None = None,
     overview: Any = _UNSET,
+    preparation: Mapping[str, Any] | None = None,
 ) -> LazyObservation:
     """Create a public observation without rendering the captured document."""
     return LazyObservation(
-        document, screenshot, details_document=details_document, element_details=element_details, overview=overview
+        document,
+        screenshot,
+        details_document=details_document,
+        element_details=element_details,
+        overview=overview,
+        preparation=preparation,
     )
 
 
@@ -117,6 +138,13 @@ def peek_observation_text(state: Mapping[str, Any]) -> str | None:
     # The pipeline shares retained bindings with their owning service.
     # pylint: disable-next=protected-access
     return state._rendered_text if isinstance(state, LazyObservation) else state.get("text")
+
+
+def observation_document(state: Mapping[str, Any]) -> ObservationDocument | None:
+    """Return the retained source document without rendering or reacquiring it."""
+    # This module owns the immutable observation's presentation source.
+    # pylint: disable-next=protected-access
+    return state._document if isinstance(state, LazyObservation) else None
 
 
 if TYPE_CHECKING:

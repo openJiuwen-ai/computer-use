@@ -35,7 +35,7 @@ class ControllerAdapters:
 
     create_app: Callable[[SessionController, Record], UIHandle]
     observation_state: Callable[[Record], Observation]
-    action_result: Callable[[Record], ActionResult]
+    action_result: Callable[..., ActionResult]
     captured_text: Callable[..., TextPage]
     register_image: Callable[[PNG, Record], None]
     image_delivery_epoch: Callable[[], int]

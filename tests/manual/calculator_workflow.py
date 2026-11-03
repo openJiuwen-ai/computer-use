@@ -3,7 +3,7 @@
 
 """Opt-in macOS SDK acceptance: read, find, click, verify, then clear.
 
-Run with the same desktop mode and permissions before and after the refactor.
+Run with the same input authorization and permissions before and after the refactor.
 Only run on a disposable calculator session: this clears its current expression.
 """
 
@@ -13,6 +13,8 @@ import re
 import sys
 from pathlib import Path
 from time import monotonic
+
+from artifact_json import encode_artifact
 
 from computer_use import Computer
 
@@ -56,7 +58,7 @@ async def main():
             source=str(Path(__file__).resolve().parents[2]),
             driver=computer._controller.transport.driver,
         )
-        Path(sys.argv[1]).write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        Path(sys.argv[1]).write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact))
         sys.stdout.write("Calculator workflow passed: 0 → 7 → 0\n")
     finally:
         computer._controller.transport.close()

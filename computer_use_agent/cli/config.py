@@ -27,15 +27,6 @@ def load(path: Path | None = None, *, overrides=None):
         raise FileNotFoundError(path)
     if not isinstance(value, dict):
         raise TypeError("Agent configuration must be a JSON object.")
-    # Accept existing ReAct model settings at the configuration boundary.
-    aliases = {"baseUrl": "api_base", "apiKey": "api_key"}
-    for old, new in aliases.items():
-        if old in value and new not in value:
-            value[new] = value[old]
-    if "modelTimeoutMs" in value and "model_timeout" not in value:
-        value["model_timeout"] = value["modelTimeoutMs"] / 1000
-    if "context_window" not in value and isinstance(value.get("context"), dict):
-        value["context_window"] = value["context"].get("windowTokens", 1_000_000)
     environment = {
         "model": os.getenv("MODEL_NAME") or os.getenv("OPENAI_MODEL"),
         "provider": os.getenv("MODEL_PROVIDER"),
@@ -72,7 +63,7 @@ def build(value, *, workspace):
     )
     mcp = value.get("mcp")
     config = AgentConfig(
-        desktop=value.get("desktop", "exclusive"),
+        allow_global_input=value.get("allow_global_input", True),
         max_iterations=value.get("max_iterations", 40),
         context_window=value.get("context_window", 1_000_000),
         workspace=str(workspace),

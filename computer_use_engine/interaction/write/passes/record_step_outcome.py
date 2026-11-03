@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from computer_use.interaction.write.model import AttemptOutcome
@@ -31,7 +32,9 @@ def create(*, native: NativePort, state: WriteRunState) -> Callable[[AttemptOutc
         step = outcome.step
         if step is None:
             return outcome
-        state.steps.append(step)
+        if not state.steps or state.steps[-1].command != outcome.command or state.steps[-1].receipt is not None:
+            raise ValueError("Native receipt has no matching attempted command")
+        state.steps[-1] = replace(state.steps[-1], receipt=step)
         state.preparation.extend(step.preparation)
         if step.click is not None:
 

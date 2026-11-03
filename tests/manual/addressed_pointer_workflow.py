@@ -13,6 +13,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from artifact_json import encode_artifact
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.paths import native_driver
@@ -52,6 +53,7 @@ async def main():
                 },
                 ensure_ascii=False,
                 indent=2,
+                default=encode_artifact,
             )
             + "\n"
         )

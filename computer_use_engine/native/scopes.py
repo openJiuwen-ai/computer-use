@@ -18,8 +18,9 @@ class FixedWindowInvalidated(ComputerUseError):
     errors carry no lifecycle authority and must not retire an App instance.
     """
 
-    def __init__(self, binding: Binding, detail: str):
+    def __init__(self, binding: Binding, detail: str, *, directory=None):
         self.binding = binding
+        self.directory = directory
         super().__init__(
             dict(
                 code="stale_target",
@@ -34,8 +35,9 @@ class FixedWindowInvalidated(ComputerUseError):
 class FixedWindowUnconfirmed(ComputerUseError):
     """A partial directory could not observe the fixed root; identity is retained."""
 
-    def __init__(self, binding: Binding):
+    def __init__(self, binding: Binding, *, directory=None):
         self.binding = binding
+        self.directory = directory
         super().__init__(
             dict(
                 code="observation_incomplete",

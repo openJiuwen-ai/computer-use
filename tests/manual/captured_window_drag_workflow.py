@@ -24,6 +24,8 @@ import uuid
 from dataclasses import asdict
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
@@ -91,8 +93,9 @@ async def command(folder, kind):
     raise TimeoutError("Owned titlebar fixture did not consume its setup command")
 
 
-async def snapshot(ui, folder, name):
-    observation = await ui.read(view="both")
+async def snapshot(ui, folder, name, *, allow_foreground=False):
+    options = {"allow_foreground": True} if allow_foreground else {}
+    observation = await ui.read(view="both", **options)
     (folder / (name + ".txt")).write_text(observation.text)
     if observation.screenshot is not None:
         (folder / (name + ".png")).write_bytes(observation.screenshot)
@@ -144,7 +147,7 @@ def captured_drag_points(image, root, before):
 async def verify(folder, options):
     bundle = "local.computer-use.captured-drag." + uuid.uuid4().hex
     driver = Path(options.driver or native_driver()["command"]).resolve()
-    computer = Computer()
+    computer = Computer(allow_global_input=options.allow_global_input)
     computer._controller.transport.driver = {"command": str(driver), "args": []}
     journal = (folder / "diagnostics.jsonl").open("w")
     events, initial = [], None
@@ -152,6 +155,7 @@ async def verify(folder, options):
         "route": options.route,
         "custom_handle": options.custom_handle,
         "expect": options.expect,
+        "allow_global_input": options.allow_global_input,
         "sdk": computer_use.__file__,
         "driver": str(driver),
         "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
@@ -168,7 +172,14 @@ async def verify(folder, options):
     try:
         await asyncio.to_thread(build_fixture, folder, bundle, options.custom_handle)
         initial = await state(folder)
-        await command(folder, "reset")
+        result["setup_before"] = await command(folder, "reset")
+        app = computer.app(bundle)
+        await snapshot(app, folder, "app-setup")
+        window = app.window(0)
+        # Background self-activation is not a reliable fixture setup mechanism.
+        # Explicitly prepare this already observed window before measuring drag.
+        prepared = await snapshot(window, folder, "window-setup", allow_foreground=True)
+        result["setup_target_preparation"] = prepared.preparation
         await command(folder, "foreground")
         for _ in range(100):
             before = await state(folder)
@@ -178,9 +189,8 @@ async def verify(folder, options):
         else:
             raise RuntimeError("The owned window did not become foreground")
         assert not before["buttonHeld"] and before["ordered"], before
-        app = computer.app(bundle)
+        result["setup_after"] = before
         await snapshot(app, folder, "app-before")
-        window = app.window(0)
         await snapshot(window, folder, "window-before")
         before = await state(folder)
         qx, qy, qw, qh = before["frameQuartz"]
@@ -222,6 +232,8 @@ async def verify(folder, options):
         result.update(
             before=before, start=start, end=end, screen_start=[qx + local_x, qy + local_y], started_at=timestamp()
         )
+        action_start = len(events)
+        result["setup_diagnostic_count"] = action_start
         try:
             result["receipt"] = dict(await ui.drag(start, end))
         except ComputerUseError as error:
@@ -235,7 +247,7 @@ async def verify(folder, options):
         result["actual_delta_quartz"] = delta
         inputs = [
             entry["value"]
-            for entry in events
+            for entry in events[action_start:]
             if entry.get("kind") == "backend_diagnostic"
             and isinstance(entry.get("value"), dict)
             and entry["value"].get("kind") == "input_activity"
@@ -272,7 +284,7 @@ async def verify(folder, options):
             for name, digest in result["source_sha256"].items()
             if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
         ]
-        (folder / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str) + "\n")
+        (folder / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
         computer._controller.transport.close()
         await computer._controller.transport.wait_closed()
         set_diagnostic_handler(None)
@@ -285,6 +297,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--driver", type=Path)
     parser.add_argument("--route", choices=("captured", "desktop"), default="captured")
+    parser.add_argument("--allow-global-input", action="store_true", help="Explicitly authorize global input for this run")
     parser.add_argument("--custom-handle", action="store_true")
     parser.add_argument("--expect", choices=("observe", "complete", "interrupted"), default="observe")
     options = parser.parse_args()

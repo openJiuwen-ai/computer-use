@@ -257,7 +257,7 @@ def read_permissions(request=False, root=None, timeout=None, *, protocol_version
             timeout=timeout,
         )
     except FileNotFoundError:
-        raise RuntimeError("本机后端尚未构建，请先运行 computer-use-setup 或 computer-use-build。") from None
+        raise RuntimeError("本机后端尚未构建，请先运行 computer-use-build，再运行 computer-use-permissions。") from None
     if result.returncode:
         raise RuntimeError(f"权限检查未完成（{result.returncode}）。")
     status = jsonLoads(result.stdout)
@@ -277,7 +277,7 @@ def permission_state(status, platform=None):
 
 def permissions(argv=None):
     parser = argparse.ArgumentParser(
-        description="检查目标桌面权限；--request 在 macOS 发起系统授权提示，Linux 仅报告状态。请使用与 MCP 相同的终端或 SSH 会话。"
+        description="检查目标桌面权限；--request 在 macOS 发起系统授权提示，Linux 仅报告状态。请使用与 SDK 相同的终端或宿主连接。"
     )
     parser.add_argument("--request", action="store_true")
     parser.add_argument(
@@ -318,7 +318,7 @@ def permissions(argv=None):
                 f"{', '.join(missing)}"
                 f"。"
                 f"{message}"
-                f"\n权限归属以系统显示的启动程序为准（驱动、终端或 SSH 服务，例如 sshd-keygen-wrapper）；请从与 MCP "
+                f"\n权限归属以系统显示的启动程序为准（驱动、终端或 SSH 服务，例如 sshd-keygen-wrapper）；请从与 SDK "
                 f"相同的终端或 SSH 连接复查。请求命令不会代替你批准授权。"
             )
         )
@@ -335,9 +335,6 @@ def linux_session_launcher(*, directory=None, env=None):
         raise RuntimeError("Run in the target graphical session (DISPLAY or WAYLAND_DISPLAY is required).")
     if not env.get("DBUS_SESSION_BUS_ADDRESS"):
         raise RuntimeError(("Run in the graphical user's desktop terminal; DBUS_SESSION_BUS_ADDRESS is missing."))
-    mode = env.get("COMPUTER_USE_DESKTOP", "exclusive")
-    if mode != "exclusive":
-        raise ValueError("COMPUTER_USE_DESKTOP must be exclusive.")
     directory = Path(directory) if directory else Path.home() / ".local/bin"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -363,7 +360,6 @@ def linux_session_launcher(*, directory=None, env=None):
     )
     values.update(
         XDG_SESSION_TYPE="wayland" if wayland else "x11",
-        COMPUTER_USE_DESKTOP=mode,
     )
     command = " ".join(f"{key}={shlex.quote(value)}" for key, value in values.items())
     output = directory / "computer-use-mcp"
@@ -375,7 +371,7 @@ def linux_session_launcher(*, directory=None, env=None):
         + command
         + " "
         + shlex.quote(sys.executable)
-        + " -m computer_use_mcp\n",
+        + ' -m computer_use_mcp "$@"\n',
         encoding="utf-8",
     )
     output.chmod(0o700)
@@ -384,8 +380,6 @@ def linux_session_launcher(*, directory=None, env=None):
             f"Saved "
             f"{output}"
             f" ("
-            f"{mode}"
-            f"; "
             f"{'Wayland native accessibility; capture/input limited' if wayland else 'X11'}"
             f"). Regenerate after logging out or changing the desktop session."
         )

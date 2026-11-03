@@ -293,8 +293,11 @@ class ApplicationListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second[0].id, first[0].id)
         self.assertEqual(second[0].display_name, "Updated")
         self.assertEqual(directory.applications.await_count, 2)
-        for item in second:
-            self.assertIsNone(references.resolve(item.id, "session").window)
+        self.assertEqual([item.display_name for item in first], ["One", "Helper", "Installed"])
+        self.assertEqual([item.is_running for item in second], [True, True, False])
+        self.assertEqual(
+            [references.resolve(item.id, "session").selector for item in second], ["one", "helper", "installed"]
+        )
         directory.surface_batch.assert_not_awaited()
         directory.surfaces.assert_not_awaited()
         directory._query.assert_not_awaited()

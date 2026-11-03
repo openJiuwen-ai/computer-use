@@ -31,6 +31,7 @@ namespace ComputerUse.Windows
                                   NativeInputContract contract, Request r, Dictionary<string, object> result,
                                   List<string> preparation)
         {
+            keyboard.RequireGlobalInput(); // Before acquiring or installing the shared clipboard.
             var state = keyboard.Guard(contract, r);
             if (!state.Ready)
                 throw new Failure("input_unavailable", "the selected paste recipient is not ready");

@@ -5,25 +5,47 @@
 
 from collections.abc import Sequence
 
-from computer_use.native.contracts import Channel, UnitCommand
+from computer_use.native.contracts import Binding, HostPolicy, Knowledge, UnitCommand
 
 
-def uses_global_pointer(command: UnitCommand) -> bool:
-    """Integrated offers distinguish addressed mouse input from the system pointer.
+def requires_global_input(command: UnitCommand) -> bool:
+    """Known global delivery from exact target/offer evidence, never channel alone.
 
-    Non-click pointer units have no addressed-delivery declaration. Conservatively
-    order them after independent object/editor/keyboard preparation; this changes
-    no route's admission or ability to dispatch.
+    A generic keyboard or pointer unit can still be process-directed. Its native
+    mechanism checks the permission when resolving the actual delivery.
     """
+    if isinstance(command.target, Binding) and command.target.is_desktop:
+        return True
+    if command.primitive.global_input == Knowledge.YES:
+        return True
     offer = command.primitive.click
-    return offer.delivery == "desktop_pointer" if offer is not None else command.primitive.channel == Channel.POINTER
+    return offer is not None and offer.delivery == "desktop_pointer"
+
+
+def global_input_denied(command: UnitCommand, policy: HostPolicy | None) -> bool:
+    return requires_global_input(command) and not (policy is not None and policy.allow_global_input)
+
+
+def input_impact_rank(command: UnitCommand) -> int:
+    """Prefer proven non-global routes before unresolved and known global input.
+
+    The middle rank is uncertainty, not a claim of tier-one or tier-two impact.
+    Native qualification and final authorization still apply to that candidate.
+    Unit or channel names alone do not establish its actual transport.
+    """
+    if requires_global_input(command):
+        return 2
+    if command.primitive.global_input == Knowledge.NO:
+        return 0
+    offer = command.primitive.click
+    return 0 if offer is not None else 1
 
 
 def least_disruptive_group(*groups: Sequence[UnitCommand]) -> list[UnitCommand]:
-    """Prefer addressed routes, retaining each caller's readiness/semantic tiers."""
-    for global_pointer in (False, True):
+    """Prefer evidenced low impact, retaining each caller's semantic tiers."""
+    for impact in (0, 1, 2):
         for group in groups:
-            choices = [command for command in group if uses_global_pointer(command) == global_pointer]
+            choices = [command for command in group if input_impact_rank(command) == impact]
             if choices:
                 return choices
     return []

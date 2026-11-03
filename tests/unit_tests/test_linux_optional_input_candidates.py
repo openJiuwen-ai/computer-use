@@ -110,7 +110,7 @@ def dispatch_action(candidates, result):
 
 
 @pytest.mark.parametrize(
-    "code", [None, "input_unavailable", "mode_unsupported", "observation_incomplete", "ambiguous_target"]
+    "code", [None, "input_unavailable", "unsupported_operation", "observation_incomplete", "ambiguous_target"]
 )
 def test_optional_pointer_failure_retains_freshly_executable_actions(candidates, code):
     error = (

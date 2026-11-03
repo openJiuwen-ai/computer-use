@@ -278,10 +278,10 @@ internal static class UnifiedWriteTests
               "Double click must not use single-click activation admission");
         Check(!NativePointerClickAdmission.NaturalActivation(click, true, false, true),
               "Another native hit must not authorize activation");
-        var dispatched = new Request(CancellationToken.None, 1000) { Dispatched = true };
+        var dispatched = new Request(CancellationToken.None, 1000, true) { Dispatched = true };
         Check(!NativeForegroundRecovery.Try(dispatched, null),
               "Foreground recovery must stop before querying or sending after requested input");
-        var alreadyPrepared = new Request(CancellationToken.None, 1000) { ForegroundRecoveryAttempted = true };
+        var alreadyPrepared = new Request(CancellationToken.None, 1000, true) { ForegroundRecoveryAttempted = true };
         Check(!NativeForegroundRecovery.Try(alreadyPrepared, null),
               "Foreground recovery must not reset its per-request attempt history");
         CheckExpansionProfile(true, "default");

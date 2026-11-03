@@ -69,7 +69,11 @@ import ApplicationServices
             let enabled = readEnabled(attribute)
             guard isCurrent() else { return Outcome(kind: .processUnavailable) }
             if enabled == true { return Outcome(kind: .alreadyEnabled, attribute: attribute) }
+            let activity = NativeInputActivity.begin(
+                device: .element, transport: .accessibility, mechanism: attribute.rawValue,
+                pid: process.pid, stage: .preparation)
             let status = writeEnabled(attribute)
+            activity?.returned(status: Int(status.rawValue))
             // Get/set support can differ. A failed read is not permission to
             // select the legacy route; only the setter's explicit rejection is.
             if status != .attributeUnsupported {

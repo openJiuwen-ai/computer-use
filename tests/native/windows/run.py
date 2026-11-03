@@ -71,7 +71,7 @@ def main():
     compile_target("computer-use-driver", ["/target:exe", "/platform:x64"])
     for group in (
         "UnifiedWriteTests", "NativeScrollTests", "NativeExplicitActionTests", "NativeCapturedPointerTests",
-        "NativeValueReplacementTests",
+        "NativeValueReplacementTests", "NativeGlobalInputTests",
     ):
         tests = compile_target(
             group,

@@ -12,6 +12,7 @@ No clipboard substitution, value setter or editor search belongs here.
 
 import time
 
+from computer_use_linux.contracts.input_authority import require_global_input
 from computer_use_linux.contracts.protocol import Failure, integer, require
 from computer_use_linux.control.native_keyboard import NativeKeyboard
 from computer_use_linux.control.native_selection import Changed
@@ -70,7 +71,7 @@ class NativeTypedText(NativeKeyboard):
         try:
             self.preflight(operation, shortcut_selection=shortcut_selection)
         except Failure as error:
-            if error.code not in ("input_unavailable", "mode_unsupported"):
+            if error.code not in ("input_unavailable", "unsupported_operation"):
                 raise
             mapped = False
         supported = mapped and r["editable"] and self.supported(r, target)
@@ -112,6 +113,9 @@ class NativeTypedText(NativeKeyboard):
             id=identifier,
             unit="key_sequence",
             channel="keyboard",
+            globalInput=(
+                "no" if operation.intent["kind"] == "insert" and not operation.intent["parameters"]["text"] else "yes"
+            ),
             supported="yes" if supported else "no",
             readiness="yes" if supported and not pending else "no",
             pending=pending,
@@ -281,6 +285,8 @@ class NativeTypedText(NativeKeyboard):
             content_started = True
 
         try:
+            if operation.intent["kind"] != "insert" or operation.intent["parameters"]["text"]:
+                require_global_input(self.desktop)
             self.ax.begin(ctx)
             self.preflight(operation, shortcut_selection=contract["shortcutSelection"])
             if preparing:

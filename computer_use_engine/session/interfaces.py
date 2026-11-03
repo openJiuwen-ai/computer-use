@@ -17,27 +17,22 @@ from computer_use.native.contracts import Knowledge
 from computer_use.native.scopes import WorkingWindow
 
 if TYPE_CHECKING:
+    from computer_use.session.interface_images import InterfaceImage
     from computer_use.protocol.records import NativeDirectory, Record, SurfaceInfo
 
 
 @dataclass(frozen=True)
 class ApplicationEntry:
-    """An observed application choice, optionally anchored to a working window."""
+    """An observed application identity; window choices have their own registry."""
 
     session: str
     selector: str
     display_name: str
     running: bool
-    directory: NativeDirectory | None = None
-    window: str | None = None
-    application_name: str | None = None
 
     @property
     def key(self):
-        if self.window is None:
-            return self.session, self.selector, None
-        item = next(item for item in self.directory["surfaces"] if item["window"] == self.window)
-        return self.session, self.selector, self.window, item["instance"], item["surface"]
+        return self.session, self.selector
 
 
 class ApplicationReferences:
@@ -71,9 +66,6 @@ class ApplicationReferences:
             )
         return entry
 
-    def window(self, ref, session):
-        return self.resolve(ref, session).window
-
 
 class SurfaceOwner:
     """Register a member surface's private read and input scope with the session."""
@@ -95,6 +87,15 @@ class WindowIdentity:
         return cls(item["window"], item["surface"], item["instance"])
 
 
+@dataclass(frozen=True)
+class LookupContext:
+    """Exact delivered window and menu sources available to name/path lookup."""
+
+    window: WindowIdentity | None
+    menu_only: bool = False
+    menus: tuple[object, ...] = ()
+
+
 class WindowLifetime(str, Enum):
     RETAINED = "retained"
     RETIRED = "retired"
@@ -114,7 +115,7 @@ class WindowEvidence(WindowMembership):
 
     UNKNOWN permits another observation, never input. NO records a confirmed
     scope exclusion. Only complete absence or a changed native identity retires
-    a lifetime, and retirement is irreversible for this App instance.
+    a lifetime; retirement is irreversible within the application session.
     """
 
     lifetime: WindowLifetime = WindowLifetime.RETAINED
@@ -135,11 +136,11 @@ class DirectoryMembership:
 
 @dataclass
 class InstanceState:
-    """Retain an App instance's window membership and public references.
+    """Retain an application catalogue, window lifetimes and delivered references.
 
     Attributes:
-        selector: Application/working-instance selector chosen by the caller.
-        anchor: Root-window identity fixed when this instance is selected.
+        selector: Canonical application selector after discovery.
+        anchor: Current observation primary; never defines application lifetime.
         directory: Latest member catalogue, or None before first observation.
         members: Only members confirmed by the current directory; prior unknown
             members remain in evidence without input authority.
@@ -147,7 +148,6 @@ class InstanceState:
         owners: Registered private scope handles owned by this session.
         refs: Retained element snapshots; their read-specific contents are opaque here.
         observed: Members already observed through this instance.
-        menu_contexts: Confirmed window context for each application-menu surface.
         views: Weakly retained public window handles, opaque to this state owner.
         evidence: Retained window lifetimes and independently changing membership.
         owner_identities: Exact lifetimes of private scopes, preventing a reused
@@ -155,14 +155,24 @@ class InstanceState:
     """
 
     selector: str
+    session: str | None = None
+    name: str = ""
     anchor: WorkingWindow | None = None
+    input_context: WindowIdentity | None = None
+    lookup_context: LookupContext | None = None
+    delivered_image: InterfaceImage | None = None
+    image_generation: int = 0
+    delivered_image_generation: int = 0
+    window_images: dict[WindowIdentity, Any] = field(default_factory=dict)
+    window_image_generations: dict[WindowIdentity, int] = field(default_factory=dict)
+    observation_generation: int = 0
+    delivered_observation_generation: int = 0
     directory: NativeDirectory | None = None
     members: dict[str, SurfaceInfo] = field(default_factory=dict)
     windows: dict[int, str] = field(default_factory=dict)
     owners: dict[str, object] = field(default_factory=dict)
     refs: OrderedDict[str, Record] = field(default_factory=OrderedDict)
     observed: set[str] = field(default_factory=set)
-    menu_contexts: dict[str, str | None] = field(default_factory=dict)
     views: weakref.WeakValueDictionary[tuple[str, str, str], Any] = field(default_factory=weakref.WeakValueDictionary)
     evidence: dict[WindowIdentity, WindowEvidence] = field(default_factory=dict)
     owner_identities: dict[str, WindowIdentity] = field(default_factory=dict)
@@ -211,11 +221,15 @@ class InstanceState:
 
     def unconfirm(self, identity: WindowIdentity | None = None) -> None:
         """Suspend current membership after an incomplete fixed-root observation."""
-        if identity is not None and identity not in self.evidence:
-            self.evidence[identity] = WindowEvidence(identity, Knowledge.UNKNOWN)
-        for identity, item in tuple(self.evidence.items()):
-            if item.lifetime is WindowLifetime.RETAINED:
+        if identity is not None:
+            previous = self.evidence.get(identity)
+            if previous is None or previous.lifetime is WindowLifetime.RETAINED:
                 self.evidence[identity] = WindowEvidence(identity, Knowledge.UNKNOWN)
+                self.members.pop(identity.window, None)
+            return
+        for key, item in tuple(self.evidence.items()):
+            if item.lifetime is WindowLifetime.RETAINED:
+                self.evidence[key] = WindowEvidence(key, Knowledge.UNKNOWN)
         self.members = {}
 
     def surface_evidence(self, surface: str | None, identity: WindowIdentity | None = None) -> WindowEvidence | None:

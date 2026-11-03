@@ -48,12 +48,12 @@ def capture(window, width=100, height=80):
     )
 
 
-def setup_pipeline(monkeypatch, *, target_size=(100, 80), members=(ROOT, CHILD)):
+def setup_pipeline(monkeypatch, *, target_size=(100, 80), members=(ROOT, CHILD), captured_members=(ROOT, CHILD)):
     root, child = capture("root"), capture("child")
     image = InterfaceImage(
         root.image,
         (ImagePiece("root", root, (0, 0, 100, 80)), ImagePiece("child", child, (100, 0, 100, 80))),
-        (ROOT, CHILD),
+        captured_members,
     )
     image.digest = hashlib.sha256(image.png).digest()
     queried = []
@@ -75,7 +75,8 @@ def setup_pipeline(monkeypatch, *, target_size=(100, 80), members=(ROOT, CHILD))
             item[0]: dict(zip(("window", "surface", "parent", "parentState", "modal"), item)) for item in members
         },
     )
-    return InterfacePointerPipeline(controller, write), SimpleNamespace(_image=image), write, queried, root.target
+    ui = SimpleNamespace(_image=image, _anchor="root")
+    return InterfacePointerPipeline(controller, write), ui, write, queried, root.target
 
 
 @pytest.mark.parametrize(
@@ -93,6 +94,17 @@ def test_confirmed_nonmodal_child_does_not_retarget_composite_gesture(monkeypatc
     pipeline, ui, write, _, target = setup_pipeline(monkeypatch, members=(ROOT, CHILD, extra))
     asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None))
     assert write.arun.call_args.args[0].target == target
+
+
+@pytest.mark.parametrize("original_peer", [(), (("peer", "old-peer-surface", None, "none", False),)])
+def test_new_or_replaced_independent_peer_keeps_original_app_image_target(monkeypatch, original_peer):
+    peer = ("peer", "new-peer-surface", None, "none", False)
+    pipeline, ui, write, queried, target = setup_pipeline(
+        monkeypatch, members=(ROOT, CHILD, peer), captured_members=(ROOT, CHILD, *original_peer)
+    )
+    assert asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None)) == "dispatched"
+    assert write.arun.call_args.args[0].target == target and queried == [target]
+    assert not ui._image.expired
 
 
 @pytest.mark.parametrize("members", [(ROOT,), (ROOT, ("child", "replacement-surface", "root", "known", False))])

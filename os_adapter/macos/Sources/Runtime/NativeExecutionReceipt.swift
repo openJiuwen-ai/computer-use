@@ -12,6 +12,7 @@ import Foundation
     var retryReason: String?
     var context: [String: Any]?
     var application: [String: Any]?
+    var impact: [String: Any]?
     private(set) var errorCode: FailureCode?
     private(set) var acceptedCount = 0
     private(set) var preparation = [String]()
@@ -38,6 +39,7 @@ import Foundation
     func recordCleanupUnknown() { cleanup = "unknown" }
 
     func recordClipboardRestore(_ outcome: PasteboardTransaction.RestoreResult) {
+        NativeInputActivity.current?.recordClipboardRestoration(outcome)
         switch outcome {
         case .restored: clipboard = "Original clipboard contents restored."
         case .ownershipLost: clipboard = "A later or unconfirmed clipboard owner was preserved."
@@ -71,6 +73,7 @@ import Foundation
             "context": context as Any? ?? NSNull()
         ]
         if let application { value["application"] = application }
+        if let impact { value["impact"] = impact }
         if let click { value["click"] = click.wire }
         return value
     }

@@ -177,7 +177,7 @@ import ApplicationServices
             }
             let activity = NativeInputActivity.begin(
                 device: .focus, transport: .process, mechanism: "processApplicationDeactivationCleanup",
-                pid: process.pid, event: event, stage: .preparation)
+                pid: process.pid, event: event, stage: .cleanup)
             event.postToPid(process.pid)
             activity?.returned()
             // This diagnostic survives session.stop without a TaskLocal audit.

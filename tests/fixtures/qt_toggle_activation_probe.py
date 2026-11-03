@@ -22,16 +22,16 @@ from PySide6 import QtCore, QtWidgets
 class SettingsForm(QtWidgets.QWidget):
     """Persist from clicked, while Qt owns the independently visible check state."""
 
-    def __init__(self, saved=None):
+    def __init__(self, saved=None, *, checkbox_type=QtWidgets.QCheckBox, radio_type=QtWidgets.QRadioButton):
         super().__init__()
         self.model = dict(saved or {"muted": False, "recording": False})
         self.events = []
-        self.mute_on = QtWidgets.QRadioButton("Mute on", self)
-        self.mute_off = QtWidgets.QRadioButton("Mute off", self)
+        self.mute_on = radio_type("Mute on", self)
+        self.mute_off = radio_type("Mute off", self)
         self.radio_group = QtWidgets.QButtonGroup(self)
         self.radio_group.addButton(self.mute_on)
         self.radio_group.addButton(self.mute_off)
-        self.recording = QtWidgets.QCheckBox("Automatic recording", self)
+        self.recording = checkbox_type("Automatic recording", self)
         self.mute_on.setChecked(self.model["muted"])
         self.mute_off.setChecked(not self.model["muted"])
         self.recording.setChecked(self.model["recording"])

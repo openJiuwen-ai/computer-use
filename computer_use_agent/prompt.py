@@ -18,7 +18,9 @@ or view='both' when both the tree and image are needed. Coordinate spaces belong
 to the object that supplied the screenshot.
 Prefer one computer_use call for multiple operations whose targets and steps are
 already confirmed and require no intermediate observation. Execute them sequentially,
-awaiting each operation. Read the relevant UI with read() after the sequence to verify its effect.
+awaiting each operation. Use each action's related observation to assess its effect;
+read again when more or newer evidence is needed. A failed related observation does
+not undo the action receipt or authorize replay.
 Stop and observe before continuing if an operation fails, the state needed for the
 next operation is uncertain, or the next decision requires fresh UI evidence.
 Wait again when that observation reports loading or an unfinished transition.

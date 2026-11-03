@@ -5,7 +5,7 @@ import ApplicationServices
 
 /// QUERY: construct only this selected native route; PREPARE/DISPATCH is deferred to its returned closure.
 @MainActor enum BuildNativePointerFocusRoutePass {
-    static func run(_ context: NativeRouteContext) throws -> SelectedNativeRoute {
+    static func run(_ context: NativeRouteContext, target: NativePointerFocusUnit.TargetKind) throws -> SelectedNativeRoute {
         let contract = context.resolved.contract
         let op = context.operation
         let bound = context.command.target
@@ -21,11 +21,14 @@ import ApplicationServices
         else {
             throw DriverError("pointer focus is preparation only", code: .invalidRequest)
         }
+        guard target != .scalarText || intent == .replace else {
+            throw DriverError("scalar text-point preparation only authorizes replacement", code: .invalidRequest)
+        }
         let selected = try context.access.units.selectedTextUnit(
             bound, actuator: contract.actuator, receiver: contract.receiver)
         let unit = NativePointerFocusUnit(
             application: selected.application, window: selected.window, element: selected.element,
-            receiverRelation: selected.receiverRelation, cellEditor: selected.cellEditor)
+            receiverRelation: selected.receiverRelation, cellEditor: selected.cellEditor, targetKind: target)
         return .prepare {
             if foreground {
                 if try !unit.backgroundPreparationAvailable() { try op.recordBackgroundMechanismUnavailable(id) }

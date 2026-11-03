@@ -1,28 +1,30 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-from __future__ import annotations
+"""Share source-qualified empty cells without parsing rendered field wording."""
 
-from typing import TYPE_CHECKING
+from dataclasses import replace
 
 from computer_use.interaction.read.presentation.rendering.layout.empty_values import compact_empty_values
-from computer_use.interaction.read.presentation.rendering.layout.packing import apply_layout
-
-if TYPE_CHECKING:
-    from typing import Sequence
-
-    from computer_use.interaction.read.presentation.records import FormatField, NodeView
-    from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
-    from computer_use.pipeline.core import Control
-    from computer_use.protocol.records import Record
-
-
-def group_empty_values(
-    lines: list[str], roots: Sequence[NodeView], context: Record, format_field: FormatField
-) -> list[str]:
-    return compact_empty_values(lines, roots, context.get("focusedRef"))
+from computer_use.interaction.read.presentation.rendering.layout.model import LayoutFrame
+from computer_use.pipeline import Contract, Pass
+from computer_use.pipeline.core import Control
 
 
 def execute(frame: LayoutFrame, control: Control) -> LayoutFrame:
-    """Group eligible empty-value entries and return the updated layout frame and optional stage counts."""
-    return apply_layout(group_empty_values, frame)
+    lines = compact_empty_values(frame.lines, frame.empty_value_lines)
+    records = frame.records
+    if frame.context.get("recordStages"):
+        records += ({"name": "group_empty_values", "beforeLines": len(frame.lines), "afterLines": len(lines)},)
+    return replace(frame, lines=lines, records=records)
+
+
+stage = Pass.define(
+    name="group_empty_values",
+    function=execute,
+    contract=Contract(
+        LayoutFrame,
+        LayoutFrame,
+        requires=("source-qualified cell coordinates", "complete generated field slots"),
+        writes=("packed lines", "layout diagnostics"),
+    ),
+)

@@ -153,6 +153,7 @@ class NativeAppReader:
         self.overviews = NativeOverview(port)
         self.menus = NativeMenus(self.directory, self.reader)
         self._window_references = None
+        self.window_registry = None
         self._element_references = None
 
     def number_snapshots(
@@ -175,6 +176,8 @@ class NativeAppReader:
         return number_snapshots(snapshots, self._element_references, _control=_control)
 
     def window_aliases(self, directory: DirectoryFacts) -> dict[str, str]:
+        if self.window_registry is not None:
+            return self.window_registry.register_directory(directory)
         if self._window_references is None or self._window_references.session != directory["session"]:
             self._window_references = DisplayReferences(directory["session"])
         return {
@@ -391,9 +394,11 @@ class NativeAppReader:
                 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
 
                 if directory["stopReasons"]:
-                    raise FixedWindowUnconfirmed(previous.root)
+                    raise FixedWindowUnconfirmed(previous.root, directory=directory)
                 raise FixedWindowInvalidated(
-                    previous.root, "The fixed working window is absent from the complete current directory."
+                    previous.root,
+                    "The fixed working window is absent from the complete current directory.",
+                    directory=directory,
                 )
             raise failure(
                 "observation_incomplete" if directory["stopReasons"] else "stale_target",
@@ -403,7 +408,9 @@ class NativeAppReader:
         if previous is not None and previous.root != root:
             from computer_use.native.scopes import FixedWindowInvalidated
 
-            raise FixedWindowInvalidated(previous.root, "The fixed working-window identity changed.")
+            raise FixedWindowInvalidated(
+                previous.root, "The fixed working-window identity changed.", directory=directory
+            )
         return previous or WorkingWindow(application, name, root)
 
     @staticmethod

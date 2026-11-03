@@ -25,12 +25,14 @@ class ObserveUI:
         view: Requested tree, image, or combined observation.
         full: Request a complete tree rather than an eligible diff.
         menu_path: Menu hierarchy to inspect, or None for the current window.
+        allow_foreground: Explicit permission to raise the original window before observing.
     """
 
     owner: UIHandle
     view: str
     full: bool
     menu_path: Sequence[str] | None
+    allow_foreground: bool = False
 
 
 @dataclass(frozen=True)

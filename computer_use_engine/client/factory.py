@@ -26,8 +26,8 @@ def controller_adapters():
     )
 
 
-def session_controller(port=None):
-    return SessionController(port, adapters=controller_adapters())
+def session_controller(port=None, *, allow_global_input=True):
+    return SessionController(port, adapters=controller_adapters(), allow_global_input=allow_global_input)
 
 
 def native_computer(port=None):

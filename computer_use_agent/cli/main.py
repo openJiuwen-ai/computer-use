@@ -29,7 +29,10 @@ def parser():
     result.add_argument("--model")
     result.add_argument("--provider")
     result.add_argument("--api-base")
-    result.add_argument("--desktop", choices=("exclusive",), help="Desktop authorization for the local MCP server.")
+    result.add_argument(
+        "--allow-global-input", action=argparse.BooleanOptionalAction, default=None,
+        help="Allow global mouse and keyboard input for the local MCP session (default: enabled).",
+    )
     result.add_argument("--max-iterations", type=int)
     result.add_argument("--debug", action="store_true")
     return result
@@ -122,7 +125,7 @@ async def main(argv=None):
                 "model": args.model,
                 "provider": args.provider,
                 "api_base": args.api_base,
-                "desktop": args.desktop,
+                "allow_global_input": args.allow_global_input,
                 "max_iterations": args.max_iterations,
             },
         )
@@ -159,13 +162,13 @@ async def main(argv=None):
 
             terminal.line(
                 f"Computer Use · DeepAgent\n模型：{settings['model']}\n"
-                f"桌面：{config.desktop if config.mcp is None else '由目标 MCP 配置'}\n"
+                f"全局输入授权：{config.allow_global_input if config.mcp is None else '由目标 MCP 配置'}\n"
                 f"运行记录：{journal.directory}\n"
                 "回车发送 · Ctrl+J / Alt+回车换行 · /help 查看命令 · Ctrl+C 中断并退出",
                 style="cyan",
             )
             journal.record(
-                "start", {"model": settings["model"], "desktop": config.desktop if config.mcp is None else None}
+                "start", {"model": settings["model"], "allow_global_input": config.allow_global_input if config.mcp is None else None}
             )
             current = asyncio.current_task()
             loop = asyncio.get_running_loop()

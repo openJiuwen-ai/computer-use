@@ -20,8 +20,9 @@ import ApplicationServices
         ]
         var enabled: Bool?, foreground = false, role: String?, complete = false, menu = false
         func pointerOffers(
-            _ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false, addressedReceiver: Bool? = nil,
-            foregroundHitRequired: Bool = false,
+            _ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false,
+            addressedReceiver: NativeAddressedPointerReceiver.Qualification? = nil,
+            foregroundHitRequired: Bool = false, captured: Bool = false,
             qualifyPopup: ((NativePointerUnit.PhysicalClickSample) -> NativePopupPointerQualification?)? = nil
         ) throws {
             try pointer.validateWindowIdentity()
@@ -49,28 +50,37 @@ import ApplicationServices
             do {
                 try BackgroundEvents.requirePointerRoute(window: pointer.window)
             } catch is NativePreparationUnavailable { transport = false }
-            let receiver = try addressedReceiver ?? pointer.hasAddressedPointerReceiver(at: point)
-            let directedAvailable = transport && receiver
+            let receiver: NativeAddressedPointerReceiver.Qualification
+            if let addressedReceiver {
+                receiver = addressedReceiver
+            } else {
+                receiver = try pointer.addressedPointerReceiver(at: point)
+            }
+            let requirement = receiver.requirement(captured: captured)
+            let directedPointer = pointer.requiring(requirement ?? .contentReceiver)
+            let directedAvailable = transport && requirement != nil
             let backgroundAvailable =
-                directedAvailable && !foregroundHitRequired && pointer.backgroundPreparationAvailable()
+                directedAvailable && !foregroundHitRequired && directedPointer.backgroundPreparationAvailable()
             // The same existing HID readiness query retains its provenance;
             // do not sample readiness again to manufacture a preference.
             let physical = pointer.physicalClickSample(at: point)
             let systemReady = physical.ready
+            let directedReady = directedAvailable && !exposure && !foregroundHitRequired
+                && directedPointer.ready(at: point, delivery: .windowDirected)
             let directed = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
                 admission: directedAvailable
-                    ? (!exposure && !foregroundHitRequired && pointer.ready(at: point, delivery: .windowDirected)
-                        ? .ready : .preparationRequired) : .unavailable,
+                    ? (directedReady ? .ready : .preparationRequired) : .unavailable,
                 reason: !transport
                     ? "Window-directed mouse transport is unavailable."
-                    : !receiver
+                    : requirement == nil
                         ? "The point has no specific native receiver for addressed mouse input; the physical pointer route remains available."
-                        : !backgroundAvailable
+                        : !backgroundAvailable && !directedReady
                             ? "The native window needs foreground preparation before addressed mouse input." : nil,
                 preparationOptions: directedAvailable
                     ? (backgroundAvailable ? ["background", "foreground"] : ["foreground"]) : [],
-                backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !backgroundAvailable)
+                backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !backgroundAvailable,
+                pointerRequirement: requirement ?? .contentReceiver)
             try RequestDiagnostics.checkCancellation()
             let system = NativeClickContract(
                 routeFamily: "macos.hid.v1", delivery: .systemPointer,
@@ -90,7 +100,7 @@ import ApplicationServices
         if plan.query.desktop {
             let pointer = try NativePointerIntent(
                 unit: "pointer_sequence", kind: "click", parameters: op.request.parameters, foreground: false)
-            _ = try access.units.desktopUnit(binding.wire).pointer(pointer)
+            _ = try access.units.desktopUnit(binding.wire).pointer(pointer, requireAuthorization: false)
             foreground = true
             input["geometryCurrent"] = "yes"
             input["pointerRoute"] = "yes"
@@ -104,7 +114,7 @@ import ApplicationServices
             let request = try NativePointerIntent(
                 unit: "pointer_sequence", kind: "click", parameters: op.request.parameters, foreground: false)
             try pointer.validateParameters(request)
-            try pointerOffers(pointer, at: pointer.point(request.start!))
+            try pointerOffers(pointer, at: pointer.point(request.start!), captured: true)
         } else if let node = binding.node {
             let facts = try access.objects.nativeActionFacts(node)
             enabled = facts.enabled
@@ -156,7 +166,7 @@ import ApplicationServices
                             ? .menuAction(action.name, action.description) : .action(action.name, action.description),
                         offer: NativePopupClickPolicy.actionOffer(
                             NativeToggleClickPolicy.actionOffer(
-                                offer, action: action.name, stateOnlyPress: facts.stateOnlyPress),
+                                offer, action: action.name, role: role),
                             requiresPointer: popupChoice),
                         actionDocument: document)
                 }
@@ -225,15 +235,24 @@ import ApplicationServices
                                         foreground: physical.foreground), same: { CFEqual($0, $1) })
                             })
                     } else {
+                        let addressedReceiver: NativeAddressedPointerReceiver.Qualification?
+                        if plan.actuator == nil, unit.member == nil, sampled.basis == .exactHit,
+                            let hit = sampled.hit, CFEqual(hit, unit.element)
+                        {
+                            let declared = NativeAddressedPointerReceiver(
+                                role: role, actions: facts.actions?.map { $0.name },
+                                focusWritable: facts.focusWritable).supported
+                            // An exact original element supplies a point even
+                            // when it declares no semantic mouse action. Keep
+                            // popup/member/exposure qualifications independent.
+                            addressedReceiver = declared ? .declaredInteraction
+                                : facts.popupContext == nil ? .originalElementExactHit : .unconfirmed
+                        } else { addressedReceiver = nil }
                         try pointerOffers(
-                            pointer, at: geometry.point,
-                            addressedReceiver: plan.actuator == nil && sampled.basis == .exactHit
-                                ? NativeAddressedPointerReceiver(
-                                    role: role, actions: facts.actions?.map { $0.name },
-                                    focusWritable: facts.focusWritable
-                                ).supported : nil, foregroundHitRequired: sampled.preparation == .foreground)
+                            pointer, at: geometry.point, addressedReceiver: addressedReceiver,
+                            foregroundHitRequired: sampled.preparation == .foreground)
                     }
-                } catch let error as DriverError where error.code == .inputUnavailable || error.code == .modeUnsupported
+                } catch let error as DriverError where error.code == .inputUnavailable || error.code == .unsupportedOperation
                 {
                     // A pointer geometry failure cannot erase an independent
                     // action on the retained object.

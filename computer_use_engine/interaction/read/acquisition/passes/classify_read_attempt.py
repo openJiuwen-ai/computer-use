@@ -9,6 +9,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
+from computer_use.interaction.read.acquisition.images.refresh import can_refresh_image
 from computer_use.interaction.read.acquisition.loading import (
     busy_nodes,
     refreshable,
@@ -46,16 +47,12 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
             "read again before acting on the current view",
         )
         return ClassifiedAttempt(replace(attempt, scope_confirmed=False, gaps=attempt.gaps + (gap,)), Refresh.KEEP)
-    matches_attempt = (
-        True
-        if (
-            state.attempt == 0
-            and attempt.scope_confirmed
-            and components.image is None
-            and any(gap.component == "image" and gap.code == "stale_target" for gap in components.gaps)
-            and cast("Callable[[], int]", control.remaining)() >= 400
-        )
-        else False
+    matches_attempt = can_refresh_image(
+        attempt=state.attempt,
+        scope_confirmed=attempt.scope_confirmed,
+        image=components.image,
+        gaps=components.gaps,
+        remaining=cast("Callable[[], int]", control.remaining),
     )
     if matches_attempt:
         return ClassifiedAttempt(attempt, Refresh.IMAGE)

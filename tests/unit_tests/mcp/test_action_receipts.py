@@ -5,6 +5,7 @@
 
 import re
 import unittest
+from types import SimpleNamespace
 
 from computer_use.client.host import (
     set_action_handler,
@@ -15,6 +16,9 @@ from computer_use.client.host import (
     set_text_page_handler,
 )
 from computer_use.session import images as images_state
+from computer_use.session.results import action_result
+from computer_use.errors import ComputerUseError
+from computer_use.session.events import action_observation_completed
 from computer_use_mcp.runtime import Runtime
 
 
@@ -75,3 +79,76 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([block["type"] for block in result["content"]], ["text", "image", "text"])
         self.assertEqual(result["content"][0]["text"].count("Action [dispatched]"), 2)
         self.assertEqual(result["content"][2]["text"].count("Action [dispatched]"), 2)
+
+    async def test_unprinted_suffix_failure_preserves_receipt_and_exposes_choices(self):
+        receipt = dict(target="Original document", status="dispatched", detail="Close input sent once.")
+        outcome = SimpleNamespace(
+            observation=None,
+            observation_status="unavailable",
+            observation_error=dict(
+                code="window_closed",
+                detail="Original window ended.",
+                next="Choose a current instance for further work.",
+                session_usable=True,
+            ),
+            window_lifecycle="closed",
+            choices=(dict(id=7, title="Another document"),),
+        )
+        self.runtime.task_namespace.update(
+            receipt=receipt,
+            outcome=outcome,
+            materialize=action_result,
+        )
+        result = await self.execute("emit_receipt(receipt)\nresult = materialize(receipt, observation=outcome)")
+        self.assertFalse(result.get("isError"), result)
+        text = "\n".join(block["text"] for block in result["content"])
+        self.assertEqual(text.count("Action [dispatched]"), 1)
+        self.assertIn("Related observation [unavailable]", text)
+        self.assertIn("do not replay", text)
+        self.assertIn("original Window is closed", text)
+        self.assertIn("computer.window(7) Another document", text)
+
+    async def test_suffix_delivery_failure_does_not_replace_returned_receipt(self):
+        receipt = dict(target="Original document", status="dispatched", detail="Input sent once.")
+        outcome = SimpleNamespace(
+            observation=None,
+            observation_status="unavailable",
+            observation_error=dict(code="observation_timeout", detail="Read deadline elapsed."),
+            window_lifecycle="unknown",
+            choices=(),
+        )
+
+        def broken_handler(event):
+            raise ValueError("host delivery failed")
+
+        set_observation_handler(broken_handler)
+        try:
+            result = action_result(receipt, observation=outcome)
+        finally:
+            set_observation_handler(self.runtime.observation)
+        self.assertEqual(result.status, "dispatched")
+        self.assertEqual(result.observation_error["code"], "observation_timeout")
+
+    async def test_uncertain_write_gap_does_not_invent_a_success_receipt(self):
+        failure = ComputerUseError(
+            dict(
+                code="execution_unknown",
+                target="Original field",
+                effect="partial",
+                detail="Only some input may have arrived.",
+                next="Observe before continuing.",
+            )
+        )
+        failure.observation_status = "unavailable"
+        failure.observation_error = dict(
+            code="observation_timeout", detail="Read budget expired.", next="Do not replay."
+        )
+        self.runtime.task_namespace.update(failure=failure, publish_gap=action_observation_completed)
+        result = await self.execute("publish_gap(failure)\nraise failure")
+        self.assertTrue(result.get("isError"), result)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn("Action effect remains partial", text)
+        self.assertIn("Related observation [unavailable] for Original field", text)
+        self.assertNotIn("Action [dispatched]", text)
+        self.assertNotIn("Action [verified]", text)
+        self.assertIn("Only some input may have arrived", text)

@@ -7,7 +7,29 @@ import ApplicationServices
 /// facts and the OS input adapter substituted. No desktop input is posted.
 @main struct NativePopupChoiceBoundaryTests {
     @MainActor static func main() async throws {
-        setenv("COMPUTER_USE_DESKTOP", "exclusive", 1)
+        let denied = PopupChoiceProbe()
+        let deniedResult = try await denied.click()
+        precondition(deniedResult["dispatch"] as? String == "notDispatched")
+        precondition(deniedResult["errorCode"] as? String == "permission_required", "\(deniedResult)")
+        precondition(denied.mode == "Auto" && denied.events.isEmpty && denied.presses == 0)
+        precondition(deniedResult["retryReason"] is NSNull)
+        // The same denied global authority must leave an independent semantic
+        // action available. Its fake provider records ordinary AX consumption.
+        let addressed = PopupChoiceProbe()
+        addressed.scopes.currentOwner = addressed.nodes["P"]!
+        addressed.scopes.ids["E"] = 284
+        addressed.consumePress = true
+        let addressedResult = try await addressed.click(
+            qualified: false, unit: .action("AXPress", nil), kind: "native_action")
+        precondition(addressedResult["dispatch"] as? String == "dispatched")
+        precondition(addressed.mode == "Manual" && addressed.presses == 1 && addressed.events.isEmpty)
+        try await NativeInputAuthorization.$globalInputAllowed.withValue(true) {
+            try await authorizedCases()
+        }
+        precondition(!NativeInputAuthorization.globalInputAllowed)
+    }
+
+    @MainActor static func authorizedCases() async throws {
         if CommandLine.arguments.contains("--offers") {
             let probe = PopupChoiceProbe()
             let wire = try probe.offerWire(

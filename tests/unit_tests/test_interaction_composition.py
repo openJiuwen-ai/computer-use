@@ -16,10 +16,11 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.requests import ActOnElement, ResolveElement, UIKeyboard, UIPointer
 from computer_use.interaction.query.pipeline import FindElementPipeline
 from computer_use.interaction.requests import ExecuteAction
-from computer_use.native.contracts import Binding, Intent
+from computer_use.native.contracts import Binding, Intent, Knowledge
 from computer_use.pipeline import Control, Pipeline, Repeat, Scope, Select, Sequence
 from computer_use.session.events import set_action_handler, set_observation_handler
 from computer_use.session.interface_images import signature
+from computer_use.session.interfaces import LookupContext, WindowEvidence, WindowIdentity
 
 
 class UIStub(SimpleNamespace):
@@ -29,19 +30,27 @@ class UIStub(SimpleNamespace):
 class InteractionBehaviorTests(IsolatedAsyncioTestCase):
     def setUp(self):
         port = SimpleNamespace(
-            connection=SimpleNamespace(session="test", capabilities=()), calls=SimpleNamespace(retired=False)
+            connection=SimpleNamespace(session="test", capabilities=(), session_identity=(1, "test")),
+            calls=SimpleNamespace(retired=False),
         )
         self.controller = session_controller(port)
         self.target = Binding("test", "app", "window", "surface", "node")
         self.snapshot = {"binding": self.target}
         instance = SimpleNamespace(
+            session=None,
+            evidence={
+                WindowIdentity("window", "surface", "app"): WindowEvidence(
+                    WindowIdentity("window", "surface", "app"), Knowledge.YES
+                )
+            },
             anchor=None,
             refs={"1": self.snapshot},
-            members={"window": {"surface": "surface", "window": "window"}},
+            owners={},
+            members={"window": {"surface": "surface", "window": "window", "instance": "app"}},
             surface_evidence=lambda *_: None,
-            menu_contexts={},
         )
         self.ui = UIStub(_instance=instance, _anchor=None, _menu_only=True, _lookup_scopes=(object(),))
+        instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         self.controller.register(self.ui, {"selector": "test-app"})
         self.receipt = {"status": "dispatched", "target": "test element", "detail": "sent once"}
         self.engine = AsyncMock(return_value=self.receipt)
@@ -151,6 +160,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             pieces=(piece,),
             hit=lambda point: (piece, (point[0] - 10, point[1] - 20)),
         )
+        self.ui._instance.delivered_image = self.ui._image
         self.controller.adapters = replace(self.controller.adapters, image_delivery_required=lambda: False)
         with (
             patch("computer_use.interaction.write.ui.pipeline.refresh", new_callable=AsyncMock),
@@ -168,6 +178,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
     async def test_lookup_unique_missing_and_ambiguous(self):
         missing = local_failure("not found", "read again", "element_not_found")
         self.ui._lookup_scopes = (object(), object())
+        self.ui._instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         second = {"binding": replace(self.target, node="other")}
         for results, error in (
             ([missing, self.snapshot], None),
@@ -194,8 +205,13 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
     async def test_incomplete_scope_cannot_claim_unique_match(self):
         self.ui._menu_only = False
         self.ui._instance.observed = set()
+        self.ui._context = "unknown"
+        self.ui._instance.directory = {"surfaces": []}
+        self.ui._instance.lookup_context = LookupContext(
+            WindowIdentity("window", "surface", "app"), False, self.ui._lookup_scopes
+        )
         with (
-            patch("computer_use.interaction.agent.pipeline.allowed", return_value={"unknown": {}}),
+            patch("computer_use.interaction.agent.pipeline.allowed", return_value={"window": {}}),
             patch.object(FindElementPipeline, "arun", new_callable=AsyncMock, return_value=self.snapshot),
         ):
             with self.assertRaises(ComputerUseError) as caught:

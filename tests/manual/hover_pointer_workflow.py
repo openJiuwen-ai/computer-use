@@ -21,6 +21,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 import computer_use.interaction.write.progress as write_progress
 import computer_use.interaction.write.routes.policy as write_policy
@@ -129,7 +131,7 @@ async def verify(folder, expect_expand_blocked, driver=None, modes=None):
                 assert after["changed"] and after["viewHitIsDecoy"] and after["axHitIsDecoy"], action
         report["passed"] = True
     finally:
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n")
+        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
         computer._controller.transport.close()
         await computer._controller.transport.wait_closed()
         set_diagnostic_handler(None)

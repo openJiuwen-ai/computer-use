@@ -2,6 +2,10 @@
 
 import AppKit
 
+@MainActor final class ImageScopeHiddenContent: NSView {
+    override nonisolated func accessibilityChildren() -> [Any]? { [] }
+}
+
 @MainActor final class ImageScopePanel: NSPanel {
     weak var owner: NSWindow?
     override nonisolated func accessibilityParent() -> Any? { MainActor.assumeIsolated { owner } }
@@ -15,13 +19,28 @@ import AppKit
     var moved = false
     var closed = false
     var translated = false
+    var rootClosed = false
+    let weakAX = CommandLine.arguments.contains("--weak-ax")
+    let closeOnClick = CommandLine.arguments.contains("--close-on-click")
     let button = NSButton(title: "Count action", target: nil, action: nil)
 
-    @objc func click() { clicks += 1; record() }
+    @objc func click() {
+        clicks += 1
+        if closeOnClick {
+            window.removeChildWindow(panel)
+            panel.close()
+            window.close()
+            rootClosed = true
+        }
+        record()
+    }
     func record() {
         let point = window.convertPoint(toScreen: button.convert(NSPoint(x: 70, y: 15), to: nil))
         let value: [String: Any] = [
             "pid": getpid(), "clicks": clicks, "moved": moved, "closed": closed, "translated": translated,
+            "weakAX": weakAX, "rootClosed": rootClosed,
+            "frontmostPID": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1,
+            "mouse": [NSEvent.mouseLocation.x, NSEvent.mouseLocation.y],
             "frame": [window.frame.minX, window.frame.minY, window.frame.width, window.frame.height],
             "width": window.frame.width, "height": window.frame.height,
             "buttonPoint": [point.x - window.frame.minX, window.frame.maxY - point.y]
@@ -32,12 +51,15 @@ import AppKit
         window = NSWindow(contentRect: NSRect(x: 180, y: 160, width: 420, height: 220),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Image scope probe"
+        window.isReleasedWhenClosed = false
+        if weakAX { window.contentView = ImageScopeHiddenContent(frame: window.contentView!.bounds) }
         button.frame = NSRect(x: 20, y: 40, width: 160, height: 30)
         button.target = self; button.action = #selector(click)
         window.contentView!.addSubview(button)
         panel = ImageScopePanel(contentRect: NSRect(x: 600, y: 220, width: 150, height: 80),
                                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
         panel.title = "Auxiliary panel"
+        panel.isReleasedWhenClosed = false
         panel.owner = window
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true

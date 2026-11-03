@@ -89,6 +89,14 @@ import ApplicationServices
         var document: String? = nil
     }
 
+    /// Coverage belongs to the failing discovery step, not to diagnostic text.
+    /// Descendant traversal cannot hide another independent application root.
+    struct WindowIssue {
+        enum Scope { case roots, descendants }
+        let scope: Scope
+        let detail: String
+    }
+
     func focusedWindow(_ app: NSRunningApplication, windows: [Window]) -> String? {
         guard query.trusted() else { return nil }
         let root = query.application(app.processIdentifier)
@@ -100,7 +108,7 @@ import ApplicationServices
     func windows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
         purpose: NativeWindowQueryPurpose = .observation, profile: NativeInspectQuery.SurfaceProfile = .accessibility,
-        modalHints: [ModalHint] = [], reportIssue: ((String) -> Void)? = nil
+        modalHints: [ModalHint] = [], reportIssue: ((WindowIssue) -> Void)? = nil
     ) throws -> [Window] {
         guard
             case .catalogue(let windows) = try collectWindows(
@@ -140,11 +148,14 @@ import ApplicationServices
         let window: String
         let element: AXUIElement?
         let native: Native?
+        var isSheet = false
     }
     enum ModalPresence { case live, ended, unknown }
     struct ModalHint {
         let identity: ModalIdentity
         let nativePresence: ModalPresence?
+        var nativeOnScreen: Bool? = nil
+        var nativeParentID: CGWindowID? = nil
     }
 
     func inputBoundary(
@@ -167,7 +178,7 @@ import ApplicationServices
 
     private func collectWindows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
-        purpose: NativeWindowQueryPurpose, projection: Projection, reportIssue: ((String) -> Void)? = nil,
+        purpose: NativeWindowQueryPurpose, projection: Projection, reportIssue: ((WindowIssue) -> Void)? = nil,
         parentQuery: String? = nil, required: [AXUIElement] = [], modalHints: [ModalHint] = [],
         discoverRequired: Bool = false
     ) throws -> Collection {
@@ -196,9 +207,9 @@ import ApplicationServices
             timed("getter.read", property: key, root: node) { query.read(node, key) }
         }
         var boundaryIssue: String?
-        func issue(_ detail: String) {
+        func issue(_ detail: String, scope: WindowIssue.Scope = .roots) {
             if boundaryIssue == nil { boundaryIssue = detail }
-            reportIssue?(detail)
+            reportIssue?(.init(scope: scope, detail: detail))
         }
         try RequestDiagnostics.checkCancellation()
         guard query.trusted() else {
@@ -297,7 +308,9 @@ import ApplicationServices
         var scanned = [AXUIElement]()
         let surfaceRelations = AXRelationReader(api: timing?.relationAPI(query.relations) ?? query.relations)
         var surfaceIssues = Set<String>()
-        func surfaceIssue(_ detail: String) { if surfaceIssues.insert(detail).inserted { issue(detail) } }
+        func surfaceIssue(_ detail: String) {
+            if surfaceIssues.insert(detail).inserted { issue(detail, scope: .descendants) }
+        }
         func nestedSurfaces(_ parent: AXUIElement, recursive: Bool) throws -> [AXUIElement] {
             try timed("phase.surfaceDiscovery", root: parent) {
                 timing?.surfaceRoot = parent
@@ -372,7 +385,7 @@ import ApplicationServices
         var inputParents = [(child: AXUIElement, parent: AXUIElement?, known: Bool)]()
         var inputSheets = [AXUIElement]()
         var inputNativeIDs = [(element: AXUIElement, id: CGWindowID?)]()
-        var modalHintCursor = 0, absentModalHints = Set<String>()
+        var modalHintCursor = 0, absentModalHints = Set<String>(), inactiveModalRelations = Set<String>()
         func reportedID(_ element: AXUIElement) -> CGWindowID? {
             inputNativeIDs.first(where: { CFEqual($0.element, element) })?.id
         }
@@ -403,8 +416,27 @@ import ApplicationServices
         }
         func unresolvedModalHints(in windows: [Window]) -> Set<String> {
             Set(modalHints.compactMap { hint in
-                if absentModalHints.contains(hint.identity.window) { return nil }
+                if absentModalHints.contains(hint.identity.window)
+                    || (inactiveModalRelations.contains(hint.identity.window) && detachedHiddenModal(hint, in: windows)) {
+                    return nil
+                }
                 return modalRow(hint, in: windows)?.modal == nil ? hint.identity.window : nil
+            })
+        }
+        func detachedHiddenModal(_ hint: ModalHint, in windows: [Window]) -> Bool {
+            guard hint.identity.isSheet, hint.nativePresence == .live, hint.nativeOnScreen == false, hint.nativeParentID == 0,
+                let native = hint.identity.native, let original = hint.identity.element,
+                !windows.contains(where: { CFEqual($0.element, original) || reportedID($0.element) == native.id })
+            else { return false }
+            return true
+        }
+        func markInactive(_ hint: ModalHint, proof: String) {
+            // This boundary has proved the presentation relation inactive,
+            // not the native object's lifetime ended. Retain the query hint;
+            // later presentation/attachment must be sampled again.
+            inactiveModalRelations.insert(hint.identity.window)
+            NativePointerTiming.record("inactiveModalRelation", metadata: {
+                ["window": hint.identity.window, "nativeWindow": hint.identity.native?.id as Any? ?? NSNull(), "proof": proof]
             })
         }
         func inputParent(_ child: AXUIElement) throws -> (parent: AXUIElement?, known: Bool) {
@@ -452,18 +484,22 @@ import ApplicationServices
                 return found
             }
         }
-        enum Membership { case live, absent, unknown }
+        enum Membership { case live, invalid, forwardAbsent, unknown }
         // Only a previously observed modal identity requests this bounded path
         // query. Neither old modality/parent data nor a retained Role proves
         // liveness. Check each current parent edge in its forward relation.
         func modalMembership(_ hint: AXUIElement) throws -> Membership {
+            var reason = "unknown"
+            defer { NativePointerTiming.record("modalMembership", metadata: {
+                ["nativeWindow": reportedID(hint) as Any? ?? NSNull(), "reason": reason]
+            }) }
             var child = hint, seen = [AXUIElement]()
             for _ in 0..<32 {
                 try RequestDiagnostics.checkCancellation()
                 guard !seen.contains(where: { CFEqual($0, child) }) else { return .unknown }
                 seen.append(child)
                 let read = queryRead(child, kAXParentAttribute)
-                if case .invalid = read, CFEqual(child, hint) { return .absent }
+                if case .invalid = read, CFEqual(child, hint) { reason = "invalidProxy"; return .invalid }
                 guard let raw = read.value, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return .unknown }
                 let parent = unsafeDowncast(raw, to: AXUIElement.self)
                 let (status, pid) = query.pid(parent)
@@ -478,12 +514,12 @@ import ApplicationServices
                     // concurrent reparent. Keep that transition unknown.
                     try RequestDiagnostics.checkCancellation()
                     let current = queryRead(child, kAXParentAttribute)
-                    if case .invalid = current, CFEqual(child, hint) { return .absent }
+                    if case .invalid = current, CFEqual(child, hint) { reason = "invalidProxy"; return .invalid }
                     guard let raw = current.value, CFGetTypeID(raw) == AXUIElementGetTypeID(),
                         CFEqual(raw, parent) else { return .unknown }
-                    return .absent
+                    reason = "forwardAbsent"; return .forwardAbsent
                 }
-                if CFEqual(parent, root) || result.contains(where: { CFEqual($0.element, parent) }) { return .live }
+                if CFEqual(parent, root) || result.contains(where: { CFEqual($0.element, parent) }) { reason = "live"; return .live }
                 child = parent
             }
             return .unknown
@@ -509,26 +545,44 @@ import ApplicationServices
                 if hint.nativePresence == .ended { absentModalHints.insert(hint.identity.window); continue }
                 if hint.identity.native != nil && hint.nativePresence != .live { continue }
                 if modalRow(hint, in: result) != nil { continue }
+                let detachedHidden = detachedHiddenModal(hint, in: result)
                 // Pixel discovery does not inspect an anchor control's child
                 // relation to rediscover a deeply attached historical modal.
-                // Keep the missing fact explicit and its identity retained;
-                // the input projection owns live forward-membership checks.
-                if projection == .visualCatalogue { continue }
+                // The sole narrow exception reads the exact retained proxy
+                // after fresh CG facts prove hidden + detached. It does not
+                // traverse contents or require any provider-specific AXSheets.
+                if projection == .visualCatalogue && !detachedHidden { continue }
                 guard let element = hint.identity.element else { continue }
                 let read = queryRead(element, kAXModalAttribute)
+                NativePointerTiming.record("retainedModalAXRead", metadata: {
+                    let status: String
+                    switch read {
+                    case .value: status = "value"
+                    case .invalid: status = "invalid"
+                    case .unsupported: status = "unsupported"
+                    case .unavailable(let error): status = "unavailable:\(error.rawValue)"
+                    }
+                    return ["window": hint.identity.window, "nativeWindow": hint.identity.native?.id as Any? ?? NSNull(),
+                            "status": status, "modal": read.value as? Bool as Any? ?? NSNull()]
+                })
                 if case .invalid = read {
                     if hint.identity.native == nil { absentModalHints.insert(hint.identity.window) }
+                    else if detachedHidden { markInactive(hint, proof: "exactAXInvalid") }
                     continue
                 }
+                if projection == .visualCatalogue { continue }
                 if hint.identity.native == nil && read.value as? Bool == false {
                     absentModalHints.insert(hint.identity.window); continue
                 }
                 if let native = hint.identity.native, let id = query.nativeID(element), id != native.id { continue }
                 switch try modalMembership(element) {
                 case .live: candidates.append(element)
-                case .absent:
-                    // A detached/invalid AX proxy does not end a live CG window.
+                case .invalid:
                     if hint.identity.native == nil { absentModalHints.insert(hint.identity.window) }
+                    else if detachedHidden { markInactive(hint, proof: "exactAXInvalid") }
+                case .forwardAbsent:
+                    if hint.identity.native == nil { absentModalHints.insert(hint.identity.window) }
+                    else if detachedHidden { markInactive(hint, proof: "forwardAbsent") }
                 case .unknown: break
                 }
                 continue
@@ -619,6 +673,18 @@ import ApplicationServices
             let sheets: [AXUIElement]
             if projection != .catalogue {
                 let read = queryRead(element, "AXSheets")
+                NativePointerTiming.record("windowSheetsDeclaration", metadata: {
+                    let status: String
+                    switch read {
+                    case .value: status = "value"
+                    case .invalid: status = "invalid"
+                    case .unsupported: status = "unsupported"
+                    case .unavailable(let error): status = "unavailable:\(error.rawValue)"
+                    }
+                    let values = read.value.flatMap { NativeWindowDeclarationCapture.completeElements($0) }
+                    return ["nativeWindow": reportedID(element) as Any? ?? NSNull(), "status": status,
+                            "completeCount": values?.count as Any? ?? NSNull(), "projection": String(describing: projection)]
+                })
                 switch read {
                 case .value(let raw):
                     if let values = NativeWindowDeclarationCapture.completeElements(raw) {

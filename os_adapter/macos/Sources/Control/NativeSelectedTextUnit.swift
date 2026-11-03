@@ -17,16 +17,30 @@ import ApplicationServices
     var cellEditor: NativeCellEditorHandoff? = nil
 
     func contract(replace: Bool) -> Contract? {
+        try? qualifiedContract(replace: replace)
+    }
+
+    private func qualifiedContract(
+        replace: Bool, expected: Contract? = nil
+    ) throws(NativeRouteUnavailable) -> Contract? {
         guard let role = AXAccess.read(element, kAXRoleAttribute).value as? String, !role.isEmpty,
             AXAccess.read(element, "AXEditable").value as? Bool != false,
             AXAccess.writable(element, kAXSelectedTextAttribute).value == true,
             !replace || AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true
         else { return nil }
+        let current = Contract(role: role, replace: replace)
+        guard expected == nil || current == expected else { return nil }
         // The keyboard recipe owns selection on marker-backed rich editors.
         // Offering a ready numeric SelectedText setter would bypass that plan
         // before its Command-key window route has been prepared.
         if replace, NativeReplacementUnit(element: element).contract() == .selectAll { return nil }
-        return Contract(role: role, replace: replace)
+        if let excluded = NativeSelectedTextProviderQualification.sample(
+            element: element, presenterPID: application.processIdentifier)
+        {
+            diagnose(excluded.diagnostic)
+            try NativeSelectedTextProviderQualification.requireAvailable(excluded)
+        }
+        return current
     }
 
     func readiness(_ expected: Contract) throws -> NativeReadiness {
@@ -48,11 +62,13 @@ import ApplicationServices
 
     private func validate(_ expected: Contract, check: @MainActor () throws -> Void) throws {
         try check()
-        guard contract(replace: expected.replace) == expected,
-            AXAccess.read(element, kAXEnabledAttribute).value as? Bool != false
+        guard AXAccess.read(element, kAXEnabledAttribute).value as? Bool != false
         else { throw DriverError("the selected native text-edit contract changed", code: .inputUnavailable) }
         try BackgroundTarget(application).validate(input: true)
         try RequestDiagnostics.checkCancellation()
+        guard try qualifiedContract(replace: expected.replace, expected: expected) == expected else {
+            throw DriverError("the selected native text-edit contract changed", code: .inputUnavailable)
+        }
     }
 
     func prepare(

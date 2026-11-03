@@ -3,10 +3,12 @@
 
 """Worker-process entry point: persistent Python execution embedding the computer_use SDK."""
 
+import argparse
 import ast
 import asyncio
 import base64
 import builtins
+import hashlib
 import inspect
 import io
 import os
@@ -17,7 +19,6 @@ from collections import deque
 from contextvars import ContextVar
 
 from computer_use import Computer
-from computer_use.identity import Record, WeakIdentityMap
 from computer_use.client.host import (
     set_action_handler,
     set_diagnostic_handler,
@@ -34,15 +35,24 @@ from computer_use.client.images import (
     reset_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
+from computer_use.errors import ComputerUseError
+from computer_use.identity import Record, WeakIdentityMap
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
 from computer_use.native.preview import latest_preview_sink
 from computer_use.session.detail_pages import CapturedDetailPage, CapturedDetailText
-from computer_use.session.observation import peek_observation_text
+from computer_use.session.events import observation_delivered
+from computer_use.session.observation import (
+    CapturedObservationText,
+    LazyObservation,
+    lazy_observation,
+    observation_document,
+    peek_observation_text,
+)
 
-from .image_delivery import prepare_image
+from .image_delivery import prepare_image, project_document
 from .output import ObservationOutput, ObservationPresenter, OutputBuffer
-from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
 from .worker_lifecycle import READY_ENV
+from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
 
 _runs = ContextVar("computer_use_execution", default=None)
 
@@ -111,6 +121,7 @@ class Runtime:
     def flush_observations(self, run):
         def emit(text, observation):
             self.emit(dict(type="text", text=text))
+            run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
             if observation["state"].get("screenshot") is not None:
                 run["imageContexts"].set(observation["state"]["screenshot"], True)
 
@@ -149,8 +160,29 @@ class Runtime:
             return
         if run is None or not run["active"]:
             return
+        if event["kind"] == "action-observation":
+            result = event["result"]
+            failure = isinstance(result, ComputerUseError)
+            receipt = None if failure else result_receipt(result)
+            data = vars(result) if failure else result
+            self.flush_observations(run)
+            gap = data["observation_error"]
+            target = result.target if failure else receipt["target"] if receipt is not None else "original target"
+            outcome = f"Action effect remains {result.effect}" if failure else f"Action remains {result['status']}"
+            message = (
+                f"Related observation [{data['observation_status']}] for {target}: "
+                f"{gap['detail']}\n{outcome}; do not replay it. {gap['next']}"
+            )
+            if data["window_lifecycle"] == "closed":
+                message += "\nThe original Window is closed; its retained targets have not been rebound."
+            if data["choices"]:
+                message += "\nCurrent windows:\n" + "\n".join(
+                    f"computer.window({choice['id']}) {choice['title'] or '<untitled>'}" for choice in data["choices"]
+                )
+            self.emit(dict(type="text", text=message), True)
+            return
         observation = event["observation"]
-        run["observations"].observe(observation)
+        run["observations"].observe(self.present_observation(observation))
         run["observationLogs"].append(observation)
         data = dict(kind="observation_captured", scope=observation["scope"], view=observation["view"])
         if observation.get("document") is not None:
@@ -181,6 +213,36 @@ class Runtime:
             self.send(dict(diagnostic=dict(**data, elementRefs=list(observation["refs"])), executionId=run["id"]))
             run["observationLogs"].popleft()
 
+    def prepared_image(self, png):
+        """Use one actual encoded delivery for both geometry and image output."""
+        run = _runs.get()
+        if run is None:
+            return prepare_image(png)
+        fingerprint = hashlib.sha256(png).digest()
+        cached = run["preparedImages"].get(id(png))
+        if cached is None or cached[0] != fingerprint or cached[1].source is not png:
+            cached = fingerprint, prepare_image(png)
+            run["preparedImages"][id(png)] = cached
+        return cached[1]
+
+    def present_observation(self, observation):
+        """Retain source facts separately from model-facing image geometry."""
+        run = _runs.get()
+        original = observation["state"]
+        cached = run["presentations"].get(id(original))
+        if cached is not None and cached["sourceState"] is original:
+            return cached
+        document = observation.get("document") or observation_document(original)
+        png = original.get("screenshot")
+        if document is not None and png is not None:
+            projected = project_document(document, self.prepared_image(png).coordinates)
+            state = lazy_observation(projected, png)
+            presented = dict(observation, state=state, document=projected, sourceState=original)
+        else:
+            presented = dict(observation, sourceState=original)
+        run["presentations"][id(original)] = presented
+        return presented
+
     def print(self, *values, sep=" ", end="\n", file=None, flush=False):
         run = _runs.get()
         if run is None or not run["active"]:
@@ -202,15 +264,38 @@ class Runtime:
                 return
             if run["textPages"].has(values[0]):
                 values = (dict(values[0]),)
+        printed_states = []
+
+        def present(value):
+            original = (
+                value
+                if isinstance(value, LazyObservation)
+                else value.observation
+                if isinstance(value, CapturedObservationText)
+                else None
+            )
+            if original is None:
+                return value
+            projected = self.present_observation(dict(state=original))["state"]
+            printed_states.append((original, projected))
+            return str(projected["text"])
+
+        values = tuple(present(value) for value in values)
         text = (" " if sep is None else sep).join(
             value if isinstance(value, str) else pprint.pformat(value, depth=6, sort_dicts=False) for value in values
         )
         if end not in (None, "\n"):
             text += end
         self.emit(dict(type="text", text=text), True)
+        for original, projected in printed_states:
+            run["deliveredObservations"].append(original)
+            run["observations"].printed(projected["text"])
+            if original.get("screenshot") is not None:
+                run["imageContexts"].set(original["screenshot"], True)
         details = any(isinstance(value, (CapturedDetailPage, CapturedDetailText)) for value in values)
         observed = None if details else run["observations"].printed(text)
         if observed is not None:
+            run["deliveredObservations"].append(observed.get("sourceState", observed["state"]))
             self.log_observations(run, materializedOnly=True)
         if observed is not None and observed["state"].get("screenshot") is not None:
             run["imageContexts"].set(observed["state"]["screenshot"], True)
@@ -218,7 +303,7 @@ class Runtime:
     def print_image(self, png):
         if not isinstance(png, (bytes, bytearray, memoryview)):
             raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
-        delivery = prepare_image(png)
+        delivery = self.prepared_image(png)
         data = base64.b64encode(delivery.png).decode("ascii")
         run = _runs.get()
         self.emit(
@@ -260,6 +345,8 @@ class Runtime:
                 error = failure
         for delivery in run["images"]:
             image_delivered(delivery.source, delivery.coordinates)
+        for state in run["deliveredObservations"]:
+            observation_delivered(state)
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())
@@ -314,6 +401,9 @@ class Runtime:
             actions=ActionPresentation(),
             textPages=WeakIdentityMap(),
             imageContexts=WeakIdentityMap(),
+            preparedImages={},
+            presentations={},
+            deliveredObservations=[],
         )
         token = _runs.set(run)
         try:
@@ -370,7 +460,10 @@ class ConsoleWriter(io.TextIOBase):
         pass
 
 
-async def main():
+async def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--allow-global-input", action=argparse.BooleanOptionalAction, default=True)
+    args = parser.parse_args(argv)
     from .worker_transport import worker_connection
 
     protocol = consume_protocol()
@@ -378,7 +471,7 @@ async def main():
     reader, writer = await worker_connection()
 
     messages = WorkerMessageWriter(writer, protocol=protocol)
-    runtime = Runtime(messages.send)
+    runtime = Runtime(messages.send, computer_factory=lambda: Computer(allow_global_input=args.allow_global_input))
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
     if ready_requested:

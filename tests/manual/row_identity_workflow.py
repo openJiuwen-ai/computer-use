@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Compare row presentation changes with original field/record continuity.
@@ -7,6 +6,8 @@ Default mode requires that the same field remain usable across row presentation
 changes and subsequent reads. --expect-rejection reproduces the old driver's
 row-label rejection, including its partial first input and refused later calls.
 --build-only compiles the disposable app and read-only AX helper without opening UI.
+--text-chain-only verifies retained Element replacement and explicit Return only.
+--long-text adds one 1,200-code-point Unicode replacement to that same chain.
 The fixture separately publishes its model truth and AX identifier policy; an
 arbitrary application's accessibilityIdentifier is not assumed to be a data key.
 """
@@ -21,11 +22,13 @@ import plistlib
 import signal
 import subprocess
 import tempfile
+import time
 import uuid
 from dataclasses import asdict
 from pathlib import Path
 
 import computer_use
+from artifact_json import encode_artifact
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.errors import ComputerUseError
@@ -127,7 +130,7 @@ async def outcome(operation):
 
 
 def create_computer(driver):
-    computer = Computer()
+    computer = Computer(allow_global_input=False)
     computer._controller.transport.driver = {"command": str(driver), "args": []}
     return computer
 
@@ -155,6 +158,62 @@ async def retained_field(computer, bundle, folder, name):
     (folder / (name + "-before.txt")).write_text(observation.text)
     field = await app.element([{"identifier": "row-field-control"}])
     return app, field
+
+
+async def replacement_return_case(folder, bundle, report, *, driver, long_text=False):
+    """Use one retained control; native callbacks are independent of SDK receipts."""
+    before = await configure(folder, derived=True)
+    computer = create_computer(driver)
+    case = {"name": "retained-element-replace-return", "global_input_allowed": False, "before": before, "actions": []}
+    report["cases"].append(case)  # Preserve failed/partial evidence in the enclosing finally.
+    try:
+        _, field = await retained_field(computer, bundle, folder, "replace-return")
+        binding = asdict(field._snapshot["binding"])
+        case["binding"] = binding
+        values = ["Replacement query"]
+        if long_text:
+            values.append("Ab🙂" * 400)
+        for index, value in enumerate(values):
+            started = time.monotonic()
+            replacement = await outcome(field.type_text(value, replace=True))
+            elapsed = time.monotonic() - started
+            after_replace = await state(folder)
+            item = {
+                "requested": value,
+                "replace": replacement,
+                "replace_seconds": elapsed,
+                "after_replace": after_replace,
+            }
+            case["actions"].append(item)
+            assert "receipt" in replacement, item
+            after_replace = await wait_state(folder, lambda current, expected=value: current["value"] == expected)
+            item["after_replace"] = after_replace
+            assert after_replace["returnKeys"] == index and after_replace["tabKeys"] == 0, item
+            # This fixture's AXValue setter updates the same displayed/editable
+            # state as insertText. Its counters identify the mechanism; no model
+            # or listener depends on insertText, so they are not an equivalence
+            # oracle. A lost-editing-callback negative needs a separate model.
+            # No new lookup, focus, read or system recipe between the two commands.
+            started = time.monotonic()
+            submitted = await outcome(field.press_key("Return"))
+            item.update(submit=submitted, submit_seconds=time.monotonic() - started)
+            assert "receipt" in submitted, item
+            final = await wait_state(folder, lambda current, expected=index + 1: current["returnKeys"] == expected)
+            item["after_return"] = final
+            assert final["value"] == value and final["other"] == "unchanged", item
+            assert final["tabKeys"] == 0, item
+            assert final["dataKey"] == before["dataKey"], item
+            for key in ("fieldObjectID", "cellObjectID", "rowObjectID"):
+                assert final[key] == before[key], item
+            assert asdict(field._snapshot["binding"]) == binding
+            observation = submitted["receipt"].get("observation")
+            if observation is not None:
+                (folder / f"replace-return-{index}-after.txt").write_text(observation.text)
+        case["oracle_passed"] = True
+    finally:
+        case["final"] = await state(folder)
+        computer._controller.transport.close()
+        await computer._controller.transport.wait_closed()
 
 
 async def text_case(folder, bundle, probe, journal, name, *, derived, expect_rejection, driver):
@@ -310,7 +369,7 @@ async def presentation_case(folder, bundle, probe, name, *, reuse, expect_reject
         await computer._controller.transport.wait_closed()
 
 
-async def verify(folder, bundle, app, helper, expect_rejection, driver=None):
+async def verify(folder, bundle, app, helper, expect_rejection, driver=None, *, text_chain_only=False, long_text=False):
     opener = await asyncio.create_subprocess_exec("open", "-g", str(app))
     if await opener.wait():
         raise RuntimeError("Failed to open the disposable row fixture")
@@ -341,6 +400,11 @@ async def verify(folder, bundle, app, helper, expect_rejection, driver=None):
 
     set_diagnostic_handler(record)
     try:
+        if not expect_rejection:
+            await replacement_return_case(folder, bundle, report, driver=driver, long_text=long_text)
+        if text_chain_only:
+            report["oracle_passed"] = True
+            return
         report["cases"].append(
             await text_case(
                 folder,
@@ -402,7 +466,7 @@ async def verify(folder, bundle, app, helper, expect_rejection, driver=None):
             for name, digest in report["source_sha256"].items()
             if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
         ]
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n")
+        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
         set_diagnostic_handler(None)
         journal.close()
         await probe.close()
@@ -414,7 +478,11 @@ def main():
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--expect-rejection", action="store_true")
     parser.add_argument("--driver", type=Path)
+    parser.add_argument("--text-chain-only", action="store_true")
+    parser.add_argument("--long-text", action="store_true")
     args = parser.parse_args()
+    if args.expect_rejection and (args.text_chain_only or args.long_text):
+        parser.error("the GA text chain does not use the historical rejection expectation")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     output = ROOT / ".artifacts"
     output.mkdir(exist_ok=True)
@@ -423,7 +491,18 @@ def main():
     try:
         app, helper = build(folder, bundle)
         if not args.build_only:
-            asyncio.run(verify(folder, bundle, app, helper, args.expect_rejection, args.driver))
+            asyncio.run(
+                verify(
+                    folder,
+                    bundle,
+                    app,
+                    helper,
+                    args.expect_rejection,
+                    args.driver,
+                    text_chain_only=args.text_chain_only,
+                    long_text=args.long_text,
+                )
+            )
     finally:
         LOG.info("Row identity evidence: %s", folder)
 

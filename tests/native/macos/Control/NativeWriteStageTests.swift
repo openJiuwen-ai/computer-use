@@ -63,10 +63,16 @@ import ApplicationServices
         precondition(!blockedFocus.preparationAllowed && blockedFocus.pending == ["geometry", "receiver"])
         let disabled = context.requiringEnabled(false)
         precondition(!disabled.preparationAllowed && disabled.pending.contains("enabled"))
-        for unit in [NativeInputUnit.receiverContext(.init(role: "AXTextField")), .pointerFocus] {
+        for unit in [NativeInputUnit.receiverContext(.init(role: "AXTextField")),
+                     .pointerFocus(.editor), .pointerFocus(.scalarText)] {
             let blocked = unit.declaration(id: "focus", supported: true, readiness: disabled)
             precondition(blocked["supported"] as? String == "no")
         }
+        let scalarFocus = NativeInputUnit.pointerFocus(.scalarText).declaration(
+            id: "scalar", supported: true, readiness: NativeReadiness([("receiver", "no")]))
+        precondition(scalarFocus["supported"] as? String == "yes"
+                     && scalarFocus["globalInput"] as? String == "no",
+                     "text-point preparation declares its actual window-directed transport")
         keyboardWindowPreparation()
     }
 

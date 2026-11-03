@@ -35,6 +35,15 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class RecordedStep:
+    """One attempted command and its native receipt, absent after interrupted I/O."""
+
+    command: UnitCommand
+    receipt: StepResult | None = None
+    failure_effect: str | None = None
+
+
+@dataclass(frozen=True)
 class WriteRequest:
     """Parsed intent and the lookup or forwarding scope supplied by the caller.
 
@@ -91,7 +100,7 @@ class OperationSpec:
         intent: Requested operation and parameters.
         target: Pinned native identity for this write.
         within: Confirmed ancestor tokens constraining native input.
-        policy: Host desktop mode and foreground-assistance authorization.
+        policy: Host authorization for global mouse and keyboard input.
         forward_scope: Original container boundary for current-receiver forwarding.
     """
 

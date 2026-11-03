@@ -24,6 +24,8 @@ import uuid
 from dataclasses import asdict
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
@@ -264,7 +266,7 @@ async def verify(folder, bundle, app, helper, driver, expect_compatible):
             for name, digest in report["source_sha256"].items()
             if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
         ]
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n")
+        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
         set_diagnostic_handler(None)
         journal.close()
         await probe.close()

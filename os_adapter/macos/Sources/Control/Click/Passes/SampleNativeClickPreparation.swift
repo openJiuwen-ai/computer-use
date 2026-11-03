@@ -18,13 +18,11 @@ import ApplicationServices
             point = try pointer.point(plan.pointer!.start!)
         case .element(let unit):
             if !afterPreparation, let exposure = try unit.exposure() {
-                pointer = NativePointerUnit(
-                    application: unit.application, window: exposure.mapping, nativeWindow: unit.window)
+                pointer = unit.pointerUnit(mapping: exposure.mapping)
                 point = exposure.point
             } else {
                 let geometry = try afterPreparation ? unit.geometry() : unit.preparationGeometry()
-                pointer = NativePointerUnit(
-                    application: unit.application, window: geometry.mapping, nativeWindow: unit.window)
+                pointer = unit.pointerUnit(mapping: geometry.mapping)
                 point = geometry.point
             }
         default: return nil

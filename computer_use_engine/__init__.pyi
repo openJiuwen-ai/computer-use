@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import Literal, Mapping, TypedDict
 
 __all__ = [
     "UI",
     "ActionResult",
+    "ActionImpact",
+    "ActualInputImpact",
+    "InputAttempt",
+    "InputEffect",
+    "PreparationImpact",
     "App",
     "AppInfo",
     "Button",
@@ -21,10 +26,12 @@ __all__ = [
     "ElementPath",
     "ElementSelector",
     "Observation",
+    "ObservationError",
     "Point",
     "TextPage",
     "View",
     "Window",
+    "WindowInfo",
     "__version__",
 ]
 
@@ -47,9 +54,10 @@ ElementPath = list[str | ElementMatch]
 ElementSelector = int | str | ElementPath
 
 class Computer:
-    def __init__(self) -> None: ...
+    def __init__(self, *, allow_global_input: bool = True) -> None: ...
     async def list_apps(self) -> list[AppInfo]: ...
     def app(self, selector: int | str) -> App: ...
+    def window(self, ref: int) -> Window: ...
     async def read(self, *, view: View = "both", full: bool = False) -> Observation: ...
 
     # 整桌面鼠标操作；位置来自对应的桌面截图。
@@ -65,7 +73,8 @@ class UI:
     # App 与 Window 的共同接口基类，不供模型直接创建。
     async def element(self, target: ElementSelector, *, timeout_ms: int = 3000) -> Element: ...
     async def read(
-        self, *, view: View = "tree", full: bool = False, menu_path: list[str] | None = None
+        self, *, view: View = "tree", full: bool = False, menu_path: list[str] | None = None,
+        allow_foreground: bool = False
     ) -> Observation: ...
 
     # 位置来自当前 App／Window 对象交付的截图，可包含相关弹窗。
@@ -73,17 +82,20 @@ class UI:
     async def scroll(self, direction: Direction, *, at: Point, pages: float = 1) -> ActionResult: ...
     async def drag(self, start: Point, end: Point) -> ActionResult: ...
 
-    # 向这个 App／Window 范围内已确认的当前接收者输入。
+    # App 使用最近一次明确交付的输入上下文；Window 使用固定窗口。
+    # 后端准备该目标的接收链，不因执行瞬间焦点变化改选窗口。
     async def type_text(self, text: str) -> ActionResult: ...
     async def paste(self, text: str) -> ActionResult: ...
     async def press_key(self, key: str) -> ActionResult: ...
 
 class App(UI):
-    # 从实例已观察的成员目录选择具体窗口，不激活、不改变 App 范围。
+    # App 表示应用范围。窗口编号与 Computer.window() 共用，额外检查应用归属。
+    # 选择窗口不激活、不改变 App 范围。
     def window(self, ref: int) -> Window: ...
 
 class Window(UI):
-    # 由 App.window() 取得，固定窗口身份；只继承 UI 的共同操作。
+    # 由 Computer.window() 或 App.window() 取得，固定窗口身份。
+    # 原窗口关闭后失效，不改投同应用其他窗口；只继承 UI 的共同操作。
     ...
 
 class Element:
@@ -111,15 +123,67 @@ class Observation:
     ) -> TextPage: ...
     text: str
     screenshot: bytearray | None
+    preparation: Mapping[str, object] | None
 
 class AppInfo:
     id: int
     display_name: str
     is_running: bool
 
+class WindowInfo:
+    id: int
+    title: str
+
 class ActionResult:
     status: Literal["dispatched", "verified"]
     detail: str
+    observation: Observation | None
+    observation_status: Literal["available", "partial", "unavailable", "not_requested"]
+    observation_error: ObservationError | None
+    window_lifecycle: Literal["observed", "closed", "unknown", "not_applicable"]
+    choices: tuple[WindowInfo, ...]
+    impact: ActionImpact | None
+
+class PreparationImpact:
+    mouse: Literal["yes", "no", "unknown"]
+    keyboard: Literal["yes", "no", "unknown"]
+    activation: Literal["yes", "no", "unknown"]
+    clipboard: Literal["yes", "no", "unknown"]
+
+class InputEffect:
+    stage: Literal["preparation", "input", "cleanup"]
+    device: Literal["mouse", "keyboard", "focus", "element", "clipboard", "application"]
+    transport: Literal["globalHID", "process", "accessibility", "activation", "windowServer", "clipboard", "launch"]
+    mechanism: str
+    state: Literal["invoked", "possible", "notInvoked"]
+
+class ActualInputImpact:
+    coverage: Literal["complete", "partial"]
+    effects: tuple[InputEffect, ...]
+    foreground_changed: Literal["yes", "no", "unknown"]
+    clipboard_restoration: Literal["notUsed", "restored", "ownershipLost", "failed", "unknown"]
+    omitted_effects: int
+
+class InputAttempt:
+    route: str
+    declared_global_input: Literal["yes", "no", "unknown"]
+    preparation_potential: PreparationImpact | None
+    foreground_requested: bool
+    preparation_only: bool
+    preparation: tuple[str, ...] | None
+    dispatch: Literal["notDispatched", "dispatched", "partial", "unknown"]
+    cleanup: Literal["complete", "failed", "unknown"]
+    actual: ActualInputImpact | None
+
+class ActionImpact:
+    global_input_allowed: bool
+    attempts: tuple[InputAttempt, ...]
+
+class ObservationError:
+    code: str
+    detail: str
+    next: str
+    session_usable: bool
 
 class TextPage:
     text: str
@@ -132,5 +196,11 @@ class ComputerUseError(Exception):
     target: str
     detail: str
     next: str
+    impact: ActionImpact | None
+    observation: Observation | None
+    observation_status: Literal["available", "partial", "unavailable", "not_requested"]
+    observation_error: ObservationError | None
+    window_lifecycle: Literal["observed", "closed", "unknown", "not_applicable"]
+    choices: tuple[WindowInfo, ...]
 
 __version__: str

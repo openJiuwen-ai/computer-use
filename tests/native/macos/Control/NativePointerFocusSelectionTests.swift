@@ -136,7 +136,61 @@ import ApplicationServices
                      "focus must not inspect or restore selection across a changed target boundary")
     }
 
+    @MainActor static func checkScalarContentAfterReceiver() async throws {
+        let scalar = NativePointerFocusUnit(
+            application: .current, window: AXUIElementCreateApplication(0),
+            element: AXUIElementCreateApplication(0), targetKind: .scalarText)
+        for intent in [NativeKeyboardIntent.Kind.focus, .insert, .paste, .key] {
+            do {
+                try await scalar.prepare(
+                    intent: intent, foreground: true,
+                    check: { preconditionFailure("ineligible scalar intent must fail before target preparation") },
+                    onPreparation: { _ in preconditionFailure("ineligible scalar intent must not prepare") },
+                    onCleanupUnknown: { preconditionFailure("ineligible scalar intent must not inject") })
+                preconditionFailure("text-point replacement preparation must not widen other intents")
+            } catch let error as DriverError { precondition(error.code == .invalidRequest) }
+        }
+
+        for unchanged: Bool? in [true, false, nil] {
+            var actions = [String]()
+            var receiverReads = 0
+            var contentReads = 0
+            var waits = 0
+            let access = NativePointerFocusUnit.PreparationAccess(
+                ready: { false }, selection: { preconditionFailure("replacement does not preserve caret") },
+                preparePointer: { actions.append("prepare") }, clickPointer: { actions.append("click") },
+                receives: {
+                    try NativePointerFocusUnit.scalarReceiverReady(
+                        receives: {
+                            receiverReads += 1
+                            return receiverReads == 3
+                        }, contentUnchanged: {
+                            precondition(receiverReads == 3, "never validate the old value before click consumption")
+                            contentReads += 1
+                            return unchanged
+                        })
+                }, selectionWritable: { preconditionFailure("replacement does not restore caret") },
+                restoreSelection: { _ in preconditionFailure("replacement does not restore caret") })
+            do {
+                try await NativePointerFocusUnit.prepare(
+                    intent: .replace, access: access, check: {}, wait: { waits += 1 })
+                precondition(unchanged == true, "changed or unknown scalar content must stop before the body")
+            } catch let error as DriverError {
+                precondition(unchanged != true && error.code == .inputUnavailable && error.effect == .possible,
+                             "a possible scalar edit is terminal, never a preparation retry marker")
+            }
+            precondition(actions == ["prepare", "click"] && receiverReads == 3 && contentReads == 1 && waits == 2,
+                         "one click is followed by bounded receiver checks, then one preparation-effect check")
+        }
+        var contentReads = 0
+        let ready = try NativePointerFocusUnit.scalarReceiverReady(
+            receives: { false }, contentUnchanged: { contentReads += 1; return true })
+        precondition(!ready)
+        precondition(contentReads == 0, "absent fresh receiver evidence must not accept even unchanged content")
+    }
+
     @MainActor static func main() async throws {
+        try await checkScalarContentAfterReceiver()
         // A pointer callback established this exact receiver, but changed a
         // readable, read-only caret. Whole replacement owns its later Select All.
         let replacement = Editor()

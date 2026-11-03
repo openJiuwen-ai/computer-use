@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.reader import CapturedField, ChildContinuation
     from computer_use.native.contracts import Binding, Intent, OperationTarget
     from computer_use.session.interface_images import CapturedWindow, InterfaceImage
-    from computer_use.session.interfaces import InstanceState, WindowIdentity
+    from computer_use.session.interfaces import InstanceState, LookupContext, WindowIdentity
     from computer_use.types import ActionResult, AppInfo, Observation, TextPage
 
 Remaining: TypeAlias = Callable[[], int]
@@ -43,6 +43,7 @@ class ElementSnapshot(TypedDict):
     text: CapturedField | None
     children: ChildContinuation | None
     window_identity: NotRequired[WindowIdentity]
+    menu_window_identity: NotRequired[WindowIdentity | None]
 
 
 class UIHandle(Protocol):
@@ -51,7 +52,7 @@ class UIHandle(Protocol):
     Attributes:
         _instance: Shared instance membership, element references, and window views.
         _anchor: Fixed window key for a Window, or None for the App-wide view.
-        _context: Most recently confirmed member window for unqualified input.
+        _context: Proposed observation primary; publication commits actual delivered context.
         _lookup_scopes: Additional observed owners used for application-menu lookup.
         _menu_only: Whether the current view contains only an application menu.
         _image: Captured image context retained for this UI view.
@@ -60,6 +61,7 @@ class UIHandle(Protocol):
     _instance: InstanceState
     _anchor: str | None
     _context: str | None
+    _lookup_context: LookupContext | None
     _lookup_scopes: tuple[object, ...]
     _menu_only: bool
     _image: InterfaceImage | None

@@ -63,7 +63,7 @@ async def collect_component(
                     "execution_failed",
                     "stale_target",
                     "snapshot_expired",
-                    "mode_unsupported",
+                    "unsupported_operation",
                 )
             )
             else False

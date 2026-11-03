@@ -29,6 +29,9 @@ import ApplicationServices
             evidence.markCall("nativeAction")
         }
         func pointerBoundary() throws {
+            if plan.offer.delivery == .systemPointer {
+                try NativeInputAuthorization.requireGlobalInput("system pointer click")
+            }
             try boundary.markDispatchInFlight()
             evidence.markCall("posted")
         }

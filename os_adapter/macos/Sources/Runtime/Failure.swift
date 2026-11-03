@@ -5,11 +5,12 @@ import Foundation
 enum FailureCode: String {
     case staleTarget = "stale_target", snapshotExpired = "snapshot_expired", ambiguousTarget = "ambiguous_target"
     case elementNotFound = "element_not_found", observationIncomplete = "observation_incomplete"
-    case blockedByModal = "blocked_by_modal", inputUnavailable = "input_unavailable", modeUnsupported =
-        "mode_unsupported"
+    case blockedByModal = "blocked_by_modal", inputUnavailable = "input_unavailable", unsupportedOperation =
+        "unsupported_operation"
     case desktopUnavailable = "desktop_unavailable", invalidRequest = "invalid_request", executionFailed =
         "execution_failed"
     case executionUnknown = "execution_unknown"
+    case permissionRequired = "permission_required"
 
     var next: String {
         switch self {
@@ -27,8 +28,10 @@ enum FailureCode: String {
         case .blockedByModal: return "read the application and handle its blocking dialog before continuing"
         case .inputUnavailable:
             return "read the target and inspect available controls or its screenshot before continuing"
-        case .modeUnsupported:
-            return "use operations supported by the configured desktop mode; do not switch modes automatically"
+        case .unsupportedOperation:
+            return "use a supported input capability or update the SDK and native backend together"
+        case .permissionRequired:
+            return "obtain caller approval before creating a Computer with allow_global_input=True"
         case .desktopUnavailable: return "resume an available desktop session and check its required permissions"
         case .invalidRequest: return "correct the request using the documented API and observed targets"
         case .executionFailed, .executionUnknown:
@@ -53,6 +56,15 @@ protocol ClassifiedFailure: Error { var code: FailureCode { get } }
 /// is deliberately narrower than inputUnavailable: boundary/focus continuity
 /// failures must not grant permission to activate another receiver or replay.
 struct NativePreparationUnavailable: ClassifiedFailure, CustomStringConvertible {
+    let description: String
+    var code: FailureCode { .inputUnavailable }
+}
+
+/// Positive qualification evidence rules out the selected mechanism itself,
+/// not merely its background preparation. Only the receipt and public Gate may
+/// authorize another candidate, before requested input and within the original
+/// target/resource boundary. Confirmed context preparation does not replay input.
+struct NativeRouteUnavailable: ClassifiedFailure, CustomStringConvertible {
     let description: String
     var code: FailureCode { .inputUnavailable }
 }

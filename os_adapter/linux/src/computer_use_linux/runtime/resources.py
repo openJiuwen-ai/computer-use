@@ -61,7 +61,7 @@ def check_permissions(version=6):
     try:
         from computer_use_linux.runtime.native_backend import NativeBackend as Backend
 
-        backend = Backend("exclusive", threading.Event())
+        backend = Backend(False, threading.Event())
         status["sessionType"] = backend.desktop.session_type
         status["details"].extend(backend.desktop.notes)
         backend.ensure_unlocked()

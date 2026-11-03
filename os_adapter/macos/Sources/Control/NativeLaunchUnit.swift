@@ -35,6 +35,9 @@ import AppKit
             try check()
             try installation.validate()
             try onDispatch()
+            let activity = NativeInputActivity.begin(
+                device: .application, transport: .launch, mechanism: "NSWorkspace.openApplication")
+            defer { activity?.returned() }
             app = try await NSWorkspace.shared.openApplication(at: installation.url, configuration: configuration)
             launched = true
         }

@@ -5,10 +5,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.acquisition.model import QUERY, ClassifiedAttempt
+from computer_use.interaction.read.acquisition.images.refresh import settle_capture_geometry
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 async def image_wait(value: ClassifiedAttempt, control: Control) -> ClassifiedAttempt:
     """Wait 80 milliseconds before the selected image-geometry refresh."""
-    await asyncio.sleep(0.08)
+    await settle_capture_geometry()
     return value
 
 

@@ -128,6 +128,7 @@ namespace ComputerUse.Windows
         // isolated worker retains a separate hard bound for blocked providers.
         internal const int IsolatedReadMs = 5000, ObservationMs = 4000;
         internal readonly CancellationToken Token;
+        internal readonly bool GlobalInputAllowed;
         internal double Deadline;
         internal double ObservationDeadline = Double.PositiveInfinity;
         internal bool Effect, Dispatched;
@@ -135,9 +136,10 @@ namespace ComputerUse.Windows
         // Present only during a negotiated click's native preparation scope.
         internal INativePreparationJournal ClickPreparation = null;
         internal string Target = "request";
-        internal Request(CancellationToken token, int timeout)
+        internal Request(CancellationToken token, int timeout, bool globalInputAllowed = false)
         {
             Token = token;
+            GlobalInputAllowed = globalInputAllowed;
             Deadline = Wire.Now + timeout;
         }
 

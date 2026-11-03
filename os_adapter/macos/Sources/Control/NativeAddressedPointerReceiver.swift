@@ -2,14 +2,32 @@
 
 import ApplicationServices
 
-/// A concrete control with an advertised interaction, not merely a child of
-/// an AX window. Missing evidence leaves physical input available independently.
+/// Distinguish declared content interaction from a concrete hit in the original
+/// window from an exact hit on the original element. Both geometric proofs
+/// require the actual foreground window; neither grants background capability.
 struct NativeAddressedPointerReceiver {
+    enum Qualification: String {
+        case unconfirmed, declaredInteraction, sameWindowPoint, originalElementExactHit
+
+        func requirement(captured: Bool) -> NativePointerReadiness.Requirement? {
+            switch self {
+            case .declaredInteraction: return .contentReceiver
+            case .sameWindowPoint: return captured ? .foregroundWindowPoint : nil
+            case .originalElementExactHit: return captured ? nil : .foregroundWindowPoint
+            case .unconfirmed: return nil
+            }
+        }
+    }
     let role: String?
     let actions: [String]?
     var focusWritable = false
     var selectedTextWritable = false
     var valueWritable = false
+
+    func qualification(concreteHit: Bool, sameWindow: Bool) -> Qualification {
+        guard concreteHit, sameWindow else { return .unconfirmed }
+        return supported ? .declaredInteraction : .sameWindowPoint
+    }
 
     var supported: Bool {
         guard let role else { return false }

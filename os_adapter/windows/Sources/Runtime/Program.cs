@@ -12,17 +12,17 @@ namespace ComputerUse.Windows
         static NativeReadStore workerStore;
         static NativeReadBackend workerReader;
         static object[] checkpoint = new object[0];
-        static NativeRuntime CreateRuntime(string session, string mode)
+        static NativeRuntime CreateRuntime(string session, bool globalInputAllowed)
         {
             var reader = new NativeReadBackend(session);
             workerReader = reader;
             reader.Store.RestoreWindows(checkpoint);
             workerStore = reader.Store;
             var captures = new NativePointerCaptures();
-            var pointer = new NativePointer(new NativeWindowsPointer(reader.Store, captures));
-            var keyboard = new NativeKeyboard(new NativeUiaKeyboard(reader.Store, pointer), new NativeWindowsClipboard());
-            var desktopKeyboard = new NativeKeyboard(new NativeDesktopKeyboard(captures));
-            return new NativeRuntime(session, reader, new NativeExecution(new NativeUiaObjects(reader.Store), keyboard, pointer, new NativeScroll(new NativeUiaScroll(reader.Store)), desktopKeyboard, new NativeUiaCurrentReceiver(reader.Store)), new NativeCapture(reader.Store, session, mode, captures), AgentPointerFeedback.Point);
+            var pointer = new NativePointer(new NativeWindowsPointer(reader.Store, captures, globalInputAllowed));
+            var keyboard = new NativeKeyboard(new NativeUiaKeyboard(reader.Store, pointer, allowGlobalInput: globalInputAllowed), new NativeWindowsClipboard());
+            var desktopKeyboard = new NativeKeyboard(new NativeDesktopKeyboard(captures, globalInputAllowed));
+            return new NativeRuntime(session, reader, new NativeExecution(new NativeUiaObjects(reader.Store), keyboard, pointer, new NativeScroll(new NativeUiaScroll(reader.Store)), desktopKeyboard, new NativeUiaCurrentReceiver(reader.Store)), new NativeCapture(reader.Store, session, captures), AgentPointerFeedback.Point);
         }
 
         [MTAThread]
@@ -65,7 +65,7 @@ namespace ComputerUse.Windows
                 else
                 {
                     NativeIsolatedRuntime runtime = null;
-                    new Driver((session, mode) => runtime = new NativeIsolatedRuntime(session, mode), stopDisplay: () =>
+                    new Driver((session, globalInputAllowed) => runtime = new NativeIsolatedRuntime(session, globalInputAllowed), stopDisplay: () =>
                     {
                         if (runtime != null)
                             runtime.StopDisplay();

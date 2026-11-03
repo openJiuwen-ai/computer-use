@@ -21,6 +21,7 @@ import ApplicationServices
     }
 
     @MainActor static func main() {
+        dispatchBasis()
         let original = geometry()
         let expanded = geometry(frame: original.frame.insetBy(dx: -25, dy: -15))
         precondition(expanded.permitsFrozenDispatch(
@@ -59,5 +60,40 @@ import ApplicationServices
                          "original coordinate mapping, point and current visible scope remain mandatory")
         }
         print("Element pointer continuity regressions passed")
+    }
+
+    @MainActor private static func dispatchBasis() {
+        let bases: [Basis] = [.exactHit, .providerStackingGeometry, .coarseAncestorGeometry, .backgroundGeometry, .rejected]
+        for basis in bases {
+            for exactOriginalHit in [false, true] {
+                for hasMember in [false, true] {
+                    precondition(NativeElementPointerUnit.allowsDispatchBasis(
+                        basis, requirement: .contentReceiver, exactOriginalHit: exactOriginalHit, hasMember: hasMember
+                    ) == (basis != .rejected), "existing geometry and member routes keep their qualification")
+                    precondition(NativeElementPointerUnit.allowsDispatchBasis(
+                        basis, requirement: .foregroundWindowPoint, exactOriginalHit: exactOriginalHit, hasMember: hasMember
+                    ) == (basis == .exactHit && exactOriginalHit && !hasMember),
+                        "foreground preparation cannot replace the original-element exact hit with a weaker basis")
+                }
+            }
+        }
+        let target = AXUIElementCreateApplication(getpid())
+        let unit = NativeElementPointerUnit(application: .current, window: target, element: target)
+        let selected = unit.requiring(.foregroundWindowPoint)
+        precondition(unit.pointerRequirement == .contentReceiver)
+        precondition(selected.pointerRequirement == .foregroundWindowPoint)
+        precondition(CFEqual(selected.element, unit.element) && CFEqual(selected.window, unit.window))
+        // Construction only: no AX query, application activation or input post.
+        // Preparation/exposure/dispatch use this same narrow constructor.
+        let original = geometry()
+        let refreshed = geometry(window: original.mapping.frame.offsetBy(dx: 10, dy: 20))
+        for mapping in [original.mapping, refreshed.mapping] {
+            let pointer = selected.pointerUnit(mapping: mapping)
+            precondition(pointer.pointerRequirement == .foregroundWindowPoint)
+            precondition(pointer.window.id == mapping.id && pointer.window.frame == mapping.frame)
+            precondition(pointer.nativeWindow.map { CFEqual($0, target) } == true)
+            precondition(!pointer.backgroundPreparationAvailable(),
+                         "refreshing original geometry cannot drop the fixed foreground requirement")
+        }
     }
 }

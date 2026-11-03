@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Verify exact native actions using real AX callbacks in a disposable window.
@@ -29,6 +28,7 @@ from pathlib import Path
 import computer_use
 import computer_use.interaction.write.progress as write_progress
 import computer_use.interaction.write.routes.policy as write_policy
+from artifact_json import encode_artifact
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.errors import ComputerUseError
@@ -85,7 +85,7 @@ async def verify(folder, baseline, driver=None, cases=None):
     bundle = "local.computer-use.explicit-action." + uuid.uuid4().hex
     build_fixture(folder, bundle, "ExplicitActionProbe")
     initial = await state(folder)
-    computer = Computer()
+    computer = Computer(allow_global_input=False)
     driver = Path(driver if driver is not None else native_driver()["command"]).resolve()
     computer._controller.transport.driver = {"command": str(driver), "args": []}
     events, actions, unexpected_input = [], [], []
@@ -164,6 +164,7 @@ async def verify(folder, baseline, driver=None, cases=None):
         "source_sha256": {str(path): sha(path) for path in sources},
         "native_source_tree_sha256": native_source_digest(),
         "baseline": baseline,
+        "global_input_allowed": False,
         "source_provenance": "source_sha256 and native_source_tree_sha256 describe the current workspace at report time; they do not establish the source used to build a retained driver. Python hashes identify the loaded runtime sources.",
         "baseline_source_manifest": str(ROOT / ".artifacts/explicit-action-baseline-driver/metadata.json")
         if baseline
@@ -227,7 +228,13 @@ async def verify(folder, baseline, driver=None, cases=None):
                 )
             except ComputerUseError as caught:
                 error = caught
-                receipt = {"code": caught.code, "effect": caught.effect, "detail": caught.detail}
+                receipt = {
+                    "code": caught.code, "effect": caught.effect, "detail": caught.detail,
+                    "impact": caught.impact, "observation": caught.observation,
+                    "observation_status": caught.observation_status,
+                    "observation_error": caught.observation_error,
+                    "window_lifecycle": caught.window_lifecycle,
+                }
             await asyncio.sleep(0.1)
             after = await state(folder)
             if case == "slow" and after["performed"]:
@@ -240,10 +247,26 @@ async def verify(folder, baseline, driver=None, cases=None):
                 and event["value"].get("kind") == "input_activity"
                 and event["value"].get("phase") == "willCall"
             ]
+            input_effects = [effect for effect in effects if effect.get("stage") == "input"]
+            preparation_effects = [effect for effect in effects if effect.get("stage") == "preparation"]
+            cleanup_effects = [effect for effect in effects if effect.get("stage") == "cleanup"]
+            unknown_effects = [
+                effect for effect in effects if effect.get("stage") not in ("input", "preparation", "cleanup")
+            ]
+            # A successful write includes a separate postwrite observation.
+            # Use the provider's snapshot at its actual action callback to keep
+            # presentation reads out of the raw-action dispatch contract.
+            callback_reads = after["descriptionReadsAtCallbacks"]
+            dispatch_reads = callback_reads[0] if callback_reads else after["descriptionReads"]
             description_delta = {
                 name: count - before["descriptionReads"].get(name, 0)
-                for name, count in after["descriptionReads"].items()
+                for name, count in dispatch_reads.items()
                 if count != before["descriptionReads"].get(name, 0)
+            }
+            post_dispatch_description_delta = {
+                name: count - dispatch_reads.get(name, 0)
+                for name, count in after["descriptionReads"].items()
+                if count != dispatch_reads.get(name, 0)
             }
             input_contexts = [
                 {
@@ -263,7 +286,13 @@ async def verify(folder, baseline, driver=None, cases=None):
                 "result": receipt,
                 "after": after,
                 "description_reads_during_action": description_delta,
+                "description_reads_after_callback": post_dispatch_description_delta,
+                "description_measurement": "provider callback boundary" if callback_reads else "no callback dispatched",
                 "effects": effects,
+                "input_effects": input_effects,
+                "preparation_effects": preparation_effects,
+                "cleanup_effects": cleanup_effects,
+                "unknown_effects": unknown_effects,
                 "mutation_applied": pending_mutation is None,
                 "api_success": error is None,
                 "callback_confirmed": len(after["performed"]) == 1,
@@ -315,20 +344,34 @@ async def verify(folder, baseline, driver=None, cases=None):
                     else "AXCustomExact"
                 )
                 assert after["performed"] == [expected], item
+                assert not unknown_effects and not cleanup_effects, item
+                if case == "press_duplicate":
+                    assert len(preparation_effects) <= 1 and all(
+                        effect["device"] == "focus"
+                        and effect["transport"] == "process"
+                        and effect["mechanism"] == "processApplicationActivationNotification"
+                        and effect["recipientPID"] == before["pid"]
+                        for effect in preparation_effects
+                    ), item
+                else:
+                    assert not preparation_effects, item
                 if case == "slow":
                     item["timeout_observed"] = "AX error -25204" in receipt.get("detail", "")
                     assert (
                         error is not None and receipt["code"] == "execution_unknown" and receipt["effect"] == "possible"
                     ), item
-                    assert len(effects) == 1, item
+                    assert len(input_effects) == 1, item
                 elif case.startswith("standard") or case == "press_duplicate":
-                    assert error is None and len(effects) == 1, item
+                    assert error is None and len(input_effects) == 1, item
                 else:
                     assert (
                         error is not None and receipt["code"] == "execution_unknown" and receipt["effect"] == "possible"
                     ), item
-                    assert "AX error -25205" in receipt["detail"] and len(effects) == 1, item
-                assert effects[0]["mechanism"] == expected, item
+                    assert "AX error -25205" in receipt["detail"] and len(input_effects) == 1, item
+                assert input_effects[0]["mechanism"] == expected, item
+                if case == "changing":
+                    assert receipt["observation_status"] == "available" and receipt["observation"] is not None, item
+                    assert receipt["impact"].attempts[-1].dispatch == "unknown", item
                 if not baseline and action_name not in ["Run probe", "Execute probe"] and case != "press_duplicate":
                     assert not description_delta, item
                 if not baseline and case in ["large", "standard_large"]:
@@ -339,7 +382,9 @@ async def verify(folder, baseline, driver=None, cases=None):
                         assert primitive["unit"] == "native_action" and primitive["action"]["name"] == expected, item
         report["passed"] = True
     finally:
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
         computer._controller.transport.close()
         await computer._controller.transport.wait_closed()
         set_diagnostic_handler(None)

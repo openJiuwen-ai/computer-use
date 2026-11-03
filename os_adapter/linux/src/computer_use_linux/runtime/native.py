@@ -160,7 +160,7 @@ def query(value):
             )
         decode_selection_request(value)
     else:
-        raise Failure("This Linux v6 driver does not implement inspect " + str(kind) + ".", "mode_unsupported")
+        raise Failure("This Linux v6 driver does not implement inspect " + str(kind) + ".", "unsupported_operation")
     return value
 
 
@@ -306,7 +306,7 @@ class NativeExecution:
                     or target["surface"] is None
                     and intent["kind"] in ("key", "insert"),
                     "Image input supports pointer intents; captured desktop also supports keys and text insertion.",
-                    "mode_unsupported",
+                    "unsupported_operation",
                 )
             if writable and not launch:
                 decoder = (
@@ -345,7 +345,7 @@ class NativeExecution:
             return self.capture_pipeline.run(params, ctx)
         if method == "execute":
             return self.inputs.run(params, ctx)
-        require(method == "inspect", "This Linux v6 driver has no " + str(method) + " unit.", "mode_unsupported")
+        require(method == "inspect", "This Linux v6 driver has no " + str(method) + " unit.", "unsupported_operation")
         return self.queries.run(params, ctx)
 
     def close(self):

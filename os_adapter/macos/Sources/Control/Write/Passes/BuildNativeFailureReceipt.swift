@@ -9,7 +9,26 @@ import ApplicationServices
         _ error: Error, kind: String, foreground: Bool, id: String, op: NativeOperation, receipt: NativeExecutionReceipt
     ) {
         receipt.recordFailure(error)
-        if receipt.dispatch == "notDispatched", error is NativeSelectionBasis.Changed {
+        if error is NativeRouteUnavailable {
+            // A positively disqualified mechanism cannot be repaired by
+            // foreground preparation. Do not let its dispatched cases fall
+            // through to the broader inputUnavailable classification below.
+            if receipt.dispatch == "notDispatched", receipt.cleanup == "complete",
+                !op.inputStarted, op.cleanup == "complete"
+            {
+                receipt.retryReason = "routeUnavailable"
+            }
+            return
+        }
+        if (error as? ClassifiedFailure)?.code == .permissionRequired,
+            receipt.dispatch == "notDispatched", receipt.preparation.isEmpty, receipt.cleanup == "complete",
+            !op.inputStarted, op.cleanup == "complete"
+        {
+            // A late transport qualification can reveal a global requirement.
+            // Preserve that reason while allowing the public Gate to consider
+            // another route only if its cumulative effect history also permits.
+            receipt.retryReason = "routeUnavailable"
+        } else if receipt.dispatch == "notDispatched", error is NativeSelectionBasis.Changed {
             receipt.retryReason = "preconditionChanged"
         } else if receipt.dispatch == "notDispatched", (error as? ClassifiedFailure)?.code == .inputUnavailable,
             !(error is NativeReceiverContinuity.Lost)

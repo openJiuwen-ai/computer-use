@@ -12,9 +12,8 @@ from computer_use.interaction.read.presentation.rendering.layout.passes.group_ch
     stage as group_child_coverage,
 )
 from computer_use.interaction.read.presentation.rendering.layout.passes.group_empty_values import (
-    execute as apply_group_empty_values,
+    stage as group_empty_values,
 )
-from computer_use.interaction.read.presentation.rendering.layout.passes.group_empty_values import group_empty_values
 from computer_use.interaction.read.presentation.rendering.layout.passes.group_field_descriptions import (
     stage as group_field_descriptions,
 )
@@ -85,7 +84,7 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-STAGES = (group_empty_values, join_container_chains, join_text_parts)
+STAGES = (join_container_chains, join_text_parts)
 
 
 def layout_pass(
@@ -97,7 +96,6 @@ def layout_pass(
         function: Bound local handler; selecting it does not execute an unchosen branch.
     """
     handlers = {
-        group_empty_values: apply_group_empty_values,
         join_container_chains: apply_join_container_chains,
         join_text_parts: apply_join_text_parts,
         join_visual_chains: apply_join_visual_chains,
@@ -130,13 +128,13 @@ class LayoutPipeline(Pipeline["LayoutFrame", "LayoutFrame"]):
             name="LayoutPipeline",
             selector=select_layout_scope(),
             branches={
-                "unpacked": Sequence(name="UnpackedLayout", steps=[layout_pass(group_empty_values)]),
+                "unpacked": Sequence(name="UnpackedLayout", steps=[group_empty_values()]),
                 "compact": Sequence(
                     name="CompactLayout",
                     steps=[
                         group_child_coverage(),
                         group_sibling_actions(),
-                        layout_pass(group_empty_values),
+                        group_empty_values(),
                         layout_pass(join_visual_chains),
                         group_identical_leaves(),
                         group_leaf_headers(),
@@ -153,7 +151,9 @@ class LayoutPipeline(Pipeline["LayoutFrame", "LayoutFrame"]):
                         group_field_descriptions(),
                     ],
                 ),
-                "full": Sequence(name="FullLayout", steps=[*(layout_pass(stage) for stage in STAGES)]),
+                "full": Sequence(
+                    name="FullLayout", steps=[group_empty_values(), *(layout_pass(stage) for stage in STAGES)]
+                ),
             },
         )
 

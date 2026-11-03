@@ -149,11 +149,12 @@ class Server:
             if identifier == 0:
                 fields(raw, ("version", "id", "method", "params"))
                 require(self.backend is None and raw["method"] == "hello", "Expected one hello.")
-                fields(raw["params"], ("desktopMode",))
-                require(raw["params"]["desktopMode"] == "exclusive", "Invalid desktop mode.")
+                fields(raw["params"], ("globalInputAllowed",))
+                allow_global_input = raw["params"]["globalInputAllowed"]
+                require(type(allow_global_input) is bool, "Global input permission must be a boolean.")
                 ctx.check()
                 self.version = raw["version"]
-                self.backend = self.factory(raw["params"]["desktopMode"], self.stopped)
+                self.backend = self.factory(allow_global_input, self.stopped)
                 from computer_use_linux.runtime.native import NativeExecution
 
                 self.native = NativeExecution(self.backend, self.session)
@@ -161,7 +162,7 @@ class Server:
                     0,
                     result=dict(
                         platform="linux",
-                        desktopMode=raw["params"]["desktopMode"],
+                        globalInputAllowed=allow_global_input,
                         maxTimeoutMs=120000,
                         capabilities=self.native.capabilities,
                     ),

@@ -10,6 +10,7 @@ import AppKit
     var aliasTransferred = false, duplicateAtDispatch = false
     var nameReads = 0
     var descriptionReads = [String: Int]()
+    var descriptionReadsAtCallbacks = [[String: Int]]()
     var performed = [String]()
     var callbackFinished = true
     var record: () -> Void = {}
@@ -59,6 +60,7 @@ import AppKit
     override nonisolated func accessibilityPerformAction(_ action: NSAccessibility.Action) {
         MainActor.assumeIsolated {
             guard names.contains(action.rawValue) else { return }
+            descriptionReadsAtCallbacks.append(descriptionReads)
             performed.append(action.rawValue)
             callbackFinished = false
             record()
@@ -80,6 +82,7 @@ import AppKit
         duplicateAtDispatch = false
         nameReads = 0
         descriptionReads = [:]
+        descriptionReadsAtCallbacks = []
         performed = []
         callbackFinished = true
     }
@@ -101,6 +104,7 @@ import AppKit
             "mode": target.mode, "mutation": mutation, "names": target.names,
             "aliasTransferred": target.aliasTransferred, "duplicateAtDispatch": target.duplicateAtDispatch,
             "nameReads": target.nameReads, "descriptionReads": target.descriptionReads,
+            "descriptionReadsAtCallbacks": target.descriptionReadsAtCallbacks,
             "performed": target.performed, "callbackFinished": target.callbackFinished,
             "targetIdentity": String(describing: ObjectIdentifier(target)),
             "inOriginalWindow": target.window === window, "sheetAttached": window.attachedSheet != nil,

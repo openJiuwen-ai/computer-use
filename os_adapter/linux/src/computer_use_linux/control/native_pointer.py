@@ -10,6 +10,7 @@ image geometry and the actual hit route, then owns one continuous event sequence
 from copy import deepcopy
 from typing import Any, NamedTuple
 
+from computer_use_linux.contracts.input_authority import require_global_input
 from computer_use_linux.contracts.protocol import Failure, fields, finite, integer, require
 from computer_use_linux.control.native_target import NativeTarget
 from computer_use_linux.system.x11_pointer import PointerCallbacks
@@ -32,7 +33,7 @@ def pointer_intent(value, *, element=False):
         p = fields(value["parameters"], ("fromX", "fromY", "toX", "toY"))
         keys = ("fromX", "fromY", "toX", "toY")
     else:
-        raise Failure("This pointer input intent is not implemented.", "mode_unsupported")
+        raise Failure("This pointer input intent is not implemented.", "unsupported_operation")
     for key in keys:
         finite(p[key])
     return deepcopy(value)
@@ -95,7 +96,7 @@ class NativePointer:
         require(
             getattr(self.desktop, "can_input", False),
             "This desktop has no native pointer event route.",
-            "mode_unsupported",
+            "unsupported_operation",
         )
         image, selected, native = self.image(target, ctx)
         points = self.desktop.points(
@@ -137,6 +138,7 @@ class NativePointer:
             id=identifier,
             unit="pointer_sequence",
             channel="pointer",
+            globalInput="yes",
             supported="yes" if supported else "no",
             readiness="yes" if ready else "no",
             pending=[] if ready else ["foreground"],
@@ -213,6 +215,7 @@ class NativePointer:
         desktop_target = contract["target"]["surface"] is None
         expected_keyboard = None
         try:
+            require_global_input(self.desktop)
             if preparing:
                 if self.prepare(operation, contract, command["foreground"], ctx, preparation):
                     confirmation, detail = "confirmed", "The selected pointer target is reachable."

@@ -24,6 +24,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 import computer_use.interaction.write.progress as write_progress
 from computer_use import Computer
@@ -149,7 +151,7 @@ async def verify(folder, expect_replace_blocked, driver=None):
                 assert after["selectCommands"] == 0 and after["textCallbacks"] == 0, actions[-1]
         report["passed"] = True
     finally:
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n")
+        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
         computer._controller.transport.close()
         await computer._controller.transport.wait_closed()
         set_diagnostic_handler(None)

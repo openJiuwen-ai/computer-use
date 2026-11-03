@@ -30,7 +30,6 @@ import ApplicationServices
 
 /// A process identity from an observation, never a lookup of the current foreground app.
 @MainActor struct BackgroundTarget {
-    static let desktopMode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "exclusive"
     let application: NSRunningApplication
     let launched: Date?
     private let nativeIdentity: NativeProcessIdentity?
@@ -139,9 +138,6 @@ import ApplicationServices
         // Cancellation stops further input, but identity-only checks used by
         // key/button release must remain available while the task unwinds.
         if input { try RequestDiagnostics.checkCancellation() }
-        guard Self.desktopMode == "exclusive" else {
-            throw DriverError("COMPUTER_USE_DESKTOP must be exclusive", code: .modeUnsupported)
-        }
         // Preserve the original short-circuit order. Construct diagnostic fields
         // only on failure, from the exact values this validation evaluated.
         // In particular, a later lookup must not replace missing process data.

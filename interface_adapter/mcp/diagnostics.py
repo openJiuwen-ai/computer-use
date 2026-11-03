@@ -71,7 +71,7 @@ def now():
 
 
 class Journal:
-    def __init__(self):
+    def __init__(self, *, allow_global_input=True):
         directory = Path(os.environ.get("COMPUTER_USE_LOG_DIR", str(Path.home() / ".computer-use/logs")))
         self.path = directory / (now().replace(":", "-").replace(".", "-") + "-" + str(uuid.uuid4()) + ".jsonl")
         self._error = None
@@ -86,7 +86,7 @@ class Journal:
                     sdkVersion=SDK_VERSION,
                     platform=sys.platform,
                     python=sys.version.split()[0],
-                    desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "exclusive"),
+                    globalInputAllowed=allow_global_input,
                 )
             )
         except Exception as error:

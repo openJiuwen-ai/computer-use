@@ -34,7 +34,10 @@ def execution_error(message):
 
 
 class ExecutionSession:
-    def __init__(self, timeout_ms=45000, on_preview=None, demo_foreground=False):
+    def __init__(self, timeout_ms=45000, on_preview=None, demo_foreground=False, *, allow_global_input=True):
+        if type(allow_global_input) is not bool:
+            raise TypeError("allow_global_input must be a boolean")
+        self.allow_global_input = allow_global_input
         self.demo_foreground = demo_foreground
         self.timeout_ms, self.on_preview = timeout_ms, on_preview
         self._child = self._pending = self._retiring = self._resetting = self._exited = None
@@ -44,7 +47,7 @@ class ExecutionSession:
         self._worker = None
         self._generation = 0
         self._next_id = 1
-        self._journal, self._history = Journal(), HistoryGate()
+        self._journal, self._history = Journal(allow_global_input=allow_global_input), HistoryGate()
         self._tasks = set()
 
     def _track(self, coroutine):
@@ -253,7 +256,11 @@ class ExecutionSession:
 
             try:
                 child, self._reader, self._writer, job, listener = await start_windows_worker(
-                    env, stderr=asyncio.subprocess.PIPE, on_spawned=spawned, timeout=worker.remaining()
+                    env,
+                    module_args=("--allow-global-input" if self.allow_global_input else "--no-allow-global-input",),
+                    stderr=asyncio.subprocess.PIPE,
+                    on_spawned=spawned,
+                    timeout=worker.remaining(),
                 )
             except Exception as error:
                 await worker.settle(min(EXIT_SETTLE_SECONDS, worker.remaining()))
@@ -283,6 +290,7 @@ class ExecutionSession:
                 sys.executable,
                 "-m",
                 "computer_use_mcp.runtime",
+                "--allow-global-input" if self.allow_global_input else "--no-allow-global-input",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,

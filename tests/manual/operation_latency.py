@@ -10,10 +10,10 @@ Only the owned fixture receives input.
 import argparse
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import plistlib
-import re
 import signal
 import statistics
 import subprocess
@@ -22,6 +22,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
+from artifact_json import captured_interface_metadata, encode_artifact
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -78,7 +79,7 @@ async def measure(args):
     report["driver_sha256"] = hashlib.sha256(driver.read_bytes()).hexdigest()
 
     def save():
-        (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact))
 
     async def invoke(session, category, code):
         start = perf_counter()
@@ -105,9 +106,11 @@ async def measure(args):
             raise AssertionError(body[:2000])
         return body
 
-    environment = {**os.environ, "COMPUTER_USE_DESKTOP": args.desktop, "COMPUTER_USE_LOG_DIR": str(output / "mcp-logs")}
+    environment = {**os.environ, "COMPUTER_USE_LOG_DIR": str(output / "mcp-logs")}
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "computer_use_mcp"], cwd=str(args.repository), env=environment
+        command=sys.executable,
+        args=["-m", "computer_use_mcp", "--allow-global-input" if args.allow_global_input else "--no-allow-global-input"],
+        cwd=str(args.repository), env=environment
     )
     try:
         with (output / "stderr.log").open("w") as errors:
@@ -118,17 +121,20 @@ async def measure(args):
                         await invoke(session, "startup", f"print(await computer.{names['list']}())")
                         for _ in range(args.iterations):
                             await invoke(session, "list_apps", f"print(await computer.{names['list']}())")
-                        choices = await invoke(
+                        await invoke(
                             session,
                             "fixture_discovery",
-                            'base = computer.app("OperationLatencyProbe")\nawait base.read()',
+                            'base = computer.app("OperationLatencyProbe")\ndiscovery = await base.read()\ndiscovery',
                         )
-                        selected = re.search(r"(?m)^(\d+) .* — Discovery document A['\"]; computer.app", choices)
-                        assert selected, choices
                         await invoke(
                             session,
                             "fixture_bind",
-                            f"probe = computer.app({selected[1]})\nawait probe.read()\nfield = await probe.element('Document input')\nbutton = await probe.element('Mark document')",
+                            "import json\n" + inspect.getsource(captured_interface_metadata)
+                            + "\ncatalogue = await captured_interface_metadata(discovery)\n"
+                            "targets = [item for item in catalogue['windows'] if item['title'] == 'Discovery document A']\n"
+                            "assert len(targets) == 1, catalogue\n"
+                            "probe = base.window(targets[0]['ref'])\nawait probe.read()\n"
+                            "field = await probe.element('Document input')\nbutton = await probe.element('Mark document')",
                         )
                         for index in range(args.iterations):
                             await invoke(session, "fixture_tree", "await probe.read()")
@@ -145,18 +151,19 @@ async def measure(args):
                             await state_at(output, lambda state: state["documents"]["A"]["value"] == value + "x")
                             assert (await state_at(output, lambda _: True))["documents"]["B"]["value"] == "original B"
                         if args.system_settings:
-                            choices = await invoke(
+                            await invoke(
                                 session,
                                 "settings_discovery",
-                                'settings_base = computer.app("系统设置")\nawait settings_base.read()',
+                                'settings = computer.app("系统设置")\nsettings_discovery = await settings.read()\nsettings_discovery',
                             )
-                            candidates = re.findall(r"(?m)^(\d+) .*; computer.app\(\d+\)$", choices)
-                            code = (
-                                f"settings = computer.app({candidates[0]})"
-                                if candidates
-                                else "settings = settings_base"
+                            await invoke(
+                                session,
+                                "settings_bind",
+                                "catalogue = await captured_interface_metadata(settings_discovery)\n"
+                                "target = catalogue['current']\n"
+                                "assert target is not None, catalogue\n"
+                                "settings = settings.window(target)",
                             )
-                            await invoke(session, "settings_bind", code)
                             for _ in range(args.iterations):
                                 await invoke(session, "settings_tree", "await settings.read()")
                                 await invoke(session, "settings_both", "await settings.read(view='both')")
@@ -195,5 +202,5 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--system-settings", action="store_true")
-    parser.add_argument("--desktop", choices=("exclusive",), default="exclusive")
+    parser.add_argument("--allow-global-input", action="store_true")
     asyncio.run(measure(parser.parse_args()))

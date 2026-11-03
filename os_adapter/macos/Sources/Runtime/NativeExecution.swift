@@ -90,14 +90,16 @@ import ApplicationServices
     func perform(_ method: String, _ raw: Any?, timeoutMs: Int) async throws -> [String: Any] {
         let token = (raw as? [String: Any])?["operation"] as? String
         let activity = token == current?.token ? pointerActivity : nil
-        return try await AgentPointer.$current.withValue(activity) {
-            do {
-                return try await DriverPipeline.perform(
-                    method, raw, timeoutMs: timeoutMs, operation: self.operation, resource: self.resourceAccess,
-                    query: self.queryAccess, control: self.controlAccess, launch: self.launchAccess)
-            } catch {
-                activity?.recordOutcome(success: false)
-                throw error
+        return try await NativeInputAuthorization.$globalInputAllowed.withValue(state.globalInputAllowed) {
+            try await AgentPointer.$current.withValue(activity) {
+                do {
+                    return try await DriverPipeline.perform(
+                        method, raw, timeoutMs: timeoutMs, operation: self.operation, resource: self.resourceAccess,
+                        query: self.queryAccess, control: self.controlAccess, launch: self.launchAccess)
+                } catch {
+                    activity?.recordOutcome(success: false)
+                    throw error
+                }
             }
         }
     }

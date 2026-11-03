@@ -13,6 +13,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
@@ -91,7 +93,7 @@ async def verify(folder):
             "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
             "actions": actions,
         }
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
     finally:
         computer._controller.transport.close()
         await computer._controller.transport.wait_closed()

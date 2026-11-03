@@ -7,6 +7,11 @@ from .client.computer import UI, App, Computer, Element, Window
 from .errors import ComputerUseError
 from .types import (
     ActionResult,
+    ActionImpact,
+    ActualInputImpact,
+    InputAttempt,
+    InputEffect,
+    PreparationImpact,
     AppInfo,
     Button,
     ClickOption,
@@ -15,14 +20,21 @@ from .types import (
     ElementPath,
     ElementSelector,
     Observation,
+    ObservationError,
     Point,
     TextPage,
     View,
+    WindowInfo,
 )
 
 __all__ = [
     "UI",
     "ActionResult",
+    "ActionImpact",
+    "ActualInputImpact",
+    "InputAttempt",
+    "InputEffect",
+    "PreparationImpact",
     "App",
     "AppInfo",
     "Button",
@@ -35,10 +47,12 @@ __all__ = [
     "ElementPath",
     "ElementSelector",
     "Observation",
+    "ObservationError",
     "Point",
     "TextPage",
     "View",
     "Window",
+    "WindowInfo",
     "__version__",
 ]
 

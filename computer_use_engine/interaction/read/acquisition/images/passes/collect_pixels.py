@@ -36,7 +36,7 @@ def create(*, services: NativeAppReader) -> Callable[[ComponentLease, Control], 
         if "nativeCapture" not in services.port.capabilities:
             gap = ObservationGap(
                 "image",
-                "mode_unsupported",
+                "unsupported_operation",
                 "This driver does not declare window capture.",
                 "use a driver with nativeCapture support",
             )

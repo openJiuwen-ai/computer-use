@@ -77,11 +77,17 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
         if context is None:
             context = "App selector: " + json_string(source["selector"])
         stale = source.get("current", lambda: True)() is False
-        identity = "Window reference: " + (source.get("window") if source.get("window") is not None else "unknown")
+        windows = source.get("windows", ())
+        identity = (
+            ("Window reference: " if len(windows) == 1 else "Window references: ") + ", ".join(map(str, windows))
+            if windows
+            else "Window reference: unknown"
+        )
         if source.get("observed"):
             identity += "; observation=" + json_string(source["observed"]["id"])
         facts = dict(
             kind="window",
+            mappingAvailable=source.get("mappingAvailable", True),
             context=context,
             identity=identity,
             stale=stale,
@@ -101,4 +107,9 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
                 lines=[dict(line, rect=coordinates.delivered_rect(line["rect"])) for line in visual["lines"]],
             )
     caption = render_image_caption(size["width"], size["height"], facts)
-    return caption + ("\nUse this displayed image's pixels for coordinates." if coordinates is not None else "")
+    actionable = (
+        facts["kind"] in ("desktop", "window") and not facts.get("stale") and facts.get("mappingAvailable", True)
+    )
+    return caption + (
+        "\nUse this displayed image's pixels for coordinates." if coordinates is not None and actionable else ""
+    )

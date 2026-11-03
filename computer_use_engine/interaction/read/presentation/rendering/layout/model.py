@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.actions.catalogue import ActionCatalogue
     from computer_use.interaction.read.presentation.interface.model import InterfaceDocument
     from computer_use.interaction.read.presentation.records import FormatField, NodeView, RenderedTree
+    from computer_use.interaction.read.presentation.rendering.layout.empty_values import EmptyValueLine
     from computer_use.interaction.read.presentation.rendering.layout.field_prefixes import (
         FieldPrefixReplacement,
         NativeFieldSource,
@@ -152,6 +153,7 @@ class LayoutFrame:
         interface: Frozen source-bound layout choices, prepared before text generation.
         node_action_lines: Exact complete first lines and producer-generated alternatives
             without their own action slot; scoped action declarations retain that information.
+        empty_value_lines: Source-qualified cell positions and complete producer-generated fields.
     """
 
     lines: list[str]
@@ -179,3 +181,4 @@ class LayoutFrame:
     table_layouts: tuple[TableLayoutEvidence, ...] = ()
     interface: InterfaceDocument | None = None
     node_action_lines: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    empty_value_lines: Mapping[str, EmptyValueLine] = field(default_factory=dict)

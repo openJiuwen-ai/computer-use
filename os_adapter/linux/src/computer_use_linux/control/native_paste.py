@@ -10,6 +10,7 @@ never substitutes text insertion or retries the paste.
 
 from copy import deepcopy
 
+from computer_use_linux.contracts.input_authority import require_global_input
 from computer_use_linux.contracts.protocol import Failure, fields, require, string
 from computer_use_linux.control.native_keyboard import NativeKeyboard
 from computer_use_linux.control.native_selection import Changed
@@ -73,6 +74,8 @@ class NativePaste(NativeKeyboard):
         error_code, retry = None, None
         detail = "Paste was not dispatched."
         try:
+            if operation.intent["parameters"]["text"]:
+                require_global_input(self.desktop)
             self.ax.begin(ctx)
             self.preflight(operation)
             if operation.intent["parameters"]["text"] == "":

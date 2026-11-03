@@ -3,7 +3,7 @@
 
 """Action receipt identity and captured-text delivery callbacks."""
 
-from computer_use.identity import FrozenRecord, WeakIdentityMap
+from computer_use.identity import FrozenRecord, WeakIdentityMap, freeze_result
 
 _actions = WeakIdentityMap()
 # Private variables hold mutable session state.
@@ -11,9 +11,23 @@ _actions = WeakIdentityMap()
 _text_handler = None
 
 
-def action_result(receipt):
-    result = FrozenRecord(dict(status=receipt["status"], detail=receipt["detail"]))
+def action_result(receipt, *, observation=None):
+    values = dict(status=receipt["status"], detail=receipt["detail"])
+    values["impact"] = freeze_result(receipt.get("impact"))
+    if observation is not None:
+        values.update(
+            observation=observation.observation,
+            observation_status=observation.observation_status,
+            observation_error=observation.observation_error,
+            window_lifecycle=observation.window_lifecycle,
+            choices=observation.choices,
+        )
+    result = FrozenRecord(values)
     _actions.set(result, receipt)
+    if observation is not None and observation.observation_error is not None:
+        from computer_use.session.events import action_observation_completed
+
+        action_observation_completed(result)
     return result
 
 

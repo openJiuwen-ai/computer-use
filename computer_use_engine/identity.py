@@ -89,5 +89,14 @@ class FrozenRecord(Mapping):
         return self._display if self._display is not None else repr(dict(self._data))
 
 
+def freeze_result(value):
+    """Make nested public result evidence immutable without altering scalar facts."""
+    if isinstance(value, Mapping):
+        return FrozenRecord({key: freeze_result(item) for key, item in value.items()})
+    if isinstance(value, (tuple, list)):
+        return tuple(freeze_result(item) for item in value)
+    return value
+
+
 if TYPE_CHECKING:
     from typing import Any

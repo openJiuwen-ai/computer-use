@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Compare automatic click and explicit AXPress on real WebKit objects.
@@ -26,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import computer_use
+from artifact_json import encode_artifact
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.errors import ComputerUseError
@@ -160,6 +160,7 @@ async def verify(directory, bundle, options, sentinel_app):
         "operation": options.operation,
         "preparation": options.preparation,
         "requested_state": options.state,
+        "global_input_allowed": options.allow_global_input,
         "stage": "setup",
         "setup": [],
         "setup_ready": False,
@@ -192,7 +193,7 @@ async def verify(directory, bundle, options, sentinel_app):
         if options.launch_only:
             return
         result["stage"] = "observation"
-        computer = Computer()
+        computer = Computer(allow_global_input=options.allow_global_input)
         computer._controller.transport.driver = {"command": str(driver), "args": []}
         app = computer.app(bundle)
         observation = await app.read(view="tree")
@@ -297,7 +298,7 @@ async def verify(directory, bundle, options, sentinel_app):
             except OSError as error:
                 cleanup.append({"component": label, "pid": owned["pid"], "error": str(error)})
         result["cleanup"] = cleanup
-        (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+        (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, default=encode_artifact) + "\n")
 
 
 def main():
@@ -308,6 +309,7 @@ def main():
     parser.add_argument("--state", choices=["background", "foreground"], default="background")
     parser.add_argument("--element", help="Observed SDK reference or exact label override")
     parser.add_argument("--driver", type=Path, help="Native driver for an isolated before/after comparison")
+    parser.add_argument("--allow-global-input", action="store_true", help="Explicitly authorize global input for this run")
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--launch-only", action="store_true")
     parser.add_argument("--retain", action="store_true")

@@ -8,7 +8,7 @@ from dataclasses import replace
 from computer_use.interaction.write.diagnostics import record_click_selection
 from computer_use.interaction.write.routes.policy import preparation_pair_available, refuse, route_key
 from computer_use.interaction.write.routes.selection.admission import stage_admission
-from computer_use.interaction.write.routes.selection.impact import least_disruptive_group
+from computer_use.interaction.write.routes.selection.impact import global_input_denied, least_disruptive_group
 from computer_use.interaction.write.routes.selection.model import CandidateSet
 from computer_use.native.contracts import ClickSelectionDecision, ClickSelectionExclusion, UnitCommand
 from computer_use.pipeline import Contract, Pass
@@ -52,6 +52,8 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
             reason = offer.admission + (": " + offer.reason if offer.reason else "")
         if reason is None and not admission.ready and not preparation_pair_available(command, history):
             reason = "receiverPreparationAllowance"
+        if reason is None and global_input_denied(command, request.policy):
+            reason = "globalInputPermissionRequired"
         if reason is not None:
             exclusions.append(ClickSelectionExclusion(offer.route_family, reason, facts.observed))
             continue
@@ -95,6 +97,13 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
     choices = least_disruptive_group(ready, background, foreground)
     if not choices:
         record_click_selection(control, request, tuple(exclusions), None)
+        if any(item.reason == "globalInputPermissionRequired" for item in exclusions):
+            refuse(
+                "permission_required",
+                facts,
+                "The available click route requires global mouse input, which this session has not authorized.",
+                "obtain permission from the caller before creating a session with allow_global_input=True",
+            )
         detail = (
             facts.unavailable_reason or "No click delivery can satisfy the original target and requested semantics."
         )

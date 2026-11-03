@@ -29,7 +29,7 @@ def select_native_unit(operation, command, units):
         "key_sequence": units.desktop_input if contract.get("desktopKeyboard") is True else keyboard,
         "pointer_sequence": pointer,
     }.get(command["kind"])
-    require(unit is not None, "This Linux v5 input unit is not implemented.", "mode_unsupported")
+    require(unit is not None, "This Linux v5 input unit is not implemented.", "unsupported_operation")
     return unit
 
 

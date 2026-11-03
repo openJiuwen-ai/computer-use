@@ -63,6 +63,8 @@ def scene(native_modules):
     # dispatch journal while substituting only the inter-event wait.
     ctx.pause = lambda _seconds=0.02: ctx.check()
     desktop = object.__new__(m.x11.X11)
+    # This fixture verifies XTEST geometry and release for an authorized session.
+    desktop.allow_global_input = True
     desktop.can_input, desktop.keys, desktop.buttons = True, set(), set()
     desktop.xlib = SimpleNamespace(MotionNotify=6, ButtonPress=4, ButtonRelease=5, KeyRelease=3)
     desktop.pump = lambda: None
@@ -157,6 +159,7 @@ def scene(native_modules):
         if kind == "click" and not legacy:
             facts = m.offers.project_click_offers(operation, facts)
         primitive = facts["primitives"][0]
+        assert primitive["globalInput"] == "yes"
         s.operation, s.primitive, s.facts = operation, primitive, facts
         s.contract = operation.contracts[primitive["id"]]
         return facts
@@ -516,3 +519,34 @@ def test_png_local_bounds_are_checked_before_pointer_or_activation(scene, point)
     with pytest.raises(scene.failure, match="outside the captured image"):
         scene.inspect(parameters={"x": point[0], "y": point[1]})
     assert scene.events == [] and scene.activations == []
+
+
+@pytest.mark.parametrize("kind", ("click", "scroll", "drag"))
+def test_global_pointer_permission_denied_before_exposure_or_dispatch(scene, kind):
+    scene.desktop.allow_global_input = False
+    scene.covered = True
+    scene.inspect(kind)
+    if kind == "click":
+        receipt, _ = scene.dispatch(foreground=True)
+    else:
+        receipt = scene.unit.execute(
+            scene.operation,
+            dict(
+                kind="prepare_receiver", primitiveId=scene.primitive["id"], target=dict(scene.target), foreground=True
+            ),
+            scene.ctx,
+        )
+    assert receipt["errorCode"] == "permission_required"
+    assert receipt["dispatch"] == "notDispatched"
+    assert not scene.activations and not scene.events
+    assert not scene.operation.dispatched
+    assert scene.ctx.effect == "none"
+
+
+def test_native_event_boundary_denies_missing_permission_before_xlib(scene):
+    del scene.desktop.allow_global_input
+    # Call the real boundary; the fixture normally records events in memory.
+    with pytest.raises(scene.failure, match="global keyboard or pointer") as caught:
+        type(scene.desktop)._event(scene.desktop, 6, x=10, y=10)
+    assert caught.value.code == "permission_required"
+    assert not scene.events

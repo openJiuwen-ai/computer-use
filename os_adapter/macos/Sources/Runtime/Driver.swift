@@ -122,23 +122,15 @@ import CoreGraphics
                 guard try string(raw["method"], label: "method") == "hello" else {
                     throw DriverError("id 0 is reserved for hello")
                 }
-                let params = try object(raw["params"], keys: ["desktopMode"])
-                let requestedMode = try string(params["desktopMode"], label: "desktopMode")
-                let mode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "exclusive"
-                guard mode == "exclusive", requestedMode == mode else {
-                    reply(
-                        id,
-                        failure(
-                            "mode_mismatch", detail: "requested desktop mode does not match the backend",
-                            next: "configure the SDK and backend for exclusive mode"))
-                    return
-                }
+                let params = try object(raw["params"], keys: ["globalInputAllowed"])
+                let globalInputAllowed = try boolean(params["globalInputAllowed"], label: "globalInputAllowed")
+                state.configureInputAuthorization(globalInputAllowed: globalInputAllowed)
                 handshaken = true
                 reply(
                     id,
                     [
                         "result": [
-                            "platform": "macos", "desktopMode": mode, "maxTimeoutMs": 120_000,
+                            "platform": "macos", "globalInputAllowed": globalInputAllowed, "maxTimeoutMs": 120_000,
                             "capabilities": [
                                 "cancel", "requestDedup", "desktopCoordination", "nativeOperations",
                                 "nativeInputActivityV1", "nativeBoundContracts", "nativeUnitReadinessV2",
@@ -146,6 +138,7 @@ import CoreGraphics
                                 "nativeVisualSurfaceQuery", "nativeSurfaceBatch", "nativeVisualSurfaceBatch",
                                 "nativeApplicationListing", "nativeApplicationRoots", "nativeMenuActions",
                                 "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeDesktopInput",
+                                "nativeObservationPreparation",
                                 "nativeRelations", "nativeNodePages", "nativeNodeDepthBudget", "nativeRelationPages",
                                 "nativeCapturedText", "nativeParameterizedText", "nativeRawNodeMetadata",
                                 "nativeAXAttributeQueries", "nativeActionIntents", "nativeWindowScope",

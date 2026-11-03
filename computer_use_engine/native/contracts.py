@@ -439,6 +439,38 @@ class ClickSelectionDecision:
 
 
 @dataclass(frozen=True)
+class PreparationImpact:
+    """Potential preparation effects declared by a specific native recipe."""
+
+    mouse: Knowledge = Knowledge.UNKNOWN
+    keyboard: Knowledge = Knowledge.UNKNOWN
+    activation: Knowledge = Knowledge.UNKNOWN
+    clipboard: Knowledge = Knowledge.UNKNOWN
+
+
+@dataclass(frozen=True)
+class InputEffect:
+    """Grouped native invocation evidence; never application consumption."""
+
+    stage: str
+    device: str
+    transport: str
+    mechanism: str
+    state: str
+
+
+@dataclass(frozen=True)
+class NativeImpact:
+    """Actual evidence from one native execution range, with explicit coverage."""
+
+    coverage: str
+    effects: tuple[InputEffect, ...]
+    foreground_changed: Knowledge
+    clipboard_restoration: str
+    omitted_effects: int = 0
+
+
+@dataclass(frozen=True)
 class Primitive:
     """Driver-declared execution unit with its support and readiness evidence."""
 
@@ -452,6 +484,8 @@ class Primitive:
     action: str | None = None
     action_description: str | None = None
     click: ClickOffer | None = None
+    global_input: Knowledge = Knowledge.UNKNOWN
+    preparation_impact: PreparationImpact | None = None
 
     def __post_init__(self):
         from computer_use.protocol.execution import unit_contracts
@@ -499,17 +533,13 @@ class Facts:
 
 @dataclass(frozen=True)
 class HostPolicy:
-    """Complete desktop input authority; preparation and delivery remain route-local."""
+    """Explicit input permission, independent of target focus and preparation."""
 
-    mode: str = "exclusive"
+    allow_global_input: bool = True
 
     def __post_init__(self):
-        if self.mode != "exclusive":
-            raise ValueError("Desktop mode must be exclusive")
-
-    @property
-    def foreground_allowed(self):
-        return True
+        if type(self.allow_global_input) is not bool:
+            raise TypeError("allow_global_input must be a bool")
 
 
 @dataclass(frozen=True)
@@ -542,6 +572,7 @@ class StepResult:
     context: Mapping[str, Any] | None = None
     application: Mapping[str, Any] | None = None
     click: ClickReceipt | None = None
+    impact: NativeImpact | None = None
 
     def __post_init__(self):
         if self.retry_reason not in (None, "routeUnavailable", "preparationUnavailable", "preconditionChanged"):

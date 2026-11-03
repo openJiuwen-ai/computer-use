@@ -11,7 +11,7 @@ from computer_use.session.interface_images import Membership
 def compatible_membership(captured: Membership, current: Membership, target: str) -> bool:
     """Keep the addressed member's original scope and current modal evidence.
 
-    The existing instance owner validates the root and instance identities.
+    The existing state owner validates the target and instance identities.
     This predicate retains the addressed member and its captured ancestor path.
     Other member lifetimes do not change its frozen local-coordinate map.
 
@@ -22,8 +22,9 @@ def compatible_membership(captured: Membership, current: Membership, target: str
 
     Returns:
         Whether the original member is still in the captured scope and every
-        changed or new current member is a confirmed nonmodal child. Native
-        dispatch still checks the original capture, modality and physical hit.
+        changed or new current member is a confirmed nonmodal child or an
+        independent nonmodal window outside its ancestor path. Native dispatch
+        still checks the original capture, modality and physical hit.
     """
     previous = {item[0]: item for item in captured}
     fresh = {item[0]: item for item in current}
@@ -40,9 +41,21 @@ def compatible_membership(captured: Membership, current: Membership, target: str
             return False
         path.add(member)
         member = previous[member][2]
+    if member is not None:
+        # A captured edge to an unread ancestor is still part of this target's
+        # boundary. Its later appearance cannot be classified as a new peer.
+        path.add(member)
     # Changed non-addressed members are current surfaces, not new input
     # targets. The delivered image continues to resolve their old bindings.
     confirmed = {key for key, item in fresh.items() if key in previous and same(previous[key], item)}
+    # App now observes an application catalogue rather than one fixed-root
+    # subtree. A separate, explicitly nonmodal window does not change the
+    # addressed window's local pixel map. Unknown parents or modality supply
+    # no such proof; confirmed descendants are handled by the same gate below.
+    confirmed.update(
+        key for key, item in fresh.items()
+        if key not in path and item[2] is None and item[3] == "none" and item[4] is False
+    )
     remaining = {key: item for key, item in fresh.items() if key not in confirmed}
     while remaining:
         children = [

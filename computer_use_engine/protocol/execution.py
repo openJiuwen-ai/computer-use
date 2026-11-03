@@ -49,6 +49,18 @@ binding = obj(
 )
 application_binding = obj(dict(session=identity, application=identity))
 operation_target = union(binding, application_binding)
+
+
+def decode_observation_preparation_request(value):
+    result = obj(dict(operation=identity, target=binding)).parse(value)
+    target = result["target"]
+    if any(target[key] is None for key in ("instance", "rootWindow", "surface")) or any(
+        target[key] is not None for key in ("node", "capture")
+    ):
+        raise ValueError("Observation preparation requires an exact window scope")
+    return result
+
+
 current_receiver = obj(
     dict(
         state=enum("confirmed", "absent", "unavailable", "conflict"),
@@ -148,12 +160,32 @@ primitive = obj(
         readiness=knowledge,
         pending=array(enum(*pending_conditions), max=5),
         backgroundPreparation=knowledge,
+        globalInput=knowledge.optional(),
+        preparationImpact=obj(dict(mouse=knowledge, keyboard=knowledge, activation=knowledge, clipboard=knowledge)).optional(),
         action=obj(dict(name=identity, description=string().optional())).optional(),
         click=click_offer.optional(),
     )
 )
 
 cleanup = enum("complete", "failed", "unknown")
+input_impact = obj(
+    dict(
+        coverage=enum("complete", "partial"),
+        effects=array(
+            obj(dict(
+                stage=enum("preparation", "input", "cleanup"),
+                device=enum("mouse", "keyboard", "focus", "element", "clipboard", "application"),
+                transport=enum("globalHID", "process", "accessibility", "activation", "windowServer", "clipboard", "launch"),
+                mechanism=string(min=1, max=512),
+                state=enum("invoked", "possible", "notInvoked"),
+            )),
+            max=128,
+        ),
+        foregroundChanged=knowledge,
+        clipboardRestoration=enum("notUsed", "restored", "ownershipLost", "failed", "unknown"),
+        omittedEffects=number(integer=True, min=0).optional(),
+    )
+)
 # These are wire-contract meanings, not a fallback policy. Both decoded driver
 # declarations and in-process NativePort implementations obey the same rules.
 unit_contracts = {
@@ -518,9 +550,20 @@ _schemas = {
             context=unknown(),
             application=_application.optional(),
             click=click_receipt.optional(),
+            impact=input_impact.optional(),
         )
     ),
     "finish": obj(dict(cleanup=cleanup)),
+    "prepareObservation": obj(
+        dict(
+            kind=enum("observationPreparation"),
+            binding=binding,
+            activation=enum("notRequested", "requested"),
+            raiseStatus=enum("notRequested", "requested", "unsupported", "unknown"),
+            foreground=boolean(),
+            redraw=enum("unknown"),
+        )
+    ),
     "capture": obj(
         dict(
             kind=enum("capture"),
@@ -716,6 +759,9 @@ def decode_execution_result(method, value, *, retain_observation=False):
         for p in result["primitives"]:
             _validate_primitive(p)
     if method == "execute":
+        impact = result.get("impact")
+        if impact is not None and impact["coverage"] == "complete" and impact.get("omittedEffects", 0):
+            raise ValueError("protocol: complete input impact cannot omit effects")
         if "click" in result:
             validate_click_receipt(result["click"], result["target"], result["dispatch"], result["cleanup"])
         if result["context"] is not None:

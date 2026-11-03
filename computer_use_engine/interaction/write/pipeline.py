@@ -10,8 +10,10 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, cast
 
 from computer_use.errors import ComputerUseError
+from computer_use.identity import freeze_result
 from computer_use.interaction.control import scope_control
 from computer_use.interaction.write.model import OpenedWrite
+from computer_use.interaction.write.impact import action_impact
 from computer_use.interaction.write.passes.complete_empty_input import stage as complete_empty_input
 from computer_use.interaction.write.passes.format_write_result import stage as format_write_result
 from computer_use.interaction.write.passes.observe_selected_pair import stage as observe_selected_pair
@@ -151,7 +153,8 @@ class WritePipeline:
         )
         request = self.intent.run((intent, target, path, query_timeout_ms, forward_current), control)
         try:
-            return await self.main.arun(request, control)
+            result = await self.main.arun(request, control)
+            return {**result, "impact": action_impact(self.state, self.native.policy)}
         except BaseException as caught:
             if isinstance(caught, asyncio.CancelledError):
                 error = caught
@@ -162,7 +165,9 @@ class WritePipeline:
                     caught.detail,
                     self.state.dispatched,
                     self.state.preparation,
-                    minimum_effect=caught.effect,
+                    minimum_effect=(
+                        "possible" if caught.effect == "none" and self.state.native_mutation_possible else caught.effect
+                    ),
                     next_step=caught.next,
                 )
             else:
@@ -172,7 +177,9 @@ class WritePipeline:
                     str(caught),
                     self.state.dispatched,
                     self.state.preparation,
+                    minimum_effect="possible" if self.state.native_mutation_possible else "none",
                 )
+            error.impact = freeze_result(action_impact(self.state, self.native.policy))
             if error is caught:
                 raise
             for note in getattr(caught, "__notes__", ()):

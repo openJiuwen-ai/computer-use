@@ -5,21 +5,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
+import weakref
 
 from computer_use.interaction.query.instances.scope import allowed
-from computer_use.interaction.read.presentation.content import DisplayText, join, template
+from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.content import json_value as quoted
 from computer_use.interaction.read.presentation.details import captured_details_document
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.element_details import CapturedElementDetails
-from computer_use.interaction.read.presentation.headers import InterfaceHeader, MemberHeading, reported_input_label
+from computer_use.interaction.read.presentation.headers import InterfaceHeader, MemberHeading
 from computer_use.interaction.read.presentation.preparation import prepare_snapshot
 from computer_use.protocol.primitives import frozen
-from computer_use.session.events import observation_completed
-from computer_use.session.interfaces import ApplicationEntry
+from computer_use.session.events import observation_completed, register_observation_delivery
+from computer_use.session.interfaces import ApplicationEntry, LookupContext, WindowIdentity
 from computer_use.session.observation import lazy_observation
 from computer_use.session.observation_data import retain_observation_data
 
@@ -33,7 +34,6 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.views.pipeline import WindowPart
     from computer_use.interaction.records import UIHandle
     from computer_use.native.contracts import Binding
-    from computer_use.native.scopes import WorkingWindow
     from computer_use.protocol.png import PNG
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
     from computer_use.types import Observation
@@ -109,6 +109,12 @@ def publish(
     scope: str | None = None,
     view: str = "window",
     directory: DirectoryFacts | None = None,
+    partial: bool = False,
+    content_available: bool = True,
+    gaps: tuple[ObservationGap, ...] = (),
+    preparation: dict | None = None,
+    context_owner=None,
+    lookup_context: LookupContext | None = None,
 ) -> Observation:
     """Publish the combined interface observation and retain its source data.
 
@@ -122,20 +128,28 @@ def publish(
         scope: Observed native scope; defaults to the desktop label.
         view: Scope label attached to the publication event, such as window or desktop.
         directory: Current application window catalogue, when available.
+        lookup_context: Exact source context for explicit subtree publication; ordinary UI reads capture their staged view.
     """
     document = text if isinstance(text, DisplayDocument) else DisplayDocument.join((text,))
     roots = [root for _, snapshot in trees for root in snapshot.roots]
     refs = {ref: node for _, snapshot in trees for ref, node in snapshot.refs.items()}
     windows, instance, identity = {}, None, None
+    if owner is not None and lookup_context is None:
+        item = owner._instance.members.get(getattr(owner, "_context", None))
+        lookup_context = LookupContext(
+            WindowIdentity.of(item) if item is not None and content_available else None,
+            bool(getattr(owner, "_menu_only", False)),
+            tuple(getattr(owner, "_lookup_scopes", ())),
+        )
     if owner is not None:
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
         state = owner._instance
-        if state.anchor is not None:
+        if state.directory is not None:
             permitted = allowed(owner)
             windows = {str(ref): key for ref, key in state.windows.items() if key in permitted}
             alias = {key: ref for ref, key in windows.items()}
-            current = getattr(owner, "_context", None)
+            current = lookup_context.window.window if lookup_context.window is not None else None
             identity = dict(current=alias.get(current), windows=[])
             for ref, key in windows.items():
                 window_data = dict(
@@ -155,16 +169,10 @@ def publish(
                 identity["focusedWindow"] = alias[focused]
             if current in permitted and permitted[current].get("document") is not None:
                 identity["document"] = permitted[current]["document"]
+            native_state = controller.state(owner)
+            name = native_state.name or str(state.selector)
             instance = controller.interfaces.references.publish(
-                ApplicationEntry(
-                    state.anchor.root.session,
-                    state.directory["application"],
-                    state.anchor.name,
-                    True,
-                    state.directory,
-                    state.anchor.root.root_window,
-                    state.anchor.name,
-                )
+                ApplicationEntry(state.directory["session"], state.directory["application"], name, True)
             )
         else:
             instance = state.selector
@@ -176,7 +184,7 @@ def publish(
             context=(
                 state.directory["session"],
                 state.directory["application"],
-                state.anchor.root.root_window,
+                getattr(owner, "_anchor", None),
                 identity.get("current"),
                 identity.get("document"),
                 tuple(
@@ -185,13 +193,96 @@ def publish(
                 ),
             ),
         )
+    if preparation is not None:
+        note = (
+            "Observation preparation: activation="
+            + preparation["activation"]
+            + "; window raise="
+            + preparation["raiseStatus"]
+            + "; foreground="
+            + str(preparation["foreground"]).lower()
+            + ". Focus/stacking may have changed; no global input was sent. Redraw freshness remains unknown."
+        )
+        from dataclasses import replace
+
+        document = replace(DisplayDocument.join((document, note)), context=document.context)
     result = lazy_observation(
         document,
         screenshot,
         details_document=captured_details_document(document),
         element_details=CapturedElementDetails.from_document(document),
+        preparation=frozen(preparation) if preparation is not None else None,
     )
-    retain_observation_data(result, roots, refs, windows, instance, identity)
+    retain_observation_data(
+        result,
+        roots,
+        refs,
+        windows,
+        instance,
+        identity,
+        partial=partial,
+        content_available=content_available,
+        gaps=gaps,
+        directory=directory,
+    )
+    if owner is not None:
+        # Publication proposes a context. Only actual delivery changes the
+        # canonical application's convenience-input receiver, including when
+        # this observation was made through an explicit Window handle.
+        instance_state = owner._instance
+        captured_lookup = lookup_context
+        captured = captured_lookup.window if content_available else None
+        captured_image = getattr(owner, "_image", None) if screenshot is not None else None
+        native_session = (directory or instance_state.directory or {}).get("session")
+        instance_state.observation_generation += 1
+        generation = instance_state.observation_generation
+        retained_state, retained_controller = weakref.ref(instance_state), weakref.ref(controller)
+        fixed_owner = context_owner() if context_owner is not None else owner
+        fixed = getattr(fixed_owner, "_window_identity", None)
+        root = instance_state.members.get(fixed.root_window) if fixed is not None else None
+        confirmed_fixed_context = (
+            captured is not None
+            and root is not None
+            and WindowIdentity.of(root) == WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)
+            and ancestor(directory or instance_state.directory, captured.window, fixed.root_window)
+        )
+        retained_fixed = weakref.ref(fixed_owner) if confirmed_fixed_context else None
+        fixed_lookup = None
+        if confirmed_fixed_context:
+            fixed_menus = []
+            for menu_owner in captured_lookup.menus:
+                menu_identity = controller.state(menu_owner).menu_window_identity
+                menu_window = instance_state.members.get(menu_identity.window) if menu_identity is not None else None
+                if (
+                    menu_window is not None
+                    and WindowIdentity.of(menu_window) == menu_identity
+                    and ancestor(directory or instance_state.directory, menu_identity.window, fixed.root_window)
+                ):
+                    fixed_menus.append(menu_owner)
+            fixed_lookup = LookupContext(captured, captured_lookup.menu_only, tuple(fixed_menus))
+
+        def delivered() -> None:
+            state, runtime = retained_state(), retained_controller()
+            if state is None or runtime is None or runtime.transport.session != native_session:
+                return
+            if generation > state.delivered_observation_generation:
+                state.input_context = captured
+                state.lookup_context = captured_lookup
+                state.delivered_observation_generation = generation
+            fixed_target = retained_fixed() if retained_fixed is not None else None
+            if fixed_target is not None and generation > fixed_target._delivered_generation:
+                fixed_target._input_context = captured
+                fixed_target._lookup_context = fixed_lookup
+                fixed_target._delivered_generation = generation
+            if captured_image is not None and not runtime.adapters.image_delivery_required():
+                # Direct SDK return includes the PNG. MCP acknowledges image
+                # delivery separately, only after the image actually leaves the
+                # tool response; text delivery alone grants no coordinates.
+                from computer_use.session.images import image_delivered
+
+                image_delivered(captured_image.png)
+
+        register_observation_delivery(result, delivered)
     observation_completed(
         dict(
             source=controller,
@@ -223,7 +314,7 @@ def capture_header(
     Per-member metadata retains its collection and recheck directories separately.
     """
     instance = ui._instance
-    anchor = cast("WorkingWindow", instance.anchor)
+    anchor = instance.anchor
     aliases = {key: ref for ref, key in instance.windows.items()}
     permitted = allowed(ui)
     displayed = dict(parts)
@@ -238,7 +329,7 @@ def capture_header(
                 ref,
                 item["title"],
                 key,
-                key == anchor.root.root_window,
+                key == ui._anchor,
                 key == getattr(ui, "_context", None),
                 key == focus,
                 aliases.get(item["parent"]),
@@ -254,13 +345,6 @@ def capture_header(
                 source.scope_confirmed if source is not None else None,
             )
         )
-    other = [item for item in directory["surfaces"] if item["window"] not in instance.members]
-    choices = controller.interfaces.discovery.publish_choices(anchor.name, directory) if other else ()
-    other_choices = tuple(
-        (item.id, item.display_name)
-        for item in choices
-        if controller.interfaces.references.window(item.id, directory["session"]) not in instance.members
-    )
     covered_reasons = {
         gap.detail
         for original, gaps in delivered_gaps
@@ -271,15 +355,13 @@ def capture_header(
         and gap.next == "inspect the directory again if the required window is missing"
     }
     return InterfaceHeader(
-        anchor.name,
-        "instance" if ui._anchor is None else "window",
-        aliases[ui._anchor or anchor.root.root_window],
-        aliases[anchor.root.root_window],
+        controller.state(ui).name or (anchor.name if anchor is not None else str(instance.selector)),
+        "application" if ui._anchor is None else "window",
+        aliases.get(ui._anchor),
         aliases.get(getattr(ui, "_context", None)),
         aliases.get(focus),
-        "unknown" if focus is None else "member" if focus in aliases else "outside",
+        "unknown" if focus is None else "member" if focus in permitted else "outside",
         tuple(windows),
-        other_choices,
         tuple(reason for reason in directory["stopReasons"] if reason not in covered_reasons),
         directory,
     )
@@ -303,88 +385,8 @@ def directory_text(
             this header, paired with their original directory objects. Only identical source
             objects can cover a repeated directory reason.
     """
-    # pylint: disable-next=protected-access
-    instance = ui._instance
-    selected = cast("WorkingWindow", instance.anchor).root.root_window
-    view = (
-        "instance"
-        # pylint: disable-next=protected-access
-        if ui._anchor is None
-        # pylint: disable-next=protected-access
-        else template("Window {0}", next(ref for ref, key in instance.windows.items() if key == ui._anchor))
-    )
-    lines = [template("App: {0} ({1}).", quoted(cast("WorkingWindow", instance.anchor).name), view)]
-    if len(instance.members) > 1:
-        windows = []
-        for ref, key in instance.windows.items():
-            windows.append(
-                template(
-                    "{0} {1}{2}{3}{4}",
-                    ref,
-                    quoted(instance.members[key]["title"]),
-                    " (main)" if key == selected else "",
-                    " (modal)" if instance.members[key]["modal"] is True else "",
-                    template(
-                        " (parent={0})",
-                        next(
-                            (r for r, w in instance.windows.items() if w == instance.members[key]["parent"]),
-                            "unknown",
-                        ),
-                    )
-                    if instance.members[key]["parent"] is not None
-                    else "",
-                )
-            )
-        lines.append(
-            template(
-                "Windows: {0}; current={1}",
-                join(windows, "; "),
-                next((ref for ref, key in instance.windows.items() if key == getattr(ui, "_context", None)), "unknown"),
-            )
-        )
-    focus = directory.get("focusedWindow")
-    if focus is not None:
-        ref = next((ref for ref, key in instance.windows.items() if key == focus), None)
-        reported = reported_input_label(ref)
-        if len(instance.members) > 1:
-            lines[-1] = template("{0}; reported input={1}", lines[-1], reported)
-        else:
-            lines.append(template("Reported input window: {0}", reported))
-    other = [item for item in directory["surfaces"] if item["window"] not in instance.members]
-    if other:
-        choices = controller.interfaces.discovery.publish_choices(
-            cast("WorkingWindow", instance.anchor).name, directory
-        )
-
-        def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
-            for item in _source_items:
-                if controller.interfaces.references.window(item.id, directory["session"]) not in instance.members:
-                    yield template("{0} {1!r}", item.id, item.display_name)
-
-        lines.append(
-            template(
-                "Other independent or unconfirmed windows: {0}; select with computer.app(id).",
-                join(
-                    _iter_item(iter(choices)),
-                    "; ",
-                ),
-            )
-        )
-    covered_reasons = {
-        gap.detail
-        for source, gaps in delivered_gaps
-        if source is directory
-        for gap in gaps
-        if gap.component == "directory"
-        and gap.code == "observation_incomplete"
-        and gap.next == "inspect the directory again if the required window is missing"
-    }
-    lines.extend(
-        template("Directory partial: {0}", reason)
-        for reason in directory["stopReasons"]
-        if reason not in covered_reasons
-    )
-    return lines
+    header = capture_header(controller, ui, directory, parts=(), delivered_gaps=delivered_gaps)
+    return [DisplayText("interface_header", (header,))]
 
 
 def window_heading(ui: UIHandle, ref: int, title: str) -> DisplayText:

@@ -130,6 +130,7 @@ import ApplicationServices
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
                 && $0.unit == unit && $0.click?.routeFamily == sampled.routeFamily
+                && $0.click?.pointerRequirement == sampled.pointerRequirement
                 && sameProof($0.click?.popupPointer, sampled.popupPointer)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
@@ -146,6 +147,7 @@ import ApplicationServices
             readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]))
         wire["backgroundPreparation"] = offer.preparationOptions.contains("background") ? "yes" : "no"
         wire["click"] = offer.wire
+        wire["globalInput"] = offer.delivery == .systemPointer ? "yes" : "no"
         primitives.append(wire)
     }
 

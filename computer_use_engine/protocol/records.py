@@ -162,12 +162,30 @@ class SurfaceInfo(TypedDict):
     accessibility: bool
 
 
+class DesktopWindowInfo(TypedDict):
+    """Desktop geometry plus an optional exact, retained directory identity.
+
+    Platforms that cannot retain a native window identity still deliver their
+    visible catalogue row. A title/frame never substitutes for ``window``.
+    """
+
+    app: str
+    title: str
+    rect: Record
+    selector: NotRequired[str]
+    window: NotRequired[SurfaceInfo]
+
+
 NativeDirectory: TypeAlias = Record
 """Decoded directory variant: applications, surfaces, or application roots.
 
 All variants retain session/platform/observed/stopReasons. The selected kind
 adds applications, surfaces, or roots; a surface/root directory's application
-field is an identity string. The existing query/schema determines the variant.
+field is an identity string. Surface directories also publish
+rootDiscoveryComplete: whether independent-root discovery and relationships
+are complete, independently of attached-content discovery. stopReasons retain
+diagnostic details and full-catalogue gaps; their wording does not select a root.
+The existing query/schema determines the variant.
 """
 
 

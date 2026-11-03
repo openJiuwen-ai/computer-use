@@ -35,9 +35,9 @@ class NativeClipboard:
         self.max_property = min(self.MAX_BYTES, (min(self.d.display.info.max_request_length, 65535) - 6) * 4)
         self.closed = False
         try:
-            require(self.d.has_extension("XFIXES"), "Clipboard transactions require XFixes.", "mode_unsupported")
+            require(self.d.has_extension("XFIXES"), "Clipboard transactions require XFixes.", "unsupported_operation")
             version = self.d.xfixes_query_version()
-            require(version.major_version >= 2, "Clipboard transactions require XFixes 2.", "mode_unsupported")
+            require(version.major_version >= 2, "Clipboard transactions require XFixes 2.", "unsupported_operation")
             self.window = self.new_window()
             names = (
                 "CLIPBOARD",

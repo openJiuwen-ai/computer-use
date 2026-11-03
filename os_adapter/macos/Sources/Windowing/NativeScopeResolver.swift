@@ -29,6 +29,18 @@ import ApplicationServices
         self.pointer = pointer
     }
 
+    func observationSurface(_ binding: [String: Any]) throws -> NativeDirectory.Surface {
+        try sharing.checkAvailable()
+        return try directory.windowScope(
+            instance: string(binding["instance"], label: "instance"),
+            root: string(binding["rootWindow"], label: "rootWindow"),
+            surface: string(binding["surface"], label: "surface")).surface
+    }
+
+    func retainDesktopWindow(_ native: NativeWindows.Window, owner: NSRunningApplication) -> [String: Any] {
+        directory.retainDesktopWindow(native, owner: owner)
+    }
+
     func observePointer(_ binding: [String: Any]) {
         guard let scope = binding["surface"] as? String, let mapping = directory.surface(scope)?.native?.mapping else {
             return

@@ -5,8 +5,7 @@ import ApplicationServices
 
 /// DISPATCH/RESOURCE: same original launch unit and near-dispatch checks; no alternate route or retry.
 @MainActor enum DispatchNativeLaunchPass {
-    static func run(_ op: NativeOperation, command: NativeUnitCommand, access: NativeLaunchAccess) async -> [String:
-        Any]
+    static func run(_ op: NativeOperation, command: NativeUnitCommand, access: NativeLaunchAccess) async -> NativeExecutionReceipt
     {
         let receipt = NativeExecutionReceipt(
             target: command.target, detail: "Application launch pending.", confirmation: "notRequested",
@@ -41,6 +40,6 @@ import ApplicationServices
                 ? "The selected application started; window and content readiness require an explicit read."
                 : "The selected installation is already running; no launch or activation was sent."
         } catch { receipt.recordFailure(error) }
-        return receipt.wire
+        return receipt
     }
 }
