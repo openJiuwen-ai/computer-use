@@ -26,7 +26,7 @@ def action_intent(value):
         require(
             p.get("button", "left") == "left" and p.get("count", 1) == 1,
             "This native action unit does not synthesize pointer clicks.",
-            "mode_unsupported",
+            "unsupported_operation",
         )
     elif kind == "action":
         p = fields(value["parameters"], ("action",))
@@ -34,7 +34,7 @@ def action_intent(value):
     elif kind == "openMenu":
         fields(value["parameters"], ())
     else:
-        raise Failure("This Linux v5 driver does not implement this input intent.", "mode_unsupported")
+        raise Failure("This Linux v5 driver does not implement this input intent.", "unsupported_operation")
     return deepcopy(value)
 
 
@@ -100,6 +100,7 @@ class NativeAction:
                         id=identifier,
                         unit="native_action",
                         channel="object",
+                        globalInput="no",
                         supported="yes" if usable else "no",
                         readiness="yes" if enabled and usable else "no",
                         pending=[] if enabled else ["enabled"],

@@ -44,6 +44,8 @@ def create(
         )
         result = snapshots(cast("Binding", value.selected), cast("SemanticSnapshot", value.tree))[ref]
         result["source"]["ref"] = None
+        if result.get("scope_kind") == "applicationMenu":
+            result["menu_window_identity"] = value.plan.state.menu_window_identity
         return result
 
     return snapshot

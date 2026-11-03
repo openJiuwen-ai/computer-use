@@ -60,7 +60,7 @@ import ApplicationServices
             if NativePointerIntent.Kind(rawValue: op.intent) != nil {
                 let pointer = try NativePointerIntent(
                     unit: "pointer_sequence", kind: op.intent, parameters: op.request.parameters, foreground: false)
-                _ = try unit.pointer(pointer)
+                _ = try unit.pointer(pointer, requireAuthorization: false)
                 input["geometryCurrent"] = "yes"
                 input["pointerRoute"] = "yes"
             } else {
@@ -161,7 +161,18 @@ import ApplicationServices
                 // Re-offering a no-op cannot establish missing editing
                 // capability. Explicit focus may still confirm readiness.
                 if kind == .focus || !readiness.ready {
-                    declare(.pointerFocus, supported: true, readiness: { _ in readiness })
+                    declare(.pointerFocus(.editor), supported: true, readiness: { _ in readiness })
+                }
+            }
+            if !cellActivation, kind == .replace, let element = unit.element, facts.receiver(element) != "yes",
+                nativeRole == kAXIncrementorRole
+            {
+                let pointer = NativePointerFocusUnit(
+                    application: unit.application, window: unit.window, element: element,
+                    receiverRelation: unit.receiverRelation, cellEditor: unit.cellEditor, targetKind: .scalarText)
+                let readiness = try pointer.readiness()
+                if readiness.preparationAllowed {
+                    declare(.pointerFocus(.scalarText), supported: true, readiness: { _ in readiness })
                 }
             }
             if !cellActivation, [.insert, .replace, .paste].contains(kind), let element = unit.element {

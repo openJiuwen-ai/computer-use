@@ -29,6 +29,23 @@ import Darwin
 
     static func list(_ app: NSRunningApplication) -> [Window] { listIfAvailable(app) ?? [] }
 
+    /// Group a helper window only through the existing in-bundle process
+    /// ancestry proof. This describes application membership, never document
+    /// parentage or modality. No installed/running application scan is needed.
+    static func discoveryOwner(_ window: Window) -> NSRunningApplication {
+        var owner = window.application, current = window.process, seen = Set<pid_t>()
+        for _ in 0..<16 {
+            guard seen.insert(current.pid).inserted, current.parent > 1,
+                let parent = NativeProcessIdentity.read(current.parent), current.wasBorn(afterOrWith: parent)
+            else { break }
+            if let application = NSRunningApplication(processIdentifier: parent.pid), belongs(window.process, to: application) {
+                owner = application
+            }
+            current = parent
+        }
+        return owner
+    }
+
     /// Absence proofs must not turn a WindowServer query failure into an empty desktop.
     static func listIfAvailable(_ app: NSRunningApplication) -> [Window]? {
         ownership.prune()
@@ -39,8 +56,19 @@ import Darwin
             let catalog = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]]
         else { return nil }
+        var windows = catalogue(catalog, owner: app)
+        let parents = NativeWindowParents.read(windows.map { $0.mapping.id })
+        for index in windows.indices { windows[index].parentID = parents?[windows[index].mapping.id] }
+        return NativeMenuSurfaces.classify(windows)
+    }
+
+    /// Reuse an already captured WindowServer catalogue. Desktop discovery
+    /// does not initialize AX providers, scan application catalogues or infer
+    /// document ownership from window geometry. Process identity is sampled
+    /// once per owner and retained with the native window reference.
+    static func catalogue(_ catalog: [[String: Any]], owner app: NSRunningApplication? = nil) -> [Window] {
         var owners = [pid_t: NativeProcessIdentity](), rejected = Set<pid_t>()
-        var windows: [Window] = catalog.compactMap { value in
+        return catalog.compactMap { value in
             guard let pid = (value[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, !rejected.contains(pid),
                 let id = (value[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
                 let bounds = value[kCGWindowBounds as String] as? [String: Any],
@@ -58,7 +86,7 @@ import Darwin
                 process = known
             } else {
                 guard let candidate = NativeProcessIdentity.read(pid),
-                    pid == app.processIdentifier || belongs(candidate, to: app)
+                    app.map({ pid == $0.processIdentifier || belongs(candidate, to: $0) }) ?? true
                 else {
                     rejected.insert(pid)
                     return nil
@@ -76,9 +104,6 @@ import Darwin
                     height: Int(frame.height.rounded(.up))), onScreen: onScreen,
                 level: (value[kCGWindowLayer as String] as? NSNumber)?.intValue)
         }
-        let parents = NativeWindowParents.read(windows.map { $0.mapping.id })
-        for index in windows.indices { windows[index].parentID = parents?[windows[index].mapping.id] }
-        return NativeMenuSurfaces.classify(windows)
     }
 
 }

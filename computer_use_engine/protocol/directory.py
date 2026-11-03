@@ -20,7 +20,7 @@ _application = obj(
         windows=array(obj(dict(selector=identity, window=identity)), max=512).optional(),
     )
 )
-_surface = obj(
+surface_schema = obj(
     dict(
         window=identity,
         instance=identity,
@@ -60,7 +60,8 @@ _schemas = {
         dict(
             kind=enum("surfaces"),
             application=identity,
-            surfaces=array(_surface, max=512),
+            surfaces=array(surface_schema, max=512),
+            rootDiscoveryComplete=boolean(),
             focusedWindow=identity.nullable().optional(),
             provider=obj(
                 dict(status=identity, attribute=identity.nullable(), writeStatus=number(integer=True).nullable())
@@ -77,6 +78,14 @@ _schemas = {
         )
     ),
 }
+
+
+def validate_surface(value):
+    """Check facts shared by application and desktop window catalogues."""
+    if (value["parent"] is not None) != (value["parentState"] == "known"):
+        raise ValueError("protocol: parent relationship knowledge is inconsistent")
+    if (value["node"] is not None) != value["accessibility"]:
+        raise ValueError("protocol: accessibility root availability is inconsistent")
 
 
 def decode_directory(value):
@@ -138,10 +147,7 @@ def decode_directory(value):
             if len(set(values)) != len(values):
                 raise ValueError("protocol: duplicate surface identity")
         for item in entries:
-            if (item["parent"] is not None) != (item["parentState"] == "known"):
-                raise ValueError("protocol: parent relationship knowledge is inconsistent")
-            if (item["node"] is not None) != item["accessibility"]:
-                raise ValueError("protocol: accessibility root availability is inconsistent")
+            validate_surface(item)
         # Unknown parents and cycles are provider facts, not an excuse to drop
         # windows or guess another document. Selection handles them explicitly.
     return result

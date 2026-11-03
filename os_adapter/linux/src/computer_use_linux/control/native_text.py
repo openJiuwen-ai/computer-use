@@ -22,7 +22,7 @@ def text_intent(value):
     require(
         value["kind"] in ("insert", "replace"),
         "This Linux v5 driver currently implements only native text insertion/replacement.",
-        "mode_unsupported",
+        "unsupported_operation",
     )
     parameters = fields(value["parameters"], ("text",))
     text = string(parameters["text"], empty=True)
@@ -122,6 +122,7 @@ class NativeText:
                 id=identifier,
                 unit="native_text_edit",
                 channel="object",
+                globalInput="no",
                 supported="yes",
                 readiness="yes" if ready else "no",
                 pending=pending,

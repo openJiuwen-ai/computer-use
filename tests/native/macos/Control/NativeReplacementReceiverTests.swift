@@ -5,6 +5,7 @@ import ApplicationServices
 
 @main enum NativeReplacementReceiverTests {
     @MainActor static func main() throws {
+        scalarRecipeRequiresTextCapability()
         let window = AXUIElementCreateApplication(1_000_001)
         let element = AXUIElementCreateApplication(1_000_002)
         let other = AXUIElementCreateApplication(1_000_003)
@@ -73,5 +74,42 @@ import ApplicationServices
             _ = try Input.atomicTextEvents("date\n", source: source)
             preconditionFailure("whole-string encoding silently introduced a submit/control key")
         } catch let error as DriverError { precondition(error.code == .invalidRequest) }
+        print("PASS replacement receiver, scalar text contract and atomic encoding regressions")
+    }
+
+    @MainActor static func scalarRecipeRequiresTextCapability() {
+        func eligible(
+            role: String? = kAXIncrementorRole, selection: NativeReplacementUnit.Selection = .shortcut,
+            count: AXRead<CFTypeRef> = .value(NSNumber(value: 10)), writable: Bool = true,
+            before: NativeTextSelection = .init(count: 10, location: 0, length: 4)
+        ) -> Bool {
+            NativeReplacementUnit.usesScalarTextRecipe(
+                selection: selection, role: role, characterCount: count, rangeWritable: writable,
+                before: .numeric(before))
+        }
+        // The observed Qt QDateEdit exposes this text contract even when all
+        // QObject names are custom. No identifier/class-name input is needed.
+        precondition(eligible())
+        precondition(eligible(before: .init(count: 10, location: 8, length: 2)))
+        precondition(eligible(before: .init(count: 10, location: 0, length: 10)))
+
+        // Qt Quick's standard SpinBox has a ValueInterface, not TextInterface.
+        // A value string fallback in the ordinary selection reader cannot
+        // manufacture the missing native character-count evidence here.
+        precondition(!eligible(count: .unsupported))
+        precondition(!eligible(count: .unavailable(.noValue)))
+        precondition(!eligible(count: .value("2026/11/15" as CFString)))
+        precondition(!eligible(count: .value(kCFBooleanTrue)))
+        precondition(!eligible(count: .value(NSNumber(value: -1))))
+        precondition(!eligible(count: .value(NSNumber(value: 9))))
+        precondition(!eligible(writable: false))
+        precondition(!eligible(before: .init(count: 10, location: nil, length: nil)))
+        precondition(!eligible(before: .init(count: 10, location: 0, length: 4, contiguous: false)))
+        for role: String? in [nil, kAXTextFieldRole, kAXTextAreaRole, "AXWebArea", kAXSliderRole] {
+            precondition(!eligible(role: role), "ordinary text and non-text controls keep their existing recipe")
+        }
+        for selection: NativeReplacementUnit.Selection in [.range, .markers, .selectAll] {
+            precondition(!eligible(selection: selection))
+        }
     }
 }

@@ -12,13 +12,14 @@ namespace ComputerUse.Windows
 {
     internal sealed class Driver
     {
-        readonly string session, mode;
+        readonly string session;
+        bool globalInputAllowed;
         readonly object gate = new object(), output = new object();
         readonly BlockingCollection<Action> work = new BlockingCollection<Action>();
         readonly Dictionary<long, string> requests = new Dictionary<long, string>(),
                                           replies = new Dictionary<long, string>();
         readonly Queue<long> order = new Queue<long>();
-        readonly Func<string, string, INativeRuntime> createRuntime;
+        readonly Func<string, bool, INativeRuntime> createRuntime;
         readonly Func<object> checkpoint;
         readonly Func<bool> recycle;
         readonly Func<object> pointerCheckpoint;
@@ -30,7 +31,7 @@ namespace ComputerUse.Windows
         volatile bool hello, stopping, negotiating;
         int bytes;
         CancellationTokenSource cancellation;
-        internal Driver(Func<string, string, INativeRuntime> createRuntime, string session = null,
+        internal Driver(Func<string, bool, INativeRuntime> createRuntime, string session = null,
                         Func<object> checkpoint = null, Func<bool> recycle = null,
                         Func<object> pointerCheckpoint = null, Action stopDisplay = null)
         {
@@ -42,7 +43,6 @@ namespace ComputerUse.Windows
             this.recycle = recycle;
             this.pointerCheckpoint = pointerCheckpoint;
             this.stopDisplay = stopDisplay;
-            mode = Environment.GetEnvironmentVariable("COMPUTER_USE_DESKTOP") ?? "exclusive";
         }
 
         void Write(string line)
@@ -181,12 +181,10 @@ namespace ComputerUse.Windows
                     if (Wire.Str(p, "method") != "hello")
                         throw new Failure("invalid_request", "id zero is reserved for hello");
                     var options = Wire.Object(p["params"]);
-                    Wire.Keys(options, "desktopMode");
-                    if (mode != "exclusive" || Wire.Str(options, "desktopMode") != mode)
-                    {
-                        Reply(0, Error("mode_mismatch", "host desktop mode differs from requested mode"));
-                        return;
-                    }
+                    Wire.Keys(options, "globalInputAllowed");
+                    if (!(options["globalInputAllowed"] is bool))
+                        throw new Failure("invalid_request", "globalInputAllowed must be a boolean");
+                    globalInputAllowed = (bool)options["globalInputAllowed"];
 
                     // All UIA construction and use belongs to the same
                     // windowless MTA worker, including future COM providers.
@@ -195,10 +193,10 @@ namespace ComputerUse.Windows
                              {
                                  try
                                  {
-                                     native = createRuntime(session, mode);
+                                     native = createRuntime(session, globalInputAllowed);
                                      hello = true;
                                      negotiating = false;
-                                     Reply(0, Wire.Obj("result", Wire.Obj("platform", "windows", "desktopMode", mode,
+                                     Reply(0, Wire.Obj("result", Wire.Obj("platform", "windows", "globalInputAllowed", globalInputAllowed,
                                                                           "maxTimeoutMs", 120000, "capabilities",
                                                                           native.Capabilities)));
                                  }
@@ -256,7 +254,7 @@ namespace ComputerUse.Windows
 
                     active = current;
                     cancellation = new CancellationTokenSource();
-                    var request = new Request(cancellation.Token, timeout);
+                    var request = new Request(cancellation.Token, timeout, globalInputAllowed);
                     work.Add(() => Execute(current, method, parameters, request));
                 }
             }

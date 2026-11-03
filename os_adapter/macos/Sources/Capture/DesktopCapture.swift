@@ -5,7 +5,7 @@ import CoreGraphics
 @preconcurrency import ScreenCaptureKit
 
 /// Desktop observation does not traverse AX, select an application or change
-/// focus. Exclusive input retains optional focused-window evidence separately.
+/// focus. Input retains optional focused-window evidence separately.
 @MainActor final class DesktopCapture {
     private let applications: ApplicationDiscovery
     init(applications: ApplicationDiscovery) { self.applications = applications }
@@ -176,7 +176,7 @@ import CoreGraphics
         ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
     }
 
-    func read(maxDimension: Int = 4096) async throws -> [String: Any] {
+    func read(maxDimension: Int = 4096, retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]) async throws -> [String: Any] {
         AgentPointer.beginDesktopCapture()
         defer { AgentPointer.endDesktopCapture() }
         try RequestDiagnostics.checkObservationBudget()
@@ -290,21 +290,40 @@ import CoreGraphics
             Desktop screenshot is observation-only: \(changes.joined(separator: "; ")) during capture. \
             Window catalogue describes the end of capture and may differ from the image.
             """
-        let windows: [[String: Any]] = (rawWindows ?? []).compactMap { raw in
+        let visibleWindows = (rawWindows ?? []).filter { raw in
             guard !AgentPointer.isDecoration(raw), (raw[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1 > 0,
                 let rawRect = raw[kCGWindowBounds as String] as? [String: Any],
                 let rect = CGRect(dictionaryRepresentation: rawRect as CFDictionary), rect.width > 0, rect.height > 0,
                 geometry.displays.contains(where: { $0.frame.intersects(rect) })
-            else { return nil }
+            else { return false }
+            return true
+        }
+        let catalogue = Array(visibleWindows.prefix(256))
+        let nativeWindows = Dictionary(
+            NativeWindows.catalogue(catalogue).map { ($0.mapping.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var owners = [pid_t: NSRunningApplication]()
+        let windows: [[String: Any]] = try catalogue.map { raw in
+            try RequestDiagnostics.checkCancellation()
+            let rect = CGRect(dictionaryRepresentation: raw[kCGWindowBounds as String] as! CFDictionary)!
             let pid = (raw[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
-            let app = pid.flatMap { NSRunningApplication(processIdentifier: $0) }
+            let id = (raw[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+            let native = id.flatMap { nativeWindows[$0] }
+            let app: NSRunningApplication?
+            if let native {
+                let owner = owners[native.process.pid] ?? NativeWindows.discoveryOwner(native)
+                owners[native.process.pid] = owner
+                app = owner
+            } else { app = pid.flatMap { NSRunningApplication(processIdentifier: $0) } }
             var item: [String: Any] = [
                 "app": String(
                     (app?.localizedName ?? raw[kCGWindowOwnerName as String] as? String ?? "Unknown application")
                         .prefix(512)), "title": String((raw[kCGWindowName as String] as? String ?? "").prefix(512)),
                 "rect": rectangle(geometry.rect(rect.intersection(geometry.bounds)))
             ]
-            if let app, let selector = applications.selector(for: app) { item["selector"] = selector }
+            if let app, let selector = applications.selector(for: app) {
+                item["selector"] = selector
+                if let native { item["window"] = retainWindow(native, app) }
+            }
             return item
         }
         let displays: [[String: Any]] = geometry.displays.enumerated().map { index, display in
@@ -316,9 +335,8 @@ import CoreGraphics
             return item
         }
         var observation: [String: Any] = [
-            "mode": "exclusive",
             "canvas": ["width": geometry.width, "height": geometry.height], "displays": displays,
-            "windows": Array(windows.prefix(256)), "omittedWindows": max(0, windows.count - 256)
+            "windows": windows, "omittedWindows": max(0, visibleWindows.count - 256)
         ]
         if let frontmost {
             var app: [String: Any] = ["name": frontmost.localizedName ?? "Unknown application"]

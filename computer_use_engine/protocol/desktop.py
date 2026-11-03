@@ -2,9 +2,10 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 from .captures import capture_metadata, decode_capture, decode_stamp
+from .directory import surface_schema, validate_surface
 from .png import png_size
 from .primitives import nonempty, record
-from .schema import array, boolean, enum, number, obj, string
+from .schema import array, boolean, number, obj, string
 
 _name = string(min=1, max=4096)
 _rect = obj(
@@ -17,11 +18,21 @@ _rect = obj(
 )
 _schema = obj(
     dict(
-        mode=enum("exclusive"),
         canvas=obj(dict(width=number(integer=True, min=1, max=4096), height=number(integer=True, min=1, max=4096))),
         frontmost=obj(dict(name=_name, selector=_name.optional())).nullable(),
         displays=array(obj(dict(name=_name, rect=_rect, captured=boolean(), error=_name.optional())), min=1, max=32),
-        windows=array(obj(dict(app=_name, title=string(max=4096), selector=_name.optional(), rect=_rect)), max=256),
+        windows=array(
+            obj(
+                dict(
+                    app=_name,
+                    title=string(max=4096),
+                    selector=_name.optional(),
+                    rect=_rect,
+                    window=surface_schema.optional(),
+                )
+            ),
+            max=256,
+        ),
         omittedWindows=number(integer=True, min=0),
         catalogError=_name.optional(),
     )
@@ -41,6 +52,11 @@ def decode_desktop(value):
             raise ValueError("protocol: desktop rectangle exceeds canvas")
     if any(d["captured"] == ("error" in d) for d in result["displays"]):
         raise ValueError("protocol: inconsistent display capture status")
+    for item in result["windows"]:
+        if "window" in item:
+            if "selector" not in item:
+                raise ValueError("protocol: desktop window binding requires its application selector")
+            validate_surface(item["window"])
     return result
 
 

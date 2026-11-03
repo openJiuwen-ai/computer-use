@@ -19,8 +19,12 @@ import ApplicationServices
         var currentProcesses = [pid_t:NativeProcessIdentity]()
         var unavailableProcesses = Set<pid_t>(), goneProcesses = Set<pid_t>()
         var nativePresence = [CGWindowID:WindowServerInfo.Presence]()
+        var rawOnScreen: Set<CGWindowID>?
+        var onScreenAvailable = true
+        var onScreenQueries = 0
         var pidReads = [CFHashCode:Int](), pidLimit = [CFHashCode:Int]()
         var invalid = Set<CFHashCode>()
+        var readOverrides = [CFHashCode: [String: AXRead<CFTypeRef>]]()
         var elapsed = 100.0
         var calls = [String: Int]()
         var deepCount = 0
@@ -57,6 +61,13 @@ import ApplicationServices
                 self.live ? self.info(id) : nil
             }
             services.presence = { id in self.nativePresence[id] ?? (self.nativeIDs.contains(id) ? .present(self.info(id)) : .absent) }
+            services.onScreenWindows = {
+                self.onScreenQueries += 1
+                return self.onScreenAvailable ? self.rawOnScreen ?? Set(self.nativeIDs) : nil
+            }
+            services.parents = { ids in Dictionary(uniqueKeysWithValues: ids.compactMap { id in
+                self.unknownNativeParents.contains(id) ? nil : (id, self.nativeParents[id] ?? 0)
+            }) }
             services.isGone = { self.goneProcesses.contains($0) }
             services.role = { self.value($0,kAXRoleAttribute) as? String }
             return NativeDirectory(state: state, session: "test-session", windowServices: services)
@@ -117,6 +128,7 @@ import ApplicationServices
             api.application = { _ in self.application }
             api.read = { node, key in
                 if self.invalid.contains(CFHash(node)) { return .invalid }
+                if let read = self.readOverrides[CFHash(node)]?[key] { return read }
                 return self.value(node, key).map(AXRead.value) ?? .unsupported
             }
             api.element = { node, key in
@@ -191,7 +203,7 @@ import ApplicationServices
             let ref = graph.windows.first { CFEqual($0.element,modal) }!.ref
             let surface = access.observationScope(app,window:modal,reference:ref)
             directory.remember(.init(owner:app,window:ref,scope:surface,parent:rootRef,element:modal,native:nil,
-                                     queryHint:.observedModal))
+                                     queryHint:.observedModal(isSheet: false)))
             put(open,"AXSheets",[] as CFArray)
         }
         func uncertainModalOwner() throws -> (modal: AXUIElement,owner: AXUIElement) {
@@ -214,7 +226,7 @@ import ApplicationServices
             let ref=access.windowReference(native,element:modal)
             let scope=access.observationScope(app,window:modal,reference:ref)
             directory.remember(.init(owner:app,window:ref,scope:scope,parent:rootRef,element:modal,native:native,
-                                     queryHint:.observedModal))
+                                     queryHint:.observedModal(isSheet: false)))
             return(ref,scope,native)
         }
     }
@@ -235,6 +247,8 @@ import ApplicationServices
         try observedModalHints()
         try cgModalDeepRegression()
         try cgModalBoundaries()
+        try dismissedSheetKeepsWindowLifetimeWithoutBlocking()
+        rawOnScreenCatalogue()
         try cgModalNativeOtherDocumentRegression()
         try visualDirectoryBoundaryCombinations()
         try modalOwnerAncestry()
@@ -344,7 +358,7 @@ import ApplicationServices
         if change == "ownModalUnavailable" {
             let native=scene.windows()[0]
             scene.directory.remember(.init(owner:scene.app,window:scene.rootRef,scope:scene.scope,parent:nil,
-                                          element:scene.open,native:native,queryHint:.observedModal))
+                                          element:scene.open,native:native,queryHint:.observedModal(isSheet: false)))
         }
         if change == "unknownOwnerBefore" || change == "unknownModalAncestor" {
             let pair = try scene.uncertainModalOwner()
@@ -713,7 +727,7 @@ import ApplicationServices
         let ref=scene.access.windowReference(native,element:modal)
         let surface=scene.access.observationScope(scene.app,window:modal,reference:ref)
         scene.directory.remember(.init(owner:scene.app,window:ref,scope:surface,parent:scene.rootRef,
-                                      element:modal,native:native,queryHint:.observedModal))
+                                      element:modal,native:native,queryHint:.observedModal(isSheet: false)))
         let anchor=scene.node("AXGroup",parent:scene.open)
         scene.children[CFHash(scene.open)]=[anchor];scene.children[CFHash(anchor)]=[modal]
         scene.put(modal,kAXParentAttribute,anchor)
@@ -780,6 +794,135 @@ import ApplicationServices
         expect(try nested.boundary().isEmpty) // every native edge is positive; endpoint is a known AX root
         nested.nativeParents[701]=0;try refused(nested)
         nested.nativeParents[701]=999;try refused(nested)
+    }
+
+    @MainActor static func dismissedSheetKeepsWindowLifetimeWithoutBlocking() throws {
+        func sample() throws -> (scene: Scene, sheet: AXUIElement, ref: String, scope: String, instance: String) {
+            let scene = Scene(); scene.bind()
+            let sheet = scene.node(kAXSheetRole, parent: scene.open)
+            scene.put(sheet, kAXModalAttribute, kCFBooleanTrue)
+            scene.ids[CFHash(sheet)] = 501; scene.nativeIDs.append(501); scene.nativeParents[501] = 380
+            // Actual AppKit evidence: AXSheets is unsupported. The active
+            // Sheet is discovered from the current window/children frontier.
+            for node in [scene.open, scene.other, sheet] {
+                scene.attributes[CFHash(node)]?.removeValue(forKey: "AXSheets")
+            }
+            scene.declared.append(sheet); scene.children[CFHash(scene.open)] = [sheet]
+            let observed = try scene.directory.collectSurfaces("instance:modal-fixture", profile: .visual)
+            let row = (observed["surfaces"] as! [[String: Any]]).first { $0["kind"] as? String == "sheet" }!
+            guard case .retainedModal(let identity)? = scene.directory.surface(row["surface"] as! String)?.queryHint,
+                identity.isSheet else { preconditionFailure("observed sheet lost its exact mechanism qualification") }
+            let retained = scene.directory.surface(row["surface"] as! String)!
+            scene.directory.remember(.init(owner: retained.owner, window: retained.window, scope: retained.scope,
+                parent: retained.parent, element: retained.element, native: retained.native))
+            guard case .retainedModal(let refreshed)? = scene.directory.surface(retained.scope)?.queryHint,
+                refreshed.isSheet else { preconditionFailure("missing modal data erased its historical sheet query qualification") }
+            expect(!(try scene.boundary()).isEmpty)
+            expect(scene.onScreenQueries == 0) // no extra catalogue while visible
+            // Dismissal retains the CG object, whose row omits IsOnscreen;
+            // the exact old AX proxy is invalid, and native attachment is 0.
+            scene.nativeIDs.removeAll { $0 == 501 }; scene.nativeParents[501] = 0
+            scene.nativePresence[501] = .present(scene.info(501))
+            scene.declared.removeAll { CFEqual($0, sheet) }; scene.children[CFHash(scene.open)] = []
+            scene.invalid.insert(CFHash(sheet))
+            return (scene, sheet, row["window"] as! String, row["surface"] as! String, row["instance"] as! String)
+        }
+        func refused(_ scene: Scene) throws {
+            do { _ = try scene.boundary(); preconditionFailure("incomplete dismissal evidence released a modal") }
+            catch let error as DriverError { expect(error.code == .inputUnavailable) }
+        }
+        let dismissed = try sample()
+        expect(try dismissed.scene.boundary().isEmpty)
+        expect(dismissed.scene.onScreenQueries == 1)
+        let visual = try dismissed.scene.directory.collectSurfaces("instance:modal-fixture", profile: .visual)
+        expect(!(visual["stopReasons"] as! [String]).contains { $0.contains("previously observed modal identity") })
+        expect(dismissed.scene.onScreenQueries == 2) // once per boundary, no cached absence
+        // Inactive modal relation never retires or deletes the original window.
+        _ = try dismissed.scene.directory.windowScope(instance: dismissed.instance, root: dismissed.ref, surface: dismissed.scope)
+        expect(dismissed.scene.directory.surface(dismissed.scope)?.queryHint != nil)
+        dismissed.scene.nativeIDs.append(501); dismissed.scene.nativeParents[501] = 380
+        dismissed.scene.invalid.remove(CFHash(dismissed.sheet)); dismissed.scene.declared.append(dismissed.sheet)
+        dismissed.scene.children[CFHash(dismissed.scene.open)] = [dismissed.sheet]
+        expect(!(try dismissed.scene.boundary()).isEmpty) // same sheet presented again
+
+        let visible = try sample(); visible.scene.rawOnScreen = Set(visible.scene.nativeIDs + [501])
+        try refused(visible.scene) // raw visibility wins even when filtered rows omit it
+        let unavailable = try sample(); unavailable.scene.onScreenAvailable = false; try refused(unavailable.scene)
+        let attached = try sample(); attached.scene.nativeParents[501] = 380; try refused(attached.scene)
+        let parentUnknown = try sample(); parentUnknown.scene.unknownNativeParents.insert(501); try refused(parentUnknown.scene)
+        let axUnknown = try sample(); axUnknown.scene.invalid.remove(CFHash(axUnknown.sheet))
+        axUnknown.scene.attributes[CFHash(axUnknown.sheet)]?.removeValue(forKey: kAXModalAttribute)
+        axUnknown.scene.attributes[CFHash(axUnknown.sheet)]?.removeValue(forKey: kAXParentAttribute)
+        try refused(axUnknown.scene)
+        axUnknown.scene.readOverrides[CFHash(axUnknown.sheet)] = [
+            kAXModalAttribute: .unavailable(.cannotComplete), kAXParentAttribute: .unavailable(.cannotComplete)]
+        try refused(axUnknown.scene)
+        let stillDeclared = try sample(); stillDeclared.scene.invalid.remove(CFHash(stillDeclared.sheet))
+        stillDeclared.scene.declared.append(stillDeclared.sheet)
+        expect(!(try stillDeclared.scene.boundary()).isEmpty)
+        let forwardLive = try sample(); forwardLive.scene.invalid.remove(CFHash(forwardLive.sheet))
+        forwardLive.scene.children[CFHash(forwardLive.scene.open)] = [forwardLive.sheet]
+        expect(!(try forwardLive.scene.boundary()).isEmpty)
+        let forwardAbsent = try sample(); forwardAbsent.scene.invalid.remove(CFHash(forwardAbsent.sheet))
+        expect(try forwardAbsent.scene.boundary().isEmpty) // complete absence + same reread AXParent
+        forwardAbsent.scene.readOverrides[CFHash(forwardAbsent.sheet)] = [kAXModalAttribute: .unavailable(.cannotComplete)]
+        expect(try forwardAbsent.scene.boundary().isEmpty) // independent relationship proof, no AXModal prerequisite
+        let reparented = try sample(); reparented.scene.invalid.remove(CFHash(reparented.sheet))
+        var parentReads = 0
+        reparented.scene.onCount = { node in
+            if CFEqual(node, reparented.scene.open) {
+                parentReads += 1
+                if parentReads == 2 { reparented.scene.put(reparented.sheet, kAXParentAttribute, reparented.scene.other) }
+            }
+        }
+        // Read the original parent first, then change it during its forward
+        // relation query. The stable-parent proof must fail.
+        try refused(reparented.scene)
+
+        let appModal = try sample()
+        let original = appModal.scene.directory.surface(appModal.scope)!
+        let newProxy = appModal.scene.node(kAXWindowRole, parent: appModal.scene.application)
+        appModal.scene.ids[CFHash(newProxy)] = 501
+        appModal.scene.directory.remember(.init(owner: original.owner, window: original.window, scope: original.scope,
+            parent: nil, element: newProxy, native: original.native, queryHint: .observedModal(isSheet: false)))
+        appModal.scene.invalid.insert(CFHash(newProxy))
+        guard case .retainedModal(let changed)? = appModal.scene.directory.surface(appModal.scope)?.queryHint,
+            !changed.isSheet else { preconditionFailure("replacement AX proxy inherited old sheet qualification") }
+        try refused(appModal.scene) // hidden app-modal run loop may still be active
+        expect(appModal.scene.onScreenQueries == 0)
+
+        let changedKind = try sample()
+        let sameObject = changedKind.scene.directory.surface(changedKind.scope)!
+        changedKind.scene.directory.remember(.init(owner: sameObject.owner, window: sameObject.window, scope: sameObject.scope,
+            parent: nil, element: sameObject.element, native: sameObject.native, queryHint: .observedModal(isSheet: false)))
+        guard case .retainedModal(let currentKind)? = changedKind.scene.directory.surface(changedKind.scope)?.queryHint,
+            !currentKind.isSheet else { preconditionFailure("explicit ordinary-modal observation kept historical sheet qualification") }
+        try refused(changedKind.scene) // same NSWindow can now run as an app-modal
+        expect(changedKind.scene.onScreenQueries == 0)
+
+        let several = try sample()
+        let second = several.scene.node(kAXSheetRole, parent: several.scene.other)
+        let secondBinding = several.scene.rememberCGModal(second, id: 502)
+        several.scene.directory.remember(.init(owner: several.scene.app, window: secondBinding.ref, scope: secondBinding.scope,
+            parent: several.scene.otherRef, element: second, native: secondBinding.native, queryHint: .observedModal(isSheet: true)))
+        several.scene.nativeIDs.removeAll { $0 == 502 }
+        several.scene.nativePresence[502] = .present(several.scene.info(502)); several.scene.invalid.insert(CFHash(second))
+        expect(try several.scene.boundary().isEmpty)
+        expect(several.scene.onScreenQueries == 1) // all retained hints share one raw sample
+    }
+
+    static func rawOnScreenCatalogue() {
+        var queries = 0
+        let rows: [[String: Any]] = [[kCGWindowNumber as String: 501, kCGWindowAlpha as String: 0]]
+        let ids = WindowServerInfo.onScreenWindows { options, relative in
+            queries += 1; expect(options == .optionOnScreenOnly && relative == kCGNullWindowID)
+            return rows
+        }
+        expect(ids == Set([CGWindowID(501)]) && queries == 1) // never geometry/alpha filtered
+        expect(WindowServerInfo.onScreenWindows { _, _ in [] } == [])
+        expect(WindowServerInfo.onScreenWindows { _, _ in nil } == nil)
+        expect(WindowServerInfo.onScreenWindows { _, _ in [[:]] } == nil)
+        expect(WindowServerInfo.onScreenWindows { _, _ in [[kCGWindowNumber as String: "501"]] } == nil)
     }
 
     @MainActor static func cgModalBoundaries() throws {
@@ -855,7 +998,7 @@ import ApplicationServices
 
         let own=Scene();own.bind()
         own.directory.remember(.init(owner:own.app,window:own.rootRef,scope:own.scope,parent:nil,element:own.open,
-                                    native:own.windows()[0],queryHint:.observedModal))
+                                    native:own.windows()[0],queryHint:.observedModal(isSheet: false)))
         own.trusted=false;expect(try own.boundary().isEmpty)
         own.trusted=true;own.invalid.insert(CFHash(own.open))
         expect(try own.boundary().isEmpty) // CG self remains operable without an AX proxy
@@ -870,7 +1013,7 @@ import ApplicationServices
 
         let ancestor=Scene();ancestor.bind()
         ancestor.directory.remember(.init(owner:ancestor.app,window:ancestor.rootRef,scope:ancestor.scope,parent:nil,
-                                         element:ancestor.open,native:ancestor.windows()[0],queryHint:.observedModal))
+                                         element:ancestor.open,native:ancestor.windows()[0],queryHint:.observedModal(isSheet: false)))
         let target=ancestor.node(kAXWindowRole,parent:ancestor.open)
         ancestor.put(target,kAXModalAttribute,kCFBooleanTrue);ancestor.put(target,"AXSheets",[] as CFArray)
         let binding=ancestor.rememberCGModal(target);ancestor.declared.append(target)

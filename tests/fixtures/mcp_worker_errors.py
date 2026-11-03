@@ -16,8 +16,12 @@ MISSING_MODULE = "computer_use.interaction.read.presentation.interface.readable.
 
 def redirect_worker(original):
     async def spawn(*args, **kwargs):
-        if args[-2:] == ("-m", "computer_use_mcp.runtime"):
-            args = (*args[:-2], str(Path(__file__).resolve()), "--worker")
+        runtime = next(
+            (i for i in range(len(args) - 1) if args[i:i + 2] == ("-m", "computer_use_mcp.runtime")),
+            None,
+        )
+        if runtime is not None:
+            args = (*args[:runtime], str(Path(__file__).resolve()), "--worker", *args[runtime + 2:])
         return await original(*args, **kwargs)
 
     return spawn

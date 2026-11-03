@@ -8,7 +8,7 @@ import ApplicationServices
 @MainActor final class NativeDirectory {
     struct Surface {
         enum QueryHint {
-            case observedModal
+            case observedModal(isSheet: Bool)
             case retainedModal(NativeApplicationReader.ModalIdentity)
         }
         let owner: NSRunningApplication
@@ -37,6 +37,8 @@ import ApplicationServices
         var process: (pid_t) -> NativeProcessIdentity? = { NativeProcessIdentity.read($0) }
         var info: (CGWindowID) -> [String: Any]? = { WindowServerInfo.window($0) }
         var presence: (CGWindowID) -> WindowServerInfo.Presence = { WindowServerInfo.read($0) }
+        var onScreenWindows: () -> Set<CGWindowID>? = { WindowServerInfo.onScreenWindows() }
+        var parents: ([CGWindowID]) -> [CGWindowID: CGWindowID]? = { NativeWindowParents.read($0) }
         var isGone: (pid_t) -> Bool = { NativeProcessIdentity.isGone($0) }
         var role: (AXUIElement) -> String? = { AXAccess.read($0, kAXRoleAttribute).value as? String }
     }
@@ -65,6 +67,31 @@ import ApplicationServices
         self.windowServices = windowServices
     }
     func surface(_ id: String) -> Surface? { surfaces[id] }
+
+    /// A desktop row is a direct native window selection, independent of AX
+    /// completeness or parent relationships. Reuse the same identity owners
+    /// as application discovery; presentation never substitutes title/frame.
+    /// CGWindowNumber is unique within the user session (Apple Quartz Window
+    /// Services); the registry additionally binds the process incarnation.
+    func retainDesktopWindow(_ native: NativeWindows.Window, owner: NSRunningApplication) -> [String: Any] {
+        let app = owner
+        let window = state.applications.windowReference(native)
+        let scope = state.applications.observationScope(app, window: nil, reference: window)
+        let instance = state.appSelections.get(owner: app, root: window)
+        let previous = surfaces[scope]
+        let same = previous?.owner.isEqual(app) == true && previous?.window == window
+            && previous?.native?.process == native.process && previous?.native?.mapping.id == native.mapping.id
+        // Preserve retained AX and relation evidence for the original target's
+        // input-boundary queries. This catalogue makes no new AX/modal claim.
+        remember(Surface(owner: app, window: window, scope: scope,
+            parent: same ? previous?.parent : nil, element: same ? previous?.element : nil, native: native))
+        return [
+            "window": window, "instance": instance.id, "surface": scope, "node": NSNull(),
+            "title": native.mapping.title ?? "", "kind": "window", "parent": NSNull(),
+            "parentState": "unknown", "modal": NSNull(), "nativeWindow": true, "accessibility": false
+        ]
+    }
+
     func windowElement(_ window: String, owner: NSRunningApplication) -> AXUIElement? {
         surfaces.values.first { $0.window == window && $0.owner.isEqual(owner) }?.element
     }
@@ -350,40 +377,70 @@ import ApplicationServices
 
     private func modalPresence(
         _ expected: NativeApplicationReader.ModalIdentity.Native, current: [NativeWindows.Window]
-    ) -> NativeApplicationReader.ModalPresence {
+    ) -> (presence: NativeApplicationReader.ModalPresence, onScreen: Bool?) {
         if let window = current.first(where: { $0.mapping.id == expected.id }) {
-            return window.process == expected.process ? .live : .ended
+            return (window.process == expected.process ? .live : .ended, window.onScreen)
         }
         let process = current.first(where: { $0.process.pid == expected.process.pid })?.process
             ?? windowServices.process(expected.process.pid)
-        guard let process else { return windowServices.isGone(expected.process.pid) ? .ended : .unknown }
-        guard process == expected.process else { return .ended }
+        guard let process else { return (windowServices.isGone(expected.process.pid) ? .ended : .unknown, nil) }
+        guard process == expected.process else { return (.ended, nil) }
         switch windowServices.presence(expected.id) {
         case .present(let row):
             guard (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value == expected.id,
-                let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return .unknown }
-            return pid == expected.process.pid ? .live : .ended
-        case .absent: return .ended
-        case .unavailable: return .unknown
+                let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return (.unknown, nil) }
+            return (pid == expected.process.pid ? .live : .ended,
+                (row[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue)
+        case .absent: return (.ended, nil)
+        case .unavailable: return (.unknown, nil)
         }
     }
 
     private func retainedModalHints(owner: NSRunningApplication, native: [NativeWindows.Window]) throws
         -> [NativeApplicationReader.ModalHint]
     {
-        try surfaces.values.filter { $0.owner.isEqual(owner) }.compactMap { surface in
+        var hints: [NativeApplicationReader.ModalHint] = try surfaces.values.filter { $0.owner.isEqual(owner) }.compactMap { surface in
             guard case .retainedModal(let identity)? = surface.queryHint else { return nil }
             try RequestDiagnostics.checkCancellation()
-            return .init(identity: identity, nativePresence: identity.native.map { modalPresence($0, current: native) })
+            let state = identity.native.map { modalPresence($0, current: native) }
+            return .init(identity: identity, nativePresence: state?.presence, nativeOnScreen: state?.onScreen)
         }
+        // A retained CG window can outlive its modal presentation. Query raw
+        // visibility once only when the exact live identity lacks that fact;
+        // absence from the filtered native directory cannot establish it.
+        if hints.contains(where: { $0.identity.isSheet && $0.nativePresence == .live && $0.nativeOnScreen == nil }) {
+            try RequestDiagnostics.checkCancellation()
+            if let onScreen = windowServices.onScreenWindows() {
+                for index in hints.indices where hints[index].nativePresence == .live && hints[index].nativeOnScreen == nil {
+                    if let id = hints[index].identity.native?.id { hints[index].nativeOnScreen = onScreen.contains(id) }
+                }
+            }
+        }
+        let hidden = hints.filter { $0.identity.isSheet && $0.nativePresence == .live && $0.nativeOnScreen == false }
+        try RequestDiagnostics.checkCancellation()
+        let parents = hidden.isEmpty ? nil : windowServices.parents(hidden.compactMap { $0.identity.native?.id })
+        try RequestDiagnostics.checkCancellation()
+        for index in hints.indices {
+            if let id = hints[index].identity.native?.id { hints[index].nativeParentID = parents?[id] }
+            let hint = hints[index]
+            NativePointerTiming.record("modalHintNativeEvidence", metadata: {
+                ["window": hint.identity.window, "nativeWindow": hint.identity.native?.id as Any? ?? NSNull(),
+                 "presence": hint.nativePresence.map { String(describing: $0) } ?? "AX-only",
+                 "onScreen": hint.nativeOnScreen as Any? ?? NSNull(), "parentID": hint.nativeParentID as Any? ?? NSNull(),
+                 "observedSheet": hint.identity.isSheet]
+            })
+        }
+        return hints
     }
 
     func remember(_ observed: Surface) {
         var surface = observed
-        if case .observedModal? = surface.queryHint {
+        if case .observedModal(let isSheet)? = surface.queryHint {
+            // A positive ordinary-modal observation replaces an older sheet
+            // qualification, even if the native object itself is unchanged.
             surface.queryHint = .retainedModal(.init(
                 window: surface.window, element: surface.element,
-                native: surface.native.map { .init(id: $0.mapping.id, process: $0.process) }))
+                native: surface.native.map { .init(id: $0.mapping.id, process: $0.process) }, isSheet: isSheet))
         } else if surface.queryHint == nil, let previous = surfaces[surface.scope],
             previous.owner.isEqual(surface.owner), previous.window == surface.window
         {
@@ -442,6 +499,7 @@ import ApplicationServices
         }
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         var reasons = [String]()
+        var rootDiscoveryComplete = true
         var provider: [String: Any] = [
             "status": "permissionUnavailable", "attribute": NSNull(), "writeStatus": NSNull()
         ]
@@ -460,8 +518,14 @@ import ApplicationServices
             ]
         }
         let native = windowServices.listIfAvailable(app)
-        if native == nil { reasons.append("WindowServer catalogue unavailable") }
-        if !windowServices.trusted() { reasons.append("accessibility permission unavailable; native windows are retained") }
+        if native == nil {
+            reasons.append("WindowServer catalogue unavailable")
+            rootDiscoveryComplete = false
+        }
+        if !windowServices.trusted() {
+            reasons.append("accessibility permission unavailable; native windows are retained")
+            rootDiscoveryComplete = false
+        }
         // Reuse the platform's explicit AX/WindowServer correspondence. This
         // describes native ownership, not AppSelection's default-view policy.
         let ax: [NativeApplicationAccess.Window]
@@ -469,11 +533,15 @@ import ApplicationServices
             ax = try state.applications.windows(
                 app, nativeWindows: native ?? [], profile: profile,
                 modalHints: profile == .visual ? retainedModalHints(owner: app, native: native ?? []) : [],
-                reportIssue: { reasons.append($0) })
+                reportIssue: {
+                    reasons.append($0.detail)
+                    if $0.scope == .roots { rootDiscoveryComplete = false }
+                })
         } catch {
             try RequestDiagnostics.checkCancellation()
             reasons.append(
                 "AX surface catalogue failed; native windows remain available: \(error.localizedDescription)")
+            rootDiscoveryComplete = false
             ax = []
         }
         let visual = Dictionary(grouping: native ?? [], by: { state.applications.windowReference($0) })
@@ -481,6 +549,7 @@ import ApplicationServices
         if !relations.unresolved.isEmpty {
             let issue = "some native window parent relationships could not be confirmed"
             if !reasons.contains(issue) { reasons.append(issue) }
+            rootDiscoveryComplete = false
         }
         var entries = [[String: Any]](), known = Set<String>()
         func append(
@@ -519,11 +588,19 @@ import ApplicationServices
                 matching[0].process == oldNative.process
             { retainedElement = previous.element }
             else { retainedElement = element }
+            let hint: Surface.QueryHint? = modal == true || (kind == "sheet" && modal != false)
+                ? .observedModal(isSheet: kind == "sheet") : nil
+            if hint != nil {
+                NativePointerTiming.record("observedModalRelation", metadata: {
+                    ["window": window, "nativeWindow": matching.first?.mapping.id as Any? ?? NSNull(),
+                     "surfaceKind": kind, "parent": parent as Any? ?? NSNull(), "parentUnknown": parentUnknown]
+                })
+            }
             remember(
                 Surface(
                     owner: app, window: window, scope: scope, parent: parent, element: retainedElement,
                     native: matching.count == 1 ? matching[0] : nil,
-                    queryHint: modal == true || (kind == "sheet" && modal != false) ? .observedModal : nil))
+                    queryHint: hint))
             entries.append([
                 "window": window, "instance": instance.id, "surface": scope, "node": node as Any? ?? NSNull(),
                 "title": title, "kind": kind, "parent": parent as Any? ?? NSNull(), "parentState": parentState,
@@ -564,11 +641,18 @@ import ApplicationServices
                 if matches.count == 1 { focusedWindow = matches[0] }
             }
         }
-        if known.count > entries.count { reasons.append("surface catalogue entry limit") }
+        if known.count > entries.count {
+            reasons.append("surface catalogue entry limit")
+            rootDiscoveryComplete = false
+        }
+        if entries.contains(where: { $0["parentState"] as? String == "unknown" }) {
+            rootDiscoveryComplete = false
+        }
         try windowServices.owner(app)
         var value = result("surfaces", began: began, reasons: reasons)
         value["application"] = application
         value["surfaces"] = entries
+        value["rootDiscoveryComplete"] = rootDiscoveryComplete
         value["provider"] = provider
         value["focusedWindow"] = focusedWindow as Any? ?? NSNull()
         return value

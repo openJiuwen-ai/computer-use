@@ -15,9 +15,6 @@ extension NativeElementControl {
         let applicationMenuContext: Bool
         let foreground: Bool
         var focusWritable: Bool = false
-        /// Provider AXPress toggles presentation without full click activation.
-        /// This fact is sampled only for automatic click offers.
-        var stateOnlyPress = false
         var documentEvidence = DocumentEvidence.unknown
         var document: (any NativeActionDocumentInput)? {
             if case .standard(let value) = documentEvidence { return value }
@@ -69,14 +66,6 @@ extension NativeElementControl {
             }
         }
         if explicitRequest != nil { return facts }
-        if [kAXCheckBoxRole, kAXRadioButtonRole].contains(role ?? "") {
-            let identifier = target.identity.attributes[kAXIdentifierAttribute]
-            let currentWindowPath = try NativeQtAccessibilityQuery.isWidget(
-                target.element, identifier: identifier, originalWindow: target.observedInteractionSurface,
-                presenterPID: target.application.processIdentifier)
-            facts.stateOnlyPress = NativeToggleClickPolicy.stateOnlyPress(
-                role: role, identifier: identifier, currentWindowPath: currentWindowPath)
-        }
         facts.focusWritable = AXAccess.writable(target.element, kAXFocusedAttribute).value == true
         if let context = target.popupOwner, target.ancestors.count == 2, CFEqual(target.ancestors[0], context.popup),
             CFEqual(target.ancestors[1], context.list), let observed = target.observedInteractionSurface,

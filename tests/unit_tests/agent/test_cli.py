@@ -13,24 +13,30 @@ import time
 from computer_use_agent.cli.config import initialize, load
 from computer_use_agent.cli.input import MessageInput
 from computer_use_agent.cli.journal import Journal
-from computer_use_agent.cli.main import main
+from computer_use_agent.cli.main import main, parser
 from computer_use_agent.cli.terminal import Terminal
 from rich.console import Console
 
 from .conftest import answer, tool_call
 
 
-def test_cli_configuration_and_legacy_aliases(tmp_path, monkeypatch):
+def test_cli_configuration_and_environment_overrides(tmp_path, monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
     path = tmp_path / "config.json"
     initialize(path)
-    path.write_text(json.dumps({"model": "configured", "baseUrl": "http://127.0.0.1/v1", "apiKey": "file-key"}))
+    path.write_text(json.dumps({"model": "configured", "api_base": "http://127.0.0.1/v1", "api_key": "file-key"}))
     monkeypatch.setenv("OPENAI_API_KEY", "environment-key")
     value = load(path, overrides={"model": "override"})
     assert value["model"] == "override"
     assert value["api_base"] == "http://127.0.0.1/v1"
     assert value["api_key"] == "environment-key"
+
+
+def test_global_input_cli_preserves_config_default_and_explicit_opt_out():
+    assert parser().parse_args([]).allow_global_input is None
+    assert parser().parse_args(["--allow-global-input"]).allow_global_input is True
+    assert parser().parse_args(["--no-allow-global-input"]).allow_global_input is False
 
 
 def test_cli_config_init_reports_once_and_preserves_existing_file(tmp_path, capsys):
@@ -191,7 +197,7 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
 
     if os.name != "posix":
         pytest.skip("This test sends POSIX process signals.")
-    server = model_server([tool_call("await __import__('asyncio').sleep(60)")])
+    server = model_server([tool_call("import time\nwhile True:\n    time.sleep(0.01)")])
     path = tmp_path / "model.json"
     path.write_text(
         json.dumps(

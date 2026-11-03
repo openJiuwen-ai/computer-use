@@ -55,11 +55,20 @@ import ApplicationServices
                 else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
                 target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))
             } else if capture {
-                let unit = NativePointerUnit(capture: try access.captures.input(command.target))
+                guard offer.pointerRequirement == .contentReceiver || offer.delivery == .windowDirected else {
+                    throw DriverError("captured point requirement needs window-directed delivery", code: .invalidRequest)
+                }
+                let unit = NativePointerUnit(
+                    capture: try access.captures.input(command.target), pointerRequirement: offer.pointerRequirement)
                 try unit.validateParameters(request)
                 target = .captured(unit)
             } else {
-                target = .element(try access.units.elementPointerUnit(command.target, actuator: contract.actuator))
+                guard offer.permitsElementPointer(hasActuator: contract.actuator != nil) else {
+                    throw DriverError("original element point requirement needs its window-directed route", code: .invalidRequest)
+                }
+                target = .element(
+                    try access.units.elementPointerUnit(command.target, actuator: contract.actuator)
+                        .requiring(offer.pointerRequirement))
             }
         case .desktop("click"):
             guard command.kind == "pointer_sequence", offer.delivery == .systemPointer, !command.foreground else {

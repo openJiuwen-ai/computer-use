@@ -296,7 +296,7 @@ namespace ComputerUse.Windows
                                                                               true);
             operation.Contracts.Add(contract.Id, contract);
             var primitive =
-                Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "pointer", "supported", "yes",
+                Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "pointer", "globalInput", "yes", "supported", "yes",
                          "readiness", state.Ready ? "yes" : "no", "pending",
                          state.Ready ? new string[0] : new[] { state.ForegroundReady ? "receiver" : "foreground" },
                          "backgroundPreparation", "no");

@@ -81,6 +81,7 @@ def prepare(scene):
     facts = scene.unit.inspect(scene.operation, scene.target, (), scene.context)
     primitive = facts["primitives"][0]
     assert primitive["unit"] == "prepare_receiver" and primitive["supported"] == "yes"
+    assert primitive["globalInput"] == "no"
     result = scene.unit.execute(
         scene.operation,
         {"kind": "prepare_receiver", "primitiveId": primitive["id"], "target": scene.target, "foreground": False},
@@ -131,8 +132,53 @@ def test_actual_input_still_requires_xtest_before_preparation(modules, scene, un
     with pytest.raises(modules.protocol.Failure) as caught:
         unit.preflight(operation)
 
-    assert caught.value.code == "mode_unsupported"
+    assert caught.value.code == "unsupported_operation"
     scene.desktop.keycode.assert_not_called()
     scene.desktop.text_preflight.assert_not_called()
     scene.desktop.activate.assert_not_called()
     scene.unit.target.call.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "unit_name,type_name,kind,parameters,contract_unit,extra",
+    (
+        ("keyboard", "NativeKeyboard", "key", {"key": "Return"}, "key_sequence", {}),
+        ("typed", "NativeTypedText", "insert", {"text": "abc"}, "key_sequence", {"typedText": True}),
+        ("typed", "NativeTypedText", "replace", {"text": ""}, "key_sequence", {"typedText": True}),
+        ("paste", "NativePaste", "paste", {"text": "abc"}, "clipboard_paste", {}),
+    ),
+)
+@pytest.mark.parametrize("preparing", (False, True))
+def test_global_input_denied_before_receiver_or_clipboard_preparation(
+    modules, scene, unit_name, type_name, kind, parameters, contract_unit, extra, preparing
+):
+    unit = object.__new__(getattr(getattr(modules, unit_name), type_name))
+    unit.desktop = scene.desktop
+    unit.ax = SimpleNamespace(begin=Mock())
+    unit.prepare = Mock()
+    unit.guard = Mock()
+    unit.preflight = Mock()
+    scene.desktop.can_input = True  # Capability alone is not authorization.
+    operation = modules.operation.NativeOperation(
+        scene.target, scene.context.deadline, {"kind": kind, "parameters": parameters}, writable=True
+    )
+    primitive = operation.contract(contract_unit, scene.target, (), supported=True, **extra)
+    result = unit.execute(
+        operation,
+        dict(
+            kind="prepare_receiver" if preparing else contract_unit,
+            primitiveId=primitive,
+            target=scene.target,
+            foreground=preparing,
+        ),
+        scene.context,
+    )
+    assert result["errorCode"] == "permission_required"
+    assert result["dispatch"] == "notDispatched" and not operation.dispatched
+    assert result["preparation"] == [] and scene.context.effect == "none"
+    unit.prepare.assert_not_called()
+    unit.guard.assert_not_called()
+    unit.preflight.assert_not_called()
+    unit.ax.begin.assert_not_called()
+    scene.desktop.activate.assert_not_called()
+    scene.desktop.press_key.assert_not_called()

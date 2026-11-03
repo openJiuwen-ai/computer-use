@@ -9,6 +9,7 @@ import logging
 import os
 import time
 
+from computer_use_linux.contracts.input_authority import require_global_input
 from computer_use_linux.contracts.protocol import Failure, finite, integer, now, require, token
 from computer_use_linux.objects.registry import Window
 from computer_use_linux.system.x11_pointer import PointerCallbacks
@@ -26,11 +27,13 @@ class X11:
     notes = []
     _resource_version = _RESOURCE_UNQUERIED
 
-    def __init__(self, retire):
+    def __init__(self, retire, *, allow_global_input=False):
+        require(type(allow_global_input) is bool, "Global input permission must be a boolean.")
+        self.allow_global_input = allow_global_input
         if os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
             raise Failure(
                 "This backend currently requires an X11 desktop; XWayland is not a complete desktop route.",
-                "mode_unsupported",
+                "unsupported_operation",
                 next="Use an X11 desktop session or an isolated X11 VM for this version.",
             )
         if not os.environ.get("DISPLAY"):
@@ -212,7 +215,7 @@ class X11:
 
     def prepare(self, instance, ctx, pointer=False):
         if not self.can_input:
-            raise Failure("XTest is unavailable; native accessibility actions remain available.", "mode_unsupported")
+            raise Failure("XTest is unavailable; native accessibility actions remain available.", "unsupported_operation")
         w = self.validate(instance)
         if not w.mapped:
             raise Failure("Window is not visible; restore it before using visual input.", "input_unavailable")
@@ -519,6 +522,7 @@ class X11:
         return self.points(capture, ((x, y),))[0]
 
     def _event(self, kind, detail=0, x=0, y=0):
+        require_global_input(self)
         from Xlib.ext import xtest
 
         errors = []
@@ -559,8 +563,9 @@ class X11:
         return code
 
     def press_key(self, key, ctx, validate=lambda: None, before_dispatch=lambda: None):
+        require_global_input(self)
         if not self.can_input:
-            raise Failure("XTest keyboard synthesis is unavailable.", "mode_unsupported")
+            raise Failure("XTest keyboard synthesis is unavailable.", "unsupported_operation")
         parts = key.split("+")
         codes = [self.keycode(name) for name in parts]
         self.require_idle_input()
@@ -585,12 +590,15 @@ class X11:
         from computer_use_linux.system.x11_text import keyboard_for, plan_text
 
         if not self.can_input:
-            raise Failure("XTest keyboard synthesis is unavailable.", "mode_unsupported")
+            raise Failure("XTest keyboard synthesis is unavailable.", "unsupported_operation")
         return plan_text(text, keyboard_for(self).snapshot())
 
     def type_text(self, text, ctx, validate=lambda: None, before_dispatch=lambda: None, before_character=lambda: None):
         from computer_use_linux.system.x11_text import check_plan, keyboard_for
 
+        if text == "":
+            return
+        require_global_input(self)
         plan = self.text_preflight(text)  # Entire payload before any key press.
         keyboard = keyboard_for(self)
         self.require_idle_input()
@@ -641,7 +649,7 @@ class X11:
         any higher-level receiver preparation.
         """
         if not self.can_input:
-            raise Failure("XTest pointer synthesis is unavailable.", "mode_unsupported")
+            raise Failure("XTest pointer synthesis is unavailable.", "unsupported_operation")
         require(kind in ("click", "scroll", "drag"), "Invalid pointer operation.")
         require(button in ("left", "middle", "right"), "Invalid pointer button.")
         integer(count, 1, 2)
@@ -708,6 +716,7 @@ class X11:
         freeze_points, when supplied, resolves the whole gesture once; later
         validation never supplies replacement coordinates to the event plan.
         """
+        require_global_input(self)
         callbacks = PointerCallbacks() if callbacks is None else callbacks
         validate, before_dispatch = callbacks.validate, callbacks.before_dispatch
         validate_drag, scroll_step_complete = callbacks.validate_drag, callbacks.scroll_step_complete

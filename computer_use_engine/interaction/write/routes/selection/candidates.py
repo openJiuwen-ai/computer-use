@@ -72,7 +72,11 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
                 f"No native action matches {name!r} on this element." + observed,
                 "read the element and use a complete action name or description from that observation",
             )
-        return CandidateSet(request, tuple(p for p in matches if p.supported == Knowledge.YES))
+        # Matching an action name is distinct from admitting its current route.
+        # Preserve unavailable declarations and their blockers for the refusal
+        # explanation; stage_admission still prevents preparing or dispatching
+        # unsupported candidates. Dropping one here hides known disabled state.
+        return CandidateSet(request, tuple(matches))
     # Coordinate requests mean pointer events, even when a semantic action exists.
     matches_key = (
         True

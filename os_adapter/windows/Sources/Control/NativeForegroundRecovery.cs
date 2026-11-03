@@ -48,7 +48,7 @@ namespace ComputerUse.Windows
 
         internal static bool Try(Request r, Host host)
         {
-            if (r.Dispatched || r.ForegroundRecoveryAttempted)
+            if (!r.GlobalInputAllowed || r.Dispatched || r.ForegroundRecoveryAttempted)
                 return false;
             r.Check();
             host.Guard(false);
@@ -471,12 +471,12 @@ namespace ComputerUse.Windows
                     Native.Key(27, false),
                     Native.Key(27, true)
                 };
-                return Native.SendInput(2, events, Marshal.SizeOf(typeof(Native.INPUT)));
+                return Native.SendInput(2, events, Marshal.SizeOf(typeof(Native.INPUT)), request.GlobalInputAllowed);
             }
 
             internal override void ReleaseEscape()
             {
-                Native.Release(Native.Key(27, true));
+                Native.Release(Native.Key(27, true), request.GlobalInputAllowed);
             }
 
             internal override void Activate()

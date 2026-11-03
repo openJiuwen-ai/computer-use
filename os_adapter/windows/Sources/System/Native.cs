@@ -124,8 +124,6 @@ namespace ComputerUse.Windows
         [DllImport("user32.dll")]
         internal static extern bool GetCursorPos(out POINT point);
         [DllImport("user32.dll")]
-        internal static extern bool SetCursorPos(int x, int y);
-        [DllImport("user32.dll")]
         internal static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll", EntryPoint = "SendInput", SetLastError = true)]
         static extern uint SendInputRaw(uint count, INPUT[] inputs, int size);
@@ -135,8 +133,9 @@ namespace ComputerUse.Windows
             Interlocked.Exchange(ref lastVisualInput, (long)Math.Ceiling(Wire.Now));
         }
 
-        internal static uint SendInput(uint count, INPUT[] inputs, int size)
+        internal static uint SendInput(uint count, INPUT[] inputs, int size, bool globalInputAllowed)
         {
+            NativeGlobalInput.Require(globalInputAllowed);
             uint sent = SendInputRaw(count, inputs, size);
             if (sent > 0)
                 NoteVisualInput();
@@ -569,17 +568,18 @@ namespace ComputerUse.Windows
 
         internal static void Send(INPUT[] inputs, Request r)
         {
+            NativeGlobalInput.Require(r.GlobalInputAllowed);
             r.Sending();
-            uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+            uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)), r.GlobalInputAllowed);
             if (sent != inputs.Length)
                 throw new Failure("execution_unknown",
                                   "SendInput accepted " + sent + "/" + inputs.Length +
                                       " events (possibly blocked by integrity level); not retried");
         }
 
-        internal static void Release(INPUT input)
+        internal static void Release(INPUT input, bool globalInputAllowed)
         {
-            SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+            SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)), globalInputAllowed);
         }
 
         internal static void EditMessage(IntPtr h, uint message, IntPtr w, string value, Request r)

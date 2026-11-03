@@ -136,6 +136,10 @@ class NativePort(Protocol):
     ) -> dict:
         pass
 
+    async def prepare_observation(self, operation: str, target: Binding, timeout_ms: int) -> dict:
+        """Explicit window preparation, never part of an inspect or capture query."""
+        pass
+
     async def execute(self, operation: str, step: int, command: UnitCommand, timeout_ms: int) -> StepResult:
         pass
 

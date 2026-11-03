@@ -11,7 +11,7 @@ def can_keep_object_contracts(result, error, request_effect, unit):
         return False
     if isinstance(error, Failure) and (
         error.effect != "none"
-        or error.code not in ("input_unavailable", "mode_unsupported", "observation_incomplete", "ambiguous_target")
+        or error.code not in ("input_unavailable", "unsupported_operation", "observation_incomplete", "ambiguous_target")
     ):
         return False
     return any(

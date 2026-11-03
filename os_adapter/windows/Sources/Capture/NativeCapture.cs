@@ -16,12 +16,11 @@ namespace ComputerUse.Windows
     {
         readonly NativeReadStore store;
         readonly NativePointerCaptures captures;
-        readonly string desktopScope, mode;
-        internal NativeCapture(NativeReadStore store, string session, string mode, NativePointerCaptures captures = null)
+        readonly string desktopScope;
+        internal NativeCapture(NativeReadStore store, string session, NativePointerCaptures captures = null)
         {
             this.store = store;
             desktopScope = session + ":desktop";
-            this.mode = mode;
             this.captures = captures;
         }
 
@@ -158,7 +157,7 @@ namespace ComputerUse.Windows
 
             Check(r);
             var displays = displaysBefore.Select(s => Wire.Obj("name", s.Name, "rect", shape.Clip(s.Bounds.X, s.Bounds.Y, s.Bounds.Width, s.Bounds.Height), "captured", true)).ToArray();
-            var observation = Wire.Obj("mode", mode, "canvas", Wire.Obj("width", shape.Width, "height", shape.Height), "frontmost", frontmost, "displays", displays, "windows", windows.Take(256).ToArray(), "omittedWindows", Math.Max(0, windows.Count - 256));
+            var observation = Wire.Obj("canvas", Wire.Obj("width", shape.Width, "height", shape.Height), "frontmost", frontmost, "displays", displays, "windows", windows.Take(256).ToArray(), "omittedWindows", Math.Max(0, windows.Count - 256));
             if (notes.Count > 0)
                 observation["catalogError"] = NativeReadStore.Text(String.Join("\n", notes));
             var image = Image(kind, desktopScope, start, shape, pixels);

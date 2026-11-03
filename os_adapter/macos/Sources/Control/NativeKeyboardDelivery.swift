@@ -61,7 +61,7 @@ import Carbon
 @MainActor enum NativeKeyboardDelivery {
     case process(BackgroundEvents.KeyboardRecipient)
     case scopedForegroundHID(NativeScopedKeyboardDelivery)
-    case exclusiveDesktop
+    case desktop
 
     var processRecipient: BackgroundEvents.KeyboardRecipient? {
         if case .process(let value) = self { return value }
@@ -79,8 +79,10 @@ import Carbon
     func requireAdmission() throws {
         switch self {
         case .process: try BackgroundEvents.requireKeyboardRoute()
-        case .scopedForegroundHID(let value): try value.requireCurrentBoundary()
-        case .exclusiveDesktop: try Input.requireDesktopInput()
+        case .scopedForegroundHID(let value):
+            try NativeInputAuthorization.requireGlobalInput("scoped foreground keyboard")
+            try value.requireCurrentBoundary()
+        case .desktop: try Input.requireDesktopInput()
         }
     }
 
@@ -92,7 +94,7 @@ import Carbon
             activity = NativeInputActivity.begin(
                 device: .keyboard, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap",
                 pid: scoped.process.pid, window: scoped.mapping.id, event: event)
-        case .exclusiveDesktop:
+        case .desktop:
             activity = NativeInputActivity.begin(
                 device: .keyboard, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap", event: event)
         }
@@ -111,7 +113,7 @@ import Carbon
                     "unicodeUnits": count
                 ] as [String: Any])
             event.post(tap: .cghidEventTap)
-        case .exclusiveDesktop: event.post(tap: .cghidEventTap)
+        case .desktop: event.post(tap: .cghidEventTap)
         }
         activity?.returned()
     }
@@ -120,7 +122,7 @@ import Carbon
     func canRelease(expectedProcess: NativeProcessIdentity?) -> Bool {
         switch self {
         case .process(let recipient): return NativeProcessIdentity.read(recipient.pid) == expectedProcess
-        case .scopedForegroundHID, .exclusiveDesktop: return true
+        case .scopedForegroundHID, .desktop: return true
         }
     }
 

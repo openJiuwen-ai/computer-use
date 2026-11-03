@@ -114,7 +114,7 @@ namespace ComputerUse.Windows
                 break;
             case "launch":
             case "roots":
-                throw new Failure("mode_unsupported",
+                throw new Failure("unsupported_operation",
                                   "this native Windows slice provides window discovery and raw UIA reading only");
             default:
                 throw new Failure("invalid_request", "unknown native observation query");

@@ -48,6 +48,7 @@ namespace ComputerUse.Windows
                                                   Height = box.Height };
         }
         readonly NativeReadStore windows;
+        readonly bool globalInputAllowed;
         readonly NativePointerCaptures captures;
         sealed class Target
         {
@@ -58,9 +59,10 @@ namespace ComputerUse.Windows
             internal string Kind;
         }
 
-        internal NativeWindowsPointer(NativeReadStore windows, NativePointerCaptures captures)
+        internal NativeWindowsPointer(NativeReadStore windows, NativePointerCaptures captures, bool allowGlobalInput = false)
         {
             this.windows = windows;
+            globalInputAllowed = allowGlobalInput;
             this.captures = captures;
         }
 
@@ -185,6 +187,7 @@ namespace ComputerUse.Windows
 
         public void RequireIdle(Request r)
         {
+            NativeGlobalInput.Require(globalInputAllowed);
             r.Check();
             NativeDesktopState.RequireInput();
             Native.Released();
@@ -227,7 +230,7 @@ namespace ComputerUse.Windows
                                                                                       Data = unchecked((uint)e.Data) } }
                              })
                              .ToArray();
-            return (int)Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.INPUT)));
+            return (int)Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.INPUT)), globalInputAllowed);
         }
     }
 }

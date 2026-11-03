@@ -126,15 +126,33 @@ def test_desktop_keyboard_preserves_captured_scope_without_mode_flags(linux_modu
     unit.captures.keyboard_destination.assert_called_once()
 
 
-@pytest.mark.parametrize("mode", ["shared", "restricted", ""])
-def test_removed_modes_are_rejected_before_backend_initialization(linux_modules, mode):
+@pytest.mark.parametrize("permission", ["true", "false", 0, 1, None, {}])
+def test_permission_must_be_boolean_before_backend_initialization(linux_modules, permission):
     factory, output = Mock(), io.StringIO()
     server = linux_modules.server.Server(factory, source=io.BytesIO(), output=output)
     server.execute(
-        dict(version=6, id=0, method="hello", params=dict(desktopMode=mode)),
+        dict(version=6, id=0, method="hello", params=dict(globalInputAllowed=permission)),
         linux_modules.protocol.Request(time.monotonic() + 10, threading.Event()),
     )
     factory.assert_not_called()
     response = json.loads(output.getvalue())
     assert response["error"]["code"] == "invalid_request"
     assert response["error"]["effect"] == "none"
+
+
+@pytest.mark.parametrize("permission", [False, True])
+def test_permission_is_session_local_and_echoed(linux_modules, permission):
+    factory, output = Mock(), io.StringIO()
+    server = linux_modules.server.Server(factory, source=io.BytesIO(), output=output)
+    source = Path(__file__).resolve().parents[2] / "os_adapter/linux/src"
+    with patch.object(sys, "path", [str(source), *sys.path]):
+        native = importlib.import_module("computer_use_linux.runtime.native")
+    with patch.object(native, "NativeExecution", return_value=SimpleNamespace(capabilities=["nativeOperations"])):
+        server.execute(
+            dict(version=6, id=0, method="hello", params=dict(globalInputAllowed=permission)),
+            linux_modules.protocol.Request(time.monotonic() + 10, threading.Event()),
+        )
+    factory.assert_called_once_with(permission, server.stopped)
+    response = json.loads(output.getvalue())
+    assert response["result"]["globalInputAllowed"] is permission
+    assert set(response["result"]) == {"platform", "globalInputAllowed", "maxTimeoutMs", "capabilities"}

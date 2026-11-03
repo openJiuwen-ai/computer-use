@@ -9,12 +9,13 @@ using System.Windows.Automation;
 
 namespace ComputerUse.Windows
 {
-    internal sealed partial class NativeUiaKeyboard : INativeKeyboardProvider,
+    internal sealed partial class NativeUiaKeyboard : INativeKeyboardProvider, INativeGlobalKeyboardAuthority,
                                                       INativeKeyboardTextProvider,
                                                       INativeKeyboardEditorPreparation,
                                                       INativeAppInsertProvider
     {
         readonly NativeReadStore store;
+        readonly bool globalInputAllowed;
         readonly NativeUiaBoundary boundary;
         readonly NativePointer pointer;
         readonly INativeCharacterMessagePort characterMessages;
@@ -26,10 +27,11 @@ namespace ComputerUse.Windows
             internal string[] Within;
         }
         internal NativeUiaKeyboard(NativeReadStore store, NativePointer pointer = null,
-                                   INativeCharacterMessagePort characterMessages = null)
+                                   INativeCharacterMessagePort characterMessages = null, bool allowGlobalInput = false)
         {
 
             this.store = store;
+            globalInputAllowed = allowGlobalInput;
             this.pointer = pointer;
             this.characterMessages = characterMessages ?? NativeCharacterWin32.Messages;
             boundary = new NativeUiaBoundary(store);
@@ -203,6 +205,8 @@ namespace ComputerUse.Windows
 
         public void RequireIdle(NativeKeyEvent[] events, Request r)
         {
+            if (events.Length != 0)
+                NativeGlobalInput.Require(globalInputAllowed);
             r.Check();
             NativeDesktopState.RequireInput();
             Native.Released();
@@ -252,10 +256,15 @@ namespace ComputerUse.Windows
             }
         }
 
+        public void RequireGlobalInput()
+        {
+            NativeGlobalInput.Require(globalInputAllowed);
+        }
+
         public int Send(NativeKeyEvent[] events)
         {
             var inputs = events.Select(e => Native.Key(e.Code, e.Up, e.Unicode, e.Extended)).ToArray();
-            return (int)Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.INPUT)));
+            return (int)Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.INPUT)), globalInputAllowed);
         }
 
         public void PrepareEditor(NativeKeyboardState state, NativeWriteOperation operation, Request r,

@@ -12,7 +12,7 @@ from computer_use_native_tools.console import report
 
 
 def summarize(records):
-    """Use effect-boundary evidence; never infer global input from desktop mode."""
+    """Use effect-boundary evidence; never infer actual global input from its authorization."""
     scopes = {}
     commands = {}
     malformed = []
@@ -173,7 +173,7 @@ def _activity(key, scope):
         "command": metadata.get("command"),
         "intent": metadata.get("intent"),
         "target": metadata.get("target"),
-        "desktopMode": metadata.get("desktopMode"),
+        "globalInputAllowed": metadata.get("globalInputAllowed"),
         "traceIds": sorted(scope["traceIds"]),
         "executionIds": sorted(scope["executionIds"]),
         "driverPIDs": sorted(scope["driverPIDs"]),

@@ -20,7 +20,7 @@ from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
 from computer_use.native.transport import ConnectionPort
 from computer_use.protocol.observation import NativeNode
-from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION, desktop_mode
+from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
 from computer_use.session.bindings import SessionBindings
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
 from computer_use.session.events import observations_invalidated
@@ -46,7 +46,9 @@ class SessionController:
     that construct public SDK results.
     """
 
-    def __init__(self, port: NativePort | None = None, *, adapters: ControllerAdapters) -> None:
+    def __init__(
+        self, port: NativePort | None = None, *, adapters: ControllerAdapters, allow_global_input: bool = True
+    ) -> None:
         """Create the session services and their shared execution entry.
 
         Args:
@@ -55,6 +57,7 @@ class SessionController:
                 by the SDK host.
         """
         self.adapters = adapters
+        policy = HostPolicy(allow_global_input=allow_global_input)
         self._observation_state = adapters.observation_state
         self._action_result, self._captured_text = adapters.action_result, adapters.captured_text
         self.bindings = SessionBindings()
@@ -64,9 +67,11 @@ class SessionController:
         self.transport = (
             port.connection
             if port is not None
-            else Connection(self.invalidate, protocol_version=NATIVE_PROTOCOL_VERSION)
+            else Connection(
+                self.invalidate, protocol_version=NATIVE_PROTOCOL_VERSION, allow_global_input=policy.allow_global_input
+            )
         )
-        self.port = port or ConnectionPort(self.transport, HostPolicy(desktop_mode()))
+        self.port = port or ConnectionPort(self.transport, policy)
         self.reader, self.desktop_reader = NativeAppReader(self.port), NativeDesktopReader(self.port)
         self.engine, self.pages = Engine(self.port), ContentPages()
         self.pipeline = SessionPipeline(self)
@@ -106,7 +111,6 @@ class SessionController:
 
     def invalidate(self) -> None:
         self.desktop.reset()
-        self.bindings.invalidate()
         observations_invalidated(self)
         # Handles retain their prior session identity so subsequent validation
         # detects expiration.

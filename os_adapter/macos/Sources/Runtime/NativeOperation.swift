@@ -82,6 +82,9 @@ import Foundation
     /// sequence) owns all its events and releases inside that one dispatch.
     func recordInputDispatch() { inputStarted = true }
 
+    /// Preparation owns helper cleanup even when no requested input is sent.
+    func recordUnconfirmedCleanup() { cleanup = "unknown" }
+
     func preparationConfirmed(_ primitive: String) -> Bool { confirmedPreparation.contains(primitive) }
 
     func confirmPreparation(_ primitive: String) throws {

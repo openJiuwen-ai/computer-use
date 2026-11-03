@@ -69,14 +69,14 @@ namespace ComputerUse.Windows
                 if (target["capture"] == null)
                     throw new Failure("invalid_request", "desktop input requires an observed desktop capture");
                 if (desktopKeyboard == null)
-                    throw new Failure("mode_unsupported",
+                    throw new Failure("unsupported_operation",
                                       "desktop input requires a desktop keyboard provider");
                 if (!new[] { "key", "insert" }.Contains((string)intent["kind"]))
                     throw new Failure("invalid_request", "desktop keyboard supports key and insert intents");
                 desktopKeyboard.ValidateIntent(intent);
             }
             else if (target["capture"] != null)
-                throw new Failure("mode_unsupported", "this native unit does not implement the captured-image intent");
+                throw new Failure("unsupported_operation", "this native unit does not implement the captured-image intent");
             else if ((string)intent["kind"] == "scroll" && scroll != null)
                 NativeScroll.Validate(intent);
             else if (KeyboardIntent(intent) && keyboard != null)
@@ -117,12 +117,12 @@ namespace ComputerUse.Windows
                     Wire.Num(p, "count", 1, 2, true);
                 if (p.ContainsKey("button") && (string)p["button"] != "left" ||
                     p.ContainsKey("count") && Convert.ToInt32(p["count"]) != 1)
-                    throw new Failure("mode_unsupported",
+                    throw new Failure("unsupported_operation",
                                       "this object unit cannot synthesize right or repeated pointer clicks");
             }
             else
                 throw new Failure(
-                    "mode_unsupported",
+                    "unsupported_operation",
                     "this Windows native slice provides addressed actions and whole-value replacement only");
         }
 
@@ -130,7 +130,7 @@ namespace ComputerUse.Windows
                                                Request r)
         {
             if (currentReceiver == null)
-                throw new Failure("mode_unsupported", "native current receiver discovery is unavailable");
+                throw new Failure("unsupported_operation", "native current receiver discovery is unavailable");
             if (operation.Dispatched)
                 throw new Failure("execution_unknown", "current receiver discovery cannot follow dispatched input");
             if (operation.Selected != null)
@@ -184,7 +184,7 @@ namespace ComputerUse.Windows
                                                                  AppInsertPin = operation.AppInsertPin };
                         operation.Contracts.Add(contract.Id, contract);
                         var primitive =
-                            Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "object", "supported", "yes",
+                            Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "object", "globalInput", "no", "supported", "yes",
                                      "readiness", "yes", "pending", new string[0], "backgroundPreparation", "no");
                         keyboardFacts["primitives"] =
                             Wire.Array(keyboardFacts["primitives"]).Concat(new[] { primitive }).ToArray();
@@ -316,7 +316,7 @@ namespace ComputerUse.Windows
                             .Pointer.Occlusion.TargetCondition;
                 operation.Contracts.Add(contract.Id, contract);
                 bool permitted = NativeObjectActionPermission.Allows(state.Enabled, contract);
-                var item = Wire.Obj("id", contract.Id, "unit", unit, "channel", "object", "supported",
+                var item = Wire.Obj("id", contract.Id, "unit", unit, "channel", "object", "globalInput", "no", "supported",
                                     supported == true    ? "yes"
                                     : supported == false ? "no"
                                                          : "unknown",
@@ -380,7 +380,7 @@ namespace ComputerUse.Windows
                     // Identity, modality and cancellation still propagate;
                     // object execution performs its usual final native guards.
                     if (state.Replaceable != true || r.Effect || r.Dispatched ||
-                        !new[] { "input_unavailable", "mode_unsupported", "observation_incomplete", "ambiguous_target" }
+                        !new[] { "input_unavailable", "unsupported_operation", "observation_incomplete", "ambiguous_target" }
                              .Contains(error.Code))
                         throw;
                     result["unavailableReason"] = "The optional keyboard route is unavailable: " + error.Message;

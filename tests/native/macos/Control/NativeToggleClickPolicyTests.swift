@@ -3,46 +3,44 @@
 import Foundation
 
 @main enum NativeToggleClickPolicyTests {
-    static let checkbox = "QApplication.Dialog.QWidget.settings.CheckBox"
-    static let radio = "QApplication.Dialog.QWidget.settings.radio_widget.0"
-
     static func main() {
-        for identifier in [checkbox, radio, "QApplication.Dialog.qt_scrollarea_viewport.custom_toggle"] {
-            precondition(NativeQtAccessibilityIdentifier.isWidgetPath(identifier))
-        }
-        for identifier: String? in [
-            nil, "", "QApplication", "QApplication.CustomView", "QApplication.CustomView.control",
-            "Other.QApplication.QWidget.check", "OtherApplication.QWidget.check", "QApplication..QWidget.check",
-            "QApplication.QWidget.check.", "QApplication.CustomQWidget.check"
-        ] {
-            precondition(!NativeQtAccessibilityIdentifier.isWidgetPath(identifier))
-        }
-
         let action = NativeClickContract(
             routeFamily: "macos.axAction.AXPress", delivery: .objectAction, admission: .ready, reason: nil,
             preparationOptions: [])
         for role in ["AXCheckBox", "AXRadioButton"] {
-            let stateOnly = NativeToggleClickPolicy.stateOnlyPress(
-                role: role, identifier: checkbox, currentWindowPath: true)
-            precondition(stateOnly)
-            let offer = NativeToggleClickPolicy.actionOffer(action, action: "AXPress", stateOnlyPress: stateOnly)
-            precondition(offer.admission == .unavailable && offer.preparationOptions.isEmpty)
-            precondition(offer.routeFamily == action.routeFamily && offer.delivery == action.delivery)
+            // No provider/class identifier participates in this boundary. Both
+            // standard and custom implementations may have state-only AXPress.
+            for admission in [NativeClickContract.Admission.ready, .preparationRequired] {
+                let original = NativeClickContract(
+                    routeFamily: action.routeFamily, delivery: .objectAction, admission: admission, reason: nil,
+                    preparationOptions: admission == .ready ? [] : ["background", "foreground"],
+                    backgroundFamily: action.routeFamily)
+                let offer = NativeToggleClickPolicy.actionOffer(original, action: "AXPress", role: role)
+                precondition(offer.admission == .insufficientEvidence && offer.preparationOptions.isEmpty)
+                precondition(offer.routeFamily == action.routeFamily && offer.delivery == action.delivery)
+                precondition(offer.reason?.contains("unconfirmed") == true)
+                precondition(offer.backgroundFamily == nil)
+            }
+            for admission in [NativeClickContract.Admission.unavailable, .insufficientEvidence] {
+                let original = NativeClickContract(
+                    routeFamily: action.routeFamily, delivery: .objectAction, admission: admission,
+                    reason: "The selected native action is disabled.", preparationOptions: [])
+                precondition(NativeToggleClickPolicy.actionOffer(original, action: "AXPress", role: role) == original,
+                             "a known blocker must retain its specific evidence")
+            }
             // An unrelated declared action keeps its own semantics. The policy
             // is only applied to automatic click offers, never explicit AXPress.
-            precondition(
-                NativeToggleClickPolicy.actionOffer(action, action: "CustomAction", stateOnlyPress: true) == action)
+            precondition(NativeToggleClickPolicy.actionOffer(action, action: "CustomAction", role: role) == action)
+            for delivery in [NativeClickDelivery.windowDirected, .systemPointer, .objectSelection] {
+                let original = NativeClickContract(
+                    routeFamily: "independent", delivery: delivery, admission: .ready, reason: nil,
+                    preparationOptions: [])
+                precondition(NativeToggleClickPolicy.actionOffer(original, action: "AXPress", role: role) == original)
+            }
         }
         for role: String? in [nil, "AXButton", "AXMenuButton", "AXStaticText", "AXRow"] {
-            precondition(!NativeToggleClickPolicy.stateOnlyPress(
-                role: role, identifier: checkbox, currentWindowPath: true))
+            precondition(NativeToggleClickPolicy.actionOffer(action, action: "AXPress", role: role) == action)
         }
-        precondition(!NativeToggleClickPolicy.stateOnlyPress(
-            role: "AXCheckBox", identifier: checkbox, currentWindowPath: false))
-        precondition(!NativeToggleClickPolicy.stateOnlyPress(
-            role: "AXCheckBox", identifier: "native-control", currentWindowPath: true))
-        precondition(NativeToggleClickPolicy.actionOffer(action, action: "AXPress", stateOnlyPress: false) == action)
-
-        print("Qt toggle click policy regressions passed")
+        print("Toggle full-click equivalence regressions passed")
     }
 }

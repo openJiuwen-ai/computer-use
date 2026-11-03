@@ -13,6 +13,7 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.operation import HostOperation
 from computer_use.interaction.query.pipeline import AppScopeReconciliation
 from computer_use.interaction.write.request.model import ActionPlan
+from computer_use.interaction.write.request.observation import WriteWithObservation
 from computer_use.interaction.write.request.passes.materialize_action_result import stage as materialize_action_result
 from computer_use.interaction.write.request.passes.prepare_write_scope import stage as prepare_write_scope
 from computer_use.interaction.write.request.passes.publish_action_event import stage as publish_action_event
@@ -155,15 +156,23 @@ class ControllerWritePipeline(HostOperation):
         return Sequence(
             name="ControllerWritePipeline",
             steps=[
-                validate_write_binding(validate_element=controller.validate_element),
-                WriteFailureBoundary(
+                WriteWithObservation(
                     controller,
                     Sequence(
-                        name="PrepareAndWrite",
-                        steps=[prepare_write_scope(state_of=controller.state), dispatch],
+                        name="WriteAndPublishReceipt",
+                        steps=[
+                            validate_write_binding(validate_element=controller.validate_element),
+                            WriteFailureBoundary(
+                                controller,
+                                Sequence(
+                                    name="PrepareAndWrite",
+                                    steps=[prepare_write_scope(state_of=controller.state), dispatch],
+                                ),
+                            ),
+                            publish_action_event(),
+                        ],
                     ),
                 ),
-                publish_action_event(),
                 # The pipeline shares retained bindings with their owning service.
                 # pylint: disable-next=protected-access
                 materialize_action_result(action_result=controller._action_result),

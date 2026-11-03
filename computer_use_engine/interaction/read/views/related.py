@@ -1,0 +1,95 @@
+# coding: utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
+"""Pure selection evidence for one bounded observation after an action."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+from weakref import ReferenceType
+
+from computer_use.native.contracts import Binding
+from computer_use.session.interfaces import WindowIdentity
+
+
+if TYPE_CHECKING:
+    from computer_use.interaction.records import UIHandle
+
+
+@dataclass(frozen=True)
+class RelatedRead:
+    """Original action target and the catalogue known before dispatch.
+
+    Newly discovered windows are observation candidates, not evidence that the
+    action created them. The original target remains independent of selection.
+    """
+
+    original: Binding
+    known_windows: tuple[WindowIdentity, ...]
+    context_owner: ReferenceType[UIHandle] | None = None
+    context_root: WindowIdentity | None = None
+
+    @property
+    def original_window(self) -> WindowIdentity | None:
+        return next((item for item in self.known_windows if item.window == self.original.root_window), None)
+
+    def recovery_window(self, directory) -> str | None:
+        """Find a surviving original scope after collection updates its directory.
+
+        A closing modal can be present during initial selection and absent by
+        the component recheck. A fixed owner only permits its retained exact
+        lifetime. An App may instead observe a fresh focused or sole window;
+        that choice grants no input context until its content is delivered.
+        """
+        current = {WindowIdentity.of(item) for item in directory["surfaces"]}
+        for identity in (self.original_window, self.context_root):
+            if identity is not None and identity in current:
+                return identity.window
+        if self.context_root is None:
+            windows = [item["window"] for item in directory["surfaces"] if item["kind"] != "menu"]
+            focused = directory.get("focusedWindow")
+            if focused in windows:
+                return focused
+            if len(windows) == 1:
+                return windows[0]
+        return None
+
+    def new_windows(self, directory) -> tuple[str, ...]:
+        return tuple(
+            item["window"]
+            for item in directory["surfaces"]
+            if item["kind"] != "menu" and WindowIdentity.of(item) not in self.known_windows
+        )
+
+    def preferred(self, directory, fallback: str) -> str:
+        newly_seen = self.new_windows(directory)
+        focused = directory.get("focusedWindow")
+        if focused in newly_seen:
+            return focused
+        if len(newly_seen) == 1:
+            return newly_seen[0]
+        if any(item["window"] == self.original.root_window for item in directory["surfaces"]):
+            return self.original.root_window
+        if self.context_root is not None and any(
+            WindowIdentity.of(item) == self.context_root for item in directory["surfaces"]
+        ):
+            return self.context_root.window
+        return fallback
+
+
+def original_lifecycle(target, directory, previous: WindowIdentity | None = None) -> str:
+    """Compare the original window lifetime with one exact captured directory."""
+    if target.root_window is None:
+        return "not_applicable"
+    if directory is None or directory["session"] != target.session:
+        return "unknown"
+    item = next((item for item in directory["surfaces"] if item["window"] == target.root_window), None)
+    if item is not None:
+        return (
+            "observed"
+            if WindowIdentity.of(item)
+            == (previous or WindowIdentity(target.root_window, target.surface, target.instance))
+            else "closed"
+        )
+    return "unknown" if directory["stopReasons"] else "closed"

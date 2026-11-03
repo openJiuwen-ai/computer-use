@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Stable recovery categories, preserved from computer_use_engine/errors.ts."""
+"""Public recovery categories for SDK operations and native protocol failures."""
 
 from __future__ import annotations
 
@@ -28,6 +28,14 @@ class ComputerUseError(Exception):
         self.detail = failure["detail"]
         self.next = failure["next"]
         self._failure_context = None
+        # A read-only suffix may enrich a write failure without changing its
+        # identity, effect, recovery category, cause, or native failure context.
+        self.observation = None
+        self.observation_status = "not_requested"
+        self.observation_error = None
+        self.window_lifecycle = "unknown"
+        self.choices = ()
+        self.impact = None
         if cause is not None:
             self.__cause__ = cause
 
@@ -41,7 +49,8 @@ def public_error_code(code: str) -> str:
         "element_not_found",
         "observation_incomplete",
         "input_unavailable",
-        "mode_unsupported",
+        "permission_required",
+        "unsupported_operation",
         "desktop_unavailable",
         "invalid_request",
         "execution_failed",
@@ -49,7 +58,6 @@ def public_error_code(code: str) -> str:
     }:
         return code
     return {
-        "mode_mismatch": "mode_unsupported",
         "session_mismatch": "stale_target",
         "version_mismatch": "invalid_request",
         "request_conflict": "invalid_request",

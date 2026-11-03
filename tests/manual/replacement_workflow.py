@@ -15,6 +15,8 @@ import signal
 import tempfile
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
@@ -30,15 +32,15 @@ async def verify(folder):
     bundle = "local.computer-use.replacement-probe." + folder.name
     build_fixture(folder, bundle, "ReplacementInputProbe")
     initial = await state(folder)
-    computer = Computer()
+    computer = Computer(allow_global_input=False)
     journal = (folder / "diagnostics.jsonl").open("w", encoding="utf-8")
     set_diagnostic_handler(lambda value: journal.write(json.dumps(value, ensure_ascii=False, default=str) + "\n"))
     results = []
     try:
         app = computer.app(bundle)
-        await app.read()
-        field = await app.element("Replacement input")
-        selected = await app.element("Reported full selection")
+        await asyncio.to_thread(app.read)
+        field = await asyncio.to_thread(app.element, "Replacement input")
+        selected = await asyncio.to_thread(app.element, "Reported full selection")
         for target, key, value in [
             (field, "input", "replacement"),
             (selected, "selected", "already selected"),
@@ -47,7 +49,7 @@ async def verify(folder):
             (field, "input", "新的文本🙂"),
         ]:
             before = await state(folder)
-            receipt = dict(await target.type_text(value, replace=True))
+            receipt = dict(await asyncio.to_thread(target.type_text, value, replace=True))
             current = await state(folder)
             already_empty = before[key]["value"] == value == ""
             assert current[key]["value"] == value, current
@@ -62,7 +64,7 @@ async def verify(folder):
         await asyncio.sleep(0.1)
         before = await state(folder)
         try:
-            await field.type_text("must not reach another control", replace=True)
+            await asyncio.to_thread(field.type_text, "must not reach another control", replace=True)
         except ComputerUseError as error:
             results.append({"changed_receiver": {"code": error.code, "effect": error.effect}})
         else:
@@ -75,15 +77,17 @@ async def verify(folder):
         source = ROOT / "os_adapter/macos/Sources/Control/NativeReplacementUnit.swift"
         report = {
             "sdk": computer_use.__file__,
+            "global_input_allowed": False,
             "driver": str(driver),
             "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
             "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
             "actions": results,
         }
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
     finally:
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         os.kill(initial["pid"], signal.SIGTERM)

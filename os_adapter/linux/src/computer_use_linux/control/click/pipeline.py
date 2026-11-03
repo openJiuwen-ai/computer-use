@@ -3,6 +3,7 @@
 
 """One selected native click: preparation, final boundary and dispatch."""
 
+from computer_use_linux.contracts.input_authority import require_global_input
 from computer_use_linux.contracts.protocol import Failure, require
 from computer_use_linux.control.action.pipeline import NativeActionPipeline
 
@@ -53,6 +54,7 @@ class NativeClickPipeline:
                         "The selected XTest pointer mechanism is unavailable.",
                         "input_unavailable",
                     )
+                    require_global_input(plan.unit.desktop)
                     with diagnostics.stage("prepareAndObserveExposure"):
                         ready = prepare_pointer_exposure(operation, plan, ledger, ctx)
                     if ready:

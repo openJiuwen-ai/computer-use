@@ -13,7 +13,11 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
-def render_desktop(value: Record, applications: Mapping[str, int] | None = None) -> str:
+def render_desktop(
+    value: Record,
+    applications: Mapping[str, int] | None = None,
+    windows: Mapping[str, int] | None = None,
+) -> str:
     "Format desktop displays, capture geometry, and observation provenance."
 
     def box(rect: Record) -> str:
@@ -34,7 +38,7 @@ def render_desktop(value: Record, applications: Mapping[str, int] | None = None)
     captured = sum(bool(d["captured"]) for d in value["displays"])
     front = value["frontmost"]
     lines = [
-        f"Desktop: {value['mode']}; View: full",
+        "Desktop: full view",
         "Foreground: "
         + (json_string(front["name"]) + application(front.get("selector"), "; ") if front is not None else "unknown"),
         (
@@ -56,7 +60,8 @@ def render_desktop(value: Record, applications: Mapping[str, int] | None = None)
     if captured:
         lines.append("Display gaps and uncaptured regions are blank canvas, not interactive desktop.")
     lines.append("On-screen windows (rectangles may overlap; not element references):")
-    for window in value["windows"]:
+    for index, window in enumerate(value["windows"]):
+        reference = windows.get(str(index)) if windows is not None else None
         lines.append(
             "  "
             + json_string(window["app"])
@@ -64,7 +69,8 @@ def render_desktop(value: Record, applications: Mapping[str, int] | None = None)
             + (json_string(window["title"]) if window["title"] else "<untitled>")
             + " "
             + box(window["rect"])
-            + application(window.get("selector"), " ")
+            + (f" computer.window({reference})" if reference is not None else "")
+            + application(window.get("selector"), "; application: ")
         )
     if not value["windows"]:
         lines.append("  Unknown" if value.get("catalogError") else "  None reported")

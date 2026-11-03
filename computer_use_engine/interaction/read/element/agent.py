@@ -14,6 +14,8 @@ from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
 from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
 from computer_use.interaction.read.views.publication import publish, tree_document
+from computer_use.session.interfaces import LookupContext, SurfaceOwner
+from computer_use.session.state import AppState
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
@@ -72,7 +74,7 @@ class AgentElementReadPipeline:
                     raise local_failure(
                         "this provider cannot page that native relation",
                         "read its explicit source subtree",
-                        "mode_unsupported",
+                        "unsupported_operation",
                     )
                 options: Record = dict(children_page={key: page[key] for key in ("cursor", "limit")})
         else:
@@ -89,10 +91,10 @@ class AgentElementReadPipeline:
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
         controller._remember(state, target, tree)
-        identity = snapshot.get("window_identity")
-        if identity is not None:
-            for ref in tree.refs:
-                state.refs[ref]["window_identity"] = identity
+        for field in ("window_identity", "menu_window_identity"):
+            if field in snapshot:
+                for ref in tree.refs:
+                    state.refs[ref][field] = snapshot[field]
         ref = next(ref for ref, node in tree.refs.items() if node == target.node)
         return tree, state.refs[ref]
 
@@ -108,6 +110,23 @@ class AgentElementReadPipeline:
                 tree_document(self.controller, snapshot["binding"], tree, prepared=prepared),
             )
         )
+        # An explicit subtree belongs to its snapshot, even when the App
+        # wrapper last staged an unrelated window/menu observation.
+        menus = ()
+        menu_only = fresh.get("scope_kind") == "applicationMenu"
+        identity = fresh.get("menu_window_identity") if menu_only else fresh.get("window_identity")
+        if menu_only:
+            state = self.controller.state(ui)
+            source = AppState(
+                state.selector,
+                running=state.running,
+                refs=ui._instance.refs,
+                query_target=fresh["binding"],
+                query_scope_kind="applicationMenu",
+                menu_window_identity=identity,
+            )
+            menus = (SurfaceOwner(self.controller, source),)
+        lookup_context = LookupContext(identity, menu_only, menus)
         return publish(
             self.controller,
             ui,
@@ -116,6 +135,7 @@ class AgentElementReadPipeline:
             full=True,
             scope="element:" + repr(snapshot["binding"]),
             view="element",
+            lookup_context=lookup_context,
         )
 
 

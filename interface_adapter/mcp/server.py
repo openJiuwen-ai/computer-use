@@ -6,7 +6,6 @@
 import argparse
 import asyncio
 import logging
-import os
 import signal
 import sys
 
@@ -14,7 +13,6 @@ from computer_use.diagnostics import SDK_VERSION
 from computer_use.native.preview import latest_preview_sink
 from computer_use.protocol.primitives import trim
 from computer_use.protocol.schema import obj, string
-from computer_use.protocol.session import desktop_mode
 
 from mcp import types
 from mcp.server.lowlevel import Server
@@ -25,17 +23,20 @@ from .history import HISTORY_KEY, history_request
 from .session import ExecutionSession
 
 DESCRIPTION = (
-    "Execute Python with top-level await in a persistent Computer Use session on "
+    "Execute synchronous Python in a persistent Computer Use session on "
     "the MCP host. App selectors and file paths refer to that computer. "
     "Preloaded: computer, print(*values), print_image(PNG bytes). Follow the "
-    "Computer → App/Window → Element SDK. Variables survive calls. "
+    "Computer → App/Window → Element SDK. SDK methods return results directly; "
+    "call them without await, including app.element(name).click(). Variables survive calls. "
     "Prefer one computer_use call for multiple operations whose targets and steps are "
-    "already confirmed and require no intermediate observation. Execute them sequentially, "
-    "awaiting each operation. Read the relevant UI with read() after the sequence to verify its effect. "
+    "already confirmed and require no intermediate observation. Each operation finishes or "
+    "raises before the next statement runs. Use the related observation returned after each action to assess its effect; "
+    "read again when more or newer evidence is needed. "
     "Stop and observe before continuing if an operation fails, the state needed for the "
     "next operation is uncertain, or the next decision requires fresh UI evidence. "
-    "Actions emit dispatched/verified receipts only, without automatically "
-    "reading trees or screenshots, even on failure. Reads default to tree for "
+    "Completed actions emit dispatched/verified receipts followed by a bounded related observation. "
+    "The receipt remains valid if that observation fails; do not replay input to repair a read. "
+    "Reads default to tree for "
     "App/Window and both for Computer; view='image' or 'both' requests images. "
     "Reads automatically present text; diffs require host-confirmed retained "
     "history, otherwise full text is used. state.text is always complete for its "
@@ -83,7 +84,10 @@ def _supports(client_capabilities, key, version):
 
 
 class ComputerUseServer:
-    def __init__(self):
+    def __init__(self, *, allow_global_input=True):
+        if type(allow_global_input) is not bool:
+            raise TypeError("allow_global_input must be a boolean")
+        self.allow_global_input = allow_global_input
         self.server = Server("computer-use", version=SDK_VERSION)
         self.session = None
 
@@ -177,6 +181,7 @@ class ComputerUseServer:
                     latest_preview_sink(preview) if _supports(experimental, "computer-use-preview", 2) else None,
                     _supports(experimental, "computer-use-demo-foreground", 1)
                     and experimental["computer-use-demo-foreground"].get("enabled") is True,
+                    allow_global_input=self.allow_global_input,
                 )
             metadata = context.meta.model_dump() if context.meta is not None else {}
             progress_token = metadata.get("progressToken")
@@ -218,8 +223,8 @@ class ComputerUseServer:
             await self.close()
 
 
-async def main():
-    host = ComputerUseServer()
+async def main(*, allow_global_input=True):
+    host = ComputerUseServer(allow_global_input=allow_global_input)
     task = asyncio.current_task()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -235,12 +240,12 @@ async def main():
 
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Computer Use stdio MCP host")
-    parser.add_argument("--desktop", choices=("exclusive",), help="Desktop authorization for this MCP process")
+    parser.add_argument(
+        "--allow-global-input", action=argparse.BooleanOptionalAction, default=True,
+        help="Allow global mouse and keyboard input (default: enabled); qualified low-impact routes remain preferred",
+    )
     args = parser.parse_args(argv)
-    if args.desktop is not None:
-        os.environ["COMPUTER_USE_DESKTOP"] = args.desktop
-    desktop_mode()
-    asyncio.run(main())
+    asyncio.run(main(allow_global_input=args.allow_global_input))
 
 
 if __name__ == "__main__":

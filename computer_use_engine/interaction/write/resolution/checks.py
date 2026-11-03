@@ -35,7 +35,7 @@ def require_actuators(capabilities: Iterable[str], facts: Facts) -> None:
     if "nativeActuators" not in capabilities:
         raise ComputerUseError(
             dict(
-                code="mode_unsupported",
+                code="unsupported_operation",
                 effect="none",
                 target=facts.target_label,
                 detail="The driver cannot bind the selected internal editor.",

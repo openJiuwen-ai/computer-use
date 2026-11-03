@@ -12,12 +12,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 LOG = logging.getLogger(__name__)
 GROUPS = (
+    "NativeInputAuthorization",
+    "NativeInputActivity",
     "NativeInspectQuery",
     "NativePopupChoiceBoundary",
     "NativeToggleClickPolicy",
     "NativePopupAXFacts",
     "NativeReplacementReceiver",
     "NativePointerFocusSelection",
+    "NativeScalarTextPoint",
+    "NativeSelectedTextProvider",
     "NativeScrollOwnerPermission",
     "NativeElementPointerContinuity",
     "NativeQtInlineListHit",

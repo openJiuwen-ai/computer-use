@@ -24,10 +24,9 @@ import ApplicationServices
             let receipt = NativeExecutionReceipt(target: decoded.target, onEffect: access.recordEffect)
             let activity = NativeInputActivity(
                 operation: op.token, step: request.step, command: kind, intent: op.request.kind, target: decoded.target,
-                mode: BackgroundTarget.desktopMode)
+                globalInputAllowed: NativeInputAuthorization.globalInputAllowed)
             return await NativeInputActivity.$current.withValue(activity) {
                 await NativeInputActivity.$stage.withValue(kind == "prepare_receiver" ? .preparation : .input) {
-                    defer { activity.finish(dispatch: receipt.dispatch, cleanup: receipt.cleanup) }
                     if op.clickContract != nil {
                         // Lookup is inside dedup admission but before live resolution,
                         // so an expired target still reports the selected stable family.
@@ -64,6 +63,7 @@ import ApplicationServices
                         }
                     }
                     AgentPointer.current?.recordOutcome(success: receipt.succeeded)
+                    receipt.impact = activity.finish(dispatch: receipt.dispatch, cleanup: receipt.cleanup)
                     return receipt.wire
                 }
             }

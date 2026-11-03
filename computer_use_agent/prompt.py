@@ -6,7 +6,8 @@
 from importlib.resources import files
 
 INSTRUCTIONS = """You operate desktop applications to carry out the user's task.
-Use computer_use to execute Python with top-level await. The preloaded computer,
+Use computer_use to execute synchronous Python. The SDK methods return results
+directly; call them without await, including app.element(name).click(). The preloaded computer,
 print and print_image and all Python variables persist between calls and messages.
 App selectors and paths refer to the MCP host, which may be a different computer.
 Resolve relative dates and times using the MCP host's Python clock and timezone,
@@ -17,8 +18,10 @@ automatically; use print for other values. Use view='image' for a visual check,
 or view='both' when both the tree and image are needed. Coordinate spaces belong
 to the object that supplied the screenshot.
 Prefer one computer_use call for multiple operations whose targets and steps are
-already confirmed and require no intermediate observation. Execute them sequentially,
-awaiting each operation. Read the relevant UI with read() after the sequence to verify its effect.
+already confirmed and require no intermediate observation. Each operation finishes or
+raises before the next statement runs. Use each action's related observation to assess its effect;
+read again when more or newer evidence is needed. A failed related observation does
+not undo the action receipt or authorize replay.
 Stop and observe before continuing if an operation fails, the state needed for the
 next operation is uncertain, or the next decision requires fresh UI evidence.
 Wait again when that observation reports loading or an unfinished transition.

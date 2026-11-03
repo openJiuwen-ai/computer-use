@@ -12,7 +12,9 @@ from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
 from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
 from computer_use.native.scopes import RunningApplication
-from computer_use.session.interfaces import SurfaceOwner
+from computer_use.native.contracts import Binding
+from computer_use.native.query.directory import select_surface
+from computer_use.session.interfaces import SurfaceOwner, WindowIdentity
 from computer_use.session.state import AppState
 
 from .publication import directory_text, publish, tree_document
@@ -25,7 +27,6 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.interaction.read.model import MenuAppObservation
     from computer_use.interaction.records import UIHandle
-    from computer_use.native.contracts import Binding
     from computer_use.types import Observation
 
 
@@ -52,11 +53,14 @@ def remember_menu(
             query_target=part.target,
             query_scope_kind=tree.scope_kind,
         )
+        state.menu_window_identity = WindowIdentity.of(ui._instance.members[context]) if context is not None else None
         owner = SurfaceOwner(controller, state)
         # pylint: disable-next=protected-access
         controller._remember(state, part.target, tree)
-        # pylint: disable-next=protected-access
-        ui._instance.menu_contexts[part.target.surface] = context
+        # Menu references retain the exact source window independently of a
+        # later menu read that may reuse the same application-menu surface.
+        for ref in tree.refs:
+            state.refs[ref]["menu_window_identity"] = state.menu_window_identity
         owners.append(owner)
         trees.append((part.target, tree))
     return tuple(owners), tuple(trees)
@@ -79,7 +83,12 @@ class InterfaceMenuPipeline:
         self.preparation = PrepareSnapshotPipeline()
 
     async def run(
-        self, ui: UIHandle, path: Sequence[str], *, observed: MenuAppObservation | None = None
+        self,
+        ui: UIHandle,
+        path: Sequence[str],
+        *,
+        observed: MenuAppObservation | None = None,
+        preparation: dict | None = None,
     ) -> Observation:
         """Collect and publish menus within the handle's established interface scope.
 
@@ -93,7 +102,18 @@ class InterfaceMenuPipeline:
         controller, instance = self.controller, ui._instance
         state = controller.state(ui)
         lines: list[str | DisplayText | DisplayDocument]
-        if instance.anchor is None:
+        if instance.anchor is None and ui._anchor is None and instance.members:
+            # An application catalogue can be useful without a preferred
+            # document. Application-menu observation does not grant an input
+            # receiver to any of those independent windows.
+            with controller.port.calls.claim(30000) as remaining:
+                menu = await controller.reader.menus.collect(
+                    state.running.application, remaining, path=path, context=None
+                )
+            context = None
+            ui._context = context
+            lines = directory_text(controller, ui, cast("DirectoryFacts", instance.directory))
+        elif instance.anchor is None and ui._anchor is None:
             # NativeAppReader retains the established running identity and
             # performs the same final directory/session recheck as window reads.
             observed = observed or await controller.reader.read(
@@ -109,17 +129,24 @@ class InterfaceMenuPipeline:
                 "No working window is bound; this is the application menu only.",
             ]
         else:
-            target = controller.interfaces.keyboard_context(ui, require_observed=False)
+            # This is observation selection, not permission to deliver input.
+            # A new App.read(menu_path=...) must not require a prior delivered
+            # keyboard context, nor overwrite it until this result is returned.
+            selected = select_surface(instance.directory, ui._anchor or instance.anchor.root.root_window)
+            item = next(item for item in instance.members.values() if item["surface"] == selected.surface)
+            target = Binding(instance.directory["session"], item["instance"], item["window"], item["surface"], None)
             with controller.port.calls.claim(30000) as remaining:
                 menu = await controller.reader.menus.collect(
-                    instance.anchor.application, remaining, path=path, context=target
+                    state.running.application, remaining, path=path, context=target
                 )
                 # Collection cannot turn a closed instance into an application
                 # menu for an unrelated document.
                 # pylint: disable-next=protected-access
-                await controller.reader._discover(instance.anchor, remaining)
+                await controller.reader._discover(state.selection or instance.anchor, remaining)
             context = next(key for key, item in instance.members.items() if item["surface"] == target.surface)
+            ui._context = context
             lines = directory_text(controller, ui, cast("DirectoryFacts", instance.directory))
+        ui._context = context
         owners, trees = remember_menu(controller, ui, menu, context)
         # pylint: disable-next=protected-access
         ui._lookup_scopes = owners
@@ -142,6 +169,7 @@ class InterfaceMenuPipeline:
             scope="menu:" + state.application + ":" + str(ui._anchor) + ":" + repr(path),
             view="menu",
             directory=instance.directory,
+            preparation=preparation,
         )
 
 

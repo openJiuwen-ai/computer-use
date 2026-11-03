@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Batched discovery preserves application order, instance bindings and failures."""
+"""App discovery avoids window queries; explicit surface batches retain their native contracts."""
 
 from copy import deepcopy
 from types import SimpleNamespace
@@ -24,49 +24,20 @@ class DirectoryFixture:
         self.port = SimpleNamespace(connection=SimpleNamespace(capabilities=capabilities))
         self.apps = [dict(id=f"app:{i}", displayName=f"Editor {i}", isRunning=True) for i in range(count)]
         self.calls = []
-        self.directories = {
-            item["id"]: {**directory(window(f"window:{i}")), "application": item["id"]}
-            for i, item in enumerate(self.apps)
-        }
+        self.stop_reasons = []
         self.failure = None
 
-    @staticmethod
-    def assert_visual(profile):
-        if profile is not SurfaceReadProfile.VISUAL:
-            raise AssertionError("batch lost visual intent")
-
     async def applications(self):
-        return dict(session="session", applications=deepcopy(self.apps), stopReasons=[])
-
-    async def _query(self, query, timeout):
-        self.calls.append(query)
-        result = self.directories[query["application"]]
-        if isinstance(result, Exception):
-            raise result
-        return deepcopy(result)
-
-    async def surface_batch(self, applications, *, profile=None):
-        query = dict(kind="surfaceBatch", applications=list(applications))
-        if "nativeVisualSurfaceBatch" in self.port.connection.capabilities:
-            self.assert_visual(profile)
-            query["profile"] = profile.value
-        self.calls.append(query)
+        self.calls.append(dict(kind="applications"))
         if self.failure is not None:
             raise self.failure
-        entries = []
-        for app in applications:
-            item = self.directories[app]
-            entries.append(
-                dict(
-                    application=app,
-                    **(
-                        dict(error={key: getattr(item, key) for key in ("code", "target", "effect", "detail", "next")})
-                        if isinstance(item, ComputerUseError)
-                        else dict(result=deepcopy(item))
-                    ),
-                )
-            )
-        return dict(entries=entries)
+        return dict(session="session", applications=deepcopy(self.apps), stopReasons=list(self.stop_reasons))
+
+    async def _query(self, query, timeout):
+        raise AssertionError("Application listing must not inspect windows")
+
+    async def surface_batch(self, applications, *, profile=None):
+        raise AssertionError("Application listing must not inspect window batches")
 
 
 def failure(effect="none"):
@@ -82,60 +53,79 @@ def failure(effect="none"):
 
 
 class ApplicationDiscoveryTests(IsolatedAsyncioTestCase):
-    async def compare(self, sequential, batched):
-        first, second = ApplicationReferences(), ApplicationReferences()
-        a = await ApplicationDiscoveryPipeline(sequential, first).run()
-        b = await ApplicationDiscoveryPipeline(batched, second).run()
-        self.assertEqual(a, b)
-        for entry in a:
-            self.assertEqual(first.resolve(entry["id"], "session"), second.resolve(entry["id"], "session"))
-        return b
+    async def test_listing_preserves_running_and_installed_application_order(self):
+        fixture = DirectoryFixture()
+        fixture.apps.insert(1, dict(id="installed", displayName="Installed", isRunning=False))
+        references = ApplicationReferences()
+        result = await ApplicationDiscoveryPipeline(fixture, references).run()
+        self.assertEqual([item.display_name for item in result], ["Editor 0", "Installed", "Editor 1", "Editor 2"])
+        self.assertEqual([item.is_running for item in result], [True, False, True, True])
+        self.assertEqual(
+            [references.resolve(item.id, "session").selector for item in result],
+            ["app:0", "installed", "app:1", "app:2"],
+        )
+        self.assertEqual(fixture.calls, [dict(kind="applications")])
 
-    async def test_batch_keeps_root_choices_unknown_ownership_and_provider_gaps(self):
-        sequential, batched = DirectoryFixture(), DirectoryFixture(("nativeSurfaceBatch",))
-        for fixture in (sequential, batched):
-            fixture.apps.insert(1, dict(id="installed", displayName="Installed", isRunning=False))
-            fixture.directories["app:0"]["surfaces"] += [
-                window("child", parent="window:0"),
-                {**window("unknown"), "parentState": "unknown"},
-                {**window("menu"), "kind": "menu"},
-            ]
-            fixture.directories["app:1"] = failure()
-        await self.compare(sequential, batched)
-        self.assertEqual(len(sequential.calls), 3)
-        self.assertEqual(batched.calls, [dict(kind="surfaceBatch", applications=["app:0", "app:1", "app:2"])])
+    async def test_large_listing_does_not_add_per_application_window_queries(self):
+        fixture = DirectoryFixture(("nativeSurfaceBatch",), count=130)
+        references = ApplicationReferences()
+        result = await ApplicationDiscoveryPipeline(fixture, references).run()
+        self.assertEqual(len(result), 130)
+        self.assertEqual(
+            [references.resolve(item.id, "session").selector for item in result],
+            [f"app:{i}" for i in range(130)],
+        )
+        self.assertEqual(fixture.calls, [dict(kind="applications")])
 
-    async def test_batches_are_bounded_and_keep_the_original_publication_order(self):
-        a, b = DirectoryFixture(count=130), DirectoryFixture(("nativeSurfaceBatch",), count=130)
-        await self.compare(a, b)
-        self.assertEqual([len(call["applications"]) for call in b.calls], [64, 64, 2])
+    async def test_same_application_names_do_not_merge_native_identities(self):
+        fixture = DirectoryFixture(count=2)
+        for item in fixture.apps:
+            item["displayName"] = "Same name"
+        references = ApplicationReferences()
+        result = await ApplicationDiscoveryPipeline(fixture, references).run()
+        self.assertNotEqual(result[0].id, result[1].id)
+        self.assertEqual(
+            [references.resolve(item.id, "session").selector for item in result], ["app:0", "app:1"]
+        )
+        self.assertEqual(fixture.calls, [dict(kind="applications")])
 
-    async def test_failed_read_only_batch_uses_the_existing_sequential_route(self):
-        a, b = DirectoryFixture(), DirectoryFixture(("nativeSurfaceBatch",))
-        b.failure = failure()
-        await self.compare(a, b)
-        self.assertEqual([call["kind"] for call in b.calls], ["surfaceBatch", "surfaces", "surfaces", "surfaces"])
-
-    async def test_possible_effect_is_never_downgraded_to_an_empty_directory(self):
+    async def test_application_query_failure_retains_its_original_effect(self):
         fixture = DirectoryFixture(("nativeSurfaceBatch",))
         fixture.failure = failure("possible")
-        with self.assertRaises(ComputerUseError):
+        with self.assertRaises(ComputerUseError) as caught:
             await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
-        self.assertEqual(len(fixture.calls), 1)
+        self.assertIs(caught.exception, fixture.failure)
+        self.assertEqual(caught.exception.effect, "possible")
+        self.assertEqual(fixture.calls, [dict(kind="applications")])
 
-    async def test_isolated_native_discovery_keeps_its_existing_query_contract(self):
-        fixture = DirectoryFixture(("nativeSurfaceBatch", "nativeReadIsolation"))
-        await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
-        self.assertEqual(len(fixture.calls), 3)
-        self.assertTrue(
-            all(call["kind"] == "surfaces" and call["includeAccessibility"] is False for call in fixture.calls)
+    async def test_incomplete_empty_listing_reports_failure_without_scanning_windows(self):
+        fixture = DirectoryFixture(count=0)
+        fixture.stop_reasons = ["provider unavailable"]
+        with self.assertRaises(ComputerUseError) as caught:
+            await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
+        self.assertEqual(caught.exception.code, "observation_incomplete")
+        self.assertEqual(caught.exception.effect, "none")
+        self.assertIn("provider unavailable", caught.exception.detail)
+        self.assertEqual(fixture.calls, [dict(kind="applications")])
+
+    async def test_window_query_capabilities_do_not_change_application_listing(self):
+        capabilities = (
+            (),
+            ("nativeSurfaceBatch",),
+            ("nativeSurfaceBatch", "nativeReadIsolation"),
+            ("nativeSurfaceBatch", "nativeVisualSurfaceQuery"),
+            ("nativeSurfaceBatch", "nativeVisualSurfaceQuery", "nativeVisualSurfaceBatch"),
+            ("nativeApplicationListing",),
         )
-
-    async def test_uncertain_per_application_failure_is_propagated(self):
-        fixture = DirectoryFixture(("nativeSurfaceBatch",))
-        fixture.directories["app:1"] = failure("possible")
-        with self.assertRaises(ComputerUseError):
-            await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
+        baseline = None
+        for supported in capabilities:
+            with self.subTest(capabilities=supported):
+                fixture = DirectoryFixture(supported)
+                result = await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
+                if baseline is None:
+                    baseline = result
+                self.assertEqual(result, baseline)
+                self.assertEqual(fixture.calls, [dict(kind="applications")])
 
 
 def window(id, parent=None, modal=False, accessible=True):
@@ -162,34 +152,13 @@ def directory(*surfaces, reasons=()):
         application="running:1",
         observed=dict(id="obs", startedAt=1, completedAt=2),
         stopReasons=list(reasons),
+        rootDiscoveryComplete=not reasons,
         surfaces=list(surfaces),
         provider=dict(status="alreadyEnabled", attribute=None, writeStatus=None),
     )
 
 
 class VisualBatchProfileTests(IsolatedAsyncioTestCase):
-    async def test_visual_batches_keep_the_established_visual_route(self):
-        fixture = DirectoryFixture(("nativeSurfaceBatch", "nativeVisualSurfaceQuery", "nativeVisualSurfaceBatch"))
-        baseline = DirectoryFixture(("nativeVisualSurfaceQuery",))
-        await ApplicationDiscoveryTests.compare(self, baseline, fixture)
-        self.assertEqual(
-            fixture.calls, [dict(kind="surfaceBatch", applications=["app:0", "app:1", "app:2"], profile="visual")]
-        )
-        self.assertTrue(all(call.get("profile") == "visual" for call in baseline.calls))
-
-    async def test_legacy_batch_does_not_replace_a_supported_visual_query(self):
-        fixture = DirectoryFixture(("nativeSurfaceBatch", "nativeVisualSurfaceQuery"))
-        await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
-        self.assertEqual([call["kind"] for call in fixture.calls], ["surfaces"] * 3)
-        self.assertTrue(all(call.get("profile") == "visual" for call in fixture.calls))
-
-    async def test_batch_failure_returns_to_visual_queries(self):
-        fixture = DirectoryFixture(("nativeSurfaceBatch", "nativeVisualSurfaceQuery", "nativeVisualSurfaceBatch"))
-        fixture.failure = failure()
-        await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
-        self.assertEqual([call["kind"] for call in fixture.calls], ["surfaceBatch"] + ["surfaces"] * 3)
-        self.assertTrue(all(call.get("profile") == "visual" for call in fixture.calls))
-
     async def test_batch_profile_requires_its_own_capability(self):
         for caps in ((), ("nativeSurfaceBatch", "nativeVisualSurfaceQuery"), ("nativeVisualSurfaceBatch",)):
             port = SimpleNamespace(connection=SimpleNamespace(capabilities=caps))
@@ -238,7 +207,7 @@ class BatchScopeTests(IsolatedAsyncioTestCase):
                 session_identity=(1, "session"),
                 request=AsyncMock(return_value=payload),
             )
-            port = ConnectionPort(connection, HostPolicy("exclusive"))
+            port = ConnectionPort(connection, HostPolicy())
             port._operations["read"] = (connection.session_identity, None)
             call = port.directory(
                 "read", Binding("session", None, None, None), dict(kind="surfaceBatch", applications=["a", "b"]), 30000

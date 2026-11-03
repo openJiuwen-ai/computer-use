@@ -34,14 +34,14 @@ COLD = Primitive(
 READY = replace(COLD, readiness=Knowledge.YES, pending=())
 
 
-def receipt(*, dispatched=False, error_code=None, retry_reason=None):
+def receipt(*, dispatched=False, error_code=None, retry_reason=None, preparation=()):
     return decode_execution_result(
         "execute",
         {
             "target": encode_target(TARGET),
             "dispatch": "dispatched" if dispatched else "notDispatched",
             "detail": "AXPress sent" if dispatched else "Original document preparation result",
-            "preparation": [],
+            "preparation": list(preparation),
             "confirmation": "unavailable" if error_code or dispatched else "confirmed",
             "cleanup": "complete",
             "errorCode": error_code,
@@ -121,13 +121,15 @@ async def test_document_preparation_that_leaves_action_disabled_never_dispatches
     disabled = replace(READY, supported=supported, readiness=Knowledge.NO, pending=("enabled",))
     port, connection, facts = wire_port(
         [cold, observed(disabled, enabled=Knowledge.NO, native_role="AXButton")],
-        [receipt()],
+        [receipt(preparation=("native document context AXMain",))],
     )
 
     with pytest.raises(ComputerUseError) as caught:
         await Engine(port).execute(ACTION, TARGET)
 
     assert caught.value.code == "input_unavailable"
+    assert caught.value.detail == "The selected control is disabled."
+    assert caught.value.effect == "possible", "preparation effects must survive a later disabled refusal"
     # A refusal before preparation cannot satisfy this regression. The original
     # document must have been prepared and inspected again before the refusal.
     assert execute_commands(connection) == [
@@ -152,6 +154,8 @@ async def test_disabled_action_without_document_preparation_obligation_never_exe
         await Engine(port).execute(ACTION, TARGET)
 
     assert caught.value.code == "input_unavailable"
+    assert caught.value.detail == "The selected control is disabled."
+    assert caught.value.effect == "none"
     assert execute_commands(connection) == []
     assert facts.inspections == 1
     assert connection.request.await_args_list[-1].args[0] == "finish"

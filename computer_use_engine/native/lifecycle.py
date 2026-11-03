@@ -74,6 +74,30 @@ class CallLifecycle:
         self._owner = None
         self._admission = None
         self._call_id = None
+        self._limit = None
+
+    @contextmanager
+    def limit(self, timeout_ms: int) -> Iterator[None]:
+        """Bound successive claims in an optional observation without cancelling admission.
+
+        Each native request receives the remaining deadline through its normal
+        claim. Cleanup keeps its existing grace; this scope never restarts input
+        or cancels an in-flight begin merely because observation time ran out.
+        """
+        if type(timeout_ms) is not int or timeout_ms < 1:
+            raise ValueError("Invalid observation time budget")
+        owner = asyncio.current_task()
+        previous = self._limit
+        if previous is not None and previous[0] is not owner:
+            raise RuntimeError("Another task owns the observation budget")
+        deadline = time.monotonic() + timeout_ms / 1000
+        if previous is not None:
+            deadline = min(deadline, previous[1])
+        self._limit = (owner, deadline)
+        try:
+            yield
+        finally:
+            self._limit = previous
 
     def control(self, remaining: Callable[[], int]) -> Control:
         try:
@@ -94,6 +118,11 @@ class CallLifecycle:
         self.busy = True
         self._owner = asyncio.current_task()
         deadline = time.monotonic() + timeout_ms / 1000
+        if self._limit is not None:
+            if self._limit[0] is not self._owner:
+                self.busy, self._owner = False, None
+                raise RuntimeError("Another task owns the observation budget")
+            deadline = min(deadline, self._limit[1])
 
         def remaining() -> int:
             value = int((deadline - time.monotonic()) * 1000)
@@ -142,7 +171,7 @@ class CallLifecycle:
                     effect="none",
                     target="native call",
                     detail="The native session is retired." if self.retired else "Another native call owns this stage.",
-                    next="close the old driver and observe a new session" if self.retired else "await the active call",
+                    next="close the old driver and observe a new session" if self.retired else "wait for the active call to finish",
                 )
             )
         self._admission = None

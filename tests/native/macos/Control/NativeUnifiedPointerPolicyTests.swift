@@ -4,24 +4,9 @@ import AppKit
 import ApplicationServices
 
 @main enum NativeUnifiedPointerPolicyTests {
-    @MainActor static func main() throws {
+    @MainActor static func main() async throws {
         typealias Readiness = NativePointerReadiness
-        // A transport preparation record is not a native content receiver.
-        precondition(
-            !Readiness.ready(
-                kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target, backgroundPrepared: true,
-                backgroundWindowFocused: false))
-        precondition(
-            !Readiness.ready(
-                kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target, backgroundPrepared: true))
-        precondition(
-            !Readiness.ready(
-                kind: .click, foreground: false, windowKind: .keyRequiring, focus: .otherWindow,
-                backgroundPrepared: true, backgroundWindowFocused: true, backgroundReportedActive: true))
-        precondition(
-            Readiness.ready(
-                kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target, backgroundPrepared: true,
-                backgroundWindowFocused: true, backgroundReportedActive: true))
+        backgroundDocumentReadiness()
         precondition(
             !Readiness.ready(
                 kind: .click, foreground: false, windowKind: .visualOnly, focus: .notRequired, backgroundPrepared: true)
@@ -34,11 +19,6 @@ import ApplicationServices
             Readiness.ready(
                 kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
                 backgroundPrepared: true))
-        precondition(
-            !Readiness.ready(
-                kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target, backgroundPrepared: true,
-                backgroundWindowFocused: true, backgroundReportedActive: false),
-            "a background document can report window focus without an internally active content receiver")
         // Activation does not change the captured delivery. A ready ordinary
         // window remains addressed even while it owns the actual foreground.
         precondition(
@@ -71,6 +51,9 @@ import ApplicationServices
         precondition(NativeAddressedPointerReceiver(role: kAXButtonRole, actions: [kAXPressAction]).supported)
         precondition(NativeAddressedPointerReceiver(role: kAXTextFieldRole, actions: [], focusWritable: true).supported)
         precondition(!NativeAddressedPointerReceiver(role: kAXTextFieldRole, actions: [kAXConfirmAction]).supported)
+        try foregroundPointQualification()
+        try await foregroundPointRelease(afterDown: false)
+        try await foregroundPointRelease(afterDown: true)
         for kind in [NativePointerIntent.Kind.click, .drag, .scroll] {
             let declaration = NativeInputUnit.pointer(kind).declaration(
                 id: "addressed", supported: true, readiness: NativeReadiness([("receiver", "unknown")]))
@@ -80,5 +63,150 @@ import ApplicationServices
         print(
             "PASS addressed delivery survives foreground preparation; synthetic transport alone cannot admit content clicks"
         )
+    }
+
+    private static func backgroundDocumentReadiness() {
+        typealias Readiness = NativePointerReadiness
+        // AppKit's normal window can report AXFocused=false (not writable)
+        // while its text field reports AXFocused=true. Neither element flag
+        // belongs in this window-receiver contract: AXFocusedWindow identifies
+        // the original key window, and AXFrontmost reports internal activation.
+        precondition(Readiness.ready(
+            kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target,
+            backgroundPrepared: true, backgroundReportedActive: true),
+            "a prepared active original key window remains usable when a child holds keyboard focus")
+        for focus: Readiness.WindowFocus in [.otherWindow, .absent, .unresolved, .failed, .notRequired] {
+            precondition(!Readiness.ready(
+                kind: .click, foreground: false, windowKind: .keyRequiring, focus: focus,
+                backgroundPrepared: true, backgroundReportedActive: true),
+                "a background pointer needs positive original focused-window identity")
+        }
+        for active: Bool? in [false, nil] {
+            precondition(!Readiness.ready(
+                kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target,
+                backgroundPrepared: true, backgroundReportedActive: active),
+                "a key-window report without confirmed internal application activation is insufficient")
+        }
+        precondition(!Readiness.ready(
+            kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target,
+            backgroundPrepared: false, backgroundReportedActive: true),
+            "an expired or missing local preparation receipt cannot admit background input")
+        precondition(!Readiness.ready(
+            kind: .click, foreground: false, windowKind: .identityConflict, focus: .target,
+            backgroundPrepared: true, backgroundReportedActive: true),
+            "activation and window focus cannot repair an original-window identity conflict")
+    }
+
+    @MainActor private static func foregroundPointQualification() throws {
+        typealias Receiver = NativeAddressedPointerReceiver
+        typealias Readiness = NativePointerReadiness
+        let group = Receiver(role: kAXGroupRole, actions: [])
+        let point = group.qualification(concreteHit: true, sameWindow: true)
+        precondition(point == .sameWindowPoint && !group.supported)
+        precondition(point.requirement(captured: true) == .foregroundWindowPoint)
+        precondition(point.requirement(captured: false) == nil, "element and pointer-focus admission must not broaden")
+        let exactOriginal = Receiver.Qualification.originalElementExactHit
+        precondition(exactOriginal.requirement(captured: false) == .foregroundWindowPoint)
+        precondition(exactOriginal.requirement(captured: true) == nil,
+                     "an element identity proof cannot authorize a captured point")
+        precondition(!Receiver(role: kAXRowRole, actions: []).supported,
+                     "exact-element delivery must not add a role-based semantic receiver exception")
+        for facts in [group, Receiver(role: kAXButtonRole, actions: [kAXPressAction])] {
+            precondition(facts.qualification(concreteHit: false, sameWindow: true) == .unconfirmed)
+            precondition(facts.qualification(concreteHit: true, sameWindow: false) == .unconfirmed)
+        }
+        precondition(Receiver.Qualification.unconfirmed.requirement(captured: true) == nil)
+        let declared = Receiver(role: kAXButtonRole, actions: [kAXPressAction])
+            .qualification(concreteHit: true, sameWindow: true)
+        precondition(declared.requirement(captured: true) == .contentReceiver)
+        precondition(declared.requirement(captured: false) == .contentReceiver)
+        // Role/action evidence is sampled once. Later semantic changes do not
+        // replace the selected original-window/point requirement.
+        let pinned = point.requirement(captured: true)!
+        var backgroundPreparations = 0
+        do {
+            try NativeClickPreparationPipeline.requireBackgroundPreparation(pinned)
+            backgroundPreparations += 1
+            preconditionFailure("a no-longer-ready foreground-only route cannot enter local preparation")
+        } catch is NativePreparationUnavailable { }
+        precondition(backgroundPreparations == 0,
+                     "the actual preparation branch must refuse before any background preparation effect")
+        try NativeClickPreparationPipeline.requireBackgroundPreparation(.contentReceiver)
+        backgroundPreparations += 1
+        precondition(backgroundPreparations == 1, "ordinary content receiver preparation remains available")
+        for foreground in [true, false, true] {
+            precondition(Readiness.ready(
+                kind: .click, foreground: foreground, windowKind: .keyRequiring, focus: .target,
+                backgroundPrepared: true, backgroundReportedActive: true,
+                requirement: pinned) == foreground,
+                "a foreground loss must stop this route even with a valid background preparation receipt")
+        }
+        precondition(!Readiness.ready(
+            kind: .click, foreground: true, windowKind: .keyRequiring, focus: .otherWindow,
+            backgroundPrepared: true, requirement: pinned))
+        precondition(!Readiness.ready(
+            kind: .click, foreground: true, windowKind: .identityConflict, focus: .target,
+            backgroundPrepared: true, requirement: pinned))
+        let mapping = WindowGeometry.WindowMapping(
+            id: 71, pid: getpid(), frame: CGRect(x: 0, y: 0, width: 100, height: 100),
+            title: nil, width: 100, height: 100)
+        let unit = NativePointerUnit(
+            application: .current, window: mapping, pointerRequirement: pinned)
+        // No real AX object is supplied: fixed delivery must not re-query a role
+        // or fall through to HID after qualification was already retained.
+        let fixedDelivery = try unit.resolvedDelivery(nil, at: .zero, kind: .click)
+        precondition(fixedDelivery == .windowDirected)
+        precondition(!unit.backgroundPreparationAvailable())
+        let retained = try unit.resolvingCaptureTranslation()
+        precondition(retained.pointerRequirement == pinned)
+        let offer = NativeClickContract(
+            routeFamily: "macos.windowDirected.v1", delivery: .windowDirected, admission: .preparationRequired,
+            reason: nil, preparationOptions: ["foreground"], pointerRequirement: pinned)
+        var other = offer
+        other.pointerRequirement = .contentReceiver
+        precondition(offer != other, "native primitive reuse must preserve the selected route requirement")
+        precondition(offer.permitsElementPointer(hasActuator: false),
+                     "a retained window-directed requirement may enter the original-element unit")
+        precondition(!offer.permitsElementPointer(hasActuator: true),
+                     "the new exact-original-element requirement cannot adopt a member")
+        let global = NativeClickContract(
+            routeFamily: "macos.hid.v1", delivery: .systemPointer, admission: .preparationRequired,
+            reason: nil, preparationOptions: ["foreground"], pointerRequirement: pinned)
+        precondition(!global.permitsElementPointer(hasActuator: false),
+                     "the new requirement cannot change its selected delivery to global input")
+        precondition(other.permitsElementPointer(hasActuator: true),
+                     "existing declared-content member routes retain their own admission contract")
+    }
+
+    private enum ForegroundLost: Error { case beforeNextInput }
+
+    @MainActor private static func foregroundPointRelease(afterDown: Bool) async throws {
+        let request = try NativePointerIntent(
+            unit: "pointer_sequence", kind: "click", parameters: ["x": 25, "y": 25, "count": 2], foreground: false)
+        let sequence = try NativePointerEvents(
+            request: request, from: CGPoint(x: 25, y: 25), to: nil, viewport: CGSize(width: 100, height: 100),
+            source: CGEventSource(stateID: .privateState)!)
+        var foreground = true
+        var posted = [(CGEventType, NativeClickDelivery)]()
+        var releases = 0
+        let delivery = NativeClickDelivery.windowDirected
+        do {
+            try await sequence.deliver(
+                check: { _, _ in
+                    guard NativePointerReadiness.ready(
+                        kind: .click, foreground: foreground, windowKind: .keyRequiring, focus: .target,
+                        backgroundPrepared: true, backgroundReportedActive: true,
+                        requirement: .foregroundWindowPoint) else { throw ForegroundLost.beforeNextInput }
+                },
+                post: { event, _ in
+                    posted.append((event.type, delivery))
+                    if event.type == (afterDown ? .leftMouseDown : .mouseMoved) { foreground = false }
+                }, canRelease: { releases += 1; return true }, skipped: { preconditionFailure("release skipped") },
+                onDispatch: {}, onPosted: {})
+            preconditionFailure("focus loss must stop before the next requested down")
+        } catch ForegroundLost.beforeNextInput { }
+        precondition(posted.map { $0.0 } == (afterDown ? [.mouseMoved, .leftMouseDown, .leftMouseUp] : [.mouseMoved]))
+        precondition(posted.allSatisfy { $0.1 == .windowDirected }, "release must retain the original process channel")
+        precondition(releases == (afterDown ? 1 : 0), "held input must release without admitting another click")
     }
 }

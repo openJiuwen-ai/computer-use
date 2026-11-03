@@ -306,6 +306,7 @@ class NativeDirectory:
             platform="linux",
             observed=stamp(start),
             stopReasons=list(dict.fromkeys(notes))[:128],
+            rootDiscoveryComplete=not notes and all(row["parentState"] != "unknown" for row in result),
             application=application,
             provider=dict(status="atspi" if provider_available else "unavailable", attribute=None, writeStatus=None),
             surfaces=result,

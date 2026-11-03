@@ -106,6 +106,22 @@ import ApplicationServices
         ).map(Snapshot.markers)
     }
 
+    /// A scalar ValueInterface alone is not a text editor. Require its own
+    /// native character extent and one readable, writable numeric selection;
+    /// a display string, toolkit identifier or role alone grants no recipe.
+    static func usesScalarTextRecipe(
+        selection: Selection, role: String?, characterCount: AXRead<CFTypeRef>, rangeWritable: Bool,
+        before: Snapshot
+    ) -> Bool {
+        guard selection == .shortcut, role == kAXIncrementorRole, rangeWritable,
+            case .numeric(let numeric) = before, numeric.contiguous,
+            numeric.location != nil, numeric.length != nil,
+            case .value(let raw) = characterCount, let number = raw as? NSNumber,
+            CFGetTypeID(number) != CFBooleanGetTypeID(), let count = Int(number.stringValue), count >= 0
+        else { return false }
+        return count == numeric.count
+    }
+
     private func keyboardSelectionIsScoped() -> Bool {
         func owns(_ marker: AXTextMarker) -> Bool {
             var raw: CFTypeRef?
@@ -183,7 +199,7 @@ import ApplicationServices
     /// uncertain selection result stops here; there is no second recipe.
     func deliver(
         text: String, selection: Selection, delivery: NativeKeyboardDelivery, applicationPID: pid_t,
-        originalWindow: AXUIElement, check: @escaping @MainActor () throws -> Void,
+        check: @escaping @MainActor () throws -> Void,
         validateReceiver: @escaping @MainActor () async throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
         onCleanupUnknown: @escaping () -> Void
@@ -211,19 +227,26 @@ import ApplicationServices
             throw DriverError("target text extent is unavailable; no replacement sent", code: .inputUnavailable)
         }
         if before.empty && text.isEmpty { return true }
-        // Qt's spinbox Select All uses a reversed selection. Its date parser
-        // can retain a day from earlier editing while the caret is in the year
-        // section. A forward numeric range plus one whole-string key event is
-        // one preselected recipe, not a retry after rejected characters.
-        let structuredQt =
-            try selection == .shortcut
-            && AXAccess.read(element, kAXRoleAttribute).value as? String == kAXIncrementorRole
-            && AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true
-            && NativeQtAccessibilityQuery.isWidget(
-                element, identifier: AXAccess.read(element, kAXIdentifierAttribute).value as? String,
-                originalWindow: originalWindow, presenterPID: applicationPID)
-        let atomicText =
-            try structuredQt && !text.isEmpty ? Input.prepareAtomicText(text, foreground: delivery.isGlobal) : nil
+        // Structured scalar editors can validate each intermediate character
+        // and retain a segment independently of their full AX range. Establish
+        // editing, a forward complete range, and one whole-string input. Qt
+        // subclasses/objectNames need not expose a framework class in their
+        // identifier, so the recipe uses this editor's text contract instead.
+        var atomicText: Input.AtomicTextEvents?
+        if !text.isEmpty, selection == .shortcut,
+            AXAccess.read(element, kAXRoleAttribute).value as? String == kAXIncrementorRole,
+            Self.usesScalarTextRecipe(
+            selection: selection, role: kAXIncrementorRole,
+            characterCount: AXAccess.read(element, kAXNumberOfCharactersAttribute),
+            rangeWritable: AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true, before: before)
+        {
+            guard let events = try Input.prepareAtomicText(text, foreground: delivery.isGlobal) else {
+                throw DriverError(
+                    "the complete scalar replacement cannot be encoded; no replacement input sent",
+                    code: .inputUnavailable)
+            }
+            atomicText = events
+        }
         // An existing full AX range can have been set without the editor's
         // Select All command. Establish keyboard editing even in that case.
         if selection.usesWindowCommand || !before.full {

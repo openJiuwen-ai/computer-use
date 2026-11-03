@@ -174,6 +174,7 @@ import ApplicationServices
                     code: .inputUnavailable)
             }
             if proposal.needsForeground {
+                try NativeInputAuthorization.requireGlobalInput("scoped foreground keyboard")
                 guard background.isForeground else {
                     throw NativePreparationUnavailable(
                         description:
@@ -322,6 +323,9 @@ import ApplicationServices
         if proposal?.unavailable == true {
             throw NativePreparationUnavailable(
                 description: "observed Web keyboard ownership is unavailable; no requested input was sent")
+        }
+        if proposal?.needsForeground == true {
+            try NativeInputAuthorization.requireGlobalInput("scoped foreground keyboard")
         }
         if let proposal, requiresForegroundSelection(proposal, state: try initial ?? sample()), !foreground {
             throw NativePreparationUnavailable(
@@ -498,7 +502,7 @@ import ApplicationServices
             }
             return try await NativeReplacementUnit(element: element).deliver(
                 text: request.value!, selection: replacement, delivery: delivery,
-                applicationPID: application.processIdentifier, originalWindow: window,
+                applicationPID: application.processIdentifier,
                 check: {
                     try check()
                     try self.checkEnabled()

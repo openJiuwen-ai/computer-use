@@ -119,6 +119,10 @@ namespace ComputerUse.Windows
             bool directedCharacters =
                 characterSequence != null &&
                 SelectCharacterDeliveryPass.Run(characterSequence, r) == NativeTextDelivery.DirectedCharacters;
+            // Qualify the actual channel before replacement selection can mutate
+            // the editor. Directed characters do not borrow SendInput authority.
+            if (!directedCharacters && (contract.Replacement || text.Length != 0))
+                keyboard.RequireGlobalInput();
             var dispatchSequence = sequence as INativeTypedTextDispatchSequence;
             Func<NativeKeyboardState> receiver = () =>
             {

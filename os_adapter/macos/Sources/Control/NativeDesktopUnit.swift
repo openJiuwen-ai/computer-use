@@ -9,13 +9,17 @@ import CoreGraphics
     let desktop: DesktopCapture
     let ref: String
 
-    func check() throws {
-        try Input.requireDesktopInput()
+    func check(requireAuthorization: Bool = true) throws {
+        try RequestDiagnostics.checkCancellation()
+        if requireAuthorization { try Input.requireDesktopInput() }
+        else { try BackgroundTarget.validateDesktop(input: true) }
         _ = try desktop.observed(ref)
     }
 
-    func pointer(_ request: NativePointerIntent) throws -> (from: CGPoint, to: CGPoint?, viewport: CGSize) {
-        try check()
+    func pointer(_ request: NativePointerIntent, requireAuthorization: Bool = true) throws
+        -> (from: CGPoint, to: CGPoint?, viewport: CGSize)
+    {
+        try check(requireAuthorization: requireAuthorization)
         let mapping = try desktop.mapping(ref)
         guard let start = request.start else {
             throw DriverError("desktop pointer needs image coordinates", code: .invalidRequest)
@@ -98,11 +102,11 @@ import CoreGraphics
         }
         if request.kind == .key {
             try await Input.preparedKey(
-                request.value!, delivery: .exclusiveDesktop, validate: validate, onDispatch: onDispatch,
+                request.value!, delivery: .desktop, validate: validate, onDispatch: onDispatch,
                 onPosted: onPosted, onCleanupUnknown: onCleanupUnknown)
         } else {
             try await Input.preparedText(
-                request.value!, delivery: .exclusiveDesktop, applicationPID: nil,
+                request.value!, delivery: .desktop, applicationPID: nil,
                 validate: {
                     try validate()
                     try BackgroundTarget.validateReleasedInput()

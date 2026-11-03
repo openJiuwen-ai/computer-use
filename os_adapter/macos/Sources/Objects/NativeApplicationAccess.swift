@@ -69,7 +69,8 @@ import ApplicationServices
     func windows(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
         purpose: NativeWindowQueryPurpose = .observation, profile: NativeInspectQuery.SurfaceProfile = .accessibility,
-        modalHints: [NativeApplicationReader.ModalHint] = [], reportIssue: ((String) -> Void)? = nil
+        modalHints: [NativeApplicationReader.ModalHint] = [],
+        reportIssue: ((NativeApplicationReader.WindowIssue) -> Void)? = nil
     ) throws -> [Window] {
         return try reader.windows(
             app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: purpose, profile: profile,

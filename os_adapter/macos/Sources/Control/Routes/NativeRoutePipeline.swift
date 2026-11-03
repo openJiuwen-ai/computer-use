@@ -23,7 +23,7 @@ import ApplicationServices
             return try BuildNativeTextValueRoutePass.run(context, valueContract: valueContract)
         case .receiverContext(let receiverContract):
             return try BuildNativeReceiverRoutePass.run(context, receiverContract: receiverContract)
-        case .pointerFocus: return try BuildNativePointerFocusRoutePass.run(context)
+        case .pointerFocus(let target): return try BuildNativePointerFocusRoutePass.run(context, target: target)
         case .selectedText(let editContract):
             return try BuildNativeSelectedTextRoutePass.run(context, editContract: editContract)
         case .scroll: return try BuildNativeScrollRoutePass.run(context)

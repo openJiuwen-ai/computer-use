@@ -12,7 +12,8 @@ namespace ComputerUse.Windows
     // element, text, image and operation tokens are never silently reconstructed.
     internal sealed class NativeIsolatedRuntime : INativeRuntime, INativeWorkerHealthStatus
     {
-        readonly string session, mode;
+        readonly string session;
+        readonly bool globalInputAllowed;
         readonly AgentPointer pointer = new AgentPointer();
         INativeWorkerProcess child;
         readonly Func<INativeWorkerProcess> createChild;
@@ -37,10 +38,10 @@ namespace ComputerUse.Windows
                 return capabilities.Concat(new[] { "nativeReadIsolation", "nativeWindowReadiness" }).ToArray();
             }
         }
-        internal NativeIsolatedRuntime(string session, string mode, Func<INativeWorkerProcess> createChild = null)
+        internal NativeIsolatedRuntime(string session, bool globalInputAllowed, Func<INativeWorkerProcess> createChild = null)
         {
             this.session = session;
-            this.mode = mode;
+            this.globalInputAllowed = globalInputAllowed;
             this.createChild = createChild ?? (() => new NativeChildProcess("--native-worker"));
             try
             {
@@ -88,9 +89,12 @@ namespace ComputerUse.Windows
                 var ready = Receive(request, Wire.Now + 5000);
                 if (!ready.ContainsKey("ready") || !Equals(ready["ready"], true))
                     throw new InvalidOperationException("native worker bootstrap failed");
-                child.Send(Wire.Obj("version", 6, "id", 0, "method", "hello", "params", Wire.Obj("desktopMode", mode)));
+                child.Send(Wire.Obj("version", 6, "id", 0, "method", "hello", "params", Wire.Obj("globalInputAllowed", globalInputAllowed)));
                 var hello = Receive(request, Wire.Now + 5000);
-                capabilities = Wire.Array(Wire.Object(hello["result"])["capabilities"]).Cast<string>().ToArray();
+                var result = Wire.Object(hello["result"]);
+                if (!Equals(result["globalInputAllowed"], globalInputAllowed))
+                    throw new Failure("invalid_request", "native worker input permission differs from this session");
+                capabilities = Wire.Array(result["capabilities"]).Cast<string>().ToArray();
             }
             catch
             {

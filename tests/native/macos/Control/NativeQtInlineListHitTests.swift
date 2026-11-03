@@ -44,6 +44,18 @@ import ApplicationServices
     static func proves(_ facts: Evidence.Facts<String>) -> Bool { Evidence.proves(facts, same: ==) }
 
     static func main() {
+        // The identifier signature remains local to the inline-list hit proof;
+        // it must not be broadened to classify arbitrary custom Qt classes.
+        for identifier in [targetID, hitID, "QApplication.Dialog.qt_scrollarea_viewport.custom_toggle"] {
+            precondition(NativeQtAccessibilityIdentifier.isWidgetPath(identifier))
+        }
+        for identifier: String? in [
+            nil, "", "QApplication", "QApplication.CustomView", "QApplication.CustomView.control",
+            "Other.QApplication.QWidget.check", "OtherApplication.QWidget.check", "QApplication..QWidget.check",
+            "QApplication.QWidget.check.", "QApplication.CustomQWidget.check"
+        ] {
+            precondition(!NativeQtAccessibilityIdentifier.isWidgetPath(identifier))
+        }
         precondition(proves(facts()), "a current raised Qt inline-list leaf must survive its provider's lower hit")
         let rect = CGRect(x: 100, y: 100, width: 100, height: 100)
         let absent = CGRect(x: 0, y: 0, width: 10, height: 10)

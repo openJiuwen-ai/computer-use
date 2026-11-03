@@ -39,7 +39,8 @@ from computer_use.interaction.read.presentation.interface.atoms.semantics import
 from computer_use.interaction.read.presentation.ir import FactKey
 from computer_use.interaction.read.presentation.rendering.layout.child_coverage import capture_child_hint
 from computer_use.interaction.read.presentation.rendering.layout.empty_values import (
-    compact_empty_values,
+    EmptyValueLine,
+    empty_value_cells,
 )
 from computer_use.interaction.read.presentation.rendering.layout.model import (
     ChildCoverageHint,
@@ -74,7 +75,6 @@ __all__ = [
     "CONVENTIONAL",
     "STANDARD_CLICK",
     "bounded",
-    "compact_empty_values",
     "field",
     "partial",
     "preview",
@@ -363,6 +363,8 @@ def render_projection_lines(
     node_line_ranges: dict[str, tuple[int, int]] = {}
     node_prefixes: dict[str, str] = {}
     node_action_lines: dict[str, tuple[str, str]] = {}
+    empty_cells = empty_value_cells(roots, focused_ref)
+    empty_lines: dict[str, EmptyValueLine] = {}
     captions: dict[str, list[EmittedCaption]] = {}
     visible_nodes: dict[str, NodeView] = {}
     visible_parents: dict[str, str | None] = {}
@@ -887,7 +889,7 @@ def render_projection_lines(
             )
         elif partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
             hint(
-                f"{indent}\tInspect subtree: (await app.element({node['ref']})).read()"
+                f"{indent}\tInspect subtree: app.element({node['ref']}).read()"
                 if context.get("publicApi")
                 else f"{indent}\tInspect subtree: element({quoted(node['ref'])}).read()"
             )
@@ -911,7 +913,7 @@ def render_projection_lines(
         if block_value:
             continuation = (
                 (
-                    f"; use (await app.element({node['ref']})).read_text()"
+                    f"; use app.element({node['ref']}).read_text()"
                     if context.get("publicApi")
                     else f"; use element({quoted(node['ref'])}).read_text()"
                 )
@@ -1012,6 +1014,20 @@ def render_projection_lines(
             )
         )
         node_line_ranges[node["ref"]] = (line_start, len(lines_value))
+        cell = empty_cells.get(node["ref"])
+        if (
+            cell is not None
+            and cell.parent == parent_ref
+            and show_value
+            and len(lines_value) == line_start + 1
+            and field_base == f"{node['ref']} {node_prefixes[node['ref']]} {node['name']}"
+        ):
+            # A common source caption before the address remains part of the
+            # shared header. Escaped/excerpted captions keep their explicit line.
+            properties = node_prefixes[node["ref"]] + (" " + cell.caption if cell.caption else "")
+            empty_lines[node["ref"]] = EmptyValueLine(
+                cell, indent, properties, tuple(fields), lines_value[line_start]
+            )
         groups = {ref: group for group in node.get("layoutGroups", ()) for ref in group["members"]}
         for child in node["children"]:
             child_layout = layout
@@ -1303,4 +1319,5 @@ def render_projection_lines(
         node_prefixes=node_prefixes,
         unexpanded_menus=unexpanded_menus,
         node_action_lines=node_action_lines,
+        empty_value_lines=empty_lines,
     )

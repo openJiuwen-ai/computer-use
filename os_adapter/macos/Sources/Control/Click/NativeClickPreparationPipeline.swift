@@ -6,6 +6,16 @@ import ApplicationServices
 /// Explicit preparation composition for the fixed selected delivery. No
 /// attempt loop, cross-delivery selection or fresh request deadline lives here.
 @MainActor enum NativeClickPreparationPipeline {
+    /// A route sampled as ready may lose foreground before execution. Its
+    /// retained requirement still excludes local background preparation; the
+    /// existing Gate owns any later explicitly selected foreground attempt.
+    static func requireBackgroundPreparation(_ requirement: NativePointerReadiness.Requirement) throws {
+        guard requirement != .foregroundWindowPoint else {
+            throw NativePreparationUnavailable(
+                description: "the original point needs foreground preparation; no background preparation was sent")
+        }
+    }
+
     static func run(
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
         evidence: NativeClickEvidence, objects: any NativeControlObjectAccess
@@ -56,6 +66,7 @@ import ApplicationServices
                     preparation, boundary: boundary, receipt: receipt, evidence: evidence)
             case .windowDirected:
                 let pointer = preparation.pointer
+                try requireBackgroundPreparation(pointer.pointerRequirement)
                 try pointer.validateWindowIdentity()
                 do {
                     let outcome = try await NativeFocusPipeline.prepare(

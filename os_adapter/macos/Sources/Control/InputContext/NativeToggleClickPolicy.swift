@@ -2,22 +2,21 @@
 
 import Foundation
 
-/// Qt's Cocoa bridge maps check/radio AXPress to toggle(), which changes state
-/// without the clicked signal delivered by a mouse click. Default click must
-/// retain its complete activation semantics; explicit AX actions are separate.
+/// Automatic check/radio clicks require full activation, not just a changed
+/// checked value. Declaring AXPress does not establish that equivalence for
+/// these roles: providers can implement it as state-only toggle(). Keep the
+/// ordinary pointer offers independent; explicit AX actions bypass this policy.
 enum NativeToggleClickPolicy {
-    static func stateOnlyPress(role: String?, identifier: String?, currentWindowPath: Bool) -> Bool {
-        currentWindowPath && ["AXCheckBox", "AXRadioButton"].contains(role ?? "")
-            && NativeQtAccessibilityIdentifier.isWidgetPath(identifier)
-    }
-
     static func actionOffer(
-        _ original: NativeClickContract, action: String, stateOnlyPress: Bool
+        _ original: NativeClickContract, action: String, role: String?
     ) -> NativeClickContract {
-        guard action == "AXPress", stateOnlyPress, original.delivery == .objectAction else { return original }
+        guard action == "AXPress", ["AXCheckBox", "AXRadioButton"].contains(role ?? ""),
+            original.delivery == .objectAction,
+            [.ready, .preparationRequired].contains(original.admission)
+        else { return original }
         return .init(
-            routeFamily: original.routeFamily, delivery: original.delivery, admission: .unavailable,
-            reason: "This provider's AXPress only changes the checked state; a mouse click supplies full activation.",
+            routeFamily: original.routeFamily, delivery: original.delivery, admission: .insufficientEvidence,
+            reason: "Full click activation through AXPress is unconfirmed for this check or radio control; mouse routes remain independent.",
             preparationOptions: [])
     }
 }

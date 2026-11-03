@@ -93,7 +93,7 @@ namespace ComputerUse.Windows
                                                      : "unknown",
                             "blockedBy", new string[0], "within", within, "nativeRole", state.Role, "actionsComplete",
                             true, "primitives",
-                            new[] { Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "object", "supported",
+                            new[] { Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "object", "globalInput", "no", "supported",
                                              available                  ? "yes"
                                              : state.Scrollable == null ? "unknown"
                                                                         : "no",

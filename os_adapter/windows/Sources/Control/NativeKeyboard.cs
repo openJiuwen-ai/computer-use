@@ -129,7 +129,7 @@ namespace ComputerUse.Windows
                 NativePaste.Validate(Wire.Str(p, "text", true));
             }
             else
-                throw new Failure("mode_unsupported", "this keyboard unit supports focus and key intents");
+                throw new Failure("unsupported_operation", "this keyboard unit supports focus and key intents");
         }
 
         static string Unit(NativeWriteOperation operation)
@@ -195,6 +195,12 @@ namespace ComputerUse.Windows
                 pending.Add("receiver");
             if (replacement && !state.TextSelection)
                 pending.Add("selection");
+            // Chords, replacement and clipboard recipes use SendInput. Plain
+            // insertion may select a qualified directed character route later.
+            string inputKind = (string)operation.Intent["kind"];
+            string globalInput = inputKind == "insert" ? "unknown"
+                                 : inputKind == "focus" ? (Ready(state, false) ? "no" : "unknown")
+                                 : "yes";
             return Wire.Obj(
                 "kind", "inputContext", "binding", new Dictionary<string, object>(target), "observed",
                 "observation:" + Guid.NewGuid().ToString("N"), "targetLabel",
@@ -205,7 +211,7 @@ namespace ComputerUse.Windows
                                          : "unknown",
                 "blockedBy", new string[0], "nativeRole", state.Role, "actionsComplete", false, "within", within,
                 "primitives",
-                new[] { Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "keyboard", "supported",
+                new[] { Wire.Obj("id", contract.Id, "unit", contract.Unit, "channel", "keyboard", "globalInput", globalInput, "supported",
                                  supported ? "yes" : "no", "readiness",
                                  supported && Ready(state, replacement) ? "yes" : "no", "pending", pending,
                                  "backgroundPreparation",
@@ -236,6 +242,13 @@ namespace ComputerUse.Windows
                     NativeKeyboardStateChecks.Validate(contract, state, preparing);
                     return state;
                 });
+        }
+
+        internal void RequireGlobalInput()
+        {
+            var authority = provider as INativeGlobalKeyboardAuthority;
+            if (authority != null)
+                authority.RequireGlobalInput();
         }
 
         internal void SendBatch(NativeWriteOperation operation, NativeKeyEvent[] events, Request r,
@@ -307,6 +320,10 @@ namespace ComputerUse.Windows
                 }
                 else if (preparing)
                 {
+                    // Key chords and clipboard paste always use SendInput here.
+                    // Focus and text may use object/message routes instead.
+                    if (contract.Unit == "clipboard_paste" || !contract.Text && contract.Unit == "key_sequence")
+                        RequireGlobalInput();
                     if (preparationPipeline.Run(
                             contract, (bool)command["foreground"], r, preparation,
                             contract.Replacement ? (string)Wire.Object(operation.Intent["parameters"])["text"] : null,

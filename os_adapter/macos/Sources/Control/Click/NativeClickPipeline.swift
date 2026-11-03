@@ -14,6 +14,9 @@ import AppKit
         do {
             let plan = try ResolveNativeClickPlanPass.run(
                 command, resolved: resolved, op: operation, step: step, access: access)
+            if plan.offer.delivery == .systemPointer {
+                try NativeInputAuthorization.requireGlobalInput("system pointer click")
+            }
             try await NativeInputActivity.$stage.withValue(.preparation) {
                 try await NativeClickPreparationPipeline.run(
                     plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)

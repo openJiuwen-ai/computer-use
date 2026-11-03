@@ -16,6 +16,14 @@ struct NativeClickContract: Equatable {
     var backgroundFamily: String? = nil
     var backgroundUnavailable = false
     var popupPointer: NativePopupPointerQualification? = nil
+    var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
+
+    /// The retained native offer, never an execute field, owns this requirement.
+    /// A qualified popup or member keeps its separate existing admission proof.
+    func permitsElementPointer(hasActuator: Bool) -> Bool {
+        guard popupPointer == nil else { return false }
+        return pointerRequirement == .contentReceiver || delivery == .windowDirected && !hasActuator
+    }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         let popupMatches: Bool
@@ -28,6 +36,7 @@ struct NativeClickContract: Equatable {
             && lhs.admission == rhs.admission && lhs.reason == rhs.reason
             && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
             && lhs.backgroundUnavailable == rhs.backgroundUnavailable
+            && lhs.pointerRequirement == rhs.pointerRequirement
     }
 
     var wire: [String: Any] {

@@ -87,7 +87,10 @@ import ApplicationServices
         for menu in menus.reversed() {
             onPreparation("close prepared menu")
             onNativePreparation(.init(kind: .menuContext, phase: .willSend, detail: "close prepared menu", window: nil))
-            if AXMessaging.performAction(menu, kAXCancelAction as CFString) != .success { accepted = false }
+            let status = NativeInputActivity.$stage.withValue(.cleanup) {
+                AXMessaging.performAction(menu, kAXCancelAction as CFString)
+            }
+            if status != .success { accepted = false }
             onNativePreparation(.init(kind: .menuContext, phase: .returned, detail: "close prepared menu", window: nil))
         }
         await withCheckedContinuation { continuation in

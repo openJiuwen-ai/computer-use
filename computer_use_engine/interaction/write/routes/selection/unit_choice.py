@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.write.routes.policy import preparation_pair_available, route_key
 from computer_use.interaction.write.routes.selection.admission import stage_admission
-from computer_use.interaction.write.routes.selection.impact import least_disruptive_group
+from computer_use.interaction.write.routes.selection.impact import global_input_denied, least_disruptive_group
 from computer_use.interaction.write.routes.selection.model import CandidateSet, EligibleRoutes, RouteOptions
 from computer_use.native.contracts import Channel, UnitCommand
 
@@ -33,6 +33,8 @@ def eligible_unit_routes(value: CandidateSet) -> EligibleRoutes:
         ):
             continue
         command = UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver)
+        if global_input_denied(command, request.policy):
+            continue
         if route_key(command) in attempts.unavailable:
             continue
         admission = stage_admission(primitive)

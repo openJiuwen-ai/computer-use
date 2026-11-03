@@ -23,11 +23,37 @@ def test_nonmodal_scrollbar_window_does_not_expire_original_window_pixels():
         (*CHILD[:4], None),
         ("child", "child-surface", "root", "unknown", False),
         ("child", "child-surface", "other", "known", False),
-        ("child", "child-surface", None, "none", False),
     ],
 )
 def test_new_modal_or_unconfirmed_surfaces_still_expire_image(child):
     assert not compatible_membership((ROOT,), (ROOT, child), "root")
+
+
+@pytest.mark.parametrize("surface", ["other-surface", "replacement-surface"])
+def test_independent_nonmodal_peer_does_not_change_captured_target(surface):
+    peer = ("other", "other-surface", None, "none", False)
+    fresh_peer = ("other", surface, None, "none", False)
+    child = ("other-child", "other-child-surface", "other", "known", False)
+    assert compatible_membership((ROOT,), (ROOT, fresh_peer, child), "root")
+    assert compatible_membership((ROOT, peer), (ROOT, fresh_peer, child), "root")
+    if surface != peer[1]:
+        assert not compatible_membership((ROOT, peer), (ROOT, fresh_peer), "other")
+
+
+@pytest.mark.parametrize("modal", [True, None])
+def test_new_independent_modal_or_unknown_modality_is_not_assumed_irrelevant(modal):
+    peer = ("other", "other-surface", None, "none", modal)
+    assert not compatible_membership((ROOT,), (ROOT, peer), "root")
+
+
+def test_unknown_parent_peer_cannot_be_treated_as_independent():
+    peer = ("other", "other-surface", None, "unknown", False)
+    assert not compatible_membership((ROOT,), (ROOT, peer), "root")
+
+
+def test_unread_captured_ancestor_is_not_a_new_unrelated_peer():
+    child = ("child", "child-surface", "root", "known", False)
+    assert not compatible_membership((child,), (child, ROOT), "child")
 
 
 @pytest.mark.parametrize(

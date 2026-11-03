@@ -112,6 +112,7 @@ class NativeLaunch:
                     id=identifier_local,
                     unit="launch_application",
                     channel="object",
+                    globalInput="no",
                     supported=available,
                     readiness=available,
                     pending=[],

@@ -32,13 +32,4 @@ def computer_host(factory=None):
         factory = Computer
     computer = factory()
 
-    async def close():
-        # The pipeline shares retained bindings with their owning service.
-        # pylint: disable-next=protected-access
-        transport = computer._controller.transport
-        if hasattr(transport, "close"):
-            transport.close()
-        if hasattr(transport, "waitClosed"):
-            await transport.wait_closed()
-
-    return Record(computer=computer, close=close)
+    return Record(computer=computer, close=computer.close)

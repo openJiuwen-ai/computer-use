@@ -21,6 +21,8 @@ import uuid
 from dataclasses import asdict
 from pathlib import Path
 
+from artifact_json import encode_artifact
+
 import computer_use
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
@@ -95,8 +97,15 @@ async def verify(folder, cases, selected_driver):
     helper = folder / "ScrollOwnerPermissionAXProbe"
     await asyncio.to_thread(
         subprocess.run,
-        ["swiftc", "-swift-version", "6", "-parse-as-library",
-         str(ROOT / "tests/fixtures/ScrollOwnerPermissionAXProbe.swift"), "-o", str(helper)],
+        [
+            "swiftc",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+            str(ROOT / "tests/fixtures/ScrollOwnerPermissionAXProbe.swift"),
+            "-o",
+            str(helper),
+        ],
         check=True,
     )
     bundle = "local.computer-use.scroll-owner." + uuid.uuid4().hex
@@ -109,10 +118,12 @@ async def verify(folder, cases, selected_driver):
     journal = (folder / "diagnostics.jsonl").open("w", encoding="utf-8")
     events = []
     report = {
-        "sdk": computer_use.__file__, "driver": str(driver),
+        "sdk": computer_use.__file__,
+        "driver": str(driver),
         "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
         "source_sha256": {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in SOURCES},
-        "cases": [], "passed": False,
+        "cases": [],
+        "passed": False,
     }
 
     def record(value):
@@ -132,7 +143,7 @@ async def verify(folder, cases, selected_driver):
             native_before = await asyncio.to_thread(native_evidence, helper, initial["pid"])
             (folder / (name + "-native-before.json")).write_text(json.dumps(native_before, indent=2) + "\n")
             require_provider(native_before, name)
-            observed = await app.read(view="both", full=True)
+            observed = await asyncio.to_thread(app.read, view="both", full=True)
             (folder / (name + "-before.txt")).write_text(observed.text)
             if observed.screenshot is not None:
                 (folder / (name + "-before.png")).write_bytes(observed.screenshot)
@@ -141,28 +152,36 @@ async def verify(folder, cases, selected_driver):
                 "bar_alias_disabled": "Borrowed vertical scroll bar",
                 "page_alias_disabled": "Page down",
             }.get(name, "Scroll content anchor")
-            target = await app.element(label)
+            target = await asyncio.to_thread(app.element, label)
             wheel = name in ("wheel", "wheel_hit_alias_disabled")
             pages = 0.5 if wheel else 1 if name == "page" or name.endswith("alias_disabled") else 3
             start = len(events)
             error = None
             try:
-                receipt = dict(await target.scroll("down", pages=pages))
+                receipt = dict(await asyncio.to_thread(target.scroll, "down", pages=pages))
             except ComputerUseError as caught:
                 error = caught
                 receipt = {"code": caught.code, "effect": caught.effect, "detail": caught.detail}
             await asyncio.sleep(0.1)
             after = await state(folder)
             effects = [
-                item["value"] for item in events[start:]
-                if item.get("kind") == "backend_diagnostic" and isinstance(item.get("value"), dict)
+                item["value"]
+                for item in events[start:]
+                if item.get("kind") == "backend_diagnostic"
+                and isinstance(item.get("value"), dict)
                 and item["value"].get("kind") == "input_activity"
                 and item["value"].get("phase") == "willCall"
             ]
             row = {
-                "case": name, "binding": asdict(target._snapshot["binding"]), "pages": pages,
-                "before": before, "result": receipt, "after": after, "native_before": native_before,
-                "native_after": await asyncio.to_thread(native_evidence, helper, initial["pid"]), "effects": effects,
+                "case": name,
+                "binding": asdict(target._snapshot["binding"]),
+                "pages": pages,
+                "before": before,
+                "result": receipt,
+                "after": after,
+                "native_before": native_before,
+                "native_after": await asyncio.to_thread(native_evidence, helper, initial["pid"]),
+                "effects": effects,
             }
             report["cases"].append(row)
             assert after["owner"] == before["owner"] and after["other"] == before["other"]
@@ -186,8 +205,16 @@ async def verify(folder, cases, selected_driver):
                 assert error is not None and error.effect == "partial", (name, receipt)
                 if name in ("region_disables", "bar_disables", "page_disables"):
                     assert error.code == "input_unavailable" and "scrolling control is disabled" in error.detail
-                    assert after[{"region_disables": "regionEnabled", "bar_disables": "barEnabled",
-                                  "page_disables": "pageEnabled"}[name]] is False
+                    assert (
+                        after[
+                            {
+                                "region_disables": "regionEnabled",
+                                "bar_disables": "barEnabled",
+                                "page_disables": "pageEnabled",
+                            }[name]
+                        ]
+                        is False
+                    )
                 elif name == "relation_changes":
                     assert error.code == "input_unavailable" and "scroll bar left its region" in error.detail
                     assert after["conflictingBar"] is True
@@ -197,8 +224,7 @@ async def verify(folder, cases, selected_driver):
                 assert 22 not in after["mouseEvents"], "a partial page action cannot be replayed through wheel"
         report["passed"] = True
     finally:
-        computer._controller.transport.close()
-        await computer._controller.transport.wait_closed()
+        await asyncio.to_thread(computer.close)
         set_diagnostic_handler(None)
         journal.close()
         os.kill(initial["pid"], signal.SIGTERM)
@@ -209,7 +235,9 @@ async def verify(folder, cases, selected_driver):
                 report["owned_fixture_terminated"] = True
                 break
             await asyncio.sleep(0.02)
-        (folder / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n")
+        (folder / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, default=encode_artifact) + "\n"
+        )
 
 
 def main():

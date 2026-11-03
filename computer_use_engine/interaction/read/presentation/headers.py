@@ -57,14 +57,12 @@ class InterfaceHeader:
     """
 
     application: str
-    scope: Literal["instance", "window"]
-    scope_root: int
-    instance_root: int
+    scope: Literal["application", "window"]
+    scope_root: int | None
     current: int | None
     reported_input: int | None
     input_state: Literal["member", "outside", "unknown"]
     windows: tuple[MemberHeading, ...]
-    other_choices: tuple[tuple[int, str], ...]
     directory_gaps: tuple[str, ...]
     directory: Mapping[str, object]
 
@@ -117,7 +115,7 @@ def _flags(window: MemberHeading) -> list[str]:
     elif window.modal is None:
         flags.append("modal unknown")
     if window.parent_state == "known":
-        flags.append(f"parent={window.parent}" if window.parent is not None else "parent outside instance")
+        flags.append(f"parent={window.parent}" if window.parent is not None else "parent outside catalogue")
     elif window.parent_state == "unknown":
         flags.append("parent unknown")
     return flags
@@ -132,7 +130,7 @@ def member_heading(window: MemberHeading, *, name_in_body: bool = False) -> str:
         flags.append("not expanded")
     suffix = " (" + ", ".join(flags) + ")" if flags else ""
     title = "" if name_in_body else " " + _quoted(window.title)
-    return f"Window {window.ref}:" + title + suffix
+    return f"Window {window.ref}:" + title + suffix + f"; computer.window({window.ref})"
 
 
 def reported_input_label(ref: int | None, *, observed: bool = True) -> str:
@@ -148,7 +146,7 @@ def reported_input_label(ref: int | None, *, observed: bool = True) -> str:
     """
     if not observed:
         return "unknown"
-    return str(ref) if ref is not None else "outside this instance (observed focus)"
+    return str(ref) if ref is not None else "outside this observation (observed focus)"
 
 
 def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> str:
@@ -158,7 +156,9 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
     if single is not None:
         suffix = " (window scope)" if header.scope == "window" else ""
         title = "" if name_in_body else ": " + _quoted(single.title)
-        lines.append(f"Window {single.ref}{title}, App: {_quoted(header.application)}{suffix}.")
+        lines.append(
+            f"Window {single.ref}{title}, App: {_quoted(header.application)}{suffix}; computer.window({single.ref})."
+        )
         relations = [flag for flag in _flags(single) if flag not in ("main", "current", "reports input")]
         if relations:
             lines.append("Window relation: " + ", ".join(relations))
@@ -169,7 +169,7 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
     if header.current is None:
         lines.append("Current window: unknown")
     elif single is not None and header.current != single.ref:
-        lines.append(f"Current window: {header.current}")
+        lines.append(f"Detailed observation: Window {header.current}; computer.window({header.current})")
     if header.input_state != "member":
         lines.append(
             "Reported input window: "
@@ -180,12 +180,6 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
     for window in header.windows:
         if not window.in_scope or not window.expanded:
             lines.append(member_heading(window))
-    if header.other_choices:
-        lines.append(
-            "Other independent or unconfirmed windows: "
-            + "; ".join(f"{ref} {_quoted(title)}" for ref, title in header.other_choices)
-            + "; select with computer.app(id)."
-        )
     lines.extend("Directory partial: " + reason for reason in header.directory_gaps)
     return "\n".join(lines)
 

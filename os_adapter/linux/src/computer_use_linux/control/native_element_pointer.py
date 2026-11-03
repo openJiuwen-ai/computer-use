@@ -82,7 +82,7 @@ class NativeElementPointer(NativePointer):
         require(
             getattr(self.desktop, "can_input", False),
             "This desktop has no native pointer event route.",
-            "mode_unsupported",
+            "unsupported_operation",
         )
         require(enabled, "The selected pointer control is disabled.", "input_unavailable")
         require(
@@ -259,7 +259,7 @@ class NativeElementPointer(NativePointer):
         except (Failure, self.ax.glib.Error) as error:
             if isinstance(error, Failure) and error.code not in (
                 "input_unavailable",
-                "mode_unsupported",
+                "unsupported_operation",
                 "stale_target",
             ):
                 raise
@@ -289,6 +289,7 @@ class NativeElementPointer(NativePointer):
             id=identifier,
             unit="pointer_sequence",
             channel="pointer",
+            globalInput="yes",
             supported="yes" if supported else "no",
             readiness="yes" if ready else "no",
             pending=pending,

@@ -210,7 +210,7 @@ class AccessibilityDesktop:
                 f" session. Native accessibility reading and supported element "
                 f"actions remain available."
             ),
-            "mode_unsupported",
+            "unsupported_operation",
             next=(
                 "Use an observed element's supported native action, or connect an X11 "
                 "desktop for screenshot and keyboard/mouse "
@@ -267,7 +267,7 @@ class AccessibilityDesktop:
         pass
 
 
-def connect_desktop(ax, retire):
+def connect_desktop(ax, retire, *, allow_global_input=False):
     wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
     if wayland:
         return AccessibilityDesktop(ax, retire, "wayland")
@@ -278,6 +278,6 @@ def connect_desktop(ax, retire):
     from computer_use_linux.system.x11 import X11
 
     try:
-        return X11(retire)
+        return X11(retire, allow_global_input=allow_global_input)
     except Exception as error:
         return AccessibilityDesktop(ax, retire, "x11-unavailable", f"X11 connection unavailable: {error}")

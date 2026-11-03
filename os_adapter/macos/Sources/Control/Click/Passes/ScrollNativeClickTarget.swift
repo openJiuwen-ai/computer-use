@@ -10,8 +10,7 @@ import AppKit
         deadline: TimeInterval, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
         evidence: NativeClickEvidence
     ) async throws {
-        let pointer = NativePointerUnit(
-            application: unit.application, window: exposure.mapping, nativeWindow: unit.window)
+        let pointer = unit.pointerUnit(mapping: exposure.mapping)
         let request = try NativePointerIntent(
             unit: "pointer_sequence", kind: "scroll",
             parameters: ["direction": exposure.direction, "pages": exposure.pages], foreground: false, element: true)

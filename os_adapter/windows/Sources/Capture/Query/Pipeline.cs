@@ -25,7 +25,7 @@ namespace ComputerUse.Windows
         internal object Run(Dictionary<string, object> p, Request r, NativeOperationView state)
         {
             if (capture == null)
-                throw new Failure("mode_unsupported", "this native driver has no capture provider");
+                throw new Failure("unsupported_operation", "this native driver has no capture provider");
             var scope = ResolveCaptureScopePass.Run(p, binding, state);
             r.Deadline = Math.Min(r.Deadline, state.Deadline);
             bool cleanupFailure = false;

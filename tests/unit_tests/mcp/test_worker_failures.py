@@ -44,8 +44,12 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
         original = asyncio.create_subprocess_exec
 
         async def spawn(*args, **kwargs):
-            if args[-2:] == ("-m", "computer_use_mcp.runtime") and os.environ.get("MCP_FIXTURE_FAULT"):
-                args = (*args[:-2], str(FIXTURE), "--worker")
+            runtime = next(
+                (i for i in range(len(args) - 1) if args[i:i + 2] == ("-m", "computer_use_mcp.runtime")),
+                None,
+            )
+            if runtime is not None and os.environ.get("MCP_FIXTURE_FAULT"):
+                args = (*args[:runtime], str(FIXTURE), "--worker", *args[runtime + 2:])
             child = await original(*args, **kwargs)
             self.children.append(child)
             return child
@@ -230,7 +234,7 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
         new = self.session._worker
         self.assertIsNot(new, old)
         self.assertNotEqual(new.generation, old.generation)
-        active = self.session.execute("import asyncio\nawait asyncio.sleep(0.05)\nprint('current')")
+        active = self.session.execute("import time\ntime.sleep(0.05)\nprint('current')")
         await self.until(lambda: self.session._pending is not None)
         execution_id = self.session._pending["id"]
         stale = asyncio.StreamReader()
@@ -283,7 +287,7 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Path(self.env["MCP_FIXTURE_DISPATCHES"]).read_text(), "received\n")
 
     async def test_task_cancellation_during_send_drain_retires_sent_request(self):
-        self.assertEqual(text(await self.session.execute("import asyncio\ncounter = 0\nprint('ready')")), "ready")
+        self.assertEqual(text(await self.session.execute("import time\ncounter = 0\nprint('ready')")), "ready")
         old = self.session._child
         writer = self.session._writer
         original_drain = writer.drain
@@ -296,7 +300,9 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(writer, "drain", blockedDrain):
             try:
-                pending = self.session.execute("counter += 1\nprint('sent:' + str(counter))\nawait asyncio.sleep(30)")
+                pending = self.session.execute(
+                    "counter += 1\nprint('sent:' + str(counter))\nwhile True:\n    time.sleep(0.01)"
+                )
                 await asyncio.wait_for(entered.wait(), 3)
                 await self.until(
                     lambda: any(
@@ -353,10 +359,10 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
         ):
             try:
                 pending = self.session.execute(
-                    "import asyncio, subprocess, sys\n"
+                    "import time, subprocess, sys\n"
                     "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(0.6)'], "
                     "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=(4,))\n"
-                    "print('native lifetime held')\nawait asyncio.sleep(30)",
+                    "print('native lifetime held')\nwhile True:\n    time.sleep(0.01)",
                 )
                 await asyncio.wait_for(entered.wait(), 3)
                 await self.until(

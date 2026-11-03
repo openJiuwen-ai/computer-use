@@ -290,7 +290,11 @@ async def test_every_click_delivery_keeps_preparation_atomic_and_stops_after_pos
         ClickTransportEvidence(call_entered=True, call_returned=True),
         ClickContinuation("sameCandidateRefresh", TARGET, offer.route_family),
     )
-    port = RecordingPort([facts(CASES[0], declared)], [StepResult(TARGET, dispatch, "possible input", click=click)])
+    port = RecordingPort(
+        [facts(CASES[0], declared)],
+        [StepResult(TARGET, dispatch, "possible input", click=click)],
+        HostPolicy(allow_global_input=delivery == "desktop_pointer"),
+    )
     operation = Engine(port).execute(Intent("click", {"button": "left", "count": 1}), TARGET)
     if dispatch == Dispatch.DISPATCHED:
         assert (await operation)["status"] == "dispatched"

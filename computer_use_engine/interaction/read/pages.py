@@ -206,7 +206,7 @@ class ContentPages:
                     else:
                         lines.append(
                             template(
-                                "{0} {1}, continuation: node = await app.element({0}); await node.read(cursor={2})",
+                                "{0} {1}, continuation: node = app.element({0}); node.read(cursor={2})",
                                 ref,
                                 label,
                                 json_value(alias),

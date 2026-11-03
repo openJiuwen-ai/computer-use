@@ -105,7 +105,8 @@ def test_cancellation_resets_python_without_replay(tmp_path):
                 toolkit.tools[0].invoke(
                     {
                         "code": f"from pathlib import Path; marker = 'before'; "
-                        f"Path({str(started)!r}).write_text(marker); await __import__('asyncio').sleep(60)"
+                        f"Path({str(started)!r}).write_text(marker)\n"
+                        "import time\nwhile True:\n    time.sleep(0.01)"
                     }
                 )
             )

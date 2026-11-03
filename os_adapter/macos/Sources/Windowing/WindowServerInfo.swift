@@ -12,6 +12,23 @@ enum WindowServerInfo {
         case unavailable
     }
 
+    /// Raw WindowServer visibility evidence, before any application, alpha or
+    /// geometry filtering. A missing optional IsOnscreen key is not false.
+    /// Only a successful complete on-screen catalogue proves an ID absent.
+    static func onScreenWindows(
+        query: (CGWindowListOption, CGWindowID) -> [[String: Any]]? = {
+            CGWindowListCopyWindowInfo($0, $1) as? [[String: Any]]
+        }
+    ) -> Set<CGWindowID>? {
+        guard let rows = query(.optionOnScreenOnly, kCGNullWindowID) else { return nil }
+        var ids = Set<CGWindowID>()
+        for row in rows {
+            guard let id = row[kCGWindowNumber as String] as? NSNumber else { return nil }
+            ids.insert(id.uint32Value)
+        }
+        return ids
+    }
+
     /// A successful complete catalogue can establish absence. A failed API
     /// cannot; keep this distinction for historical native-window lifetimes.
     static func read(

@@ -1493,6 +1493,8 @@ namespace ComputerUse.Windows
             }
 
             return Wire.Obj("kind", kind, "session", session, "platform", "windows", "observed", Stamp(start),
+                            "rootDiscoveryComplete", notes.Count == 0 && rows.Cast<Dictionary<string, object>>()
+                                .All(x => (string)x["parentState"] != "unknown"),
                             "stopReasons", notes, "application", application, "provider",
                             Wire.Obj("status",
                                      NeedsRestart     ? "unavailable"

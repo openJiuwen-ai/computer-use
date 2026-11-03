@@ -10,9 +10,26 @@ import ApplicationServices
     @TaskLocal static var current: NativeInputActivity?
     @TaskLocal static var stage = Stage.input
 
-    enum Stage: String { case preparation, input }
-    enum Device: String { case mouse, keyboard, focus, element }
-    enum Transport: String { case globalHID, process, accessibility, activation, windowServer }
+    enum Stage: String, Hashable { case preparation, input, cleanup }
+    enum Device: String, Hashable { case mouse, keyboard, focus, element, clipboard, application }
+    enum Transport: String, Hashable { case globalHID, process, accessibility, activation, windowServer, clipboard, launch }
+
+    private struct ImpactEffect: Hashable {
+        let stage: Stage
+        let device: Device
+        let transport: Transport
+        let mechanism: String
+        var state: String
+        var wire: [String: Any] {
+            ["stage": stage.rawValue, "device": device.rawValue, "transport": transport.rawValue,
+             "mechanism": mechanism, "state": state]
+        }
+        var sortKey: String { [stage.rawValue, device.rawValue, transport.rawValue, mechanism, state].joined(separator: "\t") }
+    }
+    private struct PendingEffect {
+        let resources: [String]
+        let effect: ImpactEffect
+    }
 
     @MainActor struct Effect {
         fileprivate let id: Int
@@ -40,14 +57,21 @@ import ApplicationServices
     }()
     private var sequence = 0
     private var effects = 0
-    private var pending = [Int: [String]]()
+    private var pending = [Int: PendingEffect]()
+    private var completedEffects = Set<ImpactEffect>()
     private var shared = Set<String>()
     private var possible = Set<String>()
     private var foregroundReceiver = false
     private var ended = false
+    private var finalImpact: [String: Any]?
+    private var previousForeground: pid_t?
+    private var foregroundChangeObserved = false
+    private var foregroundObservationUnknown = false
+    private var clipboardRestoration = "notUsed"
+    private var summaryCompacted = false
 
     init(
-        operation: String, step: Int64, command: String, intent: String, target: [String: Any], mode: String,
+        operation: String, step: Int64, command: String, intent: String, target: [String: Any], globalInputAllowed: Bool,
         clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         snapshot: @escaping @MainActor () -> [String: Any] = NativeInputActivity.desktopSnapshot,
         emit: @escaping ([String: Any]) -> Void = { diagnose($0) }
@@ -57,9 +81,11 @@ import ApplicationServices
         self.emit = emit
         started = clock()
         initial = snapshot()
+        previousForeground = initial["foregroundPID"] as? Int32
+        foregroundObservationUnknown = previousForeground == nil
         metadata = [
             "kind": "input_activity", "version": 1, "activityId": UUID().uuidString, "operation": operation,
-            "step": step, "command": command, "intent": intent, "target": target, "desktopMode": mode
+            "step": step, "command": command, "intent": intent, "target": target, "globalInputAllowed": globalInputAllowed
         ]
         record("begin", ["desktop": initial])
     }
@@ -78,10 +104,11 @@ import ApplicationServices
         device: Device, transport: Transport, mechanism: String, pid: pid_t? = nil, window: CGWindowID? = nil,
         event: CGEvent? = nil, stage: Stage? = nil, presenterPID: pid_t? = nil
     ) -> Effect? {
-        current?.begin(
+        let release = event.map { [.leftMouseUp, .rightMouseUp, .otherMouseUp, .keyUp].contains($0.type) } ?? false
+        return current?.begin(
             device: device, transport: transport, mechanism: mechanism, pid: pid, window: window,
             eventType: event.map { Int($0.type.rawValue) }, point: device == .mouse ? event?.location : nil,
-            stage: stage ?? Self.stage, presenterPID: presenterPID)
+            stage: stage ?? (release ? .cleanup : Self.stage), presenterPID: presenterPID)
     }
 
     /// The injected ports exercise the same recorder without sending OS input.
@@ -92,8 +119,15 @@ import ApplicationServices
         guard !ended else { return nil }
         effects += 1
         let before = snapshot()
+        observeForeground(before)
         let resources = Self.resources(device: device, transport: transport, pid: pid, desktop: before)
-        pending[effects] = resources
+        let scalars = mechanism.unicodeScalars
+        let summaryMechanism = String(String.UnicodeScalarView(scalars.prefix(512)))
+        if scalars.count > 512 { summaryCompacted = true }
+        pending[effects] = PendingEffect(
+            resources: resources,
+            effect: ImpactEffect(stage: stage, device: device, transport: transport, mechanism: summaryMechanism, state: "possible"))
+        if device == .clipboard { clipboardRestoration = "unknown" }
         let presenter = presenterPID ?? pid
         let receiver = device == .keyboard && presenter != nil && (before["foregroundPID"] as? Int32) == presenter
         foregroundReceiver = foregroundReceiver || receiver
@@ -127,6 +161,7 @@ import ApplicationServices
     private static func resources(device: Device, transport: Transport, pid: pid_t?, desktop: [String: Any]) -> [String]
     {
         if transport == .globalHID { return device == .mouse ? ["mouse"] : device == .keyboard ? ["keyboard"] : [] }
+        if device == .clipboard { return ["clipboard"] }
         if transport == .activation || transport == .windowServer { return ["focus"] }
         if device == .focus {
             // Background AX focus can stay local. Missing foreground evidence
@@ -138,8 +173,12 @@ import ApplicationServices
     }
 
     private func returned(_ effect: Effect, nativeInvoked: Bool?, status: Int?, accepted: Bool?) {
-        guard !ended, pending.removeValue(forKey: effect.id) != nil else { return }
+        guard !ended, let pendingEffect = pending.removeValue(forKey: effect.id) else { return }
+        var summary = pendingEffect.effect
+        summary.state = nativeInvoked == true ? "invoked" : nativeInvoked == false ? "notInvoked" : "possible"
+        completedEffects.insert(summary)
         let after = snapshot()
+        observeForeground(after)
         let resources = effect.fields["sharedResources"] as? [String] ?? []
         if nativeInvoked == true { shared.formUnion(resources) }
         if nativeInvoked == nil { possible.formUnion(resources) }
@@ -153,11 +192,41 @@ import ApplicationServices
             ]) { _, new in new })
     }
 
-    func finish(dispatch: String, cleanup: String) {
-        guard !ended else { return }
+    @discardableResult func finish(dispatch: String, cleanup: String) -> [String: Any] {
+        if let finalImpact { return finalImpact }
         ended = true
         let final = snapshot()
-        possible.formUnion(pending.values.flatMap { $0 })
+        observeForeground(final)
+        possible.formUnion(pending.values.flatMap { $0.resources })
+        completedEffects.formUnion(pending.values.map { $0.effect })
+        var summaries = completedEffects
+        if summaries.count > 128 {
+            summaryCompacted = true
+            // Preserve resource/transport/state evidence when mechanism names
+            // are numerous. Repeated keyboard characters never expand this set.
+            summaries = Set(summaries.map {
+                ImpactEffect(stage: $0.stage, device: $0.device, transport: $0.transport,
+                             mechanism: "multiple recorded native calls", state: $0.state)
+            })
+        }
+        let ordered = summaries.sorted {
+            // Keep every possible global-input category before lower-impact
+            // detail if a future adapter introduces additional combinations.
+            if ($0.transport == .globalHID) != ($1.transport == .globalHID) { return $0.transport == .globalHID }
+            return $0.sortKey < $1.sortKey
+        }
+        // Completeness covers SDK mutation invocations during this execute
+        // range, including its synchronous/awaited preparation and cleanup.
+        // It does not claim provider consumption, business effects, or include
+        // later session-lifetime cleanup and unrelated user/app activity.
+        let impact: [String: Any] = [
+            "coverage": summaryCompacted || ordered.count > 128 ? "partial" : "complete",
+            "effects": ordered.prefix(128).map { $0.wire },
+            "omittedEffects": max(0, ordered.count - 128),
+            "foregroundChanged": foregroundChangeObserved ? "yes" : foregroundObservationUnknown ? "unknown" : "no",
+            "clipboardRestoration": clipboardRestoration
+        ]
+        finalImpact = impact
         record(
             "end",
             [
@@ -167,6 +236,24 @@ import ApplicationServices
                 "desktop": final, "foregroundChanged": Self.foregroundChanged(initial, final),
                 "durationMs": max(0, clock() - started) * 1000
             ])
+        return impact
+    }
+
+    private func observeForeground(_ snapshot: [String: Any]) {
+        let current = snapshot["foregroundPID"] as? Int32
+        if let previousForeground, let current {
+            foregroundChangeObserved = foregroundChangeObserved || previousForeground != current
+        } else { foregroundObservationUnknown = true }
+        previousForeground = current
+    }
+
+    func recordClipboardRestoration(_ result: PasteboardTransaction.RestoreResult) {
+        guard !ended, clipboardRestoration != "notUsed" else { return }
+        switch result {
+        case .restored: clipboardRestoration = "restored"
+        case .ownershipLost: clipboardRestoration = "ownershipLost"
+        case .failed: clipboardRestoration = "failed"
+        }
     }
 
     private static func foregroundChanged(_ before: [String: Any], _ after: [String: Any]) -> Bool {

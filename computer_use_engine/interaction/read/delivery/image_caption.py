@@ -103,6 +103,8 @@ def _base_caption(width: int, height: int, facts: Mapping[str, Any]) -> str:
     validity = (
         ("This image is stale; read this App and return its current screenshot before using coordinates.")
         if facts.get("stale")
+        else "This partial image has no executable coordinate mapping; read a specific Window."
+        if not facts.get("mappingAvailable", True)
         else "Window PNG coordinates; printing does not refresh."
     )
     return (

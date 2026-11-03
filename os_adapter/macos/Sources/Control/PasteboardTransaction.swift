@@ -14,6 +14,14 @@ import AppKit
     private var ownedChange: Int?
     private var ownedContents: Contents?
 
+    private func mutate<T>(_ mechanism: String, stage: NativeInputActivity.Stage, _ body: () -> T) -> T {
+        let effect = NativeInputActivity.begin(
+            device: .clipboard, transport: .clipboard, mechanism: mechanism, stage: stage)
+        let result = body()
+        effect?.returned()
+        return result
+    }
+
     init(_ pasteboard: NSPasteboard = .general) throws {
         self.pasteboard = pasteboard
         initialChange = pasteboard.changeCount
@@ -66,10 +74,10 @@ import AppKit
         // NSPasteboard has no compare-and-swap operation. Check on both sides
         // of our mutations and never adopt a later generation. A simultaneous
         // external write between the check and clear cannot be made atomic.
-        ownedChange = pasteboard.clearContents()
+        ownedChange = mutate("NSPasteboard.clearContents", stage: .preparation) { pasteboard.clearContents() }
         ownedContents = []
         try validateOwnership()
-        let written = pasteboard.writeObjects([item])
+        let written = mutate("NSPasteboard.writeObjects", stage: .preparation) { pasteboard.writeObjects([item]) }
         if let ownedChange, matches(temporary, generation: ownedChange) { ownedContents = temporary }
         guard written, ownedContents == temporary else {
             throw DriverError("could not place text on the clipboard; no paste sent", code: .inputUnavailable)
@@ -115,10 +123,12 @@ import AppKit
         guard matches(ownedContents, generation: ownedChange) else { return .ownershipLost }
         self.ownedChange = nil
         self.ownedContents = nil
-        let restoreChange = pasteboard.clearContents()
+        let restoreChange = mutate("NSPasteboard.clearContents", stage: .cleanup) { pasteboard.clearContents() }
         guard matches([], generation: restoreChange) else { return .ownershipLost }
         if items.isEmpty { return .restored }
-        let written = writeItems?(items) ?? pasteboard.writeObjects(items)
+        let written = mutate("NSPasteboard.writeObjects", stage: .cleanup) {
+            writeItems?(items) ?? pasteboard.writeObjects(items)
+        }
         guard pasteboard.changeCount == restoreChange else { return .ownershipLost }
         guard written else { return .failed }
         guard matches(original, generation: restoreChange) else { return .ownershipLost }

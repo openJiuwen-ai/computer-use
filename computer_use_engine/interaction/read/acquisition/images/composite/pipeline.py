@@ -29,14 +29,14 @@ from PIL import Image
 
 if TYPE_CHECKING:
     from typing import Any, Sequence
-    from computer_use.session.image_coordinates import ImageCoordinates
 
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.read.acquisition.images.capture import WindowImage
     from computer_use.interaction.read.views.pipeline import WindowPart
     from computer_use.interaction.records import UIHandle
-    from computer_use.native.scopes import WorkingWindow
+    from computer_use.native.contracts import Binding
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
+    from computer_use.session.image_coordinates import ImageCoordinates
 
 
 class InterfaceImagePipeline:
@@ -65,10 +65,12 @@ class InterfaceImagePipeline:
         from computer_use.interaction.query.instances.scope import allowed
 
         members = allowed(ui)
+        requested = set()
         images = []
         for part in parts:
+            key = next(key for key, item in members.items() if item["surface"] == part.target.surface)
+            requested.add(key)
             if part.image is not None:
-                key = next(key for key, item in members.items() if item["surface"] == part.target.surface)
                 images.append((key, part.image))
         if not images:
             return None, [
@@ -81,8 +83,8 @@ class InterfaceImagePipeline:
         images = list(unique.items())
         collected = tuple(images)
         try:
-            if len(images) != len(members):
-                raise ValueError("Some member windows could not be captured or exceeded the read budget.")
+            if len(images) != len(requested):
+                raise ValueError("Some windows selected for this observation could not be captured.")
             if len({image.coordinates["nativeSpace"] for _, image in images}) != 1:
                 raise ValueError("The window captures use different native coordinate spaces.")
             frames = {key: frame(image) for key, image in images} if len(images) > 1 else {}
@@ -134,7 +136,7 @@ class InterfaceImagePipeline:
                     pixels.save(buffer, format="PNG")
                 stamps = [capture_metadata(image.image) for _, image in images]
                 # pylint: disable-next=protected-access
-                scope = "ui:" + cast("WorkingWindow", ui._instance.anchor).root.surface + ":" + str(ui._anchor)
+                scope = "ui:" + images[0][1].target.surface + ":" + str(ui._anchor)
                 png = decode_capture(
                     dict(
                         id="canvas:" + uuid4().hex,
@@ -172,8 +174,8 @@ class InterfaceImagePipeline:
                     ref,
                 ),
             ]
-        self.register(ui, canvas)
         summary = self.metadata(ui, canvas, collected, displayed, kind)
+        self.register(ui, canvas, images[0][1].target, summary.windows)
         notes.append(DisplayText("image_header", (summary,)))
         return canvas, notes
 
@@ -215,17 +217,23 @@ class InterfaceImagePipeline:
             canvas.membership,
         )
 
-    def register(self, ui: UIHandle, canvas: InterfaceImage) -> None:
+    def register(self, ui: UIHandle, canvas: InterfaceImage, target: Binding, windows: tuple[int, ...]) -> None:
         """Retain the composite image's source windows and coordinate mapping.
 
         Args:
             ui: App or Window handle whose instance and observation bounds constrain the
                 operation.
+            target: A captured source identity whose native session owns this image.
+            windows: Public references for the windows actually displayed in this PNG.
         """
         adapters = self.controller.adapters
         canvas.digest = hashlib.sha256(canvas.png).digest()
         # pylint: disable-next=protected-access
-        previous = ui._image
+        state = ui._instance
+        fixed_window = ui._anchor is not None
+        previous = ui._image if fixed_window else state.delivered_image
+        state.image_generation += 1
+        generation = state.image_generation
 
         def sources(value: Any) -> tuple[Any, ...]:
             return tuple((piece.window, replace(piece.image.target, capture=None), piece.box) for piece in value.pieces)
@@ -248,41 +256,55 @@ class InterfaceImagePipeline:
             # command still dispatches through its new native token and map.
             canvas.delivered = previous.delivered
             canvas.delivered_coordinates = previous.delivered_coordinates
-        owner, value = weakref.ref(ui), weakref.ref(canvas)
+        owner, value, application = weakref.ref(ui), weakref.ref(canvas), weakref.ref(state)
         # pylint: disable-next=protected-access
-        session = cast("WorkingWindow", ui._instance.anchor).root.session
+        session = target.session
         controller = weakref.ref(self.controller)
 
         def current() -> bool:
-            target, image, native = owner(), value(), controller()
-            return (
-                target is not None
-                and image is not None
-                and native is not None
-                # pylint: disable-next=protected-access
-                and target._image is image
-                and not image.expired
-                and native.transport.session == session
-                and hashlib.sha256(image.png).digest() == image.digest
-            )
+            target, image, native, state = owner(), value(), controller(), application()
+            if (
+                image is None
+                or native is None
+                or state is None
+                or image.expired
+                or native.transport.session != session
+                or hashlib.sha256(image.png).digest() != image.digest
+            ):
+                return False
+            if state.delivered_image is image:
+                return True
+            if fixed_window:
+                return target is not None and target._image is image
+            # An unprinted sample does not revoke the delivered App image.
+            # An older App alias cannot become current again after a newer
+            # image has actually been delivered through any alias.
+            return generation > state.delivered_image_generation
 
         def delivered(coordinates: ImageCoordinates | None = None) -> None:
             if current():
-                value().delivered = adapters.image_delivery_epoch()
-                value().delivered_coordinates = coordinates
+                image, state, native = value(), application(), controller()
+                image.delivered = adapters.image_delivery_epoch()
+                image.delivered_coordinates = coordinates
+                if generation > state.delivered_image_generation:
+                    state.delivered_image = image
+                    state.delivered_image_generation = generation
+                native.interfaces.windows.retain_image(state, image, generation=generation)
 
         adapters.register_image(
             canvas.png,
             dict(
                 kind="window",
+                windows=windows,
+                mappingAvailable=not canvas.unavailable_mapping,
                 # pylint: disable-next=protected-access
                 selector=str(ui._instance.selector),
                 context=template(
-                    "App instance {}; {}",
+                    "App {}; {}",
                     # pylint: disable-next=protected-access
-                    cast("WorkingWindow", ui._instance.anchor).name,
+                    ui._instance.name or str(ui._instance.selector),
                     # pylint: disable-next=protected-access
-                    "overall view" if ui._anchor is None else "fixed Window",
+                    "observed windows" if ui._anchor is None else "fixed Window",
                 ),
                 current=current,
                 delivered=delivered,

@@ -219,7 +219,7 @@ namespace ComputerUse.Windows
                 if (writable)
                 {
                     if (writer == null)
-                        throw new Failure("mode_unsupported", "this native driver has no input execution provider");
+                        throw new Failure("unsupported_operation", "this native driver has no input execution provider");
                     writer.Validate(intent, target);
                 }
                 else if (mode != "read" || kind != "read" || parameters.Count != 0)
@@ -267,7 +267,7 @@ namespace ComputerUse.Windows
         object Execute(Dictionary<string, object> p, Request r)
         {
             if (writer == null)
-                throw new Failure("mode_unsupported", "this native driver has no input execution provider");
+                throw new Failure("unsupported_operation", "this native driver has no input execution provider");
             Wire.Keys(p, "operation,step,command");
             string id = Wire.Str(p, "operation");
             long step = (long)Wire.Num(p, "step", 1, 9007199254740991, true);

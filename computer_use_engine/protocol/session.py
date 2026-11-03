@@ -3,8 +3,6 @@
 
 """Session negotiation and structured failures for the native protocol."""
 
-import os
-
 from ..errors import ComputerUseError, public_error_code
 from .action_context import decode_action_context
 from .primitives import finite, nonempty, record, safe_integer
@@ -21,21 +19,6 @@ def remember_failure_context(error, context=None):
 
 def failure_context(error):
     return getattr(error, "_failure_context", None) if isinstance(error, BaseException) else None
-
-
-def desktop_mode():
-    mode = os.environ.get("COMPUTER_USE_DESKTOP", "exclusive")
-    if mode != "exclusive":
-        raise ComputerUseError(
-            dict(
-                code="invalid_request",
-                effect="none",
-                target="COMPUTER_USE_DESKTOP",
-                detail="COMPUTER_USE_DESKTOP must be exclusive",
-                next="correct the host desktop mode configuration before connecting",
-            )
-        )
-    return mode
 
 
 def decode_failure(value):
@@ -56,7 +39,9 @@ def failure_error(method, failure):
     return error
 
 
-def decode_hello(value, mode, version=NATIVE_PROTOCOL_VERSION):
+def decode_hello(value, allow_global_input, version=NATIVE_PROTOCOL_VERSION):
+    if type(allow_global_input) is not bool:
+        raise TypeError("allow_global_input must be a bool")
     if version != NATIVE_PROTOCOL_VERSION:
         raise ValueError("Unsupported native protocol version")
     error_reply = isinstance(value, dict) and "error" in value
@@ -71,10 +56,10 @@ def decode_hello(value, mode, version=NATIVE_PROTOCOL_VERSION):
     nonempty(reply["session"], "protocol session")
     if error_reply:
         raise failure_error("hello", decode_failure(reply["error"]))
-    result = record(reply["result"], ["platform", "desktopMode", "maxTimeoutMs", "capabilities"])
+    result = record(reply["result"], ["platform", "globalInputAllowed", "maxTimeoutMs", "capabilities"])
     nonempty(result["platform"], "protocol platform")
-    if mode != "exclusive" or result["desktopMode"] != mode:
-        raise ValueError("protocol: backend desktop mode does not match the requested mode")
+    if type(result["globalInputAllowed"]) is not bool or result["globalInputAllowed"] != allow_global_input:
+        raise ValueError("protocol: backend global input permission does not match the requested permission")
     if not safe_integer(result["maxTimeoutMs"]) or not 1 <= result["maxTimeoutMs"] <= 120_000:
         raise ValueError("protocol: invalid maximum request timeout")
     capabilities = result["capabilities"]
@@ -93,7 +78,7 @@ def decode_hello(value, mode, version=NATIVE_PROTOCOL_VERSION):
     return dict(
         session=reply["session"],
         platform=result["platform"],
-        desktopMode=mode,
+        globalInputAllowed=allow_global_input,
         maxTimeoutMs=result["maxTimeoutMs"],
         capabilities=tuple(capabilities),
     )

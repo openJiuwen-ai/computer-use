@@ -16,7 +16,7 @@ namespace ComputerUse.Windows
             if (scope.Target["node"] == null || scope.Target["capture"] != null || Wire.Array(scope.Query["within"]).Length != 0)
                 throw new Failure("invalid_request", "current receiver discovery requires an unselected element scope");
             if (inspectCurrentReceiver == null)
-                throw new Failure("mode_unsupported", "native current receiver discovery is unavailable");
+                throw new Failure("unsupported_operation", "native current receiver discovery is unavailable");
             return inspectCurrentReceiver(write, scope.Target, r);
         }
     }

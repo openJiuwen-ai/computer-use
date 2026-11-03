@@ -71,6 +71,7 @@ import Carbon
 
     /// Global input deliberately has no AX window-preparation dependency.
     static func requireDesktopInput() throws {
+        try NativeInputAuthorization.requireGlobalInput("desktop")
         try RequestDiagnostics.checkCancellation()
         try BackgroundTarget.validateDesktop(input: true)
     }
@@ -124,7 +125,7 @@ import Carbon
     /// fallback, or post-input focus requirement. The caller checks its exact
     /// receiver before every down; releases always use the captured route.
     /// The typed delivery distinguishes original App scope from explicitly
-    /// exclusive desktop input; a missing recipient cannot select global input.
+    /// authorized desktop input; a missing recipient cannot select global input.
     static func preparedKey(
         _ key: String, delivery: NativeKeyboardDelivery, validate: @escaping @MainActor () async throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
