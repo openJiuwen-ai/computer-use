@@ -15,10 +15,18 @@ import AppKit
             unit: "pointer_sequence", kind: "scroll",
             parameters: ["direction": exposure.direction, "pages": exposure.pages], foreground: false, element: true)
         var entered = false
-        let detail = "scroll original element into view"
+        let detail = exposure.probe
+            ? "probe passive window background to expose the original element"
+            : "scroll original element into view"
         try await pointer.deliver(
             request, from: exposure.point, to: nil, viewport: exposure.viewport.size,
-            check: boundary.checkConditions,
+            check: {
+                try boundary.checkConditions()
+                if exposure.probe {
+                    try NativeWindowScrollExposure.requirePassiveReceiver(
+                        at: exposure.point, application: unit.application, window: unit.window, mapping: exposure.mapping)
+                }
+            },
             onDispatch: {
                 if !entered {
                     entered = true
@@ -29,19 +37,26 @@ import AppKit
             }, onPosted: {}, onCleanupUnknown: receipt.recordCleanupUnknown, delivery: delivery)
         evidence.record(.init(kind: .viewport, phase: .returned, detail: detail, window: exposure.mapping.id))
         let waitUntil = min(deadline, ProcessInfo.processInfo.systemUptime + 0.4)
-        var frame = exposure.frame, changedAt = ProcessInfo.processInfo.systemUptime
+        var frame = exposure.frame.offsetBy(dx: -exposure.mapping.frame.minX, dy: -exposure.mapping.frame.minY)
+        var changedAt = ProcessInfo.processInfo.systemUptime
         repeat {
             // Waiting only samples the retained geometry. The boundary is
             // checked before every native event and again before the click.
             try RequestDiagnostics.checkCancellation()
             let sampled = try unit.viewport(), now = ProcessInfo.processInfo.systemUptime
-            if sampled.frame != frame {
-                frame = sampled.frame
+            guard sampled.mapping.id == exposure.mapping.id, sampled.mapping.pid == exposure.mapping.pid else {
+                throw DriverError("the scroll preparation's original window changed", code: .staleTarget)
+            }
+            let local = sampled.frame.offsetBy(dx: -sampled.mapping.frame.minX, dy: -sampled.mapping.frame.minY)
+            if local != frame {
+                frame = local
                 changedAt = now
             }
-            let progressed = sampled.exposure.map {
-                !CFEqual($0.region, exposure.region) || $0.distance < exposure.distance - 0.5
-            } ?? true
+            // A disappearing overlay bar / missing parent is not success. The
+            // same original target must actually become visible or move closer.
+            let progressed = NativeElementViewport.progressed(
+                frame: sampled.frame, clipped: sampled.clipped, window: sampled.mapping.frame,
+                from: exposure.frame, originalWindow: exposure.mapping.frame, viewport: exposure.viewport)
             if progressed && now - changedAt >= 0.06 { return }
             try await Task.sleep(for: .milliseconds(20))
         } while ProcessInfo.processInfo.systemUptime < waitUntil

@@ -133,7 +133,7 @@ import QuartzCore
     /// Reads do not move an onscreen target. Keep the new observed surface so
     /// a dismissed/hidden transient cannot strand the marker forever.
     func observe(_ window: WindowGeometry.WindowMapping) {
-        guard enabled, !closed else { return }
+        guard enabled, !closed, !visualState.expired else { return }
         observedWindow = window
         guard !active, target == nil else { return }
         revision &+= 1
@@ -226,9 +226,13 @@ import QuartzCore
     }
 
     func stop() {
+        clearDecoration()
+        visualState = AgentPointerVisualState()
+    }
+
+    private func clearDecoration() {
         generation &+= 1
         revision &+= 1
-        visualState = AgentPointerVisualState()
         target = nil
         observedWindow = nil
         anchors.removeAll()
@@ -261,6 +265,13 @@ import QuartzCore
 
     private func tick() {
         let now = ProcessInfo.processInfo.systemUptime
+        if visualState.expireIfIdle(at: now) {
+            // Close the panel, stop animation/timers and release target handles.
+            // Keep the expired state until a new operation begins; reads alone
+            // must not resurrect the decoration. Revision rejects late AX results.
+            clearDecoration()
+            return
+        }
         guard target != nil else {
             hide()
             return

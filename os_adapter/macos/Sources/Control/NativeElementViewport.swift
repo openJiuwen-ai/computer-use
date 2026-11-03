@@ -15,12 +15,15 @@ import ApplicationServices
         let direction: String
         let pages: Double
         let distance: Double
-        var point: CGPoint { CGPoint(x: viewport.midX, y: viewport.midY) }
+        var inputPoint: CGPoint? = nil
+        var probe = false
+        var point: CGPoint { inputPoint ?? CGPoint(x: viewport.midX, y: viewport.midY) }
     }
 
     let frame: CGRect
     let clipped: CGRect
     let exposure: Exposure?
+    let mapping: WindowGeometry.WindowMapping
 
     static func sample(element: AXUIElement, window: AXUIElement, mapping: WindowGeometry.WindowMapping) throws
         -> NativeElementViewport
@@ -66,8 +69,28 @@ import ApplicationServices
                     direction: movement.direction, pages: movement.pages, distance: movement.distance)
                 break
             }
+            if exposure == nil, regions.isEmpty, current.map({ CFEqual($0, window) }) == true,
+                AXAccess.read(element, "AXHidden").value as? Bool != true
+            {
+                exposure = try NativeWindowScrollExposure.sample(
+                    frame: frame, window: window, mapping: mapping)
+            }
         }
-        return NativeElementViewport(frame: frame, clipped: clipped, exposure: exposure)
+        return NativeElementViewport(frame: frame, clipped: clipped, exposure: exposure, mapping: mapping)
+    }
+
+    nonisolated static func progressed(
+        frame: CGRect, clipped: CGRect, window: CGRect, from original: CGRect, originalWindow: CGRect, viewport: CGRect
+    ) -> Bool {
+        if !clipped.isNull && !clipped.isEmpty { return true }
+        let local = frame.offsetBy(dx: -window.minX, dy: -window.minY)
+        let originalLocal = original.offsetBy(dx: -originalWindow.minX, dy: -originalWindow.minY)
+        let viewportLocal = viewport.offsetBy(dx: -originalWindow.minX, dy: -originalWindow.minY)
+        guard local != originalLocal,
+            let before = movement(frame: originalLocal, viewport: viewportLocal),
+            let after = movement(frame: local, viewport: viewportLocal)
+        else { return false }
+        return before.direction == after.direction && after.distance < before.distance - 0.5
     }
 
     /// Pixel geometry only; no item order, labels, time increments or toolkit

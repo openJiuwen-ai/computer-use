@@ -3,8 +3,8 @@
 import AppKit
 import ApplicationServices
 
-/// Explicit object-action composition: optional application activity, exact
-/// document preparation, then one addressed action inside its final boundary.
+/// Explicit object-action composition: required original-document preparation,
+/// then one addressed action inside its final boundary.
 @MainActor enum NativeObjectActionPipeline {
     static func select(_ context: NativeRouteContext, name: String, description: String?) throws -> SelectedNativeRoute
     {
@@ -85,13 +85,11 @@ import ApplicationServices
             }
         }
         return .dispatch {
-            try await NativeInputActivity.$stage.withValue(.preparation) {
-                try await prepareLocalContext(checkReadyAction)
-            }
+            try checkReadyAction()
             if let retained = try originalDocument(), try retained.observe() == .other,
                 !op.preparationConfirmed(context.command.primitiveID)
             {
-                // Optional local activity may restore a different key window.
+                // The selected document may have changed since route selection.
                 // Re-observe the same contract before selecting preparation;
                 // no requested action has entered its dispatch barrier.
                 throw NativeSelectionBasis.Changed()

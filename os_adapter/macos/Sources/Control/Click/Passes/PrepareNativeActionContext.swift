@@ -3,7 +3,7 @@
 import AppKit
 import ApplicationServices
 
-/// PREPARE: optional local activity for the original action, with no requested input.
+/// PREPARE: local activity only for a proven original-document selection need.
 @MainActor enum PrepareNativeActionContextPass {
     static func run(
         _ unit: any NativeApplicationContextInput, plan: NativeClickPlan, boundary: NativeUnitBoundary,
@@ -14,17 +14,21 @@ import ApplicationServices
         if let retained = plan.actionDocument {
             let focus = try retained.observe()
             preparingDocument = retained.selectionRequired && focus != .target
+        } else if plan.documentPreparation.windowSelectionRequired, let document = plan.document {
+            preparingDocument = try document.focus() != .target
         } else {
             preparingDocument = false
         }
+        // An AXPress declaration does not establish an activation dependency.
+        // An AppKit activation notification can make a provider truly foreground
+        // and change popup lifetime, even though it was addressed to its PID.
+        // Only the independent document preparation may need this context.
+        guard preparingDocument else { return }
         func validateAction() throws {
             try boundary.checkConditions()
             let facts = try objects.nativeActionFacts(node)
             guard NativeAction.matches(facts.actions, name: name, description: description) else {
                 throw DriverError("the selected action changed during local-context preparation", code: .staleTarget)
-            }
-            guard preparingDocument || facts.enabled != false else {
-                throw DriverError("the selected action became disabled", code: .inputUnavailable)
             }
             try boundary.checkConditions()
         }

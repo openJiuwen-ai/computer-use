@@ -22,11 +22,15 @@ import ApplicationServices
                 precondition(probe.document.a == (blocked ? 0 : 1), "original document effect: \(mode)")
                 precondition(succeeded == (!blocked && mode != "unconfirmedAction"), "wrong result: \(mode)")
                 precondition(probe.document.foregrounds == (mode == "fallback" ? 1 : 0))
-                if ["background", "restoreOther"].contains(mode) {
+                if mode == "background" {
                     precondition(probe.trace.first == "local", "local activity must precede document selection")
                 }
-                if ["windowless", "unknownOnly", "initialTarget", "custom"].contains(mode) {
+                if ["windowless", "unknownOnly", "initialTarget", "restoreOther", "custom"].contains(mode) {
                     precondition(probe.document.selections == 0, "no unnecessary document preparation")
+                }
+                if mode == "restoreOther" {
+                    precondition(!probe.localPrepared && probe.localPreparationCalls == 0,
+                                 "do not inject activity that can replace an already-correct original document")
                 }
                 if mode == "uncertainSelection" { precondition(probe.uncertain, "selection uncertainty was lost") }
             }
@@ -392,17 +396,9 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
                     { try await prepareExplicit(true) }
                 }
                 let receipt = NativeExecutionReceipt(target: binding, onEffect: {})
-                do {
-                    guard case .dispatch(let dispatch) = try route("native_action", foreground: false, receipt: receipt)
-                    else { preconditionFailure("explicit action must dispatch") }
-                    _ = try await dispatch()
-                } catch is NativeSelectionBasis.Changed where mode == "restoreOther" {
-                    precondition(presses == 0 && retained?.selectionRequired == true)
-                    try await prepareExplicit(false)
-                    guard case .dispatch(let dispatch) = try route("native_action", foreground: false, receipt: receipt)
-                    else { preconditionFailure("explicit action must dispatch") }
-                    _ = try await dispatch()
-                }
+                guard case .dispatch(let dispatch) = try route("native_action", foreground: false, receipt: receipt)
+                else { preconditionFailure("explicit action must dispatch") }
+                _ = try await dispatch()
             } else {
                 do {
                     try await click(["readyBeforeForeground", "localRestoresTarget"].contains(mode))

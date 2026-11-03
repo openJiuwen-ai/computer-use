@@ -7,13 +7,14 @@ import ApplicationServices
 /// require the actual foreground window; neither grants background capability.
 struct NativeAddressedPointerReceiver {
     enum Qualification: String {
-        case unconfirmed, declaredInteraction, sameWindowPoint, originalElementExactHit
+        case unconfirmed, declaredInteraction, sameWindowPoint, originalElementExactHit, originalElementNeedsExposure
 
         func requirement(captured: Bool) -> NativePointerReadiness.Requirement? {
             switch self {
             case .declaredInteraction: return .contentReceiver
             case .sameWindowPoint: return captured ? .foregroundWindowPoint : nil
-            case .originalElementExactHit: return captured ? nil : .foregroundWindowPoint
+            case .originalElementExactHit, .originalElementNeedsExposure:
+                return captured ? nil : .foregroundWindowPoint
             case .unconfirmed: return nil
             }
         }
@@ -23,6 +24,14 @@ struct NativeAddressedPointerReceiver {
     var focusWritable = false
     var selectedTextWritable = false
     var valueWritable = false
+
+    /// A scroll preparation point is not the requested click receiver. For a
+    /// retained original element, allow exposure before its final hit can be
+    /// sampled. Undeclared controls keep the foreground/exact-original-hit
+    /// requirement; this is not evidence that the hidden target is already hit.
+    var exposureQualification: Qualification {
+        supported ? .declaredInteraction : .originalElementNeedsExposure
+    }
 
     func qualification(concreteHit: Bool, sameWindow: Bool) -> Qualification {
         guard concreteHit, sameWindow else { return .unconfirmed }

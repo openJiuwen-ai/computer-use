@@ -8,7 +8,7 @@ import ApplicationServices
         try eventConstruction()
         try await optionalContext()
         try await actionRoutes()
-        print("PASS optional action context, standard/explicit AXPress and original-scope boundaries")
+        print("PASS document-only activity preparation; ordinary AXPress does not activate its application")
     }
 
     @MainActor static func eventConstruction() throws {
@@ -78,18 +78,15 @@ import ApplicationServices
         for explicit in [false, true] {
             for mode in [
                 "observed", "ignored", "unknown", "unavailable", "preexistingActive", "foreground", "modal", "target",
-                "within", "action", "cancel", "unconfirmedAction", "windowless", "scopeDuringPoll"
+                "within", "action", "cancel", "unconfirmedAction", "windowless", "disabled"
             ] {
                 let probe = ContextProbe(mode: mode)
                 let result = try await probe.run(explicit: explicit)
-                let blocked = ["modal", "target", "within", "action", "cancel", "scopeDuringPoll"].contains(mode)
+                let blocked = ["modal", "target", "within", "action", "cancel", "disabled"].contains(mode)
                 precondition(probe.presses == (blocked ? 0 : 1))
                 precondition(
-                    probe.preparationCalls == (mode == "windowless" ? 0 : 1),
-                    "an absent optional context cannot prevent the original action")
-                precondition(
-                    probe.posts
-                        == (["unavailable", "preexistingActive", "foreground", "windowless"].contains(mode) ? 0 : 1))
+                    probe.preparationCalls == 0 && probe.posts == 0,
+                    "ordinary AXPress must not inject activation before discovering whether it needs any preparation")
                 if blocked || mode == "unconfirmedAction" { precondition(!result) } else { precondition(result) }
                 // No public input recipe or second AXPress follows an uncertain action.
                 precondition(probe.presses <= 1)
@@ -116,13 +113,9 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
         if mode == "windowless" { binding["rootWindow"] = NSNull() }
     }
     func boundaryCheck() throws {
-        guard posts > 0 else { return }
         if mode == "modal" { throw DriverError("known modal", code: .blockedByModal) }
         if mode == "target" || mode == "within" { throw DriverError("original scope changed", code: .staleTarget) }
         if mode == "cancel" { throw CancellationError() }
-        if mode == "scopeDuringPoll" && samples >= 5 {
-            throw DriverError("scope changed during read-only activity polls", code: .staleTarget)
-        }
     }
     func prepare(
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
@@ -201,7 +194,7 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts {
         .init(
             role: kAXButtonRole,
-            actions: mode == "action" && posts > 0 ? [] : [.init(name: "AXPress", description: nil)], enabled: true,
+            actions: mode == "action" ? [] : [.init(name: "AXPress", description: nil)], enabled: mode != "disabled",
             applicationMenuContext: false, foreground: false)
     }
     func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts {
@@ -213,6 +206,9 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     ) throws {
         guard try nativeActionFacts(ref).actions?.isEmpty == false else {
             throw DriverError("action changed", code: .staleTarget)
+        }
+        guard try nativeActionFacts(ref).enabled != false else {
+            throw DriverError("action disabled", code: .inputUnavailable)
         }
         try onDispatch()
         presses += 1

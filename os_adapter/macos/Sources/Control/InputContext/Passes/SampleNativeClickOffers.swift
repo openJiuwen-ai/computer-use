@@ -190,10 +190,20 @@ import ApplicationServices
                             throw DriverError(
                                 "the original popup choice must already be visible", code: .inputUnavailable)
                         }
+                        let receiver: NativeAddressedPointerReceiver.Qualification?
+                        if plan.actuator == nil, unit.member == nil {
+                            receiver = NativeAddressedPointerReceiver(
+                                role: role, actions: facts.actions?.map { $0.name },
+                                focusWritable: facts.focusWritable).exposureQualification
+                        } else { receiver = nil }
+                        // The viewport center receives preparation wheels; it
+                        // need not advertise the original target's click. The
+                        // selected element unit rechecks that target after the
+                        // scroll, including an exact hit for undeclared content.
                         try pointerOffers(
                             NativePointerUnit(
                                 application: unit.application, window: exposure.mapping, nativeWindow: unit.window),
-                            at: exposure.point, exposure: true)
+                            at: exposure.point, exposure: true, addressedReceiver: receiver)
                         return NativeSampledInput(
                             plan: plan, declarations: declarations, enabled: enabled, foreground: foreground,
                             input: input, nativeRole: role, actionsComplete: complete, applicationMenu: menu)

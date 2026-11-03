@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 LOG = logging.getLogger(__name__)
 GROUPS = (
+    "AgentPointerLifecycle",
     "NativeInputAuthorization",
     "NativeInputActivity",
     "NativeInspectQuery",
@@ -24,6 +25,7 @@ GROUPS = (
     "NativeSelectedTextProvider",
     "NativeScrollOwnerPermission",
     "NativeElementPointerContinuity",
+    "NativeWindowScrollExposure",
     "NativeQtInlineListHit",
     "NativeCapturedPointerPlan",
     "NativeCapturedPointerSequence",

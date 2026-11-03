@@ -101,7 +101,9 @@ import ApplicationServices
             plan.documentPreparation =
                 try plan.actionDocument.map { .init(windowSelectionRequired: $0.selectionRequired) }
                 ?? facts.documentPreparation(name)
-            plan.actionContext = try access.units.actionContextUnit(command.target, action: name)
+            if plan.documentPreparation.windowSelectionRequired || plan.actionDocument?.selectionRequired == true {
+                plan.actionContext = try access.units.actionContextUnit(command.target, action: name)
+            }
         }
         return plan
     }

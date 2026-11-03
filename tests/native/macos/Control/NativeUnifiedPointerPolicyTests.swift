@@ -52,6 +52,7 @@ import ApplicationServices
         precondition(NativeAddressedPointerReceiver(role: kAXTextFieldRole, actions: [], focusWritable: true).supported)
         precondition(!NativeAddressedPointerReceiver(role: kAXTextFieldRole, actions: [kAXConfirmAction]).supported)
         try foregroundPointQualification()
+        exposureRetainsOriginalTargetRequirement()
         try await foregroundPointRelease(afterDown: false)
         try await foregroundPointRelease(afterDown: true)
         for kind in [NativePointerIntent.Kind.click, .drag, .scroll] {
@@ -63,6 +64,35 @@ import ApplicationServices
         print(
             "PASS addressed delivery survives foreground preparation; synthetic transport alone cannot admit content clicks"
         )
+    }
+
+    @MainActor private static func exposureRetainsOriginalTargetRequirement() {
+        typealias Receiver = NativeAddressedPointerReceiver
+        // A list row does not need to advertise AXPress at the scroll viewport
+        // center. Admission may prepare it, but dispatch still needs an exact
+        // hit on that original row in its physical foreground window.
+        let row = Receiver(role: kAXRowRole, actions: [])
+        precondition(!row.supported)
+        let pending = row.exposureQualification
+        precondition(pending == .originalElementNeedsExposure)
+        precondition(pending.requirement(captured: true) == nil,
+                     "exposure of a retained object cannot authorize unrelated screenshot coordinates")
+        let requirement = pending.requirement(captured: false)!
+        precondition(requirement == .foregroundWindowPoint)
+        for exact in [true, false] {
+            precondition(NativeElementPointerUnit.allowsDispatchBasis(
+                .exactHit, requirement: requirement, exactOriginalHit: exact, hasMember: false) == exact,
+                "preparation must not replace the original hidden row with a visible sibling")
+        }
+        precondition(!NativeElementPointerUnit.allowsDispatchBasis(
+            .exactHit, requirement: requirement, exactOriginalHit: true, hasMember: true))
+        precondition(!NativePointerReadiness.ready(
+            kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
+            backgroundPrepared: true, requirement: requirement),
+            "an exposure promise cannot waive the actual original foreground window")
+        let radio = Receiver(role: kAXRadioButtonRole, actions: [kAXPressAction])
+        precondition(radio.exposureQualification.requirement(captured: false) == .contentReceiver,
+                     "an ordinary declared control retains its background preparation route")
     }
 
     private static func backgroundDocumentReadiness() {
