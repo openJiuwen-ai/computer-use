@@ -9,6 +9,7 @@ import ApplicationServices
         wire: [String: Any], blocked: [String], node: String?
     )
     func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String]
+    func qtComboChoiceBoundary(_ raw: Any?, qualification: NativeQtComboChoice) throws -> [String]
     func keyboardBoundaryAnchor(_ binding: [String: Any], application: NSRunningApplication, window: AXUIElement) throws
         -> NativeKeyboardBoundaryAnchor?
     func keyboardBoundary(_ anchor: NativeKeyboardBoundaryAnchor) throws -> NativeKeyboardBoundaryDecision
@@ -23,6 +24,9 @@ import ApplicationServices
 }
 
 extension NativeScopeAccess {
+    func qtComboChoiceBoundary(_ raw: Any?, qualification: NativeQtComboChoice) throws -> [String] {
+        throw DriverError("qualified Qt choice boundary unavailable", code: .inputUnavailable)
+    }
     func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String] {
         throw DriverError("qualified popup pointer boundary unavailable", code: .inputUnavailable)
     }

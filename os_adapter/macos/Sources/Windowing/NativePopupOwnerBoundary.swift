@@ -10,7 +10,21 @@ enum NativePopupOwnerBoundary {
         let element: Node
         var parent: String? = nil
         var modal: Bool? = false
+        var parentUnknown = false
     }
+    /// Both catalogue sources are object/native-ID relationships. An unknown
+    /// or conflicting source is not a declaration that this popup changed owner.
+    static func hasKnownParentConflict<Node>(
+        popup: Node, owner: Node, windows: [Window<Node>], same: (Node, Node) -> Bool
+    ) -> Bool {
+        let owners = windows.filter { same($0.element, owner) }
+        let popups = windows.filter { same($0.element, popup) }
+        guard owners.count == 1, popups.count == 1, !popups[0].parentUnknown,
+            let parent = popups[0].parent
+        else { return false }
+        return parent != owners[0].ref
+    }
+
     static func blocked<Node>(
         popup: Node, owner: Node, windows: [Window<Node>], same: (Node, Node) -> Bool
     ) throws -> [String] {
@@ -26,7 +40,7 @@ enum NativePopupOwnerBoundary {
             guard popupWindow.modal == false else {
                 throw DriverError("popup modality is unavailable or changed", code: .inputUnavailable)
             }
-            if let parent = popupWindow.parent, parent != original.ref {
+            if hasKnownParentConflict(popup: popup, owner: owner, windows: windows, same: same) {
                 throw DriverError("popup has a conflicting window parent", code: .staleTarget)
             }
         }

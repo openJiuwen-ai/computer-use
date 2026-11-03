@@ -24,6 +24,7 @@ extension NativeElementControl {
         var popupContext: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>? = nil
         /// Current native leaf membership, separate from the observed owner.
         var popupElementWindowID: UInt32? = nil
+        var qtComboChoice: NativeQtComboChoice? = nil
 
         @MainActor func documentPreparation(_ action: String) throws -> NativeActionDocumentPolicy.Preparation {
             NativeActionDocumentPolicy.preparation(
@@ -67,6 +68,9 @@ extension NativeElementControl {
         }
         if explicitRequest != nil { return facts }
         facts.focusWritable = AXAccess.writable(target.element, kAXFocusedAttribute).value == true
+        facts.qtComboChoice = try NativeQtComboChoice.query(
+            element: target.element, role: role, observedWindow: target.observedInteractionSurface,
+            ancestors: target.ancestors, pid: target.application.processIdentifier)
         if let context = target.popupOwner, target.ancestors.count == 2, CFEqual(target.ancestors[0], context.popup),
             CFEqual(target.ancestors[1], context.list), let observed = target.observedInteractionSurface,
             CFEqual(observed, context.popup)

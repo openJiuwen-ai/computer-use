@@ -52,6 +52,13 @@ struct NativeUnitBoundary {
                     else { throw DriverError("popup point qualification used by another route", code: .invalidRequest) }
                     return try access.scopes.popupPointerBoundary(command.value["target"], qualification: proof)
                 }
+                if let proof = contract.click?.qtComboChoice {
+                    guard case .pointer(.click) = contract.unit, contract.actuator == nil, contract.receiver == nil,
+                        binding.node != nil, !(binding.wire["capture"] is String),
+                        [.windowDirected, .systemPointer].contains(contract.click!.delivery)
+                    else { throw DriverError("Qt choice proof used by another route", code: .invalidRequest) }
+                    return try access.scopes.qtComboChoiceBoundary(command.value["target"], qualification: proof)
+                }
                 let attachedMenuAction: Bool
                 if case .action = contract.unit { attachedMenuAction = true } else { attachedMenuAction = false }
                 return try access.scopes.inputBinding(

@@ -461,6 +461,45 @@ import ApplicationServices
         return (value.wire, value.blocked, value.node)
     }
 
+    /// Only a selected Qt choice pointer consumes its two-path membership.
+    /// Ordinary AX and generic pointer boundaries retain their own rules.
+    func qtComboChoiceBoundary(_ raw: Any?, qualification proof: NativeQtComboChoice) throws -> [String] {
+        let requested = try NativeTarget(raw)
+        try requested.requireSession(session)
+        let read = try applications.readRoot(try string(requested.node, label: "node"))
+        guard read.application.processIdentifier == proof.pid, CFEqual(read.element, proof.element),
+            let observed = read.observedInteractionSurface, CFEqual(observed, proof.observedWindow),
+            read.ancestors.count == proof.ancestors.count,
+            zip(read.ancestors, proof.ancestors).allSatisfy({ CFEqual($0.0, $0.1) })
+        else { throw DriverError("the selected Qt choice observation changed", code: .staleTarget) }
+        let scope = try inputScope(requested, canonicalize: false, observed: read, popupOwner: proof.ownerStamp?.owner)
+        try read.validate()
+        guard try proof.confirms() else {
+            throw DriverError("the original Qt choice popup membership changed", code: .staleTarget)
+        }
+        guard scope.blocked.isEmpty else { return scope.blocked }
+        if !CFEqual(proof.observedWindow, proof.popup), let graph = scope.windowEvidence,
+            NativePopupOwnerBoundary.hasKnownParentConflict(
+                popup: proof.popup, owner: proof.observedWindow,
+                windows: graph.windows.map {
+                    .init(ref: $0.ref, element: $0.element, parent: $0.parent, modal: $0.modal,
+                        parentUnknown: $0.parentUnknown)
+                }, same: { CFEqual($0, $1) })
+        {
+            throw DriverError("Qt popup has a confirmed different window owner", code: .staleTarget)
+        }
+        if let owner = proof.ownerStamp?.owner {
+            guard let graph = scope.windowEvidence else {
+                throw DriverError("Qt popup owner boundary evidence unavailable", code: .inputUnavailable)
+            }
+            return try NativePopupOwnerBoundary.blocked(
+                popup: proof.popup, owner: owner,
+                windows: graph.windows.map { .init(ref: $0.ref, element: $0.element, parent: $0.parent, modal: $0.modal) },
+                same: { CFEqual($0, $1) })
+        }
+        return []
+    }
+
     /// Only NativeUnitBoundary's selected original-element HID contract can
     /// enter here. General target(input:true) keeps its original membership.
     func popupPointerBoundary(_ raw: Any?, qualification proof: NativePopupPointerQualification) throws -> [String] {
@@ -602,11 +641,15 @@ import ApplicationServices
         let scrolling = actuator?.relation == "scrollPointer"
         let geometry = scrolling ? actuator!.region! : node
         let read = try applications.readRoot(geometry)
+        let combo = try actuator == nil ? NativeQtComboChoice.query(
+            element: read.element, role: AXAccess.read(read.element, kAXRoleAttribute).value as? String,
+            observedWindow: read.observedInteractionSurface, ancestors: read.ancestors,
+            pid: scope.application.processIdentifier) : nil
         return NativeElementPointerUnit(
-            application: scope.application, window: try scope.requireWindow(),
+            application: scope.application, window: try combo?.popup ?? scope.requireWindow(),
             element: read.element,
             member: try actuator.map { try applications.readRoot($0.node).element }, kind: scrolling ? .scroll : .click,
-            logicalWindow: read.observedInteractionSurface)
+            logicalWindow: read.observedInteractionSurface, qtComboChoice: combo)
     }
 
     func menuUnit(_ binding: [String: Any], within: [String] = []) throws -> NativeMenuUnit {

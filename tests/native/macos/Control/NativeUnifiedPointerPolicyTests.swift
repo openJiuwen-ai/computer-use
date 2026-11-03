@@ -8,6 +8,7 @@ import ApplicationServices
         typealias Readiness = NativePointerReadiness
         backgroundDocumentReadiness()
         receiverSampling()
+        qtComboChoice()
         precondition(
             !Readiness.ready(
                 kind: .click, foreground: false, windowKind: .visualOnly, focus: .notRequired, backgroundPrepared: true)
@@ -65,6 +66,86 @@ import ApplicationServices
         print(
             "PASS addressed delivery survives foreground preparation; synthetic transport alone cannot admit content clicks"
         )
+    }
+
+    @MainActor private static func qtComboChoice() {
+        typealias Choice = NativeQtComboChoice
+        let qt = "QApplication.Probe.hours.QComboBoxListView"
+        precondition(
+            Choice.kind(role: kAXStaticTextRole, identifier: qt, listIdentifier: qt, rowIdentifier: qt, hasRow: true)
+                == .tableCell)
+        let custom = "QApplication.QComboBoxPrivateContainer.QListWidget"
+        precondition(
+            Choice.kind(
+                role: kAXStaticTextRole, identifier: custom + ".QWidget.QLabel", listIdentifier: custom,
+                rowIdentifier: nil, hasRow: false) == .widget)
+        precondition(
+            Choice.kind(
+                role: kAXStaticTextRole, identifier: "QApplication.QListView", listIdentifier: "QApplication.QListView",
+                rowIdentifier: nil, hasRow: false) == nil)
+        precondition(
+            Choice.kind(
+                role: kAXStaticTextRole, identifier: "unrelated", listIdentifier: qt, rowIdentifier: qt, hasRow: true)
+                == nil)
+        func membership(popup: [String]?, list: [String]?, cells: [String]?) -> Bool {
+            Choice.containsChoice(
+                element: "choice", list: "list", row: "row", popupChildren: popup, listChildren: list,
+                rowChildren: cells, same: ==)
+        }
+        precondition(membership(popup: ["list"], list: ["row", "other"], cells: ["choice"]))
+        precondition(!membership(popup: ["another-popup-list"], list: ["row"], cells: ["choice"]))
+        precondition(!membership(popup: ["list"], list: ["another-row"], cells: ["choice"]))
+        precondition(!membership(popup: ["list"], list: ["row"], cells: ["another-choice"]))
+        precondition(!membership(popup: nil, list: ["row"], cells: ["choice"]))
+        // Both presentation entries reach the same real popup; the AX leaf
+        // can keep its independent document native ID in either entry.
+        for observed in [UInt32(4), UInt32(9)] {
+            precondition(Choice.acceptsObservedWindow(popup: 9, owner: 4, observed: observed))
+            precondition(Choice.acceptsWindowIDs(popup: 9, owner: 4, members: [4]))
+        }
+        precondition(!Choice.acceptsObservedWindow(popup: 9, owner: 4, observed: 10))
+        precondition(Choice.kind(role: kAXRowRole, identifier: qt, listIdentifier: qt,
+            rowIdentifier: qt, hasRow: true) == nil)
+        precondition(Choice.acceptsWindowIDs(popup: 9, owner: 4, members: [4, 9, nil]))
+        precondition(!Choice.acceptsWindowIDs(popup: 9, owner: 4, members: [10]))
+        func parentConflict(_ parent: String?, unknown: Bool = false) -> Bool {
+            NativePopupOwnerBoundary.hasKnownParentConflict(
+                popup: "popup", owner: "document",
+                windows: [.init(ref: "D", element: "document"),
+                    .init(ref: "P", element: "popup", parent: parent, parentUnknown: unknown)], same: ==)
+        }
+        precondition(!parentConflict(nil))
+        precondition(!parentConflict("D"))
+        precondition(parentConflict("another-document"))
+        precondition(!parentConflict("another-document", unknown: true))
+        let action = NativeClickContract(
+            routeFamily: "macos.axAction.AXPress", delivery: .objectAction, admission: .ready, reason: nil,
+            preparationOptions: [])
+        precondition(
+            Choice.actionOffer(action, action: kAXPressAction, kind: .tableCell).admission == .insufficientEvidence)
+        precondition(Choice.actionOffer(action, action: kAXPressAction, kind: .widget) == action)
+        precondition(Choice.actionOffer(action, action: kAXPressAction, kind: nil) == action)
+        precondition(Choice.actionOffer(action, action: kAXConfirmAction, kind: .tableCell) == action)
+        // Contract reuse must not retain a proof after its reverse owner path
+        // changes, even when the two physical native IDs have not changed.
+        let leaf = AXUIElementCreateApplication(101), list = AXUIElementCreateApplication(102)
+        let row = AXUIElementCreateApplication(103), popup = AXUIElementCreateApplication(104)
+        let owner = AXUIElementCreateApplication(105), oldCombo = AXUIElementCreateApplication(106)
+        let newCombo = AXUIElementCreateApplication(107)
+        let process = NativeProcessIdentity(pid: 101, parent: 1, seconds: 1, microseconds: 0, executable: "fixture")
+        func choice(combo: AXUIElement) -> Choice {
+            let stamp = NativePopupOwnerStamp(popup: popup, list: list, reverse: [list, combo, owner],
+                roles: ["AXList", "AXComboBox", "AXWindow"], popupWindowID: 9, ownerWindowID: 4, process: process)!
+            return Choice(element: leaf, list: list, row: row, popup: popup, observedWindow: popup,
+                ancestors: [popup, list, row], pid: 101, popupID: 9, ownerID: 4, observedWindowID: 9,
+                ownerStamp: stamp, kind: .tableCell)
+        }
+        var original = action, unchanged = action, changed = action
+        original.qtComboChoice = choice(combo: oldCombo)
+        unchanged.qtComboChoice = choice(combo: oldCombo)
+        changed.qtComboChoice = choice(combo: newCombo)
+        precondition(original == unchanged)
+        precondition(original != changed)
     }
 
     private static func receiverSampling() {

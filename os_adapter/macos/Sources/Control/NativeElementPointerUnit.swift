@@ -13,6 +13,7 @@ import ApplicationServices
     var member: AXUIElement? = nil
     var kind: NativePointerIntent.Kind = .click
     var logicalWindow: AXUIElement? = nil
+    var qtComboChoice: NativeQtComboChoice? = nil
     /// Only the selected qualified-popup adapter sets this. Ordinary pointers
     /// retain their existing fresh gesture geometry and exposure preparation.
     var frozenGeometry: Geometry? = nil
@@ -107,6 +108,12 @@ import ApplicationServices
     func exposure() throws -> NativeElementViewport.Exposure? { try viewport().exposure }
 
     private func validatePhysicalWindow() throws {
+        if let qtComboChoice {
+            guard CFEqual(qtComboChoice.popup, window), try qtComboChoice.confirms() else {
+                throw DriverError("the original Qt choice no longer belongs to its popup", code: .staleTarget)
+            }
+            return
+        }
         if let logicalWindow, !CFEqual(logicalWindow, window) {
             guard let current = WindowGeometry.owningWindow(element, pid: application.processIdentifier, in: window),
                 CFEqual(current, window)

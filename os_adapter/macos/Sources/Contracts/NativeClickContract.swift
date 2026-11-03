@@ -16,6 +16,7 @@ struct NativeClickContract: Equatable {
     var backgroundFamily: String? = nil
     var backgroundUnavailable = false
     var popupPointer: NativePopupPointerQualification? = nil
+    var qtComboChoice: NativeQtComboChoice? = nil
     var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
 
     /// The retained native offer, never an execute field, owns this requirement.
@@ -32,7 +33,13 @@ struct NativeClickContract: Equatable {
         case (let a?, let b?): popupMatches = a.matches(b, same: { CFEqual($0, $1) })
         default: popupMatches = false
         }
-        return popupMatches && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
+        let comboMatches: Bool
+        switch (lhs.qtComboChoice, rhs.qtComboChoice) {
+        case (nil, nil): comboMatches = true
+        case (let a?, let b?): comboMatches = a.matches(b)
+        default: comboMatches = false
+        }
+        return comboMatches && popupMatches && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
             && lhs.admission == rhs.admission && lhs.reason == rhs.reason
             && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
             && lhs.backgroundUnavailable == rhs.backgroundUnavailable

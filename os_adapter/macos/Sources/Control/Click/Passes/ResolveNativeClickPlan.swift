@@ -66,9 +66,14 @@ import ApplicationServices
                 guard offer.permitsElementPointer(hasActuator: contract.actuator != nil) else {
                     throw DriverError("original element point requirement needs its window-directed route", code: .invalidRequest)
                 }
-                target = .element(
-                    try access.units.elementPointerUnit(command.target, actuator: contract.actuator)
-                        .requiring(offer.pointerRequirement))
+                let unit = try access.units.elementPointerUnit(command.target, actuator: contract.actuator)
+                    .requiring(offer.pointerRequirement)
+                if let original = offer.qtComboChoice {
+                    guard let current = unit.qtComboChoice, original.matches(current) else {
+                        throw DriverError("the selected Qt popup choice changed before dispatch", code: .staleTarget)
+                    }
+                }
+                target = .element(unit)
             }
         case .desktop("click"):
             guard command.kind == "pointer_sequence", offer.delivery == .systemPointer, !command.foreground else {

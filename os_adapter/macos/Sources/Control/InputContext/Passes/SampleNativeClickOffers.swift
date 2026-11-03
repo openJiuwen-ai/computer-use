@@ -23,6 +23,7 @@ import ApplicationServices
             _ pointer: NativePointerUnit, at point: CGPoint, exposure: Bool = false,
             addressedReceiver: NativeAddressedPointerReceiver.Qualification? = nil,
             foregroundHitRequired: Bool = false, captured: Bool = false,
+            qtComboChoice: NativeQtComboChoice? = nil,
             qualifyPopup: ((NativePointerUnit.PhysicalClickSample) -> NativePopupPointerQualification?)? = nil
         ) throws {
             try pointer.validateWindowIdentity()
@@ -67,7 +68,7 @@ import ApplicationServices
             let systemReady = physical.ready
             let directedReady = directedAvailable && !exposure && !foregroundHitRequired
                 && directedPointer.ready(at: point, delivery: .windowDirected)
-            let directed = NativeClickContract(
+            var directed = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
                 admission: directedAvailable
                     ? (directedReady ? .ready : .preparationRequired) : .unavailable,
@@ -82,7 +83,7 @@ import ApplicationServices
                 backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !backgroundAvailable,
                 pointerRequirement: requirement ?? .contentReceiver)
             try RequestDiagnostics.checkCancellation()
-            let system = NativeClickContract(
+            var system = NativeClickContract(
                 routeFamily: "macos.hid.v1", delivery: .systemPointer,
                 admission: systemReady && !exposure && !foregroundHitRequired ? .ready : .preparationRequired,
                 reason: exposure
@@ -94,6 +95,8 @@ import ApplicationServices
                     ? ["foreground"] : systemReady ? (exposure ? ["background"] : []) : ["foreground"],
                 backgroundFamily: "macos.windowDirected.v1",
                 backgroundUnavailable: !directedAvailable || !backgroundAvailable)
+            directed.qtComboChoice = qtComboChoice
+            system.qtComboChoice = qtComboChoice
             for offer in [directed, system] { declarations.declareClick(.pointer(.click), offer: offer) }
             input["pointerRoute"] = systemReady || directed.admission == .ready ? "yes" : "no"
         }
@@ -124,7 +127,7 @@ import ApplicationServices
             menu = facts.applicationMenuContext
             let applicationRoot = access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") != nil
             var popupChoice = false
-            if !applicationRoot, !menu, plan.actuator == nil, plan.receiver == nil,
+            if !applicationRoot, !menu, plan.actuator == nil, plan.receiver == nil, facts.qtComboChoice == nil,
                 NativePopupClickPolicy.permitsIntent(op.request), let context = facts.popupContext
             {
                 popupChoice = NativePopupClickPolicy.requiresPointer(
@@ -164,10 +167,11 @@ import ApplicationServices
                     declarations.declareClick(
                         isMenu
                             ? .menuAction(action.name, action.description) : .action(action.name, action.description),
-                        offer: NativePopupClickPolicy.actionOffer(
-                            NativeToggleClickPolicy.actionOffer(
-                                offer, action: action.name, role: role),
-                            requiresPointer: popupChoice),
+                        offer: NativeQtComboChoice.actionOffer(
+                            NativePopupClickPolicy.actionOffer(
+                                NativeToggleClickPolicy.actionOffer(offer, action: action.name, role: role),
+                                requiresPointer: popupChoice),
+                            action: action.name, kind: facts.qtComboChoice?.kind),
                         actionDocument: document)
                 }
             }
@@ -192,9 +196,10 @@ import ApplicationServices
                         }
                         let receiver: NativeAddressedPointerReceiver.Qualification?
                         if plan.actuator == nil, unit.member == nil {
-                            receiver = NativeAddressedPointerReceiver.query(
-                                unit.element, role: role, actions: facts.actions?.map { $0.name },
-                                focusWritable: facts.focusWritable).exposureQualification
+                            receiver = unit.qtComboChoice != nil ? .declaredInteraction
+                                : NativeAddressedPointerReceiver.query(
+                                    unit.element, role: role, actions: facts.actions?.map { $0.name },
+                                    focusWritable: facts.focusWritable).exposureQualification
                         } else { receiver = nil }
                         // The viewport center receives preparation wheels; it
                         // need not advertise the original target's click. The
@@ -203,7 +208,7 @@ import ApplicationServices
                         try pointerOffers(
                             NativePointerUnit(
                                 application: unit.application, window: exposure.mapping, nativeWindow: unit.window),
-                            at: exposure.point, exposure: true, addressedReceiver: receiver)
+                            at: exposure.point, exposure: true, addressedReceiver: receiver, qtComboChoice: unit.qtComboChoice)
                         return NativeSampledInput(
                             plan: plan, declarations: declarations, enabled: enabled, foreground: foreground,
                             input: input, nativeRole: role, actionsComplete: complete, applicationMenu: menu)
@@ -246,7 +251,9 @@ import ApplicationServices
                             })
                     } else {
                         let addressedReceiver: NativeAddressedPointerReceiver.Qualification?
-                        if plan.actuator == nil, unit.member == nil, sampled.basis == .exactHit,
+                        if unit.qtComboChoice != nil {
+                            addressedReceiver = .declaredInteraction
+                        } else if plan.actuator == nil, unit.member == nil, sampled.basis == .exactHit,
                             let hit = sampled.hit, CFEqual(hit, unit.element)
                         {
                             let declared = NativeAddressedPointerReceiver.query(
@@ -260,7 +267,7 @@ import ApplicationServices
                         } else { addressedReceiver = nil }
                         try pointerOffers(
                             pointer, at: geometry.point, addressedReceiver: addressedReceiver,
-                            foregroundHitRequired: sampled.preparation == .foreground)
+                            foregroundHitRequired: sampled.preparation == .foreground, qtComboChoice: unit.qtComboChoice)
                     }
                 } catch let error as DriverError where error.code == .inputUnavailable || error.code == .unsupportedOperation
                 {
