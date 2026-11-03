@@ -70,6 +70,15 @@ import ApplicationServices
 
     @MainActor private static func qtComboChoice() {
         typealias Choice = NativeQtComboChoice
+        // Document-scope observations retain the exact forward window path,
+        // even though the generic nested-surface property is intentionally nil.
+        let roles = ["document": kAXWindowRole, "popup": kAXWindowRole, "combo": kAXMenuButtonRole,
+            "list": kAXListRole, "row": kAXRowRole, "cell": kAXStaticTextRole]
+        let path = ["document", "combo", "list", "row"]
+        precondition(Choice.observationAnchor(logicalSurface: nil, ancestors: path, role: { roles[$0] }) == "document")
+        precondition(Choice.observationAnchor(logicalSurface: "popup", ancestors: path, role: { roles[$0] }) == "popup")
+        precondition(Choice.observationAnchor(logicalSurface: nil, ancestors: ["list", "row"], role: { roles[$0] }) == nil)
+        precondition(Choice.observationAnchor(logicalSurface: nil, ancestors: ["unknown"], role: { roles[$0] }) == nil)
         let qt = "QApplication.Probe.hours.QComboBoxListView"
         precondition(
             Choice.kind(role: kAXStaticTextRole, identifier: qt, listIdentifier: qt, rowIdentifier: qt, hasRow: true)

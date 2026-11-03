@@ -44,6 +44,16 @@ struct NativeQtComboChoice {
         return nil
     }
 
+    /// Ordinary AXWindow descendants intentionally have no generic nested
+    /// interaction-surface anchor. This mechanism separately needs its original
+    /// observed window to prove the combo's forward attachment to the popup.
+    /// Select only from that observation path, never from focus or a new parent.
+    nonisolated static func observationAnchor<Node>(
+        logicalSurface: Node?, ancestors: [Node], role: (Node) -> String?
+    ) -> Node? {
+        logicalSurface ?? ancestors.last(where: { role($0) == kAXWindowRole })
+    }
+
     /// Missing leaf AXWindow is ordinary Qt behavior. A known different native
     /// window is a conflict; neither a Qt identifier nor a matching role wins.
     nonisolated static func acceptsWindowIDs(popup: UInt32, owner: UInt32, members: [UInt32?]) -> Bool {
@@ -93,7 +103,7 @@ struct NativeQtComboChoice {
     @MainActor static func query(
         element: AXUIElement, role: String?, observedWindow: AXUIElement?, ancestors: [AXUIElement], pid: pid_t
     ) throws -> Self? {
-        guard role == kAXStaticTextRole, let observedWindow,
+        guard role == kAXStaticTextRole,
             let identifier = AXAccess.read(element, kAXIdentifierAttribute).value as? String,
             NativeQtAccessibilityIdentifier.isWidgetPath(identifier),
             let parent = AXAccess.element(element, kAXParentAttribute)
@@ -113,7 +123,11 @@ struct NativeQtComboChoice {
                 role: role, identifier: identifier,
                 listIdentifier: AXAccess.read(list, kAXIdentifierAttribute).value as? String,
                 rowIdentifier: row.flatMap { AXAccess.read($0, kAXIdentifierAttribute).value as? String },
-                hasRow: row != nil), let observedWindowID = BackgroundEvents.nativeWindowID(observedWindow)
+                hasRow: row != nil),
+            let observedWindow = observationAnchor(
+                logicalSurface: observedWindow, ancestors: ancestors,
+                role: { AXAccess.read($0, kAXRoleAttribute).value as? String }),
+            let observedWindowID = BackgroundEvents.nativeWindowID(observedWindow)
         else { return nil }
         try RequestDiagnostics.checkCancellation()
         // Start with the actual parent surface when available. Qt's standard

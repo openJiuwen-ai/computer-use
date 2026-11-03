@@ -68,6 +68,8 @@ extension NativeElementControl {
         }
         if explicitRequest != nil { return facts }
         facts.focusWritable = AXAccess.writable(target.element, kAXFocusedAttribute).value == true
+        // Qt owns its two-path popup proof. A nil generic nested surface is
+        // not absence of the original window in the retained observation path.
         facts.qtComboChoice = try NativeQtComboChoice.query(
             element: target.element, role: role, observedWindow: target.observedInteractionSurface,
             ancestors: target.ancestors, pid: target.application.processIdentifier)

@@ -468,7 +468,10 @@ import ApplicationServices
         try requested.requireSession(session)
         let read = try applications.readRoot(try string(requested.node, label: "node"))
         guard read.application.processIdentifier == proof.pid, CFEqual(read.element, proof.element),
-            let observed = read.observedInteractionSurface, CFEqual(observed, proof.observedWindow),
+            let observed = NativeQtComboChoice.observationAnchor(
+                logicalSurface: read.observedInteractionSurface, ancestors: read.ancestors,
+                role: { AXAccess.read($0, kAXRoleAttribute).value as? String }),
+            CFEqual(observed, proof.observedWindow),
             read.ancestors.count == proof.ancestors.count,
             zip(read.ancestors, proof.ancestors).allSatisfy({ CFEqual($0.0, $0.1) })
         else { throw DriverError("the selected Qt choice observation changed", code: .staleTarget) }
@@ -641,6 +644,8 @@ import ApplicationServices
         let scrolling = actuator?.relation == "scrollPointer"
         let geometry = scrolling ? actuator!.region! : node
         let read = try applications.readRoot(geometry)
+        // Use the same original-observation anchor as Qt offer sampling and
+        // final validation; generic nested-surface absence cannot erase it.
         let combo = try actuator == nil ? NativeQtComboChoice.query(
             element: read.element, role: AXAccess.read(read.element, kAXRoleAttribute).value as? String,
             observedWindow: read.observedInteractionSurface, ancestors: read.ancestors,
