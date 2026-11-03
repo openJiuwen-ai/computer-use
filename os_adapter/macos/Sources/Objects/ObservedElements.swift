@@ -13,34 +13,30 @@ final class ObservedElements<Key: Hashable, Evidence: Equatable, Value> {
         var value: Value
     }
     private struct Snapshot {
+        let target: String
         let text: String?
         let bytes: Int
     }
     private let namespace: String
-    private let targetLimit: Int
-    private let bindingLimit: Int
+    private let snapshotLimit: Int
     private let textLimit: Int
     private let reconcile: (Evidence, Value, Evidence, Value) -> (Evidence, Value)?
     private var serial: UInt64 = 0
     private var current = [Key: String]()
     private var targets = [String: Target]()
-    private var bindings = [String: String]()
     private var snapshots = [String: Snapshot]()
-    private var targetOrder = [String]()
-    private var bindingOrder = [String]()
+    private var latestSnapshot = [String: String]()
     private var snapshotOrder = [String]()
     private var textBytes = 0
-    private var pins = [String: Int]()
     private var pinnedBindings = [String: Int]()
 
     init(
-        namespace: String, targetLimit: Int = 8_192, bindingLimit: Int = 16_384, textLimit: Int = 16 * 1_024 * 1_024,
+        namespace: String, snapshotLimit: Int = 16_384, textLimit: Int = 16 * 1_024 * 1_024,
         reconcile: ((Evidence, Value, Evidence, Value) -> (Evidence, Value)?)? = nil
     ) {
-        precondition(targetLimit > 0 && bindingLimit > 0 && textLimit >= 0)
+        precondition(snapshotLimit > 0 && textLimit >= 0)
         self.namespace = namespace
-        self.targetLimit = targetLimit
-        self.bindingLimit = bindingLimit
+        self.snapshotLimit = snapshotLimit
         self.textLimit = textLimit
         self.reconcile = reconcile ?? { old, _, new, value in old == new ? (new, value) : nil }
     }
@@ -65,8 +61,6 @@ final class ObservedElements<Key: Hashable, Evidence: Equatable, Value> {
         let id = next("t")
         current[key] = id
         targets[id] = Target(key: key, evidence: evidence, value: value)
-        targetOrder.append(id)
-        evict()
         return id
     }
 
@@ -75,41 +69,32 @@ final class ObservedElements<Key: Hashable, Evidence: Equatable, Value> {
         return (id, target.value)
     }
     func retain(_ reference: String) -> (() -> Void)? {
-        let id = bindings[reference] ?? reference
+        let id = snapshots[reference]?.target ?? reference
         guard targets[id] != nil else { return nil }
-        pins[id, default: 0] += 1
-        if bindings[reference] != nil { pinnedBindings[reference, default: 0] += 1 }
+        if snapshots[reference] != nil { pinnedBindings[reference, default: 0] += 1 }
         var released = false
         return { [weak self] in
             guard !released, let self else { return }
             released = true
-            if let count = self.pins[id], count > 1 {
-                self.pins[id] = count - 1
-            } else {
-                self.pins.removeValue(forKey: id)
-            }
             if let count = self.pinnedBindings[reference], count > 1 {
                 self.pinnedBindings[reference] = count - 1
             } else {
                 self.pinnedBindings.removeValue(forKey: reference)
             }
-            self.evict()
-            self.evictBindings()
+            self.evictSnapshots()
         }
     }
 
-    private func evict() {
-        while targets.count > targetLimit {
-            guard let id = targetOrder.first(where: { pins[$0] == nil }) else { break }
-            retire(id)
-        }
-    }
-
-    private func evictBindings() {
-        while bindings.count > bindingLimit {
-            guard let token = bindingOrder.first(where: { pinnedBindings[$0] == nil }) else { break }
-            bindings.removeValue(forKey: token)
-            bindingOrder.removeAll { $0 == token }
+    /// Only immutable captured content is a cache. A live action reference is
+    /// an identity, retained until explicit object/scope retirement or session end.
+    private func evictSnapshots() {
+        while textBytes > textLimit || snapshots.count > snapshotLimit {
+            guard let token = snapshotOrder.first(where: { pinnedBindings[$0] == nil }),
+                let expired = snapshots.removeValue(forKey: token)
+            else { break }
+            textBytes -= expired.bytes
+            snapshotOrder.removeAll { $0 == token }
+            if latestSnapshot[expired.target] == token { latestSnapshot.removeValue(forKey: expired.target) }
         }
     }
 
@@ -117,26 +102,21 @@ final class ObservedElements<Key: Hashable, Evidence: Equatable, Value> {
     /// resolve to the same confirmed native target's most recent metadata.
     func bind(_ id: String, text: String?) -> String? {
         guard targets[id] != nil else { return nil }
-        let token = next("e")
-        bindings[token] = id
-        bindingOrder.append(token)
-        evictBindings()
+        if let token = latestSnapshot[id], let previous = snapshots[token], previous.text == text { return token }
         let bytes = text?.utf8.count ?? 0
-        if bytes <= textLimit {
-            snapshots[token] = Snapshot(text: text, bytes: bytes)
-            snapshotOrder.append(token)
-            textBytes += bytes
-            while textBytes > textLimit || snapshots.count > bindingLimit {
-                let expired = snapshotOrder.removeFirst()
-                textBytes -= snapshots.removeValue(forKey: expired)!.bytes
-            }
-        }
+        guard bytes <= textLimit else { return nil }
+        let token = next("e")
+        snapshots[token] = Snapshot(target: id, text: text, bytes: bytes)
+        latestSnapshot[id] = token
+        snapshotOrder.append(token)
+        textBytes += bytes
+        evictSnapshots()
         return token
     }
 
     // Live-node references and captured-text tokens resolve to the same
     // retained lifetime; immutable text remains available after it expires.
-    func target(_ token: String) -> Value? { targets[bindings[token] ?? token]?.value }
+    func target(_ token: String) -> Value? { targets[snapshots[token]?.target ?? token]?.value }
     /// Outer nil means expired; an existing snapshot with nil text means no string Value.
     func text(_ token: String) -> TextSnapshot? { snapshots[token].map { TextSnapshot(value: $0.text) } }
 
@@ -150,10 +130,9 @@ final class ObservedElements<Key: Hashable, Evidence: Equatable, Value> {
         guard !ids.isEmpty else { return }
         for id in ids {
             guard let target = targets.removeValue(forKey: id) else { continue }
-            pins.removeValue(forKey: id)
+            latestSnapshot.removeValue(forKey: id)
             if current[target.key] == id { current.removeValue(forKey: target.key) }
         }
-        targetOrder.removeAll { ids.contains($0) }
         // Captured text remains readable; action aliases cannot revive this lifetime.
     }
 }

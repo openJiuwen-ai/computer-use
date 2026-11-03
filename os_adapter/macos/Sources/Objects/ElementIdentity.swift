@@ -23,13 +23,21 @@ struct ElementIdentity: Equatable {
 
     init(facts: Facts) {
         let keys = Set(Self.keys)
-        attributes = facts.values.filter { keys.contains($0.key) && !$0.value.isEmpty }
-        absent = facts.absent.union(facts.values.filter { $0.value.isEmpty }.map(\.key)).intersection(keys)
+        self.init(
+            attributes: facts.values.filter { keys.contains($0.key) && !$0.value.isEmpty },
+            absent: facts.absent.union(facts.values.filter { $0.value.isEmpty }.map(\.key)).intersection(keys))
     }
 
     private init(attributes: [String: String], absent: Set<String>) {
-        self.attributes = attributes
-        self.absent = absent
+        var keys = Set(Self.keys)
+        // An identified native row may move when neighbours are inserted or
+        // sorted. Its advertised ordinal is not another identity requirement.
+        // Unidentified virtual rows and positional cells retain position checks.
+        if attributes["AXRole"] == "AXRow", let identifier = attributes["AXIdentifier"], !identifier.isEmpty {
+            keys.subtract(Self.positionKeys)
+        }
+        self.attributes = attributes.filter { keys.contains($0.key) }
+        self.absent = absent.intersection(keys)
     }
 
     /// Missing evidence does not contradict the old identity. Preserve known
@@ -62,4 +70,41 @@ struct ElementIdentity: Equatable {
     }
 
     func matches(_ current: [String: String]) -> Bool { check(Facts(values: current)) == .matched }
+
+    /// Ancestor metadata is not automatically a descendant's identity. A
+    /// layout group's identifier/URL, or a window's subrole/identifier, can
+    /// change while the exact child remains alive. Keep only actual ownership
+    /// boundaries here; NativeScopeResolver independently checks the fixed
+    /// window lifecycle and current input membership before dispatch.
+    func inheritedBoundary(inMenu: Bool) -> Self? {
+        let role = attributes["AXRole"] ?? ""
+        let keys: Set<String>
+        if ["AXWindow", "AXSheet", "AXPopover"].contains(role) {
+            keys = ["AXRole", "AXDocument"]
+        } else if role == "AXRow" || !Set(attributes.keys).isDisjoint(with: Self.positionKeys) {
+            // A reused row/cell can keep its AX address while acquiring a
+            // different identifier or advertised position.
+            keys = Set(Self.keys)
+        } else if role == "AXMenuBar" || inMenu && ["AXMenu", "AXMenuItem", "AXMenuBarItem"].contains(role) {
+            keys = ["AXRole", "AXIdentifier"]
+        } else if attributes["AXDocument"] != nil || role == "AXWebArea" && attributes["AXURL"] != nil {
+            keys = Set(["AXRole", "AXDocument"])
+                .union(role == "AXWebArea" ? ["AXURL"] : [])
+        } else {
+            return nil
+        }
+        return Self(attributes: attributes.filter { keys.contains($0.key) }, absent: absent.intersection(keys))
+    }
+
+    /// Field names suffice to explain a rejection without logging document
+    /// URLs, identifiers or other application content.
+    func changedFields(in current: Facts) -> [String] {
+        attributes.keys.filter { key in
+            current.absent.contains(key) || current.values[key].map { $0 != attributes[key] } == true
+        }.sorted()
+    }
+
+    func unavailableFields(in current: Facts) -> [String] {
+        attributes.keys.filter { current.values[$0] == nil && !current.absent.contains($0) }.sorted()
+    }
 }

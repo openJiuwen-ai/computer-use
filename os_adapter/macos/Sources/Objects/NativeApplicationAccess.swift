@@ -23,6 +23,12 @@ import ApplicationServices
 
     func retainNode(_ ref: String) -> (() -> Void)? { registry.retain(ref) }
 
+    /// Consume a directory's positive end-of-lifetime evidence, never a missing
+    /// node in a partial content observation or a cache capacity decision.
+    func retireScope(owner: NSRunningApplication, scope: String) {
+        registry.invalidate { $0.application.isEqual(owner) && $0.scope == scope }
+    }
+
     /// Decoration reads retained identities only. Geometry is resolved on the
     /// pointer's separate queue, never by adding AX work to the input path.
     func visualElement(_ ref: String) -> AXUIElement? { registry.target(ref)?.element }

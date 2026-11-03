@@ -134,9 +134,10 @@ Other platforms do not yet implement this preparation capability.
 
 Writes include a bounded related observation independently of their execution result.
 Inspect `result.observation`, `result.observation_status`, and `result.observation_error`;
-a missing observation does not mean the input was not sent. A `ComputerUseError` with
-`effect="partial"` or `"possible"` also retains these fields when the original session
-can still be observed. Its original error and effect remain unchanged; the SDK does not replay uncertain input.
+a missing observation does not mean the input was not sent. A `ComputerUseError` for an expired target,
+temporarily incomplete target evidence, a modal blocker, or `effect="partial"` / `"possible"` also retains
+these fields when the original session can still be observed. Use the attached current observation to
+decide the next action. The original error and effect remain unchanged; the SDK does not replay uncertain input.
 
 #### Python SDK
 
@@ -182,6 +183,14 @@ The SDK handles target preparation; a genuinely ambiguous context returns window
 choices. Each `choices` entry is a `WindowInfo` with an `id` accepted by
 `computer.window(id)` and a descriptive `title`. Post-action observation may show
 a newly discovered window without rebinding existing Window, Element or screenshot targets.
+
+On macOS, live element references survive unrelated layout-wrapper changes, partial observations,
+and cache pressure from other references. The SDK refreshes necessary operation facts.
+A destroyed element, closed/reopened window, or actual document ownership change still rejects the
+old reference and includes the related observation when available. Action identities are independent
+of bounded historical text caches; minimal reference metadata remains until confirmed retirement or
+session end. This native stability improvement and its real SDK/MCP validation cover macOS;
+the corresponding Windows/Linux native changes and validation are follow-up work.
 
 The SDK returns source screenshots and their original pixel coordinates. When MCP
 resizes an image, automatic output, `print(obs)` and `print(obs.text)` project desktop,

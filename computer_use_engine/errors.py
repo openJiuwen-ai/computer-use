@@ -22,6 +22,7 @@ class ComputerUseError(Exception):
     def __init__(self, failure: Mapping[str, Any], *, method: str | None = None, cause: BaseException | None = None):
         super().__init__(format_failure(failure, method))
         self.name = "ComputerUseError"
+        self._method = method
         self.code = failure["code"]
         self.effect = failure["effect"]
         self.target = failure["target"]
@@ -38,6 +39,10 @@ class ComputerUseError(Exception):
         self.impact = None
         if cause is not None:
             self.__cause__ = cause
+
+    def __str__(self) -> str:
+        """Render current recovery guidance after an attached observation."""
+        return format_failure(vars(self), self._method)
 
 
 def public_error_code(code: str) -> str:

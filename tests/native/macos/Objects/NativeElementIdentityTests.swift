@@ -33,7 +33,7 @@ import ApplicationServices
 
     static func verifyStrongEvidence() {
         let strong = [
-            "AXRole": "AXRow", "AXSubrole": "AXTableRow", "AXIdentifier": "original-control",
+            "AXRole": "AXCell", "AXSubrole": "AXTableCell", "AXIdentifier": "original-control",
             "AXURL": "file:///original", "AXDocument": "file:///document",
             "AXRowIndexRange": "0:1", "AXColumnIndexRange": "1:1"
         ]
@@ -114,7 +114,8 @@ import ApplicationServices
                 role: values["AXRole"] ?? "", identity: .init(facts: .init(values: values)),
                 provider: provider, providerKnown: provider != nil,
                 ancestors: parent.map { $0.ancestors + [$0.element] } ?? [],
-                context: parent.map(ApplicationElements.childContext) ?? [])
+                context: parent.map(ApplicationElements.childContext) ?? [],
+                contextComplete: parent?.contextComplete ?? (values["AXRole"] == "AXWindow"))
         }
 
         func targets(
@@ -177,7 +178,6 @@ import ApplicationServices
     @MainActor static func verifyRegistryBoundaries() {
         for (name, rowChange, positionChange) in [
             ("identifier", ["AXIdentifier": "different-control"], "0:1"),
-            ("row position", ["AXRowIndexRange": "3:1"], "0:1"),
             ("cell position", [:], "3:1"),
             ("row role", ["AXRole": "AXGroup"], "0:1")
         ] {
@@ -227,6 +227,128 @@ import ApplicationServices
         print("PASS original identifier/position/object/provider/scope boundaries remain enforced")
     }
 
+    @MainActor static func verifyLocalContextEvolution() {
+        let scene = Scene()
+        func root(_ version: String) -> ApplicationElements.Target {
+            scene.target(scene.window, values: [
+                "AXRole": "AXWindow", "AXDocument": "file:///original",
+                "AXIdentifier": version, "AXSubrole": version
+            ])
+        }
+        func wrapped(_ object: AXUIElement, _ version: String) -> ApplicationElements.Target {
+            let wrapper = scene.target(object, values: [
+                "AXRole": "AXGroup", "AXIdentifier": "layout-" + version, "AXURL": "file:///metadata-" + version
+            ], parent: root(version))
+            return scene.target(scene.field, values: ["AXRole": "AXButton", "AXIdentifier": "stable-button"], parent: wrapper)
+        }
+        let first = wrapped(scene.row, "first")
+        let life = scene.observe(first)
+        let alias = scene.registry.bind(life, text: "immutable observation")!
+        precondition(first.context.count == 1 && first.context[0].identity.attributes == [
+            "AXRole": "AXWindow", "AXDocument": "file:///original"
+        ], "layout metadata and window presentation do not become child identity constraints")
+        for candidate in [wrapped(scene.row, "changed"), wrapped(scene.cell, "replacement")] {
+            precondition(scene.observe(candidate) == life)
+            precondition(CFEqual(scene.registry.target(alias)!.element, scene.field))
+            precondition(scene.registry.target(alias)!.ancestors.contains { CFEqual($0, candidate.ancestors.last!) })
+        }
+        var partial = wrapped(scene.cell, "partial")
+        partial.context = []
+        partial.ancestors = []
+        partial.contextComplete = false
+        precondition(scene.observe(partial) == life, "partial context omission does not prove a different owner")
+        precondition(scene.registry.target(alias)!.context.count == 1)
+        precondition(!scene.registry.target(alias)!.ancestors.isEmpty)
+
+        var refreshed = wrapped(scene.cell, "refreshed-window-proxy")
+        let newWindow = AXUIElementCreateApplication(19120)
+        refreshed.context = [.init(native: scene.key(newWindow), identity: first.context[0].identity)]
+        precondition(scene.observe(refreshed) == life,
+                     "same leaf/scope may refresh its AXWindow proxy; physical lifetime is checked independently")
+        precondition(scene.registry.target(alias)!.observedInteractionSurface == nil,
+                     "a descendant does not force an old AXWindow proxy over its fixed input scope")
+        precondition(scene.registry.text(alias)?.value == "immutable observation")
+
+        var changedDocument = refreshed
+        changedDocument.context = [.init(native: scene.key(newWindow), identity: .init(facts: .init(values: [
+            "AXRole": "AXWindow", "AXDocument": "file:///different-document"
+        ])))]
+        precondition(scene.observe(changedDocument) != life && scene.registry.target(alias) == nil,
+                     "refreshing a window proxy must not erase a real document contradiction")
+        print("PASS live leaf survives layout wrapper/metadata changes, partial reads and window proxy refresh")
+    }
+
+    @MainActor static func verifyIdentifiedRowMovement() {
+        let scene = Scene()
+        let first = scene.targets().row
+        let life = scene.observe(first)
+        let alias = scene.registry.bind(life, text: "row")!
+        let moved = scene.targets(rowValues: rowFacts.merging(["AXRowIndexRange": "12:1"]) { _, next in next }).row
+        precondition(scene.observe(moved) == life && scene.registry.target(alias) != nil,
+                     "identified row remains the same native object after its ordinal moves")
+        let known = ElementIdentity(facts: .init(values: rowFacts))
+        let partial = ElementIdentity(facts: .init(values: ["AXRole": "AXRow", "AXRowIndexRange": "12:1"]))
+        precondition(known.refining(with: partial)?.attributes["AXRowIndexRange"] == nil,
+                     "a partial later observation must not reintroduce ordinal identity to an identified row")
+        precondition(partial.refining(with: known)?.attributes["AXRowIndexRange"] == nil,
+                     "learning the row's identifier refines away its former ordinal fallback")
+        let unkeyed = ElementIdentity(facts: .init(values: ["AXRole": "AXRow", "AXRowIndexRange": "0:1"]))
+        precondition(unkeyed.check(.init(values: ["AXRole": "AXRow", "AXRowIndexRange": "12:1"])) == .changed,
+                     "unidentified virtual row position still distinguishes a reused native receiver")
+        let cell = ElementIdentity(facts: .init(values: [
+            "AXRole": "AXCell", "AXIdentifier": "cell", "AXRowIndexRange": "0:1"
+        ]))
+        precondition(cell.check(.init(values: [
+            "AXRole": "AXCell", "AXIdentifier": "cell", "AXRowIndexRange": "12:1"
+        ])) == .changed, "positional cells retain their explicit position contract")
+        print("PASS identified row ordinal is mutable; unkeyed virtual rows and positional cells remain bounded")
+    }
+
+    static func verifyIdentityFailureEvidence() {
+        let identity = ElementIdentity(facts: .init(values: ["AXRole": "AXGroup", "AXDocument": "file:///original"]))
+        precondition(NativeElementInspection.identityCheck(identity, evidence: .invalid, isTarget: true).state == .changed)
+        precondition(NativeElementInspection.identityCheck(identity, evidence: .invalid, isTarget: false).state == .unavailable,
+                     "an invalid ancestor is not evidence that the retained child was destroyed")
+        let unknown = NativeElementInspection.identityCheck(identity, evidence: .unavailable(.cannotComplete), isTarget: true)
+        precondition(unknown.state == .unavailable && unknown.detail.contains(String(AXError.cannotComplete.rawValue)))
+        let changed = NativeElementInspection.identityCheck(identity, evidence: .value(.init(values: [
+            "AXRole": "AXGroup", "AXDocument": "file:///other"
+        ])), isTarget: false)
+        precondition(changed.state == .changed && changed.detail == "fields=AXDocument")
+        precondition(!changed.detail.contains("file:///"), "diagnostics name the fact without logging application content")
+        print("PASS identity errors distinguish leaf death, incomplete ancestor evidence and concrete changed fields")
+    }
+
+    @MainActor static func verifyDocumentOwnershipAcrossRoles() {
+        let scene = Scene()
+        let root = scene.target(scene.window, values: ["AXRole": "AXWindow"])
+        let oldDocument = scene.target(scene.row, values: [
+            "AXRole": "AXGroup", "AXDocument": "file:///old-document"
+        ], parent: root)
+        let original = scene.target(scene.field, values: ["AXRole": "AXButton", "AXIdentifier": "button"], parent: oldDocument)
+        let life = scene.observe(original)
+        let alias = scene.registry.bind(life, text: "original")!
+        let nested = scene.target(scene.cell, values: [
+            "AXRole": "AXGroup", "AXDocument": "file:///nested-document"
+        ], parent: oldDocument)
+        let extended = scene.target(scene.field, values: ["AXRole": "AXButton", "AXIdentifier": "button"], parent: nested)
+        var partial = extended
+        partial.context = [ApplicationElements.childContext(nested).last!]
+        partial.ancestors = [nested.element]
+        partial.contextComplete = false
+        precondition(scene.observe(partial) == life,
+                     "a new same-role owner in partial evidence can be nested, not a replacement")
+        precondition(scene.observe(extended) == life,
+                     "adding a nested boundary while the original owner remains is not a context-count contradiction")
+        let newDocument = scene.target(AXUIElementCreateApplication(19130), values: [
+            "AXRole": "AXWebArea", "AXDocument": "file:///new-document", "AXURL": "file:///new-document"
+        ], parent: root)
+        let replaced = scene.target(scene.field, values: ["AXRole": "AXButton", "AXIdentifier": "button"], parent: newDocument)
+        precondition(scene.observe(replaced) != life && scene.registry.target(alias) == nil,
+                     "same leaf in a complete path under a different-role document cannot retain its old ownership")
+        print("PASS complete paths distinguish new nested evidence from actual different-role document replacement")
+    }
+
     @MainActor static func verifyCommandRegistryContinuity() {
         for role in ["AXButton", "AXMenuItem", "AXMenuBarItem", "AXCheckBox", "AXRadioButton", "AXLink"] {
             let scene = Scene()
@@ -268,5 +390,9 @@ import ApplicationServices
         verifyRegistryContinuity()
         verifyRegistryBoundaries()
         verifyCommandRegistryContinuity()
+        verifyLocalContextEvolution()
+        verifyIdentifiedRowMovement()
+        verifyIdentityFailureEvidence()
+        verifyDocumentOwnershipAcrossRoles()
     }
 }

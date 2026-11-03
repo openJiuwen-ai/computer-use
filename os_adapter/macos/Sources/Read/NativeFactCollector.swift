@@ -95,6 +95,7 @@ import ApplicationServices
             provider: provider.identity, providerKnown: provider.known,
             ancestors: parent.map { $0.ancestors + [$0.element] } ?? [],
             context: parent.map(ApplicationElements.childContext) ?? [])
+        target.contextComplete = parent?.contextComplete ?? (role == kAXWindowRole)
         target.popupOwner = parent?.popupOwner
         if role == kAXListRole, let parent, parent.role == kAXWindowRole,
             parent.identity.attributes[kAXSubroleAttribute] == "AXDialog", let budget = diagnosticBudget,
@@ -161,7 +162,10 @@ import ApplicationServices
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
         advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false
     ) throws -> [String: Any] {
-        let root = try readTarget(ref)
+        var root = try readTarget(ref)
+        // Only the path traversed in this collection is complete. Historical
+        // ancestors on a subtree root do not prove omitted owners disappeared.
+        root.contextComplete = root.role == kAXWindowRole
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 5)
         // Settable is a distinct native query, not an AX attribute name. Keep
@@ -650,7 +654,8 @@ import ApplicationServices
 
     func relation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws -> [String: Any]
     {
-        let root = try readTarget(ref)
+        var root = try readTarget(ref)
+        root.contextComplete = root.role == kAXWindowRole
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 5)
         AXMessaging.configure(root.element)
