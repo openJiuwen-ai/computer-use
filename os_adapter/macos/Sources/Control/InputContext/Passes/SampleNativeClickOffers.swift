@@ -119,7 +119,9 @@ import ApplicationServices
             try pointer.validateParameters(request)
             try pointerOffers(pointer, at: pointer.point(request.start!), captured: true)
         } else if let node = binding.node {
-            let facts = try access.objects.nativeActionFacts(node)
+            let facts = try access.objects.nativeActionFacts(node).resolvingDocument {
+                try access.scopes.fixedInputWindow(binding.wire)
+            }
             enabled = facts.enabled
             foreground = facts.foreground
             role = facts.role.flatMap { $0.isEmpty ? nil : $0 }

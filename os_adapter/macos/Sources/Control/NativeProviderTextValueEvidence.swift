@@ -8,6 +8,15 @@ import CoreGraphics
 /// property or keyboard offer. No app name, DOM id, URL or current text enters
 /// the returned equality contract.
 enum NativeProviderTextValueEvidence {
+    /// A refreshed AXWindow proxy may denote the same fixed WindowServer
+    /// lifetime. No title, geometry or non-window ancestor substitutes for it.
+    static func reachesFixedWindow(
+        sameProxy: Bool, role: String, owner: Int32?, presenter: Int32,
+        currentID: UInt32?, expectedID: UInt32
+    ) -> Bool {
+        owner == presenter && expectedID != 0 && role == "AXWindow"
+            && (sameProxy || currentID == expectedID)
+    }
     enum OptionalAttribute<Value: Equatable>: Equatable { case value(Value), absent, unknown }
     enum Bounds: Equatable {
         case rectangle(CGRect)

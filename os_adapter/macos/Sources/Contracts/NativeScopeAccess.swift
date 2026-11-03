@@ -3,8 +3,25 @@
 import AppKit
 import ApplicationServices
 
+/// A fresh AX proxy for the original physical input scope, not a new target.
+@MainActor struct NativeFixedInputWindow {
+    let application: NSRunningApplication
+    let window: AXUIElement
+
+    /// Optional mechanism evidence must not reject unrelated candidates. An
+    /// unavailable query is unknown; cancellation and identity conflicts keep
+    /// their existing meaning and are never converted to missing evidence.
+    static func available<Value>(_ query: () throws -> Value?) throws -> Value? {
+        do { return try query() }
+        catch let error as DriverError where [.inputUnavailable, .observationIncomplete].contains(error.code) {
+            return nil
+        }
+    }
+}
+
 /// Live scope facts and last-moment checks; no operation journal or input unit.
 @MainActor protocol NativeScopeAccess: AnyObject {
+    func fixedInputWindow(_ binding: [String: Any]) throws -> NativeFixedInputWindow?
     func inputBinding(_ raw: Any?, input: Bool, attachedMenuAction: Bool) throws -> (
         wire: [String: Any], blocked: [String], node: String?
     )
@@ -24,6 +41,7 @@ import ApplicationServices
 }
 
 extension NativeScopeAccess {
+    func fixedInputWindow(_ binding: [String: Any]) throws -> NativeFixedInputWindow? { nil }
     func qtComboChoiceBoundary(_ raw: Any?, qualification: NativeQtComboChoice) throws -> [String] {
         throw DriverError("qualified Qt choice boundary unavailable", code: .inputUnavailable)
     }

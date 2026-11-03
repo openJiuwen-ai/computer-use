@@ -370,6 +370,14 @@ import ApplicationServices
         })
     }
 
+    /// Optional mechanism queries need the same positive lifetime evidence as
+    /// retained modal queries. Missing AX proxies cannot establish an ended
+    /// physical window, and a failed WindowServer query remains unknown.
+    func nativeWindowPresence(_ surface: Surface) -> NativeApplicationReader.ModalPresence? {
+        guard let native = surface.native else { return nil }
+        return nativePresence(.init(id: native.mapping.id, process: native.process), current: []).presence
+    }
+
     private func nativePresence(
         _ expected: NativeApplicationReader.ModalIdentity.Native, current: [NativeWindows.Window]
     ) -> (presence: NativeApplicationReader.ModalPresence, onScreen: Bool?) {

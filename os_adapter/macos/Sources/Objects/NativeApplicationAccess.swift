@@ -148,15 +148,18 @@ import ApplicationServices
             onDispatch: onDispatch, onReturned: onReturned)
     }
 
-    func nativeTextValueFacts(_ ref: String) throws -> NativeElementControl.TextValueFacts {
-        try control.nativeTextValueFacts(ref)
+    func nativeTextValueFacts(
+        _ ref: String, originalWindow: () throws -> AXUIElement?
+    ) throws -> NativeElementControl.TextValueFacts {
+        try control.nativeTextValueFacts(ref, originalWindow: originalWindow)
     }
 
     func executeNativeTextValue(
         _ ref: String, contract: NativeElementControl.TextValueContract, text: String,
-        onDispatch: @MainActor () throws -> Void
+        onDispatch: @MainActor () throws -> Void, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.ActionResult {
-        try control.executeNativeTextValue(ref, contract: contract, text: text, onDispatch: onDispatch)
+        try control.executeNativeTextValue(
+            ref, contract: contract, text: text, onDispatch: onDispatch, originalWindow: originalWindow)
     }
 
 }

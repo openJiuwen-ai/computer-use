@@ -21,7 +21,8 @@ import ApplicationServices
                 throw DriverError("native text contract mismatch", code: .invalidRequest)
             }
             let edited = try context.access.objects.executeNativeTextValue(
-                node, contract: valueContract, text: text, onDispatch: beforeDispatch)
+                node, contract: valueContract, text: text, onDispatch: beforeDispatch,
+                originalWindow: { try context.access.scopes.fixedInputWindow(context.command.target)?.window })
             receipt.detail = edited.detail
             receipt.confirmation = edited.verified ? "confirmed" : "unavailable"
             return false

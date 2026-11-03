@@ -17,7 +17,9 @@ import ApplicationServices
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts
     func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts
     func nativeSelectionContract(_ ref: String) throws -> NativeRowSelection.Contract?
-    func nativeTextValueFacts(_ ref: String) throws -> NativeElementControl.TextValueFacts
+    func nativeTextValueFacts(
+        _ ref: String, originalWindow: () throws -> AXUIElement?
+    ) throws -> NativeElementControl.TextValueFacts
 }
 
 /// Addressed control capabilities. These never select another route or editor.
@@ -37,7 +39,7 @@ import ApplicationServices
     ) throws -> NativeElementControl.ActionResult
     func executeNativeTextValue(
         _ ref: String, contract: NativeElementControl.TextValueContract, text: String,
-        onDispatch: @MainActor () throws -> Void
+        onDispatch: @MainActor () throws -> Void, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.ActionResult
 }
 

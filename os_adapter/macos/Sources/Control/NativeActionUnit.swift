@@ -16,6 +16,7 @@ extension NativeElementControl {
         let foreground: Bool
         var focusWritable: Bool = false
         var documentEvidence = DocumentEvidence.unknown
+        var hasObservedDocumentSurface = false
         var document: (any NativeActionDocumentInput)? {
             if case .standard(let value) = documentEvidence { return value }
             return nil
@@ -25,6 +26,25 @@ extension NativeElementControl {
         /// Current native leaf membership, separate from the observed owner.
         var popupElementWindowID: UInt32? = nil
         var qtComboChoice: NativeQtComboChoice? = nil
+
+        /// Ordinary physical windows are now resolved from the stable scope,
+        /// rather than retained AXWindow ancestors. Only a document-dependent
+        /// action asks for this evidence; explicit logical surfaces retain their
+        /// original classification and never fall through to a parent document.
+        @MainActor func resolvingDocument(
+            _ resolve: () throws -> NativeFixedInputWindow?,
+            subrole: (AXUIElement) -> String? = { AXAccess.read($0, kAXSubroleAttribute).value as? String }
+        ) throws -> Self {
+            guard case .unknown = documentEvidence, !hasObservedDocumentSurface, !applicationMenuContext,
+                actions?.contains(where: { $0.name == kAXPressAction }) == true,
+                let fixed = try NativeFixedInputWindow.available(resolve),
+                let value = subrole(fixed.window), !value.isEmpty
+            else { return self }
+            var result = self
+            result.documentEvidence = value == kAXStandardWindowSubrole
+                ? .standard(NativeDocumentContext(application: fixed.application, window: fixed.window)) : .other
+            return result
+        }
 
         @MainActor func documentPreparation(_ action: String) throws -> NativeActionDocumentPolicy.Preparation {
             NativeActionDocumentPolicy.preparation(
@@ -56,7 +76,9 @@ extension NativeElementControl {
         // document, even though the AX object itself is addressed exactly.
         // Other explicit actions retain their independent object semantics.
         if explicitRequest != nil && actions?.first?.name != kAXPressAction { return facts }
-        if let window = target.observedInteractionSurface,
+        let observedWindow = target.observedInteractionSurface
+        facts.hasObservedDocumentSurface = observedWindow != nil
+        if let window = observedWindow,
             let subrole = inspection.attribute(window, kAXSubroleAttribute) as? String, !subrole.isEmpty
         {
             if subrole == kAXStandardWindowSubrole {

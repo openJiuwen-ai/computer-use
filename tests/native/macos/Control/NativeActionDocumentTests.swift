@@ -5,6 +5,8 @@ import ApplicationServices
 
 @main enum NativeActionDocumentTests {
     @MainActor static func main() async throws {
+        try fixedDocumentEvidenceIsLazy()
+        try fixedWindowQuerySeparatesAXAbsenceFromEndedLifetime()
         for explicit in [false, true] {
             for mode in [
                 "selectable", "background", "initialTarget", "restoreOther", "fallback", "unavailable", "switched",
@@ -43,6 +45,154 @@ import ApplicationServices
         try await skipsPreparedDocument()
         try await documentPreparationBoundary()
         print("PASS original-window action receiver preparation, retained evidence and no-replay boundaries")
+    }
+
+    @MainActor static func fixedDocumentEvidenceIsLazy() throws {
+        let refreshedWindow = AXUIElementCreateApplication(1_000_010)
+        var queries = 0
+        let resolve = {
+            queries += 1
+            return NativeFixedInputWindow(application: .current, window: refreshedWindow)
+        }
+        func facts(_ action: String = kAXPressAction, menu: Bool = false) -> NativeElementControl.ActionFacts {
+            .init(role: kAXButtonRole, actions: [.init(name: action, description: nil)], enabled: true,
+                applicationMenuContext: menu, foreground: false)
+        }
+        let original = facts()
+        let resolved = try original.resolvingDocument(resolve, subrole: { _ in kAXStandardWindowSubrole })
+        guard let document = resolved.document as? NativeDocumentContext else {
+            preconditionFailure("ordinary descendant lost its fixed document context")
+        }
+        precondition(CFEqual(document.window, refreshedWindow) && queries == 1)
+        _ = try resolved.resolvingDocument(resolve)
+        var logicalSurface = original
+        logicalSurface.documentEvidence = .other
+        _ = try logicalSurface.resolvingDocument(resolve)
+        // A temporarily unavailable nested-surface subrole is not permission
+        // to reinterpret its action as a parent document's responder action.
+        logicalSurface.documentEvidence = .unknown
+        logicalSurface.hasObservedDocumentSurface = true
+        _ = try logicalSurface.resolvingDocument(resolve)
+        _ = try facts(kAXShowMenuAction).resolvingDocument(resolve)
+        _ = try facts(menu: true).resolvingDocument(resolve)
+        precondition(queries == 1, "existing logical surfaces and independent actions must not query a document")
+        for code: FailureCode in [.inputUnavailable, .observationIncomplete] {
+            let unknown = try original.resolvingDocument { throw DriverError("optional query unavailable", code: code) }
+            precondition(unknown.document == nil && unknown.actions?.count == 1,
+                         "optional document evidence must not remove independent action candidates")
+        }
+        do {
+            _ = try original.resolvingDocument { throw DriverError("original window ended", code: .staleTarget) }
+            preconditionFailure("known identity conflicts must propagate")
+        } catch let error as DriverError { precondition(error.code == .staleTarget) }
+        struct Cancelled: Error {}
+        do {
+            _ = try original.resolvingDocument { throw Cancelled() }
+            preconditionFailure("cancellation must propagate")
+        } catch is Cancelled { }
+    }
+
+    @MainActor static func fixedWindowQuerySeparatesAXAbsenceFromEndedLifetime() throws {
+        let app = NSRunningApplication.current
+        let root = AXUIElementCreateApplication(1_000_021)
+        let refreshed = AXUIElementCreateApplication(1_000_022)
+        let process = NativeProcessIdentity(
+            pid: app.processIdentifier, parent: 0, seconds: 1, microseconds: 0, executable: "/fixture")
+        var currentProcess: NativeProcessIdentity? = process
+        var presence = WindowServerInfo.Presence.present([
+            kCGWindowNumber as String: NSNumber(value: 70),
+            kCGWindowOwnerPID as String: NSNumber(value: app.processIdentifier)])
+        var declared: [AXUIElement]?
+        var advertisedID: CGWindowID? = 70
+        var catalogueReads = 0
+        func value(_ node: AXUIElement, _ key: String) -> CFTypeRef? {
+            if CFEqual(node, root) {
+                if key == kAXWindowsAttribute { catalogueReads += 1; return declared.map { $0 as CFArray } }
+                if key == kAXRoleAttribute { return kAXApplicationRole as CFString }
+                return nil
+            }
+            guard CFEqual(node, refreshed) else { return nil }
+            switch key {
+            case kAXRoleAttribute: return kAXWindowRole as CFString
+            case kAXSubroleAttribute: return kAXStandardWindowSubrole as CFString
+            case kAXParentAttribute: return root
+            case kAXChildrenAttribute, "AXSheets": return [] as CFArray
+            case kAXModalAttribute: return kCFBooleanFalse
+            default: return nil
+            }
+        }
+        var query = NativeWindowQueryAPI(attribute: value)
+        query.trusted = { true }; query.application = { _ in root }
+        query.read = { node, key in value(node, key).map(AXRead.value) ?? .unavailable(.cannotComplete) }
+        query.element = { node, key in key == kAXParentAttribute && CFEqual(node, refreshed) ? root : nil }
+        query.pid = { _ in (.success, app.processIdentifier) }
+        query.inputWindow = { _, _, _ in nil }; query.presentedWindow = { node, _, _ in node }
+        query.nativeID = { CFEqual($0, refreshed) ? advertisedID : nil }
+        query.hint = { node, _ in CFEqual(node, refreshed)
+            ? .init(frame: CGRect(x: 0, y: 0, width: 200, height: 100), title: "", id: advertisedID) : nil }
+        query.relations.count = { _, _ in (.success, 0) }
+        query.relations.range = { _, _, _ in (.success, [] as CFArray) }
+        query.relations.single = { _, _ in (.success, [] as CFArray) }
+        let state = NativeDesktopState(
+            applications: NativeApplicationAccess(windowQuery: query), appSelections: AppSelections(validateOwner: { _ in }))
+        var services = NativeDirectory.WindowServices()
+        services.process = { _ in currentProcess }; services.presence = { _ in presence }
+        services.isGone = { _ in false }
+        let directory = NativeDirectory(state: state, session: "fixed-window", windowServices: services)
+        let native = NativeWindows.Window(
+            application: app, process: process,
+            mapping: .init(id: 70, pid: app.processIdentifier, frame: .zero, title: nil, width: 200, height: 100),
+            onScreen: true)
+        var binding = directory.retainDesktopWindow(native, owner: app)
+        binding["session"] = "fixed-window"; binding["rootWindow"] = binding["window"]
+        binding.removeValue(forKey: "window")
+        // Only target identity fields belong to NativeTarget's closed schema.
+        binding = binding.filter { ["session", "instance", "rootWindow", "surface", "node"].contains($0.key) }
+        binding["capture"] = NSNull()
+        let execution = NativeExecution(state: state, session: "fixed-window", cancelActive: {})
+        execution.directory = directory
+        let unavailableAX = try execution.scopes.fixedInputWindow(binding)
+        precondition(unavailableAX == nil,
+                     "unavailable AX catalogue must not report the live fixed window closed")
+        let sampled = catalogueReads
+        presence = .unavailable
+        let unavailableNative = try execution.scopes.fixedInputWindow(binding)
+        precondition(unavailableNative == nil && catalogueReads == sampled)
+        presence = .present([
+            kCGWindowNumber as String: NSNumber(value: 70),
+            kCGWindowOwnerPID as String: NSNumber(value: app.processIdentifier)])
+        declared = [refreshed]
+        let fixed = try execution.scopes.fixedInputWindow(binding)
+        precondition(fixed.map { CFEqual($0.window, refreshed) } == true,
+                     "same native ID must resolve the current AX proxy")
+        for endedByProcess in [false, true] {
+            presence = endedByProcess ? .present([:]) : .absent
+            if endedByProcess {
+                currentProcess = .init(pid: process.pid, parent: 0, seconds: 2, microseconds: 0, executable: "/fixture")
+            }
+            do {
+                _ = try execution.scopes.fixedInputWindow(binding)
+                preconditionFailure("confirmed original lifetime loss must propagate")
+            } catch let error as DriverError { precondition(error.code == .staleTarget) }
+        }
+        // A separate AX-only binding keeps its existing exact-object route;
+        // it does not borrow the ended native binding or require WindowServer.
+        advertisedID = nil
+        let axRow = try state.applications.windows(app).first!
+        let axScope = state.applications.observationScope(app, window: refreshed)
+        let axSurface = NativeDirectory.Surface(
+            owner: app, window: axRow.ref, scope: axScope, parent: nil, element: refreshed, native: nil)
+        directory.remember(axSurface)
+        let axBinding: [String: Any] = [
+            "session": "fixed-window", "instance": state.appSelections.get(owner: app, root: axRow.ref).id,
+            "rootWindow": axRow.ref, "surface": axScope, "node": NSNull(), "capture": NSNull()]
+        let axFixed = try execution.scopes.fixedInputWindow(axBinding)
+        precondition(axFixed.map { CFEqual($0.window, refreshed) } == true)
+        directory.remember(.init(
+            owner: app, window: axRow.ref, scope: axScope, parent: nil,
+            element: AXUIElementCreateApplication(1_000_023), native: nil))
+        let differentProxy = try execution.scopes.fixedInputWindow(axBinding)
+        precondition(differentProxy == nil, "AX-only identity cannot adopt a different native proxy")
     }
 
     @MainActor static func unauthorizedForeground() async throws {
@@ -467,7 +617,7 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
     ) throws -> NativeElementControl.ActionResult { preconditionFailure("selection was not selected") }
     func executeNativeTextValue(
         _ ref: String, contract: NativeElementControl.TextValueContract, text: String,
-        onDispatch: @MainActor () throws -> Void
+        onDispatch: @MainActor () throws -> Void, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.ActionResult { preconditionFailure("text was not selected") }
     func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)? {
         hasLocalActionContext ? self : nil
@@ -530,7 +680,9 @@ extension DocumentProbe: NativeQueryObjectAccess, NativeContractAccess {
         preconditionFailure("unselected root")
     }
     func nativeSelectionContract(_ ref: String) throws -> NativeRowSelection.Contract? { nil }
-    func nativeTextValueFacts(_ ref: String) throws -> NativeElementControl.TextValueFacts {
+    func nativeTextValueFacts(
+        _ ref: String, originalWindow: () throws -> AXUIElement?
+    ) throws -> NativeElementControl.TextValueFacts {
         preconditionFailure("unselected edit")
     }
     func replacePrimitiveContracts(_ token: String, _ values: [NativePrimitiveContract]) {}

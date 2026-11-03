@@ -546,7 +546,7 @@ import ApplicationServices
     ) throws -> NativeElementControl.ActionResult { preconditionFailure("unselected route") }
     func executeNativeTextValue(
         _ ref: String, contract: NativeElementControl.TextValueContract, text: String,
-        onDispatch: @MainActor () throws -> Void
+        onDispatch: @MainActor () throws -> Void, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.ActionResult { preconditionFailure("unselected route") }
     func query() throws -> (NativeOperation, NativeInputQueryScope) {
         let op = NativeOperation(

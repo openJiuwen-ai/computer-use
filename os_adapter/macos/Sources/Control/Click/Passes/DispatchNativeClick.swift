@@ -7,7 +7,8 @@ import ApplicationServices
 @MainActor enum DispatchNativeClickPass {
     static func run(
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
-        evidence: NativeClickEvidence, objects: any NativeControlObjectAccess
+        evidence: NativeClickEvidence, objects: any NativeControlObjectAccess,
+        resolveWindow: () throws -> NativeFixedInputWindow? = { nil }
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickDispatch)
         defer { metric?.end() }
@@ -18,7 +19,7 @@ import ApplicationServices
                 name == kAXPressAction
             {
                 retained = try plan.operation.actionDocuments.context(scope) {
-                    try objects.nativeActionFacts(node).document
+                    try objects.nativeActionFacts(node).resolvingDocument(resolveWindow).document
                 }
             }
             try NativeActionDocumentPolicy.checkDispatch(

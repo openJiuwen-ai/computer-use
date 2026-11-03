@@ -230,7 +230,7 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     ) throws -> NativeElementControl.ActionResult { preconditionFailure("selection was not selected") }
     func executeNativeTextValue(
         _ ref: String, contract: NativeElementControl.TextValueContract, text: String,
-        onDispatch: @MainActor () throws -> Void
+        onDispatch: @MainActor () throws -> Void, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.ActionResult { preconditionFailure("text was not selected") }
     func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)? {
         precondition(action == "AXPress")

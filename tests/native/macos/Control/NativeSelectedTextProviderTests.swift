@@ -51,9 +51,47 @@ import ApplicationServices
         redundantBundleMetadataDoesNotReplaceExecutableEvidence()
         try chromiumWebDelegateIsDistinctFromViews()
         relatedEditorRemainsAKeyboardReceiver()
+        try providerWindowUsesFixedIdentityWithoutWeakeningTextEvidence()
         try qualificationRefreshPrecedesPreparation()
         try onlyPreInputRouteRefusalsPermitContinuation()
         print("PASS selected-text implementation qualification preserves native Views and related keyboard receivers")
+    }
+
+    @MainActor static func providerWindowUsesFixedIdentityWithoutWeakeningTextEvidence() throws {
+        typealias Evidence = NativeProviderTextValueEvidence
+        precondition(Evidence.reachesFixedWindow(
+            sameProxy: false, role: "AXWindow", owner: 10, presenter: 10, currentID: 70, expectedID: 70))
+        for (role, owner, id): (String, Int32, UInt32) in [
+            ("AXWindow", 10, 71), ("AXWindow", 11, 70), ("AXSheet", 10, 70),
+            ("AXPopover", 10, 70), ("AXGroup", 10, 70)
+        ] {
+            precondition(!Evidence.reachesFixedWindow(
+                sameProxy: false, role: role, owner: owner, presenter: 10, currentID: id, expectedID: 70))
+        }
+        let element = AXUIElementCreateApplication(1_000_011)
+        var queries = 0
+        let missing = try NativeProviderTextValueQuery.proof(
+            element: element, originalWindow: { queries += 1; return nil }, presenterPID: 10,
+            role: kAXTextFieldRole, subrole: .absent, valueWritable: true)
+        precondition(missing == nil && queries == 0, "ordinary/unknown providers must not acquire window prerequisites")
+        var facts = Evidence.Facts(
+            role: "AXTextField", subrole: .absent, valueWritable: true, enabled: true,
+            editable: .absent, valueUTF16Length: 4, rangeLocation: 0, rangeLength: 1,
+            bounds: .rectangle(CGRect(x: 0, y: 0, width: 8, height: 16)),
+            scope: .init(
+                presenterPID: 10, elementPublicPID: 10, elementActualPID: 10, windowPublicPID: 10,
+                webAreaPublicPID: 10, webAreaActualPID: 10, originalWindowID: 70,
+                elementWindowID: 70, webAreaWindowID: 70, reachedOriginalWindow: true,
+                exactlyOneWebArea: true, elementProviderNodeID: "402", webAreaProviderNodeID: "12"))
+        precondition(Evidence.prove(facts) != nil)
+        facts.valueUTF16Length = 0
+        precondition(Evidence.prove(facts) == nil, "window proxy refresh must not broaden empty-field text semantics")
+        facts.valueUTF16Length = 4
+        facts.bounds = .rectangle(.zero)
+        precondition(Evidence.prove(facts) == nil, "native Views' zero bounds are not callback evidence")
+        facts.bounds = .rectangle(CGRect(x: 0, y: 0, width: 8, height: 16))
+        facts.scope.elementWindowID = 71
+        precondition(Evidence.prove(facts) == nil, "another physical window cannot inherit provider editing evidence")
     }
 
     static func chromiumWebDelegateIsDistinctFromViews() throws {

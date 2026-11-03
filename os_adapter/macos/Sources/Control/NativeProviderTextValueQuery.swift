@@ -29,7 +29,7 @@ import ApplicationServices
         return AXUIElementGetPid(element, &pid) == .success && pid > 0 ? pid : nil
     }
     static func proof(
-        element: AXUIElement, originalWindow: AXUIElement?, presenterPID: pid_t, role: String?,
+        element: AXUIElement, originalWindow: () throws -> AXUIElement?, presenterPID: pid_t, role: String?,
         subrole: Evidence.OptionalAttribute<String>, valueWritable: Bool?
     ) throws -> Evidence.Proof? {
         guard role == kAXTextFieldRole, valueWritable == true else { return nil }
@@ -43,12 +43,15 @@ import ApplicationServices
         guard let providerNode = string(element, "ChromeAXNodeId"), Evidence.nodeID(providerNode) != nil else {
             return nil
         }
-        guard let originalWindow, string(originalWindow, kAXRoleAttribute) == kAXWindowRole,
+        // Establish this mechanism's existing nonempty text evidence before
+        // querying its fixed window; ordinary properties need no such query.
+        guard let value = string(element, kAXValueAttribute), let scalar = value.unicodeScalars.first,
+            let originalWindow = try NativeFixedInputWindow.available(originalWindow),
+            string(originalWindow, kAXRoleAttribute) == kAXWindowRole,
             let windowID = BackgroundEvents.nativeWindowID(originalWindow), windowID != 0,
             publicPID(originalWindow) == presenterPID, publicPID(element) == presenterPID,
             BackgroundEvents.accessibilityProcessID(element) == presenterPID,
-            BackgroundEvents.nativeWindowID(element) == windowID, let value = string(element, kAXValueAttribute),
-            let scalar = value.unicodeScalars.first
+            BackgroundEvents.nativeWindowID(element) == windowID
         else { return nil }
         // A non-BMP first scalar needs both UTF16 code units. Do not manufacture
         // a character to classify an empty field and do not cache prior proof.
@@ -61,7 +64,12 @@ import ApplicationServices
                 let currentRole = string(cursor, kAXRoleAttribute)
             else { return nil }
             seen.append(cursor)
-            if CFEqual(cursor, originalWindow) {
+            if Evidence.reachesFixedWindow(
+                sameProxy: CFEqual(cursor, originalWindow), role: currentRole,
+                owner: publicPID(cursor), presenter: presenterPID,
+                currentID: currentRole == kAXWindowRole ? BackgroundEvents.nativeWindowID(cursor) : nil,
+                expectedID: windowID)
+            {
                 reachedWindow = true
                 break
             }

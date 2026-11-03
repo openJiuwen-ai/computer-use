@@ -94,7 +94,9 @@ import ApplicationServices
             target: target, offer: offer, pointer: pointer, command: command, operation: op, within: contract.within,
             step: step)
         if case .action(let node, let name, _) = target, name == kAXPressAction {
-            let facts = try access.objects.nativeActionFacts(node)
+            let facts = try access.objects.nativeActionFacts(node).resolvingDocument {
+                try access.scopes.fixedInputWindow(command.target)
+            }
             let documentScope = NativeActionDocumentContexts.Scope(
                 node: node, surface: try string(resolved.binding.wire["surface"], label: "surface"),
                 within: contract.within, actuator: contract.actuator, receiver: contract.receiver)

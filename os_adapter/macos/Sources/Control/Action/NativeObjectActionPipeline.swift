@@ -17,10 +17,13 @@ import ApplicationServices
         let request = plan.request, node = plan.node
 
         @MainActor func facts() throws -> NativeElementControl.ActionFacts {
+            let current: NativeElementControl.ActionFacts
             if request.kind == "action" {
-                return try context.access.objects.nativeExplicitActionFacts(node, request: request.value!)
+                current = try context.access.objects.nativeExplicitActionFacts(node, request: request.value!)
+            } else {
+                current = try context.access.objects.nativeActionFacts(node)
             }
-            return try context.access.objects.nativeActionFacts(node)
+            return try current.resolvingDocument { try context.access.scopes.fixedInputWindow(context.command.target) }
         }
         let documentScope = NativeActionDocumentContexts.Scope(
             node: node, surface: try string(binding.wire["surface"], label: "surface"), within: contract.within,

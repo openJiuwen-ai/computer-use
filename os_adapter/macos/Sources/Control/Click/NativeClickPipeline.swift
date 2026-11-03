@@ -22,7 +22,8 @@ import AppKit
                     plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
             }
             try await DispatchNativeClickPass.run(
-                plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
+                plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects,
+                resolveWindow: { try access.scopes.fixedInputWindow(command.target) })
         } catch {
             var failure = error
             if let observation = error as? NativeTogglePress.Unconfirmed {

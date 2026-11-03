@@ -52,7 +52,11 @@ import ApplicationServices
         // different: its owner must not receive the child's replacement.
         let textFacts =
             try op.intent == "replace" && actuator == nil
-            ? binding.node.map { try access.objects.nativeTextValueFacts($0) } : nil
+            ? binding.node.map {
+                try access.objects.nativeTextValueFacts($0, originalWindow: {
+                    try access.scopes.fixedInputWindow(binding.wire)?.window
+                })
+            } : nil
         if desktop {
             let unit = try access.units.desktopUnit(binding.wire)
             enabled = nil
@@ -225,7 +229,7 @@ import ApplicationServices
                 }
             }
         } else if let node = binding.node {
-            let facts: NativeElementControl.ActionFacts
+            var facts: NativeElementControl.ActionFacts
             if op.intent == "action" {
                 let request = try NativeObjectIntent(
                     unit: "native_action", kind: "action", parameters: op.request.parameters)
@@ -233,6 +237,7 @@ import ApplicationServices
             } else {
                 facts = try access.objects.nativeActionFacts(node)
             }
+            facts = try facts.resolvingDocument { try access.scopes.fixedInputWindow(binding.wire) }
             enabled = facts.enabled
             foreground = facts.foreground
             applicationMenu = facts.applicationMenuContext

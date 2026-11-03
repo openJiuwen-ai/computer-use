@@ -41,7 +41,9 @@ extension NativeElementControl {
         let foreground: Bool
     }
 
-    func nativeTextValueFacts(_ ref: String) throws -> TextValueFacts {
+    func nativeTextValueFacts(
+        _ ref: String, originalWindow: () throws -> AXUIElement?
+    ) throws -> TextValueFacts {
         guard let target = registry.target(ref) else {
             throw DriverError("element reference expired", code: .staleTarget)
         }
@@ -95,7 +97,8 @@ extension NativeElementControl {
             let providerSubrole: NativeProviderTextValueEvidence.OptionalAttribute<String> =
                 subroleKnown ? subrole.map { .value($0) } ?? .absent : .unknown
             if let provider = try NativeProviderTextValueQuery.proof(
-                element: target.element, originalWindow: target.observedInteractionSurface,
+                element: target.element,
+                originalWindow: { try target.observedInteractionSurface ?? originalWindow() },
                 presenterPID: target.application.processIdentifier, role: role, subrole: providerSubrole,
                 valueWritable: settable == .success ? writable.boolValue : nil)
             {
@@ -109,11 +112,12 @@ extension NativeElementControl {
     }
 
     func executeNativeTextValue(
-        _ ref: String, contract: TextValueContract, text: String, onDispatch: @MainActor () throws -> Void
+        _ ref: String, contract: TextValueContract, text: String, onDispatch: @MainActor () throws -> Void,
+        originalWindow: () throws -> AXUIElement?
     ) throws -> ActionResult {
         try validateText(text)
         let target = try inputTarget(ref)
-        guard try nativeTextValueFacts(ref).contract == contract else {
+        guard try nativeTextValueFacts(ref, originalWindow: originalWindow).contract == contract else {
             throw DriverError(
                 "the selected text-value replacement contract is no longer available", code: .inputUnavailable)
         }

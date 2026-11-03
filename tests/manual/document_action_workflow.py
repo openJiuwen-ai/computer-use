@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -28,7 +29,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import computer_use
-from artifact_json import captured_interface_metadata, encode_artifact
+from artifact_json import encode_artifact
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.errors import ComputerUseError
@@ -59,6 +60,10 @@ SOURCES = (
     "os_adapter/macos/Sources/Control/BackgroundEvents.swift",
     "os_adapter/macos/Sources/Capture/NativeCapture.swift",
     "os_adapter/macos/Sources/Capture/NativeCapturedPointerPlan.swift",
+    "computer_use_engine/interaction/agent/pipeline.py",
+    "computer_use_engine/interaction/query/instances/scope.py",
+    "computer_use_engine/interaction/write/request/pipeline.py",
+    "computer_use_engine/session/interfaces.py",
     "computer_use_engine/session/interface_images.py",
     "tests/fixtures/DocumentActionProbe.swift",
     "tests/fixtures/WebActionProbe.swift",
@@ -70,6 +75,23 @@ SOURCES = (
 
 def callback_counts(value, receiver):
     return [document[receiver + "Actions"] for document in value["documents"]]
+
+
+def window_choices(text, title):
+    """Use only window references delivered in the public observation.
+
+    A window title can appear in its heading or in the expanded window body.
+    These two fixture windows have distinct titles; neither contains the
+    other's title. Retain the whole matching block as discovery evidence.
+    """
+    headings = list(re.finditer(r"(?m)^Window (\d+):", text))
+    matches = []
+    for index, heading in enumerate(headings):
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+        block = text[heading.start() : end]
+        if title in block:
+            matches.append({"ref": int(heading[1]), "title": title, "delivered_block": block})
+    return matches
 
 
 def window_ready(value, index):
@@ -237,14 +259,15 @@ async def verify(folder, options):
         computer = Computer(allow_global_input=options.allow_global_input)
         computer._controller.transport.driver = {"command": str(driver), "args": []}
         app = computer.app(bundle)
-        chooser = await asyncio.to_thread(app.read, view="tree")
+        chooser = await asyncio.to_thread(app.read, view="tree", full=True)
         (folder / "app-choices.txt").write_text(chooser.text)
-        catalogue = captured_interface_metadata(chooser)
-        candidates = [item for item in catalogue["windows"] if item["title"] == "Document context A"]
+        candidates = window_choices(chooser.text, "Document context A")
         report["target_choices"] = candidates
         assert len(candidates) == 1, report["target_choices"]
         target_ref = candidates[0]["ref"]
         target_window = app.window(target_ref)
+        root = target_window._window_identity
+        report["fixed_window_binding"] = asdict(root)
         # A background launch cannot assume AppKit will honor self-activation.
         # Explicit observation preparation sets up only this known A window;
         # the measured action starts after B/sentinel replaces that context.
@@ -253,17 +276,24 @@ async def verify(folder, options):
         await command(folder, "front-target")
         await wait_for(folder, lambda value: window_ready(value, 0))
         observation = await snapshot(app, folder, "a-observed")
-        delivered = captured_interface_metadata(observation)
-        assert delivered["scope"] == "application" and delivered["current"] == target_ref, delivered
-        ui = app
+        delivered = window_choices(observation.text, "Document context A")
+        assert len(delivered) == 1 and delivered[0]["ref"] == target_ref, delivered
+        # App reads describe an application; they do not bind it to whichever
+        # window happens to be current. Retain the explicit A Window throughout
+        # the B/sentinel switch, including element lookup and post-action read.
+        ui = target_window
         if options.operation == "coordinate":
-            if options.coordinate_scope == "window":
-                ui = target_window
+            if options.coordinate_scope == "app":
+                ui = app
+            else:
                 await snapshot(ui, folder, "a-window-observed")
-            root = computer._controller.state(ui).selection.root
             report["target_binding"] = asdict(root)
         else:
-            target = await asyncio.to_thread(app.element, [{"identifier": "document-" + options.receiver + "-A"}])
+            await snapshot(target_window, folder, "a-window-observed")
+            target = await asyncio.to_thread(
+                target_window.element, [{"identifier": "document-" + options.receiver + "-A"}]
+            )
+            assert target._owner is target_window
             report["target_binding"] = asdict(target._snapshot["binding"])
         report["target_before_switch"] = await state(folder)
         if options.operation == "coordinate":
@@ -287,6 +317,15 @@ async def verify(folder, options):
             )
             await wait_for(folder, lambda value: not value["active"] and value["frontmostPID"] == sentinel["pid"])
         before = await state(folder)
+        other_window = before["documents"][1]["window"]
+        if options.state == "background":
+            # B was confirmed key/main before the sentinel took foreground.
+            # AppKit may clear those roles while inactive; that is normal and
+            # must not be repaired by reactivating B before the measured action.
+            assert before["mainWindow"] in (0, other_window), before
+            assert before["keyWindow"] in (0, other_window), before
+        else:
+            assert before["mainWindow"] == before["keyWindow"] == other_window, before
         assert all(
             document["directActions"] == document["responderActions"] == document["contentDowns"] == 0
             for document in before["documents"]
@@ -371,10 +410,12 @@ async def verify(folder, options):
             else []
         )
         report["target_binding_after"] = asdict(
-            computer._controller.state(ui).selection.root
-            if options.operation == "coordinate"
-            else target._snapshot["binding"]
+            target_window._window_identity if options.operation == "coordinate" else target._snapshot["binding"]
         )
+        report["fixed_window_binding_after"] = asdict(target_window._window_identity)
+        assert report["fixed_window_binding_after"] == report["fixed_window_binding"]
+        if options.operation != "coordinate":
+            assert target._owner is target_window
         assert report["target_binding_after"] == report["target_binding"]
         assert report["unrelated_callback_delta"] == [0, 0], report["unrelated_callback_delta"]
         assert all(

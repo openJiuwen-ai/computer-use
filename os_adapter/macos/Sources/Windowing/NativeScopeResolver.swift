@@ -63,6 +63,49 @@ import ApplicationServices
         return try inputScope(value, canonicalize: canonicalize, observed: observed)
     }
 
+    func fixedInputWindow(_ binding: [String: Any]) throws -> NativeFixedInputWindow? {
+        let requested = try NativeTarget(binding)
+        try requested.requireSession(session)
+        let entry = try appSelections.entry(try string(requested.instance, label: "instance"))
+        let id = try string(requested.surface, label: "surface")
+        guard requested.rootWindow == entry.root else {
+            throw DriverError("working root changed", code: .staleTarget)
+        }
+        guard directory.applicationRoot(id) == nil else { return nil }
+        guard let selected = directory.surface(id), selected.owner.isEqual(entry.owner) else {
+            throw DriverError("original mechanism window binding changed", code: .staleTarget)
+        }
+        if let node = requested.node {
+            let read = try applications.readRoot(node)
+            guard read.scope == id, read.application.isEqual(entry.owner) else {
+                throw DriverError("node belongs to a different mechanism window", code: .staleTarget)
+            }
+        }
+        // This is optional mechanism evidence, not another admission boundary.
+        // The original physical identity must survive, but an incomplete AX
+        // catalogue must not turn a missing proxy into a public "closed" error.
+        if selected.native != nil {
+            switch directory.nativeWindowPresence(selected) {
+            case .ended: throw DriverError("original mechanism window lifetime ended", code: .staleTarget)
+            case .live: break
+            case .unknown, nil: return nil
+            }
+        }
+        let windows = try applications.windows(
+            entry.owner, nativeWindows: selected.native.map { [$0] } ?? [],
+            contentRoot: selected.element, purpose: .inputValidation)
+        let matches = windows.filter { $0.ref == selected.window }
+        guard matches.count == 1, let window = matches.first else { return nil }
+        if let native = selected.native {
+            guard window.nativeID == native.mapping.id else { return nil }
+        } else {
+            // AX-only scopes retain their original exact object. Without a
+            // physical ID there is no proof authorizing a replacement proxy.
+            guard let original = selected.element, CFEqual(window.element, original) else { return nil }
+        }
+        return NativeFixedInputWindow(application: entry.owner, window: window.element)
+    }
+
     private func inputScope(
         _ target: NativeTarget, canonicalize: Bool, observed: NativeApplicationReader.ReadRoot?,
         popupOwner: AXUIElement? = nil
