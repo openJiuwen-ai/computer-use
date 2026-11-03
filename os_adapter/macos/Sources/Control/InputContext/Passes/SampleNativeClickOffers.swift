@@ -192,8 +192,8 @@ import ApplicationServices
                         }
                         let receiver: NativeAddressedPointerReceiver.Qualification?
                         if plan.actuator == nil, unit.member == nil {
-                            receiver = NativeAddressedPointerReceiver(
-                                role: role, actions: facts.actions?.map { $0.name },
+                            receiver = NativeAddressedPointerReceiver.query(
+                                unit.element, role: role, actions: facts.actions?.map { $0.name },
                                 focusWritable: facts.focusWritable).exposureQualification
                         } else { receiver = nil }
                         // The viewport center receives preparation wheels; it
@@ -249,8 +249,8 @@ import ApplicationServices
                         if plan.actuator == nil, unit.member == nil, sampled.basis == .exactHit,
                             let hit = sampled.hit, CFEqual(hit, unit.element)
                         {
-                            let declared = NativeAddressedPointerReceiver(
-                                role: role, actions: facts.actions?.map { $0.name },
+                            let declared = NativeAddressedPointerReceiver.query(
+                                unit.element, role: role, actions: facts.actions?.map { $0.name },
                                 focusWritable: facts.focusWritable).supported
                             // An exact original element supplies a point even
                             // when it declares no semantic mouse action. Keep

@@ -9,7 +9,18 @@ import ApplicationServices
         try await optionalActivityDoesNotGate()
         try await stoppedScopeDoesNotPrepareWindow()
         try await nonKeyPanelAndCallbacks()
+        try await restoredStatePrecedesConfirmation()
         print("PASS application activity precedes fresh native window planning without new readiness gates")
+    }
+
+    @MainActor static func restoredStatePrecedesConfirmation() async throws {
+        let probe = FocusCompositionProbe(mode: .restoreOther)
+        probe.returnForeground = true
+        let outcome = try await probe.run(observeOutcome: false)
+        precondition(probe.trace.firstIndex(of: "restore")! < probe.trace.firstIndex(of: "confirm")!)
+        precondition(probe.trace.last == "sample", "restoration requires fresh final facts even without verbose evidence")
+        precondition(outcome.final.focusedWindow == 9 && !outcome.final.foreground)
+        precondition(probe.samples == 2)
     }
 
     @MainActor static func activityPrecedesWindowPlan() async throws {
@@ -140,6 +151,7 @@ import ApplicationServices
     var failure: String?
     var failAfterPost = false
     var reportCleanupUnknown = false
+    var returnForeground = false
     var trace = [String](), legacy = [String](), effects = [String]()
     var effectWindows = [UInt32?](), forwardedNeedsKey = [Bool](), rememberedNeedsKey = [Bool]()
     var applicationCalls = 0, posts = 0, samples = 0, notifications = 0, selections = 0
@@ -182,7 +194,7 @@ import ApplicationServices
         _ = try await NativeApplicationContextUnit.prepare(
             pid: pid, sample: { .init(foregroundPID: self.foregroundPID, reportedActive: self.active) },
             alreadyPosted: { self.ownedPost },
-            make: { self.mode == .unavailable ? nil : SyntheticFocusEvents.applicationActivation(active: true) },
+            make: { self.mode == .unavailable ? nil : SyntheticFocusEvents.applicationActivation() },
             post: { event in
                 let native = NSEvent(cgEvent: event)!
                 precondition(native.type == .appKitDefined && native.subtype.rawValue == 1)
@@ -276,6 +288,12 @@ import ApplicationServices
                 self.prepared = true
                 self.rememberedNeedsKey.append($0.needsKeyWindow)
                 if self.reportCleanupUnknown { $0.onCleanupUnknown() }
+            }, finishPreparation: { _ in
+                guard self.returnForeground else { return false }
+                self.trace.append("restore")
+                self.foregroundPID = self.pid + 1
+                self.focusedWindow = 9
+                return true
             })
         return try await NativeFocusPipeline.run(request, observeOutcome: observeOutcome, stages: stages)
     }

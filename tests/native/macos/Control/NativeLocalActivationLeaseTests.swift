@@ -11,7 +11,7 @@ import Darwin
         let a = process(101), b = process(102), replacement = process(101, born: 2)
         var leases = NativeLocalActivationLeases()
         precondition(!leases.isCurrent(a, current: a, foregroundPID: 200))
-        precondition(leases.takeAll().isEmpty, "no actual activation post grants no cleanup ownership")
+        precondition(leases.takeAll().isEmpty, "no actual activation post grants no submission ownership")
 
         leases.recordPosted(a)
         precondition(leases.isCurrent(a, current: a, foregroundPID: 200))
@@ -22,14 +22,7 @@ import Darwin
         precondition(!leases.isCurrent(a, current: a, foregroundPID: a.pid))
         leases.recordPosted(a)
         precondition(leases.takeAll() == [a], "repeated posting retains one process lease")
-        precondition(leases.takeAll().isEmpty, "repeated stop cannot replay deactivation")
-
-        for (current, foreground, expected): (NativeProcessIdentity?, pid_t?, NativeLocalActivationLeases.Cleanup) in [
-            (a, 200, .deactivate), (a, a.pid, .foreground), (replacement, 200, .processChanged),
-            (nil, 200, .processUnavailable), (a, nil, .foregroundUnavailable)
-        ] {
-            precondition(NativeLocalActivationLeases.cleanup(a, current: current, foregroundPID: foreground) == expected)
-        }
+        precondition(leases.takeAll().isEmpty, "repeated stop cannot retire ownership twice")
 
         leases.recordPosted(a)
         leases.recordPosted(b)
@@ -40,35 +33,37 @@ import Darwin
         precondition(leases.take(a.pid, matching: a) == nil, "an old observer cannot remove a new incarnation")
         precondition(leases.take(a.pid, matching: replacement) == replacement)
 
-        // A's real activation notification was queued; B is frontmost by the
-        // time it is handled. Its payload, not that later snapshot, ends A's
-        // synthetic ownership, so neither process receives an inactive event.
+        // Switching between other applications must leave this background
+        // receiver usable across the open -> read -> select tool sequence.
         leases.recordPosted(a)
         leases.recordPosted(b)
+        precondition(leases.takeForWorkspaceActivation(process(200)) == nil)
+        precondition(leases.isCurrent(a, current: a, foregroundPID: 200))
+        precondition(leases.isCurrent(b, current: b, foregroundPID: 200))
+        precondition(leases.takeForWorkspaceActivation(process(201)) == nil)
+        precondition(leases.isCurrent(a, current: a, foregroundPID: 201))
+        precondition(leases.isCurrent(b, current: b, foregroundPID: 201))
+
+        // A's real activation supersedes A's local submission only. It does not
+        // authorize a deactivation of B or clear B's independent preparation.
         precondition(leases.takeForWorkspaceActivation(a) == a)
-        let delayedActivationCleanup = leases.takeAll().filter {
-            NativeLocalActivationLeases.cleanup($0, current: $0, foregroundPID: b.pid) == .deactivate
-        }
-        precondition(delayedActivationCleanup.isEmpty, "a queued real activation must not be synthetically revoked")
+        precondition(!leases.isCurrent(a, current: a, foregroundPID: 201))
+        precondition(leases.isCurrent(b, current: b, foregroundPID: a.pid))
+        precondition(leases.takeAll() == [b])
         leases.recordPosted(replacement)
         precondition(leases.takeForWorkspaceActivation(a) == nil, "old activation payload cannot claim a new incarnation")
         precondition(leases.takeForWorkspaceActivation(nil) == nil, "missing payload identity grants no ownership")
         precondition(leases.takeAll() == [replacement])
 
-        // The coordinator drains before posting. A synchronous provider callback
-        // or another stop during cleanup therefore cannot acquire a second send.
+        // Teardown only drains local tracking. It cannot manufacture an inverse
+        // event that would close the menu/editor the request just opened.
         leases.recordPosted(a)
         leases.recordPosted(b)
-        var sent: [pid_t] = []
-        for retained in leases.takeAll() {
-            if NativeLocalActivationLeases.cleanup(retained, current: retained, foregroundPID: b.pid) == .deactivate {
-                precondition(leases.take(retained.pid) == nil)
-                precondition(leases.takeAll().isEmpty)
-                sent.append(retained.pid)
-            }
-        }
-        precondition(sent == [a.pid], "workspace activation must not deactivate the actual foreground process")
+        let retired = leases.takeAll()
+        precondition(retired == [a, b])
+        precondition(leases.take(a.pid) == nil)
+        precondition(leases.take(b.pid) == nil)
         precondition(leases.takeAll().isEmpty)
-        print("PASS local activation lease ownership and guarded cleanup")
+        print("PASS local activation ownership, independent background receivers and effect-preserving retirement")
     }
 }

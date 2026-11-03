@@ -12,12 +12,12 @@ import ApplicationServices
     }
 
     @MainActor static func eventConstruction() throws {
-        for active in [true, false] {
-            let raw = SyntheticFocusEvents.applicationActivation(active: active)!
+        do {
+            let raw = SyntheticFocusEvents.applicationActivation()!
             let event = NSEvent(cgEvent: raw)!
             precondition(event.type == .appKitDefined)
             precondition(raw.timestamp > 0)
-            precondition(event.subtype.rawValue == (active ? 1 : 2))
+            precondition(event.subtype.rawValue == 1)
             precondition(event.windowNumber == 0 && event.modifierFlags.isEmpty && event.data1 == 0 && event.data2 == 0)
         }
     }
@@ -33,7 +33,7 @@ import ApplicationServices
             _ = try await NativeApplicationContextUnit.prepare(
                 pid: 101, sample: { .init(foregroundPID: foreground, reportedActive: active) },
                 alreadyPosted: { owned },
-                make: { available ? SyntheticFocusEvents.applicationActivation(active: true) : nil },
+                make: { available ? SyntheticFocusEvents.applicationActivation() : nil },
                 post: { _ in posts += 1 }, check: { fullChecks += 1 }, pollCheck: { pollChecks += 1 },
                 onPreparation: { _ in }, onNativePreparation: { _ in }, wait: { waits += 1 })
             precondition(posts == expected)
@@ -46,7 +46,7 @@ import ApplicationServices
         var reported = false, posts = 0
         let outcome = try await NativeApplicationContextUnit.prepare(
             pid: 101, sample: { .init(foregroundPID: 999, reportedActive: reported) }, alreadyPosted: { false },
-            make: { SyntheticFocusEvents.applicationActivation(active: true) },
+            make: { SyntheticFocusEvents.applicationActivation() },
             post: { _ in
                 posts += 1
                 reported = true
@@ -119,6 +119,7 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     }
     func prepare(
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
+        onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
     ) async throws -> NativeApplicationContextUnit.Outcome {
         preparationCalls += 1
@@ -130,7 +131,7 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
                     foregroundPID: self.mode == "foreground" ? 101 : 999,
                     reportedActive: self.mode == "unknown" ? nil : self.mode == "preexistingActive" || self.active)
             }, alreadyPosted: { false },
-            make: { self.mode == "unavailable" ? nil : SyntheticFocusEvents.applicationActivation(active: true) },
+            make: { self.mode == "unavailable" ? nil : SyntheticFocusEvents.applicationActivation() },
             post: { _ in
                 self.posts += 1
                 if self.mode != "ignored" && self.mode != "scopeDuringPoll" { self.active = true }

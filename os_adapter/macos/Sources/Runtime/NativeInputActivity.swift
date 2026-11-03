@@ -68,6 +68,7 @@ import ApplicationServices
     private var foregroundChangeObserved = false
     private var foregroundObservationUnknown = false
     private var clipboardRestoration = "notUsed"
+    private var foregroundRestorations = Set<String>()
     private var summaryCompacted = false
 
     init(
@@ -224,6 +225,7 @@ import ApplicationServices
             "effects": ordered.prefix(128).map { $0.wire },
             "omittedEffects": max(0, ordered.count - 128),
             "foregroundChanged": foregroundChangeObserved ? "yes" : foregroundObservationUnknown ? "unknown" : "no",
+            "foregroundRestoration": foregroundRestoration,
             "clipboardRestoration": clipboardRestoration
         ]
         finalImpact = impact
@@ -254,6 +256,37 @@ import ApplicationServices
         case .ownershipLost: clipboardRestoration = "ownershipLost"
         case .failed: clipboardRestoration = "failed"
         }
+    }
+
+    /// Observations already obtained by the preparation owner, including a
+    /// delayed activation between native-call snapshots. Recording never reads
+    /// the desktop, restores focus, or changes input/cleanup progress.
+    func recordForegroundObservation(_ pid: pid_t?) {
+        guard !ended else { return }
+        observeForeground(["foregroundPID": pid as Any? ?? NSNull()])
+    }
+
+    func recordForegroundRestoration(_ outcome: String, originalPID: pid_t?, targetPID: pid_t?) {
+        guard !ended else { return }
+        let known = ["notNeeded", "restored", "ownershipLost", "retained", "unavailable", "failed", "unknown"]
+        let result = known.contains(outcome) ? outcome : "unknown"
+        foregroundRestorations.insert(result)
+        // A confirmed restoration reports an observed excursion, even if its
+        // asynchronous activation fell between the effect-boundary snapshots.
+        if result == "restored", let originalPID, let targetPID, originalPID != targetPID {
+            foregroundChangeObserved = true
+        }
+        record("foregroundRestoration", [
+            "outcome": result, "originalPID": originalPID as Any? ?? NSNull(),
+            "targetPID": targetPID as Any? ?? NSNull()
+        ])
+    }
+
+    /// Retain unresolved impact when several preparations share an execution
+    /// step. This summary is evidence only, never retry or cleanup policy.
+    private var foregroundRestoration: String {
+        ["failed", "unknown", "retained", "unavailable", "ownershipLost", "restored", "notNeeded"]
+            .first { foregroundRestorations.contains($0) } ?? "notUsed"
     }
 
     private static func foregroundChanged(_ before: [String: Any], _ after: [String: Any]) -> Bool {

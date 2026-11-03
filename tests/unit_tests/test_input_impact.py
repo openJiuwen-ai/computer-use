@@ -130,6 +130,32 @@ async def test_missing_native_impact_is_unknown_even_for_successful_dispatch():
     assert action_result(raw).impact.attempts[0].actual is None
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("restoration", ["ownershipLost", "failed"])
+async def test_foreground_restoration_outcome_does_not_replay_or_erase_dispatched_input(restoration):
+    evidence = replace(actual(), foreground_changed=Knowledge.YES, foreground_restoration=restoration)
+    port = RecordingPort([observed(KEYS)], [StepResult(TARGET, Dispatch.DISPATCHED, "posted", impact=evidence)])
+    result = action_result(await Engine(port).execute(Intent("insert", {"text": "a"}), TARGET))
+    attempt = result.impact.attempts[0]
+    assert result.status == "dispatched"
+    assert attempt.dispatch == "dispatched" and attempt.cleanup == "complete"
+    assert attempt.actual.foreground_restoration == restoration
+    assert attempt.actual.foreground_changed == "yes"
+    assert len(port.commands) == 1
+
+
+def test_foreground_restoration_wire_distinguishes_unimplemented_from_unused():
+    wire = {"coverage": "complete", "effects": [], "foregroundChanged": "no", "clipboardRestoration": "notUsed"}
+    assert decode_native_impact(input_impact.parse(wire)).foreground_restoration == "unavailable"
+    wire["foregroundRestoration"] = "notUsed"
+    assert decode_native_impact(input_impact.parse(wire)).foreground_restoration == "notUsed"
+    wire["foregroundRestoration"] = "restored"
+    assert decode_native_impact(input_impact.parse(wire)).foreground_restoration == "restored"
+    wire["foregroundRestoration"] = "alwaysSafe"
+    with pytest.raises(ValueError):
+        input_impact.parse(wire)
+
+
 def test_wire_impact_retains_unknown_and_truncation_and_rejects_malformed_state():
     wire = dict(
         coverage="partial",

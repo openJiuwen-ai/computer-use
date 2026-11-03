@@ -7,6 +7,7 @@ import ApplicationServices
     @MainActor static func main() async throws {
         typealias Readiness = NativePointerReadiness
         backgroundDocumentReadiness()
+        receiverSampling()
         precondition(
             !Readiness.ready(
                 kind: .click, foreground: false, windowKind: .visualOnly, focus: .notRequired, backgroundPrepared: true)
@@ -64,6 +65,43 @@ import ApplicationServices
         print(
             "PASS addressed delivery survives foreground preparation; synthetic transport alone cannot admit content clicks"
         )
+    }
+
+    private static func receiverSampling() {
+        typealias Receiver = NativeAddressedPointerReceiver
+        // A range control must receive the same declaration through a retained
+        // Element and a coordinate AX hit. A cached false focus flag is not a
+        // substitute for its independent writable Value capability.
+        for role in [kAXSliderRole, kAXIncrementorRole] {
+            for cachedFocus: Bool? in [nil, false, true] {
+                var reads = [String]()
+                let receiver = Receiver.sample(
+                    role: role, actions: [kAXIncrementAction, kAXDecrementAction], focusWritable: cachedFocus
+                ) { key in
+                    reads.append(key)
+                    return key == kAXValueAttribute
+                }
+                precondition(receiver.supported)
+                precondition(receiver.exposureQualification == .declaredInteraction)
+                precondition(receiver.qualification(concreteHit: true, sameWindow: true) == .declaredInteraction)
+                precondition(reads == [kAXValueAttribute])
+            }
+            precondition(!Receiver.sample(role: role, actions: [kAXIncrementAction]) { _ in false }.supported)
+        }
+        var reads = [String]()
+        let selectedText = Receiver.sample(role: kAXTextFieldRole, actions: [], focusWritable: false) { key in
+            reads.append(key)
+            return key == kAXSelectedTextAttribute
+        }
+        precondition(selectedText.supported && reads == [kAXSelectedTextAttribute],
+                     "retained-element facts must preserve independent selected-text interaction")
+        let button = Receiver.sample(role: kAXButtonRole, actions: [kAXPressAction]) { _ in
+            preconditionFailure("button pointer admission must not query text or ranged-value attributes")
+        }
+        precondition(button.supported)
+        precondition(!Receiver.sample(role: nil, actions: [kAXPressAction]) { _ in
+            preconditionFailure("missing role must not trigger unrelated provider queries")
+        }.supported)
     }
 
     @MainActor private static func exposureRetainsOriginalTargetRequirement() {
@@ -135,6 +173,18 @@ import ApplicationServices
         precondition(point == .sameWindowPoint && !group.supported)
         precondition(point.requirement(captured: true) == .foregroundWindowPoint)
         precondition(point.requirement(captured: false) == nil, "element and pointer-focus admission must not broaden")
+        let visualPoint = Receiver.Qualification.originalWindowPoint
+        precondition(visualPoint.requirement(captured: true) == .foregroundWindowPoint)
+        precondition(visualPoint.requirement(captured: false) == nil,
+                     "a screenshot window point cannot stand in for a retained element's exact hit")
+        precondition(Readiness.ready(
+            kind: .click, foreground: true, windowKind: .visualOnly, focus: .notRequired,
+            backgroundPrepared: false, requirement: visualPoint.requirement(captured: true)!),
+            "an exact foreground WindowServer hit remains a valid directed receiver without AX children")
+        precondition(!Readiness.ready(
+            kind: .click, foreground: false, windowKind: .visualOnly, focus: .notRequired,
+            backgroundPrepared: true, requirement: visualPoint.requirement(captured: true)!),
+            "missing AX children do not establish a background receiver")
         let exactOriginal = Receiver.Qualification.originalElementExactHit
         precondition(exactOriginal.requirement(captured: false) == .foregroundWindowPoint)
         precondition(exactOriginal.requirement(captured: true) == nil,
@@ -182,6 +232,9 @@ import ApplicationServices
             title: nil, width: 100, height: 100)
         let unit = NativePointerUnit(
             application: .current, window: mapping, pointerRequirement: pinned)
+        let weakAXQualification = try unit.addressedPointerReceiver(at: .zero)
+        precondition(weakAXQualification == .originalWindowPoint,
+                     "an absent AX window cannot erase the retained WindowServer route")
         // No real AX object is supplied: fixed delivery must not re-query a role
         // or fall through to HID after qualification was already retained.
         let fixedDelivery = try unit.resolvedDelivery(nil, at: .zero, kind: .click)

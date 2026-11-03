@@ -161,6 +161,7 @@ def decode_native_impact(value):
         Knowledge(value["foregroundChanged"]),
         value["clipboardRestoration"],
         value.get("omittedEffects", 0),
+        value.get("foregroundRestoration", "unavailable"),
     )
 
 

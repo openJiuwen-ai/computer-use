@@ -468,6 +468,7 @@ class NativeImpact:
     foreground_changed: Knowledge
     clipboard_restoration: str
     omitted_effects: int = 0
+    foreground_restoration: str = "unavailable"
 
 
 @dataclass(frozen=True)

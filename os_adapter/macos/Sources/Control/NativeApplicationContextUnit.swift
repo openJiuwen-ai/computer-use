@@ -6,6 +6,7 @@ import ApplicationServices
 @MainActor protocol NativeApplicationContextInput {
     func prepare(
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
+        onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
     ) async throws -> NativeApplicationContextUnit.Outcome
 }
@@ -22,6 +23,7 @@ import ApplicationServices
 
     func prepare(
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
+        onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
     ) async throws -> Outcome {
         let target = BackgroundTarget(application)
@@ -31,7 +33,10 @@ import ApplicationServices
         let root = AXUIElementCreateApplication(application.processIdentifier)
         AXUIElementSetMessagingTimeout(root, 0.1)
         let coordinator = SyntheticFocusCoordinator.shared
-        return try await Self.prepare(
+        return try await NativeBackgroundPreparationScope.perform(
+            target: target, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown
+        ) {
+          try await Self.prepare(
             pid: application.processIdentifier,
             sample: {
                 State(
@@ -39,7 +44,7 @@ import ApplicationServices
                     reportedActive: AXAccess.read(root, kAXFrontmostAttribute).value as? Bool)
             }, alreadyPosted: { coordinator.localActivationIsCurrent(target) },
             make: {
-                guard let event = SyntheticFocusEvents.applicationActivation(active: true) else { return nil }
+                guard let event = SyntheticFocusEvents.applicationActivation() else { return nil }
                 coordinator.observe(application.processIdentifier)
                 return event
             },
@@ -61,8 +66,12 @@ import ApplicationServices
                     throw DriverError(
                         "the original action host changed during local activity observation", code: .staleTarget)
                 }
-            }, onPreparation: onPreparation, onNativePreparation: onNativePreparation,
+            }, onPreparation: onPreparation, onNativePreparation: { event in
+                NativeBackgroundPreparationScope.current?.record(event)
+                onNativePreparation(event)
+            },
             wait: { try await Task.sleep(for: .milliseconds(25)) })
+        }
     }
 
     /// Optional construction and provider observations never authorize a new

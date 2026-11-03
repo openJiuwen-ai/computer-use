@@ -55,6 +55,7 @@ import Foundation
         precondition(unavailable["foregroundChanged"] as? String == "unknown")
         precondition(unavailable["coverage"] as? String == "complete")
         precondition(unavailable["clipboardRestoration"] as? String == "notUsed")
+        precondition(unavailable["foregroundRestoration"] as? String == "notUsed")
 
         let many = NativeInputActivity(
             operation: "many", step: 1, command: "native_action", intent: "action", target: [:],
@@ -70,7 +71,37 @@ import Foundation
         precondition(compact["omittedEffects"] as? Int == 0)
         precondition(compact["coverage"] as? String == "partial")
         try providerInitialization()
+        foregroundRestorationEvidence()
         print("PASS grouped invoked/possible/notInvoked effects, cleanup, clipboard ownership, foreground uncertainty, bounded impact")
+    }
+
+    @MainActor static func foregroundRestorationEvidence() {
+        var log = [[String: Any]]()
+        var reads = 0
+        let activity = NativeInputActivity(
+            operation: "restore", step: 1, command: "native_action", intent: "click", target: [:],
+            globalInputAllowed: false,
+            snapshot: { reads += 1; return ["foregroundPID": Int32(1)] }, emit: { log.append($0) })
+        let before = reads
+        // Both boundary snapshots see app 1. The preparation owner observed
+        // app 2 becoming foreground asynchronously in between those snapshots.
+        activity.recordForegroundObservation(2)
+        activity.recordForegroundRestoration("restored", originalPID: 1, targetPID: 2)
+        activity.recordForegroundRestoration("ownershipLost", originalPID: 1, targetPID: 3)
+        activity.recordForegroundRestoration("notNeeded", originalPID: 1, targetPID: 4)
+        precondition(reads == before, "recording a restoration must not query the desktop")
+        let receipt = NativeExecutionReceipt(target: [:], onEffect: {})
+        receipt.dispatch = "dispatched"
+        receipt.impact = activity.finish(dispatch: receipt.dispatch, cleanup: receipt.cleanup)
+        precondition(receipt.succeeded && receipt.dispatch == "dispatched" && receipt.cleanup == "complete",
+                     "preserving a new foreground owner is not failed input or failed cleanup")
+        precondition(receipt.impact?["foregroundChanged"] as? String == "yes",
+                     "returning to the original app must not erase an observed transient activation")
+        precondition(receipt.impact?["foregroundRestoration"] as? String == "ownershipLost",
+                     "a later no-op preparation must not hide the earlier restoration outcome")
+        let outcomes = log.filter { $0["phase"] as? String == "foregroundRestoration" }
+        precondition(outcomes.count == 3 && outcomes[0]["originalPID"] as? Int32 == 1)
+        precondition(outcomes[1]["outcome"] as? String == "ownershipLost")
     }
 
     @MainActor static func providerInitialization() throws {

@@ -29,18 +29,24 @@ import CryptoKit
 /// These independent callbacks are the oracle, not AXPress or an SDK receipt.
 @MainActor final class PointerButtonSurface: NSView {
     let title: String
+    let exposesAccessibility: Bool
     var callbacks = [[String: Any]]()
     var changed: () -> Void = {}
 
-    init(frame: NSRect, title: String) {
+    init(frame: NSRect, title: String, exposesAccessibility: Bool = true) {
         self.title = title
+        self.exposesAccessibility = exposesAccessibility
         super.init(frame: frame)
-        setAccessibilityElement(true)
+        setAccessibilityElement(exposesAccessibility)
         setAccessibilityRole(.group)
         setAccessibilityLabel(title)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        if exposesAccessibility { return super.accessibilityHitTest(point) }
+        return MainActor.assumeIsolated { window }
+    }
 
     func record(_ name: String, _ event: NSEvent) {
         callbacks.append([
@@ -69,7 +75,9 @@ import CryptoKit
 @MainActor final class PointerButtonDelegate: NSObject, NSApplicationDelegate {
     let folder = Bundle.main.bundleURL.deletingLastPathComponent()
     var window: NSWindow!
-    let target = PointerButtonSurface(frame: NSRect(x: 20, y: 80, width: 320, height: 180), title: "Pointer target")
+    let target = PointerButtonSurface(
+        frame: NSRect(x: 20, y: 80, width: 320, height: 180), title: "Pointer target",
+        exposesAccessibility: !CommandLine.arguments.contains("--weak-ax"))
     let guardSurface = PointerButtonSurface(
         frame: NSRect(x: 365, y: 80, width: 240, height: 180), title: "Unrelated guard")
     let guardField = NSTextField(string: "unchanged guard text")
@@ -91,6 +99,7 @@ import CryptoKit
         let cursor = CGEvent(source: nil)?.location
         let value: [String: Any] = [
             "pid": getpid(), "window": window.windowNumber, "active": NSApp.isActive,
+            "weakAX": !target.exposesAccessibility,
             "frontmostPID": NSWorkspace.shared.frontmostApplication?.processIdentifier as Any? ?? NSNull(),
             "width": window.frame.width, "height": window.frame.height,
             "targetPoint": [screen.x - window.frame.minX, window.frame.maxY - screen.y],

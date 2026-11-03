@@ -125,6 +125,10 @@ class ActualInputImpact(Protocol):
     effects: tuple[InputEffect, ...]
     foreground_changed: ImpactKnowledge
     clipboard_restoration: Literal["notUsed", "restored", "ownershipLost", "failed", "unknown"]
+    # unavailable includes platforms which do not report this mechanism yet.
+    foreground_restoration: Literal[
+        "notUsed", "notNeeded", "restored", "ownershipLost", "retained", "unavailable", "failed", "unknown"
+    ]
     omitted_effects: int
 
 

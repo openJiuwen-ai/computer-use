@@ -338,7 +338,11 @@ enum NativePointerDeliveryPolicy {
     }
 
     func addressedPointerReceiver(at point: CGPoint) throws -> NativeAddressedPointerReceiver.Qualification {
-        guard let nativeWindow else { return .unconfirmed }
+        // This unit already retains the original WindowServer identity and
+        // capture mapping. Without a concrete AX child, a captured point may
+        // still use addressed transport after exact foreground-window hit
+        // preparation. It gains no semantic/background or element authority.
+        guard let nativeWindow else { return .originalWindowPoint }
         try RequestDiagnostics.checkCancellation()
         var hit: AXUIElement?
         let status = AXUIElementCopyElementAtPosition(
@@ -347,21 +351,17 @@ enum NativePointerDeliveryPolicy {
         guard status == .success, let hit, !CFEqual(hit, nativeWindow) else {
             diagnose([
                 "kind": "pointer_receiver_evidence", "window": window.id, "queryStatus": status.rawValue,
-                "nativeType": "AXUIElement", "supported": false, "reason": "no concrete control at the original point"
+                "nativeType": "AXUIElement", "supported": false,
+                "qualification": NativeAddressedPointerReceiver.Qualification.originalWindowPoint.rawValue,
+                "reason": "no concrete AX child; captured point retains exact foreground-window requirement"
             ])
-            return .unconfirmed
+            return .originalWindowPoint
         }
         let role = AXAccess.read(hit, kAXRoleAttribute).value as? String
         var rawActions: CFArray?
         let actionStatus = AXUIElementCopyActionNames(hit, &rawActions)
         let actions = actionStatus == .success ? rawActions as? [String] : nil
-        let text = [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role ?? "")
-        let ranged = [kAXSliderRole, kAXIncrementorRole].contains(role ?? "")
-        let evidence = NativeAddressedPointerReceiver(
-            role: role, actions: actions,
-            focusWritable: text && AXAccess.writable(hit, kAXFocusedAttribute).value == true,
-            selectedTextWritable: text && AXAccess.writable(hit, kAXSelectedTextAttribute).value == true,
-            valueWritable: ranged && AXAccess.writable(hit, kAXValueAttribute).value == true)
+        let evidence = NativeAddressedPointerReceiver.query(hit, role: role, actions: actions)
         let owner = WindowGeometry.owningWindow(hit, pid: window.pid, in: nativeWindow)
         let within = owner.map { CFEqual($0, nativeWindow) } == true
         let qualification = evidence.qualification(concreteHit: true, sameWindow: within)

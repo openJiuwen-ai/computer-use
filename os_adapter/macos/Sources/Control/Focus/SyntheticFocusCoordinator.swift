@@ -5,6 +5,8 @@ import ApplicationServices
 
 /// Owns process/window preparation receipts and posted local activation leases,
 /// independently of keyboard receivers. Neither proves application consumption.
+/// A posted activation is not a reversible resource: its opposite event can
+/// dismiss the menu/editor produced by a completed request.
 @MainActor final class SyntheticFocusCoordinator {
     static let shared = SyntheticFocusCoordinator()
 
@@ -92,7 +94,7 @@ import ApplicationServices
             }
         }
         // Without an incarnation, an AX callback cannot identify which posted
-        // lease it may release. Workspace/session cleanup still owns that lease.
+        // lease it may retire. Session teardown can still release its bookkeeping.
         guard let process = NativeProcessIdentity.read(pid) else { return }
         if let prior = observers[pid] {
             // A known new incarnation needs its own AX observer, never an old
@@ -143,46 +145,25 @@ import ApplicationServices
     }
 
     private func workspaceActivationChanged(_ activated: NSRunningApplication?) {
-        prepared.removeAll()
-        // A queued activation notification still establishes that the user gave
-        // this application real activation, even after a later switch elsewhere.
-        // Match its registration lifetime before reading the current kernel
-        // identity, so an old PID notification cannot claim a replacement lease.
-        if let activated, !activated.isTerminated,
+        // A change elsewhere does not revoke this process's internal receiver.
+        // The native input unit still samples current key-window/receiver facts
+        // before delivery. Only the newly active target's old preparation is
+        // superseded here; provider deactivation owns its independent invalidation.
+        // Workspace notifications can be queued across a completed background
+        // preparation and foreground return. There is no occurrence timestamp,
+        // so an old notification cannot invalidate freshly confirmed preparation
+        // once its application is no longer actually foreground.
+        guard let activated, !activated.isTerminated,
             let registered = NSRunningApplication(processIdentifier: activated.processIdentifier),
             registered.isEqual(activated), registered.launchDate == activated.launchDate,
-            let process = localActivations.takeForWorkspaceActivation(
-                NativeProcessIdentity.read(activated.processIdentifier))
-        {
-            diagnoseLease(process, trigger: "workspaceActivationChanged", outcome: "dropped", reason: "workspaceActivated")
+            NSWorkspace.shared.frontmostApplication?.processIdentifier == activated.processIdentifier,
+            let process = NativeProcessIdentity.read(activated.processIdentifier)
+        else { return }
+        if prepared[process.pid]?.process == process {
+            prepared.removeValue(forKey: process.pid)
         }
-        cleanupLocalActivations(trigger: "workspaceActivationChanged")
-    }
-
-    private func cleanupLocalActivations(trigger: String) {
-        for process in localActivations.takeAll() {
-            let decision = NativeLocalActivationLeases.cleanup(
-                process, current: NativeProcessIdentity.read(process.pid),
-                foregroundPID: NSWorkspace.shared.frontmostApplication?.processIdentifier)
-            guard decision == .deactivate else {
-                diagnoseLease(process, trigger: trigger,
-                              outcome: decision == .processUnavailable || decision == .foregroundUnavailable
-                                ? "unknown" : "dropped", reason: decision.rawValue)
-                continue
-            }
-            guard let event = SyntheticFocusEvents.applicationActivation(active: false) else {
-                diagnoseLease(process, trigger: trigger, outcome: "unknown", reason: "eventUnavailable",
-                              effect: "unconfirmed")
-                continue
-            }
-            let activity = NativeInputActivity.begin(
-                device: .focus, transport: .process, mechanism: "processApplicationDeactivationCleanup",
-                pid: process.pid, event: event, stage: .cleanup)
-            event.postToPid(process.pid)
-            activity?.returned()
-            // This diagnostic survives session.stop without a TaskLocal audit.
-            // postToPid returning confirms submission only, never consumption.
-            diagnoseLease(process, trigger: trigger, outcome: "sent", reason: "leaseEnded", effect: "unconfirmed")
+        if let retired = localActivations.takeForWorkspaceActivation(process) {
+            diagnoseLease(retired, trigger: "workspaceActivationChanged", outcome: "dropped", reason: "workspaceActivated")
         }
     }
 
@@ -191,12 +172,12 @@ import ApplicationServices
     ) {
         let recording = trigger == "recordPosted"
         diagnose([
-            "kind": "synthetic_local_activation_lease", "phase": recording ? "recordPosted" : "cleanup",
+            "kind": "synthetic_local_activation_lease", "phase": recording ? "recordPosted" : "retired",
             "trigger": trigger,
             "targetPID": process.pid, "processIncarnation": process.incarnation, "outcome": outcome,
             "reason": reason, "effect": effect, "confirmation": "unavailable",
             "transport": "process",
-            "mechanism": recording ? "processApplicationActivation" : "processApplicationDeactivationCleanup"
+            "mechanism": "processApplicationActivation"
         ] as [String: Any])
     }
 
@@ -208,6 +189,11 @@ import ApplicationServices
         prepared.removeAll()
         if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
         activationObserver = nil
-        cleanupLocalActivations(trigger: "sessionStop")
+        // The requested operation may have left a menu/editor open for the next
+        // caller. Session teardown releases our observers and records, not that
+        // application effect. There is no paired input to release for subtype 1.
+        for process in localActivations.takeAll() {
+            diagnoseLease(process, trigger: "sessionStop", outcome: "dropped", reason: "trackingEnded")
+        }
     }
 }

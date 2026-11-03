@@ -307,6 +307,14 @@ DeepAgent manages model calls, conversation context and the tool loop. The engin
 
 ## Features
 
+On macOS, background input preparation conditionally returns foreground control changed temporarily
+by the SDK while retaining the target's internal input context. This is not an unconditional restore
+after every operation: explicit activation and subsequent user choices are preserved. Workspace
+switches and session shutdown do not send an extra deactivation notification that would undo an open
+menu; paired input and observers are still released. Equivalent foreground restoration and menu
+continuity improvements for Windows/Linux remain future work. Actual-impact receipts distinguish
+foreground changes, restoration outcomes and global input; they do not certify application business results.
+
 - **DeepAgent integration**: standard openJiuwen invocation, streaming and Runner integration, with computer-operation tools reusable in existing DeepAgent applications.
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.

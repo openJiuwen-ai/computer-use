@@ -169,6 +169,9 @@ class ActualInputImpact:
     effects: tuple[InputEffect, ...]
     foreground_changed: Literal["yes", "no", "unknown"]
     clipboard_restoration: Literal["notUsed", "restored", "ownershipLost", "failed", "unknown"]
+    foreground_restoration: Literal[
+        "notUsed", "notNeeded", "restored", "ownershipLost", "retained", "unavailable", "failed", "unknown"
+    ]
     omitted_effects: int
 
 class InputAttempt:

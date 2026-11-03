@@ -52,7 +52,8 @@ import ApplicationServices
             if let local = try context.access.units.actionContextUnit(context.command.target, action: name) {
                 try check()
                 _ = try await local.prepare(
-                    check: check, onPreparation: context.receipt.recordPreparation, onNativePreparation: { _ in })
+                    check: check, onPreparation: context.receipt.recordPreparation,
+                    onCleanupUnknown: context.receipt.recordCleanupUnknown, onNativePreparation: { _ in })
                 try check()
             }
         }

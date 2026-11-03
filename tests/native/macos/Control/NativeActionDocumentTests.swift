@@ -269,6 +269,7 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
     }
     func prepare(
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
+        onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
     ) async throws -> NativeApplicationContextUnit.Outcome {
         try check()

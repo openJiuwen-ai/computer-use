@@ -183,6 +183,9 @@ input_impact = obj(
         ),
         foregroundChanged=knowledge,
         clipboardRestoration=enum("notUsed", "restored", "ownershipLost", "failed", "unknown"),
+        foregroundRestoration=enum(
+            "notUsed", "notNeeded", "restored", "ownershipLost", "retained", "unavailable", "failed", "unknown"
+        ).optional(),
         omittedEffects=number(integer=True, min=0).optional(),
     )
 )

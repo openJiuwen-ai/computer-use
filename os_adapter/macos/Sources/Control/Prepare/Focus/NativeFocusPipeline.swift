@@ -15,10 +15,18 @@ import ApplicationServices
     ) async throws -> NativeFocusOutcome {
         let request = NativeFocusRequest(
             target: target, window: window, element: nativeWindow, needsKeyWindow: needsKeyWindow, check: beforeAction,
-            onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown, onNativePreparation: onNativePreparation)
+            onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
+            onNativePreparation: { event in
+                NativeBackgroundPreparationScope.current?.record(event)
+                onNativePreparation(event)
+            })
         let metric = RequestDiagnostics.metrics?.start(.windowPreparation)
         defer { metric?.end() }
-        return try await run(
+        return try await NativeBackgroundPreparationScope.perform(
+            target: target, check: beforeAction, onPreparation: onPreparation,
+            onCleanupUnknown: onCleanupUnknown
+        ) {
+          try await run(
             request, observeOutcome: observeOutcome,
             stages: NativeFocusStages(
                 begin: {
@@ -26,8 +34,10 @@ import ApplicationServices
                     SyntheticFocusCoordinator.shared.observe($0.window.pid)
                 }, applicationContext: PrepareFocusApplicationContextPass.run, sample: SampleFocusStatePass.run,
                 notify: PrepareSyntheticApplicationPass.run, selectWindow: PrepareTargetWindowPass.run,
-                settle: { _ in try await Task.sleep(for: .milliseconds(30)) }, confirm: ConfirmFocusPreparationPass.run)
-        )
+                settle: { _ in try await Task.sleep(for: .milliseconds(30)) }, confirm: ConfirmFocusPreparationPass.run,
+                finishPreparation: { _ in await NativeBackgroundPreparationScope.current?.finish() ?? false })
+          )
+        }
     }
 
     /// The same selected-window composition is used by the native adapter and
@@ -44,8 +54,11 @@ import ApplicationServices
         // Keep the existing bounded queue settle. The key-focus notification
         // neither requests an active ACK nor proves the window/receiver ready.
         if plan.notify || plan.selectWindow { try await stages.settle(request) }
+        // Foreground restitution belongs before confirmation/input. Its real
+        // deactivation may change the key/main receiver and invalidate receipts.
+        let restored = await stages.finishPreparation(request)
         try stages.confirm(request)
         return NativeFocusOutcome(
-            initial: state, final: observeOutcome ? try stages.sample(request) : state, waitEnd: .notNeeded)
+            initial: state, final: observeOutcome || restored ? try stages.sample(request) : state, waitEnd: .notNeeded)
     }
 }

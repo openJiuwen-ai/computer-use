@@ -34,7 +34,8 @@ import ApplicationServices
         }
         try validateAction()
         let outcome = try await unit.prepare(
-            check: validateAction, onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record)
+            check: validateAction, onPreparation: receipt.recordPreparation,
+            onCleanupUnknown: receipt.recordCleanupUnknown, onNativePreparation: evidence.record)
         try validateAction()
         evidence.observeActionContext(outcome)
     }

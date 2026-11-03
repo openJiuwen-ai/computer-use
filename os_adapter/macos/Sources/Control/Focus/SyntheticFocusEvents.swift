@@ -8,13 +8,11 @@ import ApplicationServices
 enum SyntheticFocusEvents {
     /// Public event construction, with independently observed AppKit delivery.
     /// Posting is not proof that the application consumed the notification.
-    static func applicationActivation(active: Bool) -> CGEvent? {
+    static func applicationActivation() -> CGEvent? {
         guard
             let event = NSEvent.otherEvent(
                 with: .appKitDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-                subtype: active
-                    ? NSEvent.EventSubtype.applicationActivated.rawValue
-                    : NSEvent.EventSubtype.applicationDeactivated.rawValue, data1: 0, data2: 0)?.cgEvent
+                subtype: NSEvent.EventSubtype.applicationActivated.rawValue, data1: 0, data2: 0)?.cgEvent
         else { return nil }
         event.timestamp = DispatchTime.now().uptimeNanoseconds
         return event

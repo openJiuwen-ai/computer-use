@@ -2,17 +2,18 @@
 
 import ApplicationServices
 
-/// Distinguish declared content interaction from a concrete hit in the original
-/// window from an exact hit on the original element. Both geometric proofs
-/// require the actual foreground window; neither grants background capability.
+/// Declared content interaction may admit background preparation. Point-only
+/// qualifications retain their exact foreground-window requirement; an AX
+/// provider omitting children cannot by itself require global mouse injection.
 struct NativeAddressedPointerReceiver {
     enum Qualification: String {
-        case unconfirmed, declaredInteraction, sameWindowPoint, originalElementExactHit, originalElementNeedsExposure
+        case unconfirmed, declaredInteraction, sameWindowPoint, originalWindowPoint
+        case originalElementExactHit, originalElementNeedsExposure
 
         func requirement(captured: Bool) -> NativePointerReadiness.Requirement? {
             switch self {
             case .declaredInteraction: return .contentReceiver
-            case .sameWindowPoint: return captured ? .foregroundWindowPoint : nil
+            case .sameWindowPoint, .originalWindowPoint: return captured ? .foregroundWindowPoint : nil
             case .originalElementExactHit, .originalElementNeedsExposure:
                 return captured ? nil : .foregroundWindowPoint
             case .unconfirmed: return nil
@@ -24,6 +25,32 @@ struct NativeAddressedPointerReceiver {
     var focusWritable = false
     var selectedTextWritable = false
     var valueWritable = false
+
+    /// One role-scoped query for both retained elements and AX point hits. A
+    /// previously sampled focus attribute can be reused, but it does not erase
+    /// independent selected-text or ranged-value interaction declarations.
+    static func sample(
+        role: String?, actions: [String]?, focusWritable: Bool? = nil, writable: (String) -> Bool
+    ) -> Self {
+        var result = Self(role: role, actions: actions)
+        switch role {
+        case kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole:
+            result.focusWritable = focusWritable ?? writable(kAXFocusedAttribute)
+            if !result.focusWritable { result.selectedTextWritable = writable(kAXSelectedTextAttribute) }
+        case kAXSliderRole, kAXIncrementorRole:
+            result.valueWritable = writable(kAXValueAttribute)
+        default: break
+        }
+        return result
+    }
+
+    @MainActor static func query(
+        _ element: AXUIElement, role: String?, actions: [String]?, focusWritable: Bool? = nil
+    ) -> Self {
+        sample(role: role, actions: actions, focusWritable: focusWritable) {
+            AXAccess.writable(element, $0).value == true
+        }
+    }
 
     /// A scroll preparation point is not the requested click receiver. For a
     /// retained original element, allow exposure before its final hit can be

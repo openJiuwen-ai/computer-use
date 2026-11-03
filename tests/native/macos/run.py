@@ -37,6 +37,7 @@ GROUPS = (
     "NativeWindowQueryTiming",
     "NativeUnifiedPointerPolicy",
     "NativeForegroundPreparation",
+    "NativeForegroundRestoration",
     "NativeInputWindowScope",
     "NativeVisualDirectory",
     "NativeKeyboardEndpoint",

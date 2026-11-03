@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Verify real AppKit right/middle/double click callbacks through the public SDK.
@@ -51,7 +50,7 @@ def expected_callbacks(button, count):
     return [(name, number, click) for click in range(1, count + 1) for name in names[button]]
 
 
-async def verify(folder, selected, driver_option):
+async def verify(folder, selected, driver_option, *, weak_ax=False):
     bundle = "local.computer-use.pointer-buttons." + uuid.uuid4().hex
     driver = Path(driver_option or native_driver()["command"]).resolve()
     computer = Computer(allow_global_input=False)
@@ -61,10 +60,11 @@ async def verify(folder, selected, driver_option):
     report = {
         "passed": False,
         "allow_global_input": False,
+        "weak_ax": weak_ax,
         "sdk": computer_use.__file__,
         "driver": str(driver),
         "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
-        "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "head": (await asyncio.to_thread(subprocess.check_output, ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True)).strip(),
         "cases": [],
     }
     sources = {
@@ -83,8 +83,11 @@ async def verify(folder, selected, driver_option):
 
     set_diagnostic_handler(record)
     try:
-        await asyncio.to_thread(build_fixture, folder, bundle, "PointerButtonProbe")
+        await asyncio.to_thread(
+            build_fixture, folder, bundle, "PointerButtonProbe", arguments=("--weak-ax",) if weak_ax else ()
+        )
         initial = await state(folder)
+        assert initial["weakAX"] == weak_ax
         report["initial"] = initial
         app = computer.app(bundle)
         for case in selected:
@@ -136,6 +139,19 @@ async def verify(folder, selected, driver_option):
                 and isinstance(item.get("value"), dict)
                 and item["value"].get("kind") == "input_activity"
             ]
+            if weak_ax and case == "left":
+                receiver_evidence = [
+                    item["value"]
+                    for item in events[start:]
+                    if item.get("kind") == "backend_diagnostic"
+                    and isinstance(item.get("value"), dict)
+                    and item["value"].get("kind") == "pointer_receiver_evidence"
+                ]
+                row["receiver_evidence"] = receiver_evidence
+                assert any(item.get("qualification") == "originalWindowPoint" for item in receiver_evidence), (
+                    "The weak AX case must exercise the retained-window qualification, not a concrete child",
+                    receiver_evidence,
+                )
             if caught is not None:
                 raise caught
             callbacks = after["callbacks"][len(before["callbacks"]) :]
@@ -197,12 +213,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", choices=("all", *CASES), default="all")
     parser.add_argument("--driver", help="Rebuilt driver path; defaults to this checkout's driver")
+    parser.add_argument("--weak-ax", action="store_true", help="Expose the target as its AX window only")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     (ROOT / ".artifacts").mkdir(exist_ok=True)
     folder = Path(tempfile.mkdtemp(prefix="pointer-buttons-", dir=ROOT / ".artifacts"))
     try:
-        asyncio.run(verify(folder, CASES if args.case == "all" else [args.case], args.driver))
+        asyncio.run(verify(folder, CASES if args.case == "all" else [args.case], args.driver, weak_ax=args.weak_ax))
     finally:
         LOG.info("Pointer button evidence: %s", folder)
 
