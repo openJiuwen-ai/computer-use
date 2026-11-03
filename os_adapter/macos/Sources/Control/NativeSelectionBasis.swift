@@ -185,7 +185,7 @@ import ApplicationServices
         var validated = Set<String>()
         for item in checks {
             try RequestDiagnostics.checkCancellation()
-            if validated.insert(item.key[0]).inserted { try NativeFactCollector.validateRetainedTarget(item.target) }
+            if validated.insert(item.key[0]).inserted { _ = try access.nativeReadTarget(item.key[0]) }
             let element = item.target.element
             let actual: Fact
             switch item.key[1] {

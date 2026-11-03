@@ -107,7 +107,10 @@ class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
                     and (state.observation.image.target == cast("Binding", request.target))
                 ):
                     state.capture_expired = True
-            pending_observations_discarded(self.controller)
+            try:
+                pending_observations_discarded(self.controller)
+            except Exception as delivery_error:  # noqa: BLE001 - host cleanup cannot replace the action outcome
+                error.add_note(f"Pending observation delivery cleanup failed: {delivery_error}")
             raise
 
     def _run(self, value: ExecuteAction, control: Control) -> ActionResult:

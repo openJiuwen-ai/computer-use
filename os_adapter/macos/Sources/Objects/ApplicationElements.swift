@@ -115,7 +115,11 @@ import ApplicationServices
         }
         let provider = newKnown ? next.provider : previous.provider
         var target = newTarget
-        if Self.boundaryContext(next.context).count < Self.boundaryContext(previous.context).count {
+        let currentBoundaries = Set(Self.boundaryContext(next.context).map(\.native))
+        if !newTarget.contextComplete, contexts.contains(where: { !currentBoundaries.contains($0.native) }) {
+            // Equal-size partial paths can still omit an original host window
+            // while adding a new nested owner. Retained boundary evidence,
+            // rather than the old/new counts, identifies this missing path.
             target.ancestors = previousTarget.ancestors
         }
         // A later observation may create a new lifetime, never fill an old
@@ -172,7 +176,8 @@ import ApplicationServices
                 }
             }
         }
-        for current in currentPath {
+        var ordered = [Context]()
+        for (position, current) in currentPath.enumerated() {
             let physicalWindow = current.identity.attributes["AXRole"] == "AXWindow"
             if let index = merged.firstIndex(where: {
                 $0.native == current.native || physicalWindow && $0.identity.attributes["AXRole"] == "AXWindow"
@@ -185,12 +190,33 @@ import ApplicationServices
                               "fields": merged[index].identity.changedFields(in: .init(values: current.identity.attributes, absent: current.identity.absent))])
                     return nil
                 }
-                merged[index] = Context(native: current.native, identity: identity)
+                let refined = Context(native: current.native, identity: identity)
+                merged[index] = refined
+                ordered.append(refined)
             } else {
-                merged.append(current)
+                // Even a subtree can prove that a new owner precedes an
+                // already retained inner owner. Preserve that local order
+                // without treating other omitted boundaries as removed.
+                let nextKnown = currentPath.dropFirst(position + 1).first { next in
+                    merged.contains { $0.native == next.native }
+                }
+                let insertion = nextKnown.flatMap { next in merged.firstIndex { $0.native == next.native } }
+                merged.insert(current, at: insertion ?? merged.count)
+                ordered.append(current)
             }
         }
-        return merged
+        // A complete path also supplies the current containment order. Merely
+        // appending newly observed outer owners would make them look innermost
+        // to observedInteractionSurface, despite the original leaf surviving.
+        if completePath { return ordered }
+        // A partial path also establishes the relative order of the boundaries
+        // it actually contains. Refill only their slots in current order;
+        // omitted owners stay retained and omission never proves removal.
+        let observed = Set(ordered.map(\.native))
+        var current = ordered.makeIterator()
+        var retained = merged.map { observed.contains($0.native) ? current.next() ?? $0 : $0 }
+        retained.append(contentsOf: current)
+        return retained
     }
 
     func invalidate(pid: pid_t, scope: String? = nil) {

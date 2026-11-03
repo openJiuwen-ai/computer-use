@@ -94,6 +94,8 @@ import AppKit
             "windowID": String(describing: ObjectIdentifier(window)),
             "oldButtonID": oldButtonID, "oldWrapperID": oldWrapperID, "oldWindowID": oldWindowID,
             "windowNumber": window.windowNumber, "buttonAttached": button.window === window,
+            "buttonTitle": button.title, "buttonEnabled": button.isEnabled,
+            "buttonFrame": NSStringFromRect(button.frame), "windowFrame": NSStringFromRect(window.frame),
             "frontmostPID": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1,
             "commandError": commandError as Any? ?? NSNull()
         ]
@@ -116,6 +118,20 @@ import AppKit
         case "metadata":
             wrapper.generation += 1
             marker.stringValue = "Layout metadata changed \(sequence)"
+        case "state":
+            button.title = "Retained button (renamed)"
+            button.frame.origin.x += 15
+            window.setFrameOrigin(NSPoint(x: window.frame.origin.x + 20, y: window.frame.origin.y + 10))
+            marker.stringValue = "Label and geometry changed \(sequence)"
+        case "disable":
+            button.isEnabled = false
+            marker.stringValue = "Temporarily disabled \(sequence)"
+        case "enable":
+            button.isEnabled = true
+            marker.stringValue = "Enabled again \(sequence)"
+        case "reset-state":
+            button.title = "Retained button"
+            button.isEnabled = true
         case "rewrap":
             oldWrapperID = String(describing: ObjectIdentifier(wrapper))
             wrapper.removeFromSuperview()

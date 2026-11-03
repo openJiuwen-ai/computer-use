@@ -187,7 +187,11 @@ a newly discovered window without rebinding existing Window, Element or screensh
 On macOS, live element references survive unrelated layout-wrapper changes, partial observations,
 and cache pressure from other references. The SDK refreshes necessary operation facts.
 A destroyed element, closed/reopened window, or actual document ownership change still rejects the
-old reference and includes the related observation when available. Action identities are independent
+old reference and includes the related observation when available. `app.element(ref)` and
+`window.element(ref)` can retrieve a reference already published by that application; constructing
+the handle does not claim its target is alive or authorize access. Actual reads and writes check
+the original window scope and lifetime, so failed writes can return current observation in the same call.
+Action identities are independent
 of bounded historical text caches; minimal reference metadata remains until confirmed retirement or
 session end. This native stability improvement and its real SDK/MCP validation cover macOS;
 the corresponding Windows/Linux native changes and validation are follow-up work.

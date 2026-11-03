@@ -349,6 +349,242 @@ import ApplicationServices
         print("PASS complete paths distinguish new nested evidence from actual different-role document replacement")
     }
 
+    @MainActor static func verifyCurrentBoundaryOrder(complete: Bool) {
+        let scene = Scene()
+        let root = scene.target(scene.window, values: ["AXRole": "AXWindow"])
+        let popover = scene.target(scene.row, values: ["AXRole": "AXPopover"], parent: root)
+        func button(_ parent: ApplicationElements.Target) -> ApplicationElements.Target {
+            scene.target(scene.field, values: ["AXRole": "AXButton", "AXIdentifier": "button"], parent: parent)
+        }
+        let life = scene.observe(button(popover))
+        let alias = scene.registry.bind(life, text: "original button")!
+        let editorState = scene.registry.target(alias)!.cellEditorState
+        let outerSheet = scene.target(scene.cell, values: ["AXRole": "AXSheet"], parent: root)
+        let nestedPopover = scene.target(scene.row, values: ["AXRole": "AXPopover"], parent: outerSheet)
+        var extended = button(nestedPopover)
+        if !complete {
+            extended.context.removeFirst()
+            extended.ancestors.removeFirst()
+            extended.contextComplete = false
+        }
+        precondition(scene.observe(extended) == life,
+                     "adding an outer owner while the exact popover and leaf survive does not replace the target")
+        let retained = scene.registry.target(alias)!
+        precondition(retained.context.map { $0.identity.attributes["AXRole"]! } == ["AXWindow", "AXSheet", "AXPopover"],
+                     "complete and partial observations preserve proven local order instead of appending new owners")
+        precondition(CFEqual(retained.observedInteractionSurface!, popover.element),
+                     "a newly observed outer sheet must not steal the surviving inner popover's input surface")
+        precondition(retained.cellEditorState === editorState)
+        if !complete {
+            precondition(retained.ancestors.contains { CFEqual($0, root.element) },
+                         "equal-size partial paths can add a sheet yet omit the still-required host window")
+            precondition(!retained.contextComplete,
+                         "retaining the omitted window does not manufacture a current complete path")
+        }
+
+        let innerSheet = scene.target(AXUIElementCreateApplication(19140), values: ["AXRole": "AXSheet"], parent: nestedPopover)
+        precondition(scene.observe(button(innerSheet)) == life)
+        precondition(CFEqual(scene.registry.target(alias)!.observedInteractionSurface!, innerSheet.element),
+                     "an actual new innermost surface, unlike an outer insertion, becomes the current surface")
+
+        var partial = button(nestedPopover)
+        partial.context = [ApplicationElements.childContext(nestedPopover).last!]
+        partial.ancestors = [nestedPopover.element]
+        partial.contextComplete = false
+        precondition(scene.observe(partial) == life)
+        precondition(CFEqual(scene.registry.target(alias)!.observedInteractionSurface!, innerSheet.element),
+                     "a partial relationship read cannot prove the omitted inner owner disappeared")
+        precondition(scene.registry.text(alias)?.value == "original button")
+
+        var reordered = button(innerSheet)
+        reordered.context = [
+            ApplicationElements.childContext(innerSheet).last!,
+            ApplicationElements.childContext(nestedPopover).last!
+        ]
+        reordered.ancestors = [innerSheet.element, nestedPopover.element]
+        reordered.contextComplete = false
+        precondition(scene.observe(reordered) == life)
+        let current = scene.registry.target(alias)!
+        precondition(current.context.map(\.native) == [
+            root, outerSheet, innerSheet, nestedPopover
+        ].map { ApplicationElements.childContext($0).last!.native },
+        "a partial path's explicitly observed owners can reorder while omitted window/sheet evidence survives")
+        precondition(CFEqual(current.observedInteractionSurface!, nestedPopover.element),
+                     "reordering two known boundaries must update the actual nearest input surface")
+
+        let movedSheet = scene.target(innerSheet.element, values: ["AXRole": "AXSheet"], parent: outerSheet)
+        let movedPopover = scene.target(popover.element, values: ["AXRole": "AXPopover"], parent: movedSheet)
+        let completeCurrent = button(movedPopover)
+        precondition(scene.observe(completeCurrent) == life)
+        let currentAncestors = scene.registry.target(alias)!.ancestors
+        precondition(currentAncestors.count == completeCurrent.ancestors.count
+                     && zip(currentAncestors, completeCurrent.ancestors).allSatisfy { CFEqual($0, $1) },
+                     "a later complete path must replace retained historical ancestry with its actual current path")
+        precondition(scene.registry.target(alias)!.contextComplete)
+
+        let replacement = scene.target(AXUIElementCreateApplication(19141), values: ["AXRole": "AXPopover"], parent: outerSheet)
+        let nextLife = scene.observe(button(replacement))
+        precondition(nextLife != life && scene.registry.target(alias) == nil,
+                     "a complete path proving the original popover disappeared still retires the old binding")
+        precondition(scene.registry.target(nextLife)!.cellEditorState !== editorState)
+        print("PASS boundary order selects the real innermost surface (complete=\(complete)); partial reads retain owners")
+    }
+
+    @MainActor static func verifyUncertainReobservation() {
+        let scene = Scene()
+        var original = scene.targets().field
+        original.providerKnown = true
+        let life = scene.observe(original)
+        let alias = scene.registry.bind(life, text: "original text")!
+        let editorState = scene.registry.target(alias)!.cellEditorState
+        var partial = scene.target(scene.field, values: ["AXRole": "AXTextField"])
+        partial.contextComplete = false
+        precondition(scene.observe(partial) == life,
+                     "temporarily unreadable identifier/provider/parent facts are not contradictory evidence")
+        let retained = scene.registry.target(alias)!
+        precondition(retained.identity == original.identity && retained.context == original.context)
+        precondition(retained.providerKnown && retained.provider == nil)
+        precondition(retained.cellEditorState === editorState)
+        precondition(!retained.contextComplete,
+                     "retaining old ancestors must not turn a partial read into a complete current path")
+        precondition(scene.observe(original) == life,
+                     "the same reference remains usable when the original facts can be read again")
+
+        var missingIdentifier = partial
+        missingIdentifier.identity = .init(facts: .init(values: ["AXRole": "AXTextField"], absent: ["AXIdentifier"]))
+        precondition(scene.observe(missingIdentifier) != life && scene.registry.target(alias) == nil,
+                     "confirmed disappearance of an earlier known leaf identifier differs from a failed query")
+        precondition(scene.registry.text(alias)?.value == "original text",
+                     "retiring the live object does not rewrite its captured historical text")
+        print("PASS uncertain re-observation preserves lifetime and provenance; confirmed leaf conflict still retires")
+    }
+
+    @MainActor static func verifyProviderFailureLifetime(reading: Bool) {
+        func validate(_ scene: Scene, _ life: String) throws {
+            let inspection = NativeElementInspection(registry: scene.registry)
+            if reading {
+                _ = try NativeFactCollector(registry: scene.registry, inspection: inspection).readTarget(life)
+            } else {
+                try inspection.validateTargetIdentity(scene.registry.target(life)!)
+            }
+        }
+        for known in [false, true] {
+            let scene = Scene()
+            var target = scene.target(scene.field, values: ["AXRole": "AXButton"])
+            target.providerKnown = known
+            let life = scene.observe(target)
+            let alias = scene.registry.bind(life, text: "provider snapshot")!
+            let unrelated = scene.observe(scene.target(scene.cell, values: ["AXRole": "AXButton"]))
+            do {
+                try validate(scene, life)
+                preconditionFailure("a foreign native PID without its process incarnation cannot authorize input")
+            } catch let error as DriverError {
+                precondition(error.code == (known ? .staleTarget : .observationIncomplete))
+            } catch {
+                preconditionFailure("unexpected provider error: \(error)")
+            }
+            precondition((scene.registry.target(life) == nil) == known,
+                         "confirmed provider movement retires; unknown provider evidence retains the original lifetime")
+            precondition((scene.registry.target(alias) == nil) == known)
+            precondition(scene.registry.target(unrelated) != nil,
+                         "a leaf provider failure cannot retire unrelated objects in the same scope")
+            precondition(scene.registry.text(alias)?.value == "provider snapshot")
+            if known {
+                precondition(scene.observe(target) != life && scene.registry.target(life) == nil,
+                             "later observations must not revive a provider-conflicted token")
+            } else {
+                precondition(scene.observe(target) == life,
+                             "an uncertain provider query must not force the caller to acquire another token")
+            }
+        }
+
+        let scene = Scene()
+        var target = scene.target(AXUIElementCreateApplication(scene.app.processIdentifier), values: ["AXRole": "AXApplication"])
+        target.provider = NativeProcessIdentity(
+            pid: scene.app.processIdentifier, parent: 0, seconds: 0, microseconds: 0, executable: "/old-provider")
+        target.providerKnown = true
+        let life = scene.observe(target)
+        do {
+            try validate(scene, life)
+            preconditionFailure("a changed provider incarnation must be rejected before attribute or input reads")
+        } catch let error as DriverError {
+            precondition(error.code == .staleTarget && error.description.contains("lifetime changed"))
+        } catch {
+            preconditionFailure("unexpected provider incarnation error: \(error)")
+        }
+        precondition(scene.registry.target(life) == nil,
+                     "process incarnation conflict must retire the original native action reference")
+
+        let invalidScene = Scene()
+        let invalid = invalidScene.observe(invalidScene.target(
+            AXUIElementCreateApplication(-1), values: ["AXRole": "AXButton"]))
+        do {
+            try validate(invalidScene, invalid)
+            preconditionFailure("AX invalidUIElement is positive leaf end-of-lifetime evidence")
+        } catch let error as DriverError {
+            precondition(error.code == .staleTarget)
+        } catch {
+            preconditionFailure("unexpected invalid native object error: \(error)")
+        }
+        precondition(invalidScene.registry.target(invalid) == nil,
+                     "both reading and writing must retire a native object confirmed invalid")
+        print("PASS provider validation (reading=\(reading)) retains unknown evidence and retires confirmed conflicts")
+    }
+
+    // Only metadata is substituted in the mismatch tests; each expected
+    // failure must occur before any process lookup or AX query on this token.
+    final class LaunchMetadata: NSRunningApplication, @unchecked Sendable {
+        var value: Date?
+        override var launchDate: Date? { value }
+    }
+
+    @MainActor static func verifyLaunchMetadataLifetime() throws {
+        let initial = Date(timeIntervalSince1970: 10), later = Date(timeIntervalSince1970: 20)
+        precondition(NativeFactCollector.launchDateCheck(expected: nil, current: nil) == .matched)
+        precondition(NativeFactCollector.launchDateCheck(expected: nil, current: initial) == .matched,
+                     "newly available launch metadata cannot block the original retained application")
+        precondition(NativeFactCollector.launchDateCheck(expected: initial, current: initial) == .matched)
+        precondition(NativeFactCollector.launchDateCheck(expected: initial, current: nil) == .unavailable)
+        precondition(NativeFactCollector.launchDateCheck(expected: initial, current: later) == .changed)
+
+        for current in [nil, later] {
+            let app = LaunchMetadata()
+            app.value = current
+            let registry = ApplicationElements(), element = AXUIElementCreateApplication(getpid())
+            let identity = ElementIdentity(facts: .init(values: ["AXRole": "AXApplication"]))
+            let target = ApplicationElements.Target(
+                application: app, launched: initial, element: element, scope: "launch-metadata",
+                role: "AXApplication", identity: identity)
+            let life = registry.observe(
+                .init(pid: getpid(), launched: initial, element: element, scope: target.scope),
+                evidence: .init(identity: identity, provider: nil, context: []), value: target)
+            let alias = registry.bind(life, text: "original metadata")!
+            let collector = NativeFactCollector(registry: registry, inspection: .init(registry: registry))
+            do {
+                _ = try collector.readTarget(life)
+                preconditionFailure("known launch metadata must be checked before reading the native object")
+            } catch let error as DriverError {
+                precondition(error.code == (current == nil ? .observationIncomplete : .staleTarget))
+            }
+            precondition((registry.target(life) == nil) == (current != nil),
+                         "only a known launch-date contradiction permanently retires the original reference")
+            precondition(registry.text(alias)?.value == "original metadata")
+        }
+
+        let scene = Scene()
+        let element = AXUIElementCreateApplication(scene.app.processIdentifier)
+        let identity = ElementIdentity(facts: .init(values: ["AXRole": "AXApplication"]))
+        let target = ApplicationElements.Target(
+            application: scene.app, launched: nil, element: element, scope: scene.scope,
+            role: "AXApplication", identity: identity, providerKnown: true)
+        let life = scene.observe(target)
+        let collector = NativeFactCollector(registry: scene.registry, inspection: .init(registry: scene.registry))
+        let current = try collector.readTarget(life)
+        precondition(CFEqual(current.element, element) && scene.registry.target(life) != nil,
+                     "unknown historical launch metadata still permits the real application and native provider checks")
+        print("PASS launch metadata enrichment remains usable; missing known facts retain and contradictions retire")
+    }
+
     @MainActor static func verifyCommandRegistryContinuity() {
         for role in ["AXButton", "AXMenuItem", "AXMenuBarItem", "AXCheckBox", "AXRadioButton", "AXLink"] {
             let scene = Scene()
@@ -383,6 +619,9 @@ import ApplicationServices
     }
 
     @MainActor static func main() throws {
+        // An unregistered CLI has NSRunningApplication.current PID -1. Create
+        // only the windowless AppKit process, never activate or open a surface.
+        NSApplication.shared.setActivationPolicy(.prohibited)
         verifyRowPresentation()
         verifyStrongEvidence()
         verifyCommandPresentation()
@@ -394,5 +633,11 @@ import ApplicationServices
         verifyIdentifiedRowMovement()
         verifyIdentityFailureEvidence()
         verifyDocumentOwnershipAcrossRoles()
+        verifyCurrentBoundaryOrder(complete: true)
+        verifyCurrentBoundaryOrder(complete: false)
+        verifyUncertainReobservation()
+        verifyProviderFailureLifetime(reading: false)
+        verifyProviderFailureLifetime(reading: true)
+        try verifyLaunchMetadataLifetime()
     }
 }

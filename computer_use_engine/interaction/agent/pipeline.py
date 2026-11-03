@@ -476,26 +476,17 @@ class AgentInterfacePipeline:
     def validate_reference_owner(self, ui: UIHandle, snapshot: ElementSnapshot) -> None:
         """Retrieve a known handle without claiming its target is still alive.
 
-        Retained application/window provenance authorizes handle construction,
-        not input. The write/read boundary checks current lifetime and scope;
-        a failed write can then return the current related observation.
+        The application's reference table establishes where the number came
+        from. Construction grants neither input nor live read access. Those
+        boundaries check current Window scope and lifetime, including ended
+        descendants whose former ancestry is no longer in the directory. A
+        failed write can then return its related observation in the same call.
         """
         target = snapshot["binding"]
         self.controller.validate_element(target)
         instance = ui._instance
         if instance.session is not None and instance.session != target.session:
             raise local_failure("element belongs to another session", "obtain a current App", "stale_target")
-        identity = snapshot.get("window_identity")
-        evidence = instance.surface_evidence(target.surface, identity)
-        fixed = getattr(ui, "_window_identity", None)
-        if evidence is not None and (
-            ui._anchor is None
-            or fixed is not None and evidence.identity == WindowIdentity(ui._anchor, fixed.surface, fixed.instance)
-        ):
-            return
-        # Descendant and application-menu references still need their original
-        # scope relation; do not grant one merely because a number is known.
-        self.validate_snapshot(ui, snapshot, allow_unknown=True)
 
     @staticmethod
     def keyboard_context(ui: UIHandle, *, require_observed: bool = True) -> Binding:
