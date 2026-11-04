@@ -33,7 +33,7 @@ import ApplicationServices
         let root = AXUIElementCreateApplication(application.processIdentifier)
         AXUIElementSetMessagingTimeout(root, 0.1)
         let coordinator = SyntheticFocusCoordinator.shared
-        return try await NativeBackgroundPreparationScope.perform(
+        return try await NativeForegroundRestorationScope.perform(
             target: target, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown
         ) {
           try await Self.prepare(
@@ -67,7 +67,7 @@ import ApplicationServices
                         "the original action host changed during local activity observation", code: .staleTarget)
                 }
             }, onPreparation: onPreparation, onNativePreparation: { event in
-                NativeBackgroundPreparationScope.current?.record(event)
+                NativeForegroundRestorationScope.current?.record(event)
                 onNativePreparation(event)
             },
             wait: { try await Task.sleep(for: .milliseconds(25)) })

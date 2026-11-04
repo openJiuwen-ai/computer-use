@@ -44,12 +44,19 @@ enum NativeElementHitSelection {
         // later frozen-point checks. Only additional candidate queries are short.
         var queryTimeout: Float? { source == .center ? nil : 0.05 }
     }
-    enum Basis: String { case exactHit, providerStackingGeometry, coarseAncestorGeometry, backgroundGeometry, rejected }
+    enum Basis: String {
+        case exactHit, providerStackingGeometry, coarseAncestorGeometry, backgroundGeometry
+        case unsupportedForegroundGeometry, rejected
+    }
     enum Preparation { case geometryReady, foreground, unavailable }
     struct Observation<Hit> {
         let evidence: NativeElementHitEvidence
         let hit: Hit?
         let foreground: Bool
+        // Independent, live parent-path and physical-window evidence. Only a
+        // provider explicitly lacking hit testing can use this qualification;
+        // a timeout, empty result or conflicting child never acquires it.
+        var originalWindowGeometry = false
     }
     struct Selection<Hit> {
         let candidate: Candidate
@@ -133,12 +140,16 @@ enum NativeElementHitSelection {
                     : observation.evidence.relation == .coarseAncestorWindow && observation.foreground
                     && candidate.permitsGeometryFallback
                     ? .coarseAncestorGeometry
+                    : observation.evidence.relation == .unsupported && observation.foreground
+                    && observation.originalWindowGeometry && candidate.permitsGeometryFallback
+                    ? .unsupportedForegroundGeometry
                     : (!observation.foreground && candidate.permitsGeometryFallback
                         && observation.evidence.permitsBackgroundGeometry ? .backgroundGeometry : .rejected))
             let result = Selection(candidate: candidate, observation: observation, basis: basis)
             if basis == .exactHit { return result }
             if basis == .providerStackingGeometry { return result }
             if basis == .coarseAncestorGeometry { coarse = result }
+            if basis == .unsupportedForegroundGeometry { coarse = result }
             if basis == .backgroundGeometry { fallback = result }
             if preparation(result) == .foreground, preparable == nil || candidate.source == .center {
                 preparable = result

@@ -329,6 +329,38 @@ def test_ordinary_read_does_not_add_directory_polling_or_image_acquisition(monke
     refresh.assert_not_awaited()
 
 
+@pytest.mark.parametrize("automatic", [True, False])
+def test_lost_tree_body_adds_pixels_only_to_automatic_observation(monkeypatch, automatic):
+    a = window("A")
+    current = directory(a)
+    controller, app, state = setup(current)
+    observed = replace(parent_result(state, a, current, current), tree=None)
+    controller.reader.read = AsyncMock(return_value=observed)
+    pipeline = InterfaceReadPipeline(controller)
+    image = pixels(state, a)
+    pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, a), image=image))
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", AsyncMock(return_value=current))
+    related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),), before_tree=tree(a, "Previous content"))
+    events = []
+    set_observation_handler(events.append)
+    try:
+        result = asyncio.run(pipeline._collect(
+            app, "tree", False, None, current, None, None, related if automatic else None
+        ))
+    finally:
+        set_observation_handler(None)
+    if automatic:
+        pipeline.member.assert_awaited_once()
+        assert pipeline.member.call_args.args[2] == "image"
+        assert result.screenshot is not None
+        blocks = deliver_through_runtime([event["observation"] for event in events])
+        assert not blocks.get("isError"), blocks
+        assert sum(block["type"] == "image" for block in blocks["content"]) == 1
+    else:
+        pipeline.member.assert_not_awaited()
+        assert result.screenshot is None
+
+
 def test_completeness_check_failure_keeps_captured_tree_and_image(monkeypatch):
     a = window("A")
     controller, app, state = setup(directory(a))

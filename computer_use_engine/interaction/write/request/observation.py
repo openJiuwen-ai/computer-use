@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord
+from computer_use.interaction.read.acquisition.loading import window_content_unexposed
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.interaction.write.request.model import ObservedAction
@@ -148,6 +149,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 else:
                     visual = request.target.capture is not None or (
                         request.target.node is None and getattr(owner, "_image", None) is not None
+                        and (related is None or related.before_tree is None
+                             or window_content_unexposed(related.before_tree))
                     )
                     options = dict(related=related) if related is not None else {}
                     # A pointer target explains how input was addressed, not

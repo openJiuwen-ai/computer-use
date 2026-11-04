@@ -47,6 +47,7 @@ class ClickOption:
     count: Literal[1, 2] = 1
 
 class ElementMatch(TypedDict, total=False):
+    # Canonical role words: 'menuItem' and 'menu item' select the same role.
     role: str
     name: str
     identifier: str

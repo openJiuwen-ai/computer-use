@@ -60,7 +60,9 @@ import Foundation
         errorCode = (cause as? ClassifiedFailure)?.code ?? .executionFailed
         detail = String(describing: cause)
         confirmation = "notRequested"
-        if acceptedCount > 0 { dispatch = "partial" }
+        // A later restoration/cleanup failure cannot undo completed input.
+        // An interrupted sequence still retains its accepted prefix.
+        if acceptedCount > 0, dispatch != "dispatched" { dispatch = "partial" }
     }
 
     var succeeded: Bool { errorCode == nil && cleanup == "complete" }

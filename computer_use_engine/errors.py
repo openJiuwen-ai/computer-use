@@ -26,7 +26,11 @@ def format_failure(failure: Mapping[str, Any], method: str | None = None) -> str
             if effects:
                 lines.append("Global input: " + "; ".join(effects))
             restoration = actual.get("foreground_restoration")
-            if restoration and restoration not in ("notUsed", "notNeeded"):
+            if actual.get("foreground_changed") == "yes":
+                lines.append("Foreground changed: yes")
+            if restoration and (
+                restoration not in ("notUsed", "notNeeded") or actual.get("foreground_changed") == "yes"
+            ):
                 lines.append("Foreground restoration: " + restoration)
     return "\n".join(lines)
 

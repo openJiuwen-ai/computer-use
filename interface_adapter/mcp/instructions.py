@@ -12,6 +12,9 @@ element.type_text(text, replace=True), element.open_menu(). The SDK handles
 target preparation and delivery. Use screenshot coordinates for regions without
 a usable semantic target. Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.
+For double-click: from computer_use import ClickOption;
+app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
+to its Element: app.element(ref).perform_action('raise'), including a window root.
 Use an action's attached observation first. A new form with only an image can
 benefit from one scoped tree/both read when several semantic fields are needed.
 

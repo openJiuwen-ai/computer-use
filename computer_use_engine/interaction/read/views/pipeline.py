@@ -38,7 +38,7 @@ from .collection import CollectionPlan, components
 from .menus import InterfaceMenuPipeline, remember_menu
 from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
 from .publication import capture_header, publish, related_window_summary, tree_document
-from .related import RelatedRead
+from .related import RelatedRead, original_lifecycle
 from .settling import same_window_content
 
 if TYPE_CHECKING:
@@ -404,6 +404,9 @@ class InterfaceReadPipeline:
                         )
                     principal_error = None
                     notes.append(
+                        "The action's original window closed; the current related window is shown."
+                        if original_lifecycle(related.original, directory, related.original_window) == "closed"
+                        else
                         "Preferred related-window detail was unavailable; the original window is shown."
                         if old["window"] == related.original.root_window
                         else "The previous detail could not be delivered; the surviving fixed Window is shown."

@@ -33,12 +33,14 @@ import ApplicationServices
             from: original, basis: .exactHit, requiresExactGeometry: true),
                      "a qualified popup cannot adopt changed geometry")
 
-        for basis in [Basis.providerStackingGeometry, .coarseAncestorGeometry, .backgroundGeometry, .rejected] {
+        for basis in [Basis.providerStackingGeometry, .coarseAncestorGeometry, .backgroundGeometry,
+                      .unsupportedForegroundGeometry, .rejected] {
             precondition(!expanded.permitsFrozenDispatch(
                 from: original, basis: basis, requiresExactGeometry: false),
                          "changed layout requires a fresh exact hit, not a geometry fallback")
         }
-        for basis in [Basis.exactHit, .providerStackingGeometry, .coarseAncestorGeometry, .backgroundGeometry] {
+        for basis in [Basis.exactHit, .providerStackingGeometry, .coarseAncestorGeometry, .backgroundGeometry,
+                      .unsupportedForegroundGeometry] {
             for strict in [false, true] {
                 precondition(original.permitsFrozenDispatch(
                     from: original, basis: basis, requiresExactGeometry: strict))

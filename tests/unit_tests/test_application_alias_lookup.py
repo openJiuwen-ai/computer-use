@@ -9,7 +9,7 @@ import pytest
 
 from computer_use.client.computer import computer_for_controller
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.query.instances.scope import adopt
+from computer_use.interaction.query.instances.scope import adopt, display_selection
 from computer_use.interaction.read.views.pipeline import WindowPart, remember
 from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Binding
@@ -89,6 +89,38 @@ def test_pending_read_on_other_alias_does_not_change_delivered_lookup():
         assert roots[-1].root_window == "a"
     finally:
         set_observation_handler(None)
+
+
+@pytest.mark.parametrize("observed,current,closed", [
+    (True, True, True), (False, True, True), (True, False, True), (True, True, False),
+])
+def test_app_name_lookup_after_popup_closure_uses_only_observed_current_primary(observed, current, closed):
+    controller, app = setup()
+    fixed = app.window(ref(app, "a"))
+    observed_query_roots(controller, app)
+    app._context = "a"
+    publish(controller, app, "Old popup", directory=app._instance.directory)
+    delivered = app._instance.lookup_context
+    facts = directory(surface("next"), focus="next", ended=(surface("a"),) if closed else ())
+    adopt(controller, app, facts)
+    app._instance.anchor = display_selection(controller, app._instance, facts) if current else None
+    if observed:
+        observed_query_roots(controller, app)
+    roots = finder(controller)
+    if observed and current and closed:
+        result = asyncio.run(controller.interfaces.element(app, "OK", 0, None))
+        assert result["binding"].root_window == "next"
+        assert [root.root_window for root in roots] == ["next"]
+        # Semantic query recovery does not acknowledge model delivery or
+        # rebind the original popup handle/its existing element references.
+        assert app._instance.lookup_context is delivered
+        assert app._instance.input_context.window == "a"
+        with pytest.raises(ComputerUseError):
+            asyncio.run(controller.interfaces.element(fixed, "OK", 0, None))
+    else:
+        with pytest.raises(ComputerUseError):
+            asyncio.run(controller.interfaces.element(app, "OK", 0, None))
+        assert roots == []
 
 
 def menu_owner(controller, app, key):

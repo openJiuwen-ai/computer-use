@@ -31,6 +31,7 @@ from computer_use.session.cursors import TextCursors
 from computer_use.session.interfaces import (
     ApplicationEntry,
     ApplicationReferences,
+    LookupContext,
     WindowEvidence,
     WindowIdentity,
     WindowLifetime,
@@ -387,7 +388,10 @@ class AgentInterfacePipeline:
         # Application aliases share the last actually delivered lookup scope.
         # A fixed Window retains its own menu view and always bounds window
         # lookup by its original root. Pending reads grant neither alias a new
-        # name/path context.
+        # name/path context while that scope is live. A retired popup is not
+        # the App's lifetime: a fresh name query may use the App's already
+        # observed current primary. Fixed handles and numbered references do
+        # not acquire this recovery, and no input/image delivery is advanced.
         lookup_context = instance.lookup_context if ui._anchor is None else ui._lookup_context
         if ui._anchor is None and lookup_context is None:
             raise local_failure(
@@ -397,6 +401,15 @@ class AgentInterfacePipeline:
         if ui._anchor is None and lookup_context.window is not None:
             from computer_use.interaction.query.instances.scope import require_identity
 
+            previous = instance.evidence.get(lookup_context.window)
+            primary = instance.anchor.root if instance.anchor is not None else None
+            current = instance.members.get(primary.root_window) if primary is not None else None
+            if (
+                previous is not None and previous.lifetime is WindowLifetime.RETIRED
+                and current is not None and current["window"] in instance.observed
+                and WindowIdentity.of(current) == WindowIdentity(primary.root_window, primary.surface, primary.instance)
+            ):
+                lookup_context = LookupContext(WindowIdentity.of(current), False, ())
             require_identity(ui, lookup_context.window)
         context = ui._anchor or (lookup_context.window.window if lookup_context.window is not None else None)
         menu_only = lookup_context.menu_only if lookup_context is not None else False

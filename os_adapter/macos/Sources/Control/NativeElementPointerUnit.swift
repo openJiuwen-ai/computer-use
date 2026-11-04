@@ -269,10 +269,17 @@ import ApplicationServices
                     // mismatch. They cannot enter background geometry fallback.
                 }
                 let evidence = NativeElementHitEvidence.result(status, relation: relation)
+                let originalWindowGeometry = try expand && candidate.permitsGeometryFallback
+                    && evidence.relation == .unsupported
+                    && pointer.foregroundWindow(at: candidate.point)
+                    && hasCurrentParentPathToWindow(until: deadline)
                 if WindowGeometry.inputDiagnosticsEnabled {
                     var observation: [String: Any] = [
                         "source": candidate.source.rawValue, "point": [candidate.point.x, candidate.point.y],
-                        "axStatus": status.rawValue, "relation": evidence.relation.rawValue
+                        "axStatus": status.rawValue, "relation": evidence.relation.rawValue,
+                        "originalWindowGeometry": originalWindowGeometry,
+                        "elementFrame": [frame.minX, frame.minY, frame.width, frame.height],
+                        "windowFrame": [mapping.frame.minX, mapping.frame.minY, mapping.frame.width, mapping.frame.height]
                     ]
                     if let systemStatus {
                         observation["systemWideStatus"] = systemStatus.rawValue
@@ -291,7 +298,9 @@ import ApplicationServices
                     ? coarseForeground
                     : candidate.permitsGeometryFallback && evidence.permitsBackgroundGeometry
                         ? pointer.foregroundWindow(at: candidate.point) : true
-                return .init(evidence: evidence, hit: status == .success ? hit : nil, foreground: foreground)
+                return .init(
+                    evidence: evidence, hit: status == .success ? hit : nil, foreground: foreground,
+                    originalWindowGeometry: originalWindowGeometry)
             })
         guard let selected else {
             throw DriverError("the selected element has no usable pointer point", code: .inputUnavailable)

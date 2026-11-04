@@ -133,6 +133,7 @@ enum ForegroundActivation {
         child.standardOutput = output
         child.standardError = FileHandle.nullDevice
         try check()
+        NativeForegroundRestorationScope.current?.willActivate()
         let activity = NativeInputActivity.begin(
             device: .focus, transport: .activation, mechanism: "NSRunningApplication.activate", pid: request.pid,
             stage: .preparation)

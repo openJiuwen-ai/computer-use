@@ -13,7 +13,10 @@ from unittest.mock import AsyncMock, patch
 from computer_use.client.factory import session_controller
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
+from computer_use.interaction.read.views.related import RelatedRead
 from computer_use.interaction.requests import ExecuteAction
+from computer_use.interaction.write.request.model import ObservedAction
+from computer_use.interaction.write.request.observation import WriteWithObservation
 from computer_use.native.contracts import Binding, Intent
 from computer_use.native.lifecycle import CallLifecycle
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, RunningApplication
@@ -142,6 +145,24 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         await self.run_action(target=replace(self.target, node=None, capture="capture"))
         self.assertEqual(self.read.call_args.args[1], "both")
         self.assertEqual(self.read.call_args.kwargs, {})  # default read never activates
+
+    async def test_window_key_does_not_repeat_cached_image_when_tree_body_is_available(self):
+        self.ui._image = object()
+        request = ExecuteAction(self.ui, Intent("key", {}), replace(self.target, node=None))
+        related = RelatedRead(self.target, (), before_tree=object())
+        suffix = WriteWithObservation(self.controller, SimpleNamespace(contract=SimpleNamespace(effects=frozenset())))
+        with patch("computer_use.interaction.write.request.observation.window_content_unexposed", return_value=False):
+            await suffix.observe(request, ObservedAction(self.receipt), "dispatched", (1, "test"), related)
+        self.assertEqual(self.read.call_args.args[1], "tree")
+
+    async def test_window_key_keeps_pixels_when_prior_tree_is_only_a_shell(self):
+        self.ui._image = object()
+        request = ExecuteAction(self.ui, Intent("key", {}), replace(self.target, node=None))
+        related = RelatedRead(self.target, (), before_tree=object())
+        suffix = WriteWithObservation(self.controller, SimpleNamespace(contract=SimpleNamespace(effects=frozenset())))
+        with patch("computer_use.interaction.write.request.observation.window_content_unexposed", return_value=True):
+            await suffix.observe(request, ObservedAction(self.receipt), "dispatched", (1, "test"), related)
+        self.assertEqual(self.read.call_args.args[1], "both")
 
     async def test_desktop_input_keeps_desktop_observation(self):
         await self.run_action(owner=False, target=Binding("test", None, None, None, capture="image"))

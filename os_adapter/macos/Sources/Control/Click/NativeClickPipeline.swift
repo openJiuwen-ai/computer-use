@@ -17,13 +17,33 @@ import AppKit
             if plan.offer.delivery == .systemPointer {
                 try NativeInputAuthorization.requireGlobalInput("system pointer click")
             }
-            try await NativeInputActivity.$stage.withValue(.preparation) {
-                try await NativeClickPreparationPipeline.run(
-                    plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
+            func execute() async throws {
+                try await NativeInputActivity.$stage.withValue(.preparation) {
+                    try await NativeClickPreparationPipeline.run(
+                        plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
+                }
+                NativeForegroundRestorationScope.current?.willDispatchInput()
+                try await DispatchNativeClickPass.run(
+                    plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects,
+                    resolveWindow: { try access.scopes.fixedInputWindow(command.target) })
             }
-            try await DispatchNativeClickPass.run(
-                plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects,
-                resolveWindow: { try access.scopes.fixedInputWindow(command.target) })
+            let application: NSRunningApplication?
+            switch plan.target {
+            case .element(let unit): application = unit.application
+            case .captured(let unit): application = unit.application
+            case .menu(let unit, _, _, _): application = unit.application
+            default: application = nil
+            }
+            if command.foreground, let application {
+                try await NativeForegroundRestorationScope.perform(
+                    target: BackgroundTarget(application), check: {
+                        try operation.check()
+                        try RequestDiagnostics.checkCancellation()
+                    }, onPreparation: receipt.recordPreparation, onCleanupUnknown: receipt.recordCleanupUnknown,
+                    afterInput: true, inputDispatched: { receipt.dispatch != "notDispatched" }, body: execute)
+            } else {
+                try await execute()
+            }
         } catch {
             var failure = error
             if let observation = error as? NativeTogglePress.Unconfirmed {

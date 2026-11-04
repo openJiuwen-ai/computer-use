@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.read.acquisition.loading import window_content_unexposed
 from computer_use.native.query.directory import select_surface
 from computer_use.session.interfaces import WindowIdentity
 
@@ -114,6 +115,13 @@ class CollectionPlan:
         captured = frozenset(name for name in ("tree", "image") if getattr(part, name) is not None)
         self.attempted[identity] = self.attempted.get(identity, frozenset()) | captured
         self.captured_components[identity] = self.captured_components.get(identity, frozenset()) | captured
+        if self.related is not None and "tree" in self.attempted[identity] and (
+            part.tree is None or window_content_unexposed(part.tree)
+        ):
+            # A fresh automatic tree can lose its body after a key or click.
+            # Add the missing visual component within this same collection;
+            # a prior rich tree must not suppress observation of a new canvas.
+            self.requested[identity] = self.requested.get(identity, frozenset()) | {"image"}
         if "tree" in captured:
             self.pending_upgrades.discard(identity)
 

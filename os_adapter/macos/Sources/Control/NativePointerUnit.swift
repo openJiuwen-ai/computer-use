@@ -614,6 +614,7 @@ enum NativePointerDeliveryPolicy {
                 dragging: request.kind == .drag ? event.type != .leftMouseUp : nil)
             event.location = point
             if global {
+                NativeForegroundRestorationScope.current?.willPostGlobalInput(event.type)
                 let activity = NativeInputActivity.begin(
                     device: .mouse, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap", pid: window.pid,
                     window: window.id, event: event)
