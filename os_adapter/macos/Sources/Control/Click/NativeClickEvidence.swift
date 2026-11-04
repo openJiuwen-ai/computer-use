@@ -82,6 +82,12 @@ import Foundation
         }
     }
 
+    func observeActionContext(_ outcome: NativeApplicationContextUnit.Outcome) {
+        guard let index = preparation.lastIndex(where: { $0.kind == "focusNotification" }) else { return }
+        preparation[index].observations.append("processLocalActivity=" + outcome.rawValue)
+        preparation[index].wait = outcome == .activityObserved ? "satisfied" : "unavailable"
+    }
+
     func markCall(_ kind: String) {
         transportKind = kind
         entered = true

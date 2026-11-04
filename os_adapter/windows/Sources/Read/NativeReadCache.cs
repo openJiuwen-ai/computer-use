@@ -3,7 +3,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Windows.Automation;
 using UIA = NativeUIA;
 
@@ -21,53 +20,41 @@ namespace ComputerUse.Windows
         readonly Dictionary<string, UiaElement> snapshots = new Dictionary<string, UiaElement>();
         readonly HashSet<string> uncached = new HashSet<string>();
         readonly Dictionary<string, UiaClient.Pattern[]> patterns = new Dictionary<string, UiaClient.Pattern[]>();
-        sealed class ByReference : IEqualityComparer<UiaElement>
-        {
-            public bool Equals(UiaElement a, UiaElement b)
-            {
-                return Object.ReferenceEquals(a, b);
-            }
-
-            public int GetHashCode(UiaElement e)
-            {
-                return RuntimeHelpers.GetHashCode(e);
-            }
-        }
-
-        readonly Dictionary<UiaElement, string> keys = new Dictionary<UiaElement, string>(new ByReference());
+        readonly NativeReadObjectKeys<UiaElement> keys;
         string Key(UiaElement e)
         {
-            string key;
-            if (keys.TryGetValue(e, out key))
-                return key;
+            return keys.Get(e);
+        }
+        void UnavailableArrayMember(int index, Exception error)
+        {
+            NativeReadBackend.Status(error);
             check();
-            try
-            {
-                key = NativeReadStore.Runtime(e);
-            }
-            catch (ElementNotAvailableException)
-            {
-                check();
-                key = null;
-            }
-
-            if (String.IsNullOrEmpty(key))
-                key = NativeReadStore.Token("unidentified");
-            keys[e] = key;
-            return key;
+            note("UIA read array member " + index +
+                 " unavailable; its position remains a gap and later members are preserved: " + error.Message);
         }
 
-        internal NativeReadCache(IEnumerable<string> fields, Action check, Action<string> note, Action<string, int, Exception> failedCachedRead = null)
+        internal NativeReadCache(IEnumerable<string> fields, Action check, Action<string> note,
+                                 Action<string, int, Exception> failedCachedRead = null)
         {
             this.check = check;
             this.note = note;
             this.failedCachedRead = failedCachedRead;
-            var requested = new HashSet<int>
-            {
-                AutomationElement.RuntimeIdProperty.Id,
-                AutomationElement.NativeWindowHandleProperty.Id,
-                AutomationElement.IsPasswordProperty.Id
-            };
+            keys = new NativeReadObjectKeys<UiaElement>(
+                NativeReadStore.Runtime, () => NativeReadStore.Token("unidentified"), check,
+                error =>
+                {
+                    NativeReadBackend.Status(error);
+                    check();
+                    note(
+                        "UIA runtime identity unavailable; this object's properties retain an observation-local cache key: " +
+                        error.Message);
+                },
+                (first, second) =>
+                    UiaClient.Call(() => UiaClient.Current.CompareElements(first.Native, second.Native)) != 0,
+                note);
+            var requested = new HashSet<int> { AutomationElement.RuntimeIdProperty.Id,
+                                               AutomationElement.NativeWindowHandleProperty.Id,
+                                               AutomationElement.IsPasswordProperty.Id };
             foreach (string name in fields)
             {
                 AutomationProperty p;
@@ -120,18 +107,23 @@ namespace ComputerUse.Windows
             // Relations are not inserted into the property cache: their native
             // objects and scope must be handled explicitly by the collector.
             if (uncached.Contains(Key(element)) || !cachedProperties.Contains(property))
-                value = element.GetCurrentPropertyValue(property, true);
+                value = element.GetCurrentPropertyValue(property, true, UnavailableArrayMember);
             else
             {
-                value = NativeCachedPropertyGate.Read(() => snapshot.GetCachedPropertyValue(property, true), () => element.GetCurrentPropertyValue(property, true), error =>
-                {
-                    if (failedCachedRead != null)
-                        failedCachedRead(Key(element), property, error);
-                }, check);
+                value = NativeCachedPropertyGate.Read(
+                    () => snapshot.GetCachedPropertyValue(property, true, UnavailableArrayMember),
+                    () => element.GetCurrentPropertyValue(property, true, UnavailableArrayMember),
+                    error =>
+                    {
+                        if (failedCachedRead != null)
+                            failedCachedRead(Key(element), property, error);
+                    },
+                    check);
             }
 
             check();
-            if (ReferenceEquals(value, AutomationElement.NotSupported) && property != AutomationElement.NativeWindowHandleProperty.Id)
+            if (ReferenceEquals(value, AutomationElement.NotSupported) &&
+                property != AutomationElement.NativeWindowHandleProperty.Id)
                 throw new NativeFieldUnavailable("unsupported");
             return value;
         }
@@ -149,8 +141,7 @@ namespace ComputerUse.Windows
             patterns[id] = result;
             return result;
         }
-
-        internal IEnumerable<UiaElement> Children(UiaElement element)
+        internal NativeReadChildren Children(UiaElement element)
         {
             UiaElement[] children = null;
             bool fetched = false;
@@ -159,7 +150,7 @@ namespace ComputerUse.Windows
                 check();
                 var cache = elementCache.Clone();
                 cache.TreeScope = (UIA.TreeScope)2;
-                children = element.Snapshot(cache).CachedChildren;
+                children = element.Snapshot(cache).ReadCachedChildren(UnavailableArrayMember);
                 check();
                 fetched = true;
             }
@@ -168,24 +159,43 @@ namespace ComputerUse.Windows
                 check();
                 note("UIA children cache unavailable; bounded RawViewWalker used: " + error.Message);
             }
-
-            if (fetched)
+            // An empty cache is not evidence of provider consistency. Probe
+            // only the first Raw View child; select the walker only when this
+            // supplies conflicting evidence, never perform two full scans.
+            var route = NativeReadChildRoutes.Resolve(fetched, children,
+                                                      () =>
+                                                      {
+                                                          check();
+                                                          var first = UiaClient.FirstChild(element);
+                                                          check();
+                                                          return first;
+                                                      });
+            if (route.UseSnapshot)
+                return new NativeReadChildren(CachedChildren(children), true);
+            if (route.ConflictingEmptyCache)
+                note(
+                    "UIA cached children were empty but RawViewWalker exposed a child; the walker relation is sampled separately and cache completeness is unknown.");
+            return new NativeReadChildren(WalkChildren(route.First), false, route.ConflictingEmptyCache);
+        }
+        IEnumerable<UiaElement> CachedChildren(UiaElement[] children)
+        {
+            for (int i = 0; i < children.Length; i++)
             {
-                for (int i = 0; children != null && i < children.Length; i++)
+                check();
+                var child = children[i];
+                // A null/stale member is handled by the relation collector;
+                // its position must not prevent later cached objects arriving.
+                if (child != null)
                 {
-                    check();
-                    var child = children[i];
                     string id = Key(child);
                     if (!snapshots.ContainsKey(id))
                         snapshots[id] = child;
-                    yield return child;
                 }
-
-                yield break;
+                yield return child;
             }
-
-            check();
-            var current = UiaClient.FirstChild(element);
+        }
+        IEnumerable<UiaElement> WalkChildren(UiaElement current)
+        {
             while (current != null)
             {
                 check();

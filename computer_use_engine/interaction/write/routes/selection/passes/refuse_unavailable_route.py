@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.write.routes.policy import refuse
+from computer_use.interaction.write.routes.policy import preparation_pair_available, refuse
+from computer_use.interaction.write.routes.selection.admission import stage_admission
 from computer_use.interaction.write.routes.selection.model import RouteOptions
 from computer_use.native.contracts import Binding, Knowledge, UnitCommand
 from computer_use.pipeline import Contract, Pass
@@ -19,7 +20,21 @@ if TYPE_CHECKING:
 def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
     """Explain why the remaining native candidates cannot satisfy the requested input."""
     request = options.eligible.request
-    facts, intent, policy = request.facts, request.intent, request.policy
+    facts, intent = request.facts, request.intent
+    candidates = options.eligible.candidates
+    if any(
+        stage_admission(primitive).preparation
+        and not preparation_pair_available(
+            UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver), request.history
+        )
+        for primitive in candidates
+    ):
+        refuse(
+            "input_unavailable",
+            facts,
+            "The selected receiver still needs preparation after the receiver preparation allowance was consumed.",
+            "read the original target after its editor settles",
+        )
     if request.needs_editing_evidence:
         refuse(
             "input_unavailable",
@@ -27,7 +42,6 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
             "The selected control has no confirmed text-editing capability or remaining preparation route.",
             "read the intended control or its window; focus alone does not authorize text input",
         )
-    candidates = options.eligible.candidates
     if candidates and all("enabled" in p.pending for p in candidates):
         refuse(
             "input_unavailable",
@@ -48,7 +62,6 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
         True
         if (
             facts.platform == "windows"
-            and policy.mode == "exclusive"
             and intent.kind == "scroll"
             and isinstance(facts.binding, Binding)
             and facts.binding.node is not None
@@ -66,8 +79,8 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
     refuse(
         "input_unavailable",
         facts,
-        "No confirmed route can perform this intent in the current desktop mode.",
-        "read the current target; foreground assistance or an independent desktop may be required",
+        "No confirmed route can perform this intent on the original target.",
+        "read the current target and its image to inspect the available input scope",
     )
 
 

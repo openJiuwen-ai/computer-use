@@ -15,7 +15,11 @@ namespace ComputerUse.Windows
         readonly Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object> inspectInput;
         readonly Func<NativeWriteOperation, Dictionary<string, object>, Request, object> inspectCurrentReceiver;
         readonly Action finish, expire;
-        internal NativeQueryPipeline(INativeReadBackend reader, Func<object, Dictionary<string, object>> binding, Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object> inspectInput, Action finish, Action expire, Func<NativeWriteOperation, Dictionary<string, object>, Request, object> inspectCurrentReceiver = null)
+        internal NativeQueryPipeline(
+            INativeReadBackend reader, Func<object, Dictionary<string, object>> binding,
+            Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object> inspectInput,
+            Action finish, Action expire,
+            Func<NativeWriteOperation, Dictionary<string, object>, Request, object> inspectCurrentReceiver = null)
         {
             this.reader = reader;
             this.binding = binding;
@@ -30,6 +34,7 @@ namespace ComputerUse.Windows
             var scope = ResolveQueryScopePass.Run(p, binding);
             bool directory = CheckQueryBoundaryPass.Run(scope, state);
             r.Deadline = Math.Min(r.Deadline, state.Deadline);
+            bool cleanupFailure = false;
             try
             {
                 r.ObservationDeadline = Math.Min(r.Deadline, Wire.Now + Request.ObservationMs);
@@ -37,8 +42,17 @@ namespace ComputerUse.Windows
                 CheckQueryOperationPass.Run(scope, state.Write, inspectInput != null);
                 if ((string)scope.Query["kind"] != "inputContext")
                     PrepareReadSurfacePass.Run(scope, directory, r, state.Write, reader);
-                var result = (string)scope.Query["kind"] == "inputContext" ? scope.Query.ContainsKey("currentReceiver") ? CollectCurrentReceiverPass.Run(scope, r, state.Write, inspectCurrentReceiver) : CollectInputContextPass.Run(scope, r, state.Write, inspectInput) : CollectRequestedFactsPass.Run(scope, r, reader);
+                var result = (string)scope.Query["kind"] == "inputContext"
+                                 ? scope.Query.ContainsKey("currentReceiver")
+                                       ? CollectCurrentReceiverPass.Run(scope, r, state.Write, inspectCurrentReceiver)
+                                       : CollectInputContextPass.Run(scope, r, state.Write, inspectInput)
+                                 : CollectRequestedFactsPass.Run(scope, r, reader);
                 return EncodeNativeFactsPass.Run(result, r);
+            }
+            catch (NativeDesktopCleanupFailure)
+            {
+                cleanupFailure = true;
+                throw;
             }
             catch (Failure error)
             {
@@ -46,9 +60,12 @@ namespace ComputerUse.Windows
                     finish();
                 throw;
             }
+            // This call-local flag only carries an exception through unwind
+            // to Perform's existing health owner; it grants no future state.
             finally
             {
-                expire();
+                if (!cleanupFailure)
+                    expire();
             }
         }
     }

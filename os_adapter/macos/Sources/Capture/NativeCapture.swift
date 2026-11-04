@@ -17,6 +17,11 @@ import ApplicationServices
         // requirement is added to pixel capture or its public result.
         let windowAttributes: [String: AXRead<CFTypeRef>]
     }
+    struct Input {
+        let entry: Entry
+        let mapping: WindowGeometry.WindowMapping
+        let blocked: [String]
+    }
     private let directory: NativeDirectory
     private let sharing: WindowSharing
     private var entries = [String: Entry]()
@@ -34,7 +39,7 @@ import ApplicationServices
         return entry
     }
 
-    func input(_ binding: [String: Any]) throws -> (entry: Entry, blocked: [String]) {
+    private func bindingScope(_ binding: [String: Any]) throws -> (entry: Entry, blocked: [String]) {
         let entry = try retained(string(binding["capture"], label: "capture"))
         guard NSDictionary(dictionary: entry.binding).isEqual(to: binding) else {
             throw DriverError("capture belongs to another input binding", code: .staleTarget)
@@ -44,8 +49,20 @@ import ApplicationServices
             root: string(binding["rootWindow"], label: "rootWindow"),
             surface: string(binding["surface"], label: "surface"))
         try directory.validateWindow(entry.surface)
-        try entry.screen.validate(entry.mapping)
         return (entry, current.blocked)
+    }
+
+    /// Scope checks do not adopt new geometry for an already-started gesture.
+    func inputScope(_ binding: [String: Any]) throws -> (entry: Entry, blocked: [String]) {
+        let current = try bindingScope(binding)
+        try current.entry.screen.validateInputScope()
+        return current
+    }
+
+    func input(_ binding: [String: Any]) throws -> Input {
+        let current = try bindingScope(binding)
+        let mapping = try current.entry.screen.inputMapping(current.entry.mapping)
+        return Input(entry: current.entry, mapping: mapping, blocked: current.blocked)
     }
 
     func capture(binding: [String: Any], maxDimension: Int) async throws -> [String: Any] {

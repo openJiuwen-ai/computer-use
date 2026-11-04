@@ -8,10 +8,15 @@ from computer_use_linux.system.x11_pointer import PointerCallbacks
 
 def dispatch_pointer_click(operation, plan, ledger, ctx, diagnostics):
     unit, contract = plan.unit, plan.contract
-    with diagnostics.stage("guardAndFreezePointer"):
-        points, _, _ = unit.guard(operation, contract, ctx)
-        desktop_target = contract["target"]["surface"] is None
-        expected = unit.captures.pointer_destination(contract["target"], points[0], ctx) if desktop_target else None
+    desktop_target = contract["target"]["surface"] is None
+    expected = None
+
+    def freeze_points():
+        nonlocal expected
+        with diagnostics.stage("guardAndFreezePointer"):
+            points, _, _ = unit.guard(operation, contract, ctx)
+            expected = unit.captures.pointer_destination(contract["target"], points[0], ctx) if desktop_target else None
+            return points
 
     def barrier():
         operation.dispatched = True
@@ -19,13 +24,14 @@ def dispatch_pointer_click(operation, plan, ledger, ctx, diagnostics):
     with diagnostics.stage("xtestSequenceAndOwnedRelease"):
         unit.desktop.pointer_sequence(
             "click",
-            points,
+            (),
             ctx,
             **unit.options(operation.intent),
             callbacks=PointerCallbacks(
                 before_dispatch=barrier,
                 validate=lambda: unit.guard(operation, contract, ctx),
                 event_progress=ledger.event,
+                freeze_points=freeze_points,
             ),
         )
         ledger.requested_complete = True

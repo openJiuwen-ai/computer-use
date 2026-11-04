@@ -63,6 +63,7 @@ class NativeRelation(TypedDict):
         offset: Starting target index for this page.
         total: Full target count when reported by the provider.
         detail: Provider explanation of incomplete or conflicting evidence.
+        membershipObservedAt: Capture interval of retained relationship members; not current membership.
     """
 
     source: str
@@ -74,6 +75,7 @@ class NativeRelation(TypedDict):
     offset: NotRequired[int]
     total: NotRequired[int]
     detail: NotRequired[str]
+    membershipObservedAt: NotRequired[Record]
 
 
 class FactCollection(TypedDict):

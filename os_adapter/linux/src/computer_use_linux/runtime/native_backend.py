@@ -11,12 +11,13 @@ from computer_use_linux.windowing.desktop import connect_desktop, coordination_i
 
 class NativeBackend:
     def __init__(self, mode, stopped):
+        require(mode == "exclusive", "Only the complete exclusive input pipeline is supported.", "mode_unsupported")
         self.mode, self.stopped = mode, stopped
         self.registry = Registry()
         self.clipboard = None
         self.ax = NativeAccessibility()
         try:
-            self.desktop = connect_desktop(self.ax, mode, self.registry.retire)
+            self.desktop = connect_desktop(self.ax, self.registry.retire)
         except Exception:
             self.ax.close()
             raise

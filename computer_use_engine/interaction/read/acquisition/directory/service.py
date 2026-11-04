@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.native.query.directory import (
+    SurfaceReadProfile,
     select_application,
     select_surface,
     selected_window,
@@ -37,6 +38,21 @@ class NativeDirectory:
         if not isinstance(application, str) or not application:
             raise ValueError("An observed running-application id is required")
         return await self._query(dict(kind="surfaces", application=application), timeout_ms)
+
+    async def surface_batch(
+        self,
+        applications: list[str],
+        *,
+        profile: SurfaceReadProfile = SurfaceReadProfile.ACCESSIBILITY,
+        timeout_ms: int = 30000,
+    ) -> DirectoryFacts:
+        """Read ordered per-application directories through the negotiated batch endpoint."""
+        if not isinstance(profile, SurfaceReadProfile):
+            raise ValueError("A typed surface read profile is required")
+        query = dict(kind="surfaceBatch", applications=applications)
+        if profile is SurfaceReadProfile.VISUAL and "nativeVisualSurfaceBatch" in self.port.connection.capabilities:
+            query["profile"] = "visual"
+        return await self._query(query, timeout_ms)
 
     async def _query(self, query: Record, timeout_ms: int) -> DirectoryFacts:
         from computer_use.interaction.read.acquisition.directory.model import DirectoryRequest

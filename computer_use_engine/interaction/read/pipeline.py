@@ -17,19 +17,18 @@ from computer_use.interaction.read.acquisition.pipeline import AcquisitionPipeli
 from computer_use.interaction.read.app_read.model import (
     ApplicationSelection,
     ReadCall,
+    ReadComponentKind,
     ReadInvocation,
     _StartupReceipt,
 )
 from computer_use.interaction.read.app_read.pipeline import AppReadPreparationPipeline
 from computer_use.interaction.read.delivery.pipeline import AppDeliveryPipeline
-from computer_use.interaction.read.numbering.observation.pipeline import (
-    NumberedPresentationPipeline,
-)
+from computer_use.interaction.read.limits import DEFAULT_MENU_MAX_NODES
+from computer_use.interaction.read.numbering.observation.pipeline import NumberedPresentationPipeline
 from computer_use.interaction.read.passes.parse_read_request import stage as parse_read_request
 from computer_use.interaction.read.passes.plan_read_components import stage as plan_read_components
-from computer_use.interaction.read.passes.select_read_components import (
-    stage as select_read_components,
-)
+from computer_use.interaction.read.passes.select_read_components import stage as select_read_components
+from computer_use.interaction.read.passes.reject_windowless_image import stage as reject_windowless_image
 from computer_use.pipeline import Contract, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
 
@@ -96,7 +95,7 @@ class _ReadCallBody(Node["ReadCall", "AppObservation | MenuAppObservation"]):
                 value.launch,
                 value.call.remaining,
                 fields=request.fields,
-                max_nodes=request.max_nodes,
+                max_nodes=DEFAULT_MENU_MAX_NODES if request.max_nodes is None else request.max_nodes,
                 max_depth=request.max_depth,
                 _control=control,
             )
@@ -127,8 +126,9 @@ class _ReadCallBody(Node["ReadCall", "AppObservation | MenuAppObservation"]):
             name="ObservedReadBranch",
             selector=select_read_components(),
             branches={
-                True: MenuReadBranch(),
-                False: Sequence(
+                ReadComponentKind.MENU: MenuReadBranch(),
+                ReadComponentKind.IMAGE_UNAVAILABLE: reject_windowless_image(),
+                ReadComponentKind.WINDOW: Sequence(
                     name="WindowReadPipeline",
                     steps=[plan_read_components(), WindowObservationPipeline(services)],
                 ),

@@ -13,15 +13,18 @@ import ApplicationServices
         defer { metric?.end() }
         func actionBoundary() throws {
             try boundary.checkConditions()
-            if let document = plan.document,
-                try
-                    (!NativeDocumentContext.permitsDispatch(
-                        document.focus(), prepared: plan.documentPreparationRequired)
-                    || (plan.documentPreparationRequired && !BackgroundTarget(document.application).isForeground))
+            var retained = plan.actionDocument
+            if retained == nil, let scope = plan.documentScope, case .action(let node, let name, _) = plan.target,
+                name == kAXPressAction
             {
-                throw NativePreparationUnavailable(
-                    description: "document context changed before AXPress; no requested action was sent")
+                retained = try plan.operation.actionDocuments.context(scope) {
+                    try objects.nativeActionFacts(node).document
+                }
             }
+            try NativeActionDocumentPolicy.checkDispatch(
+                retained?.unit ?? plan.document,
+                required: plan.documentPreparation.windowSelectionRequired || retained?.selectionRequired == true,
+                retained: retained)
             try boundary.beforeDispatch()
             evidence.markCall("nativeAction")
         }
@@ -64,6 +67,10 @@ import ApplicationServices
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery)
+        case .popupPointer(let unit):
+            try await unit.deliver(
+                plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
+                onCleanupUnknown: receipt.recordCleanupUnknown)
         case .desktop(let unit):
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,

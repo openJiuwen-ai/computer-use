@@ -18,6 +18,8 @@ namespace ComputerUse.Windows
 
     // Retain metadata, never PNG bytes or an inferred UIA target. Scope and
     // transforms cannot be refreshed implicitly after the model sees an image.
+    // A selected execution may freeze a separate full-window translation;
+    // that never mutates these pixels, scale, inset or capture-time bounds.
     internal sealed class NativePointerCapture
     {
         internal readonly Dictionary<string, object> Binding;
@@ -45,12 +47,27 @@ namespace ComputerUse.Windows
                 throw new Failure("invalid_request", "pointer trajectory leaves the captured displays");
         }
 
+        internal void RequireCapturedPoint(NativePointerPoint point)
+        {
+            if (!Contains(Image, point))
+                throw new Failure("invalid_request", "pointer trajectory leaves the retained image");
+            // A window image may include pixels captured outside the desktop.
+            // Their current projected coordinates determine screen reachability.
+            if (Binding["surface"] == null)
+                RequirePoint(point);
+        }
+
         internal NativePointerPoint Point(double x, double y)
         {
             if (Double.IsNaN(x) || Double.IsNaN(y) || x < 0 || y < 0 || x >= Image.Width || y >= Image.Height)
                 throw new Failure("invalid_request", "coordinates are outside the retained image");
-            var p = new NativePointerPoint(Image.X + (int)Math.Floor(x * Image.NativeWidth / Image.Width), Image.Y + (int)Math.Floor(y * Image.NativeHeight / Image.Height));
-            RequirePoint(p);
+            long physicalX = (long)Image.X + (int)Math.Floor(x * Image.NativeWidth / Image.Width);
+            long physicalY = (long)Image.Y + (int)Math.Floor(y * Image.NativeHeight / Image.Height);
+            if (physicalX < Int32.MinValue || physicalX > Int32.MaxValue ||
+                physicalY < Int32.MinValue || physicalY > Int32.MaxValue)
+                throw new Failure("invalid_request", "image coordinates exceed physical screen integer coordinates");
+            var p = new NativePointerPoint((int)physicalX, (int)physicalY);
+            RequireCapturedPoint(p);
             return p;
         }
 

@@ -72,6 +72,35 @@ def roots(directory: DirectoryFacts) -> list[SurfaceInfo]:
     return list(_iter_item(iter(directory["surfaces"])))
 
 
+def automatic_root(directory: DirectoryFacts) -> SurfaceInfo | None:
+    """Select one proved root without claiming its descendant discovery is complete.
+
+    macOS discovers attached surfaces only by following a candidate window's
+    child edges. Failure in that traversal can omit descendants, but cannot
+    omit another independent root. Keep those gaps in the original directory;
+    every other discovery gap and every unknown parent path still needs an
+    explicit choice. The native protocol currently publishes these scoped
+    failures as strings, so accept only its exact attached-traversal categories.
+    """
+    candidates = roots(directory)
+    if len(candidates) != 1 or candidates[0]["parentState"] != "none":
+        return None
+    root = candidates[0]
+    if any(ancestry(directory, item["window"], root["window"]) is Knowledge.UNKNOWN for item in directory["surfaces"]):
+        return None
+    attached_limits = {
+        "attached surface discovery incomplete: child/node budget or changing relation",
+        "attached surface discovery incomplete: time budget",
+        "attached surface discovery incomplete: time/node budget",
+    }
+    for reason in directory["stopReasons"]:
+        if directory.get("platform") != "macos" or not (
+            reason.startswith("attached surface children unavailable: ") or reason in attached_limits
+        ):
+            return None
+    return root
+
+
 def in_scope(ui: UIHandle, surface: str | None) -> bool:
     """Check whether a native surface belongs to the App/Window view."""
     # The pipeline shares retained bindings with their owning service.

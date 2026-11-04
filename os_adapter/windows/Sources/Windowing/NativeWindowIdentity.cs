@@ -1,7 +1,6 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 using System;
-using System.Diagnostics;
 
 namespace ComputerUse.Windows
 {
@@ -16,12 +15,11 @@ namespace ComputerUse.Windows
         internal void Validate()
         {
             if (!Native.IsWindow(Handle) || Native.PID(Handle) != Pid || Native.Generation(Handle) != Generation)
-                throw new Failure("stale_target", "the selected window closed or was replaced; no other document was selected");
+                throw new Failure("stale_target",
+                                  "the selected window closed or was replaced; no other document was selected");
             try
             {
-                using (var p = Process.GetProcessById((int)Pid))
-                    if (p.StartTime.ToUniversalTime().Ticks != Started)
-                        throw new InvalidOperationException();
+                NativeProcessLifetime.Require(Pid, Started);
             }
             catch
             {

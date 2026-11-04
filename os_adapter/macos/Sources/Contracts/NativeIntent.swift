@@ -32,9 +32,9 @@ struct NativeBeginRequest {
     let clickContract: String?
 
     init(_ raw: Any?) throws {
-        let extended = (raw as? [String: Any])?.keys.contains("clickContract") == true
-        value = try object(
-            raw, keys: extended ? ["mode", "target", "intent", "clickContract"] : ["mode", "target", "intent"])
+        let rawKeys = (raw as? [String: Any])?.keys
+        let extended = rawKeys?.contains("clickContract") == true
+        value = try object(raw, keys: Set(["mode", "target", "intent"] + (extended ? ["clickContract"] : [])))
         mode = try string(value["mode"], label: "mode")
         intent = try NativeIntent(value["intent"], mode: mode)
         clickContract = extended ? try string(value["clickContract"], label: "clickContract") : nil

@@ -12,12 +12,18 @@ from ..support import action_matches
 
 
 def collect_action_index(contract, selected, target, within, ctx, target_service, facts):
-    obj, _, _, role, enabled = target_service.read(target, within, ctx)
+    role_required = contract.get("roleRequired", True)
+    obj, _, _, role, enabled = target_service.read(target, within, ctx, include_role=role_required)
     require(
-        enabled and role == contract["role"], "The original control role or enabled state changed.", "input_unavailable"
+        enabled and (not role_required or role == contract["role"]),
+        "The original control role or enabled state changed.",
+        "input_unavailable",
     )
-    catalogue = facts.action_catalogue(obj, ctx)
-    matches = action_matches(catalogue, selected)
+    match_by = contract.get("matchBy", "name")
+    catalogue = facts.action_catalogue(obj, ctx, descriptions=role_required)
+    if not role_required and match_by == "description" and catalogue["state"] == "complete":
+        catalogue = facts.action_descriptions(obj, catalogue)
+    matches = action_matches(catalogue, selected, match_by=match_by)
     require(
         catalogue["state"] == "complete" and len(matches) == 1,
         "The selected action is missing or ambiguous in the current catalogue.",

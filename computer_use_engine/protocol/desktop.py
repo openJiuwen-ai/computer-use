@@ -17,7 +17,7 @@ _rect = obj(
 )
 _schema = obj(
     dict(
-        mode=enum("shared", "exclusive"),
+        mode=enum("exclusive"),
         canvas=obj(dict(width=number(integer=True, min=1, max=4096), height=number(integer=True, min=1, max=4096))),
         frontmost=obj(dict(name=_name, selector=_name.optional())).nullable(),
         displays=array(obj(dict(name=_name, rect=_rect, captured=boolean(), error=_name.optional())), min=1, max=32),

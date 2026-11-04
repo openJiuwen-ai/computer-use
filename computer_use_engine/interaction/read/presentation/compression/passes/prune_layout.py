@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.compression.boundaries import anonymous_layout
+from computer_use.interaction.read.presentation.compression.evidence import transparent_provider_wrapper
 from computer_use.interaction.read.presentation.compression.policy import REGIONS, WRAPPERS, layout
 
 if TYPE_CHECKING:
@@ -31,6 +32,8 @@ def prune_layout(
         and (parent["role"] not in WRAPPERS or parent.get("name") or parent.get("description"))
     )
     removable = anonymous_layout(node) if state.context.get("compact") else layout(node)
+    if not removable and state.context.get("compact") and transparent_provider_wrapper(state, node):
+        removable = anonymous_layout({**node, "preserveGroup": False})
     raw_layout = (
         node.get("_factBacked")
         and node["role"] == "group"

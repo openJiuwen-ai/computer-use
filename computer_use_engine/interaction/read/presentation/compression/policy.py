@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.presentation.compression.descriptions import shared_description
 from computer_use.interaction.read.presentation.policy import independent_actions
 from computer_use.interaction.read.presentation.tree import (
     carries_value,
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from computer_use.interaction.read.presentation.records import NodeView
+
 
 WRAPPERS = {"group", "cell", "column"}
 REGIONS = {
@@ -88,9 +90,18 @@ def protected_content(node: NodeView) -> bool:
     """
     return bool(
         "selectionRange" in node
-        or node.get("selectedText")
+        or node.get("selectedText") is not None
         or node.get("actionsUnavailable")
         or node.get("placeholder")
+        or "documentUrl" in node
+        or "documentReports" in node
+        or any(
+            field in node and node[field] is not False
+            for field in ("readOnly", "textReadOnly", "rangeReadOnly", "unsaved", "invalid", "errorRelations")
+        )
+        or any(
+            field in node and not shared_description(node, field) for field in ("valueDescription", "rangeDescription")
+        )
         or any(node.get(field) for field in ("documentText", "controlValue", "rangeValue"))
         or any(
             node.get(field) for field in ("headingLevel", "landmarkType", "localizedLandmarkType", "fullDescription")

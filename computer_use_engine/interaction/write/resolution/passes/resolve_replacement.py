@@ -8,10 +8,15 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
+from computer_use.errors import ComputerUseError
 from computer_use.interaction.write.model import ResolutionFrame
 from computer_use.interaction.write.resolution.checks import parts, require_actuators
 from computer_use.interaction.write.resolution.receiver import ReceiverQuery
-from computer_use.interaction.write.routes.policy import has_independent_text_route, validate_target
+from computer_use.interaction.write.routes.policy import (
+    has_independent_text_route,
+    selects_ready_value_replacement,
+    validate_target,
+)
 from computer_use.pipeline import Contract, Effect, Pass
 
 if TYPE_CHECKING:
@@ -40,16 +45,41 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         # A declared object edit already owns its native recipient and mutation
         # contract. Editor discovery is evidence for contextual input, not an
         # extra prerequisite imposed by the driver's actuator capability.
-        if not has_independent_text_route(facts, intent, frame.request.history):
+        if not (
+            has_independent_text_route(facts, intent, frame.request.history)
+            or selects_ready_value_replacement(facts, intent, native.policy, frame.request.history)
+        ):
             if cast("Binding", target).node is None:
                 raise ValueError("Full-text replacement requires a specified text control")
             query = ReceiverQuery(native, operation, target, remaining)
-            receiver = await query.resolve(
-                require_editable=True,
-                allow_preparation="nativeEditorPreparation" in capabilities,
-                focused=facts.input.focused_node if "nativeActuators" in capabilities else None,
-                allow_internal="nativeActuators" in capabilities,
-            )
+            try:
+                receiver = await query.resolve(
+                    require_editable=True,
+                    allow_preparation="nativeEditorPreparation" in capabilities,
+                    focused=facts.input.focused_node if "nativeActuators" in capabilities else None,
+                    allow_internal="nativeActuators" in capabilities,
+                )
+            except ComputerUseError as error:
+                # An optional contextual editor query cannot invalidate an
+                # independent, ready whole-value contract. Boundary changes,
+                # explicit editing prohibitions and uncertain effects propagate.
+                if not (
+                    error.code == "observation_incomplete"
+                    and error.effect == "none"
+                    and selects_ready_value_replacement(
+                        facts, intent, native.policy, frame.request.history, needs_editing_evidence=True
+                    )
+                ):
+                    raise
+                fresh = await native.inspect(operation, target, remaining(), **frame.scope)
+                if not fresh.binding.same_target(target):
+                    raise ValueError("Native replacement inspection returned a different target") from error
+                validate_target(fresh, native.policy)
+                if not selects_ready_value_replacement(
+                    fresh, intent, native.policy, frame.request.history, needs_editing_evidence=True
+                ):
+                    raise
+                return replace(frame, facts=fresh, needs_editing_evidence=True)
             frame = replace(frame, needs_editing_evidence=receiver.needs_editing_evidence)
             if receiver.actuator is not None:
                 require_actuators(capabilities, facts)

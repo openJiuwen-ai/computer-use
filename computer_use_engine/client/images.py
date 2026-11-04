@@ -37,6 +37,7 @@ __all__ = [
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.content import DisplayText
     from computer_use.interaction.read.presentation.document import DisplayDocument
+    from computer_use.session.image_coordinates import ImageCoordinates
 
 
 def register_image(png, source):
@@ -59,8 +60,10 @@ def _context_text(value: str | DisplayDocument | DisplayText | None) -> str | No
     return value
 
 
-def image_label(png, context_already_shown=False):
+def image_label(png, context_already_shown=False, coordinates: ImageCoordinates | None = None):
     size = png_size(png)
+    if coordinates is not None:
+        size = {"width": coordinates.delivered_size[0], "height": coordinates.delivered_size[1]}
     known = _source(png)
     source = known["source"] if known is not None else None
     if source is None:
@@ -91,4 +94,11 @@ def image_label(png, context_already_shown=False):
         notes = window_state_notes(known["metadata"])
         facts["stopReasons"] += notes[1:] if facts.get("omitContext") else notes
         facts["visualText"] = known["metadata"].get("visualText")
-    return render_image_caption(size["width"], size["height"], facts)
+        if coordinates is not None and facts["visualText"] is not None:
+            visual = facts["visualText"]
+            facts["visualText"] = dict(
+                visual,
+                lines=[dict(line, rect=coordinates.delivered_rect(line["rect"])) for line in visual["lines"]],
+            )
+    caption = render_image_caption(size["width"], size["height"], facts)
+    return caption + ("\nUse this displayed image's pixels for coordinates." if coordinates is not None else "")

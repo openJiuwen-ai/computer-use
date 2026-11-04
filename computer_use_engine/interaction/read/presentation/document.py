@@ -10,7 +10,6 @@ from dataclasses import dataclass, is_dataclass, replace
 from functools import cached_property
 from typing import TYPE_CHECKING
 
-from computer_use.json import dumps, utf8
 from computer_use.interaction.read.presentation.content import DisplayText, text
 from computer_use.protocol.observation import NativeObservation, encode_observation
 
@@ -137,7 +136,9 @@ class DisplayDocument:
     @cached_property
     def estimated_bytes(self) -> int:
         """Estimate retained structured bytes for the bounded delivery baseline cache."""
-        return len(utf8(dumps(self.to_data())))
+        from .sizing import DocumentSize
+
+        return DocumentSize().document(self)
 
     def summary_data(self) -> dict[str, object]:
         """Describe captured sections and source identities for pre-render diagnostics."""

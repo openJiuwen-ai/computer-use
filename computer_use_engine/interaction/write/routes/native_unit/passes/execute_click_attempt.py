@@ -25,6 +25,7 @@ def create(
         """Prepare, resolve the final point, dispatch, and clean up in one native call."""
         if invocation.unit.command.prepare:
             raise ValueError("An integrated click cannot issue a separate preparation command")
+        state.reserve_preparation(invocation.unit.command, invocation.unit.plan.resolved.target.facts)
         return await send_native_unit(invocation, native, state)
 
     return execute

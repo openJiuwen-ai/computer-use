@@ -20,6 +20,9 @@ from computer_use.interaction.read.presentation.rendering.document.model import 
 from computer_use.interaction.read.presentation.rendering.document.passes.format_document import (
     stage as format_document,
 )
+from computer_use.interaction.read.presentation.rendering.document.passes.plan_capture_context import (
+    stage as plan_capture_context,
+)
 from computer_use.pipeline import Contract, Pipeline, Sequence
 from computer_use.pipeline.core import Node
 
@@ -54,6 +57,14 @@ class _RenderSnapshotSources(Node["DocumentRenderRequest", "RenderedDocumentInpu
                     pending.extend(reversed(part.values))
             elif isinstance(part, (tuple, list)):
                 pending.extend(reversed(part))
+        sections = {}
+        for source in sources.values():
+            for root in source.roots:
+                for group in root.groups.groups if root.groups is not None else ():
+                    signature = (group.capture, group.entries, group.recovery_refs)
+                    previous = sections.setdefault(group.section_key, signature)
+                    if previous != signature:
+                        raise ValueError("Content directory section identifies different captured fields")
         snapshots = {key: self.presentation.run(source, control) for key, source in sources.items()}
         return RenderedDocumentInput(request, MappingProxyType(snapshots))
 
@@ -72,4 +83,7 @@ class DocumentRenderingPipeline(Pipeline["DocumentRenderRequest", "str"]):
         super().__init__(root=self.build())
 
     def build(self) -> Step[DocumentRenderRequest, str]:
-        return Sequence(name="DocumentRenderingPipeline", steps=[_RenderSnapshotSources(), format_document()])
+        return Sequence(
+            name="DocumentRenderingPipeline",
+            steps=[plan_capture_context(), _RenderSnapshotSources(), format_document()],
+        )

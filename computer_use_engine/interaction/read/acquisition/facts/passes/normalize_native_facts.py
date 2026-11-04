@@ -35,6 +35,8 @@ def create(*, reader: NativeReader) -> Callable[[CollectedFacts, Control], Seman
             driver_features=getattr(reader.port.connection, "capabilities", ()),
             scope_kind=value.profile.scope.request.scope_kind,
             operation_capabilities=value.metadata.operation_capabilities,
+            diagnostic_fields=value.metadata.diagnostic_fields,
+            field_sources=value.metadata.field_sources,
         )
         result.collection = value.metadata
         return result

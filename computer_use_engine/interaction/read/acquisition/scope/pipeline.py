@@ -88,7 +88,7 @@ class WorkingScopeDiscoveryPipeline(Pipeline["WorkingScopeRequest", "tuple[Worki
         async def collect(value: Any, control: Control) -> _ObservedDirectory:
             query = surfaces_query(
                 value.request.selection.application,
-                accessibility=value.request.accessibility,
+                profile=value.request.profile,
                 capabilities=services.port.connection.capabilities,
             )
             directory = await services.directory.collect(value.read, query, _control=control)

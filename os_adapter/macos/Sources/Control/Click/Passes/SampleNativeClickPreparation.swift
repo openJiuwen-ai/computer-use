@@ -14,8 +14,8 @@ import ApplicationServices
         let pointer: NativePointerUnit, point: CGPoint
         switch plan.target {
         case .captured(let unit):
-            pointer = unit
-            point = try unit.point(plan.pointer!.start!)
+            pointer = try unit.resolvingCaptureTranslation()
+            point = try pointer.point(plan.pointer!.start!)
         case .element(let unit):
             if !afterPreparation, let exposure = try unit.exposure() {
                 pointer = NativePointerUnit(
@@ -33,9 +33,6 @@ import ApplicationServices
         try BackgroundTarget(pointer.application).validate(input: true)
         try BackgroundTarget.validateReleasedInput()
         if plan.offer.delivery == .windowDirected {
-            guard !BackgroundTarget.isExclusive else {
-                throw DriverError("window-directed clicks are unavailable in exclusive mode", code: .modeUnsupported)
-            }
             try BackgroundEvents.requirePointerRoute(window: pointer.window)
         }
         let needed = !pointer.ready(at: point, delivery: plan.offer.delivery)

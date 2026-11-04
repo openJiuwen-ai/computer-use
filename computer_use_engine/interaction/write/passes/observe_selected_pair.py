@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 def create(*, state: WriteRunState) -> Callable[[ResolvedWrite, Control], ResolvedWrite]:
     def observe_pair(resolved: ResolvedWrite, _: object) -> ResolvedWrite:
-        """Record the selected actuator/receiver pair for this write's stability bound."""
+        """Record resolved receiver evidence without excluding an already-ready route."""
         state.attempts.observe(resolved.target.facts)
         return resolved
 

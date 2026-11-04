@@ -9,13 +9,14 @@ import base64
 import hashlib
 import math
 import weakref
-from dataclasses import replace
+from dataclasses import asdict, replace
 from io import BytesIO
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import uuid4
 
 from computer_use.interaction.query.instances.membership import ancestor
 from computer_use.interaction.read.presentation.content import DisplayText, template, text
+from computer_use.interaction.read.presentation.headers import ImageHeader
 from computer_use.protocol.captures import capture_metadata, decode_capture
 from computer_use.session.interface_images import (
     ImagePiece,
@@ -28,10 +29,14 @@ from PIL import Image
 
 if TYPE_CHECKING:
     from typing import Any, Sequence
+    from computer_use.session.image_coordinates import ImageCoordinates
 
     from computer_use.interaction.controller import SessionController
+    from computer_use.interaction.read.acquisition.images.capture import WindowImage
     from computer_use.interaction.read.views.pipeline import WindowPart
     from computer_use.interaction.records import UIHandle
+    from computer_use.native.scopes import WorkingWindow
+    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 class InterfaceImagePipeline:
@@ -68,15 +73,13 @@ class InterfaceImagePipeline:
         if not images:
             return None, [
                 text(
-                    (
-                        "Screenshot: unavailable; use member-window reads or "
-                        'Computer.read(view="image") for visual '
-                        "observation."
-                    )
-                )
+                    'Screenshot: unavailable; use member-window reads or Computer.read(view="image") for visual observation.'
+                ),
+                DisplayText("image_header", (ImageHeader("unavailable", (), False, (), None),)),
             ]
         unique = dict(images)
         images = list(unique.items())
+        collected = tuple(images)
         try:
             if len(images) != len(members):
                 raise ValueError("Some member windows could not be captured or exceeded the read budget.")
@@ -147,18 +150,15 @@ class InterfaceImagePipeline:
                     scope,
                 )
                 canvas = InterfaceImage(png, tuple(pieces), signature(members), (left, top), scale)
-            notes = [
-                template(
-                    "Screenshot: {}; origin=top-left; coordinates belong only to this App/Window object.",
-                    "instance window layout" if len(images) > 1 else "window",
-                ),
-                text("Window images were captured separately; image/tree contents are not an atomic snapshot."),
-            ]
+            displayed = tuple(key for key, _ in images)
+            kind = "single" if len(images) == 1 else "composite"
+            notes = []
         except (ValueError, OSError) as error:
             key, image = images[0]
             canvas = InterfaceImage(image.image, (), signature(members), unavailable_mapping=True)
             # pylint: disable-next=protected-access
             ref = next(ref for ref, window in ui._instance.windows.items() if window == key)
+            displayed, kind = (key,), "partial"
             notes = [
                 template(
                     "Screenshot: partial; shows only window {}, not the complete instance layout. {}", ref, str(error)
@@ -173,7 +173,47 @@ class InterfaceImagePipeline:
                 ),
             ]
         self.register(ui, canvas)
+        summary = self.metadata(ui, canvas, collected, displayed, kind)
+        notes.append(DisplayText("image_header", (summary,)))
         return canvas, notes
+
+    @staticmethod
+    def metadata(
+        ui: UIHandle,
+        canvas: InterfaceImage,
+        images: Sequence[tuple[str, WindowImage]],
+        displayed: tuple[str, ...],
+        kind: Literal["single", "composite", "partial"],
+    ) -> ImageHeader:
+        """Freeze original captures and the actual displayed sources before publication.
+
+        Partial canvases retain their selected source independently of empty pieces.
+        Pixel composition, image registration and input mappings stay unchanged.
+        """
+        aliases = {window: ref for ref, window in ui._instance.windows.items()}
+        captures = tuple(
+            dict(
+                window=key,
+                ref=aliases[key],
+                displayed=key in displayed,
+                target=asdict(image.target),
+                observed=image.observed,
+                coordinates=image.coordinates,
+                capture=capture_metadata(image.image),
+            )
+            for key, image in images
+        )
+        return ImageHeader(
+            kind,
+            tuple(aliases[key] for key in displayed),
+            not canvas.unavailable_mapping,
+            captures,
+            capture_metadata(canvas.png),
+            tuple((piece.window, piece.box) for piece in canvas.pieces),
+            canvas.origin,
+            canvas.scale,
+            canvas.membership,
+        )
 
     def register(self, ui: UIHandle, canvas: InterfaceImage) -> None:
         """Retain the composite image's source windows and coordinate mapping.
@@ -207,6 +247,7 @@ class InterfaceImagePipeline:
             # Knowledge of identical pixels can survive a fresh capture. The
             # command still dispatches through its new native token and map.
             canvas.delivered = previous.delivered
+            canvas.delivered_coordinates = previous.delivered_coordinates
         owner, value = weakref.ref(ui), weakref.ref(canvas)
         # pylint: disable-next=protected-access
         session = cast("WorkingWindow", ui._instance.anchor).root.session
@@ -225,9 +266,10 @@ class InterfaceImagePipeline:
                 and hashlib.sha256(image.png).digest() == image.digest
             )
 
-        def delivered() -> None:
+        def delivered(coordinates: ImageCoordinates | None = None) -> None:
             if current():
                 value().delivered = adapters.image_delivery_epoch()
+                value().delivered_coordinates = coordinates
 
         adapters.register_image(
             canvas.png,
@@ -246,8 +288,3 @@ class InterfaceImagePipeline:
                 delivered=delivered,
             ),
         )
-
-
-if TYPE_CHECKING:
-    from computer_use.native.scopes import WorkingWindow
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts

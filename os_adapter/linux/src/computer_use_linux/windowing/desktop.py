@@ -267,7 +267,7 @@ class AccessibilityDesktop:
         pass
 
 
-def connect_desktop(ax, mode, retire):
+def connect_desktop(ax, retire):
     wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
     if wayland:
         return AccessibilityDesktop(ax, retire, "wayland")
@@ -278,6 +278,6 @@ def connect_desktop(ax, mode, retire):
     from computer_use_linux.system.x11 import X11
 
     try:
-        return X11(mode, retire)
+        return X11(retire)
     except Exception as error:
         return AccessibilityDesktop(ax, retire, "x11-unavailable", f"X11 connection unavailable: {error}")

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.read.presentation.semantics.passes.build_projection_input import (
     stage as build_projection_input,
 )
+from computer_use.interaction.read.presentation.semantics.passes.collect_geometry import stage as collect_geometry
 from computer_use.interaction.read.presentation.semantics.passes.compose_display_semantics import (
     stage as compose_display_semantics,
 )
@@ -39,5 +40,5 @@ class SemanticPipeline(Pipeline["SemanticNode", "ProjectionInput"]):
         branch = self.branch
         return Sequence(
             name="SemanticPipeline",
-            steps=[compose_display_semantics(), build_projection_input(branch=branch)],
+            steps=[compose_display_semantics(), build_projection_input(branch=branch), collect_geometry(branch=branch)],
         )

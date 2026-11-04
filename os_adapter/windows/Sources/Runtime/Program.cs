@@ -14,15 +14,14 @@ namespace ComputerUse.Windows
         static object[] checkpoint = new object[0];
         static NativeRuntime CreateRuntime(string session, string mode)
         {
-            var reader = new NativeReadBackend(session, mode: mode);
+            var reader = new NativeReadBackend(session);
             workerReader = reader;
             reader.Store.RestoreWindows(checkpoint);
             workerStore = reader.Store;
-            bool foregroundAllowed = Environment.GetEnvironmentVariable("COMPUTER_USE_FOREGROUND_ASSIST") == "1";
             var captures = new NativePointerCaptures();
-            var pointer = new NativePointer(new NativeWindowsPointer(reader.Store, captures, mode), mode, foregroundAllowed);
-            var keyboard = new NativeKeyboard(new NativeUiaKeyboard(reader.Store, pointer, mode), mode, foregroundAllowed, new NativeWindowsClipboard());
-            var desktopKeyboard = mode == "exclusive" ? new NativeKeyboard(new NativeDesktopKeyboard(captures), mode, false) : null;
+            var pointer = new NativePointer(new NativeWindowsPointer(reader.Store, captures));
+            var keyboard = new NativeKeyboard(new NativeUiaKeyboard(reader.Store, pointer), new NativeWindowsClipboard());
+            var desktopKeyboard = new NativeKeyboard(new NativeDesktopKeyboard(captures));
             return new NativeRuntime(session, reader, new NativeExecution(new NativeUiaObjects(reader.Store), keyboard, pointer, new NativeScroll(new NativeUiaScroll(reader.Store)), desktopKeyboard, new NativeUiaCurrentReceiver(reader.Store)), new NativeCapture(reader.Store, session, mode, captures), AgentPointerFeedback.Point);
         }
 

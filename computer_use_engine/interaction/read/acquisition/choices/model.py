@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from computer_use.native.query.directory import SurfaceReadProfile
+
 if TYPE_CHECKING:
     from computer_use.errors import ComputerUseError
     from computer_use.interaction.read.acquisition.images.overview import WindowOverview
@@ -26,6 +28,7 @@ class WindowChoiceRequest:
         directory: Observed application/window catalogue, including incomplete relationships.
         selection: Fixed working-instance/root-window selection, when established.
         include_overview: Whether the window-choice response includes independent window previews.
+        profile: Original directory intent retained through preview rechecks.
     """
 
     error: ComputerUseError
@@ -34,6 +37,7 @@ class WindowChoiceRequest:
     directory: DirectoryFacts
     selection: WorkingWindow | None = None
     include_overview: bool = True
+    profile: SurfaceReadProfile = SurfaceReadProfile.ACCESSIBILITY
 
 
 @dataclass(frozen=True)

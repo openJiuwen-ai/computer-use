@@ -9,33 +9,35 @@ namespace ComputerUse.Windows
     // NativeResourceScope owner across begin/inspect/execute/finish frames.
     // Query/prepare/dispatch subpipelines below borrow this state on the existing
     // single native executor; none independently owns leases or replay history.
-    internal sealed class NativeRuntime : INativeRuntime
+    internal sealed class NativeRuntime : INativeRuntime, INativeWorkerHealthStatus
     {
-        static readonly string[] ReadCapabilities =
-        {
-            "cancel",
-            "requestDedup",
-            "nativeOperations",
-            "nativeDirectory",
-            "nativeRelations",
-            "nativeNodePages",
-            "nativeNodeDepthBudget",
-            "nativeRelationPages",
-            "nativeCapturedText",
-            "nativeTableFacts",
-            "nativeAdvertisedFields",
-            "nativeFollowRelations",
-            "nativeUiaReadV2",
-            "nativeUiaTextContext",
-            "nativeUiaTextLines",
-            "nativeWindowContent",
-            "nativeRawNodeMetadata"
-        };
+        static readonly string[] ReadCapabilities = { "cancel",
+                                                      "requestDedup",
+                                                      "nativeOperations",
+                                                      "nativeDirectory",
+                                                      "nativeRelations",
+                                                      "nativeNodePages",
+                                                      "nativeNodeDepthBudget",
+                                                      "nativeRelationPages",
+                                                      "nativeCapturedText",
+                                                      "nativeTableFacts",
+                                                      "nativeAdvertisedFields",
+                                                      "nativeFollowRelations",
+                                                      "nativeUiaReadV2",
+                                                      "nativeUiaTextContext",
+                                                      "nativeUiaTextLines",
+                                                      "nativeWindowContent",
+                                                      "nativeRawNodeMetadata",
+                                                      "nativeObservationScopes",
+                                                      "nativeReadDiscovery" };
+
         public string[] Capabilities
         {
-            get
-            {
-                return ReadCapabilities.Concat(writer == null ? new string[0] : writer.Capabilities).Concat(reader is INativeReadEventBackend ? new[] { "nativeReadEvents" } : new string[0]).Concat(capture == null ? new string[0] : new[] { "nativeCapture", "nativeCaptureKinds" }).ToArray();
+            get {
+                return ReadCapabilities.Concat(writer == null ? new string[0] : writer.Capabilities)
+                    .Concat(reader is INativeReadEventBackend ? new[] { "nativeReadEvents" } : new string[0])
+                    .Concat(capture == null ? new string[0] : new[] { "nativeCapture", "nativeCaptureKinds" })
+                    .ToArray();
             }
         }
 
@@ -54,6 +56,28 @@ namespace ComputerUse.Windows
         NativeWriteOperation write;
         IDisposable lease;
         bool retired;
+        public string WorkerRetirementReason { get; private set; }
+        void PromoteWorkerRetirement()
+        {
+            if (write == null || write.WorkerRetirementReason == null)
+                return;
+            if (WorkerRetirementReason == null)
+                WorkerRetirementReason = write.WorkerRetirementReason;
+            retired = true;
+        }
+        void PreserveRetiredReceipt(Dictionary<string, object> result)
+        {
+            if (WorkerRetirementReason == null)
+                return;
+            result["cleanup"] = "failed";
+            result["retryReason"] = null;
+            if (result["errorCode"] == null)
+            {
+                result["errorCode"] = "execution_unknown";
+                result["detail"] = (string)result["detail"] +
+                                   " Native worker preparation cleanup is unconfirmed; reconnect before further input.";
+            }
+        }
         sealed class Step
         {
             internal Dictionary<string, object> Command;
@@ -63,7 +87,10 @@ namespace ComputerUse.Windows
         readonly Dictionary<long, Step> steps = new Dictionary<long, Step>();
         readonly Queue<long> stepOrder = new Queue<long>();
         long highStep;
-        internal NativeRuntime(string session, INativeReadBackend reader, NativeExecution writer = null, INativeCaptureBackend capture = null, Action<string, Dictionary<string, object>, NativePointerPoint, bool, int, bool> displayPointer = null)
+        internal NativeRuntime(
+            string session, INativeReadBackend reader, NativeExecution writer = null,
+            INativeCaptureBackend capture = null,
+            Action<string, Dictionary<string, object>, NativePointerPoint, bool, int, bool> displayPointer = null)
         {
             binding = raw => NativeBinding.Resolve(raw, session);
             this.reader = reader;
@@ -71,13 +98,22 @@ namespace ComputerUse.Windows
             this.capture = capture;
             this.displayPointer = displayPointer;
             captures = new NativeCapturePipeline(reader, capture, binding, FinishCurrent, Expire);
-            queries = new NativeQueryPipeline(reader, binding, writer == null ? null : new Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object>(writer.Inspect), FinishCurrent, Expire, writer == null ? null : new Func<NativeWriteOperation, Dictionary<string, object>, Request, object>(writer.InspectCurrentReceiver));
+            queries = new NativeQueryPipeline(
+                reader, binding,
+                writer == null ? null
+                               : new Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object>(
+                                     writer.Inspect),
+                FinishCurrent, Expire,
+                writer == null ? null
+                               : new Func<NativeWriteOperation, Dictionary<string, object>, Request, object>(
+                                     writer.InspectCurrentReceiver));
         }
 
         void FinishCurrent()
         {
             if (operation == null)
                 return;
+            PromoteWorkerRetirement();
             string closed = operation, cleanup = write == null ? "complete" : write.Cleanup;
             if (cleanup != "complete")
                 retired = true;
@@ -86,7 +122,15 @@ namespace ComputerUse.Windows
             write = null;
             steps.Clear();
             stepOrder.Clear();
-            cleanup = NativeResourcePipeline.Release(cleanup, reader, ref lease, ref retired);
+            // Do not enter COM/provider/lease cleanup after unsafe thread state.
+            // The outer process owner must confirm exit before accepting more work.
+            if (WorkerRetirementReason == null)
+                cleanup = NativeResourcePipeline.Release(cleanup, reader, ref lease, ref retired);
+            else
+            {
+                cleanup = "failed";
+                lease = null;
+            }
             finished[closed] = cleanup;
             finishedOrder.Enqueue(closed);
             while (finishedOrder.Count > 8)
@@ -101,19 +145,52 @@ namespace ComputerUse.Windows
             }
             finally
             {
-                var events = reader as INativeReadEventBackend;
-                if (events != null)
-                    events.Dispose();
+                if (WorkerRetirementReason == null)
+                {
+                    var events = reader as INativeReadEventBackend;
+                    if (events != null)
+                        events.Dispose();
+                }
             }
         }
 
         public void Expire()
         {
-            if (operation != null && Wire.Now >= deadline)
+            PromoteWorkerRetirement();
+            if (operation != null && (WorkerRetirementReason != null || Wire.Now >= deadline))
                 FinishCurrent();
         }
 
         public object Perform(string method, Dictionary<string, object> p, Request r)
+        {
+            PromoteWorkerRetirement();
+            if (WorkerRetirementReason != null && method != "finish")
+                throw new Failure("execution_unknown",
+                                  "native worker preparation cleanup is unconfirmed; this runtime is retired");
+            try
+            {
+                return PerformCore(method, p, r);
+            }
+            catch (NativeDesktopCleanupFailure error)
+            {
+                // Read/begin failures can precede a write owner. Retain health
+                // in this existing runtime, never in a static desktop helper.
+                if (write != null)
+                    write.RetireWorker(error.Reason);
+                if (WorkerRetirementReason == null)
+                    WorkerRetirementReason = error.Reason;
+                retired = true;
+                var primary = error.OriginalFailure;
+                throw new Failure(primary == null ? "execution_unknown" : primary.Code, error.Message,
+                                  primary == null ? "reconnect and observe; do not replay the original input"
+                                                  : primary.Next);
+            }
+            finally
+            {
+                PromoteWorkerRetirement();
+            }
+        }
+        object PerformCore(string method, Dictionary<string, object> p, Request r)
         {
             if (method == "finish")
             {
@@ -155,7 +232,9 @@ namespace ComputerUse.Windows
                 if (operation != null)
                     throw new Failure("busy", "another native operation is active");
                 r.Check();
-                NativeResourcePipeline.Acquire(writable, target, r, reader, writer == null ? null : new Func<Request, IDisposable>(writer.Acquire), ref lease, ref retired);
+                NativeResourcePipeline.Acquire(writable, target, r, reader,
+                                               writer == null ? null : new Func<Request, IDisposable>(writer.Acquire),
+                                               ref lease, ref retired);
                 operation = Guid.NewGuid().ToString("N");
                 original = target;
                 deadline = r.Deadline;
@@ -165,10 +244,12 @@ namespace ComputerUse.Windows
                 {
                     string displayOperation = operation;
                     var displayTarget = new Dictionary<string, object>(target);
-                    write.DisplayPointer = (point, pulse, count, dragging) => displayPointer(displayOperation, displayTarget, point, pulse, count, dragging);
+                    write.DisplayPointer = (point, pulse, count, dragging) =>
+                        displayPointer(displayOperation, displayTarget, point, pulse, count, dragging);
                 }
 
-                var begun = Wire.Obj("operation", operation, "target", new Dictionary<string, object>(original), "remainingMs", Math.Max(0, (int)Math.Floor(deadline - Wire.Now)));
+                var begun = Wire.Obj("operation", operation, "target", new Dictionary<string, object>(original),
+                                     "remainingMs", Math.Max(0, (int)Math.Floor(deadline - Wire.Now)));
                 if (clickV1)
                     begun["clickContract"] = "v1";
                 return begun;
@@ -201,7 +282,9 @@ namespace ComputerUse.Windows
             Step prior;
             if (steps.TryGetValue(step, out prior))
             {
-                bool same = command.Keys.All(k => k == "target" ? NativeWriteOperation.Same(target, Wire.Object(prior.Command[k])) : Equals(command[k], prior.Command[k]));
+                bool same = command.Keys.All(k => k == "target"
+                                                      ? NativeWriteOperation.Same(target, Wire.Object(prior.Command[k]))
+                                                      : Equals(command[k], prior.Command[k]));
                 if (!same)
                     throw new Failure("request_conflict", "step id reused with different input");
                 return prior.Result;
@@ -212,22 +295,23 @@ namespace ComputerUse.Windows
             if (write.InputTerminated)
             {
                 r.Effect = true;
-                throw new Failure("execution_unknown", "this operation has unresolved input or incompatible preparation; it cannot send again");
+                throw new Failure(
+                    "execution_unknown",
+                    "this operation has unresolved input or incompatible preparation; it cannot send again");
             }
 
             r.Deadline = Math.Min(r.Deadline, deadline);
             highStep = step;
+            bool cleanupFailure = false;
             try
             {
                 r.Check();
                 object result = writer.Execute(write, command, r, operation, step);
+                PromoteWorkerRetirement();
+                PreserveRetiredReceipt(Wire.Object(result));
                 var copy = new Dictionary<string, object>(command);
                 copy["target"] = new Dictionary<string, object>(target);
-                steps[step] = new Step
-                {
-                    Command = copy,
-                    Result = result
-                };
+                steps[step] = new Step { Command = copy, Result = result };
                 stepOrder.Enqueue(step);
                 while (stepOrder.Count > 32)
                     steps.Remove(stepOrder.Dequeue());
@@ -236,15 +320,22 @@ namespace ComputerUse.Windows
                     FinishCurrent();
                 return result;
             }
+            catch (NativeDesktopCleanupFailure)
+            {
+                cleanupFailure = true;
+                throw;
+            }
             catch (Failure error)
             {
                 if (error.Code == "cancelled" || error.Code == "deadline_exceeded")
                     FinishCurrent();
                 throw;
             }
+            // Carry only this pending exception to Perform's existing owner.
             finally
             {
-                Expire();
+                if (!cleanupFailure)
+                    Expire();
             }
         }
     }

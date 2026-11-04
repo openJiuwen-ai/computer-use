@@ -13,17 +13,26 @@ enum AXMessaging {
         AXUIElementSetMessagingTimeout(element, timeoutSeconds)
     }
 
-    static func performAction(_ element: AXUIElement, _ action: CFString, onCall: () -> Void = {}) -> AXError {
+    @MainActor static func performAction(_ element: AXUIElement, _ action: CFString, onCall: () -> Void = {}) -> AXError
+    {
         let status = configure(element)
         guard status == .success else { return status }
         // A configuration error must not be treated as a returned action.
         onCall()
-        return AXUIElementPerformAction(element, action)
+        return NativeInputActivity.accessibility(
+            element, mechanism: action as String, focus: action as String == kAXRaiseAction
+        ) { AXUIElementPerformAction(element, action) }
     }
 
-    static func setAttributeValue(_ element: AXUIElement, _ attribute: CFString, _ value: CFTypeRef) -> AXError {
+    @MainActor static func setAttributeValue(_ element: AXUIElement, _ attribute: CFString, _ value: CFTypeRef)
+        -> AXError
+    {
         let status = configure(element)
         guard status == .success else { return status }
-        return AXUIElementSetAttributeValue(element, attribute, value)
+        let focus = [kAXFocusedAttribute, kAXFocusedWindowAttribute, kAXMainAttribute, kAXMainWindowAttribute].contains(
+            attribute as String)
+        return NativeInputActivity.accessibility(element, mechanism: attribute as String, focus: focus) {
+            AXUIElementSetAttributeValue(element, attribute, value)
+        }
     }
 }

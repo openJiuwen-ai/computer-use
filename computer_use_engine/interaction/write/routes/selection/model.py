@@ -5,7 +5,7 @@ from collections.abc import Mapping, Set
 from dataclasses import dataclass
 from typing import Protocol
 
-from computer_use.interaction.write.routes.policy import RouteKey
+from computer_use.interaction.write.routes.policy import ReceiverPair, RouteKey
 from computer_use.native.contracts import Facts, HostPolicy, Intent, Primitive, UnitCommand
 
 
@@ -15,7 +15,8 @@ class RouteHistory(Protocol):
     Attributes:
         unavailable: Routes already refused for this operation.
         background_unavailable: Routes whose background preparation failed.
-        prepared: Route/foreground pairs already prepared by this operation.
+        prepared: Route/mode preparation attempts consumed by this operation.
+        preparation_pairs: Recipients whose native preparation has started in this operation.
     """
 
     @property
@@ -28,6 +29,10 @@ class RouteHistory(Protocol):
 
     @property
     def prepared(self) -> Set[tuple[RouteKey, bool]]:
+        pass
+
+    @property
+    def preparation_pairs(self) -> Set[ReceiverPair]:
         pass
 
     @property
@@ -88,16 +93,12 @@ class EligibleRoutes:
 
 @dataclass(frozen=True)
 class RouteOptions:
-    """Candidate preparation modes and the command chosen by route selection.
+    """Eligible routes and the command chosen by route selection.
 
     Attributes:
         eligible: Filtered candidates and their original request.
-        preparation: Candidate command and whether it requires foreground input.
-        property_replacements: Eligible object-property replacement commands.
         selected: One chosen command, or None before a branch selects one.
     """
 
     eligible: EligibleRoutes
-    preparation: tuple[tuple[UnitCommand, bool], ...] = ()
-    property_replacements: tuple[UnitCommand, ...] = ()
     selected: UnitCommand | None = None

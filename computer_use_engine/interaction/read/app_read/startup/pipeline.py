@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.control import NativeScopeBody
+from computer_use.native.query.directory import surfaces_query
 from computer_use.interaction.read.acquisition.scope.pipeline import DirectoryServiceNode
 from computer_use.interaction.read.app_read.startup.model import StartupAttempt, StartupLease
 from computer_use.interaction.read.app_read.startup.passes.remember_associated_running_scope import (
@@ -84,7 +85,11 @@ class StartupDirectoryPipeline(Pipeline["StartupDirectoryState", "tuple[Applicat
             try:
                 directory = await services.directory.collect(
                     value.read,
-                    dict(kind="surfaces", application=value.state.application["id"]),
+                    surfaces_query(
+                        value.state.application["id"],
+                        profile=value.state.profile,
+                        capabilities=services.port.connection.capabilities,
+                    ),
                     _control=control,
                 )
             except ComputerUseError as error:

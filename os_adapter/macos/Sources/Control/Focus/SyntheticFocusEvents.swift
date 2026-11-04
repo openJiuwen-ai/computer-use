@@ -6,6 +6,20 @@ import ApplicationServices
 /// Process-addressed notifications observed in SkyComputerUseService 26.1013.1001501.
 /// These prepare AppKit's local state without requesting global activation.
 enum SyntheticFocusEvents {
+    /// Public event construction, with independently observed AppKit delivery.
+    /// Posting is not proof that the application consumed the notification.
+    static func applicationActivation(active: Bool) -> CGEvent? {
+        guard
+            let event = NSEvent.otherEvent(
+                with: .appKitDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                subtype: active
+                    ? NSEvent.EventSubtype.applicationActivated.rawValue
+                    : NSEvent.EventSubtype.applicationDeactivated.rawValue, data1: 0, data2: 0)?.cgEvent
+        else { return nil }
+        event.timestamp = DispatchTime.now().uptimeNanoseconds
+        return event
+    }
+
     // Native evidence: 0x100735ff4, 0x10073617c and notifyWindowKeyFocusReturned.
     static let processNotification: UInt = 21
     static let keyFocusReturned: Int16 = .min

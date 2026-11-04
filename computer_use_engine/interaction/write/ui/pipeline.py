@@ -19,15 +19,18 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import UIHandle
     from computer_use.pipeline.core import Control, Step
     from computer_use.protocol.records import Record
-    from computer_use.session.interface_images import InterfaceImage
+    from computer_use.session.interface_images import ImagePiece, InterfaceImage
     from computer_use.types import ActionResult, Point
+
+
+from .membership import compatible_membership
 
 
 class InterfacePointerPipeline:
     """Execute a gesture in an App or Window screenshot's coordinate space.
 
     Check the delivered image and current window membership, then map the gesture
-    to its captured native member window. Revalidate composite-image layout
+    to its captured native member window. Revalidate that member's pixel scale
     before dispatch, then return the mapped window's action result.
 
     Attributes:
@@ -79,14 +82,17 @@ class InterfacePointerPipeline:
                 "use an authorized exclusive desktop image for a cross-window drag",
                 "mode_unsupported",
             )
-        await refresh(self.controller, ui)
-        if image.membership != signature(allowed(ui)):
+        # This gesture addresses a retained image, not provider controls. Query
+        # fresh window/membership facts; native dispatch still validates the
+        # original capture, identity, modality and physical target boundary.
+        await refresh(self.controller, ui, accessibility=False)
+        if not compatible_membership(image.membership, signature(allowed(ui)), piece.window):
             image.expired = True
             raise local_failure(
                 "the window membership or modal layout changed", "read this UI image again", "snapshot_expired"
             )
         if len(image.pieces) > 1:
-            await self.check_layout(image)
+            await self.check_layout(image, piece)
         if intent == "drag":
             start, end = mapped[0][1], mapped[1][1]
             parameters = dict(fromX=start[0], fromY=start[1], toX=end[0], toY=end[1])
@@ -95,17 +101,15 @@ class InterfacePointerPipeline:
             parameters = dict(x=x, y=y, **options)
         return await self.write.arun(ExecuteAction(ui, Intent(intent, parameters), piece.image.target), control)
 
-    async def check_layout(self, image: InterfaceImage) -> None:
-        """Require captured member windows to retain their size and relative positions."""
-        shifts = []
-        for piece in image.pieces:
-            current = await self.controller.reader.images.window(piece.image.target)
-            old, new = frame(piece.image), frame(current)
-            if any(abs(a - b) > 1e-6 for a, b in zip(old[2:], new[2:])):
-                image.expired = True
-                raise local_failure("a member window changed size", "read this UI image again", "snapshot_expired")
-            shifts.append((new[0] - old[0], new[1] - old[1]))
-        for shift in shifts[1:]:
-            if any(abs(a - b) > 1e-6 for a, b in zip(shifts[0], shift)):
-                image.expired = True
-                raise local_failure("relative window positions changed", "read this UI image again", "snapshot_expired")
+    async def check_layout(self, image: InterfaceImage, piece: ImagePiece) -> None:
+        """Keep the addressed member's scale without depending on unrelated captures.
+
+        hit() already resolved the canvas to one retained member and local point.
+        Other members cannot change that map. Native dispatch still checks the
+        original capture geometry, current modality and physical hit.
+        """
+        current = await self.controller.reader.images.window(piece.image.target)
+        old, new = frame(piece.image), frame(current)
+        if any(abs(a - b) > 1e-6 for a, b in zip(old[2:], new[2:])):
+            image.expired = True
+            raise local_failure("the target window changed size", "read this UI image again", "snapshot_expired")

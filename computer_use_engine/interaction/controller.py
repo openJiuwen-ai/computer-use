@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast, overload
 
@@ -67,9 +66,7 @@ class SessionController:
             if port is not None
             else Connection(self.invalidate, protocol_version=NATIVE_PROTOCOL_VERSION)
         )
-        self.port = port or ConnectionPort(
-            self.transport, HostPolicy(desktop_mode(), os.environ.get("COMPUTER_USE_FOREGROUND_ASSIST") == "1")
-        )
+        self.port = port or ConnectionPort(self.transport, HostPolicy(desktop_mode()))
         self.reader, self.desktop_reader = NativeAppReader(self.port), NativeDesktopReader(self.port)
         self.engine, self.pages = Engine(self.port), ContentPages()
         self.pipeline = SessionPipeline(self)
@@ -152,6 +149,12 @@ class SessionController:
             )
             return node.role in {"group", "unknown", "window", "sheet", "dialog", "alert"} and not writable
 
+        def text_source(ref: str, token: str) -> str | None:
+            """Use the acquisition's explicit readText source without changing input values."""
+            if tree.collection is not None and (path := tree.collection.text_read_fields.get(token)):
+                return ".".join(map(str, path))
+            return tree.value_fields.get(ref)
+
         return cast(
             "dict[str, ElementSnapshot]",
             {
@@ -160,7 +163,7 @@ class SessionController:
                     binding=replace(target, node=node, capture=None),
                     scope_kind=tree.scope_kind,
                     source=dict(ref=ref, observed=tree.facts["observed"]),
-                    text=captured_field(tree, ref, tree.value_fields.get(ref), nodes=native_nodes),
+                    text=captured_field(tree, ref, text_source(ref, node), nodes=native_nodes),
                     children=captured_children(tree, ref, relations=child_relations),
                 )
                 for ref, node in tree.refs.items()
@@ -187,6 +190,8 @@ class SessionController:
             parameter = "desktopRef"
         else:
             target, parameter = params["appRef"], "appRef"
+        if owner is None and method in ("click", "scroll", "drag"):
+            params = self.desktop.map_parameters(method, params)
         intent = dict(type_text="insert", press_key="key").get(method, method)
         return await self._execute(
             owner,

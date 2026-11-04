@@ -66,6 +66,7 @@ class DriverWire:
             raise ValueError("driver observation: unsupported transport format")
         self.platform = self.raw["platform"]
         self.semantic_values = semantic_values
+        self.has_semantic_urls = False
         self.session = text(self.raw["session"])
         self.nodes: dict[str, dict[str, Any]] = {}
         self.remaining = 2_000_000
@@ -162,17 +163,10 @@ class DriverWire:
             return metadata["enum_name"]
         if native_type == "CFDate" and type(data) in (int, float):
             return {"nativeType": "CFDate", "absoluteTime": data}
-        matches_native_type = (
-            True
-            if (
-                self.semantic_values
-                and native_type == "CFURL"
-                and isinstance(data, str)
-                and isinstance(metadata.get("base"), str)
-            )
-            else False
-        )
-        if matches_native_type:
+        if native_type == "CFURL" and isinstance(data, str) and isinstance(metadata.get("base"), str):
+            self.has_semantic_urls = True
+            if not self.semantic_values:
+                return data
             base = urlsplit(metadata["base"])
             # urljoin's scheme allowlist excludes custom application URL schemes.
             # Resolve their path using the same hierarchical rules, then restore it.
@@ -340,13 +334,36 @@ def relation_record(
     )
     if invalid_details:
         raise ValueError("driver observation: invalid relation continuation")
+    membership = details.get("membershipObservedAt")
+    if membership is not None:
+        if (
+            not isinstance(membership, dict)
+            or set(membership) != {"id", "startedAt", "completedAt"}
+            or not isinstance(membership["id"], str)
+            or not membership["id"]
+            or any(
+                type(membership[name]) is not int or not 0 <= membership[name] <= 2**53 - 1
+                for name in ("startedAt", "completedAt")
+            )
+            or membership["completedAt"] < membership["startedAt"]
+            or membership["completedAt"] > wire.interval[1] // 1_000_000
+        ):
+            raise ValueError("driver observation: captured relation membership interval is invalid")
+        if state != "partial" or total is None or not details.get("detail"):
+            raise ValueError(
+                "driver observation: captured relation membership needs partial coverage, count and explanation"
+            )
     return {
         "source": node,
         "property": key,
         "targets": [item["node"] for item in items],
         "certainty": certainty,
         "state": state,
-        **{name: details[name] for name in ("offset", "total", "cursor", "detail") if name in details},
+        **{
+            name: details[name]
+            for name in ("offset", "total", "cursor", "detail", "membershipObservedAt")
+            if name in details
+        },
     }
 
 
@@ -465,9 +482,31 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
     }
 
 
+class DecodedDriverObservation(Mapping[str, Any]):
+    """One validated response owned by its request, with reusable parsed evidence.
+
+    Diagnostics retain the original wire record. Scope checks consume query
+    facts, while the immutable semantic reply is built only when requested.
+    """
+
+    def __init__(self, value: Any) -> None:
+        self.wire = DriverWire(value)
+        self.facts = query_facts(self.wire)
+        self.reply = None
+
+    def __getitem__(self, key: str) -> Any:
+        return self.wire.raw[key]
+
+    def __iter__(self):
+        return iter(self.wire.raw)
+
+    def __len__(self) -> int:
+        return len(self.wire.raw)
+
+
 def decode_query_facts(value: Any) -> dict[str, Any]:
     """Decode request-local native query facts without publishing a second graph."""
-    return query_facts(DriverWire(value))
+    return value.facts if isinstance(value, DecodedDriverObservation) else query_facts(DriverWire(value))
 
 
 def validate_driver_payload(value: Any) -> None:

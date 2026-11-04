@@ -97,7 +97,7 @@ uv run computer-use-mcp --desktop exclusive
 }
 ```
 
-将仓库路径替换为目标电脑上的绝对路径。`exclusive` 允许必要的前台准备和整桌面输入；`shared` 将输入限制在选定的 App 或 Window 范围内。不显式指定时，读取 `COMPUTER_USE_DESKTOP`，默认值为 `shared`。
+将仓库路径替换为目标电脑上的绝对路径。`exclusive` 表示桌面操作授权，也是 `COMPUTER_USE_DESKTOP` 的默认值。操作优先采用元素或应用定向输入，仅在所选路线确有需要时取得前台或使用全局输入。
 
 `computer_use` 工具中已提供 `computer`、`print()` 和 `print_image()`。可以先查询应用引用：
 
@@ -166,7 +166,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Agent 默认以 `exclusive` 模式操作本机桌面。可传入 `config=AgentConfig(desktop="shared")` 选择共享模式，或通过 `AgentConfig.mcp` 配置 `McpConfig` 连接其他 MCP 宿主。异步上下文在对话结束时清理电脑操作会话。
+Agent 使用统一的后台优先执行管线，桌面操作授权为 `exclusive`。通过 `AgentConfig.mcp` 配置 `McpConfig` 可连接其他 MCP 宿主。异步上下文在对话结束时清理电脑操作会话。
 
 已有 openJiuwen DeepAgent 应用也可以通过 `ComputerUseToolkit` 接入标准工具集合：
 
@@ -225,7 +225,7 @@ DeepAgent 负责模型调用、对话上下文与工具循环；引擎维护 `Co
 - **单工具代码执行**：模型写 Python，变量跨调用保留，一次调用完成多步工作流。
 - **无障碍树优先**：元素按十进制 ref 编号，支持 `element(path)` 路径查询、文本分页读取、菜单读取。
 - **可核验回执**：每个动作返回 `dispatched` / `verified`，失败结构化为 `code / effect / next`。
-- **共享与独占两种桌面模式**：默认不抢前台，对后台窗口定向输入；可按需启用前台辅助。
+- **后台优先输入**：优先使用元素和应用定向操作，仅在操作确有需要时取得前台焦点或占用全局鼠标。
 - **跨平台原生驱动**：macOS、Windows、Linux 各一套，协议一致。
 - **可观测**：每次执行写入 `~/.computer-use/logs` 的 JSONL 日志，含代码、观测与回执。
 

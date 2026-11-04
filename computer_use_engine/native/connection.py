@@ -64,7 +64,7 @@ class Connection:
         self.protocol_version = protocol_version
         self.invalidate, self.driver = invalidate, driver
         self._child = self._pending = self._hello = self._handshake = self._retiring = None
-        self._buffer = b""
+        self._buffer: bytearray = bytearray()
         self._requesting = self._waiting_for_exit = False
         self._next_id, self._generation = 1, 0
         self._diagnostic = ""
@@ -114,7 +114,7 @@ class Connection:
                 "execution_failed",
                 "connection",
             )
-        self._buffer, self._diagnostic, self._next_id = b"", "", 1
+        self._buffer, self._diagnostic, self._next_id = bytearray(), "", 1
         self._traces = {}
         windows = sys.platform == "win32"
         # Windows uses native stdio handles. The POSIX 3/4 descriptor bridge
@@ -172,7 +172,7 @@ class Connection:
                 kind="connection",
                 sdkVersion=SDK_VERSION,
                 platform=sys.platform,
-                desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "shared"),
+                desktopMode=os.environ.get("COMPUTER_USE_DESKTOP", "exclusive"),
                 executable=command,
                 pid=child.pid,
             )
@@ -720,11 +720,15 @@ class Connection:
             self.close(RuntimeError("host cancelled the request"))
             raise
 
-    def _receive(self, data):
+    def _receive(self, data: bytes) -> None:
         try:
-            self._buffer += data
+            self._buffer.extend(data)
             if len(self._buffer) > 64 * 1024 * 1024:
                 raise ValueError("protocol: response frame too large")
+            # Earlier chunks contain no terminator. Inspect only the new bytes
+            # until a complete line arrives, then decode the retained frame once.
+            if b"\n" not in data:
+                return
             while b"\n" in self._buffer:
                 line, self._buffer = self._buffer.split(b"\n", 1)
                 if line.endswith(b"\r"):
@@ -781,7 +785,7 @@ class Connection:
                     failure = decode_failure(response["error"])
                     error = failure_error(pending["method"], failure)
                 else:
-                    result = decode_execution_result(pending["method"], response["result"])
+                    result = decode_execution_result(pending["method"], response["result"], retain_observation=True)
                 desktop_capture = (
                     pending["method"] == "capture" and result is not None and result.get("kind") == "desktopCapture"
                 )
@@ -792,6 +796,10 @@ class Connection:
                 ):
                     raise ValueError("protocol: desktop observation mode differs from the negotiated session")
                 summary = result
+                from computer_use.protocol.observation.adapters.wire import DecodedDriverObservation
+
+                if isinstance(result, DecodedDriverObservation):
+                    summary = result.wire.raw
                 if desktop_capture and result is not None:
                     summary = {
                         **result,
@@ -905,7 +913,7 @@ class Connection:
             if not pending_value["future"].done():
                 pending_value["future"].set_exception(failure)
         self.invalidate()
-        self._buffer = b""
+        self._buffer = bytearray()
         atexit.unregister(self._on_exit)
         if self._preview_transport is not None:
             self._preview_transport.close()

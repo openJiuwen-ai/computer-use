@@ -26,34 +26,61 @@ namespace ComputerUse.Windows
             }
         }
 
-        internal static void Send(NativeKeyboard keyboard, INativeKeyboardTextProvider receiverProvider, INativeClipboardProvider clipboard, NativeWriteOperation operation, NativeInputContract contract, Request r, Dictionary<string, object> result, List<string> preparation)
+        internal static void Send(NativeKeyboard keyboard, INativeKeyboardTextProvider receiverProvider,
+                                  INativeClipboardProvider clipboard, NativeWriteOperation operation,
+                                  NativeInputContract contract, Request r, Dictionary<string, object> result,
+                                  List<string> preparation)
         {
             var state = keyboard.Guard(contract, r);
             if (!state.Ready)
                 throw new Failure("input_unavailable", "the selected paste recipient is not ready");
             var sequence = receiverProvider.BeginSequence(state, r);
+            sequence.Validate(r);
+            var consumerProvider = receiverProvider as INativePasteConsumerProvider;
+            var consumer = consumerProvider == null ? null : consumerProvider.PasteConsumer(state, r);
+            sequence.Validate(r); // A freshly captured consumer cannot replace the pinned receiver.
             var publication = sequence as INativePasteClipboardSequence;
             string text = (string)Wire.Object(operation.Intent["parameters"])["text"];
-            bool finalParagraph = text.Length != 0 && (text[text.Length - 1] == '\r' || text[text.Length - 1] == '\n') && publication != null && publication.FinalParagraph(r);
+            bool finalParagraph = text.Length != 0 &&
+                                  (text[text.Length - 1] == '\r' || text[text.Length - 1] == '\n') &&
+                                  publication != null && publication.FinalParagraph(r);
             Action receiver = () =>
             {
                 if (!keyboard.Guard(contract, r).Ready)
                     throw new Failure("input_unavailable", "the original paste recipient is no longer ready");
                 sequence.Validate(r);
             };
-            var lease = clipboard.Save(r);
+            NativeClipboardTransaction lease;
+            try
+            {
+                lease = clipboard.Save(r);
+            }
+            catch (NativeClipboardCleanupFailure error)
+            {
+                operation.Cleanup = "failed";
+                throw new Failure("execution_unknown", error.Message);
+            }
             try
             {
                 receiver();
-                lease.Install(text, r, finalParagraph);
-                keyboard.SendBatch(operation, NativeKeys.Chord("ctrl+v", "shared"), r, result, () =>
-                {
-                    // UIA validation can run application callbacks, including
-                    // clipboard writes. Check our payload after those calls.
-                    receiver();
-                    lease.Validate(r);
-                });
-                result["detail"] = "Paste chord sent; clipboard consumption and application effect require observation.";
+                lease.Install(text, r, finalParagraph, consumer);
+                keyboard.SendBatch(operation, NativeKeys.Chord("ctrl+v"), r, result,
+                                   () =>
+                                   {
+                                       // UIA validation can run application callbacks, including
+                                       // clipboard writes. Check our payload after those calls.
+                                       receiver();
+                                       lease.Validate(r);
+                                   });
+                var handoff = lease.Handoff(r);
+                result["detail"] =
+                    handoff == NativePasteHandoff.TargetRead
+                        ? "The original native consumer retrieved the clipboard payload; observe the control to verify the application effect."
+                    : handoff == NativePasteHandoff.OwnershipLost
+                        ? "Paste chord was sent, but clipboard ownership changed before target delivery was confirmed. Observe the target; no input was replayed."
+                    : handoff == NativePasteHandoff.TargetLost
+                        ? "Paste chord was sent, but the original native consumer ended before delivery was confirmed. Its application effect remains unconfirmed; no input was replayed."
+                        : "Paste chord was sent; target clipboard delivery remains unconfirmed after the bounded handoff wait. A pending paste may still run. Observe the target before further input; nothing was replayed.";
             }
             finally
             {

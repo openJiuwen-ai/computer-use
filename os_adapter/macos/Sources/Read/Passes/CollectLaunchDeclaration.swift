@@ -21,8 +21,7 @@ import ApplicationServices
             "kind": "launch", "binding": item.wire, "observed": UUID().uuidString, "targetLabel": item.name,
             "primitives": [
                 unit.declaration(
-                    id: contract.id, supported: true, readiness: NativeReadiness(),
-                    exclusive: BackgroundTarget.isExclusive)
+                    id: contract.id, supported: true, readiness: NativeReadiness())
             ]
         ]
     }

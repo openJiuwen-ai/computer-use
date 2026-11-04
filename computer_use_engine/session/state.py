@@ -30,6 +30,7 @@ class AppState:
         delivered: Capture identity and delivery epoch, when delivered to the model.
         delivered_pixels: Exact window identity, digest, and delivery epoch.
         capture_expired: Whether the delivered image's coordinate mapping has expired.
+        delivered_coordinates: Model-image pixels mapped to the retained window PNG.
     """
 
     selector: str
@@ -45,6 +46,7 @@ class AppState:
     delivered: tuple[str | None, int] | None = None
     delivered_pixels: tuple[Binding, bytes, int] | None = None
     capture_expired: bool = False
+    delivered_coordinates: ImageCoordinates | None = None
 
     @property
     def application(self):
@@ -56,5 +58,6 @@ class AppState:
 
 
 if TYPE_CHECKING:
+    from computer_use.session.image_coordinates import ImageCoordinates
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
     from computer_use.protocol.records import Record

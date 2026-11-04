@@ -11,6 +11,11 @@ from computer_use.interaction.read.presentation.accounting.pipeline import Accou
 from computer_use.interaction.read.presentation.accounting.relations import RelationPresentation
 from computer_use.interaction.read.presentation.compression.pipeline import CompressionPipeline
 from computer_use.interaction.read.presentation.fallback import UncompressedFacts, branch_references
+from computer_use.interaction.read.presentation.interface.geometric.presentation.pipeline import (
+    GeometricPresentationPipeline,
+)
+from computer_use.interaction.read.presentation.interface.text.model import InterfaceTextRequest
+from computer_use.interaction.read.presentation.interface.text.pipeline import InterfaceTextPipeline
 from computer_use.interaction.read.presentation.model import (
     PRESENTATION_FAILURES,
     PURE,
@@ -19,9 +24,7 @@ from computer_use.interaction.read.presentation.model import (
     SnapshotParts,
     SnapshotRenderRequest,
 )
-from computer_use.interaction.read.presentation.passes.assemble_rendered_part import (
-    stage as assemble_rendered_part,
-)
+from computer_use.interaction.read.presentation.passes.assemble_rendered_part import stage as assemble_rendered_part
 from computer_use.interaction.read.presentation.preparation import (
     CapturedSnapshot,
     PreparationFailure,
@@ -29,8 +32,8 @@ from computer_use.interaction.read.presentation.preparation import (
     PreparedSnapshot,
     prepare_snapshot,
     prepared_nodes,
-    render_prepared_snapshot,
 )
+from computer_use.interaction.read.presentation.preparation import render_prepared_snapshot
 from computer_use.interaction.read.presentation.rendering.pipeline import RenderPipeline
 from computer_use.interaction.read.presentation.semantics.pipeline import SemanticPipeline
 from computer_use.pipeline import Contract, Pipeline, Sequence
@@ -109,22 +112,36 @@ class _BranchCollection(Node["SnapshotRenderRequest", "PreparedSnapshot"]):
         from dataclasses import replace
 
         captured = CapturedSnapshot.capture(request.snapshot)
-        snapshot = captured.materialize()
+        snapshot = captured.materialize(read_only_facts=True)
         local_request = replace(request, snapshot=snapshot)
         roots = []
+        recovery_prefix = request.recovery_prefix_units
         for root in snapshot.roots:
             # Identity and source validation deliberately remain outside the
             # pure display fallback; they must never publish guessed bindings.
             branch = _branch_facts(snapshot, local_request, root)
             try:
-                projection = PresentationPipeline(branch).run(root, control)
-                prepared = PreparedRoot.capture(root["ref"], branch.members, projection)
+                if request.compact and request.public_api and request.share_descriptions:
+                    source = SemanticPipeline(branch).run(root, control)
+                    prepared = GeometricPresentationPipeline(branch, captured, recovery_prefix).run(source, control)
+                    recovery_prefix = max(
+                        (group.recovery_units for group in prepared.groups.groups), default=recovery_prefix
+                    )
+                else:
+                    projection = PresentationPipeline(branch).run(root, control)
+                    prepared = PreparedRoot.capture(root["ref"], branch.members, projection)
             except PRESENTATION_FAILURES as error:
                 prepared = PreparedRoot(root["ref"], branch.members, None, failure=PreparationFailure.capture(error))
             roots.append(prepared)
         prepared_roots = tuple(roots)
         return PreparedSnapshot(
-            replace(request, snapshot=captured), prepared_roots, prepared_nodes(prepared_roots, captured)
+            replace(request, snapshot=captured),
+            prepared_roots,
+            prepared_nodes(
+                prepared_roots,
+                captured,
+                defer_inactive_selections=request.compact and request.public_api and request.share_descriptions,
+            ),
         )
 
     async def _arun(self, request: SnapshotRenderRequest, control: Control) -> PreparedSnapshot:
@@ -154,7 +171,7 @@ class _RenderPreparedRoots(Node["PreparedSnapshot", "SnapshotParts"]):
     def _run(self, prepared: PreparedSnapshot, control: Control) -> SnapshotParts:
         from dataclasses import replace
 
-        snapshot = prepared.snapshot.materialize()
+        snapshot = prepared.snapshot.materialize(read_only_facts=True)
         request = replace(prepared.request, snapshot=snapshot)
         parts, uncompressed = [], None
         for root, projection in zip(snapshot.roots, prepared.roots):
@@ -162,10 +179,33 @@ class _RenderPreparedRoots(Node["PreparedSnapshot", "SnapshotParts"]):
             try:
                 if projection.failure is not None:
                     raise projection.failure.exception()
-                renderer = Sequence(
-                    name="RenderPreparedRoot", steps=[RenderPipeline(branch), AccountingPipeline(branch)]
-                )
-                part = renderer.run(projection.materialize(), control)
+                materialized = projection.materialize()
+                if projection.interface is not None and projection.atoms is not None:
+                    renderer = Sequence(
+                        name="RenderPreparedInterface", steps=[InterfaceTextPipeline(), AccountingPipeline(branch)]
+                    )
+                    part = renderer.run(
+                        InterfaceTextRequest(
+                            projection.interface,
+                            projection.atoms,
+                            materialized,
+                            projection.disclosure,
+                            projection.collections,
+                            projection.fields,
+                            projection.sharing,
+                            projection.coverage,
+                            projection.text_slices,
+                            projection.groups,
+                            prepared.snapshot,
+                            projection.readable,
+                        ),
+                        control,
+                    )
+                else:
+                    renderer = Sequence(
+                        name="RenderPreparedRoot", steps=[RenderPipeline(branch), AccountingPipeline(branch)]
+                    )
+                    part = renderer.run(materialized, control)
             except PRESENTATION_FAILURES as error:
                 if uncompressed is None:
                     uncompressed = UncompressedFacts(snapshot.facts, snapshot.refs)

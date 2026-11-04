@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import weakref
 
-from computer_use.identity import FrozenRecord
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.agent.requests import (
     ActOnElement,
@@ -33,7 +32,13 @@ def observation_state(state=None, *, document=None):
         from computer_use.session.observation import lazy_observation
 
         return lazy_observation(document, (state or {}).get("screenshot"))
-    return FrozenRecord(state, display=state["text"])
+    from computer_use.session.observation import CapturedTextDocument, lazy_observation
+
+    return lazy_observation(
+        CapturedTextDocument(state["text"]),
+        state.get("screenshot"),
+        details_document=CapturedTextDocument(state.get("details", state["text"])),
+    )
 
 
 def _text(text, paste=False):

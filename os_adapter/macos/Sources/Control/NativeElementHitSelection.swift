@@ -7,7 +7,7 @@ import ApplicationServices
 /// facts. A messaging failure is neither an empty point nor window occlusion.
 struct NativeElementHitEvidence {
     enum Relation: String {
-        case target, coarseAncestorWindow, otherWindow, otherControl, unknownOwner
+        case target, providerStackedTarget, windowRoot, coarseAncestorWindow, otherWindow, otherControl, unknownOwner
         case noElement, unsupported, queryFailed
     }
     let status: AXError
@@ -27,7 +27,7 @@ struct NativeElementHitEvidence {
     var permitsBackgroundGeometry: Bool {
         switch relation {
         case .otherWindow, .noElement, .unsupported, .queryFailed: return true
-        case .target, .coarseAncestorWindow, .otherControl, .unknownOwner: return false
+        case .target, .providerStackedTarget, .windowRoot, .coarseAncestorWindow, .otherControl, .unknownOwner: return false
         }
     }
 }
@@ -44,7 +44,8 @@ enum NativeElementHitSelection {
         // later frozen-point checks. Only additional candidate queries are short.
         var queryTimeout: Float? { source == .center ? nil : 0.05 }
     }
-    enum Basis: String { case exactHit, coarseAncestorGeometry, backgroundGeometry, rejected }
+    enum Basis: String { case exactHit, providerStackingGeometry, coarseAncestorGeometry, backgroundGeometry, rejected }
+    enum Preparation { case geometryReady, foreground, unavailable }
     struct Observation<Hit> {
         let evidence: NativeElementHitEvidence
         let hit: Hit?
@@ -54,6 +55,16 @@ enum NativeElementHitSelection {
         let candidate: Candidate
         let observation: Observation<Hit>
         let basis: Basis
+    }
+
+    /// A retained window root is incomplete hit evidence, not a sibling hit.
+    /// It can admit window preparation without permitting a mouse event.
+    static func preparation<Hit>(_ selection: Selection<Hit>) -> Preparation {
+        if selection.basis != .rejected { return .geometryReady }
+        switch selection.observation.evidence.relation {
+        case .windowRoot, .otherWindow: return .foreground
+        default: return .unavailable
+        }
     }
 
     /// A fresh, strict parent path differs from an AXWindow link or cached
@@ -107,25 +118,31 @@ enum NativeElementHitSelection {
     }
 
     static func select<Hit>(
-        _ candidates: [Candidate], exclusive: Bool, canContinue: (Candidate) throws -> Bool,
+        _ candidates: [Candidate], canContinue: (Candidate) throws -> Bool,
         query: (Candidate) throws -> Observation<Hit>
     ) rethrows -> Selection<Hit>? {
-        var fallback: Selection<Hit>?, coarse: Selection<Hit>?, representative: Selection<Hit>?
+        var fallback: Selection<Hit>?, coarse: Selection<Hit>?, preparable: Selection<Hit>?, representative: Selection<Hit>?
         for candidate in candidates {
             guard try canContinue(candidate) else { continue }
             let observation = try query(candidate)
             let basis: Basis =
                 observation.evidence.relation == .target
                 ? .exactHit
-                : (observation.evidence.relation == .coarseAncestorWindow && observation.foreground
+                : (observation.evidence.relation == .providerStackedTarget
+                    ? .providerStackingGeometry
+                    : observation.evidence.relation == .coarseAncestorWindow && observation.foreground
                     && candidate.permitsGeometryFallback
                     ? .coarseAncestorGeometry
-                    : (!exclusive && !observation.foreground && candidate.permitsGeometryFallback
+                    : (!observation.foreground && candidate.permitsGeometryFallback
                         && observation.evidence.permitsBackgroundGeometry ? .backgroundGeometry : .rejected))
             let result = Selection(candidate: candidate, observation: observation, basis: basis)
             if basis == .exactHit { return result }
+            if basis == .providerStackingGeometry { return result }
             if basis == .coarseAncestorGeometry { coarse = result }
             if basis == .backgroundGeometry { fallback = result }
+            if preparation(result) == .foreground, preparable == nil || candidate.source == .center {
+                preparable = result
+            }
             if representative == nil || candidate.source == .center { representative = result }
             // Query failures apply to the application, not just this point. Do
             // not multiply slow failed AX calls across eight extra candidates.
@@ -133,6 +150,6 @@ enum NativeElementHitSelection {
                 break
             }
         }
-        return coarse ?? fallback ?? representative
+        return coarse ?? fallback ?? preparable ?? representative
     }
 }

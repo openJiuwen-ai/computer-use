@@ -28,8 +28,7 @@ namespace ComputerUse.Windows
         internal bool Foreground, WindowRoute, Focused;
         internal bool Ready
         {
-            get
-            {
+            get {
                 return Enabled == true && Foreground && WindowRoute && Focused;
             }
         }
@@ -37,7 +36,8 @@ namespace ComputerUse.Windows
 
     internal interface INativeKeyboardProvider
     {
-        NativeKeyboardState Read(Dictionary<string, object> target, string[] within, Request request, bool text = false);
+        NativeKeyboardState Read(Dictionary<string, object> target, string[] within, Request request,
+                                 bool text = false);
         void RequireIdle(NativeKeyEvent[] events, Request request);
         void Activate(NativeKeyboardState state, Request request);
         void Focus(NativeKeyboardState state, Request request);
@@ -48,6 +48,21 @@ namespace ComputerUse.Windows
 
     internal interface INativeKeyboardEditorPreparation
     {
-        void PrepareEditor(NativeKeyboardState state, NativeWriteOperation operation, Request request, List<string> preparation);
+        void PrepareEditor(NativeKeyboardState state, NativeWriteOperation operation, Request request,
+                           List<string> preparation);
+    }
+    // One fresh sample for one typed scalar/selection guard, inside the same
+    // native execute call. No result grants authority to a later scalar.
+    // Composite discovery and clipboard sequences retain their original path.
+    internal interface INativeTypedTextDispatchSequence : INativeKeyboardSequence
+    {
+        bool SupportsDispatchSampling { get; }
+        void CheckNativeRecipient(Request request);
+        NativeKeyboardState ReadDispatchState(NativeInputContract contract, Request request);
+        void ValidateDispatchScope(Request request);
+        void ValidateDispatchReceiver(Request request);
+        void ValidateDispatchExplicitScope(Request request);
+        void ValidateDispatchFocus(Request request);
+        void ValidateDispatchQueue(NativeKeyboardState state, Request request);
     }
 }

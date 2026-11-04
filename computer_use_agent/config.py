@@ -18,15 +18,15 @@ class McpConfig:
 
 @dataclass(frozen=True, kw_only=True)
 class AgentConfig:
-    desktop: Literal["shared", "exclusive"] = "exclusive"
+    desktop: Literal["exclusive"] = "exclusive"
     mcp: McpConfig | None = None
     max_iterations: int = 40
     context_window: int = 1_000_000
     workspace: str | None = None
 
     def __post_init__(self):
-        if self.desktop not in ("shared", "exclusive"):
-            raise ValueError("desktop must be shared or exclusive")
+        if self.desktop != "exclusive":
+            raise ValueError("desktop must be exclusive")
         if self.max_iterations < 1 or self.context_window < 1:
             raise ValueError("max_iterations and context_window must be positive")
 

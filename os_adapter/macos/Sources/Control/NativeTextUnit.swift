@@ -75,9 +75,9 @@ extension NativeElementControl {
         let independent = explicitlyUnavailable(focus)
         // A property setter does not promise normal editing/commit callbacks.
         // Value-only controls remain independent. A focusable scalar control
-        // may additionally declare whole-value replacement. Shared background
-        // requests can use that addressed contract before preparing keys;
-        // foreground/exclusive editing keeps the callback preference. Unknown
+        // may additionally declare whole-value replacement. Background requests
+        // can use that addressed contract before preparing keys; an already
+        // prepared editor keeps the ordinary callback preference. Unknown
         // capabilities, read-only editors and contextual/search setters do not
         // justify widening this contract.
         let replacement =

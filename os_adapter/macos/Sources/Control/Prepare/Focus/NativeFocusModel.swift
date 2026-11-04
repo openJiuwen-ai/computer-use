@@ -33,3 +33,15 @@ struct NativeFocusPlan {
     let notify: Bool
     let selectWindow: Bool
 }
+
+/// Narrow native stage ports. The parent owns order and the unchanged Plan;
+/// each implementation retains the same immutable original-window request.
+@MainActor struct NativeFocusStages {
+    let begin: @MainActor (NativeFocusRequest) throws -> Void
+    let applicationContext: @MainActor (NativeFocusRequest) async throws -> Void
+    let sample: @MainActor (NativeFocusRequest) throws -> NativeFocusSnapshot
+    let notify: @MainActor (NativeFocusRequest) throws -> Void
+    let selectWindow: @MainActor (NativeFocusRequest) throws -> Void
+    let settle: @MainActor (NativeFocusRequest) async throws -> Void
+    let confirm: @MainActor (NativeFocusRequest) throws -> Void
+}

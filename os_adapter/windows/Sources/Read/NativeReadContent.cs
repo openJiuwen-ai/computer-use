@@ -29,8 +29,10 @@ namespace ComputerUse.Windows
 
         static string Hash(string value)
         {
-            using (var hash = SHA256.Create())
-                return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(value))).Replace("-", "").ToLowerInvariant();
+            using (var hash = SHA256.Create()) return BitConverter
+                .ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(value)))
+                .Replace("-", "")
+                .ToLowerInvariant();
         }
 
         Anchor PositionAnchor()
@@ -50,16 +52,13 @@ namespace ComputerUse.Windows
             int end = Math.Min(text.Length, PositionUnits);
             if (end > 0 && Char.IsHighSurrogate(text[end - 1]))
                 end--;
-            return new Anchor
-            {
-                Text = text.Substring(0, end),
-                Complete = complete && end == text.Length
-            };
+            return new Anchor { Text = text.Substring(0, end), Complete = complete && end == text.Length };
         }
 
         Dictionary<string, object> AnchorFacts(Anchor anchor)
         {
-            return Wire.Obj("source", "Text.DocumentRange", "unit", "utf16", "units", anchor.Text.Length, "complete", anchor.Complete, "sha256", Hash(anchor.Text));
+            return Wire.Obj("source", "Text.DocumentRange", "unit", "utf16", "units", anchor.Text.Length, "complete",
+                            anchor.Complete, "sha256", Hash(anchor.Text));
         }
 
         void VerifyAnchor(Anchor anchor)
@@ -70,7 +69,8 @@ namespace ComputerUse.Windows
             string current = Document.GetText(anchor.Text.Length + (anchor.Complete ? 1 : 0));
             check();
             if (current != anchor.Text)
-                throw new NativeFieldUnavailable("error", "Document changed while locating text ranges; positions are unconfirmed", current);
+                throw new NativeFieldUnavailable(
+                    "error", "Document changed while locating text ranges; positions are unconfirmed", current);
         }
 
         string Prefix(UiaTextRange range, TextPatternRangeEndpoint endpoint, Anchor anchor)
@@ -88,7 +88,8 @@ namespace ComputerUse.Windows
                 throw new NativeFieldUnavailable("absent", "UIA returned no prefix text");
             anchor.Remaining -= value.Length;
             if (value.Length >= limit || value.Length > anchor.Text.Length)
-                throw new NativeFieldUnavailable("truncated", "Range position exceeds the verified document prefix or prefix budget");
+                throw new NativeFieldUnavailable(
+                    "truncated", "Range position exceeds the verified document prefix or prefix budget");
             if (!anchor.Text.StartsWith(value, StringComparison.Ordinal))
                 throw new NativeFieldUnavailable("error", "Range prefix disagrees with the captured document", value);
             return value;
@@ -101,19 +102,25 @@ namespace ComputerUse.Windows
                 throw new NativeFieldUnavailable("absent", "UIA returned no text range");
             var value = range.Clone();
             check();
-            if (value.CompareEndpoints(TextPatternRangeEndpoint.Start, value, TextPatternRangeEndpoint.End) > 0 || value.CompareEndpoints(TextPatternRangeEndpoint.Start, Document, TextPatternRangeEndpoint.Start) < 0 || value.CompareEndpoints(TextPatternRangeEndpoint.End, Document, TextPatternRangeEndpoint.End) > 0)
+            if (value.CompareEndpoints(TextPatternRangeEndpoint.Start, value, TextPatternRangeEndpoint.End) > 0 ||
+                value.CompareEndpoints(TextPatternRangeEndpoint.Start, Document, TextPatternRangeEndpoint.Start) < 0 ||
+                value.CompareEndpoints(TextPatternRangeEndpoint.End, Document, TextPatternRangeEndpoint.End) > 0)
                 throw new NativeFieldUnavailable("error", "Text range is reversed or outside its document");
             string start = Prefix(value, TextPatternRangeEndpoint.Start, anchor);
             string end = Prefix(value, TextPatternRangeEndpoint.End, anchor);
             if (end.Length < start.Length)
                 throw new NativeFieldUnavailable("error", "Range endpoints disagree with text lengths");
-            if (start.Length < anchor.Text.Length && Char.IsLowSurrogate(anchor.Text[start.Length]) || end.Length < anchor.Text.Length && Char.IsLowSurrogate(anchor.Text[end.Length]))
+            if (start.Length < anchor.Text.Length && Char.IsLowSurrogate(anchor.Text[start.Length]) ||
+                end.Length < anchor.Text.Length && Char.IsLowSurrogate(anchor.Text[end.Length]))
                 throw new NativeFieldUnavailable("error", "UIA text endpoint splits a UTF-16 surrogate pair");
             string text = value.GetText(Math.Min(PositionUnits + 1, end.Length - start.Length + 1));
             check();
             if (text != anchor.Text.Substring(start.Length, end.Length - start.Length))
-                throw new NativeFieldUnavailable("error", "Range text disagrees with captured document endpoints", text);
-            return Wire.Obj("start", start.Length, "end", end.Length, "degenerate", value.CompareEndpoints(TextPatternRangeEndpoint.Start, value, TextPatternRangeEndpoint.End) == 0);
+                throw new NativeFieldUnavailable("error", "Range text disagrees with captured document endpoints",
+                                                 text);
+            return Wire.Obj(
+                "start", start.Length, "end", end.Length, "degenerate",
+                value.CompareEndpoints(TextPatternRangeEndpoint.Start, value, TextPatternRangeEndpoint.End) == 0);
         }
 
         sealed class ObjectRange
@@ -126,7 +133,9 @@ namespace ComputerUse.Windows
         {
             CheckIdentity();
             if (Source != "IUIAutomation.TextPattern")
-                throw new NativeFieldUnavailable("unsupported", "Legacy text supplement cannot bind native embedded-object positions");
+                throw new NativeFieldUnavailable(
+                    "unsupported",
+                    "This scoped text source does not expose its own TextPattern.RangeFromChild for embedded-object positions; container state was not substituted");
             var anchor = PositionAnchor();
             var children = Children();
             if (children == null)
@@ -139,10 +148,7 @@ namespace ComputerUse.Windows
             {
                 check();
                 var record = Wire.Obj("values", Wire.Obj(), "fieldStatus", Wire.Obj());
-                var item = new ObjectRange
-                {
-                    Record = record
-                };
+                var item = new ObjectRange { Record = record };
                 try
                 {
                     if (child == null)
@@ -180,7 +186,8 @@ namespace ComputerUse.Windows
                         while (j > 0)
                         {
                             check();
-                            int compare = sorted[j - 1].Range.CompareEndpoints(TextPatternRangeEndpoint.Start, item.Range, TextPatternRangeEndpoint.Start);
+                            int compare = sorted[j - 1].Range.CompareEndpoints(
+                                TextPatternRangeEndpoint.Start, item.Range, TextPatternRangeEndpoint.Start);
                             check();
                             if (compare <= 0)
                                 break;
@@ -194,7 +201,8 @@ namespace ComputerUse.Windows
                     for (int i = 1; i < sorted.Count; i++)
                     {
                         check();
-                        if (sorted[i - 1].Range.CompareEndpoints(TextPatternRangeEndpoint.End, sorted[i].Range, TextPatternRangeEndpoint.Start) > 0)
+                        if (sorted[i - 1].Range.CompareEndpoints(TextPatternRangeEndpoint.End, sorted[i].Range,
+                                                                 TextPatternRangeEndpoint.Start) > 0)
                             order = "overlapping";
                     }
 
@@ -207,9 +215,12 @@ namespace ComputerUse.Windows
                     state = "partial";
                 }
 
-            var result = Wire.Obj("source", Source + ".RangeFromChild", "anchor", AnchorFacts(anchor), "objects", objects.Select(item => item.Record).ToArray(), "total", children.Length, "state", state, "order", order);
+            var result = Wire.Obj("source", Source + ".RangeFromChild", "anchor", AnchorFacts(anchor), "objects",
+                                  objects.Select(item => item.Record).ToArray(), "total", children.Length, "state",
+                                  state, "order", order);
             if (children.Length > ObjectLimit)
-                result["detail"] = "At most 32 embedded-object positions; Text.Children retains remaining native references.";
+                result["detail"] =
+                    "At most 32 embedded-object positions; Text.Children retains remaining native references.";
             if (orderStatus != null)
                 result["orderStatus"] = orderStatus;
             ObservedRanges["Text.ObjectRanges"] = objects.Select(item => item.Range).ToArray();
@@ -238,9 +249,12 @@ namespace ComputerUse.Windows
         {
             CheckIdentity();
             if (focusedOnly && element.GetCurrentPropertyValue(AutomationElement.HasKeyboardFocusProperty, true) as bool? != true)
-                return Wire.Obj("state", "notProbed", "detail", "Default caret observation probes only an object that reports keyboard focus; explicit field queries can probe inactive carets.");
+                return Wire.Obj(
+                    "state", "notProbed", "detail",
+                    "Default caret observation probes only an object that reports keyboard focus; explicit field queries can probe inactive carets.");
             if (Source != "IUIAutomation.TextPattern")
-                throw new NativeFieldUnavailable("unsupported", "TextPattern2 is not available through the legacy text supplement");
+                throw new NativeFieldUnavailable("unsupported",
+                                                 "TextPattern2 is not available through the legacy text supplement");
             var raw = UiaClient.Call(() => element.Native.GetCurrentPattern(10024)) as UIA.IUIAutomationTextPattern2;
             check();
             if (raw == null)
@@ -249,10 +263,7 @@ namespace ComputerUse.Windows
             var native = raw.GetCaretRange(out active);
             check();
             var range = native == null ? null : new UiaTextRange(native);
-            ObservedRanges["Text.CaretRange"] = new[]
-            {
-                range
-            };
+            ObservedRanges["Text.CaretRange"] = new[] { range };
             var values = Wire.Obj("isActive", active != 0);
             var statuses = Wire.Obj();
             try
@@ -272,7 +283,8 @@ namespace ComputerUse.Windows
             }
 
             CheckIdentity();
-            return Wire.Obj("source", "IUIAutomationTextPattern2.GetCaretRange", "values", values, "fieldStatus", statuses, "state", statuses.Count == 0 ? "complete" : "partial");
+            return Wire.Obj("source", "IUIAutomationTextPattern2.GetCaretRange", "values", values, "fieldStatus",
+                            statuses, "state", statuses.Count == 0 ? "complete" : "partial");
         }
     }
 }

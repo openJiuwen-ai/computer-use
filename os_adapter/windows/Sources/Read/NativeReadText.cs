@@ -21,7 +21,8 @@ namespace ComputerUse.Windows
         internal readonly Dictionary<string, UiaTextRange[]> ObservedRanges = new Dictionary<string, UiaTextRange[]>();
         internal readonly Dictionary<string, object> NativeValues = new Dictionary<string, object>();
         UiaTextRange document;
-        internal NativeReadText(UiaElement element, bool nativeText, bool legacyCandidate, Action check, Action<string> trace = null)
+        internal NativeReadText(UiaElement element, bool nativeText, bool legacyCandidate, Action check,
+                                Action<string> trace = null, bool nativeTextChild = false)
         {
             this.element = element;
             this.check = check;
@@ -33,6 +34,13 @@ namespace ComputerUse.Windows
                 pattern = (UiaTextPattern)raw;
                 Source = "IUIAutomation.TextPattern";
             }
+            else if (nativeTextChild)
+            {
+                var source = new NativeReadTextChildSource(element, check);
+                document = source.Range;
+                validate = source.Validate;
+                Source = "IUIAutomation.TextChildPattern.TextRange";
+            }
             else
             {
                 // Windows' COM and managed clients have different default
@@ -41,22 +49,28 @@ namespace ComputerUse.Windows
                 // tree or actions, and only for the exact same HWND/runtime.
                 int handle = legacyCandidate ? element.Current.NativeWindowHandle : 0;
                 if (handle == 0)
-                    throw new NativeFieldUnavailable("unsupported", "UIA does not expose TextPattern");
+                    throw new NativeFieldUnavailable("unsupported",
+                                                     "UIA does not expose TextPattern or a child text range");
                 var expected = element.GetRuntimeId();
                 var peer = AutomationElement.FromHandle(new IntPtr(handle));
                 check();
                 validate = () =>
                 {
                     check();
-                    if (expected.Length == 0 || !expected.SequenceEqual(element.GetRuntimeId()) || !expected.SequenceEqual(peer.GetRuntimeId()) || peer.Current.NativeWindowHandle != handle || element.Current.NativeWindowHandle != handle || peer.Current.ProcessId != Native.PID(new IntPtr(handle)))
-                        throw new NativeFieldUnavailable("error", "Legacy text proxy identity does not match the native UIA object");
+                    if (expected.Length == 0 || !expected.SequenceEqual(element.GetRuntimeId()) ||
+                        !expected.SequenceEqual(peer.GetRuntimeId()) || peer.Current.NativeWindowHandle != handle ||
+                        element.Current.NativeWindowHandle != handle ||
+                        peer.Current.ProcessId != Native.PID(new IntPtr(handle)))
+                        throw new NativeFieldUnavailable(
+                            "error", "Legacy text proxy identity does not match the native UIA object");
                     if (peer.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty, true) as bool? != false)
                         throw new NativeFieldUnavailable("unsupported", "Legacy text protection state is not readable");
                     check();
                 };
                 validate();
                 if (!peer.TryGetCurrentPattern(TextPattern.Pattern, out raw))
-                    throw new NativeFieldUnavailable("unsupported", "Neither native nor legacy UIA text proxy exposes TextPattern");
+                    throw new NativeFieldUnavailable("unsupported",
+                                                     "Neither native nor legacy UIA text proxy exposes TextPattern");
                 pattern = new UiaTextPattern((TextPattern)raw);
                 Source = "System.Windows.Automation.TextPattern; exact HWND/runtime read-only supplement";
             }
@@ -72,8 +86,7 @@ namespace ComputerUse.Windows
 
         UiaTextRange Document
         {
-            get
-            {
+            get {
                 if (document == null)
                 {
                     check();
@@ -116,10 +129,7 @@ namespace ComputerUse.Windows
                 return Source;
             if (field == "Text.DocumentRange")
             {
-                ObservedRanges[field] = new[]
-                {
-                    Document
-                };
+                ObservedRanges[field] = new[] { Document };
                 string value = Document.GetText(limit);
                 check();
                 if (value == null)
@@ -135,12 +145,10 @@ namespace ComputerUse.Windows
                 check();
                 if (ReferenceEquals(value, AutomationElement.NotSupported))
                     throw new NativeFieldUnavailable("unsupported");
-                ObservedRanges[field] = new[]
-                {
-                    Document
-                };
+                ObservedRanges[field] = new[] { Document };
                 if (ReferenceEquals(value, TextPattern.MixedAttributeValue))
-                    NativeValues[field] = new NativeObservationValue("UIA.MixedAttributeValue", null, NativeObservationGraph.Pair("toolkit_value", "mixed"));
+                    NativeValues[field] = new NativeObservationValue(
+                        "UIA.MixedAttributeValue", null, NativeObservationGraph.Pair("toolkit_value", "mixed"));
                 return ReferenceEquals(value, TextPattern.MixedAttributeValue) ? "mixed" : value;
             }
 
@@ -148,20 +156,24 @@ namespace ComputerUse.Windows
             {
                 var value = ReadOnly(Document);
                 check();
-                ObservedRanges[field] = new[]
-                {
-                    Document
-                };
+                ObservedRanges[field] = new[] { Document };
                 if (value as string == "mixed")
-                    NativeValues[field] = new NativeObservationValue("UIA.MixedAttributeValue", null, NativeObservationGraph.Pair("toolkit_value", "mixed"));
+                    NativeValues[field] = new NativeObservationValue(
+                        "UIA.MixedAttributeValue", null, NativeObservationGraph.Pair("toolkit_value", "mixed"));
                 return value;
             }
-
+            if ((field == "Text.SupportedTextSelection" || field == "Text.Selection" ||
+                 field == "Text.SelectionBounds" || field == "Text.VisibleRanges") &&
+                pattern == null)
+                throw new NativeFieldUnavailable(
+                    "unsupported",
+                    "TextChildPattern exposes this child's exact range, not its own selection or visible-range pattern; container state was not substituted");
             if (field == "Text.SupportedTextSelection")
             {
                 var value = pattern.SupportedTextSelection;
                 check();
-                NativeValues[field] = new NativeObservationValue(value.GetType().FullName, (int)value, NativeObservationGraph.Pair("enum_name", value.ToString()));
+                NativeValues[field] = new NativeObservationValue(
+                    value.GetType().FullName, (int)value, NativeObservationGraph.Pair("enum_name", value.ToString()));
                 return value.ToString();
             }
 
@@ -214,7 +226,9 @@ namespace ComputerUse.Windows
                     values["text"] = text.Substring(0, end);
                     textUnits += end;
                     if (text.Length > limit)
-                        status["text"] = Wire.Obj("state", "truncated", "detail", "Shared range text budget exhausted; this is not the complete range.");
+                        status["text"] =
+                            Wire.Obj("state", "truncated", "detail",
+                                     "Shared range text budget exhausted; this is not the complete range.");
                 }
                 catch (Exception error)
                 {
@@ -226,7 +240,8 @@ namespace ComputerUse.Windows
                 {
                     check();
                     Trace("range " + i + " CompareEndpoints");
-                    values["degenerate"] = range.CompareEndpoints(TextPatternRangeEndpoint.Start, range, TextPatternRangeEndpoint.End) == 0;
+                    values["degenerate"] = range.CompareEndpoints(TextPatternRangeEndpoint.Start, range,
+                                                                  TextPatternRangeEndpoint.End) == 0;
                     check();
                 }
                 catch (Exception error)
@@ -240,7 +255,11 @@ namespace ComputerUse.Windows
                     check();
                     Trace("range " + i + " IsReadOnly");
                     var readOnly = ReadOnly(range);
-                    values["readOnly"] = readOnly as string == "mixed" ? new NativeObservationValue("UIA.MixedAttributeValue", null, NativeObservationGraph.Pair("toolkit_value", "mixed")) : readOnly;
+                    values["readOnly"] =
+                        readOnly as string == "mixed"
+                            ? new NativeObservationValue("UIA.MixedAttributeValue", null,
+                                                         NativeObservationGraph.Pair("toolkit_value", "mixed"))
+                            : readOnly;
                     check();
                 }
                 catch (Exception error)
@@ -269,7 +288,8 @@ namespace ComputerUse.Windows
 
                         values["bounds"] = boxes;
                         if (rects.Length > 64)
-                            status["bounds"] = Wire.Obj("state", "truncated", "detail", "At most 64 native rectangles per range.");
+                            status["bounds"] =
+                                Wire.Obj("state", "truncated", "detail", "At most 64 native rectangles per range.");
                     }
                     catch (Exception error)
                     {
@@ -280,7 +300,8 @@ namespace ComputerUse.Windows
                 result.Add(Wire.Obj("values", values, "fieldStatus", status));
             }
 
-            var output = Wire.Obj("ranges", result, "total", ranges.Length, "state", result.Count == ranges.Length ? "complete" : "partial");
+            var output = Wire.Obj("ranges", result, "total", ranges.Length, "state",
+                                  result.Count == ranges.Length ? "complete" : "partial");
             if (geometry)
                 output["coordinateSpace"] = "screenPhysicalPixels";
             return output;
@@ -291,7 +312,13 @@ namespace ComputerUse.Windows
         {
             CheckIdentity();
             if (embeddedChildren == null)
-                embeddedChildren = Document.GetChildren();
+                embeddedChildren = Document.GetChildren(
+                    (index, error) =>
+                    {
+                        NativeReadBackend.Status(error);
+                        CheckIdentity();
+                        Trace("embedded child " + index + " unavailable; its position remains a gap: " + error.Message);
+                    });
             CheckIdentity();
             return embeddedChildren;
         }
@@ -300,8 +327,13 @@ namespace ComputerUse.Windows
         {
             if (rect.IsEmpty)
                 return null;
-            if (Double.IsNaN(rect.X) || Double.IsNaN(rect.Y) || Double.IsNaN(rect.Width) || Double.IsNaN(rect.Height) || Double.IsInfinity(rect.X) || Double.IsInfinity(rect.Y) || Double.IsInfinity(rect.Width) || Double.IsInfinity(rect.Height))
-                throw new NativeFieldUnavailable("error", "UIA rectangle contains a non-finite coordinate", new NativeObservationValue("UIA.Rect", Wire.Obj("x", rect.X, "y", rect.Y, "width", rect.Width, "height", rect.Height)));
+            if (Double.IsNaN(rect.X) || Double.IsNaN(rect.Y) || Double.IsNaN(rect.Width) || Double.IsNaN(rect.Height) ||
+                Double.IsInfinity(rect.X) || Double.IsInfinity(rect.Y) || Double.IsInfinity(rect.Width) ||
+                Double.IsInfinity(rect.Height))
+                throw new NativeFieldUnavailable(
+                    "error", "UIA rectangle contains a non-finite coordinate",
+                    new NativeObservationValue(
+                        "UIA.Rect", Wire.Obj("x", rect.X, "y", rect.Y, "width", rect.Width, "height", rect.Height)));
             return Wire.Obj("x", rect.X, "y", rect.Y, "width", rect.Width, "height", rect.Height);
         }
     }

@@ -5,6 +5,7 @@
 
 from computer_use_linux.contracts.protocol import Failure, integer, require
 from computer_use_linux.control.native_selection import Changed
+from computer_use_linux.control.native_text_codec import AsciiTextCodec, text_codec
 
 from .passes.check_dispatch_conditions import check_dispatch_conditions
 from .passes.mark_dispatch_in_flight import mark_dispatch_in_flight
@@ -22,9 +23,21 @@ class NativeTextPipeline:
         target, kind = contract["target"], contract["kind"]
         retry = None
         dispatch, detail, error_code = "notDispatched", "Native text operation was not dispatched.", None
+        codec = None
 
         def check():
-            return check_dispatch_conditions(contract, ctx, self.guard, self.ax)
+            obj = check_dispatch_conditions(contract, ctx, self.guard)
+            # Once deletion or insertion has started, preserve this local
+            # recipe. Unknown metadata does not invalidate its unit; a
+            # positive contradictory hint stops the remaining mutation.
+            if (
+                kind == "insert"
+                and dispatch != "notDispatched"
+                and not isinstance(codec, AsciiTextCodec)
+                and text_codec(self.ax, obj, fallback=codec) != codec
+            ):
+                raise Failure("The native insertion length unit changed after dispatch.", "stale_target")
+            return obj
 
         def mutate(method, obj, *args):
             nonlocal dispatch
@@ -41,6 +54,14 @@ class NativeTextPipeline:
             elif text:
                 start, end = self.selection(obj)
                 obj = check()
+                # Inspection supplies a hint, not an immutable provider ABI.
+                # Complete the arguments once, before the first mutation. The
+                # existing selection check also covers metadata callbacks.
+                codec = (
+                    contract["codec"]
+                    if isinstance(contract["codec"], AsciiTextCodec)
+                    else text_codec(self.ax, obj, text=text, fallback=contract["codec"])
+                )
                 if self.selection(obj) != (start, end):
                     raise Failure("The insertion selection changed before text dispatch.", "input_unavailable")
                 if start != end:
@@ -61,7 +82,7 @@ class NativeTextPipeline:
                         "The original insertion offset is no longer present after deletion.",
                         "input_unavailable",
                     )
-                mutate("insert_text", obj, start, text, contract["codec"].insertion_length(text))
+                mutate("insert_text", obj, start, text, codec.insertion_length(text))
             else:
                 return dict(
                     target=dict(target),

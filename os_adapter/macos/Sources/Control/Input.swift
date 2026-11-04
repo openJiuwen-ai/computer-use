@@ -71,12 +71,6 @@ import Carbon
 
     /// Global input deliberately has no AX window-preparation dependency.
     static func requireDesktopInput() throws {
-        guard BackgroundTarget.isExclusive else {
-            throw DriverError(
-                "desktop input requires exclusive mode; shared mode does not permit global input",
-                code: .modeUnsupported,
-                next: "use App/Element operations in shared mode; desktop mode is host configuration")
-        }
         try RequestDiagnostics.checkCancellation()
         try BackgroundTarget.validateDesktop(input: true)
     }
@@ -186,8 +180,72 @@ import Carbon
         }
     }
 
+    struct AtomicTextEvents {
+        let source: CGEventSource
+        let down: CGEvent
+        let up: CGEvent
+    }
+
+    /// Allocate and verify the selected whole-string encoding before a
+    /// replacement changes selection. A lossy event removes only this recipe.
+    static func atomicTextEvents(
+        _ text: String, source: CGEventSource, key: (CGKeyCode, CGEventFlags)? = nil, foreground: Bool = false
+    ) throws -> AtomicTextEvents? {
+        guard !text.isEmpty else { return nil }
+        try validateText(text)
+        let (down, up) = try unicodeEvents(text, source: source, key: key, foreground: foreground)
+        let expected = Array(text.utf16)
+        for event in [down, up] {
+            var count = 0
+            event.keyboardGetUnicodeString(maxStringLength: 0, actualStringLength: &count, unicodeString: nil)
+            guard count == expected.count else { return nil }
+            var actual = [UniChar](repeating: 0, count: count)
+            event.keyboardGetUnicodeString(
+                maxStringLength: actual.count, actualStringLength: &count, unicodeString: &actual)
+            guard actual == expected else { return nil }
+        }
+        return AtomicTextEvents(source: source, down: down, up: up)
+    }
+
+    static func prepareAtomicText(_ text: String, foreground: Bool) throws -> AtomicTextEvents? {
+        guard let first = text.unicodeScalars.first else { return nil }
+        return try atomicTextEvents(text, source: source(), key: asciiKeys()[String(first)], foreground: foreground)
+    }
+
+    /// One selected Unicode string, with the same receiver, mutation barrier,
+    /// paired release and delivery settling as ordinary keyboard text.
+    static func preparedAtomicText(
+        _ events: AtomicTextEvents, delivery: NativeKeyboardDelivery, applicationPID: pid_t?,
+        validate: @escaping @MainActor () async throws -> Void, onDispatch: @escaping @MainActor () throws -> Void,
+        onPosted: @escaping @MainActor () -> Void, onCleanupUnknown: @escaping () -> Void
+    ) async throws {
+        delivery.cleanup(events.up)
+        try await withPreparedRoute(
+            source: events.source, delivery: delivery, validate: validate, onDispatch: onDispatch, onPosted: onPosted,
+            onCleanupUnknown: onCleanupUnknown
+        ) { press, release in
+            try await press(events.down, events.up, nil)
+            if let applicationPID {
+                let root = AXUIElementCreateApplication(applicationPID)
+                AXUIElementSetMessagingTimeout(root, 0.2)
+                var ignored: CFTypeRef?
+                _ = AXUIElementCopyAttributeValue(root, kAXFocusedUIElementAttribute as CFString, &ignored)
+            } else {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            release()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     static func unicodeEvents(
         _ scalar: Unicode.Scalar, source: CGEventSource, key: (CGKeyCode, CGEventFlags)? = nil, foreground: Bool = false
+    ) throws -> (CGEvent, CGEvent) {
+        try unicodeEvents(String(scalar), source: source, key: key, foreground: foreground)
+    }
+
+    private static func unicodeEvents(
+        _ text: String, source: CGEventSource, key: (CGKeyCode, CGEventFlags)?, foreground: Bool
     ) throws -> (CGEvent, CGEvent) {
         let (code, flags) = key ?? (0, CGEventFlags())
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true),
@@ -197,7 +255,7 @@ import Carbon
         // Shift describes the character; global release must clear session
         // flags. Process-addressed events retain the character's full metadata.
         up.flags = foreground ? [] : flags
-        let units = Array(String(scalar).utf16)
+        let units = Array(text.utf16)
         units.withUnsafeBufferPointer { buffer in
             down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress!)
             up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress!)

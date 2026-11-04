@@ -13,7 +13,8 @@ namespace ComputerUse.Windows
     internal static class AcquireNativeResourcesPass
     {
         internal const string Effects = "RESOURCE/QUERY";
-        internal static void Run(bool writable, Dictionary<string, object> target, Request r, INativeReadBackend reader, Func<Request, IDisposable> acquire, ref IDisposable lease, ref bool retired)
+        internal static void Run(bool writable, Dictionary<string, object> target, Request r, INativeReadBackend reader,
+                                 Func<Request, IDisposable> acquire, ref IDisposable lease, ref bool retired)
         {
             try
             {
@@ -23,6 +24,15 @@ namespace ComputerUse.Windows
                     lease = acquire(r);
                 reader.Validate(target, r);
                 r.Check();
+            }
+            catch (NativeDesktopCleanupFailure)
+            {
+                // Do not call providers or release a lease on a worker with
+                // unconfirmed native cleanup. Perform owns retirement; process
+                // exit reclaims this worker's retained resources.
+                retired = true;
+                lease = null;
+                throw;
             }
             catch
             {

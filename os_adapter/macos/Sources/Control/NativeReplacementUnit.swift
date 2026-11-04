@@ -19,14 +19,16 @@ import ApplicationServices
             || AXAccess.writable(element, kAXValueAttribute).value == true
             || AXAccess.writable(element, kAXSelectedTextAttribute).value == true
         guard editable else { return nil }
+        let role = AXAccess.read(element, kAXRoleAttribute).value as? String
+        let numericSelection: Selection = role == kAXIncrementorRole ? .shortcut : .range
         let numericWritable = AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true
         // Declared readable selection is needed to verify Select All. A role,
         // focusable flag or key-post return code cannot stand in for this fact.
         var attributes: CFArray?
         guard AXUIElementCopyAttributeNames(element, &attributes) == .success, let names = attributes as? [String]
-        else { return numericWritable ? .range : nil }
-        if AXAccess.read(element, kAXRoleAttribute).value as? String == kAXTextAreaRole,
-            names.contains(kAXSelectedTextRangeAttribute), names.contains(NativeTextMarkerSelection.selectedAttribute)
+        else { return numericWritable ? numericSelection : nil }
+        if role == kAXTextAreaRole, names.contains(kAXSelectedTextRangeAttribute),
+            names.contains(NativeTextMarkerSelection.selectedAttribute)
         {
             var parameters: CFArray?
             if AXUIElementCopyParameterizedAttributeNames(element, &parameters) == .success,
@@ -39,12 +41,15 @@ import ApplicationServices
                 return .selectAll
             }
         }
-        if numericWritable { return .range }
+        // Scalar editors have an active segment/caret independent of the
+        // reported AX extent. Their editing command establishes whole-input
+        // replacement; ordinary text and object editing retain native ranges.
+        if numericWritable { return numericSelection }
         if names.contains(kAXSelectedTextRangeAttribute) { return .shortcut }
         // Editable document roots (for example designMode WebKit) may expose
         // marker ranges instead of numeric text ranges. Marker selection alone
         // is NOT editing evidence: read-only pages expose it too.
-        if AXAccess.read(element, kAXRoleAttribute).value as? String == "AXWebArea",
+        if role == "AXWebArea",
             [
                 NativeTextMarkerSelection.selectedAttribute, NativeTextMarkerSelection.startAttribute,
                 NativeTextMarkerSelection.endAttribute
@@ -178,7 +183,8 @@ import ApplicationServices
     /// uncertain selection result stops here; there is no second recipe.
     func deliver(
         text: String, selection: Selection, delivery: NativeKeyboardDelivery, applicationPID: pid_t,
-        check: @escaping @MainActor () throws -> Void, validateReceiver: @escaping @MainActor () async throws -> Void,
+        originalWindow: AXUIElement, check: @escaping @MainActor () throws -> Void,
+        validateReceiver: @escaping @MainActor () async throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
         onCleanupUnknown: @escaping () -> Void
     ) async throws -> Bool {
@@ -205,7 +211,22 @@ import ApplicationServices
             throw DriverError("target text extent is unavailable; no replacement sent", code: .inputUnavailable)
         }
         if before.empty && text.isEmpty { return true }
-        if selection == .selectAll || !before.full {
+        // Qt's spinbox Select All uses a reversed selection. Its date parser
+        // can retain a day from earlier editing while the caret is in the year
+        // section. A forward numeric range plus one whole-string key event is
+        // one preselected recipe, not a retry after rejected characters.
+        let structuredQt =
+            try selection == .shortcut
+            && AXAccess.read(element, kAXRoleAttribute).value as? String == kAXIncrementorRole
+            && AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true
+            && NativeQtAccessibilityQuery.isWidget(
+                element, identifier: AXAccess.read(element, kAXIdentifierAttribute).value as? String,
+                originalWindow: originalWindow, presenterPID: applicationPID)
+        let atomicText =
+            try structuredQt && !text.isEmpty ? Input.prepareAtomicText(text, foreground: delivery.isGlobal) : nil
+        // An existing full AX range can have been set without the editor's
+        // Select All command. Establish keyboard editing even in that case.
+        if selection.usesWindowCommand || !before.full {
             switch (selection, before) {
             case (.range, .numeric(let numeric)):
                 try await validate()
@@ -222,6 +243,14 @@ import ApplicationServices
                     onCleanupUnknown: onCleanupUnknown)
             default: throw DriverError("replacement selection representation changed", code: .inputUnavailable)
             }
+        }
+        if atomicText != nil {
+            guard case .numeric(let numeric) = before else {
+                throw DriverError("structured editor text extent changed", code: .inputUnavailable)
+            }
+            try await validate()
+            try selectRange(
+                count: numeric.count, check: beforeSelectionMutation, onDispatch: onDispatch, onPosted: onPosted)
         }
         func selected() -> Bool {
             // Keep the original exact numeric/full-marker proof. Some providers
@@ -261,6 +290,10 @@ import ApplicationServices
             try await Input.preparedKey(
                 "BackSpace", delivery: delivery, validate: beforeContent, onDispatch: onDispatch, onPosted: posted,
                 onCleanupUnknown: onCleanupUnknown)
+        } else if let atomicText {
+            try await Input.preparedAtomicText(
+                atomicText, delivery: delivery, applicationPID: applicationPID, validate: beforeContent,
+                onDispatch: onDispatch, onPosted: posted, onCleanupUnknown: onCleanupUnknown)
         } else {
             try await Input.preparedText(
                 text, delivery: delivery, applicationPID: applicationPID, validate: beforeContent,

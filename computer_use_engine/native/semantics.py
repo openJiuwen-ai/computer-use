@@ -11,6 +11,7 @@ import re
 from collections.abc import Collection, Mapping
 from typing import Any
 
+
 # Missing/failed observations differ from a known absent or unsupported field.
 # This sentinel stays inside Python; it never enters a wire or display value.
 UNKNOWN = object()
@@ -216,6 +217,8 @@ WINDOWS_TEXT_LINE_FIELDS = {"Text.LineRanges": "textLineRanges"}
 
 # Viewport/geometry queries may enter expensive provider layout code. Normal
 # reads keep selection text; explicit native field queries can request these.
+WINDOWS_OBSERVATION_SCOPE_FIELDS = {"UIA.ReferenceScopeEvidence": "referenceScopeEvidence"}
+
 WINDOWS_ON_DEMAND_FIELDS = {"Text.VisibleRanges", "Text.SelectionBounds", "Text.StyleId"}
 
 # Additional collection-only facts retain their native names and value types.
@@ -311,6 +314,7 @@ FIELDS = {
         **WINDOWS_READ_V2_FIELDS,
         **WINDOWS_TEXT_CONTEXT_FIELDS,
         **WINDOWS_TEXT_LINE_FIELDS,
+        **WINDOWS_OBSERVATION_SCOPE_FIELDS,
     ),
     "linux": dict(
         role="role",
@@ -392,6 +396,7 @@ RELATIONS = {
         DescribedBy="describedBy",
         FlowsTo="flowsTo",
         FlowsFrom="flowsFrom",
+        **{"UIA.FocusedElement": "observedFocus", "UIA.PointElement": "observedPoint"},
     ),
     "linux": {
         "children": "children",
@@ -423,6 +428,8 @@ READ_RELATIONS = {
         "DescribedBy",
         "FlowsTo",
         "FlowsFrom",
+        "UIA.FocusedElement",
+        "UIA.PointElement",
     ),
     "linux": (
         "Table.viewportCandidates",
@@ -454,6 +461,7 @@ def followed_relations(platform, capabilities, *, content_only=False):
         "Table.viewportCandidates": "nativeTableViewport",
         "Text.Children": "nativeUiaReadV2",
         **{name: "nativeUiaTextContext" for name in ("DescribedBy", "FlowsTo", "FlowsFrom")},
+        **{name: "nativeReadDiscovery" for name in ("UIA.FocusedElement", "UIA.PointElement")},
     }
     platform_relations = relations.get(platform)
     if platform_relations is None:
@@ -720,6 +728,17 @@ def input_container(platform: str, node: Mapping[str, Any]) -> bool:
     )
 
 
+def observation_scope_evidence(value):
+    """Validate input-route provenance without importing a platform read adapter."""
+    return (
+        isinstance(value, dict)
+        and set(value) == {"ownership", "input", "detail"}
+        and value.get("ownership") in ("confirmed", "unknown", "outside")
+        and value.get("input") in ("liveValidation", "observationOnly")
+        and isinstance(value.get("detail"), str)
+    )
+
+
 def control_capabilities(platform, node, driver_features=(), *, scope_kind=None):
     """Observed semantic support; live scope/receiver checks still apply.
 
@@ -729,6 +748,14 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
     Unknown capabilities do not erase native fields or actions.
     """
     caps = {key: "unknown" for key in ("click", "typeText", "replaceText", "focus")}
+    if platform == "windows":
+        scope = node["values"].get("UIA.ReferenceScopeEvidence")
+        if (
+            observation_scope_evidence(scope)
+            and scope["input"] == "observationOnly"
+            and "UIA.ReferenceScopeEvidence" not in node["fieldStatus"]
+        ):
+            return {key: "unavailable" for key in caps}
     values = control_values(platform, node)
     if values["enabled"] is False:
         return {key: "unavailable" for key in caps}

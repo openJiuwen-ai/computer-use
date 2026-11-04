@@ -47,7 +47,7 @@ def _related(node: PreparedNode) -> tuple[str, ...]:
 def _compatible(
     before: DisplayTree, after: DisplayTree, previous_refs: Mapping[str, object], current_refs: Mapping[str, object]
 ) -> bool:
-    """Require stable scope, bound nodes, containment, and survivor order."""
+    """Require compatible presentation versions, scope, bindings and survivor order."""
     if before.scope != after.scope or before.indent != after.indent or before.details != after.details:
         return False
     if (
@@ -57,6 +57,16 @@ def _compatible(
     ):
         return False
     if any(root.failure for root in (*before.prepared.roots, *after.prepared.roots)):
+        return False
+    previous_versions = {
+        root.root_ref: root.interface.format_version if root.interface else None for root in before.prepared.roots
+    }
+    current_versions = {
+        root.root_ref: root.interface.format_version if root.interface else None for root in after.prepared.roots
+    }
+    if set(previous_versions.values()) != set(current_versions.values()) or any(
+        previous_versions[ref] != current_versions[ref] for ref in previous_versions.keys() & current_versions.keys()
+    ):
         return False
     for tree, bindings in ((before, previous_refs), (after, current_refs)):
         seen: dict[str, PreparedNode] = {}

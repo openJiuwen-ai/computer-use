@@ -1,14 +1,14 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"Pack empty table values without merging cell identities or coordinates."
+
 from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
 
 from computer_use.protocol.primitives import safe_integer
-
-"Pack empty table values without merging cell identities or coordinates."
 
 
 if TYPE_CHECKING:
@@ -27,6 +27,7 @@ def compact_empty_values(lines: list[str], roots: Sequence[NodeView], focused_re
         focusedRef: Observed focused display reference, or None when none was reported.
     """
     parents = {}
+    empty_selected_refs = set()
 
     def collect(node: NodeView, parent: NodeView | None = None, in_table: bool = False) -> None:
         """Collect.
@@ -55,6 +56,8 @@ def compact_empty_values(lines: list[str], roots: Sequence[NodeView], focused_re
         in_table = in_table or node["role"] == "table"
         if eligible_empty_cell(node, parent, in_table):
             parents[node["ref"]] = parent["ref"]
+            if node.get("selectedText") == "":
+                empty_selected_refs.add(node["ref"])
         for child in node["children"]:
             collect(child, node, in_table)
 
@@ -66,13 +69,19 @@ def compact_empty_values(lines: list[str], roots: Sequence[NodeView], focused_re
             (
                 "^(\\t*)([0-9]+) (.+) ([A-Z]+)([1-9][0-9]*), ((?:(?:Click|Input): "
                 "(?:available|unavailable|unknown), )*)Value: "
-                '""\\Z'
+                '""(, Selected text: "")?\\Z'
             ),
             line,
         )
         if match is None or match[2] not in parents:
             return None
-        indent_value, ref_value, properties_value, letters_value, row_text, fields_value = match.groups()
+        indent_value, ref_value, properties_value, letters_value, row_text, fields_value, selection_value = (
+            match.groups()
+        )
+        # Share only the exact selection fact already rendered for each source.
+        # An absent/null report must not acquire another cell's known empty text.
+        if selection_value and ref_value not in empty_selected_refs:
+            return None
         column = 0
         for char in letters_value:
             column = column * 26 + ord(char) - 64
@@ -86,6 +95,7 @@ def compact_empty_values(lines: list[str], roots: Sequence[NodeView], focused_re
             indent=indent_value,
             properties=properties_value,
             fields=fields_value,
+            selection=selection_value or "",
             column=column,
             row=row,
         )
@@ -100,7 +110,9 @@ def compact_empty_values(lines: list[str], roots: Sequence[NodeView], focused_re
         run, direction = [first], None
         while index + len(run) < len(lines):
             next_cell = cell(lines[index + len(run)])
-            if next_cell is None or any(next_cell[k] != first[k] for k in ("parent", "indent", "properties", "fields")):
+            if next_cell is None or any(
+                next_cell[k] != first[k] for k in ("parent", "indent", "properties", "fields", "selection")
+            ):
                 break
             previous = run[-1]
             horizontal = next_cell["row"] == previous["row"] and next_cell["column"] - previous["column"] == 1
@@ -112,7 +124,8 @@ def compact_empty_values(lines: list[str], roots: Sequence[NodeView], focused_re
             run.append(next_cell)
         if len(run) >= 3:
             output.append(
-                f'{first["indent"]}Empty values [{first["properties"]}; {first["fields"]}Value: ""]: '
+                f"{first['indent']}Empty values [{first['properties']}; "
+                f'{first["fields"]}Value: ""{first["selection"]}]: '
                 + ", ".join(c["ref"] + " " + c["address"] for c in run)
             )
             index += len(run)

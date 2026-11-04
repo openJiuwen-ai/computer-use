@@ -14,8 +14,10 @@ namespace ComputerUse.Windows
         internal const string Effects = "QUERY";
         internal static void Run(ObjectDispatchPlan plan, NativeObjectState state, Request r, Dictionary<string, object> result, INativeObjectProvider provider)
         {
-            var after = provider.Read(plan.Target, plan.Contract.Within, r);
-            NativeObjectChecks.CheckState(after, plan.Contract);
+            // The setter returned. Its original boundary still applies, while
+            // enabled/writable/pattern state may have been consumed or changed
+            // by that successful mutation. Observe without authorizing a new one.
+            var after = NativeObjectChecks.ReadForContract(plan, r, provider);
             if (after.TextValueKnown && after.TextValue == plan.Text)
             {
                 result["confirmation"] = "confirmed";

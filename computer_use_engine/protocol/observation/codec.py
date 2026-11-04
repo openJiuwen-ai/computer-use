@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin
 
-from .model import ElementValue, FieldPath, NativeObservation, SpecialValue
+from .model import ElementValue, FieldPath, NativeObservation, ReadIssue, SpecialValue
 from .validation import record_types, resolved_type, validate_query_observation
 
 _SAFE_INT = 2**53 - 1
@@ -228,3 +228,20 @@ def encode_observation(observation: NativeObservation) -> dict[str, Any]:
         raise TypeError("Expected NativeObservation")
     validate_query_observation(observation)
     return {"kind": "native_observation", **_encode(observation)}
+
+
+def encode_read_issue(issue: ReadIssue) -> dict[str, Any]:
+    """Encode every field of a retained issue, including empty alternatives and continuation.
+
+    This shares the observation codec's semantic-value tags without traversing the
+    unrelated node graph when producing diagnostic pages.
+    """
+    if not isinstance(issue, ReadIssue):
+        raise TypeError("Expected ReadIssue")
+    return dict(
+        path=list(issue.path),
+        state=issue.state,
+        detail=issue.detail,
+        continuation=_encode(issue.continuation),
+        alternatives=_encode(issue.alternatives),
+    )

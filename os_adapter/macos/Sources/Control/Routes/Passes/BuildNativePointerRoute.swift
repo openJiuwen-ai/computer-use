@@ -25,18 +25,16 @@ import ApplicationServices
         }
         let captured =
             try (bound["capture"] is String)
-            ? NativePointerUnit(capture: context.access.captures.input(bound).entry) : nil
+            ? NativePointerUnit(capture: context.access.captures.input(bound)) : nil
         let element =
             try captured == nil ? context.access.units.elementPointerUnit(bound, actuator: contract.actuator) : nil
         try captured?.validateParameters(pointer)
         if kind == "prepare_receiver" {
             return .prepare {
-                if foreground, !BackgroundTarget.isExclusive {
-                    try op.requireForegroundPreparation(id, hostAllowed: ForegroundAssist.enabled)
-                }
+                if foreground { try op.requireForegroundPreparation(id) }
                 if let captured {
-                    try await captured.prepare(
-                        foreground: foreground, atNative: captured.point(pointer.start!), kind: pointer.kind,
+                    try await captured.prepareCaptured(
+                        pointer, foreground: foreground,
                         check: checkBoundary, onPreparation: receipt.recordPreparation,
                         onCleanupUnknown: receipt.recordCleanupUnknown)
                 } else if let element {

@@ -8,7 +8,6 @@ import ApplicationServices
 /// background preparation and no requested input dispatch. This primitive owns
 /// no fallback policy, request-local input state or foreground/pointer cleanup.
 @MainActor struct ForegroundAssist {
-    static let enabled = ProcessInfo.processInfo.environment["COMPUTER_USE_FOREGROUND_ASSIST"] == "1"
 
     /// Diagnostic-only facts from the existing activation boundary. No extra
     /// AX request, activation, event, retry or wait is performed here.
@@ -185,9 +184,6 @@ import ApplicationServices
         _ target: BackgroundTarget, window: CGWindowID, pointerAt: CGPoint? = nil, onAction: () -> Void,
         onWait: (NativePreparationWait) -> Void = { _ in }, onCleanupUnknown: @escaping @MainActor () -> Void = {}
     ) async throws {
-        guard Self.enabled || BackgroundTarget.isExclusive else {
-            throw DriverError("foreground input is not enabled by this host", code: .modeUnsupported)
-        }
         try target.validate(input: true)
         try BackgroundTarget.validateReleasedInput()
         _ = try Self.nativeWindow(target.application.processIdentifier, window)

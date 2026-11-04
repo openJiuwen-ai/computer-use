@@ -78,8 +78,6 @@ class NativeTypedText(NativeKeyboard):
             # FOCUSED may name a scope rather than its internal editor. An
             # insertion cannot silently click and relocate its unknown caret.
             supported = supported and operation.intent["kind"] == "replace"
-        if shortcut_selection:
-            supported = supported and (self.b.mode == "exclusive" or self.desktop.assist)
         selection_known = "unknown"
         pending = [] if r["enabled"] else ["enabled"]
         if operation.intent["kind"] == "replace":
@@ -140,11 +138,6 @@ class NativeTypedText(NativeKeyboard):
         if not foreground:
             operation.background_unavailable.add(key)
             return False
-        require(
-            self.b.mode == "exclusive" or self.desktop.assist,
-            "Host policy does not permit foreground assistance.",
-            "mode_unsupported",
-        )
         self.desktop.require_idle_input()
         preparation.append("foreground")
         self.desktop.activate(r["window"], ctx)
@@ -157,11 +150,6 @@ class NativeTypedText(NativeKeyboard):
 
         def guard():
             nonlocal gesture
-            require(
-                self.b.mode == "exclusive" or self.desktop.assist,
-                "Addressed pointer focus requires exclusive mode or host foreground-assist authorization.",
-                "mode_unsupported",
-            )
             r = self.guard(contract, ctx)
             require(r["route"], "The original working window is not the keyboard window.", "input_unavailable")
             target, within = self.target.selected(

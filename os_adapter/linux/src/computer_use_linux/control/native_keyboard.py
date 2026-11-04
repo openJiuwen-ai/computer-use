@@ -40,11 +40,15 @@ class NativeKeyboard:
     def prepare(self, operation, contract, foreground, ctx, preparation):
         from .keyboard.pipeline import NativePreparePipeline
 
-        return NativePreparePipeline(self.guard, self.route_key, self.desktop, self.target, self.b.mode).run(
+        return NativePreparePipeline(self.guard, self.route_key, self.desktop, self.target).run(
             operation, contract, foreground, ctx, preparation
         )
 
     def preflight(self, operation):
+        if operation.intent["kind"] == "focus":
+            # Receiver preparation uses addressed AT-SPI focus and window
+            # activation; it does not dispatch an XTEST keyboard sequence.
+            return
         require(
             getattr(self.desktop, "can_input", False),
             "This desktop has no implemented native keyboard route.",

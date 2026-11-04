@@ -3,56 +3,19 @@
 
 """Filter route history policy."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
-from computer_use.interaction.write.routes.policy import route_key
 from computer_use.interaction.write.routes.selection.model import CandidateSet, EligibleRoutes
-from computer_use.native.contracts import Channel, UnitCommand
+from computer_use.interaction.write.routes.selection.unit_choice import eligible_unit_routes
 from computer_use.pipeline import Contract, Pass
-
-if TYPE_CHECKING:
-    from typing import Any
-
-    from computer_use.pipeline.core import Control
+from computer_use.pipeline.core import Control
 
 
-def filter_route_history_policy(value: Any) -> EligibleRoutes:
-    """Exclude failed routes and candidates lacking required editing, enabled, or geometry evidence."""
-    request = value.request
-    facts, intent, attempts = request.facts, request.intent, request.history
-    commands = []
-    for primitive in value.primitives:
-        if request.needs_editing_evidence and primitive.unit not in (
-            "prepare_receiver",
-            "native_text_edit",
-            "native_value_replace",
-        ):
-            continue  # Readiness alone does not prove editing capability.
-        matches_intent = (
-            True
-            if (
-                intent.kind == "paste"
-                and not request.needs_editing_evidence
-                and primitive.unit == "prepare_receiver"
-                and primitive.channel != Channel.POINTER
-            )
-            else False
-        )
-        if matches_intent:
-            continue
-        command = UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver)
-        if route_key(command) in attempts.unavailable:
-            continue
-        if "enabled" in primitive.pending or "geometry" in primitive.pending:
-            continue  # Coordinate expiry cannot trigger a hidden screenshot.
-        commands.append(command)
-    return EligibleRoutes(request, value.primitives, tuple(commands))
+def filter_route_history_policy(value: CandidateSet) -> EligibleRoutes:
+    """Filter candidates using the shared pure eligibility rules."""
+    return eligible_unit_routes(value)
 
 
 def execute(value: CandidateSet, control: Control) -> EligibleRoutes:
-    """Filter candidates by route history and required editing, enabled, and geometry evidence."""
+    """Filter candidates by history and required editing, enabled and geometry evidence."""
     return filter_route_history_policy(value)
 
 

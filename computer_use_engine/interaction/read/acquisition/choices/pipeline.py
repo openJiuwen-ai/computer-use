@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.control import NativeScopeBody
+from computer_use.native.query.directory import surfaces_query
 from computer_use.interaction.read.acquisition.choices.model import (
     WindowChoiceDraft,
     WindowChoiceLease,
@@ -63,7 +64,11 @@ class WindowChoicePipeline(Pipeline["WindowChoiceRequest", "WindowSelectionRequi
         async def collect(value: WindowChoiceLease, control: Control) -> WindowChoiceDraft:
             current = await services.directory.collect(
                 value.read,
-                dict(kind="surfaces", application=value.draft.request.application),
+                surfaces_query(
+                    value.draft.request.application,
+                    profile=value.draft.request.profile,
+                    capabilities=services.port.connection.capabilities,
+                ),
                 _control=control,
             )
             return replace(value.draft, current=current)

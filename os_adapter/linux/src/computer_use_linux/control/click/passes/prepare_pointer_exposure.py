@@ -14,11 +14,6 @@ def prepare_pointer_exposure(operation, plan, ledger, ctx):
     if not plan.foreground:
         return False
     require(
-        unit.b.mode == "exclusive" or unit.desktop.assist,
-        "Host policy does not permit foreground assistance.",
-        "mode_unsupported",
-    )
-    require(
         selected is not None and native is not None and not native.override_redirect,
         "An unmanaged popup cannot be activated to repair a pointer route.",
         "input_unavailable",

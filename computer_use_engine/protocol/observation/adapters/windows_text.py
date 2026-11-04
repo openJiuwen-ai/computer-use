@@ -157,6 +157,7 @@ def line_ranges(value: Any) -> bool:
         or value.get("source")
         not in (
             "IUIAutomation.TextPattern.TextUnit.Line",
+            "IUIAutomation.TextChildPattern.TextRange.TextUnit.Line",
             "System.Windows.Automation.TextPattern; exact HWND/runtime read-only supplement.TextUnit.Line",
         )
         or value.get("requestedUnit") != "Line"
@@ -286,3 +287,14 @@ def line_text_conflict(fields: Record, raw: Record) -> bool:
     start = fields["start"] * 2
     known = max(0, min(len(preview), len(original) - start))
     return original[slice(start, start + known)] != preview[:known]
+
+
+def observation_scope_evidence(value: Any) -> bool:
+    """Validate observation provenance without granting native input authority."""
+    return (
+        isinstance(value, dict)
+        and set(value) == {"ownership", "input", "detail"}
+        and value.get("ownership") in ("confirmed", "unknown", "outside")
+        and value.get("input") in ("liveValidation", "observationOnly")
+        and isinstance(value.get("detail"), str)
+    )

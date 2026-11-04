@@ -105,7 +105,7 @@ import CoreGraphics
         let windows = raw.filter { ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 }
         let window = surfaces(windows).first { $0.pid == process.pid }?.id
         var focusedWindow: CGWindowID?
-        if BackgroundTarget.isExclusive, AXIsProcessTrusted() {
+        if AXIsProcessTrusted() {
             let app = AXUIElementCreateApplication(process.pid)
             AXUIElementSetMessagingTimeout(app, 0.05)
             var focused: CFTypeRef?
@@ -316,7 +316,7 @@ import CoreGraphics
             return item
         }
         var observation: [String: Any] = [
-            "mode": BackgroundTarget.isExclusive ? "exclusive" : "shared",
+            "mode": "exclusive",
             "canvas": ["width": geometry.width, "height": geometry.height], "displays": displays,
             "windows": Array(windows.prefix(256)), "omittedWindows": max(0, windows.count - 256)
         ]

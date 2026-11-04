@@ -10,10 +10,11 @@ using System.Web.Script.Serialization;
 
 namespace ComputerUse.Windows
 {
-    internal sealed class Failure : Exception
+    internal class Failure : Exception
     {
         internal readonly string Code, Next;
-        internal Failure(string code, string detail, string next = "read the target again before continuing") : base(detail)
+        internal Failure(string code, string detail, string next = "read the target again before continuing")
+            : base(detail)
         {
             Code = code;
             Next = next;
@@ -26,8 +27,7 @@ namespace ComputerUse.Windows
         internal static readonly Stopwatch Clock = Stopwatch.StartNew();
         internal static double Now
         {
-            get
-            {
+            get {
                 return Epoch + Clock.Elapsed.TotalMilliseconds;
             }
         }
@@ -42,11 +42,7 @@ namespace ComputerUse.Windows
 
         internal static JavaScriptSerializer Serializer()
         {
-            return new JavaScriptSerializer
-            {
-                MaxJsonLength = 64 * 1024 * 1024,
-                RecursionLimit = 256
-            };
+            return new JavaScriptSerializer { MaxJsonLength = 64 * 1024 * 1024, RecursionLimit = 256 };
         }
 
         internal static string Json(object value)
@@ -65,7 +61,8 @@ namespace ComputerUse.Windows
         internal static void Keys(Dictionary<string, object> d, string required, string optional = "")
         {
             var r = required.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-            var allowed = new HashSet<string>(r.Concat(optional.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)));
+            var allowed =
+                new HashSet<string>(r.Concat(optional.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)));
             if (r.Any(k => !d.ContainsKey(k)) || d.Keys.Any(k => !allowed.Contains(k)))
                 throw new Failure("invalid_request", "invalid object fields");
         }
@@ -74,15 +71,18 @@ namespace ComputerUse.Windows
         {
             object value;
             string s;
-            if (!d.TryGetValue(key, out value) || (s = value as string) == null || (!empty && String.IsNullOrWhiteSpace(s)))
+            if (!d.TryGetValue(key, out value) || (s = value as string) == null ||
+                (!empty && String.IsNullOrWhiteSpace(s)))
                 throw new Failure("invalid_request", "invalid " + key);
             return s;
         }
 
-        internal static double Num(Dictionary<string, object> d, string key, double min, double max, bool integer = false)
+        internal static double Num(Dictionary<string, object> d, string key, double min, double max,
+                                   bool integer = false)
         {
             object value;
-            if (!d.TryGetValue(key, out value) || !(value is int || value is long || value is decimal || value is double))
+            if (!d.TryGetValue(key, out value) ||
+                !(value is int || value is long || value is decimal || value is double))
                 throw new Failure("invalid_request", "invalid " + key);
             double n = Convert.ToDouble(value);
             if (Double.IsNaN(n) || Double.IsInfinity(n) || n < min || n > max || (integer && n != Math.Floor(n)))

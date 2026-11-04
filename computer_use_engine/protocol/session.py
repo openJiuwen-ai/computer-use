@@ -24,14 +24,14 @@ def failure_context(error):
 
 
 def desktop_mode():
-    mode = os.environ.get("COMPUTER_USE_DESKTOP", "shared")
-    if mode not in ("shared", "exclusive"):
+    mode = os.environ.get("COMPUTER_USE_DESKTOP", "exclusive")
+    if mode != "exclusive":
         raise ComputerUseError(
             dict(
                 code="invalid_request",
                 effect="none",
                 target="COMPUTER_USE_DESKTOP",
-                detail="COMPUTER_USE_DESKTOP must be shared or exclusive",
+                detail="COMPUTER_USE_DESKTOP must be exclusive",
                 next="correct the host desktop mode configuration before connecting",
             )
         )
@@ -73,7 +73,7 @@ def decode_hello(value, mode, version=NATIVE_PROTOCOL_VERSION):
         raise failure_error("hello", decode_failure(reply["error"]))
     result = record(reply["result"], ["platform", "desktopMode", "maxTimeoutMs", "capabilities"])
     nonempty(result["platform"], "protocol platform")
-    if result["desktopMode"] != mode:
+    if mode != "exclusive" or result["desktopMode"] != mode:
         raise ValueError("protocol: backend desktop mode does not match the requested mode")
     if not safe_integer(result["maxTimeoutMs"]) or not 1 <= result["maxTimeoutMs"] <= 120_000:
         raise ValueError("protocol: invalid maximum request timeout")

@@ -19,6 +19,7 @@ import ApplicationServices
     var dispatchExpectedNativeID: CGWindowID? = nil
 
     typealias State = NativeReceiverSnapshot
+    enum ReadinessUse { case admission, receiver }
 
     private var background: BackgroundTarget { BackgroundTarget(application) }
 
@@ -32,9 +33,11 @@ import ApplicationServices
         let context = try NativeReceiverSnapshot.read(
             application: application, window: window, receiverRelation: receiverRelation,
             includeAncestors: includeAncestors)
-        let ownedEditor = try cellEditor.map { proof in
-            try proof.association(context).map { owned in element.map { CFEqual($0, owned.editor) } == true } == true
-        } ?? true
+        let ownedEditor =
+            try cellEditor.map { proof in
+                try proof.association(context).map { owned in element.map { CFEqual($0, owned.editor) } == true }
+                    == true
+            } ?? true
         let deliveryReady = try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
             let mapping = try NativeWindowUnit(application: application, window: context.window ?? window).mapping()
             if let expected = dispatchExpectedNativeID, mapping.id != expected {
@@ -48,12 +51,11 @@ import ApplicationServices
             // window preparation available; only a later fresh proof can admit
             // focus on this editor or requested input after that preparation.
             focus: ownedEditor ? context.focus : nil, ancestors: ownedEditor ? context.ancestors : [],
-            foreground: context.foreground,
-            relatedEditor: ownedEditor ? context.relatedEditor : nil, window: context.window, surface: context.surface,
-            scopeRoute: context.scopeRoute, reportedFocus: context.reportedFocus,
-            focusReportAbsent: ownedEditor && context.focusReportAbsent, focusedWindowRead: context.focusedWindowRead,
-            focusedWindowStatus: context.focusedWindowStatus, rawFocus: context.rawFocus,
-            rawFocusOwner: context.rawFocusOwner, rawLocalFocus: context.rawLocalFocus)
+            foreground: context.foreground, relatedEditor: ownedEditor ? context.relatedEditor : nil,
+            window: context.window, surface: context.surface, scopeRoute: context.scopeRoute,
+            reportedFocus: context.reportedFocus, focusReportAbsent: ownedEditor && context.focusReportAbsent,
+            focusedWindowRead: context.focusedWindowRead, focusedWindowStatus: context.focusedWindowStatus,
+            rawFocus: context.rawFocus, rawFocusOwner: context.rawFocusOwner, rawLocalFocus: context.rawLocalFocus)
     }
 
     func textProposal(
@@ -95,7 +97,18 @@ import ApplicationServices
         kind: NativeKeyboardIntent.Kind, text: String?, state: State,
         textPolicy: NativeKeyboardInterpreterEvidence.Policy
     ) throws -> Bool {
-        try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)?.unavailable != true
+        let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
+        if proposal?.unavailable == true { return false }
+        // Focus preparation can reveal a different editing capability or event
+        // endpoint. Do not probe an unrelated current receiver before that work.
+        // Scoped HID owns its separate admission proof, independently of a PID.
+        if kind == .focus || state.receiver(element) != "yes" || proposal?.needsForeground == true { return true }
+        return try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
+            try BackgroundEvents.requireKeyboardRoute()
+            _ = try BackgroundEvents.keyboardRecipient(
+                NativeWindowUnit(application: application, window: state.window ?? window).mapping())
+            return true
+        }
     }
 
     /// Fresh positive mechanism evidence, not a record of an attempted input.
@@ -105,7 +118,9 @@ import ApplicationServices
         if request.kind == .replace, try requiresCellEditorActivation(), let element,
             try NativeCellEditorHandoff.activationNeedsForeground(
                 element: element, application: application, window: window)
-        { return true }
+        {
+            return true
+        }
         let state = try sample()
         guard
             let proposal = try textProposal(
@@ -188,9 +203,10 @@ import ApplicationServices
         let recipient = try BackgroundEvents.keyboardRecipient(
             NativeWindowUnit(application: application, window: state.window ?? window).mapping())
         let recipientRoute: String
-        switch recipient.hostRoute {
-        case .some(.hostedWeb(_)): recipientRoute = "hostedWeb"
+        switch recipient.remoteRoute {
+        case .some(.hostedWeb(_, _)): recipientRoute = "hostedWeb"
         case .some(.ordinaryApplication(_)): recipientRoute = "ordinaryApplication"
+        case .some(.viewService(_)): recipientRoute = "service"
         case .none: recipientRoute = recipient.remoteElement == nil ? "local" : "service"
         }
         diagnose(
@@ -204,7 +220,7 @@ import ApplicationServices
             .init(
                 localProcess: recipient.pid == application.processIdentifier
                     && recipient.presenter == application.processIdentifier && recipient.remoteElement == nil
-                    && recipient.hostRoute == nil, noObservedWeb: proposal?.interpreter.kind == .noObservedWeb,
+                    && recipient.remoteRoute == nil, noObservedWeb: proposal?.interpreter.kind == .noObservedWeb,
                 sameKeyboardSurface: CFEqual(state.window ?? window, window), nativeID: recipient.window))
         return .process(recipient)
     }
@@ -212,7 +228,11 @@ import ApplicationServices
     func readiness(
         kind: NativeKeyboardIntent.Kind, key: String? = nil, text: String? = nil,
         replacement: NativeReplacementUnit.Selection? = nil, prepared: Bool = false, state: State? = nil,
-        includeDelivery: Bool = true, textPolicy: NativeKeyboardInterpreterEvidence.Policy = .existing
+        includeDelivery: Bool = true, textPolicy: NativeKeyboardInterpreterEvidence.Policy = .existing,
+        use: ReadinessUse = .admission,
+        replacementSnapshot: (AXUIElement, NativeReplacementUnit.Selection) -> NativeReplacementUnit.Snapshot? = {
+            NativeReplacementUnit(element: $0).snapshot($1)
+        }
     ) throws -> NativeReadiness {
         let state = try state ?? sample()
         let receiver = state.receiver(element)
@@ -224,14 +244,16 @@ import ApplicationServices
         // not application consumption. Live receiver checks still apply at
         // every dispatch; it never authorizes activation or replay afterwards.
         if kind == .replace {
-            let selection = element.flatMap { node in
-                replacement.flatMap { NativeReplacementUnit(element: node).snapshot($0) }
+            if use == .admission {
+                let selection = element.flatMap { node in replacement.flatMap { replacementSnapshot(node, $0) } }
+                conditions.append(("selection", selection == nil ? "unknown" : "yes"))
             }
-            conditions.append(("selection", selection == nil ? "unknown" : "yes"))
             if try requiresCellEditorActivation(), let element,
                 try NativeCellEditorHandoff.activationNeedsForeground(
                     element: element, application: application, window: window)
-            { conditions.append(("foreground", "unknown")) }
+            {
+                conditions.append(("foreground", "unknown"))
+            }
         }
         if includeDelivery,
             let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
@@ -241,6 +263,20 @@ import ApplicationServices
             }
         }
         return NativeReadiness(conditions)
+    }
+
+    /// Selection is sampled for admission; the replacement owner alone proves
+    /// its full selection before content. Per-fragment receiver validation must
+    /// not resample a selection that normal editing/autocompletion can change.
+    func receiverReadiness(
+        _ request: NativeKeyboardIntent, replacement: NativeReplacementUnit.Selection?, prepared: Bool, state: State,
+        replacementSnapshot: (AXUIElement, NativeReplacementUnit.Selection) -> NativeReplacementUnit.Snapshot? = {
+            NativeReplacementUnit(element: $0).snapshot($1)
+        }
+    ) throws -> NativeReadiness {
+        try readiness(
+            kind: request.kind, key: request.key, text: request.value, replacement: replacement, prepared: prepared,
+            state: state, includeDelivery: false, use: .receiver, replacementSnapshot: replacementSnapshot)
     }
 
     func prepare(
@@ -308,38 +344,6 @@ import ApplicationServices
                 background, window: mapping.id, onAction: { onPreparation("foreground window activation") },
                 onCleanupUnknown: onCleanupUnknown)
         } else if proposal?.needsForeground != true {
-            if (ForegroundAssist.enabled || BackgroundTarget.isExclusive),
-                windowCommandScope
-                    && request.usesWindowCommand(replacementShortcut: replacement?.usesWindowCommand == true)
-                    && !background.isForeground,
-                AXAccess.read(keyboardWindow, kAXRoleAttribute).value as? String == kAXWindowRole,
-                AXAccess.read(keyboardWindow, kAXSubroleAttribute).value as? String == kAXStandardWindowSubrole,
-                AXAccess.read(keyboardWindow, kAXFocusedAttribute).value as? Bool == false,
-                AXAccess.writable(keyboardWindow, kAXFocusedAttribute).value == false
-            {
-                let root = AXUIElementCreateApplication(application.processIdentifier)
-                AXUIElementSetMessagingTimeout(root, 0.1)
-                if AXAccess.writable(root, kAXFocusedWindowAttribute).value == false {
-                    let selection = NativeKeyboardWindowEvidence.BackgroundSelection(
-                        foregroundAllowed: true, windowScope: windowCommandScope, windowCommand: true,
-                        foreground: false, standardWindow: true, focused: false, windowFocusWritable: false,
-                        appFocusWritable: false, main: AXAccess.read(keyboardWindow, kAXMainAttribute).value as? Bool,
-                        mainWindowMatches: AXAccess.element(root, kAXMainWindowAttribute).map {
-                            CFEqual($0, keyboardWindow)
-                        },
-                        focusedWindowMatches: AXAccess.element(root, kAXFocusedWindowAttribute).map {
-                            CFEqual($0, keyboardWindow)
-                        })
-                    try check()
-                    if NativeKeyboardWindowEvidence.prefersForegroundBeforeSynthetic(selection) {
-                        throw NativePreparationUnavailable(
-                            description: """
-                                use the authorized foreground document preparation before synthetic \
-                                activation; no requested input was sent
-                                """)
-                    }
-                }
-            }
             do {
                 try await NativeFocusPipeline.prepare(
                     background, window: mapping, nativeWindow: keyboardWindow, onPreparation: onPreparation,
@@ -436,10 +440,7 @@ import ApplicationServices
             if let ownedEditor { current.relatedEditor = ownedEditor.owner }
             try continuity?.validate(current, ownedEditor: ownedEditor)
             guard
-                try self.readiness(
-                    kind: request.kind, key: request.key, text: request.value, replacement: replacement,
-                    prepared: prepared, state: current, includeDelivery: false
-                ).ready
+                try self.receiverReadiness(request, replacement: replacement, prepared: prepared, state: current).ready
             else {
                 throw DriverError(
                     "keyboard unit readiness changed; remaining key events were not sent", code: .inputUnavailable)
@@ -497,7 +498,7 @@ import ApplicationServices
             }
             return try await NativeReplacementUnit(element: element).deliver(
                 text: request.value!, selection: replacement, delivery: delivery,
-                applicationPID: application.processIdentifier,
+                applicationPID: application.processIdentifier, originalWindow: window,
                 check: {
                     try check()
                     try self.checkEnabled()

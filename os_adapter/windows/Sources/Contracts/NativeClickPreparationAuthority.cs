@@ -8,20 +8,17 @@ namespace ComputerUse.Windows
     {
         readonly string family;
         readonly Dictionary<string, object> original, target;
-        readonly bool hostAllowsForeground, hasNoBackgroundPreparation;
-        internal NativeClickPreparationAuthority(string family, NativeWriteOperation operation, Dictionary<string, object> target, bool hostAllowsForeground, bool hasNoBackgroundPreparation)
+        readonly bool hasNoBackgroundPreparation;
+        internal NativeClickPreparationAuthority(string family, NativeWriteOperation operation, Dictionary<string, object> target, bool hasNoBackgroundPreparation)
         {
             this.family = family;
             original = new Dictionary<string, object>(operation.Original);
             this.target = new Dictionary<string, object>(target);
-            this.hostAllowsForeground = hostAllowsForeground;
             this.hasNoBackgroundPreparation = hasNoBackgroundPreparation;
         }
 
         internal void Require(NativeWriteOperation operation, NativeInputContract contract)
         {
-            if (!hostAllowsForeground)
-                throw new Failure("mode_unsupported", "host policy does not permit foreground assistance");
             if (!hasNoBackgroundPreparation || contract.Click == null || contract.Click.RouteFamily != family || !NativeWriteOperation.Same(original, operation.Original) || !NativeWriteOperation.Same(target, contract.Target) || operation.Selected == null || !NativeWriteOperation.Same(target, operation.Selected))
                 throw new Failure("stale_target", "foreground preparation authority does not belong to the original click scope");
             if (operation.InputTerminated)

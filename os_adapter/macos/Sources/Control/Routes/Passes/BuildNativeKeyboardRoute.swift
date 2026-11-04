@@ -42,8 +42,7 @@ import ApplicationServices
                     if try unit.backgroundTextTransportUnavailable(keyboard, textPolicy: textPolicy) {
                         try op.recordBackgroundMechanismUnavailable(id)
                     }
-                    try op.requireForegroundPreparation(
-                        id, hostAllowed: ForegroundAssist.enabled || BackgroundTarget.isExclusive)
+                    try op.requireForegroundPreparation(id)
                 }
                 try await unit.prepare(
                     keyboard, replacement: replacement, foreground: foreground, textPolicy: textPolicy,
@@ -102,8 +101,10 @@ import ApplicationServices
             }
             if case .scopedForegroundHID(let scoped) = delivery {
                 try await unit.confirmSelectedDelivery(delivery, check: checkBoundary)
-                try NativeScopedKeyboardPreparation.prepare(
-                    scoped, check: checkBoundary, onPreparation: receipt.recordPreparation)
+                try NativeInputActivity.$stage.withValue(.preparation) {
+                    try NativeScopedKeyboardPreparation.prepare(
+                        scoped, check: checkBoundary, onPreparation: receipt.recordPreparation)
+                }
             }
             let alreadySatisfied = try await dispatchUnit.deliver(
                 keyboard, delivery: delivery, replacement: replacement, prepared: op.preparationConfirmed(id),

@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Exclusive keyboard input bound to an observed desktop's native window.
+"""Keyboard input bound to an observed desktop's native window.
 
 No activation, receiver preparation or retry is performed. Existing optional
 AX information can pin the receiver; it is never required to start a visual
@@ -21,7 +21,6 @@ class NativeDesktopInput:
 
     def guard(self, operation, target, ctx):
         ctx.check()
-        require(self.b.mode == "exclusive", "Desktop-wide keyboard input requires exclusive mode.", "mode_unsupported")
         require(
             getattr(self.desktop, "can_input", False), "This desktop has no native keyboard route.", "mode_unsupported"
         )

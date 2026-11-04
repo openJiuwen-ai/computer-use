@@ -30,7 +30,7 @@ import ApplicationServices
 
 /// A process identity from an observation, never a lookup of the current foreground app.
 @MainActor struct BackgroundTarget {
-    private static let desktopMode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "shared"
+    static let desktopMode = ProcessInfo.processInfo.environment["COMPUTER_USE_DESKTOP"] ?? "exclusive"
     let application: NSRunningApplication
     let launched: Date?
     private let nativeIdentity: NativeProcessIdentity?
@@ -39,11 +39,9 @@ import ApplicationServices
     private let owner: NSRunningApplication?
     private let ownerIdentity: NativeProcessIdentity?
 
-    static var isExclusive: Bool { desktopMode == "exclusive" }
     var isForeground: Bool {
         NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier
     }
-    var allowsMenuPopup: Bool { Self.isExclusive || isForeground }
     var capturedProcessIdentity: NativeProcessIdentity? { nativeIdentity }
 
     static func validateDesktop(input: Bool = false) throws {
@@ -141,8 +139,8 @@ import ApplicationServices
         // Cancellation stops further input, but identity-only checks used by
         // key/button release must remain available while the task unwinds.
         if input { try RequestDiagnostics.checkCancellation() }
-        guard ["shared", "exclusive"].contains(Self.desktopMode) else {
-            throw DriverError("COMPUTER_USE_DESKTOP must be shared or exclusive", code: .modeUnsupported)
+        guard Self.desktopMode == "exclusive" else {
+            throw DriverError("COMPUTER_USE_DESKTOP must be exclusive", code: .modeUnsupported)
         }
         // Preserve the original short-circuit order. Construct diagnostic fields
         // only on failure, from the exact values this validation evaluated.

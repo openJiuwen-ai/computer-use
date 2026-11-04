@@ -8,12 +8,17 @@ import ApplicationServices
 @MainActor final class NativeDesktopState {
     private(set) var effectPossible = false
     let discovery = ApplicationDiscovery()
-    let appSelections = AppSelections()
-    let applications = NativeApplicationAccess()
+    let appSelections: AppSelections
+    let applications: NativeApplicationAccess
     let sharing = WindowSharing()
     let pointer = AgentPointer()
     private(set) lazy var desktop = DesktopCapture(applications: discovery)
     let accessibilityActivation = AccessibilityActivation()
+
+    init(applications: NativeApplicationAccess = NativeApplicationAccess(), appSelections: AppSelections = AppSelections()) {
+        self.applications = applications
+        self.appSelections = appSelections
+    }
 
     func beginRequest() { effectPossible = false }
     func recordEffect() { effectPossible = true }

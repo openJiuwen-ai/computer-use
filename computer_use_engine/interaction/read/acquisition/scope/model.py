@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from computer_use.native.query.directory import SurfaceReadProfile
+
 if TYPE_CHECKING:
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
@@ -19,11 +21,11 @@ class WorkingScopeRequest:
 
     Attributes:
         selection: Fixed working-instance/root-window selection, when established.
-        accessibility: Whether the directory request asks the provider for accessibility roots.
+        profile: Immutable window-discovery intent for this read.
     """
 
     selection: WorkingWindow
-    accessibility: bool = True
+    profile: SurfaceReadProfile = SurfaceReadProfile.ACCESSIBILITY
 
 
 @dataclass(frozen=True)

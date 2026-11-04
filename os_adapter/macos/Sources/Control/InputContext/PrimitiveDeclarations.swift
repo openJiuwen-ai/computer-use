@@ -54,16 +54,41 @@ import ApplicationServices
         return NativeKeyboardInterpreterEvidence.retain(policy, observed: observed)
     }
 
-    func declare(_ unit: NativeInputUnit, supported: Bool, enabled: Bool?, readiness: (Bool) throws -> NativeReadiness)
-        rethrows
+    func actionDocument(for unit: NativeInputUnit, facts: NativeElementControl.ActionFacts) throws
+        -> NativeActionDocumentContract?
     {
+        guard case .action(let action, _) = unit, action == kAXPressAction, let node = binding.node else { return nil }
+        try op.check()
+        let retained = op.actionDocuments.context(
+            .init(node: node, surface: scope, within: within, actuator: actuator, receiver: receiver),
+            observed: facts.document)
+        try retained?.observe()
+        return retained
+    }
+
+    /// A content node can locate a separate scrolling receiver. Its enabled
+    /// state is still published, but does not grant or deny that receiver's
+    /// permission. Aliases of the region/bar/button/hit keep their own gate.
+    private func borrowsScrollPermission(_ unit: NativeInputUnit) -> Bool {
+        guard let actuator, let node = binding.node, !actuator.references.contains(node) else { return false }
+        switch unit {
+        case .scroll: return actuator.relation == "scrollPage"
+        case .pointer(.scroll): return actuator.relation == "scrollPointer"
+        default: return false
+        }
+    }
+
+    func declare(
+        _ unit: NativeInputUnit, supported: Bool, enabled: Bool?, actionDocument: NativeActionDocumentContract? = nil,
+        readiness: (Bool) throws -> NativeReadiness
+    ) rethrows {
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
                 && $0.unit == unit && selection.equivalent($0.basis, basis, scope: scope)
         }
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
-            receiver: receiver, basis: basis, unit: unit)
+            receiver: receiver, basis: basis, unit: unit, actionDocument: actionDocument)
         current.append(contract)
         let sampled = try readiness(op.preparationConfirmed(contract.id))
         let conditions: NativeReadiness
@@ -75,31 +100,50 @@ import ApplicationServices
             } else {
                 conditions = sampled
             }
+        } else if case .action(let action, _) = unit, action == kAXPressAction,
+            actionDocument?.selectionRequired == true, sampled.pending == ["receiver"]
+        {
+            // Selecting the known original window is independently necessary.
+            // Its controls may become enabled only after that preparation.
+            // Keep the raw enabled fact; refresh dispatch readiness afterwards.
+            conditions = sampled
+        } else if borrowsScrollPermission(unit) {
+            // The selected scrolling unit checks its actual receiver permission
+            // and original owner containment, including at final dispatch.
+            conditions = sampled
         } else {
             conditions = sampled.requiringEnabled(enabled)
         }
-        primitives.append(
-            unit.declaration(
-                id: contract.id, supported: supported, readiness: conditions, exclusive: BackgroundTarget.isExclusive))
+        primitives.append(unit.declaration(id: contract.id, supported: supported, readiness: conditions))
     }
 
-    func declareClick(_ unit: NativeInputUnit, offer: NativeClickContract) {
+    func declareClick(
+        _ unit: NativeInputUnit, offer sampled: NativeClickContract, actionDocument: NativeActionDocumentContract? = nil
+    ) {
+        func sameProof(_ old: NativePopupPointerQualification?, _ new: NativePopupPointerQualification?) -> Bool {
+            switch (old, new) {
+            case (nil, nil): return true
+            case (let a?, let b?): return a.matches(b, same: { CFEqual($0, $1) })
+            default: return false
+            }
+        }
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
-                && $0.unit == unit && $0.click?.routeFamily == offer.routeFamily
+                && $0.unit == unit && $0.click?.routeFamily == sampled.routeFamily
+                && sameProof($0.click?.popupPointer, sampled.popupPointer)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
+        let offer = sampled
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
-            receiver: receiver, basis: basis, unit: unit, click: offer)
+            receiver: receiver, basis: basis, unit: unit, click: offer, actionDocument: actionDocument)
         current.append(contract)
         let ready = offer.admission == .ready
         let supported = offer.admission == .ready || offer.admission == .preparationRequired
         let condition = offer.preparationOptions == ["foreground"] ? "foreground" : "receiver"
         var wire = unit.declaration(
             id: contract.id, supported: supported,
-            readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]),
-            exclusive: BackgroundTarget.isExclusive)
+            readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]))
         wire["backgroundPreparation"] = offer.preparationOptions.contains("background") ? "yes" : "no"
         wire["click"] = offer.wire
         primitives.append(wire)

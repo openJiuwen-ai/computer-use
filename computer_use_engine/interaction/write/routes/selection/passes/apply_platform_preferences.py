@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def execute(value: CandidateSet, control: Control) -> CandidateSet:
-    """Filter candidate units according to platform, desktop mode, and input semantics."""
+    """Filter candidate units according to native mechanism evidence and input semantics."""
     return apply_platform_preferences(value)
 
 

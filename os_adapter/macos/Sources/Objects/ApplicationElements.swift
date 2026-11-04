@@ -20,6 +20,7 @@ import ApplicationServices
         // before using an ancestor as a control's interaction owner.
         var ancestors: [AXUIElement] = []
         var context: [Context] = []
+        var popupOwner: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>? = nil
         // Input ownership follows this exact registered target lifetime. A new
         // observation can refine it, but cannot transfer an editor to a new cell.
         var cellEditorState = NativeCellEditorState()
@@ -87,8 +88,7 @@ import ApplicationServices
     /// current input readiness; each native unit still rechecks live evidence.
     nonisolated private static func reconcile(
         _ previous: Evidence, _ previousTarget: Target, _ next: Evidence, _ newTarget: Target
-    ) -> (Evidence, Target)?
-    {
+    ) -> (Evidence, Target)? {
         guard let identity = previous.identity.refining(with: next.identity),
             previous.context.count == next.context.count
         else { return nil }
@@ -102,6 +102,13 @@ import ApplicationServices
         guard !oldKnown || !newKnown || previous.provider == next.provider else { return nil }
         let provider = newKnown ? next.provider : previous.provider
         var target = newTarget
+        // A later observation may create a new lifetime, never fill an old
+        // reference with newly discovered ownership or change its old owner.
+        if let nextOwner = newTarget.popupOwner {
+            guard let oldOwner = previousTarget.popupOwner, oldOwner.matches(nextOwner, same: { CFEqual($0, $1) })
+            else { return nil }
+        }
+        target.popupOwner = previousTarget.popupOwner
         target.cellEditorState = previousTarget.cellEditorState
         target.identity = identity
         target.role = identity.attributes["AXRole"] ?? newTarget.role

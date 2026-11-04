@@ -68,7 +68,10 @@ import CoreGraphics
                         && [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type),
                     count: request.count, dragging: request.kind == .drag ? event.type != .leftMouseUp : nil)
                 event.location = point
+                let activity = NativeInputActivity.begin(
+                    device: .mouse, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap", event: event)
                 event.post(tap: .cghidEventTap)
+                activity?.returned()
             }, canRelease: { true }, skipped: onCleanupUnknown, onDispatch: onDispatch, onPosted: onPosted)
         completed = true
     }
@@ -84,6 +87,8 @@ import CoreGraphics
             throw DriverError("desktop keyboard supports insertion and keys", code: .invalidRequest)
         }
         let recipient = try desktop.keyboardDestination(ref)
+        NativeInputActivity.current?.keyboardDestination(
+            pid: recipient.process.pid, window: recipient.window, focusedWindow: recipient.focusedWindow)
         var completed = false
         defer { if completed { desktop.inputFinished(ref) } else { desktop.inputFailed() } }
         func validate() throws {

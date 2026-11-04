@@ -290,7 +290,7 @@ SUPPLEMENTS = {
         "Text.StyleId": "text_style",
         "Win32.WindowContentScope": "window_content_scope",
     },
-    "macos": {"AXDisclosing": "disclosing"},
+    "macos": {"AXDisclosing": "disclosing", "AXDocument": "document_uri"},
     "linux": {"sensitive": "linux.sensitive", "multiLine": "multiline"},
 }
 DISCARD_FIELDS = {

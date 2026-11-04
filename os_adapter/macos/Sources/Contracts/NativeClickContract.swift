@@ -1,6 +1,7 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import Foundation
+import ApplicationServices
 
 /// Immutable v1 offer retained by the original primitive store. The wire is
 /// a selection projection; native authority and delivery are never supplied
@@ -14,13 +15,28 @@ struct NativeClickContract: Equatable {
     let preparationOptions: [String]
     var backgroundFamily: String? = nil
     var backgroundUnavailable = false
+    var popupPointer: NativePopupPointerQualification? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        let popupMatches: Bool
+        switch (lhs.popupPointer, rhs.popupPointer) {
+        case (nil, nil): popupMatches = true
+        case (let a?, let b?): popupMatches = a.matches(b, same: { CFEqual($0, $1) })
+        default: popupMatches = false
+        }
+        return popupMatches && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
+            && lhs.admission == rhs.admission && lhs.reason == rhs.reason
+            && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
+            && lhs.backgroundUnavailable == rhs.backgroundUnavailable
+    }
 
     var wire: [String: Any] {
-        [
+        let value: [String: Any] = [
             "routeFamily": routeFamily,
             "interaction": [.objectAction, .objectSelection].contains(delivery) ? "semantic" : "pointer",
             "delivery": delivery.rawValue, "admission": admission.rawValue, "reason": reason as Any? ?? NSNull(),
             "preparationOptions": preparationOptions, "preferenceProfile": "default"
         ]
+        return value
     }
 }

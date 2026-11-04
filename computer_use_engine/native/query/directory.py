@@ -7,6 +7,8 @@ No launch, focus, screenshot, or legacy readApp bootstrap occurs here. A native-
 only window remains a valid visual target even when it has no AX root.
 """
 
+from enum import Enum
+
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import Binding
 
@@ -162,9 +164,22 @@ def select_surface(directory, window=None, *, follow_modal=True):
     return Binding(directory["session"], entries[root]["instance"], root, selected["surface"], selected["node"])
 
 
-def surfaces_query(application, *, accessibility=True, capabilities=()):
+class SurfaceReadProfile(Enum):
+    """The immutable directory intent, independent of native worker isolation."""
+
+    ACCESSIBILITY = "accessibility"
+    VISUAL = "visual"
+
+
+def surfaces_query(application, *, profile=SurfaceReadProfile.ACCESSIBILITY, capabilities=()):
     """Optional read-isolation flags require the driver's declared contract."""
+    if not isinstance(profile, SurfaceReadProfile):
+        raise ValueError("A typed surface read profile is required")
     query = dict(kind="surfaces", application=application)
-    if not accessibility and "nativeReadIsolation" in capabilities:
-        query["includeAccessibility"] = False
+    if profile is SurfaceReadProfile.VISUAL:
+        if "nativeVisualSurfaceQuery" in capabilities:
+            query["profile"] = "visual"
+        elif "nativeReadIsolation" in capabilities:
+            # Existing Windows wire/worker contract remains unchanged.
+            query["includeAccessibility"] = False
     return query

@@ -19,6 +19,7 @@ from computer_use.interaction.requests import ExecuteAction
 from computer_use.native.contracts import Binding, Intent
 from computer_use.pipeline import Control, Pipeline, Repeat, Scope, Select, Sequence
 from computer_use.session.events import set_action_handler, set_observation_handler
+from computer_use.session.interface_images import signature
 
 
 class UIStub(SimpleNamespace):
@@ -139,19 +140,21 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
     async def test_pointer_maps_coordinates_and_dispatches_once(self):
         target = replace(self.target, node=None, capture="capture")
         piece = SimpleNamespace(window="window", image=SimpleNamespace(target=target))
+        members = {
+            "window": {"window": "window", "surface": "surface", "parent": None, "parentState": "none", "modal": False}
+        }
         self.ui._image = SimpleNamespace(
             png=b"image",
             digest=hashlib.sha256(b"image").digest(),
             expired=False,
-            membership="layout",
+            membership=signature(members),
             pieces=(piece,),
             hit=lambda point: (piece, (point[0] - 10, point[1] - 20)),
         )
         self.controller.adapters = replace(self.controller.adapters, image_delivery_required=lambda: False)
         with (
             patch("computer_use.interaction.write.ui.pipeline.refresh", new_callable=AsyncMock),
-            patch("computer_use.interaction.write.ui.pipeline.allowed", return_value={}),
-            patch("computer_use.interaction.write.ui.pipeline.signature", return_value="layout"),
+            patch("computer_use.interaction.write.ui.pipeline.allowed", return_value=members),
         ):
             await self.controller.run(UIPointer(self.ui, "click", ((30, 50),), {"button": "left"}))
         self.engine.assert_awaited_once()

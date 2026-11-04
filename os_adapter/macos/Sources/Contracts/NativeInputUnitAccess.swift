@@ -10,6 +10,7 @@ import ApplicationServices
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeReceiverRelation?
     func desktopUnit(_ binding: [String: Any]) throws -> NativeDesktopUnit
+    func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)?
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeKeyboardUnit
@@ -18,11 +19,17 @@ import ApplicationServices
     ) throws -> NativeSelectedTextUnit
     func elementPointerUnit(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator?) throws
         -> NativeElementPointerUnit
+    func popupPointerUnit(_ binding: [String: Any], qualification: NativePopupPointerQualification) throws
+        -> any NativePopupPointerInput
     func menuUnit(_ binding: [String: Any], within: [String]) throws -> NativeMenuUnit
     func scrollUnit(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator) throws -> NativeScrollUnit
 }
 
 extension NativeInputUnitAccess {
+    func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)? { nil }
+    func popupPointerUnit(_ binding: [String: Any], qualification: NativePopupPointerQualification) throws
+        -> any NativePopupPointerInput
+    { NativePopupPointerUnit(element: try elementPointerUnit(binding, actuator: nil), qualification: qualification) }
     func elementPointerUnit(_ binding: [String: Any]) throws -> NativeElementPointerUnit {
         try elementPointerUnit(binding, actuator: nil)
     }

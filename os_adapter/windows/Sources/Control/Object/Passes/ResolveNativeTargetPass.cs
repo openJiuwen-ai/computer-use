@@ -13,29 +13,40 @@ namespace ComputerUse.Windows
     internal static class ResolveNativeTargetPass
     {
         internal const string Effects = "PURE";
-        internal static ObjectDispatchPlan Run(NativeWriteOperation operation, Dictionary<string, object> command, Dictionary<string, object> target, string unit, string id)
+        internal static ObjectDispatchPlan Run(NativeWriteOperation operation, Dictionary<string, object> command,
+                                               Dictionary<string, object> target, string unit, string id,
+                                               INativeObjectProvider provider)
         {
             NativeInputContract contract;
-            if (!operation.Contracts.TryGetValue(id, out contract) || contract.Unit != unit || !NativeWriteOperation.Same(contract.Target, target))
+            if (!operation.Contracts.TryGetValue(id, out contract) || contract.Unit != unit ||
+                !NativeWriteOperation.Same(contract.Target, target))
                 throw new Failure("stale_target", "the native contract expired or belongs to another target");
             if ((bool)command["foreground"])
-                throw new Failure("invalid_request", "an addressed native object action does not request foreground preparation");
+                throw new Failure("invalid_request",
+                                  "an addressed native object action does not request foreground preparation");
             string kind = (string)operation.Intent["kind"], text = null;
             if (unit == "native_action")
             {
-                if (!new[]
-                {
-                    "click",
-                    "openMenu",
-                    "action"
-                }.Contains(kind) || kind == "action" && (string)Wire.Object(operation.Intent["parameters"])["action"] != contract.Action)
+                if (!new[] { "click", "openMenu", "action" }.Contains(kind) ||
+                    kind == "action" &&
+                        (string)Wire.Object(operation.Intent["parameters"])["action"] != contract.Action)
                     throw new Failure("invalid_request", "the native action does not match the original intent");
             }
-            else if (unit == "native_text_edit" && kind == "replace")
+            else if (unit == "native_text_edit" &&
+                     (kind == "replace" || kind == "insert" && contract.SelectionInsert != null))
                 text = (string)Wire.Object(operation.Intent["parameters"])["text"];
             else
                 throw new Failure("invalid_request", "the native unit cannot implement this intent");
-            return new ObjectDispatchPlan(contract, target, unit, text);
+            // Explicit actions and whole-value replacement already fix their
+            // mutation semantics. Click/menu choices retain their semantic
+            // snapshot even when a narrow object query is available.
+            var evidence = kind == "action" && unit == "native_action" && provider is INativeExactActionObjectProvider
+                               ? NativeObjectEvidenceRequirement.ExactAction
+                           : kind == "replace" && unit == "native_text_edit" &&
+                                     provider is INativeValueReplacementObjectProvider
+                               ? NativeObjectEvidenceRequirement.ValueReplacement
+                               : NativeObjectEvidenceRequirement.SemanticSnapshot;
+            return new ObjectDispatchPlan(contract, target, unit, text, evidence);
         }
     }
 }

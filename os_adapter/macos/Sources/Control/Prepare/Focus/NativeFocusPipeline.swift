@@ -18,17 +18,34 @@ import ApplicationServices
             onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown, onNativePreparation: onNativePreparation)
         let metric = RequestDiagnostics.metrics?.start(.windowPreparation)
         defer { metric?.end() }
-        try BackgroundEvents.requireSyntheticFocusRoute(window: window)
-        SyntheticFocusCoordinator.shared.observe(window.pid)
-        let state = try SampleFocusStatePass.run(request)
-        let plan = PlanFocusPreparationPass.run(state, window: window.id)
-        if plan.notify { try PrepareSyntheticApplicationPass.run(request) }
-        if plan.selectWindow { try PrepareTargetWindowPass.run(request) }
+        return try await run(
+            request, observeOutcome: observeOutcome,
+            stages: NativeFocusStages(
+                begin: {
+                    try BackgroundEvents.requireSyntheticFocusRoute(window: $0.window)
+                    SyntheticFocusCoordinator.shared.observe($0.window.pid)
+                }, applicationContext: PrepareFocusApplicationContextPass.run, sample: SampleFocusStatePass.run,
+                notify: PrepareSyntheticApplicationPass.run, selectWindow: PrepareTargetWindowPass.run,
+                settle: { _ in try await Task.sleep(for: .milliseconds(30)) }, confirm: ConfirmFocusPreparationPass.run)
+        )
+    }
+
+    /// The same selected-window composition is used by the native adapter and
+    /// mechanism regressions; no injected Plan or second preparation route.
+    static func run(_ request: NativeFocusRequest, observeOutcome: Bool, stages: NativeFocusStages) async throws
+        -> NativeFocusOutcome
+    {
+        try stages.begin(request)
+        try await stages.applicationContext(request)
+        let state = try stages.sample(request)
+        let plan = PlanFocusPreparationPass.run(state, window: request.window.id)
+        if plan.notify { try stages.notify(request) }
+        if plan.selectWindow { try stages.selectWindow(request) }
         // Keep the existing bounded queue settle. The key-focus notification
         // neither requests an active ACK nor proves the window/receiver ready.
-        if plan.notify || plan.selectWindow { try await Task.sleep(for: .milliseconds(30)) }
-        try ConfirmFocusPreparationPass.run(request)
+        if plan.notify || plan.selectWindow { try await stages.settle(request) }
+        try stages.confirm(request)
         return NativeFocusOutcome(
-            initial: state, final: observeOutcome ? try SampleFocusStatePass.run(request) : state, waitEnd: .notNeeded)
+            initial: state, final: observeOutcome ? try stages.sample(request) : state, waitEnd: .notNeeded)
     }
 }

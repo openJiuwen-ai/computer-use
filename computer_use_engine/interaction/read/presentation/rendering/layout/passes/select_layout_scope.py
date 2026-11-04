@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Compact observations and explicit subtree reads retain natural lines."""
+"""Select compact spatial packing, subtree lines, or diagnostic layout."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ if TYPE_CHECKING:
 
 
 def select_layout_scope(frame: LayoutFrame, control: Control) -> str:
-    """Keep compact/subtree lines unpacked; reserve chain and text-part packing for
-    full diagnostic rendering.
-    """
-    return "unpacked" if frame.context.get("subtreeRef") or frame.context.get("compact") else "full"
+    """Keep subtree lines explicit and apply each full view's own layout policy."""
+    if frame.context.get("subtreeRef"):
+        return "unpacked"
+    return "compact" if frame.context.get("compact") else "full"
 
 
 stage = Pass.define(

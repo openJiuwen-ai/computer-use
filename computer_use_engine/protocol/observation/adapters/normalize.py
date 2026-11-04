@@ -40,7 +40,8 @@ from ..model import (
     TextSpan,
 )
 from ..validation import validate_query_observation
-from . import windows_text
+from . import macos_text, windows_text
+from .diagnostics import catalogue_fields, wrapped_status_code
 from .records import DriverObservationReply, DriverReadMetadata
 from .schema import (
     ACTION_KINDS,
@@ -56,6 +57,7 @@ from .schema import (
     role_name,
 )
 from .wire import DriverWire, query_facts
+
 
 _STATUS = {
     "not_read",
@@ -112,6 +114,7 @@ class NodeBuilder:
         self.paths: dict[str, tuple[str | int, ...]] = {}
         self.conflicts: set[tuple[str, ...]] = set()
         self.role: str | None = None
+        self.catalogues = catalogue_fields(owner.wire.nodes[identity]["properties"] or (), row)
         self.methods = {}
         for index, prop in enumerate(owner.wire.nodes[identity]["properties"]):
             if prop.get("arguments"):
@@ -120,6 +123,12 @@ class NodeBuilder:
                     tuple(prop["key"]),
                     tuple(owner.wire.value(item) for item in prop["arguments"]),
                 )
+
+        self.method_reads = {
+            f"{prop['key'][0]}::{prop['key'][1]}#{index}": owner.wire.read_info(prop.get("read"))
+            for index, prop in enumerate(owner.wire.nodes[identity]["properties"])
+            if prop.get("arguments")
+        }
 
     @property
     def backend(self) -> str:
@@ -198,13 +207,15 @@ class NodeBuilder:
         self.issue(path, "error", "Unrecognized provider value.")
         return _ABSENT
 
-    def supplement(self, name: str, value: Any, *, semantic_key: str | None = None) -> None:
+    def supplement(self, name: str, value: Any, *, semantic_key: str | None = None, diagnostic: bool = False) -> None:
         """Retain meaningful unnormalized facts in a named public supplement."""
         key = semantic_key or f"provider.{self.backend}.{name}"
         path = ("supplements", len(self.supplements), "value")
         converted = self.extra(value, path)
         self.paths[name] = path
         if converted is not _ABSENT:
+            if diagnostic or name in self.catalogues:
+                self.owner.diagnostic_fields.setdefault(NodeId(self.identity), []).append(path[:-1])
             self.supplements.append(Supplement(key, converted))
 
     def put(self, name: str, path: tuple[str, ...], value: Any, expected: Any = None) -> None:
@@ -373,7 +384,12 @@ class NodeBuilder:
         for key in ("rawResult", "wrappedNativeValue"):
             if key in status:
                 self.supplement(
-                    name + ".failed_payload", status[key], semantic_key=f"provider.{self.backend}.{name}.failed_payload"
+                    name + ".failed_payload",
+                    status[key],
+                    semantic_key=f"provider.{self.backend}.{name}.failed_payload",
+                    diagnostic=(
+                        key == "wrappedNativeValue" and wrapped_status_code(status, has_value=name in self.values)
+                    ),
                 )
 
     def build(self) -> NativeNode:
@@ -405,6 +421,8 @@ class Adapter:
         self.spaces: dict[SpaceId, CoordinateSpace] = {}
         self.field_sources: dict[tuple[NodeId, tuple[str | int, ...]], str] = {}
         self.relation_fields: dict[tuple[NodeId, str], str] = {}
+        self.diagnostic_fields: dict[NodeId, list[tuple[str | int, ...]]] = {}
+        self.text_read_fields: dict[NodeId, tuple[str | int, ...]] = {}
 
     def normalize(self) -> DriverObservationReply:
         """Map all acquired fields without retaining the transient query record."""
@@ -444,6 +462,8 @@ class Adapter:
             {NodeId(row["node"]): tuple(row["requestedFields"]) for row in self.facts["nodes"]},
             tuple(self.facts["requestedRelations"]),
             self.field_sources,
+            diagnostic_fields={identity: tuple(paths) for identity, paths in self.diagnostic_fields.items()},
+            text_read_fields=self.text_read_fields,
         )
         return DriverObservationReply(observation, metadata)
 
@@ -597,6 +617,11 @@ class Adapter:
 
     def special(self, node: NodeBuilder, name: str, value: Any) -> bool:
         """Handle compound declarations that cannot be reduced to a field rename."""
+        if name == "UIA.ReferenceScopeEvidence" and node.backend == "windows":
+            if name in node.row["fieldStatus"] or not windows_text.observation_scope_evidence(value):
+                return False
+            node.supplement(name, value, semantic_key="observation_scope")
+            return True
         if name == "AXSubrole":
             if not isinstance(value, str):
                 return False
@@ -1356,6 +1381,27 @@ class Adapter:
         """Keep method parameters with results and attach complete action descriptions."""
         for name, (key, arguments) in node.methods.items():
             value = node.values.get(name, _ABSENT)
+            if key == ("toolkit", "text_character_count") and arguments == ("AXNumberOfCharacters",):
+                evidence = {"arguments": arguments, "read": node.method_reads[name]}
+                if value is not _ABSENT:
+                    evidence["result"] = value
+                node.supplement(name, evidence, semantic_key="provider.macos.text_capture_count", diagnostic=True)
+                continue
+            if key == ("macos.ax", "AXStringForRange"):
+                read = node.method_reads[name]
+                complete = macos_text.captured_content(node, name, arguments, value, read)
+                if complete:
+                    self.text_read_fields[NodeId(node.identity)] = ("text", "content")
+                evidence = {"arguments": arguments, "read": read}
+                if value is not _ABSENT:
+                    evidence["result"] = value
+                node.supplement(
+                    name + ".evidence" if complete else name,
+                    evidence,
+                    semantic_key="provider.macos.parameterized_text",
+                    diagnostic=complete,
+                )
+                continue
             matches_key = (
                 True
                 if (
@@ -1454,6 +1500,11 @@ class Adapter:
             evidence,
             offset=offset,
         )
+        membership = edge.get("membershipObservedAt")
+        if membership is not None:
+            node.supplement(
+                name + ".membershipObservedAt", {"relation": key, **membership}, semantic_key="relation_membership"
+            )
         self.relation_fields[(NodeId(node.identity), key)] = name
         if edge["state"] != "complete":
             continuation = ReadRef(edge["cursor"], "relation", "live") if isinstance(edge.get("cursor"), str) else None
@@ -1478,6 +1529,22 @@ def decode_driver_reply(value: Any) -> DriverObservationReply:
     Raises:
         ValueError: The driver response violates identity, type or coverage contracts.
     """
+    from .wire import DecodedDriverObservation
+
+    if isinstance(value, DecodedDriverObservation):
+        if value.reply is None:
+            if value.wire.has_semantic_urls:
+                # Native queries retain relative CFURL values. Only the
+                # semantic view resolves their provider-declared base URL.
+                wire = DriverWire(value.wire.raw, semantic_values=True)
+                facts = query_facts(wire)
+            else:
+                from copy import copy
+
+                wire, facts = copy(value.wire), value.facts
+                wire.semantic_values = True
+            value.reply = Adapter(wire, facts).normalize()
+        return value.reply
     wire = DriverWire(value, semantic_values=True)
     return Adapter(wire, query_facts(wire)).normalize()
 

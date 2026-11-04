@@ -11,8 +11,6 @@ import AppKit
         }
         try plan.operation.requireClickForeground(
             target: plan.command.target, within: plan.within, backgroundFamily: plan.offer.backgroundFamily,
-            backgroundUnavailable: plan.offer.backgroundUnavailable,
-            hostAllowed: ForegroundAssist.enabled || BackgroundTarget.isExclusive,
-            exclusive: BackgroundTarget.isExclusive)
+            backgroundUnavailable: plan.offer.backgroundUnavailable)
     }
 }

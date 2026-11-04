@@ -1,12 +1,15 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+"Cross-platform summaries of independent text and collection facts."
+
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from computer_use.interaction.read.presentation.fallback import literal
+from computer_use.interaction.read.presentation.selection_summary import SelectionSummaryPlan, selection_summary_plan
 from computer_use.interaction.read.presentation.text_context import (
     embedded_summaries,
     line_summaries,
@@ -15,15 +18,24 @@ from computer_use.interaction.read.presentation.text_context import (
     unit_label,
 )
 
-"Cross-platform summaries of independent text and collection facts."
 
-
-def read_summaries(facts: Mapping[str, Any], refs: Mapping[str, str], *, compact: bool = False) -> list[str]:
-    "Present significant reading context from the normalized fact index."
+def read_summaries(
+    facts: Mapping[str, Any],
+    refs: Mapping[str, str],
+    *,
+    compact: bool = False,
+    roots: Sequence[Mapping[str, Any]] = (),
+    selection_plan: SelectionSummaryPlan | None = None,
+    omit_unspecified_document_text: bool = False,
+    defer_inactive_selections: bool = False,
+    concise: bool = False,
+) -> list[str]:
+    """Present significant reading context from the normalized fact index."""
     aliases = {token: ref for ref, token in refs.items()}
     output = relation_summaries(facts, aliases)
-    output.extend(geometry_summaries(facts, aliases))
-    passive_selections = {}
+    if not compact:
+        output.extend(geometry_summaries(facts, aliases))
+    selections_plan = selection_plan or selection_summary_plan(facts, refs, roots=roots)
     for relation in facts["relations"]:
         if relation.get("enumeration") == "sampled" and relation["state"] not in ("absent", "unsupported"):
             ref = aliases[relation["source"]]
@@ -37,6 +49,24 @@ def read_summaries(facts: Mapping[str, Any], refs: Mapping[str, str], *, compact
                 )
     for node in facts["nodes"]:
         ref, values = aliases[node["node"]], node["values"]
+        context = supplements(node)
+        scope = context.get("observation_scope", {})
+        if isinstance(scope, Mapping) and scope.get("input") == "observationOnly":
+            output.append(
+                f"Observation {ref}: read only; window ownership {scope['ownership']}. "
+                + (scope["detail"] + " " if scope["detail"] else "")
+                + "This reference does not authorize element input; select its confirmed window or use a current screenshot for coordinate input."
+            )
+        for path, supplement in values.items():
+            if not path.startswith("supplements[") or not isinstance(supplement, Mapping):
+                continue
+            membership = supplement.get("value")
+            if supplement.get("key") == "relation_membership" and isinstance(membership, Mapping):
+                output.append(
+                    f"Relation {membership['relation']} of {ref}: membership captured at {membership['completedAt']}; "
+                    "this page preserves earlier member references and does not assert current membership. "
+                    "Node values are observed separately; input still requires independent live validation."
+                )
         mode = values.get("structure.collection_mode")
         if mode in ("virtualized", "provider_managed"):
             output.append(
@@ -50,63 +80,22 @@ def read_summaries(facts: Mapping[str, Any], refs: Mapping[str, str], *, compact
         if values.get("role") in ("document", "web_area") and not any(
             key in values for key in ("text.content", "text.content_field")
         ):
-            state = node["fieldStatus"].get("text.content", {}).get("state", "not collected")
-            output.append(f"Document text of {ref}: {state}; control values are recorded separately.")
+            if not (compact and omit_unspecified_document_text and _unspecified_document_text(node, facts)):
+                state = node["fieldStatus"].get("text.content", {}).get("state", "not collected")
+                output.append(
+                    f"Document text [{ref}]: {state}; control values separate."
+                    if compact
+                    else f"Document text of {ref}: {state}; control values are recorded separately."
+                )
         if "text.source" not in values:
             continue
-        selections = values.get("text.selections")
-        incidental_selection = (
-            values.get("role") not in ("text_field", "text_area", "combo_box", "document", "web_area")
-            and not values.get("states.focused")
-            and not values.get("text.selected_text")
-            and selections is not None
-            and len(selections) == 1
-            and selections[0].get("start") == 0
-            and selections[0].get("end") == 0
-            and selections[0].get("text") in (None, "")
-            and "text.selections" not in node["fieldStatus"]
-        )
-        if selections is not None and not incidental_selection:
-            pieces = []
-            for index, span in enumerate(selections):
-                label = "empty range" if span.get("collapsed") is True else "range"
-                content = span.get("text")
-                excerpt = (
-                    "text unavailable"
-                    if content is None
-                    else literal(content[:160]) + ("…" if len(content) > 160 else "")
-                )
-                position = (
-                    f"; offsets [{span['start']}, {span['end']}) {values.get('text.unit', 'unspecified unit')}"
-                    if "start" in span and "end" in span
-                    else ""
-                )
-                pieces.append(f"{label} {index + 1}: {excerpt}{position}")
-            statuses = [status for name, status in node["fieldStatus"].items() if name.startswith("text.selections")]
-            state = node["fieldStatus"].get("text.selections", {}).get("state", "partial" if statuses else "complete")
-            coverage = supplements(node).get("text.selections.coverage", {})
-            if coverage.get("conflicting"):
-                state = "conflict"
-            total = coverage.get("total")
-            # Exact types preserve scalar validation and identity contracts.
-            # pylint: disable-next=unidiomatic-typecheck
-            count = f"{len(selections)}/{total}" if type(total) is int else str(len(selections))
-            suffix = (
-                f" ({state}; {count} ranges): "
-                + ("; ".join(pieces) or "none")
-                + ". Keyboard focus and caret activity are separate facts."
-            )
-            passive = (
-                compact
-                and state == "complete"
-                and values.get("states.focused") is False
-                and selections
-                and all(span.get("collapsed") is True and span.get("text") == "" for span in selections)
-            )
-            if passive:
-                passive_selections.setdefault(suffix, []).append(ref)
-            else:
-                output.append("Text selection of " + ref + suffix)
+        selection = selections_plan.entries.get(ref)
+        if (
+            selection is not None
+            and (not compact or selection.group is None)
+            and not (compact and defer_inactive_selections and selection.inactive)
+        ):
+            output.append(selection.statement(ref, concise=concise) if compact else selection.detail_statement())
         caret = {
             key: values[source]
             for key, source in (("active", "text.caret_active"), ("range", "text.caret"))
@@ -121,7 +110,9 @@ def read_summaries(facts: Mapping[str, Any], refs: Mapping[str, str], *, compact
             )
             activity = literal(caret["active"]) if "active" in caret else "unknown"
             output.append(
-                f"Caret of {ref} (active={activity}): {position}; keyboard focus and selection are independent."
+                f"Caret [{ref}]: active={activity}; {position}"
+                if compact
+                else f"Caret of {ref} (active={activity}): {position}; keyboard focus and selection are independent."
             )
         output.extend(embedded_summaries(node, ref, aliases))
         output.extend(line_summaries(node, ref))
@@ -129,10 +120,35 @@ def read_summaries(facts: Mapping[str, Any], refs: Mapping[str, str], *, compact
             for key, label in (("text.visible_ranges", "Visible text ranges"),):
                 if key in values:
                     output.append(f"{label} of {ref}: " + literal(values[key]))
-    for suffix, members in passive_selections.items():
-        label = members[0] if len(members) == 1 else "elements " + ", ".join(members)
-        output.append("Text selection of " + label + suffix)
+    if compact:
+        output.extend(selections_plan.grouped_lines(concise=concise, defer_inactive=defer_inactive_selections))
     return output
+
+
+def _unspecified_document_text(node: Mapping[str, Any], facts: Mapping[str, Any]) -> bool:
+    """Recognize an absent body field without a reported body-reading restriction.
+
+    This only classifies the renderer's synthesized explanation. Original body,
+    control values and read diagnostics retain their existing delivery paths.
+    """
+
+    def body_path(path: tuple[str | int, ...]) -> bool:
+        return (
+            not path
+            or path[0] == "role"
+            or path[0] == "text"
+            and (len(path) == 1 or path[1] in ("content", "content_field"))
+        )
+
+    for name in node["fieldStatus"]:
+        path = tuple(node["fieldPaths"].get(name, ()))
+        if body_path(path):
+            return False
+    for issue in facts.get("issues", ()):
+        path = tuple(issue["path"])
+        if len(path) < 2 or path[0] != "nodes" or path[1] == node["node"] and body_path(path[2:]):
+            return False
+    return True
 
 
 def geometry_summaries(facts: Mapping[str, Any], aliases: Mapping[str, str]) -> list[str]:
@@ -161,17 +177,12 @@ def geometry_summaries(facts: Mapping[str, Any], aliases: Mapping[str, str]) -> 
             continue
         bounds = values.get("geometry.bounds", {})
         rectangle = [bounds.get(name) for name in ("x", "y", "width", "height")]
-        matches_rectangle = (
-            True
-            if (
-                not all(type(number) in (float, int) for number in rectangle)
-                or rectangle[2] <= 0
-                or rectangle[3] <= 0
-                or bounds.get("valid") is False
-            )
-            else False
-        )
-        if matches_rectangle:
+        if (
+            not all(type(number) in (float, int) for number in rectangle)
+            or rectangle[2] <= 0
+            or rectangle[3] <= 0
+            or bounds.get("valid") is False
+        ):
             continue
         space = bounds.get("space")
         metadata = facts.get("coordinateSpaces", {}).get(space)

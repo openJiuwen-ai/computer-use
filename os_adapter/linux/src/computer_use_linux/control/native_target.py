@@ -17,7 +17,7 @@ class TargetState(NamedTuple):
     obj: Any
     states: Any
     interfaces: list[str] | tuple[str, ...]
-    role: str
+    role: str | None
     enabled: bool
 
 
@@ -126,7 +126,7 @@ class NativeTarget:
         self.validate_scope(recipient, constraints, ctx)
         return recipient, constraints
 
-    def read(self, target, within, ctx) -> TargetState:
+    def read(self, target, within, ctx, *, include_role=True) -> TargetState:
         ctx.check()
         self.b.ensure_unlocked()
         obj = self.store.get(target["node"], target["surface"]).obj
@@ -136,7 +136,9 @@ class NativeTarget:
         interfaces = self.call("Accessible", "get_interfaces", obj)
         require(isinstance(interfaces, (list, tuple)), "Native interface list is unavailable.", "input_unavailable")
         enabled = any(states.contains(getattr(self.ax.atspi.StateType, key)) for key in ("ENABLED", "SENSITIVE"))
-        role = self.call("Accessible", "get_role_name", obj)
+        # Explicit Action identity does not depend on the presentation role.
+        # live() still checks the native role enum for an invalid/destroyed object.
+        role = self.call("Accessible", "get_role_name", obj) if include_role else None
         self.validate_scope(target, within, ctx)
         return TargetState(obj, states, interfaces, role, enabled)
 

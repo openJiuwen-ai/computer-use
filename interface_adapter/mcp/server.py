@@ -14,6 +14,7 @@ from computer_use.diagnostics import SDK_VERSION
 from computer_use.native.preview import latest_preview_sink
 from computer_use.protocol.primitives import trim
 from computer_use.protocol.schema import obj, string
+from computer_use.protocol.session import desktop_mode
 
 from mcp import types
 from mcp.server.lowlevel import Server
@@ -27,17 +28,20 @@ DESCRIPTION = (
     "Execute Python with top-level await in a persistent Computer Use session on "
     "the MCP host. App selectors and file paths refer to that computer. "
     "Preloaded: computer, print(*values), print_image(PNG bytes). Follow the "
-    "Computer → App/Window → Element SDK. Variables survive calls. Await every "
-    "operation. "
+    "Computer → App/Window → Element SDK. Variables survive calls. "
+    "Prefer one computer_use call for multiple operations whose targets and steps are "
+    "already confirmed and require no intermediate observation. Execute them sequentially, "
+    "awaiting each operation. Read the relevant UI with read() after the sequence to verify its effect. "
+    "Stop and observe before continuing if an operation fails, the state needed for the "
+    "next operation is uncertain, or the next decision requires fresh UI evidence. "
     "Actions emit dispatched/verified receipts only, without automatically "
-    "reading trees or screenshots, even on failure. Explicitly call read() to "
-    "observe current UI and verify outcomes. Reads default to tree for "
+    "reading trees or screenshots, even on failure. Reads default to tree for "
     "App/Window and both for Computer; view='image' or 'both' requests images. "
     "Reads automatically present text; diffs require host-confirmed retained "
     "history, otherwise full text is used. state.text is always complete for its "
     "bounded view. Use read(full=True) for full presentation, print() for other "
     "values, and print_image() for images. print_image labels dimensions and "
-    "source without reading again. One call at a time; 45 s without native "
+    "source without reading again. One tool call at a time; 45 s without native "
     "command progress; command starts/completions renew the watchdog, printing "
     "does not. Individual commands keep their own deadlines. "
     "Timeout/cancellation clears variables and observations; never automatically "
@@ -231,12 +235,11 @@ async def main():
 
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Computer Use stdio MCP host")
-    parser.add_argument(
-        "--desktop", choices=("shared", "exclusive"), help="Override COMPUTER_USE_DESKTOP for this MCP process"
-    )
+    parser.add_argument("--desktop", choices=("exclusive",), help="Desktop authorization for this MCP process")
     args = parser.parse_args(argv)
     if args.desktop is not None:
         os.environ["COMPUTER_USE_DESKTOP"] = args.desktop
+    desktop_mode()
     asyncio.run(main())
 
 

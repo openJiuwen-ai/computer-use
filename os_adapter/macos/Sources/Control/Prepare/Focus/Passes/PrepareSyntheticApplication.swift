@@ -12,7 +12,13 @@ import ApplicationServices
                 try request.check()
                 try request.target.validate(input: true)
             }, onPreparation: request.onPreparation, onNativePreparation: request.onNativePreparation,
-            post: { $0.postToPid(request.window.pid) }, afterSend: request.check)
+            post: {
+                let activity = NativeInputActivity.begin(
+                    device: .focus, transport: .process, mechanism: "processKeyFocusNotification",
+                    pid: request.window.pid, window: request.window.id, event: $0, stage: .preparation)
+                $0.postToPid(request.window.pid)
+                activity?.returned()
+            }, afterSend: request.check)
     }
 
     /// Narrow event port keeps the single-post and preparation progress contract
