@@ -121,6 +121,7 @@ async def verify(folder, python, *, offscreen_first="cloud", offscreen_only=Fals
         entry = {
             "name": name, "code": code, "wall_seconds": wall_ns / 1e9,
             "started_epoch_ns": epoch, "completed_epoch_ns": completed, "started_monotonic_ns": monotonic,
+            "outer_started_perf_ns": start, "outer_completed_perf_ns": start + wall_ns,
             "meta": result.get("_meta"), "error": result.get("isError", False),
             "cold_worker_start": not report["operations"], "latency_passed": wall_ns <= 2_000_000_000,
         }
