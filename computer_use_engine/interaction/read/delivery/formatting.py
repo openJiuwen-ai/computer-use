@@ -160,20 +160,14 @@ def render_observation(observation: Record, observed: Record | None = None) -> R
     from computer_use.interaction.read.presentation.formatting import number_string
 
     caption = (
-        (
-            f"Screenshot: captured "
-            f"{number_string(screenshot['width'])}"
-            f"x"
-            f"{number_string(screenshot['height'])}"
-            f" px; print_image to view."
-        )
+        (f"Screenshot: captured {number_string(screenshot['width'])}x{number_string(screenshot['height'])} px.")
         if screenshot is not None
         else (f"Screenshot: unavailable ({field(observation.get('screenshotError', 'no captured window'))})")
     )
     lines.insert(1 if tree_at < 0 else tree_at + 1, caption)
     if observation.get("overviewText"):
         at = 0 if tree_at < 0 else tree_at
-        lines[at:at] = compact_overview(observation["overviewText"]).split("\n")
+        lines[at:at] = observation["overviewText"].split("\n")
     if observed is not None:
         lines.insert(1, "Observation: " + quoted(observed["id"]))
     lines[:0] = window_context(observation["windows"], observation["current"])
@@ -192,21 +186,17 @@ def render_observation(observation: Record, observed: Record | None = None) -> R
         if outside:
             related.append(number_string(outside) + " outside the expanded tree")
         if related:
-            lines.append("Shared focus: " + ", ".join(related) + " (app-declared keyboard relation; input unverified).")
+            lines.append("Shared focus: " + ", ".join(related) + " (app-declared keyboard relation).")
     if "menuPath" in observation:
         lines.append(
-            "[Menu path: "
-            + " > ".join(quoted(v) for v in observation["menuPath"])
-            + "; native data only, not opened/executed. Other UI omitted; read() for window.]"
+            "[Menu path: " + " > ".join(quoted(v) for v in observation["menuPath"]) + "; scope=application menu]"
         )
         if observation.get("commandRef") and observation["commandRef"] in visible:
-            lines.append(
-                (f"[Command: element({quoted(observation['commandRef'])}).click() when enabled and clickable.]")
-            )
+            lines.append((f"[Command element: {quoted(observation['commandRef'])}]"))
     for note in observation.get("notes", []):
         lines.append("[" + field(note) + "]")
     if observation["current"] is None and observation["windows"]:
-        lines.append(('Choose a window with app.window("<ref>").read() to inspect its contents and screenshot.'))
+        lines.append("Window contents: not expanded.")
     roots = rendered["roots"] if rendered is not None else []
     return dict(
         text="\n".join(lines),
@@ -215,34 +205,4 @@ def render_observation(observation: Record, observed: Record | None = None) -> R
         coverage=observation_coverage(observation, roots),
         contextRefs=rendered["contextRefs"] if rendered is not None else {},
         imageContext=image_context,
-    )
-
-
-def compact_overview(text: str) -> str:
-    text = re.sub(
-        (
-            "^Overview: app layout ([0-9]+x[0-9]+) px; context only; use "
-            "app\\.window\\(ref\\)\\.read\\(\\) for click "
-            "coordinates\\.$"
-        ),
-        "Overview: \\1 px; context only (not click coordinates).",
-        text,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    return text.replace(
-        (
-            "Rectangles are full window bounds in overview pixels and may "
-            "extend outside "
-            "the image. Display coverage excludes screen gaps; it does not prove "
-            "visibility through overlapping "
-            "windows."
-        ),
-        (
-            "Overview bounds: full windows in overview pixels, possibly "
-            "outside image; "
-            "display coverage excludes gaps, not "
-            "occlusion."
-        ),
-        1,
     )

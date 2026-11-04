@@ -85,7 +85,7 @@ import ApplicationServices
             receipt.detail = result.detail
             receipt.confirmation = result.verified ? "confirmed" : "unavailable"
         } else {
-            receipt.detail = "Click dispatched through the selected native delivery; application effect unconfirmed."
+            receipt.detail = "Click dispatched through the selected native delivery."
         }
         evidence.complete()
     }

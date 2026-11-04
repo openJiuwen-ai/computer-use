@@ -39,6 +39,5 @@ def require_actuators(capabilities: Iterable[str], facts: Facts) -> None:
                 effect="none",
                 target=facts.target_label,
                 detail="The driver cannot bind the selected internal editor.",
-                next="read the current target before continuing; do not replay uncertain input",
             )
         )

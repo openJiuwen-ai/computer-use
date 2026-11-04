@@ -34,7 +34,6 @@ def refuse(code: str, detail: str) -> NoReturn:
             effect="none",
             target="App context",
             detail=detail,
-            next="read this App again before continuing; no input was sent",
         )
     )
 

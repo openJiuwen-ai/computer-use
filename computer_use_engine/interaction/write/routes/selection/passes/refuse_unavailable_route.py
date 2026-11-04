@@ -34,7 +34,6 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
             "permission_required",
             facts,
             "The available route requires global input, which this session has not authorized.",
-            "obtain permission from the caller before creating a session with allow_global_input=True",
         )
     if any(
         stage_admission(primitive).preparation
@@ -47,14 +46,12 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
             "input_unavailable",
             facts,
             "The selected receiver still needs preparation after the receiver preparation allowance was consumed.",
-            "read the original target after its editor settles",
         )
     if request.needs_editing_evidence:
         refuse(
             "input_unavailable",
             facts,
             "The selected control has no confirmed text-editing capability or remaining preparation route.",
-            "read the intended control or its window; focus alone does not authorize text input",
         )
     if candidates and all("enabled" in p.pending for p in candidates):
         refuse(
@@ -63,14 +60,12 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
             "The selected control is disabled."
             if facts.enabled == Knowledge.NO
             else "The selected control has no confirmed enabled input route.",
-            "read the control after it becomes enabled; foreground assistance cannot enable it",
         )
     if facts.unavailable_reason:
         refuse(
             "input_unavailable",
             facts,
             facts.unavailable_reason,
-            "read the intended control and its current window image; choose a reachable control or image point",
         )
     matches_binding = (
         True
@@ -88,13 +83,11 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
             "input_unavailable",
             facts,
             "No usable scrolling action could be confirmed on the selected element.",
-            "return the current window or desktop image, then scroll at a visible point in the intended region",
         )
     refuse(
         "input_unavailable",
         facts,
         "No confirmed route can perform this intent on the original target.",
-        "read the current target and its image to inspect the available input scope",
     )
 
 

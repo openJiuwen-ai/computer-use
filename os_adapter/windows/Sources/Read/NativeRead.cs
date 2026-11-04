@@ -754,7 +754,7 @@ namespace ComputerUse.Windows
                         {
                             state = "partial";
                             detail =
-                                "Logical item enumeration limited to 4096 items; remaining count unknown. Read the visible subtree after an explicit scroll to explore further.";
+                                "Logical item enumeration limited to 4096 items; remaining count unknown.";
                             break;
                         }
 

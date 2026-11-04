@@ -71,7 +71,11 @@ class RouteSelectionPipeline(Sequence["Any", "Any"]):
             if matches_unavailable:
                 last = view.last_route_failure
                 raise failure(
-                    last.error_code, target.facts.target_label, last.detail, view.dispatched, view.preparation,
+                    last.error_code,
+                    target.facts.target_label,
+                    last.detail,
+                    view.dispatched,
+                    view.preparation,
                 ) from unavailable
             raise
         return RoutePlan(resolved, command.primitive, command.prepare, command.foreground, command.click_selection)

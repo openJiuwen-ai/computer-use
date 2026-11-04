@@ -80,7 +80,7 @@ namespace ComputerUse.Windows
                 store.Validate(target, r);
                 Check(r);
                 if (Native.Bounds(window.Handle) != physical || Native.IsIconic(window.Handle))
-                    throw new Failure("stale_target", "window geometry changed during capture; read again");
+                    throw new Failure("stale_target", "window geometry changed during capture");
                 var windowImage = Image(kind, (string)target["surface"], start, geometry, png);
                 if (windowPixels.VisualText != null)
                     windowImage["visualText"] = windowPixels.VisualText;
@@ -89,7 +89,7 @@ namespace ComputerUse.Windows
                 if (captures != null)
                 {
                     if (new NativePointerLayout().Signature != layout.Signature)
-                        throw new Failure("stale_target", "display layout changed during window capture; read again");
+                        throw new Failure("stale_target", "display layout changed during window capture");
                     captures.Add((string)windowImage["id"], target, geometry, layout.Canvas, layout.Signature, layout.Displays, new NativeCaptureGeometry(physical.X, physical.Y, physical.Width, physical.Height, maxDimension));
                 }
 
@@ -106,7 +106,7 @@ namespace ComputerUse.Windows
                 throw new Failure("observation_unavailable", "display catalogue is incomplete or exceeds the protocol budget");
             string pixels = DesktopPixels(canvas, shape, r);
             if (SystemInformation.VirtualScreen != canvas || !displaysBefore.Select(s => s.Name + ":" + s.Bounds).SequenceEqual(Screen.AllScreens.Select(s => s.DeviceName + ":" + s.Bounds)))
-                throw new Failure("stale_target", "display geometry changed during capture; read again");
+                throw new Failure("stale_target", "display geometry changed during capture");
             var notes = new List<string>();
             var windows = new List<object>();
             object frontmost = null;
@@ -165,7 +165,7 @@ namespace ComputerUse.Windows
             {
                 var layout = new NativePointerLayout();
                 if (layout.Signature != desktopLayout.Signature || layout.Canvas.X != canvas.X || layout.Canvas.Y != canvas.Y || layout.Canvas.NativeWidth != canvas.Width || layout.Canvas.NativeHeight != canvas.Height || !displaysBefore.Select(s => s.Name + ":" + s.Bounds).SequenceEqual(Screen.AllScreens.Select(s => s.DeviceName + ":" + s.Bounds)))
-                    throw new Failure("stale_target", "display geometry changed during capture; read again");
+                    throw new Failure("stale_target", "display geometry changed during capture");
                 captures.Add((string)image["id"], target, shape, layout.Canvas, layout.Signature, layout.Displays);
             }
 

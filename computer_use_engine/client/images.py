@@ -85,20 +85,24 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
         )
         if source.get("observed"):
             identity += "; observation=" + json_string(source["observed"]["id"])
+        coordinate_target = source.get("coordinateTarget")
+        if callable(coordinate_target):
+            coordinate_target = coordinate_target()
         facts = dict(
             kind="window",
             mappingAvailable=source.get("mappingAvailable", True),
             context=context,
             identity=identity,
             stale=stale,
-            omitContext=context_already_shown and source.get("current", lambda: True)() is not False,
+            omitContext=context_already_shown,
+            coordinateTarget=coordinate_target,
         )
     if source is not None and known["metadata"] is not None:
         facts["stopReasons"] = known["metadata"].get("stopReasons", ())
-        # App.read already shows short state facts. If that context was shown,
-        # retain only the detailed repaint guidance in the image caption.
+        facts["capture"] = known["metadata"].get("id")
+        # The observation body already carries these sampled window facts.
         notes = window_state_notes(known["metadata"])
-        facts["stopReasons"] += notes[1:] if facts.get("omitContext") else notes
+        facts["stopReasons"] += () if facts.get("omitContext") else notes
         facts["visualText"] = known["metadata"].get("visualText")
         if coordinates is not None and facts["visualText"] is not None:
             visual = facts["visualText"]

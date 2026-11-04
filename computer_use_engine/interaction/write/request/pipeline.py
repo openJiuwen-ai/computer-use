@@ -20,6 +20,7 @@ from computer_use.interaction.write.request.passes.publish_action_event import s
 from computer_use.interaction.write.request.passes.select_write_scope import stage as select_write_scope
 from computer_use.interaction.write.request.passes.validate_element_scope import stage as validate_element_scope
 from computer_use.interaction.write.request.passes.validate_write_binding import stage as validate_write_binding
+from computer_use.native.contracts import Binding
 from computer_use.pipeline import Contract, Effect, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
 from computer_use.session.events import observations_before_write
@@ -56,20 +57,56 @@ class ExecuteNativeWrite(Node["ActionPlan", "Record"]):
         """Execute the action using either its reconciled call claim or a new engine claim."""
         (engine, request) = (self.controller.engine, plan.request)
         self.children = (engine.pipeline,)
+        label = _target_label(request, plan.target)
         try:
             options: Record = dict(path=request.path, query_timeout_ms=request.query_timeout_ms, _control=control)
             if request.forward_current:
                 options["forward_current"] = True
             if self.borrowed:
-                return await engine.execute_in_call(
+                receipt = await engine.execute_in_call(
                     request.intent, cast("OperationTarget", plan.target), cast("Remaining", plan.remaining), **options
                 )
-            return await engine.execute(request.intent, cast("OperationTarget", plan.target), **options)
+            else:
+                receipt = await engine.execute(request.intent, cast("OperationTarget", plan.target), **options)
+            receipt["intent"] = request.intent.kind
+            if label:
+                receipt["target"] = label
+            return receipt
+        except ComputerUseError as error:
+            error._method = request.intent.kind
+            if label:
+                error.target = f"{label} / {error.target}"
+            raise
         finally:
             self.children = ()
 
     def _run(self, value: ActionPlan, control: Control) -> Record:
         raise TypeError("Writes require arun()")
+
+
+def _target_label(request: ExecuteAction, target: OperationTarget | None) -> str | None:
+    """Describe existing public bindings without querying or changing the target."""
+    if request.owner is None:
+        return "Computer"
+    instance = getattr(request.owner, "_instance", None)
+    if instance is None or not isinstance(target, Binding):
+        return None
+    member = getattr(instance, "members", {}).get(target.root_window)
+    if member is None or (member.get("surface"), member.get("instance")) != (target.surface, target.instance):
+        # Native root slots may be reused. A current public label cannot be
+        # borrowed for an older binding merely because its root string agrees.
+        return None
+    window = next((ref for ref, key in getattr(instance, "windows", {}).items() if key == target.root_window), None)
+    if window is None:
+        return None
+    parts = [f"Window {window}"]
+    if request.snapshot is not None:
+        element = next(
+            (ref for ref, snapshot in getattr(instance, "refs", {}).items() if snapshot is request.snapshot), None
+        )
+        if element is not None:
+            parts.append(f"Element {element}")
+    return " / ".join(parts)
 
 
 class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
@@ -188,5 +225,3 @@ class ControllerWritePipeline(HostOperation):
 if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import OperationTarget
-if TYPE_CHECKING:
-    from computer_use.native.contracts import Binding

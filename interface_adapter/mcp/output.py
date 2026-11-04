@@ -36,11 +36,7 @@ class OutputBuffer:
             raise RuntimeError("Output limit reached (8 MiB / 128 blocks); this block was omitted.")
         text_bytes = len(utf8(block["text"])) + (1 if append else 0) if block["type"] == "text" else 0
         if self._text_bytes + text_bytes > 256 * 1024:
-            raise RuntimeError(
-                (
-                    "Output limit reached (256 KiB UTF-8 text per call); this text block was omitted."
-                )
-            )
+            raise RuntimeError(("Output limit reached (256 KiB UTF-8 text per call); this text block was omitted."))
         self._bytes += size
         self._text_bytes += text_bytes
         if append:

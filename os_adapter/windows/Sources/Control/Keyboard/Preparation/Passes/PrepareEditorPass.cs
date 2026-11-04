@@ -31,7 +31,7 @@ namespace ComputerUse.Windows
                 catch (Failure error)
                 {
                     if (error.Code == "input_unavailable")
-                        throw new Failure("execution_unknown", "The editor preparation click was sent, but the original receiver could not be confirmed. No text was sent; inspect the control before retrying. " + error.Message);
+                        throw new Failure("execution_unknown", "The editor preparation click was sent, but the original receiver could not be confirmed. No text was sent. " + error.Message);
                     throw;
                 }
 

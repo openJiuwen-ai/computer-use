@@ -129,7 +129,6 @@ class AgentInterfacePipeline:
             if not self.windows.belongs(ref, application):
                 raise local_failure(
                     "window does not belong to this App's confirmed application",
-                    "use computer.window(ref), or read this App and choose one of its windows",
                     "stale_target",
                 )
         if app is None or app._instance.selector != entry.application:
@@ -307,7 +306,6 @@ class AgentInterfacePipeline:
         if invalid_identity:
             raise local_failure(
                 "the observed element window identity was retired",
-                "read the intended App/Window and choose a current element",
                 "stale_target",
             )
         if in_scope(ui, target.surface) and (evidence is None or evidence.membership is Knowledge.YES):
@@ -337,12 +335,10 @@ class AgentInterfacePipeline:
                 return
             raise local_failure(
                 "the retained element window membership is temporarily unconfirmed",
-                "read this App/Window again to refresh its evidence; no input was dispatched",
                 "observation_incomplete",
             )
         raise local_failure(
             "this element is outside the allowed App/Window scope",
-            "read the intended App or Window and choose its element",
             "stale_target",
         )
 
@@ -373,7 +369,6 @@ class AgentInterfacePipeline:
             except KeyError:
                 raise local_failure(
                     "element reference was not observed in this application",
-                    "read this App/Window and use an integer element number",
                     "stale_target",
                 ) from None
             self.validate_reference_owner(ui, snapshot)
@@ -381,14 +376,11 @@ class AgentInterfacePipeline:
         if not isinstance(target, (str, list)):
             raise local_failure(
                 "element expects an integer, exact name, or path",
-                "use ui.element(target); bool and floating references are invalid",
             )
         try:
             path = element_path([target] if isinstance(target, str) else target)
         except Exception as error:
-            raise local_failure(
-                str(error), "use an exact name or a list of names/role/name/identifier conditions"
-            ) from error
+            raise local_failure(str(error)) from error
         validate_session(self.controller, ui)
         # pylint: disable-next=protected-access
         instance = ui._instance
@@ -400,7 +392,6 @@ class AgentInterfacePipeline:
         if ui._anchor is None and lookup_context is None:
             raise local_failure(
                 "this App has no delivered lookup scope",
-                "read the intended App/Window before locating controls",
                 "stale_target",
             )
         if ui._anchor is None and lookup_context.window is not None:
@@ -460,19 +451,16 @@ class AgentInterfacePipeline:
         if len(matched) > 1:
             raise local_failure(
                 "the name/path matches controls in several member windows",
-                "choose app.window(ref) to narrow the lookup",
                 "ambiguous_target",
             )
         if incomplete:
             raise local_failure(
                 "some member lookup scopes have not been observed or have no AX root",
-                "read a specific Window or use an observed image; uniqueness is not confirmed",
                 "observation_incomplete",
             )
         if not matched:
             raise local_failure(
                 "no matching element in the completed observed scope",
-                "read this UI and check the exact name/path",
                 "element_not_found",
             )
         snapshot = next(iter(matched.values()))
@@ -492,7 +480,7 @@ class AgentInterfacePipeline:
         self.controller.validate_element(target)
         instance = ui._instance
         if instance.session is not None and instance.session != target.session:
-            raise local_failure("element belongs to another session", "obtain a current App", "stale_target")
+            raise local_failure("element belongs to another session", "stale_target")
 
     @staticmethod
     def keyboard_context(ui: UIHandle, *, require_observed: bool = True) -> Binding:
@@ -510,14 +498,12 @@ class AgentInterfacePipeline:
         if identity is None:
             raise local_failure(
                 "this App has no delivered input context",
-                "read the intended App/Window or specify an Element before keyboard input",
                 "stale_target",
             )
         require_identity(ui, identity)
         if require_observed and identity.window not in instance.observed:
             raise local_failure(
                 "the selected input window has not been observed",
-                "read this Window before keyboard input",
                 "stale_target",
             )
         return Binding(instance.session, identity.instance, identity.window, identity.surface, None)
@@ -535,7 +521,6 @@ class AgentInterfacePipeline:
         if ui._anchor is not None and not ancestor(ui._instance.directory, identity.window, ui._anchor):
             raise local_failure(
                 "the delivered receiver is no longer confirmed inside this fixed Window",
-                "read this Window to confirm its current receiver; no input was dispatched",
                 "observation_incomplete",
             )
         intent = Intent(dict(type_text="insert", press_key="key").get(method, method), parameters)
@@ -559,7 +544,6 @@ class AgentInterfacePipeline:
         if snapshot.get("container") and intent == "replace":
             raise local_failure(
                 "full replacement requires a concrete input control, not a container",
-                "select the intended input Element",
             )
         forward = (
             snapshot.get("container")

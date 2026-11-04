@@ -56,6 +56,7 @@ async def test_permission_is_preserved_when_no_permitted_alternative_remains():
         await Engine(port).execute(Intent("insert", {"text": "query"}), TARGET)
     assert caught.value.code == "permission_required" and caught.value.effect == "none"
     assert caught.value.detail == "resolved keyboard delivery needs global input"
+    assert "next" not in vars(caught.value)
     assert len(port.commands) == 1 and port.inspections == 2
 
 

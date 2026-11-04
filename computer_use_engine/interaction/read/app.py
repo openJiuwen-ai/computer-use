@@ -82,7 +82,6 @@ def failure(code: str, detail: str) -> ComputerUseError:
             effect="none",
             target="working window",
             detail=detail,
-            next="read the window directory again; explicitly select a working window if needed",
         )
     )
 
@@ -445,7 +444,6 @@ class NativeAppReader:
                 detail=detail
                 + " Observation failed: "
                 + (error.detail if isinstance(error, ComputerUseError) else str(error)),
-                next="read the same App again; inspect list_apps() before requesting another launch",
             ),
             cause=error,
         )
@@ -582,11 +580,9 @@ class NativeAppReader:
         if matches_scope_confirmed_condition:
             lines.append(
                 template(
-                    "Interaction: the application reports focus in window {}; "
-                    "this view is window {}. Use app.window({}).read() to inspect that window if relevant to the task.",
+                    "Reported focused window: {}; observed window: {}.",
                     aliases[focused],
                     aliases[selected["window"]],
-                    quoted(aliases[focused]),
                 )
             )
         lines.append("Tree: full" if prepared is not None else "Tree: unavailable")
@@ -597,17 +593,14 @@ class NativeAppReader:
             )
             lines.extend(template("Image note: {}", quoted(note)) for note in window_state_summary(metadata))
             if image_precedes_tree:
-                lines.append("The screenshot was captured before the refreshed tree; their contents may differ.")
+                lines.append("Capture order: screenshot, then refreshed tree.")
         else:
             lines.append("Screenshot: unavailable")
         if not scope_confirmed:
-            lines.append("Current view is not confirmed; components describe the observed view.")
+            lines.append("Current window selection: unknown.")
         if prepared is not None:
             lines.append(prepared if isinstance(prepared, DisplayDocument) else DisplayDocument.tree(prepared))
-        lines.extend(
-            template("{}: {}: {}", gap.component, gap.code, quoted(gap.detail))
-            for gap in gaps
-        )
+        lines.extend(template("{}: {}: {}", gap.component, gap.code, quoted(gap.detail)) for gap in gaps)
         return DisplayDocument.join(lines)
 
     @staticmethod

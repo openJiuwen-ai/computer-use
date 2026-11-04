@@ -19,8 +19,9 @@ from mcp.server.lowlevel import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
-from .session import ExecutionSession
 from .instructions import CODE_DESCRIPTION, DESCRIPTION, RESET_DESCRIPTION, TITLE_DESCRIPTION
+from .session import ExecutionSession
+
 _input = obj(dict(title=string(min=1, max=200).optional(), code=string(min=1, max=65536)))
 _empty = obj({})
 

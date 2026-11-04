@@ -28,18 +28,14 @@ def format_menu_sources(value: RenderedMenuSources, control: Control) -> Display
         return value.documents[0]
     lines = [
         template(
-            ("Menu sources: {} observed. Native elements remain separate; use an observed element number for actions."),
+            ("Menu sources: {} observed."),
             len(menu.parts),
         )
     ]
     if menu.discovery_gaps:
         lines.append(
             template(
-                (
-                    "Menu discovery incomplete: {} Other sources may exist; read the working "
-                    "window or an observed element to "
-                    "continue."
-                ),
+                "Menu discovery incomplete: {}",
                 join(menu.discovery_gaps, separator=" "),
             )
         )

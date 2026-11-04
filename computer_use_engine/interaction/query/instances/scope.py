@@ -37,7 +37,6 @@ def validate_session(controller: SessionController, ui: UIHandle) -> None:
     if controller.port.calls.retired:
         raise local_failure(
             "native session is retired after unconfirmed cleanup",
-            "reset the session and observe again; never replay the previous input",
             "stale_target",
         )
     instance = ui._instance
@@ -46,7 +45,7 @@ def validate_session(controller: SessionController, ui: UIHandle) -> None:
     if session is None and running is not None:
         session = running.session
     if session is not None and session != controller.transport.session:
-        raise local_failure("the application belongs to an expired session", "obtain a new App", "stale_target")
+        raise local_failure("the application belongs to an expired session", "stale_target")
     identity = getattr(ui, "_window_identity", None)
     if identity is not None:
         controller.validate_element(identity)
@@ -59,16 +58,14 @@ def require_identity(ui: UIHandle, identity: WindowIdentity, *, current: bool = 
     if evidence is None or evidence.lifetime is WindowLifetime.RETIRED:
         raise local_failure(
             "the fixed Window identity no longer exists",
-            "read the App and select a current Window reference",
             "stale_target",
         )
     item = ui._instance.members.get(identity.window)
     if item is not None and WindowIdentity.of(item) != identity:
-        raise local_failure("the fixed Window identity changed", "select a current Window", "stale_target")
+        raise local_failure("the fixed Window identity changed", "stale_target")
     if current and evidence.membership is not Knowledge.YES:
         raise local_failure(
             "the fixed Window is not confirmed in the current application directory",
-            "read this Window again to refresh its evidence",
             "observation_incomplete",
         )
 
@@ -169,7 +166,7 @@ async def refresh(controller, ui, *, accessibility=True):
     if running is None and instance.session is not None:
         running = RunningApplication(instance.selector, instance.name, instance.session)
     if running is None:
-        raise local_failure("this UI has no observed application", "read the App first", "stale_target")
+        raise local_failure("this UI has no observed application", "stale_target")
     directory = await controller.reader.directory._query(
         surfaces_query(
             running.application,

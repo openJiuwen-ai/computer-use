@@ -42,4 +42,5 @@ class ActionPresentation:
                     desktop_line = f"\nDesktop #{identifier}: {facts}"
         self._details[receipt["detail"]] = previous if previous is not None else number
         self._receipts[id(receipt)] = receipt
-        return f"Action [{receipt['status']}]: #{number} {receipt['target']}. {detail}{desktop_line}"
+        intent = f" / {receipt['intent']}" if receipt.get("intent") else ""
+        return f"Action [{receipt['status']}]: #{number} {receipt['target']}{intent}. {detail}{desktop_line}"

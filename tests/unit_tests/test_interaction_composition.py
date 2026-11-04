@@ -126,7 +126,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
 
     async def test_failed_or_cancelled_write_is_not_replayed(self):
         for failure in (
-            local_failure("uncertain dispatch", "read first", "execution_unknown"),
+            local_failure("uncertain dispatch", "execution_unknown"),
             asyncio.CancelledError(),
         ):
             self.engine.reset_mock()
@@ -178,7 +178,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.call_args.args[1], target)
 
     async def test_lookup_unique_missing_and_ambiguous(self):
-        missing = local_failure("not found", "read again", "element_not_found")
+        missing = local_failure("not found", "element_not_found")
         self.ui._lookup_scopes = (object(), object())
         self.ui._instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         second = {"binding": replace(self.target, node="other")}
@@ -268,7 +268,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             self.assertIn("AgentInterface", query_control.path)
 
     async def test_write_boundary_limits_native_claims_and_releases_budget_after_failure(self):
-        failure = local_failure("not dispatched", "choose a supported operation", "unsupported_operation")
+        failure = local_failure("not dispatched", "unsupported_operation")
 
         async def execute(*_args, **_kwargs):
             with self.controller.port.calls.claim(120000) as remaining:

@@ -36,7 +36,7 @@ def test_absence_summary_distinguishes_directory_coverage_without_claiming_menu_
     after = {**directory(parent, reasons=reasons), "rootDiscoveryComplete": complete}
     text = summary(before, after, {17: "A"})
     assert f"no newly observed window entries; catalogue {expected}" in text
-    assert "not whether a menu opened" in text
+    assert "menu opened" not in text
     assert "menu did not open" not in text
 
 

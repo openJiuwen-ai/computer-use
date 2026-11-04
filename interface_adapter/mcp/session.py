@@ -59,9 +59,7 @@ class ExecutionSession:
             result = await asyncio.shield(self._resetting)
             return result if result.get("isError") else await self.execute(code, signal, title, on_progress)
         if self._retiring is not None:
-            return execution_error(
-                ("Native cleanup: pending. Code execution: not started.")
-            )
+            return execution_error(("Native cleanup: pending. Code execution: not started."))
         if self._pending is not None or self._starting:
             return execution_error("Another call is running. This call's code execution: not started.")
         if signal is not None and signal.is_set():
@@ -515,9 +513,7 @@ class ExecutionSession:
                 if retired is not None:
                     await asyncio.wait_for(asyncio.shield(retired), CLEANUP_TIMEOUT_SECONDS)
             except TimeoutError:
-                failure = (
-                    "Native cleanup: pending. Capture stop: unknown."
-                )
+                failure = "Native cleanup: pending. Capture stop: unknown."
             except Exception as error:
                 failure = str(error)
             if retired is None or retired.done():

@@ -108,6 +108,8 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text.count("Action [dispatched]"), 1)
         self.assertIn("Related observation [unavailable]", text)
         self.assertIn("Action: dispatched", text)
+        self.assertNotIn("do not replay", text)
+        self.assertNotIn("Choose a current instance", text)
         self.assertIn("Original window: closed", text)
         self.assertIn("computer.window(7) Another document", text)
 

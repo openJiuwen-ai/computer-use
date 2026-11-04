@@ -12,7 +12,7 @@ from .contracts import Binding
 
 
 class FixedWindowInvalidated(ComputerUseError):
-    """Exact old root disproved by a complete directory or replacement identity.
+    """Exact old root disproved by native lifetime or replacement evidence.
 
     Only the fixed-window selector emits this evidence. Generic stale/query
     errors carry no lifecycle authority and must not retire an App instance.
@@ -27,7 +27,6 @@ class FixedWindowInvalidated(ComputerUseError):
                 effect="none",
                 target="working window",
                 detail=detail,
-                next="discover a new App; this fixed window will not follow another document",
             )
         )
 
@@ -44,7 +43,6 @@ class FixedWindowUnconfirmed(ComputerUseError):
                 effect="none",
                 target="working window",
                 detail="The fixed working window is not present in the current observed catalogue; its lifetime is unconfirmed.",
-                next="read this App/Window again to refresh its evidence",
             )
         )
 

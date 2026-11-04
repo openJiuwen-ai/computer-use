@@ -81,11 +81,7 @@ def member_target(instance: InstanceState, item: SurfaceInfo) -> Binding:
 
 def _gap_line(gap: ObservationGap, *, concise: bool = False) -> DisplayText:
     """Present the component and its observed collection gap."""
-    if (
-        concise
-        and gap.component == "directory"
-        and gap.code == "observation_incomplete"
-    ):
+    if concise and gap.component == "directory" and gap.code == "observation_incomplete":
         return template("Directory incomplete: {0}.", gap.detail)
     return template("{0}: {1}: {2}", gap.component, gap.code, gap.detail)
 
@@ -188,9 +184,7 @@ class InterfaceReadPipeline:
             current = select_surface(directory, anchor)
             item = next((item for item in permitted.values() if item["surface"] == current.surface), None)
             if item is None:
-                raise local_failure(
-                    "the observation window is not confirmed in this instance", "read its window choices"
-                )
+                raise local_failure("the observation window is not confirmed in this instance")
             preparation = await ObservationPreparationPipeline(controller.port).arun(member_target(instance, item))
         try:
             if preparation is not None:
@@ -340,7 +334,7 @@ class InterfaceReadPipeline:
                         # Exact old objects never acquire a replacement's body.
                         principal_error = local_failure(
                             "the observed window left the application catalogue during collection",
-                            "inspect the current member observations before input", "observation_incomplete",
+                            "observation_incomplete",
                         )
                     continue
             initial = False
@@ -490,8 +484,10 @@ class InterfaceReadPipeline:
         if isinstance(first, AppObservation) and first.launch:
             lines.insert(1, template("Launch: {0}", first.launch["detail"]))
         trees = []
-        if any("tree" in requested for requested in plan.requested.values()):
+        if any(part.tree is not None for _, part in displayed_parts):
             lines.append("Tree: full")
+        elif any("tree" in requested for requested in plan.requested.values()):
+            lines.append("Tree: unavailable")
         else:
             lines.append("Tree: not requested")
         recovery_prefix = 0
@@ -503,6 +499,16 @@ class InterfaceReadPipeline:
                 )
             if part.source is not None:
                 lines.extend(part.source.context_notes)
+            requested = plan.requested.get(
+                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
+            )
+            ax_status = (
+                "collected" if part.tree is not None else "unavailable" if "tree" in requested else "not requested"
+            )
+            image_status = (
+                "collected" if key in included_images else "unavailable" if "image" in requested else "not requested"
+            )
+            lines.append(f"AX: {ax_status}; Image: {image_status}.")
             blockers = [
                 other
                 for other in permitted.values()
@@ -554,8 +560,6 @@ class InterfaceReadPipeline:
                     default=recovery_prefix,
                 )
                 lines.append(tree_document(controller, part.target, part.tree, prepared=prepared))
-            elif view != "image":
-                lines.append("Tree: unavailable in this observation.")
             if part.menus is not None:
                 lines.append("Application menu:")
                 owners, menu_trees = remember_menu(controller, ui, part.menus, key)
@@ -580,10 +584,13 @@ class InterfaceReadPipeline:
         for record in coverage:
             if record["missing"]:
                 ref = next((ref for ref, key in instance.windows.items() if key == record["window"]), record["window"])
-                collection_gaps.append(ObservationGap(
-                    "window", "observation_incomplete",
-                    f"Window {ref}: {', '.join(record['missing'])} content was not included in this observation.",
-                ))
+                collection_gaps.append(
+                    ObservationGap(
+                        "window",
+                        "observation_incomplete",
+                        f"Window {ref}: {', '.join(record['missing'])} content was not included in this observation.",
+                    )
+                )
         lines += [_gap_line(gap) for gap in collection_gaps]
         lines += notes
         # pylint: disable-next=protected-access
@@ -611,7 +618,6 @@ class InterfaceReadPipeline:
             ),
             on_observation=pending.append if needs_refresh else on_observation,
         )
-
         if not needs_refresh:
             return result
         try:
@@ -638,7 +644,7 @@ class InterfaceReadPipeline:
                 if not (observation_data(refreshed) or {}).get("content_available", True):
                     raise local_failure(
                         "the refreshed observation has no available content",
-                        "use the retained capture or request a newer observation", "observation_incomplete",
+                        "observation_incomplete",
                     )
                 for event in refreshed_events:
                     (on_observation or observation_completed)(event)
@@ -650,7 +656,8 @@ class InterfaceReadPipeline:
             # its exact directory/interval and report the failed newer sample.
             metadata = observation_data(result)
             gap = ObservationGap(
-                "refresh", "observation_refresh_failed",
+                "refresh",
+                "observation_refresh_failed",
                 "The optional post-input refresh failed; the first captured observation is retained. "
                 + (error.detail if isinstance(error, ComputerUseError) else str(error) or type(error).__name__),
             )
@@ -717,10 +724,13 @@ class InterfaceReadPipeline:
             if tree is not None and component_budget_ms is not None:
                 try:
                     if window_content_unexposed(tree):
-                        gaps.append(ObservationGap(
-                            "tree", "observation_incomplete",
-                            "This window exposed no usable AX content; its identity does not establish an empty view.",
-                        ))
+                        gaps.append(
+                            ObservationGap(
+                                "tree",
+                                "observation_incomplete",
+                                "AX content unavailable in this observation.",
+                            )
+                        )
                 except Exception as error:  # noqa: BLE001 - a completeness annotation cannot invalidate captured facts
                     gaps.append(_collection_gap("coverage", error))
         if view != "tree" and not image_first:

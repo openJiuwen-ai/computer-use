@@ -54,8 +54,7 @@ def read_summaries(
         if isinstance(scope, Mapping) and scope.get("input") == "observationOnly":
             output.append(
                 f"Observation {ref}: read only; window ownership {scope['ownership']}. "
-                + (scope["detail"] + " " if scope["detail"] else "")
-                + "This reference does not authorize element input; select its confirmed window or use a current screenshot for coordinate input."
+                + (scope["detail"] if scope["detail"] else "")
             )
         for path, supplement in values.items():
             if not path.startswith("supplements[") or not isinstance(supplement, Mapping):
@@ -64,17 +63,11 @@ def read_summaries(
             if supplement.get("key") == "relation_membership" and isinstance(membership, Mapping):
                 output.append(
                     f"Relation {membership['relation']} of {ref}: membership captured at {membership['completedAt']}; "
-                    "this page preserves earlier member references and does not assert current membership. "
-                    "Node values are observed separately; input still requires independent live validation."
+                    "node values sampled separately."
                 )
         mode = values.get("structure.collection_mode")
         if mode in ("virtualized", "provider_managed"):
-            output.append(
-                (
-                    f"Collection {ref}: {mode}; exposed children do not establish the logical total. Scroll "
-                    f"or continue reading to explore more."
-                )
-            )
+            output.append((f"Collection {ref}: {mode}; logical total unknown."))
         if values.get("states.virtualized") is True:
             output.append(f"Item {ref}: virtualized; some properties may be unavailable in this observation.")
         if values.get("role") in ("document", "web_area") and not any(
@@ -198,12 +191,6 @@ def geometry_summaries(facts: Mapping[str, Any], aliases: Mapping[str, str]) -> 
             metadata["unit"], "provider units"
         )
         output.append(
-            "Unlabeled element bounds ("
-            + unit
-            + "; "
-            + metadata["origin"]
-            + "): "
-            + "; ".join(entries)
-            + ". These are not App PNG coordinates and do not prove a point is clickable."
+            "Unlabeled element bounds (" + unit + "; " + metadata["origin"] + "): " + "; ".join(entries) + "."
         )
     return output

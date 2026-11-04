@@ -225,6 +225,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertNotIn("stale", text)
         self.assertIn(f"computer.window({ref(self.app, 'b')})", text)
+        self.assertNotIn("Coordinate target=computer.app(", text)
         self.assertIs(self.app._instance.delivered_image, parent)
         b = self.app.window(ref(self.app, "b"))
         await self.click(b)
@@ -264,6 +265,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         expected = f"Coordinate inputs for this displayed canvas: computer.window({ref(self.app, 'b')})."
         self.assertIn(expected, text)
+        self.assertNotIn("Coordinate target=computer.app(", text)
         self.assertIs(self.window._image, current_parent)
         await self.click(self.window)
         self.assertEqual(self.last_target(), current_parent.pieces[0].image.target)

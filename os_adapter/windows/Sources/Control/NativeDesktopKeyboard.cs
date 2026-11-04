@@ -50,7 +50,7 @@ namespace ComputerUse.Windows
                 throw new Failure("invalid_request", "desktop keyboard cannot address a window or element");
             var image = captures.Get(target);
             if (new NativePointerLayout().Signature != image.Layout)
-                throw new Failure("snapshot_expired", "display layout changed; read the desktop again");
+                throw new Failure("snapshot_expired", "display layout changed");
             var window = Native.GetForegroundWindow();
             NativeInputAccess.RequireWindow(window, "foreground window");
             var focus = window == IntPtr.Zero ? IntPtr.Zero : Native.Focus(window);

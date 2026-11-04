@@ -38,7 +38,7 @@ namespace ComputerUse.Windows
                 SendNativeUnitPass.Run(mutate, result);
                 if (operation.ClickV1)
                     operation.Click.Completed();
-                result["detail"] = "Native object operation returned; read the control to verify its effect.";
+                result["detail"] = "Native object operation returned.";
                 if (unit == "native_text_edit")
                     ObserveObjectEffectPass.Run(plan, state, r, result, provider);
                 r.Check();

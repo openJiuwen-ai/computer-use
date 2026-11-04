@@ -156,7 +156,7 @@ namespace ComputerUse.Windows
                     r.Check();
                 }
 
-                result["detail"] = "Native scrolling returned; read the control to verify the new viewport.";
+                result["detail"] = "Native scrolling returned.";
             }
             catch (Exception error)
             {

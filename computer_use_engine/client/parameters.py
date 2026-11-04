@@ -12,15 +12,13 @@ def reference(value, label="reference"):
     # Exact types preserve scalar validation and identity contracts.
     # pylint: disable-next=unidiomatic-typecheck
     if type(value) is not int or value < 0:
-        raise local_failure(f"{label} must be a nonnegative integer", "use an integer published by this session")
+        raise local_failure(f"{label} must be a nonnegative integer")
     return str(value)
 
 
 def point(value):
     if not isinstance(value, tuple) or len(value) != 2 or any(not finite(v) or v < 0 for v in value):
-        raise local_failure(
-            "a point must be a tuple of two finite nonnegative numbers", "use (x, y) from this object's screenshot"
-        )
+        raise local_failure("a point must be a tuple of two finite nonnegative numbers")
     return value
 
 
@@ -41,16 +39,13 @@ def click(options):
     if invalid_options:
         raise local_failure(
             "click expects ClickOption(button=left/right/middle, count=1/2) or None",
-            "omit options for a single left click; do not use an options dictionary",
         )
     return dict(button=options.button, count=options.count)
 
 
 def scroll(direction, pages):
     if direction not in ("up", "down", "left", "right") or not finite(pages) or pages <= 0:
-        raise local_failure(
-            "scroll expects a direction and a finite positive page amount", "use up/down/left/right and pages=1 or 0.5"
-        )
+        raise local_failure("scroll expects a direction and a finite positive page amount")
 
 
 def view(value, full, menu_path=None):
@@ -58,7 +53,6 @@ def view(value, full, menu_path=None):
     if value not in ("tree", "image", "both") or type(full) is not bool:
         raise local_failure(
             "read expects view='tree'/'image'/'both' and a bool full",
-            "use read(view='both') to request an image and tree",
         )
     if menu_path is not None:
         from computer_use.protocol.primitives import trim, utf16_length
@@ -74,9 +68,7 @@ def view(value, full, menu_path=None):
             else False
         )
         if invalid_value_condition:
-            raise local_failure(
-                "menu_path requires 1-8 nonempty titles and view='tree'", "copy the observed menu titles"
-            )
+            raise local_failure("menu_path requires 1-8 nonempty titles and view='tree'")
 
 
 def cursor(value):
@@ -84,6 +76,4 @@ def cursor(value):
         True if value is not None and (not isinstance(value, str) or not value.strip() or len(value) > 256) else False
     )
     if invalid_value:
-        raise local_failure(
-            "cursor must be None or a returned opaque string", "copy the continuation from the corresponding read"
-        )
+        raise local_failure("cursor must be None or a returned opaque string")

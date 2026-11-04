@@ -30,7 +30,7 @@ import ApplicationServices
     func validate(_ mapping: WindowGeometry.WindowMapping) throws {
         try validateObservation()
         guard try currentMapping(mapping).frame == mapping.frame else {
-            throw ObservationChanged("window disappeared or geometry changed; read the app again")
+            throw ObservationChanged("window disappeared or geometry changed")
         }
     }
 
@@ -57,7 +57,7 @@ import ApplicationServices
         defer { metric?.end() }
         guard let window = WindowServerInfo.window(mapping.id),
             let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid == mapping.pid
-        else { throw ObservationChanged("window disappeared or owner changed; read the app again") }
+        else { throw ObservationChanged("window disappeared or owner changed") }
         NativePointerTiming.record("captureGeometrySample", metadata: {
             ["window": mapping.id, "targetPID": mapping.pid,
              "retainedFrame": [mapping.frame.minX, mapping.frame.minY, mapping.frame.width, mapping.frame.height],
@@ -67,7 +67,7 @@ import ApplicationServices
             let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary),
             [bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy(\.isFinite),
             bounds.width > 0, bounds.height > 0
-        else { throw ObservationChanged("window disappeared or geometry changed; read the app again") }
+        else { throw ObservationChanged("window disappeared or geometry changed") }
         return .init(
             id: mapping.id, pid: pid, frame: bounds, title: mapping.title, width: mapping.width, height: mapping.height)
     }

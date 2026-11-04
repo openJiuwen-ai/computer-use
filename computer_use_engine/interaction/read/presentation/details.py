@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from computer_use.protocol.observation import NativeObservation
 
 
-DETAILS_HINT = "Details: state.read_details(element=N); omit element for all."
+DETAILS_HINT = "Captured details available."
 
 
 def _record_json(value: object) -> str:

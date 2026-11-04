@@ -545,7 +545,7 @@ import ApplicationServices
                     }
                     if expired {
                         link["detail"] =
-                            "a related native object expired before registration; read the relation source again"
+                            "a related native object expired before registration"
                     }
                     if link["state"] as? String != "complete" { reasons.insert("partial native relation: " + property) }
                     links.append(link)
@@ -590,7 +590,7 @@ import ApplicationServices
             edgeCount += targets.count
             var link = relationReader.encode(page, targets: targets)
             if expired {
-                link["detail"] = "a related native object expired before registration; read the relation source again"
+                link["detail"] = "a related native object expired before registration"
             }
             links.append(link)
         }
@@ -721,7 +721,7 @@ import ApplicationServices
             }
             link = relationReader.encode(page, targets: targets)
             if expired {
-                link["detail"] = "a related native object expired before registration; read the relation source again"
+                link["detail"] = "a related native object expired before registration"
             }
         }
         return [

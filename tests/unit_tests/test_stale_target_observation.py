@@ -56,7 +56,7 @@ def test_native_admission_failure_has_current_observation_without_replay(code):
     async def run():
         controller, app, _, snapshot, observation = scenario()
         error = failure(code)
-        context, impact = object(), object()
+        context, impact = object(), {"attempts": ()}
         error._failure_context, error.impact = context, impact
         controller.engine.execute.side_effect = error
         with pytest.raises(ComputerUseError) as caught:
@@ -67,8 +67,9 @@ def test_native_admission_failure_has_current_observation_without_replay(code):
         assert error._failure_context is context and error.impact is impact
         assert error.observation is observation and error.observation_status == "available"
         assert error.window_lifecycle == "observed"
+        assert "next" not in vars(error)
         assert "read again" not in str(error)
-        assert str(error).startswith("click [original button]:")
+        assert str(error).startswith("click [Window 0 / original button]:")
         controller.engine.execute.assert_awaited_once()
         controller.interfaces.read.assert_awaited_once()
         assert controller.interfaces.read.call_args.args == (app, "tree", False, None)
@@ -335,7 +336,7 @@ def test_temporary_unknown_membership_recovers_in_one_action_without_new_referen
 
 
 @pytest.mark.parametrize("available", [True, False])
-def test_stale_observation_distinguishes_partial_content_from_scope_metadata(available):
+def test_stale_recovery_status_distinguishes_partial_content_from_scope_metadata(available):
     async def run():
         controller, app, instance, snapshot, observation = scenario()
         error = failure()
@@ -354,8 +355,10 @@ def test_stale_observation_distinguishes_partial_content_from_scope_metadata(ava
         assert caught.value is error and error.observation is observation
         assert error.observation_status == ("partial" if available else "unavailable")
         if available:
+            assert "next" not in vars(error)
             assert error.observation_error is None
         else:
+            assert "next" not in vars(error)
             assert error.observation_error["code"] == "observation_incomplete"
             assert "Some controls unreadable" in error.observation_error["detail"]
         controller.engine.execute.assert_awaited_once()
@@ -447,6 +450,7 @@ def test_failed_related_read_preserves_original_stale_reason_and_cause():
         assert caught.value is error and error.code == "stale_target" and error.effect == "none"
         assert error.observation_error["code"] == "observation_timeout"
         assert error.observation is None
+        assert "next" not in vars(error)
         assert error.__cause__.args == ("native evidence",)
         controller.engine.execute.assert_awaited_once()
 
@@ -489,6 +493,7 @@ def test_mcp_delivers_related_content_in_the_same_failed_tool_call():
             assert "Current target choices: 344 Privacy" in text
             assert "Original target ended" in text
             assert "Effect: none" in text
+            assert "Next:" not in text
             assert "Action [dispatched]" not in text
             controller.engine.execute.assert_awaited_once()
             controller.interfaces.read.assert_awaited_once()

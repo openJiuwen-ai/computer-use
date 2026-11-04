@@ -101,7 +101,6 @@ class _CaptureFixedImage(Node[FixedImageAttempt, FixedImageAttempt]):
                     effect="none",
                     target="window image",
                     detail="The image observation's native session is retired or changed.",
-                    next="Observe the target in the current native session.",
                 )
             )
 

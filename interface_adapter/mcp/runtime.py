@@ -81,11 +81,7 @@ class Runtime:
     def guard():
         run = _runs.get()
         if run is None or not run["active"] or run["phase"] != "code":
-            raise RuntimeError(
-                "Computer operation belongs to an ended tool execution. Effect: no command "
-                "sent. Next: execute operations within a current tool call; do not use "
-                "background timers for input."
-            )
+            raise RuntimeError("Tool execution ended. Command dispatch: not sent.")
         pending = asyncio.get_running_loop().create_future()
         run["pending"].add(pending)
 
@@ -221,10 +217,7 @@ class Runtime:
             gap = data["observation_error"]
             target = result.target if failure else receipt["target"] if receipt is not None else "original target"
             outcome = f"Effect: {result.effect}" if failure else f"Action: {result['status']}"
-            message = (
-                f"Related observation [{data['observation_status']}] for {target}: "
-                f"{gap['detail']}\n{outcome}"
-            )
+            message = f"Related observation [{data['observation_status']}] for {target}: {gap['detail']}\n{outcome}"
             if data["window_lifecycle"] == "closed":
                 message += "\nOriginal window: closed."
             if data["choices"]:
@@ -388,13 +381,23 @@ class Runtime:
             return
         png = delivery.source
         data = base64.b64encode(delivery.png).decode("ascii")
+        identifier = f"{run['id']}.{len(run['images']) + 1}" if run is not None else "standalone"
+        caption = image_label(png, run is not None and run["imageContexts"].has(png), delivery.coordinates)
+        label = image_label(png, True, delivery.coordinates)
         self.emit(
             dict(
                 type="text",
-                text=image_label(png, run is not None and run["imageContexts"].has(png), delivery.coordinates),
+                text=f"Image {identifier}\n{caption}",
             )
         )
-        self.emit(dict(type="image", mimeType="image/png", data=data))
+        self.emit(
+            dict(
+                type="image",
+                mimeType="image/png",
+                data=data,
+                _meta={"computer-use": {"imageId": identifier, "caption": label}},
+            )
+        )
         if run is not None and run["active"]:
             run["images"].append(delivery)
             self.send(dict(diagnostic=dict(kind="image_output", capture=image_metadata(png)), executionId=run["id"]))
@@ -407,9 +410,7 @@ class Runtime:
         if run["pending"]:
             if error is None:
                 error: BaseException | None = RuntimeError(
-                    (
-                        "Computer operations outlived their script. Pending operations have finished."
-                    )
+                    ("Computer operations outlived their script. Pending operations have finished.")
                 )
             await asyncio.gather(*list(run["pending"]), return_exceptions=True)
         try:
@@ -441,9 +442,7 @@ class Runtime:
             result["content"].append(
                 dict(
                     type="text",
-                    text=(
-                        "Completed (no output)."
-                    ),
+                    text=("Completed (no output)."),
                 )
             )
         self.send(result)

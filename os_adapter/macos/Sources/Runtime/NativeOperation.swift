@@ -312,7 +312,7 @@ import Foundation
             cleanup = "unknown"
             stop("invalid_native_result")
             throw DriverError(
-                "native result could not be retained; do not replay input", code: .executionUnknown, effect: .possible)
+                "native result could not be retained", code: .executionUnknown, effect: .possible)
         }
     }
 

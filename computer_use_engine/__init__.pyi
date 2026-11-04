@@ -118,7 +118,7 @@ class Element:
     def paste(self, text: str) -> ActionResult: ...
     def press_key(self, key: str) -> ActionResult: ...
 
-    # 按需使用，普通输入不要求预先调用 focus。
+    # SDK 自动完成普通输入所需的焦点准备。
     def focus(self) -> ActionResult: ...
     def open_menu(self) -> ActionResult: ...
     def perform_action(self, action: str) -> ActionResult: ...
@@ -142,6 +142,8 @@ class WindowInfo:
     title: str
 
 class ActionResult:
+    target: str
+    intent: str | None
     status: Literal["dispatched", "verified"]
     detail: str
     observation: Observation | None

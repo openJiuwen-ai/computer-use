@@ -73,6 +73,8 @@ class WindowInfo(Protocol):
 class ActionResult(Protocol):
     """Execution receipt and its independent, bounded subsequent observation."""
 
+    target: str
+    intent: str | None
     observation: Observation | None
     observation_status: Literal["available", "partial", "unavailable", "not_requested"]
     observation_error: "ObservationError | None"

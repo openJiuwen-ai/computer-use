@@ -127,8 +127,9 @@ Select an application with `computer.app(id)`, observe it with `app.read(view="b
 Within one tool call, every action receipt is retained while superseded automatic observations of the same scope are
 coalesced into the final state. Distinct popups and explicitly printed or full observations are preserved.
 Window coordinate actions retain visual feedback and collect available accessibility information independently.
-MCP automatically presents a full initial observation and then changes (diffs) by default, including observations after
-writes and consecutive operations in one call. Use `app.read(full=True)` or `window.read(full=True)` to restore full
+MCP automatically presents initially collected content and then changes (diffs) by default, including observations after
+writes and consecutive operations in one call. Each window reports AX/image acquisition and specific gaps separately;
+full/diff/unchanged identifies the text presentation mode. Use `app.read(full=True)` or `window.read(full=True)` to restore full
 context; no private client history protocol is required. The SDK's `state.text` remains complete for the captured scope;
 diff presentation does not change element bindings or screenshot coordinates.
 In MCP, printing an observation, its `.text`, or a direct text slice reuses automatic presentation instead of adding
@@ -139,16 +140,22 @@ Reads do not activate or raise windows to refresh pixels by default. On macOS,
 `app.read(view="both", allow_foreground=True)` explicitly allows preparation of the confirmed original window;
 the same option is available on `Window.read()`.
 This may change focus and stacking, but sends no global mouse/keyboard input and does not switch back afterward.
-The observation's `preparation` record and text retain the requests made; activation and capture do not prove application redraw.
+The observation's `preparation` record and text retain the requests made; images retain their capture provenance.
 An unresolved observation target still returns window choices instead of using this permission to guess a target.
 Other platforms do not yet implement this preparation capability.
 
 Writes include a bounded related observation independently of their execution result.
-Inspect `result.observation`, `result.observation_status`, and `result.observation_error`;
-a missing observation does not mean the input was not sent. A `ComputerUseError` for an expired target,
+Inspect `result.observation`, `result.observation_status`, and `result.observation_error`.
+`result.target`, `result.intent`, and `result.status` retain the operation's target, intent and dispatch/local verification.
+A `ComputerUseError` for an expired target,
 temporarily incomplete target evidence, a modal blocker, or `effect="partial"` / `"possible"` also retains
 these fields when the original session can still be observed. Use the attached current observation to
 decide the next action. The original error and effect remain unchanged; the SDK does not replay uncertain input.
+
+MCP and the reference Agent share one static tool contract. Results present UI content, object identities,
+execution progress and specific gaps. Each image retains its ID, source, dimensions and coordinate target through
+DeepAgent conversion. Advisory `next` fields have been removed from `ComputerUseError` and `ObservationError`;
+`TextPage.next` remains the pagination cursor.
 
 #### Python SDK
 
@@ -342,7 +349,7 @@ foreground changes, restoration outcomes and global input; they do not certify a
 - **DeepAgent integration**: standard openJiuwen invocation, streaming and Runner integration, with computer-operation tools reusable in existing DeepAgent applications.
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.
-- **Verifiable receipts**: actions retain `dispatched` / `verified` independently of `observation_status` and `observation_error`. Input failures are structured as `code / effect / next`. `unsupported_operation` means the required capability or operation is unavailable; `permission_required` identifies a missing input grant.
+- **Verifiable receipts**: actions retain `target / intent / status` independently of `observation_status` and `observation_error`. Input failures expose `code / effect / target / detail / impact`. `unsupported_operation` means the required capability or operation is unavailable; `permission_required` identifies a missing input grant.
 - **Background-first input**: prefer element and application-directed operations; acquire foreground focus or the global pointer only when the operation requires it.
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.

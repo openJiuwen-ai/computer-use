@@ -102,7 +102,6 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
                 "permission_required",
                 facts,
                 "The available click route requires global mouse input, which this session has not authorized.",
-                "obtain permission from the caller before creating a session with allow_global_input=True",
             )
         detail = (
             facts.unavailable_reason or "No click delivery can satisfy the original target and requested semantics."
@@ -118,7 +117,6 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
             "input_unavailable",
             facts,
             detail,
-            "read the target and its current window image before choosing the next action",
         )
     command = min(choices, key=lambda c: order[c.primitive.id])
     decision = ClickSelectionDecision(

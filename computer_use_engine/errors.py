@@ -10,7 +10,25 @@ from typing import Any, Mapping
 
 def format_failure(failure: Mapping[str, Any], method: str | None = None) -> str:
     prefix = f"{method} [{failure['target']}]: " if method else ""
-    return prefix + failure["detail"] + f"\nEffect: {failure['effect']}"
+    lines = [prefix + failure["detail"], f"Effect: {failure['effect']}"]
+    impact = failure.get("impact")
+    for index, attempt in enumerate(impact.get("attempts", ()) if impact else (), start=1):
+        lines.append(f"Attempt {index}: input={attempt['dispatch']}; cleanup={attempt['cleanup']}.")
+        if attempt.get("preparation"):
+            lines.append("Preparation: " + "; ".join(attempt["preparation"]))
+        actual = attempt.get("actual")
+        if actual:
+            effects = [
+                f"{effect['stage']}/{effect['device']}={effect['state']}"
+                for effect in actual.get("effects", ())
+                if effect["transport"] == "globalHID"
+            ]
+            if effects:
+                lines.append("Global input: " + "; ".join(effects))
+            restoration = actual.get("foreground_restoration")
+            if restoration and restoration not in ("notUsed", "notNeeded"):
+                lines.append("Foreground restoration: " + restoration)
+    return "\n".join(lines)
 
 
 class ComputerUseError(Exception):
@@ -32,7 +50,7 @@ class ComputerUseError(Exception):
         self.observation_error = None
         self.window_lifecycle = "unknown"
         self.choices = ()
-        self.impact = None
+        self.impact = failure.get("impact")
         if cause is not None:
             self.__cause__ = cause
 

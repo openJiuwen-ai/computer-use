@@ -188,10 +188,15 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 observation=observed,
                 observation_status="partial" if partial else "available",
                 observation_error=(
-                    FrozenRecord({
-                        "code": refresh_gap.code, "detail": refresh_gap.detail,
-                        "session_usable": self.session_usable(request, session_identity),
-                    }) if refresh_gap is not None else None
+                    FrozenRecord(
+                        {
+                            "code": refresh_gap.code,
+                            "detail": refresh_gap.detail,
+                            "session_usable": self.session_usable(request, session_identity),
+                        }
+                    )
+                    if refresh_gap is not None
+                    else None
                 ),
                 window_lifecycle=lifecycle,
                 choices=choices,

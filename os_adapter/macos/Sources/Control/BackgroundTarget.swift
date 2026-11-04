@@ -163,8 +163,8 @@ import ApplicationServices
                 check == "currentApplication"
                 ? "application registration is unavailable and has not been confirmed for this process lifetime"
                 : readFailure != nil
-                    ? "target process identity could not be read; read the app again"
-                    : "target process exited or changed; read the app again"
+                    ? "target process identity could not be read"
+                    : "target process exited or changed"
             return DriverError(detail, code: .staleTarget)
         }
         guard !terminated else { throw identityFailure("isTerminated") }
@@ -217,7 +217,7 @@ import ApplicationServices
                 NativeWindows.belongs(nativeIdentity, to: owner)
             else {
                 throw DriverError(
-                    "auxiliary window no longer belongs to the observed app; read the app again", code: .staleTarget)
+                    "auxiliary window no longer belongs to the observed app", code: .staleTarget)
             }
         }
         if input { try Self.validateDesktop(input: true) }

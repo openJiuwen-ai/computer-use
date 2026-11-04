@@ -77,7 +77,7 @@ def dumps(value):
             return encode(
                 {
                     key: getattr(value, key)
-                    for key in ("name", "code", "effect", "target", "detail", "next")
+                    for key in ("name", "code", "effect", "target", "detail")
                     if hasattr(value, key)
                 }
             )

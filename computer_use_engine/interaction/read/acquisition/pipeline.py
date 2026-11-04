@@ -303,7 +303,8 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 # window or erase facts/pixels already acquired. Identity
                 # failures still propagate their newer directory evidence.
                 gap = ObservationGap(
-                    "directory", "observation_incomplete",
+                    "directory",
+                    "observation_incomplete",
                     f"Window directory recheck budget exhausted: {error}",
                 )
                 return RecheckedAttempt(

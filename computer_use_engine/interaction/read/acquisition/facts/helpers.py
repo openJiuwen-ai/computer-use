@@ -45,7 +45,6 @@ def validate_fact_scope(target: Binding, max_nodes: int, max_depth: int | None) 
                 effect="none",
                 target="native observation",
                 detail="AX root unavailable in this observation.",
-                next="use a supported window capture route; do not infer that the window has no content",
             )
         )
     invalid_max_nodes = (

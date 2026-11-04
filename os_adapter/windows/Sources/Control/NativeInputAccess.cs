@@ -106,7 +106,7 @@ namespace ComputerUse.Windows
             }
 
             if (target != null && target.Level > own.Level)
-                throw new Failure("input_unavailable", description + " (PID " + pid + ") runs at a higher integrity level than the input driver; Windows UIPI can block injected input. Use a non-elevated target or switch away from the elevated foreground window, then read again.");
+                throw new Failure("input_unavailable", description + " (PID " + pid + ") runs at a higher integrity level than the input driver; Windows UIPI input restriction.");
         }
     }
 }

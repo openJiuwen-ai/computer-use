@@ -108,7 +108,7 @@ def test_complete_and_partial_absence_keep_their_distinct_meanings(presenter):
     missing = next(ref for ref, native in before["refs"].items() if native == "other")
     deliver(presenter, before)
     partial = deliver(presenter, observations.read(omitted=True, partial=True))
-    assert f"Not observed in this read (not proof of removal): {missing}" in partial
+    assert f"Not observed in this read: {missing}" in partial
     assert "Removed element IDs" not in partial
     deliver(presenter, observations.read())
     removed = deliver(presenter, observations.read(omitted=True))

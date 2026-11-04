@@ -30,11 +30,7 @@ def overview(draft: ObservationDraft, control: Control) -> ObservationDraft:
             document=DisplayDocument.join(
                 (
                     overview_value.document,
-                    (
-                        "Window catalogue changed after these thumbnails; some pictured windows may "
-                        "have closed and new windows may not be pictured. Use the current Windows "
-                        "list."
-                    ),
+                    ("Window catalogue changed after the thumbnail captures."),
                 )
             ),
         )

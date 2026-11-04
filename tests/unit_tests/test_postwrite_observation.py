@@ -157,6 +157,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertEqual(result.observation_error.code, "observation_timeout")
         self.assertTrue(result.observation_error.session_usable)
         self.assertEqual(result.observation_error.detail, "read budget exhausted")
+        self.assertNotIn("next", result.observation_error)
         self.execute.assert_awaited_once()
 
     async def test_closed_root_offers_exact_new_choices_without_rebinding(self):
@@ -186,6 +187,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
             await self.run_action()
         self.assertIs(caught.exception, cancelled)
         self.assertIn("Action already dispatched: Input sent once.", cancelled.__notes__)
+        self.assertNotIn("do not replay", " ".join(cancelled.__notes__))
         self.assertEqual(self.events, [self.receipt])
         self.execute.assert_awaited_once()
 
@@ -208,7 +210,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
                     ),
                     cause=original_cause,
                 )
-                context, impact = object(), object()
+                context, impact = object(), {"attempts": ()}
                 failure._failure_context, failure.impact = context, impact
                 self.execute.side_effect = failure
                 self.execute.reset_mock()

@@ -265,7 +265,7 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
                     columns.append(column)
         warning_options = dict(
             displayed_children=displayed_children,
-            hint="read the referenced element for native facts" if request.public_api else "see details",
+            hint="captured element details",
         )
         detailed_notes = observation_warnings(snapshot, **warning_options)
         compact_warning_options = dict(

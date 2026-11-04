@@ -25,7 +25,7 @@ def install_lookup(controller, find):
         binding = controller._query_root(request.owner)
         calls.append((binding.root_window, request.timeout_ms))
         if not find(binding.root_window, calls):
-            raise local_failure("not here", "inspect scope", "element_not_found")
+            raise local_failure("not here", "element_not_found")
         return {"binding": replace(binding, node="matched-control")}
 
     controller.interfaces.lookup = SimpleNamespace(arun=AsyncMock(side_effect=lookup))

@@ -49,9 +49,6 @@ class EngineCallPipeline(Node["EngineRequest", "Record"]):
                     detail="The native session is retired."
                     if native.calls.retired
                     else "Another native call is in progress.",
-                    next="close the old driver and observe a new session"
-                    if native.calls.retired
-                    else "wait for the active call to finish",
                 )
             )
         with native.calls.claim(request.timeout_ms) as remaining:

@@ -12,15 +12,7 @@ if TYPE_CHECKING:
 
 
 def png_summary(width: int, height: int, image_bytes: int) -> str:
-    return (
-        f"PNG image ("
-        f"{number_string(width)}"
-        f"x"
-        f"{number_string(height)}"
-        f" px; "
-        f"{number_string(image_bytes)}"
-        f" bytes)"
-    )
+    return f"PNG image ({number_string(width)}x{number_string(height)} px; {number_string(image_bytes)} bytes)"
 
 
 def window_state_notes(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -45,6 +37,7 @@ def window_state_summary(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
 def render_image_caption(width: int, height: int, facts: Mapping[str, Any]) -> str:
     return (
         _base_caption(width, height, facts)
+        + ("\nCapture: " + json_string(facts["capture"]) if facts.get("capture") else "")
         + "".join("\nImage note: " + json_string(reason) for reason in facts.get("stopReasons", ()))
         + _visual_text(facts.get("visualText"))
     )
@@ -84,9 +77,7 @@ def _base_caption(width: int, height: int, facts: Mapping[str, Any]) -> str:
             " Mapping: stale." if facts.get("stale") else ""
         )
     if kind == "overview":
-        return (
-            f"Image: app overview {size} px; coordinate mapping=unavailable.\n"
-        ) + (facts.get("context") or "")
+        return (f"Image: app overview {size} px; coordinate mapping=unavailable.\n") + (facts.get("context") or "")
     validity = (
         "Coordinate mapping: stale."
         if facts.get("stale")
@@ -99,4 +90,5 @@ def _base_caption(width: int, height: int, facts: Mapping[str, Any]) -> str:
         + ("" if facts.get("omitContext") else "\n" + facts["context"])
         + "\n"
         + validity
+        + (" Coordinate target=" + facts["coordinateTarget"] + "." if facts.get("coordinateTarget") else "")
     )

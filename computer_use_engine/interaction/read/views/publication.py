@@ -73,7 +73,7 @@ def related_window_summary(
         else "no newly observed window entries"
     )
     return template(
-        "After action: {0}; catalogue {1}. This reports observation changes, not whether a menu opened.",
+        "After action: {0}; catalogue {1}.",
         membership, coverage,
     )
 
@@ -413,8 +413,7 @@ def capture_header(
         for original, gaps in delivered_gaps
         if original is directory
         for gap in gaps
-        if gap.component == "directory"
-        and gap.code == "observation_incomplete"
+        if gap.component == "directory" and gap.code == "observation_incomplete"
     }
     return InterfaceHeader(
         controller.state(ui).name or (anchor.name if anchor is not None else str(instance.selector)),
