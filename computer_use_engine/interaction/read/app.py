@@ -203,6 +203,8 @@ class NativeAppReader:
         view: str = "both",
         overview: bool = True,
         source_directory: DirectoryFacts | None = None,
+        scope_managed: bool = False,
+        include_menus: bool = True,
     ) -> AppObservation | MenuAppObservation:
         """Read an application through request, acquisition and delivery pipelines.
 
@@ -219,6 +221,9 @@ class NativeAppReader:
                 existing owner.
             view: Requested observation components: tree, image, or both.
             source_directory: Directory just resolved for this fixed working window.
+            scope_managed: The enclosing interface owns member discovery and final presentation;
+                retain numbered components without an inner scope recollection or duplicate projection.
+            include_menus: Collect the optional application menu summary after window content.
         """
         from computer_use.interaction.read.app_read.model import ReadRequest
         from computer_use.interaction.read.pipeline import ApplicationObservationPipeline
@@ -237,6 +242,8 @@ class NativeAppReader:
             view,
             overview,
             source_directory,
+            scope_managed,
+            include_menus,
         )
         return await ApplicationObservationPipeline(self).arun(request)
 
@@ -600,7 +607,7 @@ class NativeAppReader:
         if prepared is not None:
             lines.append(prepared if isinstance(prepared, DisplayDocument) else DisplayDocument.tree(prepared))
         lines.extend(
-            template("{}: {}: {}; next: {}", gap.component, gap.code, quoted(gap.detail), quoted(gap.next))
+            template("{}: {}: {}", gap.component, gap.code, quoted(gap.detail))
             for gap in gaps
         )
         return DisplayDocument.join(lines)

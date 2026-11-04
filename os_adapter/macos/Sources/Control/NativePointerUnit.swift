@@ -120,6 +120,7 @@ enum NativePointerDeliveryPolicy {
     let nativeWindow: AXUIElement?
     private let observedWindowAttributes: [String: AXRead<CFTypeRef>]?
     private let capturedImage: NativeCapture.Entry?
+    private let recipientElement: AXUIElement?
     let pointerRequirement: NativePointerReadiness.Requirement
     private var target: BackgroundTarget { BackgroundTarget(application) }
 
@@ -127,7 +128,8 @@ enum NativePointerDeliveryPolicy {
         application: NSRunningApplication, window: WindowGeometry.WindowMapping, nativeWindow: AXUIElement? = nil,
         observedWindowAttributes: [String: AXRead<CFTypeRef>]? = nil,
         capturedImage: NativeCapture.Entry? = nil,
-        pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
+        pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver,
+        recipientElement: AXUIElement? = nil
     ) {
         self.application = application
         self.window = window
@@ -135,6 +137,7 @@ enum NativePointerDeliveryPolicy {
         self.observedWindowAttributes = observedWindowAttributes
         self.capturedImage = capturedImage
         self.pointerRequirement = pointerRequirement
+        self.recipientElement = recipientElement
     }
 
     init(capture: NativeCapture.Input, pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver) {
@@ -149,7 +152,7 @@ enum NativePointerDeliveryPolicy {
         Self(
             application: application, window: window, nativeWindow: nativeWindow,
             observedWindowAttributes: observedWindowAttributes, capturedImage: capturedImage,
-            pointerRequirement: requirement)
+            pointerRequirement: requirement, recipientElement: recipientElement)
     }
 
     /// QUERY: a new snapshot for an input that has not begun. The retained
@@ -160,7 +163,7 @@ enum NativePointerDeliveryPolicy {
         return Self(
             application: application, window: current, nativeWindow: nativeWindow,
             observedWindowAttributes: observedWindowAttributes, capturedImage: capturedImage,
-            pointerRequirement: pointerRequirement)
+            pointerRequirement: pointerRequirement, recipientElement: recipientElement)
     }
 
     func foregroundWindow(at point: CGPoint? = nil) -> Bool {
@@ -570,11 +573,14 @@ enum NativePointerDeliveryPolicy {
         let capturedDrag = capturedImage != nil && request.kind == .drag
         // Only event addressing follows the live window origin. The sequence
         // below was built from the one frozen screen start/end and viewport.
-        var eventWindow = window
+        var hostEventWindow = window
         if !global { try BackgroundEvents.requirePointerRoute(window: window) }
         guard let process = NativeProcessIdentity.read(window.pid) else {
             throw DriverError("pointer recipient disappeared", code: .staleTarget)
         }
+        let recipient = try global ? nil : NativePointerRecipient.resolve(
+            window, nativeWindow: nativeWindow, element: recipientElement, at: start)
+        var eventWindow = recipient?.eventWindow ?? window
         let sequence = try NativePointerEvents(
             request: request, from: start, to: end, viewport: viewport, source: source)
         let entry: CGEvent?
@@ -584,15 +590,15 @@ enum NativePointerDeliveryPolicy {
             guard
                 let value = NSEvent.enterExitEvent(
                     with: .mouseEntered,
-                    location: NSPoint(x: start.x - window.frame.minX, y: window.frame.maxY - start.y),
-                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: Int(window.id),
+                    location: NSPoint(x: start.x - eventWindow.frame.minX, y: eventWindow.frame.maxY - start.y),
+                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: Int(eventWindow.id),
                     context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)?.cgEvent
             else { throw DriverError("cannot allocate pointer entry event", code: .inputUnavailable) }
             entry = value
         }
         func post(_ event: CGEvent, point: CGPoint) {
             AgentPointer.current?.move(
-                to: point, window: eventWindow,
+                to: point, window: hostEventWindow,
                 pulse: request.kind == .click
                     && [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type), count: request.count,
                 dragging: request.kind == .drag ? event.type != .leftMouseUp : nil)
@@ -604,7 +610,8 @@ enum NativePointerDeliveryPolicy {
                 event.post(tap: .cghidEventTap)
                 activity?.returned()
             } else {
-                BackgroundEvents.post(event, window: eventWindow, point: point, clickGroup: sequence.group)
+                BackgroundEvents.post(
+                    event, window: eventWindow, point: point, clickGroup: sequence.group, presenterPID: window.pid)
             }
         }
         func validate(_ point: CGPoint, held: Bool) throws {
@@ -614,7 +621,9 @@ enum NativePointerDeliveryPolicy {
                 throw DriverError("pointer recipient changed", code: .staleTarget)
             }
             let continuingDrag = capturedDrag && held
-            if let captureGeometry { eventWindow = try captureGeometry(continuingDrag) }
+            if let captureGeometry { hostEventWindow = try captureGeometry(continuingDrag) }
+            if let recipient { eventWindow = try recipient.validate(host: hostEventWindow) }
+            else { eventWindow = hostEventWindow }
             let button: CGMouseButton =
                 request.button == "right" ? .right : request.button == "middle" ? .center : .left
             try BackgroundTarget.validateReleasedInput(allowing: global && held ? button : nil)
@@ -676,8 +685,10 @@ enum NativePointerDeliveryPolicy {
                 // query cannot adopt a different window/owner. If it is gone,
                 // retain the last confirmed local origin and original route;
                 // ordinary scope/readiness failures must not strand the up.
-                eventWindow = current
+                hostEventWindow = current
+                eventWindow = recipient?.releaseWindow(host: current) ?? current
             }
+            if let recipient, recipient.isRemote { return recipient.canRelease() }
             return global || NativeProcessIdentity.read(window.pid) == process
         }
         try await sequence.deliver(

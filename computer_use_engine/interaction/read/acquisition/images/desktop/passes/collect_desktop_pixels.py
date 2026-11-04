@@ -20,13 +20,10 @@ if TYPE_CHECKING:
 
 def create(*, port: NativePort) -> Callable[[DesktopLease, Control], Awaitable[DesktopLease]]:
     async def capture(value: DesktopLease, control: Control) -> DesktopLease:
-        """Capture desktop pixels at the requested size and attach the result after checking the
-        deadline.
-        """
+        """Capture desktop pixels at the requested size within the remaining query budget."""
         result = await port.capture(
             value.read.token, value.read.target, value.request.max_dimension, value.read.remaining(), kind="desktop"
         )
-        value.read.remaining()
         return replace(value, result=result)
 
     return capture

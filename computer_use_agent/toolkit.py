@@ -7,7 +7,7 @@ import asyncio
 import logging
 from uuid import uuid4
 
-from computer_use_mcp.server import DESCRIPTION, RESET_DESCRIPTION
+from computer_use_mcp.instructions import CODE_DESCRIPTION, DESCRIPTION, RESET_DESCRIPTION, TITLE_DESCRIPTION
 from openjiuwen.core.foundation.tool import Tool, ToolCard
 from openjiuwen.core.foundation.tool.base import render_payload_text
 from openjiuwen.core.foundation.tool.mcp.base import extract_mcp_tool_result_content
@@ -64,8 +64,8 @@ class ComputerUseToolkit:
                 name="computer_use",
                 description=DESCRIPTION,
                 properties={
-                    "title": {"type": "string", "description": "Describe this call's intent in the user's language."},
-                    "code": {"type": "string", "description": "Synchronous Python code. SDK calls return results directly."},
+                    "title": {"type": "string", "description": TITLE_DESCRIPTION},
+                    "code": {"type": "string", "description": CODE_DESCRIPTION},
                 },
                 required=["code"],
             ),

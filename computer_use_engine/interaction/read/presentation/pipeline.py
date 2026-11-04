@@ -35,6 +35,7 @@ from computer_use.interaction.read.presentation.preparation import (
 )
 from computer_use.interaction.read.presentation.preparation import render_prepared_snapshot
 from computer_use.interaction.read.presentation.rendering.pipeline import RenderPipeline
+from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedSection
 from computer_use.interaction.read.presentation.semantics.pipeline import SemanticPipeline
 from computer_use.pipeline import Contract, Pipeline, Sequence
 from computer_use.pipeline.core import Node
@@ -174,6 +175,7 @@ class _RenderPreparedRoots(Node["PreparedSnapshot", "SnapshotParts"]):
         snapshot = prepared.snapshot.materialize(read_only_facts=True)
         request = replace(prepared.request, snapshot=snapshot)
         parts, uncompressed = [], None
+        visible = set(prepared.refs)
         for root, projection in zip(snapshot.roots, prepared.roots):
             branch = _branch_facts(snapshot, request, root)
             try:
@@ -206,10 +208,23 @@ class _RenderPreparedRoots(Node["PreparedSnapshot", "SnapshotParts"]):
                         name="RenderPreparedRoot", steps=[RenderPipeline(branch), AccountingPipeline(branch)]
                     )
                     part = renderer.run(materialized, control)
+                output = getattr(part.rendered, "document", None)
+                displayed = (
+                    [
+                        node.ref
+                        for section in output.parts
+                        if isinstance(section, RenderedSection)
+                        for node in section.nodes
+                    ]
+                    if isinstance(output, RenderedDocument)
+                    else []
+                )
+                if len(displayed) != len(set(displayed)) or set(displayed) != visible.intersection(projection.members):
+                    raise ValueError("Rendered branch does not account for its prepared element references")
             except PRESENTATION_FAILURES as error:
                 if uncompressed is None:
                     uncompressed = UncompressedFacts(snapshot.facts, snapshot.refs)
-                rendered = uncompressed.render(branch.members, error)
+                rendered = uncompressed.render(branch.members, error, refresh=projection.failure is None)
                 _, sources = branch.relations.render(branch.members, rendered)
                 part = RenderedPart(rendered, {}, {}, sources, uncompressed=True)
             parts.append(part)

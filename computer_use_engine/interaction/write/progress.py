@@ -27,7 +27,6 @@ def failure(
     dispatched: Dispatch,
     preparation: Iterable[str],
     minimum_effect: str = "none",
-    next_step: str | None = None,
 ) -> ComputerUseError:
     """Build an error whose reported effect includes accumulated preparation and dispatch.
 
@@ -38,10 +37,9 @@ def failure(
         dispatched: Furthest known dispatch progress for this write.
         preparation: Preparation effects recorded before the failure.
         minimum_effect: Lower bound supplied by the original error: none, possible, or partial.
-        next_step: Suggested recovery when the write is known to have no effect.
 
     Returns:
-        An error with effect severity and recovery guidance derived from write progress.
+        An error with effect severity derived from write progress.
     """
     effect = (
         "partial"
@@ -53,12 +51,7 @@ def failure(
     severity = {"none": 0, "possible": 1, "partial": 2}
     if required_item(severity, minimum_effect) > required_item(severity, effect):
         effect = minimum_effect
-    recovery = (
-        next_step
-        if effect == "none" and next_step
-        else "read the current target before continuing; do not replay uncertain input"
-    )
-    return ComputerUseError(dict(code=code, effect=effect, target=target, detail=detail, next=recovery))
+    return ComputerUseError(dict(code=code, effect=effect, target=target, detail=detail))
 
 
 @dataclass(frozen=True)

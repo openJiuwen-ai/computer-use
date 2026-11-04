@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.delivery.model import ObservationDraft
 from computer_use.interaction.read.numbering.observation.model import RenderedObservation
+from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.pipeline import Contract, Effect, Pass
 
 if TYPE_CHECKING:
@@ -27,9 +28,14 @@ def create(*, services: NativeAppReader) -> Callable[[RenderedObservation, Contr
         target, directory = acquired.target, acquired.directory
         refs = {
             ref: replace(target, node=node, capture=None)
-            for ref, node in (rendered.snapshot.refs.items() if rendered else ())
+            for ref, node in (components.tree.refs.items() if components.tree is not None else ())
         }
         windows = services.window_aliases(directory)
+        if plan.scope_managed:
+            # The interface collector will prepare these same facts once, after
+            # missing windows have been acquired. Projection must not consume
+            # the remaining native-query budget before a late sheet is read.
+            return ObservationDraft(value, refs, windows, DisplayDocument.join(()), components.overview)
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
         document = services._document(

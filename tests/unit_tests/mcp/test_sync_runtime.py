@@ -79,7 +79,6 @@ class SyncRuntimeTests(unittest.IsolatedAsyncioTestCase):
             {
                 "code": code,
                 "executionId": 1,
-                "history": {"resetText": False, "resetImages": False, "incremental": False},
             }
         )
 

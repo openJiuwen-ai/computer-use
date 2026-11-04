@@ -18,11 +18,15 @@ struct NativeClickContract: Equatable {
     var popupPointer: NativePopupPointerQualification? = nil
     var qtComboChoice: NativeQtComboChoice? = nil
     var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
+    /// Original-element geometry must be confirmed in the exposed foreground
+    /// window, even when addressed transport already has a background lease.
+    var requiresForegroundGeometry = false
 
     /// The retained native offer, never an execute field, owns this requirement.
     /// A qualified popup or member keeps its separate existing admission proof.
     func permitsElementPointer(hasActuator: Bool) -> Bool {
         guard popupPointer == nil else { return false }
+        guard !requiresForegroundGeometry || delivery == .windowDirected && !hasActuator else { return false }
         return pointerRequirement == .contentReceiver || delivery == .windowDirected && !hasActuator
     }
 
@@ -44,6 +48,7 @@ struct NativeClickContract: Equatable {
             && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
             && lhs.backgroundUnavailable == rhs.backgroundUnavailable
             && lhs.pointerRequirement == rhs.pointerRequirement
+            && lhs.requiresForegroundGeometry == rhs.requiresForegroundGeometry
     }
 
     var wire: [String: Any] {

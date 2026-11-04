@@ -43,6 +43,16 @@ class CapturedObservationText(str):
         value.observation = observation
         return value
 
+    def __getitem__(self, key):
+        """Keep a text slice's capture identity without changing its string value.
+
+        MCP can recognize a redundant observation print by provenance. Ordinary
+        SDK consumers still receive the exact requested slice; indexing one
+        character or converting to ``str`` produces an ordinary string.
+        """
+        value = super().__getitem__(key)
+        return type(self)(value, self.observation) if isinstance(key, slice) else value
+
 
 class LazyObservation(FrozenRecord):
     """Retain a captured document and cache its full text when explicitly requested.

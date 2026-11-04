@@ -107,9 +107,4 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
                 lines=[dict(line, rect=coordinates.delivered_rect(line["rect"])) for line in visual["lines"]],
             )
     caption = render_image_caption(size["width"], size["height"], facts)
-    actionable = (
-        facts["kind"] in ("desktop", "window") and not facts.get("stale") and facts.get("mappingAvailable", True)
-    )
-    return caption + (
-        "\nUse this displayed image's pixels for coordinates." if coordinates is not None and actionable else ""
-    )
+    return caption

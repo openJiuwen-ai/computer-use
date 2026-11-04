@@ -17,9 +17,6 @@ from computer_use.interaction.read.delivery.baseline.passes.assemble_baseline im
 from computer_use.interaction.read.delivery.baseline.passes.publish_observation import (
     stage as publish_observation,
 )
-from computer_use.interaction.read.delivery.baseline.passes.retire_previous_baseline import (
-    stage as retire_previous_baseline,
-)
 from computer_use.pipeline import Pipeline, Sequence
 
 if TYPE_CHECKING:
@@ -30,9 +27,8 @@ if TYPE_CHECKING:
 class BaselinePublicationPipeline(Pipeline["BaselineInput", "None"]):
     """Replace the baseline retained for an observation stream.
 
-    Retire the preceding baseline and prepare the new delivered representation
-    and its size. Store it when it fits the retention budget; retained baselines
-    support later compatible diff comparisons.
+    Assemble the new comparison facts before atomically replacing the preceding
+    baseline. The store controls memory placement without forgetting delivery.
 
     Attributes:
         store: Bounded owner of delivered baselines and their retained-size accounting.
@@ -48,7 +44,6 @@ class BaselinePublicationPipeline(Pipeline["BaselineInput", "None"]):
         return Sequence(
             name="BaselinePublicationPipeline",
             steps=[
-                retire_previous_baseline(store=store),
                 assemble_baseline(),
                 publish_observation(store=store),
             ],

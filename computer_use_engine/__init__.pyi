@@ -113,7 +113,7 @@ class Element:
     def click(self, options: ClickOption | None = None) -> ActionResult: ...
     def scroll(self, direction: Direction, *, pages: float = 1) -> ActionResult: ...
 
-    # 具体控件准备自身；范围容器按第 4 节转发。
+    # SDK 准备具体控件；replace=True 表达全文替换。
     def type_text(self, text: str, *, replace: bool = False) -> ActionResult: ...
     def paste(self, text: str) -> ActionResult: ...
     def press_key(self, key: str) -> ActionResult: ...
@@ -192,7 +192,6 @@ class ActionImpact:
 class ObservationError:
     code: str
     detail: str
-    next: str
     session_usable: bool
 
 class TextPage:
@@ -205,7 +204,6 @@ class ComputerUseError(Exception):
     effect: Literal["none", "possible", "partial"]
     target: str
     detail: str
-    next: str
     impact: ActionImpact | None
     observation: Observation | None
     observation_status: Literal["available", "partial", "unavailable", "not_requested"]

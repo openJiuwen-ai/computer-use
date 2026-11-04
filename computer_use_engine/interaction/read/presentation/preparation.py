@@ -19,10 +19,7 @@ from computer_use.interaction.read.presentation.selection_summary import selecti
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.interface.atoms.model import AtomDocument
-    from computer_use.interaction.read.presentation.interface.collections.model import (
-        CollectionDocument,
-        CollectionPrefixPlan,
-    )
+    from computer_use.interaction.read.presentation.interface.collections.model import CollectionDocument
     from computer_use.interaction.read.presentation.interface.composition.content.model import FieldContentPlan
     from computer_use.interaction.read.presentation.interface.coverage.model import CoveragePlan
     from computer_use.interaction.read.presentation.interface.disclosure.groups.model import GroupDisclosurePlan
@@ -400,7 +397,6 @@ def prepared_nodes(
         for ref, signature in interface_layout_signatures(root.interface).items()
     }
     field_layouts = {}
-    collection_layouts = {}
     group_layouts = {}
     readable_layouts = {}
     selections = (
@@ -409,16 +405,6 @@ def prepared_nodes(
         else None
     )
     detail_selections: set[str] = set()
-
-    def collection_prefix(prefix: CollectionPrefixPlan | None) -> tuple[object, ...] | None:
-        if prefix is None:
-            return None
-        return (
-            prefix.role.label,
-            tuple(state.label for state in prefix.states),
-            tuple((slot.key, slot.label, slot.value, slot.format) for slot in prefix.slots),
-            tuple((member.ref, member.state_indices, member.slot_keys) for member in prefix.members),
-        )
 
     for root in roots:
         if root.atoms is not None and selections is not None:
@@ -486,25 +472,10 @@ def prepared_nodes(
                 )
                 for member in plan.members:
                     field_layouts[member.ref] = (plan.target_ref, member.mode, member.consumed_slots)
-        if root.collections is not None:
-            for table in root.collections.tables.values():
-                for row in table.rows:
-                    for ref in (
-                        row.ref,
-                        *(source for cell in row.cells for source in (cell.ref, *cell.descendant_refs)),
-                    ):
-                        collection_layouts[ref] = (
-                            table.ref,
-                            table.layout,
-                            row.ref,
-                            collection_prefix(table.row_prefix),
-                            tuple(collection_prefix(prefix) for prefix in table.column_prefixes),
-                            table.column_labels,
-                            tuple(
-                                (item.ref, item.slot.key, item.slot.value, item.slot.facts)
-                                for item in table.detail_fields
-                            ),
-                        )
+        # Table prefix sharing and packing only affect the full view. The
+        # terminal renderer retains complete, unshared atoms for each diff
+        # element, including row/column fields. A changed packing candidate must
+        # not mark every otherwise unchanged cell as modified.
 
     def visit(node: Mapping[str, Any], parent: str | None, depth: int) -> None:
         fields = {key: value for key, value in node.items() if key not in ("children", "native")}
@@ -520,8 +491,6 @@ def prepared_nodes(
             fields["_interfaceLayout"] = layouts[node["ref"]]
         if node["ref"] in field_layouts:
             fields["_interfaceField"] = field_layouts[node["ref"]]
-        if node["ref"] in collection_layouts:
-            fields["_interfaceCollection"] = collection_layouts[node["ref"]]
         if node["ref"] in group_layouts:
             fields["_interfaceDisclosure"] = group_layouts[node["ref"]]
         if node["ref"] in readable_layouts:
@@ -533,7 +502,10 @@ def prepared_nodes(
     for root in roots:
         if root.projection is None:
             for ref in root.members:
-                facts = display_node_facts(native[snapshot.refs[ref]])
+                facts = dict(display_node_facts(native[snapshot.refs[ref]]))
+                facts["_relations"] = tuple(
+                    relation for relation in snapshot.facts["relations"] if relation["source"] == snapshot.refs[ref]
+                )
                 result.append(PreparedNode(ref, None, 0, freeze(facts)))
         else:
             for node in root.projection["roots"]:

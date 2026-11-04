@@ -136,7 +136,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                 await self.controller.run(ActOnElement(self.ui, self.snapshot, "click", {}))
             self.assertIs(caught.exception, failure)
             self.engine.assert_awaited_once()
-            self.assertEqual([kind for kind, _ in self.events], ["discard-pending"])
+            self.assertEqual([kind for kind, _ in self.events], ["before-write"])
 
     async def test_receipt_delivery_failure_does_not_replay_action(self):
         def fail(_):

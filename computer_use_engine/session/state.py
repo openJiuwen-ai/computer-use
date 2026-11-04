@@ -23,6 +23,7 @@ class AppState:
         selection: Fixed working-window selection, when established.
         observation: Latest snapshot, whose structure is defined by the read branch.
         query_target: Exact native scope for subsequent element lookup.
+        query_snapshot: Latest facts for bounded post-input change observation, never an input authority.
         query_scope_kind: Native scope kind associated with that query target.
         directory: Last observed window catalogue, or None before observation.
         refs: Retained read-owned element snapshots, indexed by display number.
@@ -39,6 +40,9 @@ class AppState:
     # Captured observation is opaque here: the read branch owns its definition.
     observation: object | None = None
     query_target: Binding | None = None
+    # Latest facts for this exact query window, used only to recognize an
+    # unchanged first observation after input. It never supplies input authority.
+    query_snapshot: SemanticSnapshot | None = None
     query_scope_kind: str | None = None
     menu_window_identity: WindowIdentity | None = None
     directory: DirectoryFacts | None = None
@@ -59,7 +63,8 @@ class AppState:
 
 
 if TYPE_CHECKING:
-    from computer_use.session.interfaces import WindowIdentity
-    from computer_use.session.image_coordinates import ImageCoordinates
+    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
     from computer_use.protocol.records import Record
+    from computer_use.session.image_coordinates import ImageCoordinates
+    from computer_use.session.interfaces import WindowIdentity

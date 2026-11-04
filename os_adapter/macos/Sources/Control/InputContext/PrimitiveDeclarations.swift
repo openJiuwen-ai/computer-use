@@ -131,6 +131,7 @@ import ApplicationServices
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
                 && $0.unit == unit && $0.click?.routeFamily == sampled.routeFamily
                 && $0.click?.pointerRequirement == sampled.pointerRequirement
+                && $0.click?.requiresForegroundGeometry == sampled.requiresForegroundGeometry
                 && sameProof($0.click?.popupPointer, sampled.popupPointer)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }

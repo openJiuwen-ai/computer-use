@@ -36,9 +36,6 @@ from computer_use.interaction.read.delivery.menu.passes.assign_menu_window_refer
 from computer_use.interaction.read.delivery.menu.passes.bind_menu_context import (
     stage as bind_menu_context,
 )
-from computer_use.interaction.read.delivery.menu.passes.check_menu_delivery_budget import (
-    stage as check_menu_delivery_budget,
-)
 from computer_use.interaction.read.delivery.menu.passes.format_menu_header import (
     stage as format_menu_header,
 )
@@ -268,7 +265,7 @@ class AppendMenuDocuments(Node["MenuTextDraft", "MenuTextDraft"]):
     """Append source presentations to the menu observation draft.
 
     Prepare menu-source documents and append them after the structured header.
-    Return the draft for budget checking and final assembly.
+    Return the draft for final assembly.
 
     Attributes:
         sources: Menu-source preparation flow over the collected snapshots.
@@ -316,7 +313,6 @@ class MenuObservationPipeline(Pipeline["MenuObservationRequest", "MenuAppObserva
                 assign_menu_window_references(services=services),
                 format_menu_header(),
                 AppendMenuDocuments(),
-                check_menu_delivery_budget(),
                 assemble_menu_observation(),
             ],
         )

@@ -544,7 +544,6 @@ async def verify(folder, options, fixture, bundle):
                 {
                     "code": code,
                     "executionId": f"d34-{execution}",
-                    "history": {"resetText": False, "resetImages": False, "incremental": False},
                 }
             )
             texts, images = [], []

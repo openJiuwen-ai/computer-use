@@ -51,7 +51,7 @@ import ApplicationServices
             q.role = { _ in kAXTextFieldRole }
             q.endpoint = { _ in
                 self.endpointNode.map {
-                    NativeKeyboardEndpoint.Candidate(element: $0, pid: self.endpointPID, kind: self.category)
+                    NativeEventEndpoint.Candidate(element: $0, pid: self.endpointPID, kind: self.category)
                 }
             }
             q.webArea = { _, _, _ in self.web ? self.area : nil }

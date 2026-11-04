@@ -4,6 +4,7 @@
 """Local model endpoint exercising the real DeepAgent and MCP stacks."""
 
 import json
+import os
 import threading
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -119,7 +120,18 @@ class ModelServer:
 
 
 @pytest.fixture
-def model_server():
+def model_server(monkeypatch):
+    # This fixture owns a loopback HTTP server. macOS system proxy discovery
+    # can otherwise route these requests away from it and return an unrelated
+    # 502 before any Agent/MCP behavior is exercised.
+    bypass = dict.fromkeys(
+        entry
+        for value in (os.environ.get("NO_PROXY", ""), os.environ.get("no_proxy", ""), "127.0.0.1,localhost")
+        for entry in value.split(",")
+        if entry
+    )
+    for key in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(key, ",".join(bypass))
     servers = []
 
     def create(replies):

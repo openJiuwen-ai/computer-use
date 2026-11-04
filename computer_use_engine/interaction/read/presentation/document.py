@@ -63,7 +63,7 @@ class DisplayDocument:
 
     Attributes:
         parts: Captured text fields, templates, and prepared semantic snapshots in output order.
-        context: Scope, document, and modal relationships requiring a new full delivery when changed.
+        context: Captured scope, document, and modal relationships; tree scopes establish diff identity.
     """
 
     parts: tuple[DisplayText | DisplayTree, ...]

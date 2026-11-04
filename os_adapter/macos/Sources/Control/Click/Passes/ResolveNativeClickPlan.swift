@@ -55,6 +55,9 @@ import ApplicationServices
                 else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
                 target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))
             } else if capture {
+                guard !offer.requiresForegroundGeometry else {
+                    throw DriverError("retained-element geometry cannot authorize a captured point", code: .invalidRequest)
+                }
                 guard offer.pointerRequirement == .contentReceiver || offer.delivery == .windowDirected else {
                     throw DriverError("captured point requirement needs window-directed delivery", code: .invalidRequest)
                 }
@@ -67,7 +70,7 @@ import ApplicationServices
                     throw DriverError("original element point requirement needs its window-directed route", code: .invalidRequest)
                 }
                 let unit = try access.units.elementPointerUnit(command.target, actuator: contract.actuator)
-                    .requiring(offer.pointerRequirement)
+                    .requiring(offer.pointerRequirement, foregroundGeometry: offer.requiresForegroundGeometry)
                 if let original = offer.qtComboChoice {
                     guard let current = unit.qtComboChoice, original.matches(current) else {
                         throw DriverError("the selected Qt popup choice changed before dispatch", code: .staleTarget)

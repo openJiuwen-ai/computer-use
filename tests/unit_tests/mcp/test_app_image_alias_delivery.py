@@ -109,11 +109,12 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             return await self.pointer.run(ui, "click", ((20, 30),), {}, None)
 
     async def execute(self, code, *, reset_images=False):
+        if reset_images:
+            self.runtime.executor.call(images_state.reset_image_delivery)
         result = await self.runtime.execute(
             dict(
                 code=code,
                 executionId=len(self.events) + 1,
-                history=dict(resetText=False, resetImages=reset_images, incremental=False),
             )
         )
         self.assertFalse(result.get("isError"), result)

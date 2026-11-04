@@ -124,6 +124,14 @@ The SDK is synchronous: each operation returns its result or raises before the n
 Select an application with `computer.app(id)`, observe it with `app.read(view="both")`, and resolve a control with
 `app.element(name_or_path)`. A confirmed target can be used directly, for example `app.element("Save").click()`.
 
+MCP automatically presents a full initial observation and then changes (diffs) by default, including observations after
+writes and consecutive operations in one call. Use `app.read(full=True)` or `window.read(full=True)` to restore full
+context; no private client history protocol is required. The SDK's `state.text` remains complete for the captured scope;
+diff presentation does not change element bindings or screenshot coordinates.
+In MCP, printing an observation, its `.text`, or a direct text slice reuses automatic presentation instead of adding
+another full view. SDK string values, slices, and file output remain unchanged. Use a subtree or `read_text` to bound
+the observation scope.
+
 Reads do not activate or raise windows to refresh pixels by default. On macOS,
 `app.read(view="both", allow_foreground=True)` explicitly allows preparation of the confirmed original window;
 the same option is available on `Window.read()`.

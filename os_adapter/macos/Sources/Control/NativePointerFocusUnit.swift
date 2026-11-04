@@ -37,7 +37,7 @@ import ApplicationServices
     private func scalarPointer(_ sample: NativeScalarTextPoint.Sample) -> NativePointerUnit {
         NativePointerUnit(
             application: application, window: sample.mapping, nativeWindow: window,
-            pointerRequirement: .foregroundWindowPoint)
+            pointerRequirement: .foregroundWindowPoint, recipientElement: element)
     }
 
     func backgroundPreparationAvailable() throws -> Bool {

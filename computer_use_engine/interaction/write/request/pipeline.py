@@ -22,7 +22,7 @@ from computer_use.interaction.write.request.passes.validate_element_scope import
 from computer_use.interaction.write.request.passes.validate_write_binding import stage as validate_write_binding
 from computer_use.pipeline import Contract, Effect, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
-from computer_use.session.events import pending_observations_discarded
+from computer_use.session.events import observations_before_write
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -73,15 +73,15 @@ class ExecuteNativeWrite(Node["ActionPlan", "Record"]):
 
 
 class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
-    """Reconcile observation state after a failed write.
+    """Publish earlier observations and reconcile a failed input scope.
 
-    Run the enclosed action flow. On failure, discard pending observations,
+    Publish previous observations before entering the action. On failure,
     reset desktop-action state or expire a matching stale App capture as
-    applicable, and propagate the error.
+    applicable, and propagate the error without erasing earlier facts.
 
     Attributes:
-        controller: Owns the desktop, App observations, and pending delivery state.
-        body: Enclosed action flow whose failures require observation cleanup.
+        controller: Owns the desktop, App observations, and observation delivery.
+        body: Enclosed action flow whose failures reconcile affected input state.
     """
 
     def __init__(self, controller: SessionController, body: Step[ExecuteAction, ActionResult]) -> None:
@@ -89,7 +89,8 @@ class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
         super().__init__("WriteFailureBoundary", body.contract)
 
     async def _arun(self, request: ExecuteAction, control: Control) -> ActionResult:
-        """Run the write and reconcile stale image and pending-observation state on failure."""
+        """Order previous facts before input and reconcile only failed input state."""
+        observations_before_write(self.controller)
         try:
             return await self.body.arun(request, control)
         except BaseException as error:
@@ -107,10 +108,6 @@ class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
                     and (state.observation.image.target == cast("Binding", request.target))
                 ):
                     state.capture_expired = True
-            try:
-                pending_observations_discarded(self.controller)
-            except Exception as delivery_error:  # noqa: BLE001 - host cleanup cannot replace the action outcome
-                error.add_note(f"Pending observation delivery cleanup failed: {delivery_error}")
             raise
 
     def _run(self, value: ExecuteAction, control: Control) -> ActionResult:

@@ -46,6 +46,8 @@ class RenderedSection:
         prefix: Tree-local heading and interaction information before the elements.
         suffix: Selection, focus, and other summaries following the elements.
         scope: Exact native scope identity used to keep comparisons within the same tree.
+        refresh: A terminal failure requires the complete source facts of this
+            section, without replacing independently comparable sections.
     """
 
     text: str
@@ -53,6 +55,7 @@ class RenderedSection:
     prefix: str = ""
     suffix: str = ""
     scope: tuple[Hashable, ...] = ()
+    refresh: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,8 +81,8 @@ class RenderedDocument:
 
     Attributes:
         parts: Text fragments, mode-specific notes, and structured trees in output order.
-        context: Scope, document, and modal relationships that require a fresh full view
-            when they change. Observation timestamps and display-only titles stay outside it.
+        context: Current scope, document, and modal relationships. Their changes
+            do not replace a tree's native identity.
     """
 
     parts: tuple[str | RenderedLiteral | RenderedSection, ...]

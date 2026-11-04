@@ -92,7 +92,6 @@ class ActionResult(Protocol):
 class ObservationError(Protocol):
     code: str
     detail: str
-    next: str
     session_usable: bool
 
 

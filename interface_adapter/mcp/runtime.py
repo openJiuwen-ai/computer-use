@@ -31,14 +31,12 @@ from computer_use.client.images import (
     image_label,
     image_metadata,
     require_image_delivery,
-    reset_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
 from computer_use.errors import ComputerUseError
 from computer_use.identity import Record, WeakIdentityMap
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
 from computer_use.native.preview import latest_preview_sink
-from computer_use.session.detail_pages import CapturedDetailPage, CapturedDetailText
 from computer_use.session.events import observation_delivered
 from computer_use.session.observation import (
     CapturedObservationText,
@@ -161,16 +159,15 @@ class Runtime:
         if not self.executor.is_owner:
             return self.executor.call(self.observation, event)
         run = _runs.get()
-        if event["kind"] in ("invalidate", "discard-pending"):
-            if event["kind"] == "invalidate":
-                self.presenter.invalidate(event["source"])
+        if event["kind"] == "invalidate":
+            self.presenter.invalidate(event["source"])
             if run is not None:
-                if event["kind"] == "invalidate":
-                    run["observations"].invalidate(event["source"])
-                else:
-                    run["observations"].discard_pending(event["source"])
+                run["observations"].invalidate(event["source"])
             return
         if run is None or not run["active"]:
+            return
+        if event["kind"] == "before-write":
+            self.flush_observations(run)
             return
         if event["kind"] == "action-observation":
             result = event["result"]
@@ -180,13 +177,13 @@ class Runtime:
             self.flush_observations(run)
             gap = data["observation_error"]
             target = result.target if failure else receipt["target"] if receipt is not None else "original target"
-            outcome = f"Action effect remains {result.effect}" if failure else f"Action remains {result['status']}"
+            outcome = f"Effect: {result.effect}" if failure else f"Action: {result['status']}"
             message = (
                 f"Related observation [{data['observation_status']}] for {target}: "
-                f"{gap['detail']}\n{outcome}; do not replay it. {gap['next']}"
+                f"{gap['detail']}\n{outcome}"
             )
             if data["window_lifecycle"] == "closed":
-                message += "\nThe original Window is closed; its retained targets have not been rebound."
+                message += "\nOriginal window: closed."
             if data["choices"]:
                 message += "\nCurrent windows:\n" + "\n".join(
                     f"computer.window({choice['id']}) {choice['title'] or '<untitled>'}" for choice in data["choices"]
@@ -278,41 +275,41 @@ class Runtime:
                 return
             if run["textPages"].has(values[0]):
                 values = (dict(values[0]),)
-        printed_states = []
+        ordinary = []
 
-        def present(value):
-            original = (
-                value
-                if isinstance(value, LazyObservation)
-                else value.observation
-                if isinstance(value, CapturedObservationText)
-                else None
+        def emit_ordinary():
+            if not ordinary:
+                return
+            text = (" " if sep is None else sep).join(
+                value if isinstance(value, str) else pprint.pformat(value, depth=6, sort_dicts=False)
+                for value in ordinary
             )
-            if original is None:
-                return value
-            projected = self.present_observation(dict(state=original))["state"]
-            printed_states.append((original, projected))
-            return str(projected["text"])
+            if end not in (None, "\n"):
+                text += end
+            self.emit(dict(type="text", text=text), True)
+            ordinary.clear()
 
-        values = tuple(present(value) for value in values)
-        text = (" " if sep is None else sep).join(
-            value if isinstance(value, str) else pprint.pformat(value, depth=6, sort_dicts=False) for value in values
-        )
-        if end not in (None, "\n"):
-            text += end
-        self.emit(dict(type="text", text=text), True)
-        for original, projected in printed_states:
-            run["deliveredObservations"].append(original)
-            run["observations"].printed(projected["text"])
-            if original.get("screenshot") is not None:
-                run["imageContexts"].set(original["screenshot"], True)
-        details = any(isinstance(value, (CapturedDetailPage, CapturedDetailText)) for value in values)
-        observed = None if details else run["observations"].printed(text)
-        if observed is not None:
-            run["deliveredObservations"].append(observed.get("sourceState", observed["state"]))
-            self.log_observations(run, materializedOnly=True)
-        if observed is not None and observed["state"].get("screenshot") is not None:
-            run["imageContexts"].set(observed["state"]["screenshot"], True)
+        for value in values:
+            captured = value if isinstance(value, LazyObservation) else (
+                value.observation if isinstance(value, CapturedObservationText) else None
+            )
+            if captured is None:
+                ordinary.append(value)
+                continue
+            emit_ordinary()
+            # A captured observation (including a slice of its text) requests
+            # the same model presentation as its automatic delivery. SDK text
+            # stays complete; no string matching can promote arbitrary output
+            # into an observation or commit a partial slice as a full baseline.
+            if run["observations"].contains(captured):
+                self.flush_observations(run)
+            elif not any(state is captured for state in run["deliveredObservations"]):
+                self.emit(dict(type="text", text=(
+                    "Retained observation: previously delivered or superseded."
+                )), True)
+        if not values:
+            self.emit(dict(type="text", text="" if end in (None, "\n") else end), True)
+        emit_ordinary()
 
     def print_image(self, png):
         if not self.executor.is_owner:
@@ -342,9 +339,7 @@ class Runtime:
             if error is None:
                 error: BaseException | None = RuntimeError(
                     (
-                        "Computer operations outlived their script. Pending operations finished before "
-                        "this result; inspect their receipts and observations before "
-                        "continuing."
+                        "Computer operations outlived their script. Pending operations have finished."
                     )
                 )
             await asyncio.gather(*list(run["pending"]), return_exceptions=True)
@@ -368,19 +363,16 @@ class Runtime:
         message = None
         if error is not None:
             message = (type(error).__name__ + ": " + str(error))[:4096]
-            effect = (
-                ("This code did not execute; no statements from this call ran. Correct the syntax before continuing.")
-                if not run.get("evaluationStarted")
-                else "Earlier statements may have executed. Observe before retrying an action."
-            )
-            result["content"].append(dict(type="text", text=message + "\n" + effect))
+            if not run.get("evaluationStarted"):
+                message += "\nCode execution: not started."
+            result["content"].append(dict(type="text", text=message))
             result["isError"] = True
         elif not result["content"]:
             result["content"].append(
                 dict(
                     type="text",
                     text=(
-                        "Completed (no output). Reads return observations automatically; use print() for other values."
+                        "Completed (no output)."
                     ),
                 )
             )
@@ -450,17 +442,13 @@ class Runtime:
             return result
         execution = asyncio.current_task()
         self.executions.add(execution)
-        code, id_, history = message["code"], message["executionId"], message["history"]
-        if history["resetText"]:
-            self.presenter.invalidate()
-        if history["resetImages"]:
-            reset_image_delivery()
+        code, id_ = message["code"], message["executionId"]
         run = Record(
             id=id_,
             active=True,
             phase="code",
             output=OutputBuffer(),
-            observations=ObservationOutput(self.presenter, history["incremental"]),
+            observations=ObservationOutput(self.presenter),
             images=[],
             pending=set(),
             observationLogs=deque(),
@@ -504,7 +492,10 @@ class Runtime:
             task.cancel()
         if active:
             await asyncio.gather(*active, return_exceptions=True)
-        await self.executor.aclose()
+        try:
+            await self.executor.aclose()
+        finally:
+            self.presenter.close()
 
 
 _original_print = builtins.print

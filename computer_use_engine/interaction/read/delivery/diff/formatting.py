@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.delivery.diff.baseline import ComparisonDocument, ComparisonNode, ComparisonTree
 from computer_use.interaction.read.presentation.delta import DeltaPlan, TreeDelta
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
 
@@ -20,21 +21,13 @@ if TYPE_CHECKING:
 
 @dataclass
 class _TreeComparison:
-    before: DisplayTree
-    after: DisplayTree
+    before: ComparisonTree
+    after: ComparisonTree
+    display: DisplayTree
     changes: dict[str, str] = field(default_factory=dict)
     missing: tuple[str, ...] = ()
     context: set[str] = field(default_factory=set)
     expanded: set[str] = field(default_factory=set)
-
-
-_STATE_FIELDS = frozenset(
-    ("enabled", "selected", "focused", "busy", "toggleState", "expanded", "disclosing", "visible", "showing", "modal")
-)
-
-
-def _content(node: PreparedNode) -> dict[str, object]:
-    return {key: value for key, value in node.fields.items() if key not in _STATE_FIELDS}
 
 
 def _related(node: PreparedNode) -> tuple[str, ...]:
@@ -45,53 +38,69 @@ def _related(node: PreparedNode) -> tuple[str, ...]:
 
 
 def _compatible(
-    before: DisplayTree, after: DisplayTree, previous_refs: Mapping[str, object], current_refs: Mapping[str, object]
+    before: ComparisonTree,
+    after: ComparisonTree,
+    previous_refs: Mapping[str, object],
+    current_refs: Mapping[str, object],
 ) -> bool:
-    """Require compatible presentation versions, scope, bindings and survivor order."""
-    if before.scope != after.scope or before.indent != after.indent or before.details != after.details:
+    """Check identity and containment; changing observations are the diff's input."""
+    if before.scope != after.scope:
         return False
-    if (
-        before.prepared.request.compact != after.prepared.request.compact
-        or before.prepared.request.public_api != after.prepared.request.public_api
-        or before.prepared.snapshot.root_contexts != after.prepared.snapshot.root_contexts
-    ):
-        return False
-    if any(root.failure for root in (*before.prepared.roots, *after.prepared.roots)):
-        return False
-    previous_versions = {
-        root.root_ref: root.interface.format_version if root.interface else None for root in before.prepared.roots
-    }
-    current_versions = {
-        root.root_ref: root.interface.format_version if root.interface else None for root in after.prepared.roots
-    }
-    if set(previous_versions.values()) != set(current_versions.values()) or any(
-        previous_versions[ref] != current_versions[ref] for ref in previous_versions.keys() & current_versions.keys()
-    ):
+    shared = {node.ref for node in before.nodes} & {node.ref for node in after.nodes}
+    if any(previous_refs.get(ref) != current_refs.get(ref) for ref in shared):
         return False
     for tree, bindings in ((before, previous_refs), (after, current_refs)):
-        seen: dict[str, PreparedNode] = {}
+        seen: dict[str, ComparisonNode] = {}
         for node in tree.nodes:
             if node.ref in seen or node.ref not in bindings:
                 return False
             if node.parent is not None and (node.parent not in seen or seen[node.parent].depth + 1 != node.depth):
                 return False
             seen[node.ref] = node
-    old, new = {node.ref: node for node in before.nodes}, {node.ref: node for node in after.nodes}
-    return [node.ref for node in before.nodes if node.ref in new] == [
-        node.ref for node in after.nodes if node.ref in old
-    ] and all(node.parent == old[node.ref].parent for node in after.nodes if node.ref in old)
+    return True
 
 
-def _compare(before: DisplayTree, after: DisplayTree) -> _TreeComparison:
+def _compare(before: ComparisonTree, after: ComparisonTree, display: DisplayTree) -> _TreeComparison:
     old, new = {node.ref: node for node in before.nodes}, {node.ref: node for node in after.nodes}
     delta = _TreeComparison(
         before,
         after,
+        display,
         {node.ref: "~" if node.ref in old else "+" for node in after.nodes if old.get(node.ref) != node},
         tuple(node.ref for node in before.nodes if node.ref not in new),
     )
+    # Representation changes refresh their own members, never invalidate the
+    # identity of the window. Related roots are ordinary evolving AX relations.
+    old_contexts, new_contexts = dict(before.root_contexts), dict(after.root_contexts)
+    old_versions, new_versions = dict(before.versions), dict(after.versions)
+    options_changed = (before.compact, before.public_api, before.details) != (
+        after.compact,
+        after.public_api,
+        after.details,
+    )
+    for root in display.prepared.roots:
+        if options_changed or old_versions.get(root.root_ref) != new_versions.get(root.root_ref):
+            for ref in root.members:
+                if ref in new:
+                    delta.changes[ref] = "~" if ref in old else "+"
+        if old_contexts.get(root.root_ref) != new_contexts.get(root.root_ref):
+            # A compressed root can hide its original ref. Include its current
+            # displayed roots and their owners so changed relations remain usable.
+            for ref in root.members:
+                if ref in new and new[ref].parent is None:
+                    delta.changes[ref] = "~" if ref in old else "+"
+            for owner, _ in (*old_contexts.get(root.root_ref, ()), *new_contexts.get(root.root_ref, ())):
+                if owner in new:
+                    delta.context.add(owner)
+    # Reordering and reparenting are ordinary interface changes. Retain the
+    # current paths and emit moved survivors even when their own fields match.
+    old_order = [node.ref for node in before.nodes if node.ref in new]
+    new_order = [node.ref for node in after.nodes if node.ref in old]
+    for before_ref, after_ref in zip(old_order, new_order):
+        if before_ref != after_ref:
+            delta.changes[before_ref] = delta.changes[after_ref] = "~"
     children: dict[str, list[str]] = {}
-    for node in after.nodes:
+    for node in display.nodes:
         if node.parent is not None:
             children.setdefault(node.parent, []).append(node.ref)
         facts = node.fields
@@ -108,7 +117,7 @@ def _compare(before: DisplayTree, after: DisplayTree) -> _TreeComparison:
         if matches_facts:
             delta.context.add(node.ref)
     for ref in delta.changes:
-        if ref in old and new[ref].parent is not None and _content(old[ref]) != _content(new[ref]):
+        if ref in old and new[ref].parent is not None and old[ref].content != new[ref].content:
             pending = list(children.get(ref, ()))
             while pending:
                 child = pending.pop()
@@ -130,7 +139,7 @@ def _compare(before: DisplayTree, after: DisplayTree) -> _TreeComparison:
 
 
 def _related_context(deltas: list[_TreeComparison]) -> None:
-    indexes = [{node.ref: node for node in delta.after.nodes} for delta in deltas]
+    indexes = [{node.ref: node for node in delta.display.nodes} for delta in deltas]
     locations: dict[str, list[int]] = {}
     for index, nodes in enumerate(indexes):
         for ref in nodes:
@@ -149,11 +158,11 @@ def _related_context(deltas: list[_TreeComparison]) -> None:
             matches_parent = (
                 True
                 if (
-                    parent["role"] in ("group", "cell")
+                    parent.get("role") in ("group", "cell")
                     and not parent.get("name")
                     and not parent.get("description")
                     and len(members) > 1
-                    and any(node.fields["role"] in ("staticText", "heading") for node in members)
+                    and any(node.fields.get("role") in ("staticText", "heading") for node in members)
                 )
                 else False
             )
@@ -181,36 +190,40 @@ def _related_context(deltas: list[_TreeComparison]) -> None:
 
 
 def plan_document_diff(
-    before: DisplayDocument | None,
+    before: ComparisonDocument | DisplayDocument | None,
     after: DisplayDocument | None,
     previous_refs: Mapping[str, object],
     current_refs: Mapping[str, object],
     not_observed: set[str] | frozenset[str] = frozenset(),
 ) -> DeltaPlan:
     """Choose complete or incremental delivery using only structured observation data."""
-    matches_before = (
-        True
-        if (
-            not isinstance(before, DisplayDocument)
-            or not isinstance(after, DisplayDocument)
-            or before.context != after.context
-            or any(previous_refs[ref] != current_refs[ref] for ref in previous_refs.keys() & current_refs.keys())
-        )
-        else False
-    )
+    if isinstance(before, DisplayDocument):
+        before = ComparisonDocument.capture(before)
+    matches_before = not isinstance(before, ComparisonDocument) or not isinstance(after, DisplayDocument)
     if matches_before:
-        return DeltaPlan()
-    old_trees = [part for part in before.parts if isinstance(part, DisplayTree)]
+        return DeltaPlan(reason="no-structured-baseline")
+    # Directory focus and modal relationships may evolve without replacing a
+    # tree. Native tree scopes and retained bindings below establish identity;
+    # current document headers are always rendered, including changed context.
+    old_trees = before.trees
     new_trees = [part for part in after.parts if isinstance(part, DisplayTree)]
-    if (
-        not old_trees
-        or len(old_trees) != len(new_trees)
-        or any(not _compatible(old, new, previous_refs, current_refs) for old, new in zip(old_trees, new_trees))
-    ):
+    if not old_trees:
         return DeltaPlan()
-    deltas = [_compare(old, new) for old, new in zip(old_trees, new_trees)]
+    comparisons = []
+    for display in new_trees:
+        new = ComparisonTree.capture(display)
+        candidates = [old for old in old_trees if old.scope == new.scope]
+        old = candidates[0] if len(candidates) == 1 else None
+        comparisons.append(
+            _compare(old, new, display)
+            if old is not None and _compatible(old, new, previous_refs, current_refs)
+            else None
+        )
+    deltas = [delta for delta in comparisons if delta is not None]
+    if not deltas:
+        return DeltaPlan(reason="new-or-replaced-native-scope")
     _related_context(deltas)
-    changed = any(delta.changes or delta.missing for delta in deltas)
+    changed = any(delta is None or delta.changes or delta.missing for delta in comparisons)
     return DeltaPlan(
         "diff" if changed else "unchanged",
         tuple(
@@ -220,10 +233,13 @@ def plan_document_diff(
                 frozenset(delta.context),
                 frozenset(delta.expanded),
             )
-            for delta in deltas
+            if delta is not None
+            else None
+            for delta in comparisons
         ),
         frozenset(not_observed),
         frozenset(current_refs),
+        "compared-native-scopes",
     )
 
 
