@@ -45,16 +45,18 @@ import ApplicationServices
             return current
         }
         @MainActor func checkPreparationAction() throws { _ = try checkActionDeclaration() }
-        @MainActor func checkReadyAction() throws {
+        @discardableResult @MainActor func checkReadyAction() throws -> NativeElementControl.ActionFacts {
             let current = try checkActionDeclaration()
             guard current.enabled != false else {
                 throw DriverError("the selected action became disabled", code: .inputUnavailable)
             }
+            return current
         }
         @MainActor func prepareLocalContext(_ check: @escaping @MainActor () throws -> Void) async throws {
             if let local = try context.access.units.actionContextUnit(context.command.target, action: name) {
                 try check()
                 _ = try await local.prepare(
+                    requirement: .optional,
                     check: check, onPreparation: context.receipt.recordPreparation,
                     onCleanupUnknown: context.receipt.recordCleanupUnknown, onNativePreparation: { _ in })
                 try check()
@@ -89,7 +91,22 @@ import ApplicationServices
             }
         }
         return .dispatch {
-            try checkReadyAction()
+            let current = try checkReadyAction()
+            if let opener = current.qtPopupOpener, opener.applies(action: name),
+                let local = try context.access.units.actionContextUnit(context.command.target, action: name)
+            {
+                @MainActor func checkPopupOpener() throws {
+                    guard try checkReadyAction().qtPopupOpener == opener else {
+                        throw DriverError("the original Qt popup opener changed during preparation", code: .staleTarget)
+                    }
+                }
+                let outcome = try await local.prepare(
+                    requirement: .activeWhenKnownInactive, check: checkPopupOpener,
+                    onPreparation: context.receipt.recordPreparation,
+                    onCleanupUnknown: context.receipt.recordCleanupUnknown, onNativePreparation: { _ in })
+                try NativeQtPopupOpener.requirePrepared(outcome)
+                try checkPopupOpener()
+            }
             if let retained = try originalDocument(), try retained.observe() == .other,
                 !op.preparationConfirmed(context.command.primitiveID)
             {

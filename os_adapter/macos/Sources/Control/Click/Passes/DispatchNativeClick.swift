@@ -12,6 +12,10 @@ import ApplicationServices
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickDispatch)
         defer { metric?.end() }
+        func guardOperation() throws {
+            try plan.operation.check(write: true)
+            try RequestDiagnostics.checkCancellation()
+        }
         func actionBoundary() throws {
             try boundary.checkConditions()
             var retained = plan.actionDocument
@@ -63,13 +67,15 @@ import ApplicationServices
                 onReturned: evidence.markReturned)
         case .captured(let unit):
             try await unit.deliver(
-                plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
+                plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
+                onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery)
         case .element(let unit):
             // This samples the original element after preparation. Only this
             // ensuing gesture freezes geometry; no new screenshot RPC is needed.
             try await unit.deliver(
-                plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
+                plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
+                onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery)
         case .popupPointer(let unit):
             try await unit.deliver(

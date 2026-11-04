@@ -644,7 +644,7 @@ import ApplicationServices
     }
 
     func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)? {
-        guard action == kAXPressAction else { return nil }
+        guard action == kAXPressAction || action == kAXShowMenuAction else { return nil }
         let scope = try inputScope(binding)
         guard NativeObjectActionPolicy.applicationContextEligible(
             action: action, hasWindow: scope.window != nil, applicationMenu: scope.menuRoot != nil)

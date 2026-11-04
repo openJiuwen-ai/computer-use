@@ -49,11 +49,13 @@ import ApplicationServices
         return .dispatch {
             if let captured {
                 try await captured.deliver(
-                    pointer, check: checkBoundary, onDispatch: markDispatch, onPosted: receipt.recordAccepted,
+                    pointer, check: checkBoundary, guardOperation: checkBoundary,
+                    onDispatch: markDispatch, onPosted: receipt.recordAccepted,
                     onCleanupUnknown: receipt.recordCleanupUnknown)
             } else if let element {
                 try await element.deliver(
-                    pointer, check: checkBoundary, onDispatch: markDispatch, onPosted: receipt.recordAccepted,
+                    pointer, check: checkBoundary, guardOperation: checkBoundary,
+                    onDispatch: markDispatch, onPosted: receipt.recordAccepted,
                     onCleanupUnknown: receipt.recordCleanupUnknown)
             }
             receipt.detail = "\(intentKind) pointer sequence dispatched."

@@ -244,6 +244,7 @@ import ApplicationServices
 
     private func observeForeground(_ snapshot: [String: Any]) {
         let current = snapshot["foregroundPID"] as? Int32
+        NativeForegroundResponsibility.current?.observeForeground(current)
         if let previousForeground, let current {
             foregroundChangeObserved = foregroundChangeObserved || previousForeground != current
         } else { foregroundObservationUnknown = true }

@@ -685,6 +685,12 @@ import ApplicationServices
             // binding or its modal-query hint. Retention proves no current AX
             // fact; the same input boundary will revalidate it before dispatch.
             let previous = surfaces[scope]
+            // This is the retained physical identity, not an onscreen claim.
+            // A current AX root may precede the native projection on reopen;
+            // keep its already-proven CG lifetime so later positive closure
+            // is still detectable. Capture/input revalidate that exact object.
+            let retainedNative = matching.count == 1 ? matching[0]
+                : previous?.owner.isEqual(app) == true && previous?.window == window ? previous?.native : nil
             let retainedElement: AXUIElement?
             if profile == .visual, element == nil, let previous, previous.owner.isEqual(app),
                 previous.window == window, let oldNative = previous.native,
@@ -703,7 +709,7 @@ import ApplicationServices
             remember(
                 Surface(
                     owner: app, window: window, scope: scope, parent: parent, element: retainedElement,
-                    native: matching.count == 1 ? matching[0] : nil,
+                    native: retainedNative,
                     queryHint: hint))
             entries.append([
                 "window": window, "instance": instance.id, "surface": scope, "node": node as Any? ?? NSNull(),

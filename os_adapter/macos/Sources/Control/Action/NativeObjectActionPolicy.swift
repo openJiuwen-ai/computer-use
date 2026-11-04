@@ -5,6 +5,6 @@ import ApplicationServices
 /// Query-only applicability of optional context for an addressed object action.
 enum NativeObjectActionPolicy {
     static func applicationContextEligible(action: String, hasWindow: Bool, applicationMenu: Bool) -> Bool {
-        action == kAXPressAction && hasWindow && !applicationMenu
+        [kAXPressAction, kAXShowMenuAction].contains(action) && hasWindow && !applicationMenu
     }
 }

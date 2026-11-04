@@ -185,6 +185,7 @@ import ApplicationServices
         onWait: (NativePreparationWait) -> Void = { _ in }, onCleanupUnknown: @escaping @MainActor () -> Void = {}
     ) async throws {
         try target.validate(input: true)
+        NativeForegroundResponsibility.current?.requireForegroundForCandidate()
         _ = try Self.nativeWindow(target.application.processIdentifier, window)
         // Preserve the document's existing first responder when its exact
         // foreground context is already established. No activation is needed.
@@ -203,6 +204,11 @@ import ApplicationServices
             )
             return
         }
+        guard NativeForegroundResponsibility.current?.permitsForegroundPreparation() != false else {
+            throw NativePreparationUnavailable(
+                description: "the user selected a new foreground during this operation; no repeated activation sent")
+        }
+        NativeForegroundResponsibility.current?.recordPreparation(target: target.capturedProcessIdentity, foreground: true)
         onAction()
         try await Self.activate(
             target, window: window, pointerAt: pointerAt, onWait: onWait, onCleanupUnknown: onCleanupUnknown)

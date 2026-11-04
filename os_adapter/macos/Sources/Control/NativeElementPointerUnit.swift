@@ -486,7 +486,8 @@ import ApplicationServices
     }
 
     func deliver(
-        _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
+        _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void,
+        guardOperation: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
         onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
     ) async throws {
         guard request.kind == kind, request.start == nil, request.end == nil else {
@@ -497,7 +498,8 @@ import ApplicationServices
         let pointer = pointerUnit(mapping: selected.mapping)
         try await pointer.deliver(
             request, from: selected.point, to: nil, viewport: selected.visible.size,
-            check: { try validate(selected, check: check) }, onDispatch: onDispatch, onPosted: onPosted,
+            check: { try validate(selected, check: check) }, guardOperation: guardOperation,
+            onDispatch: onDispatch, onPosted: onPosted,
             onCleanupUnknown: onCleanupUnknown, delivery: delivery)
     }
 }

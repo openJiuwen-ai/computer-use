@@ -17,6 +17,7 @@ import ApplicationServices
         }
         try checkOriginalScope()
         _ = try await NativeApplicationContextUnit(application: request.target.application).prepare(
+            requirement: .optional,
             check: checkOriginalScope, onPreparation: request.onPreparation, onCleanupUnknown: request.onCleanupUnknown,
             onNativePreparation: request.onNativePreparation)
     }

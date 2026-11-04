@@ -541,7 +541,8 @@ enum NativePointerDeliveryPolicy {
     }
 
     func deliver(
-        _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
+        _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void,
+        guardOperation: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
         onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
     ) async throws {
         try check()
@@ -553,7 +554,8 @@ enum NativePointerDeliveryPolicy {
         }
         try await current.deliver(
             request, from: current.point(request.start!), to: request.end.map(current.point),
-            viewport: current.window.frame.size, check: check, captureGeometry: sampleGeometry,
+            viewport: current.window.frame.size, check: check, guardOperation: guardOperation,
+            captureGeometry: sampleGeometry,
             onDispatch: onDispatch, onPosted: onPosted, onCleanupUnknown: onCleanupUnknown, delivery: delivery)
     }
 
@@ -562,6 +564,7 @@ enum NativePointerDeliveryPolicy {
     func deliver(
         _ request: NativePointerIntent, from start: CGPoint, to end: CGPoint?, viewport: CGSize,
         check: @escaping @MainActor () throws -> Void,
+        guardOperation: @escaping @MainActor () throws -> Void,
         captureGeometry: (@MainActor (Bool) throws -> WindowGeometry.WindowMapping)? = nil,
         onDispatch: () throws -> Void, onPosted: () -> Void,
         onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
@@ -625,68 +628,62 @@ enum NativePointerDeliveryPolicy {
             }
         }
         func validate(_ point: CGPoint, held: Bool) throws {
-            try check()
-            try target.validate(input: true)
-            guard NativeProcessIdentity.read(window.pid) == process else {
-                throw DriverError("pointer recipient changed", code: .staleTarget)
-            }
             let continuingDrag = capturedDrag && held
-            if let captureGeometry { hostEventWindow = try captureGeometry(continuingDrag) }
-            if let recipient { eventWindow = try recipient.validate(host: hostEventWindow) }
-            else { eventWindow = hostEventWindow }
             let button: CGMouseButton =
                 request.button == "right" ? .right : request.button == "middle" ? .center : .left
-            try NativePhysicalInput.validate(
-                NativePhysicalInput.dependency(for: selected), allowing: global && held ? button : nil)
-            if continuingDrag {
-                // The original down fixed this drag's receiving window. Scope,
-                // document/modal, process and live window identity were checked
-                // above; z-order at a later path point is not a new down target.
-                return
-            }
-            if global {
-                guard target.isForeground else {
-                    throw DriverError(
-                        "the selected application is no longer in the foreground", code: .inputUnavailable,
-                        next: "read the desktop before continuing")
-                }
-                let hit = inputWindowHit(at: point)
-                if hit.accessibility != nil {
-                    // The public fallback can cross an AX messaging boundary.
-                    // A cancellation/expired deadline during that read must stop
-                    // this event; no global AX timeout is changed for the query.
-                    try RequestDiagnostics.checkCancellation()
-                }
-                guard let destination = hit.windowID else {
-                    throw DriverError(
-                        "the pointer destination window could not be confirmed", code: .inputUnavailable,
-                        next: "read the target window before continuing")
-                }
-                guard destination == window.id else {
-                    throw DriverError(
-                        "pointer location is covered by another window", code: .inputUnavailable,
-                        next: "read the desktop and inspect the covering window")
-                }
-                let current = contentReadiness(
-                    foreground: true, kind: request.kind, declaredWindow: initial.windowKind,
-                    initialFocus: initial.focus)
-                try check()
-                guard current.ready else {
-                    throw DriverError(
-                        "the target window is no longer prepared for content pointer input", code: .inputUnavailable,
-                        next: "read the target window before continuing")
-                }
-                // This exact foreground/window hit is the global route's
-                // readiness proof; do not issue the same native hit query twice.
-            } else {
-                let current = contentReadiness(
-                    foreground: foregroundWindow(at: point), kind: request.kind, declaredWindow: initial.windowKind,
-                    initialFocus: initial.focus)
-                try check()
-                guard current.ready else {
-                    throw DriverError("background pointer route changed", code: .inputUnavailable)
-                }
-            }
+            try ValidateNativePointerEventPass.run(
+                kind: request.kind, continuingDrag: continuingDrag,
+                guardOperation: guardOperation, checkTarget: check,
+                queryRecipient: {
+                    try target.validate(input: true)
+                    guard NativeProcessIdentity.read(window.pid) == process else {
+                        throw DriverError("pointer recipient changed", code: .staleTarget)
+                    }
+                    if let captureGeometry { hostEventWindow = try captureGeometry(continuingDrag) }
+                    if let recipient { eventWindow = try recipient.validate(host: hostEventWindow) }
+                    else { eventWindow = hostEventWindow }
+                }, queryReadiness: {
+                    if global {
+                        guard target.isForeground else {
+                            throw DriverError(
+                                "the selected application is no longer in the foreground", code: .inputUnavailable,
+                                next: "read the desktop before continuing")
+                        }
+                        let hit = inputWindowHit(at: point)
+                        if hit.accessibility != nil {
+                            // The public fallback crosses an AX messaging
+                            // boundary; cancellation must stop this event.
+                            try RequestDiagnostics.checkCancellation()
+                        }
+                        guard let destination = hit.windowID else {
+                            throw DriverError(
+                                "the pointer destination window could not be confirmed", code: .inputUnavailable,
+                                next: "read the target window before continuing")
+                        }
+                        guard destination == window.id else {
+                            throw DriverError(
+                                "pointer location is covered by another window", code: .inputUnavailable,
+                                next: "read the desktop and inspect the covering window")
+                        }
+                        // This exact original-window hit is the global route's
+                        // proof. Do not issue a duplicate native hit query.
+                        return contentReadiness(
+                            foreground: true, kind: request.kind, declaredWindow: initial.windowKind,
+                            initialFocus: initial.focus).ready
+                    }
+                    return contentReadiness(
+                        foreground: foregroundWindow(at: point), kind: request.kind,
+                        declaredWindow: initial.windowKind, initialFocus: initial.focus).ready
+                }, checkPhysicalInput: {
+                    try NativePhysicalInput.validate(
+                        NativePhysicalInput.dependency(for: selected), allowing: global && held ? button : nil)
+                }, unavailable: {
+                    global
+                        ? DriverError(
+                            "the target window is no longer prepared for content pointer input", code: .inputUnavailable,
+                            next: "read the target window before continuing")
+                        : DriverError("background pointer route changed", code: .inputUnavailable)
+                })
         }
         func canRelease() -> Bool {
             if capturedDrag, !global, let captureGeometry,

@@ -418,6 +418,7 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
         if mode == "cancel" { throw CancellationError() }
     }
     func prepare(
+        requirement: NativeApplicationContextUnit.Requirement,
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void

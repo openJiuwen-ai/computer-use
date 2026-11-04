@@ -20,6 +20,8 @@ import ApplicationServices
         var unavailableChildren = Set<CFHashCode>()
         var ids = [CFHashCode: CGWindowID]()
         var focused: AXUIElement?
+        var inputWindow: AXUIElement?
+        var focusedElement: AXUIElement?
         var nativeAvailable = true
         var nativeIDs: [CGWindowID] = [380]
         var hiddenNativeIDs = Set<CGWindowID>()
@@ -85,6 +87,8 @@ import ApplicationServices
             declared = [window]
             ids[CFHash(window)] = 380
             focused = window
+            inputWindow = window
+            focusedElement = cell
         }
         func node(_ role: String, parent: AXUIElement? = nil, nativeID: CGWindowID? = nil) -> AXUIElement {
             let node = AXUIElementCreateApplication(nextID); nextID += 1
@@ -105,7 +109,7 @@ import ApplicationServices
             if CFEqual(node, application) {
                 if key == kAXWindowsAttribute { return declarationUnavailable ? nil : declared as CFArray }
                 if key == kAXFocusedWindowAttribute || key == kAXMainWindowAttribute { return focused }
-                if key == kAXFocusedUIElementAttribute { content.append("AXFocusedUIElement"); return cell }
+                if key == kAXFocusedUIElementAttribute { content.append("AXFocusedUIElement"); return focusedElement }
             }
             return attributes[CFHash(node)]?[key]
         }
@@ -119,7 +123,7 @@ import ApplicationServices
                 return unsafeDowncast(raw, to: AXUIElement.self)
             }
             api.pid = { _ in (.success, self.app.processIdentifier) }
-            api.inputWindow = { _, _, _ in self.content.append("inputWindow focused-control policy"); return self.window }
+            api.inputWindow = { _, _, _ in self.content.append("inputWindow focused-control policy"); return self.inputWindow }
             api.presentedWindow = { node, _, _ in node }
             api.nativeID = { self.ids[CFHash($0)] }
             api.hint = { node, _ in self.ids[CFHash(node)].map { .init(frame: CGRect(x: 10, y: 10, width: 500, height: 400), title: "", id: $0) } }
@@ -170,6 +174,10 @@ import ApplicationServices
         try rootCoverageIsIndependentOfDescendantGaps()
         try nativeOnlyRefreshRetainsBinding()
         try hiddenAndUnknownNativeLifetimesCanReappear()
+        try exactNativeHintKeepsIdentityAcrossOnscreenProjectionAndAXProxyChanges()
+        try duplicateNativeHintsDoNotMergeIndependentAXRoots()
+        try unprovenExactHintDoesNotAllocateAnUnownedPhysicalLifetime()
+        try endedNativeHintGetsNewIdentityBeforeNativeProjection()
         try endedNativeLifetimeNeverReusesWindowOrScope()
         try staleRootRegistrationKeepsOtherWindowsAndNativeVisualBinding()
         try staleAXOnlyRootIsOmittedWithoutHidingHealthyWindows()
@@ -397,6 +405,160 @@ import ApplicationServices
                              "reappearing native window changed its exact binding")
             }
         }
+    }
+
+    @MainActor static func exactNativeHintKeepsIdentityAcrossOnscreenProjectionAndAXProxyChanges() throws {
+        let scene = Scene()
+        scene.nativeIDs = [380, 381]
+        scene.rootRegistration = { _, _ in "current-root" }
+        let original = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        // Qt can retain the NSWindow while replacing its AX proxy on reopen.
+        // The native list is an earlier onscreen projection; another window
+        // still proves this same process incarnation without listing the popup.
+        let replacement = scene.node(kAXWindowRole)
+        scene.ids[CFHash(replacement)] = 380
+        scene.declared = [replacement]
+        scene.focused = replacement
+        scene.inputWindow = replacement
+        scene.focusedElement = nil
+        scene.nativeIDs = [381]
+        scene.hiddenNativeIDs = [380]
+        let beforeNativeProjection = try scene.collect(nil)
+        let current = (beforeNativeProjection["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        for key in ["window", "surface", "instance"] {
+            precondition(current[key] as? String == original[key] as? String,
+                         "a fresh AX proxy changed \(key); original=\(original), current=\(current), directory=\(beforeNativeProjection)")
+        }
+        precondition(current["nativeWindow"] as? Bool == false && current["accessibility"] as? Bool == true,
+                     "identity continuity must not invent current native visibility")
+        precondition((beforeNativeProjection["endedWindows"] as! [[String: Any]]).isEmpty)
+        let retained = scene.directory.surface(current["surface"] as! String)!
+        precondition(retained.element.map { CFEqual($0, replacement) } == true,
+                     "the fixed physical identity must expose the current exact AX proxy")
+        precondition(retained.native?.mapping.id == 380,
+                     "a filtered native projection erased the retained positive physical identity")
+        scene.nativeIDs = [380, 381]
+        scene.hiddenNativeIDs = []
+        let afterNativeProjection = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        for key in ["window", "surface", "instance"] {
+            precondition(afterNativeProjection[key] as? String == current[key] as? String,
+                         "the later onscreen native projection changed an already published fixed binding")
+        }
+        precondition(afterNativeProjection["nativeWindow"] as? Bool == true)
+    }
+
+    @MainActor static func duplicateNativeHintsDoNotMergeIndependentAXRoots() throws {
+        let scene = Scene()
+        scene.nativeIDs = [380, 381]
+        scene.rootRegistration = { element, _ in String(CFHash(element)) }
+        let original = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == String(CFHash(scene.window))
+        }!
+        let first = scene.node(kAXWindowRole), second = scene.node(kAXWindowRole)
+        scene.ids[CFHash(first)] = 380
+        scene.ids[CFHash(second)] = 380
+        scene.declared = [first, second]
+        scene.focused = nil
+        scene.inputWindow = nil
+        scene.focusedElement = nil
+        scene.nativeIDs = [381]
+        scene.hiddenNativeIDs = [380]
+        let roots = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).filter { $0["accessibility"] as? Bool == true }
+        precondition(roots.count == 2 && Set(roots.compactMap { $0["window"] as? String }).count == 2,
+                     "a shared CGID hint cannot merge independent logical AX roots")
+        precondition(roots.allSatisfy { $0["window"] as? String != original["window"] as? String },
+                     "conflicting native hints cannot adopt the previously known physical reference")
+    }
+
+    @MainActor static func unprovenExactHintDoesNotAllocateAnUnownedPhysicalLifetime() throws {
+        let scene = Scene()
+        scene.nativeIDs = [381]
+        scene.rootRegistration = { _, _ in "current-root" }
+        let original = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        precondition(original["nativeWindow"] as? Bool == false)
+        // This AX-only object vanishes before any native projection proves
+        // its physical lifetime. The same numeric hint on another AX object
+        // cannot by itself revive or rebind that first public reference.
+        scene.declared = []
+        scene.inputWindow = nil
+        scene.focused = nil
+        scene.focusedElement = nil
+        _ = try scene.collect(nil)
+        let replacement = scene.node(kAXWindowRole)
+        scene.ids[CFHash(replacement)] = 380
+        scene.declared = [replacement]
+        scene.inputWindow = replacement
+        scene.focused = replacement
+        let current = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        for key in ["window", "surface", "instance"] {
+            precondition(current[key] as? String != original[key] as? String,
+                         "an unproven CGID allocated an unowned physical key and rebound the first AX-only Window")
+        }
+        scene.nativeIDs = [380, 381]
+        let projected = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        for key in ["window", "surface", "instance"] {
+            precondition(projected[key] as? String == current[key] as? String,
+                         "a first positive native match must retain the current AX object's original alias")
+        }
+    }
+
+    @MainActor static func endedNativeHintGetsNewIdentityBeforeNativeProjection() throws {
+        let scene = Scene()
+        scene.nativeIDs = [380, 381]
+        scene.rootRegistration = { _, _ in "current-root" }
+        let original = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        scene.declared = []
+        scene.focused = nil
+        scene.inputWindow = nil
+        scene.focusedElement = nil
+        scene.nativeIDs = [381]
+        let ended = try scene.collect(nil)
+        precondition((ended["endedWindows"] as! [[String: Any]]).contains {
+            $0["window"] as? String == original["window"] as? String
+        })
+        let replacement = scene.node(kAXWindowRole)
+        scene.ids[CFHash(replacement)] = 380
+        scene.declared = [replacement]
+        scene.focused = replacement
+        scene.inputWindow = replacement
+        // The new lifetime reports an exact CGID before the native projection
+        // lists it. A prior tombstone cannot be undone by that same numeric ID.
+        let current = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        for key in ["window", "surface", "instance"] {
+            precondition(current[key] as? String != original[key] as? String,
+                         "a fresh reported CGID resurrected an authoritatively ended generation")
+        }
+        scene.nativeIDs = [380, 381]
+        let projected = (try scene.collect(nil)["surfaces"] as! [[String: Any]]).first {
+            $0["node"] as? String == "current-root"
+        }!
+        for key in ["window", "surface", "instance"] {
+            precondition(projected[key] as? String == current[key] as? String,
+                         "the later native projection must preserve the new exact generation")
+        }
+        let references = ApplicationElements()
+        let process = scene.process
+        let next = NativeProcessIdentity(pid: process.pid, parent: 0, seconds: 2, microseconds: 0,
+                                         executable: "/test-window-provider")
+        let first = references.windowReference(nativeID: 380, process: process, owner: scene.app, element: replacement)
+        let second = references.windowReference(nativeID: 380, process: next, owner: scene.app, element: replacement)
+        precondition(first != second, "an exact CGID cannot alias distinct process incarnations")
     }
 
     @MainActor static func endedNativeLifetimeNeverReusesWindowOrScope() throws {

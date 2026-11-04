@@ -9,7 +9,7 @@ import ApplicationServices
 @MainActor final class NativeBackgroundPreparationScope {
     @TaskLocal static var current: NativeBackgroundPreparationScope?
 
-    enum Outcome: String { case notNeeded, restored, ownershipLost, unavailable, failed, unknown }
+    enum Outcome: String { case notNeeded, restored, ownershipLost, retained, unavailable, failed, unknown }
     struct State {
         var foregroundPID: pid_t?
         var originalCurrent: Bool
@@ -19,61 +19,39 @@ import ApplicationServices
     }
 
     let target: NativeProcessIdentity?
-    private let original: NativeProcessIdentity?
-    private let initialActivity: [UInt32]
-    private var activationObserver: NSObjectProtocol?
-    private var externalActivation = false
+    private let responsibility: NativeForegroundResponsibility
+    private let localResponsibility: Bool
+    private var original: NativeProcessIdentity? { responsibility.original }
+    private var initialActivity: [UInt32] { responsibility.initialActivity }
     private var touched = false
     private var finished = false
     private var restored = false
     private var activationUnsettled = false
-    private let check: @MainActor () throws -> Void
     private let onPreparation: @MainActor (String) -> Void
     private let onCleanupUnknown: @MainActor () -> Void
 
     private init(
-        target: BackgroundTarget, check: @escaping @MainActor () throws -> Void,
+        target: BackgroundTarget,
         onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void
     ) {
         self.target = target.capturedProcessIdentity
-        original = NSWorkspace.shared.frontmostApplication.flatMap { NativeProcessIdentity.read($0.processIdentifier) }
-        initialActivity = Self.activity()
-        self.check = check
+        let owner = NativeForegroundResponsibility.current
+        responsibility = owner ?? NativeForegroundResponsibility()
+        localResponsibility = owner == nil
         self.onPreparation = onPreparation
         self.onCleanupUnknown = onCleanupUnknown
-        guard let original, let identity = self.target, original != identity else { return }
-        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] notification in
-            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            MainActor.assumeIsolated {
-                guard let self, let app, let process = NativeProcessIdentity.read(app.processIdentifier),
-                    process != original, process != identity
-                else { return }
-                self.externalActivation = true
-            }
-        }
-    }
-
-    /// Physical activity is observed without an event tap, content recording or
-    /// event suppression. Mouse movement alone does not transfer focus ownership.
-    private static func activity() -> [UInt32] {
-        [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .flagsChanged, .scrollWheel].map {
-            CGEventSource.counterForEventType(.hidSystemState, eventType: $0)
-        }
     }
 
     func record(_ effect: NativePreparationEffect) {
-        if effect.phase == .willSend { touched = true }
+        if effect.phase == .willSend {
+            touched = true
+            responsibility.recordPreparation(target: target)
+        }
     }
 
     private func state() -> State {
-        .init(
-            foregroundPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
-            originalCurrent: original.map { NativeProcessIdentity.read($0.pid) == $0 } ?? false,
-            targetCurrent: target.map { NativeProcessIdentity.read($0.pid) == $0 } ?? false,
-            activity: Self.activity(), externalActivation: externalActivation)
+        responsibility.state(target: target)
     }
 
     @discardableResult func finish() async throws -> Bool {
@@ -83,13 +61,24 @@ import ApplicationServices
         }
         finished = true
         defer { stopObserving() }
+        guard touched else {
+            recordOutcome(.notNeeded)
+            return false
+        }
+        // A foreground menu/pointer candidate can prepare another local
+        // receiver inside this scope. It still needs foreground through input;
+        // sharing the original owner must not turn that into early restitution.
+        if responsibility.retainsForegroundForInput {
+            recordOutcome(original == target ? .notNeeded : .retained)
+            return false
+        }
         guard let original, let target else {
             recordOutcome(.unavailable)
             return false
         }
         let outcome = await Self.restore(
             originalPID: original.pid, targetPID: target.pid, touched: touched,
-            initialActivity: initialActivity, sample: state, check: check,
+            initialActivity: initialActivity, sample: state, check: responsibility.checkRestoration,
             activate: { [self] in
                 guard let application = NSRunningApplication(processIdentifier: original.pid) else { return false }
                 let background = BackgroundTarget(application)
@@ -98,7 +87,7 @@ import ApplicationServices
                 let receipt = try await ForegroundActivation.request(
                     background,
                     check: {
-                        try self.check()
+                        try self.responsibility.checkRestoration()
                         let current = self.state()
                         guard current.originalCurrent, current.targetCurrent,
                             [original.pid, target.pid].contains(current.foregroundPID ?? 0),
@@ -132,13 +121,13 @@ import ApplicationServices
     }
 
     private func recordOutcome(_ outcome: Outcome) {
+        responsibility.recordRestoration(outcome)
         NativeInputActivity.current?.recordForegroundRestoration(
             outcome.rawValue, originalPID: original?.pid, targetPID: target?.pid)
     }
 
     private func stopObserving() {
-        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
-        activationObserver = nil
+        if localResponsibility { responsibility.stop() }
     }
 
     static func ownsForeground(_ state: State, targetPID: pid_t, initialActivity: [UInt32]) -> Bool {
@@ -216,7 +205,7 @@ import ApplicationServices
     }
 
     static func perform<T>(
-        target: BackgroundTarget, check: @escaping @MainActor () throws -> Void,
+        target: BackgroundTarget,
         onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void = {}, body: () async throws -> T
     ) async throws -> T {
@@ -227,7 +216,7 @@ import ApplicationServices
             return try await body()
         }
         let scope = NativeBackgroundPreparationScope(
-            target: target, check: check, onPreparation: onPreparation,
+            target: target, onPreparation: onPreparation,
             onCleanupUnknown: onCleanupUnknown)
         return try await $current.withValue(scope) {
             do {

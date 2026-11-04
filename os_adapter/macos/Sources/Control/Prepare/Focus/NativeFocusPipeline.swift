@@ -23,7 +23,7 @@ import ApplicationServices
         let metric = RequestDiagnostics.metrics?.start(.windowPreparation)
         defer { metric?.end() }
         return try await NativeBackgroundPreparationScope.perform(
-            target: target, check: beforeAction, onPreparation: onPreparation,
+            target: target, onPreparation: onPreparation,
             onCleanupUnknown: onCleanupUnknown
         ) {
           try await run(

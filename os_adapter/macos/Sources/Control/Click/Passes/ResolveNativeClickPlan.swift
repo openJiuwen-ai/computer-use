@@ -96,22 +96,27 @@ import ApplicationServices
         var plan = NativeClickPlan(
             target: target, offer: offer, pointer: pointer, command: command, operation: op, within: contract.within,
             step: step)
-        if case .action(let node, let name, _) = target, name == kAXPressAction {
+        if case .action(let node, let name, _) = target, name == kAXPressAction || name == kAXShowMenuAction {
             let facts = try access.objects.nativeActionFacts(node).resolvingDocument {
                 try access.scopes.fixedInputWindow(command.target)
             }
-            let documentScope = NativeActionDocumentContexts.Scope(
-                node: node, surface: try string(resolved.binding.wire["surface"], label: "surface"),
-                within: contract.within, actuator: contract.actuator, receiver: contract.receiver)
-            plan.documentScope = documentScope
-            plan.actionDocument =
-                contract.actionDocument ?? op.actionDocuments.context(documentScope, observed: facts.document)
-            try plan.actionDocument?.observe()
-            plan.document = plan.actionDocument?.unit ?? facts.document
-            plan.documentPreparation =
-                try plan.actionDocument.map { .init(windowSelectionRequired: $0.selectionRequired) }
-                ?? facts.documentPreparation(name)
-            if plan.documentPreparation.windowSelectionRequired || plan.actionDocument?.selectionRequired == true {
+            plan.qtPopupOpener = facts.qtPopupOpener.flatMap { $0.applies(action: name) ? $0 : nil }
+            if name == kAXPressAction {
+                let documentScope = NativeActionDocumentContexts.Scope(
+                    node: node, surface: try string(resolved.binding.wire["surface"], label: "surface"),
+                    within: contract.within, actuator: contract.actuator, receiver: contract.receiver)
+                plan.documentScope = documentScope
+                plan.actionDocument =
+                    contract.actionDocument ?? op.actionDocuments.context(documentScope, observed: facts.document)
+                try plan.actionDocument?.observe()
+                plan.document = plan.actionDocument?.unit ?? facts.document
+                plan.documentPreparation =
+                    try plan.actionDocument.map { .init(windowSelectionRequired: $0.selectionRequired) }
+                    ?? facts.documentPreparation(name)
+            }
+            if plan.documentPreparation.windowSelectionRequired || plan.actionDocument?.selectionRequired == true
+                || plan.qtPopupOpener != nil
+            {
                 plan.actionContext = try access.units.actionContextUnit(command.target, action: name)
             }
         }

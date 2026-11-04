@@ -8,7 +8,9 @@ import ApplicationServices
         try eventConstruction()
         try await optionalContext()
         try await actionRoutes()
-        print("PASS document-only activity preparation; ordinary AXPress does not activate its application")
+        try await qtPopupRoutes()
+        try await popupActivityContracts()
+        print("PASS scoped document/Qt opener activity; ordinary AX actions remain independent; posted is not popup readiness")
     }
 
     @MainActor static func eventConstruction() throws {
@@ -75,7 +77,7 @@ import ApplicationServices
             NativeObjectActionPolicy.applicationContextEligible(
                 action: "AXPress", hasWindow: true, applicationMenu: false))
         precondition(
-            !NativeObjectActionPolicy.applicationContextEligible(
+            NativeObjectActionPolicy.applicationContextEligible(
                 action: "AXShowMenu", hasWindow: true, applicationMenu: false))
         precondition(
             !NativeObjectActionPolicy.applicationContextEligible(
@@ -104,6 +106,44 @@ import ApplicationServices
             }
         }
     }
+
+    @MainActor static func qtPopupRoutes() async throws {
+        for explicit in [false, true] {
+            for mode in ["qtObserved", "qtAlreadyActive", "qtUnknown", "qtIgnored", "qtUnavailable", "qtForeground",
+                         "qtProofChanged", "qtShowMenu", "qtDisabled", "qtCancel"] {
+                let probe = ContextProbe(mode: mode)
+                let result = try await probe.run(explicit: explicit)
+                let blocked = ["qtIgnored", "qtUnavailable", "qtProofChanged", "qtDisabled", "qtCancel"].contains(mode)
+                precondition(result != blocked && probe.presses == (blocked ? 0 : 1), "Qt popup mode: \(mode)")
+                precondition(probe.preparationCalls == (["qtDisabled", "qtCancel"].contains(mode) ? 0 : 1))
+                let noPost = ["qtAlreadyActive", "qtUnknown", "qtUnavailable", "qtDisabled", "qtCancel"].contains(mode)
+                precondition(probe.posts == (noPost ? 0 : 1), "No repeat notification or requested action")
+                precondition(probe.presses <= 1)
+            }
+        }
+    }
+
+    @MainActor static func popupActivityContracts() async throws {
+        let actions = [NativeAction.Item(name: kAXShowMenuAction, description: nil), .init(name: kAXPressAction, description: nil)]
+        let identifier = "QApplication.QWidget.QComboBox"
+        precondition(NativeQtPopupOpener.query(role: kAXMenuButtonRole, identifier: identifier, actions: actions) != nil)
+        precondition(NativeQtPopupOpener.query(role: kAXMenuButtonRole, identifier: "OtherApp.QComboBox", actions: actions) == nil)
+        precondition(NativeQtPopupOpener.query(role: kAXButtonRole, identifier: identifier, actions: actions) == nil)
+        precondition(NativeQtPopupOpener.query(role: kAXMenuButtonRole, identifier: identifier,
+                                             actions: [.init(name: kAXPressAction, description: nil)]) == nil)
+        precondition(NativeQtPopupOpener.query(role: kAXMenuButtonRole, identifier: identifier, actions: nil) == nil)
+        var posts = 0, checks = 0
+        do {
+            _ = try await NativeApplicationContextUnit.prepare(
+                pid: 101, requirement: .activeWhenKnownInactive,
+                sample: { .init(foregroundPID: 999, reportedActive: false) }, alreadyPosted: { false },
+                make: { SyntheticFocusEvents.applicationActivation() }, post: { _ in posts += 1 },
+                check: {}, pollCheck: { checks += 1; throw CancellationError() },
+                onPreparation: { _ in }, onNativePreparation: { _ in }, wait: {})
+            preconditionFailure("cancelled activity preparation returned")
+        } catch is CancellationError {}
+        precondition(posts == 1 && checks == 1, "pending requested input must remain untouched on cancellation")
+    }
 }
 
 @MainActor
@@ -119,6 +159,7 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     var posts = 0, presses = 0, preparationCalls = 0
     var active = false
     var samples = 0
+    var actionName: String { mode == "qtShowMenu" ? kAXShowMenuAction : kAXPressAction }
     init(mode: String) {
         self.mode = mode
         if mode == "windowless" { binding["rootWindow"] = NSNull() }
@@ -126,30 +167,32 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     func boundaryCheck() throws {
         if mode == "modal" { throw DriverError("known modal", code: .blockedByModal) }
         if mode == "target" || mode == "within" { throw DriverError("original scope changed", code: .staleTarget) }
-        if mode == "cancel" { throw CancellationError() }
+        if mode == "cancel" || mode == "qtCancel" { throw CancellationError() }
     }
     func prepare(
+        requirement: NativeApplicationContextUnit.Requirement,
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
     ) async throws -> NativeApplicationContextUnit.Outcome {
         preparationCalls += 1
         return try await NativeApplicationContextUnit.prepare(
-            pid: 101,
+            pid: 101, requirement: requirement,
             sample: {
                 self.samples += 1
                 return .init(
-                    foregroundPID: self.mode == "foreground" ? 101 : 999,
-                    reportedActive: self.mode == "unknown" ? nil : self.mode == "preexistingActive" || self.active)
+                    foregroundPID: ["foreground", "qtForeground"].contains(self.mode) ? 101 : 999,
+                    reportedActive: ["unknown", "qtUnknown"].contains(self.mode) ? nil
+                        : ["preexistingActive", "qtAlreadyActive"].contains(self.mode) || self.active)
             }, alreadyPosted: { false },
-            make: { self.mode == "unavailable" ? nil : SyntheticFocusEvents.applicationActivation() },
+            make: { ["unavailable", "qtUnavailable"].contains(self.mode) ? nil : SyntheticFocusEvents.applicationActivation() },
             post: { _ in
                 self.posts += 1
-                if self.mode != "ignored" && self.mode != "scopeDuringPoll" { self.active = true }
+                if !["ignored", "scopeDuringPoll", "qtIgnored"].contains(self.mode) { self.active = true }
             }, check: check, onPreparation: onPreparation, onNativePreparation: onNativePreparation, wait: {})
     }
     func run(explicit: Bool) async throws -> Bool {
-        let parameters: [String: Any] = explicit ? ["action": "AXPress"] : ["button": "left", "count": 1]
+        let parameters: [String: Any] = explicit ? ["action": actionName] : ["button": "left", "count": 1]
         let intent = try NativeIntent(["kind": explicit ? "action" : "click", "parameters": parameters], mode: "write")
         let op = NativeOperation(
             timeoutMs: 30_000, writable: true, intent: intent, target: binding, clickContract: explicit ? nil : "v2",
@@ -176,12 +219,12 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
                     sharing: state.sharing, contracts: self, recordEffect: {})
                 let contract = NativePrimitiveContract(
                     id: "press", node: "original", within: [], actuator: nil, receiver: nil, basis: [],
-                    unit: .action("AXPress", nil))
+                    unit: .action(actionName, nil))
                 let context = NativeRouteContext(
                     command: command, operation: op,
                     resolved: .init(contract: contract, binding: (binding, [], "original")), boundary: boundary,
                     receipt: receipt, access: access)
-                let selected = try NativeObjectActionPipeline.select(context, name: "AXPress", description: nil)
+                let selected = try NativeObjectActionPipeline.select(context, name: actionName, description: nil)
                 guard case .dispatch(let dispatch) = selected else {
                     preconditionFailure("explicit action must dispatch")
                 }
@@ -191,9 +234,10 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
                     routeFamily: "macos.axAction.AXPress", delivery: .objectAction, admission: .ready, reason: nil,
                     preparationOptions: [])
                 let plan = NativeClickPlan(
-                    target: .action(node: "original", name: "AXPress", description: nil), offer: offer, pointer: nil,
+                    target: .action(node: "original", name: actionName, description: nil), offer: offer, pointer: nil,
                     command: command, operation: op, within: [], step: 1,
-                    actionContext: mode == "windowless" ? nil : self)
+                    actionContext: mode == "windowless" ? nil : self,
+                    qtPopupOpener: try nativeActionFacts("original").qtPopupOpener)
                 try await NativeClickPreparationPipeline.run(
                     plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: self)
                 try await DispatchNativeClickPass.run(
@@ -204,10 +248,17 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     }
     func retainNode(_ ref: String) -> (() -> Void)? { {} }
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts {
-        .init(
+        var facts = NativeElementControl.ActionFacts(
             role: kAXButtonRole,
-            actions: mode == "action" ? [] : [.init(name: "AXPress", description: nil)], enabled: mode != "disabled",
+            actions: mode == "action" ? [] : [.init(name: actionName, description: nil)],
+            enabled: !["disabled", "qtDisabled"].contains(mode),
             applicationMenuContext: false, foreground: false)
+        if mode.hasPrefix("qt"), mode != "qtProofChanged" || !active {
+            facts.qtPopupOpener = NativeQtPopupOpener.query(
+                role: kAXMenuButtonRole, identifier: "QApplication.QWidget.QComboBox",
+                actions: [.init(name: kAXShowMenuAction, description: nil), .init(name: kAXPressAction, description: nil)])
+        }
+        return facts
     }
     func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts {
         try nativeActionFacts(ref)
@@ -244,7 +295,7 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
         onDispatch: @MainActor () throws -> Void, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.ActionResult { preconditionFailure("text was not selected") }
     func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)? {
-        precondition(action == "AXPress")
+        precondition(action == actionName)
         return mode == "windowless" ? nil : self
     }
     func receiverRelation(

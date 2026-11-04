@@ -29,7 +29,9 @@ import ApplicationServices
         + AXRelationReader.tableArrays + ["AXOwns", "AXLinkedUIElements", "AXSelectedChildren"]
     private let registry: ApplicationElements
     private let inspection: NativeElementInspection
-    private let relationReader = AXRelationReader()
+    private let relationReader: AXRelationReader
+    private let attributes: AXAttributeReader.API
+    private let clock: @Sendable () -> TimeInterval
     private let nativeResources = AXNativeValueResources()
     private struct Acquisition {
         let catalogue: (status: AXError, names: CFArray?)?
@@ -38,9 +40,17 @@ import ApplicationServices
         let batch: AXAttributeReader.Result
         let identity: AXRead<ElementIdentity.Facts>?
     }
-    init(registry: ApplicationElements, inspection: NativeElementInspection) {
+    init(
+        registry: ApplicationElements, inspection: NativeElementInspection,
+        attributes: AXAttributeReader.API = AXAttributeReader.API(),
+        relations: AXRelationReader.API = AXRelationReader.API(),
+        clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    ) {
         self.registry = registry
         self.inspection = inspection
+        self.attributes = attributes
+        self.relationReader = AXRelationReader(api: relations)
+        self.clock = clock
     }
 
     /// Reading an exact retained object does not require its label, enabled
@@ -195,7 +205,13 @@ import ApplicationServices
         // ancestors on a subtree root do not prove omitted owners disappeared.
         root.contextComplete = root.role == kAXWindowRole
         let began = Int64(Date().timeIntervalSince1970 * 1000)
-        let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 5)
+        let startedAt = clock()
+        // The request already owns its absolute deadline. Preserve its local
+        // encoding/final-check reserve once, proportionally to time actually
+        // left; a fixed 200ms reserve used to discard every short observation.
+        let budget = ObservationBudget(
+            deadline: min(RequestDiagnostics.deadline ?? .infinity, startedAt + 5), startedAt: startedAt, clock: clock)
+        let deadline = budget.collectionDeadline
         // Settable is a distinct native query, not an AX attribute name. Keep
         // its false/unsupported/error results separate from value reads.
         var queue: [(Target, String, Int)] = [(root, ref, 0)]
@@ -220,7 +236,7 @@ import ApplicationServices
         if rootPage != nil { relations = [pageProperty] + relations.filter { $0 != pageProperty } }
         func reading() throws -> Bool {
             try Task.checkCancellation()
-            return ProcessInfo.processInfo.systemUptime < deadline
+            return budget.canCollect()
         }
         func key(_ element: AXUIElement) -> Identity {
             Identity(
@@ -283,7 +299,7 @@ import ApplicationServices
                 fields += identity.keys.filter { !fields.contains($0) }
             }
             let metric = RequestDiagnostics.metrics?.start(.readAttributes)
-            let batch = try AXAttributeReader.read(element, fields: fields, withinBudget: reading)
+            let batch = try AXAttributeReader.read(element, fields: fields, api: attributes, withinBudget: reading)
             metric?.end()
             var identity: AXRead<ElementIdentity.Facts>?
             if includeIdentity, let catalogue {
@@ -711,13 +727,15 @@ import ApplicationServices
         var root = try readTarget(ref)
         root.contextComplete = root.role == kAXWindowRole
         let began = Int64(Date().timeIntervalSince1970 * 1000)
-        let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 5)
+        let startedAt = clock()
+        let budget = ObservationBudget(
+            deadline: min(RequestDiagnostics.deadline ?? .infinity, startedAt + 5), startedAt: startedAt, clock: clock)
         AXMessaging.configure(root.element)
         let result = try relationReader.read(
             root.element, source: ref, property: property, limit: limit, cursor: cursor,
             withinBudget: {
                 try Task.checkCancellation()
-                return ProcessInfo.processInfo.systemUptime < deadline
+                return budget.canCollect()
             })
         var link: [String: Any]
         let nativeEncoder = AXNativeValueEncoding(resources: nativeResources)
@@ -726,7 +744,7 @@ import ApplicationServices
         case .failure(var failure):
             if let raw = failure.removeValue(forKey: "rawNativeValue") {
                 failure["wrappedNativeValue"] = try nativeEncoder.encode(raw as CFTypeRef) { element in
-                    guard ProcessInfo.processInfo.systemUptime < deadline else { throw RequestDeadlineExceeded() }
+                    guard budget.canCollect() else { throw RequestDeadlineExceeded() }
                     if CFEqual(element, root.element) { return ref }
                     guard let (reference, _) = try related(element, app: root.application, scope: root.scope) else {
                         throw DriverError("native relation value expired before registration", code: .staleTarget)
@@ -740,7 +758,7 @@ import ApplicationServices
             var targets = [String](), expired = false
             for element in page.targets {
                 try RequestDiagnostics.checkCancellation()
-                guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+                guard budget.canCollect() else { break }
                 if CFEqual(element, root.element) {
                     targets.append(ref)
                     continue

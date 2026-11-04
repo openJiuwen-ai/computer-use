@@ -3,7 +3,8 @@
 import AppKit
 import ApplicationServices
 
-/// PREPARE: local activity only for a proven original-document selection need.
+/// PREPARE: local activity for an independent document need or a proven Qt
+/// popup opener. Ordinary AX declarations do not inherit either requirement.
 @MainActor enum PrepareNativeActionContextPass {
     static func run(
         _ unit: any NativeApplicationContextInput, plan: NativeClickPlan, boundary: NativeUnitBoundary,
@@ -19,24 +20,29 @@ import ApplicationServices
         } else {
             preparingDocument = false
         }
-        // An AXPress declaration does not establish an activation dependency.
-        // An AppKit activation notification can make a provider truly foreground
-        // and change popup lifetime, even though it was addressed to its PID.
-        // Only the independent document preparation may need this context.
-        guard preparingDocument else { return }
+        let opener = plan.qtPopupOpener
+        guard preparingDocument || opener != nil else { return }
         func validateAction() throws {
             try boundary.checkConditions()
             let facts = try objects.nativeActionFacts(node)
             guard NativeAction.matches(facts.actions, name: name, description: description) else {
                 throw DriverError("the selected action changed during local-context preparation", code: .staleTarget)
             }
+            if let opener, facts.qtPopupOpener != opener {
+                throw DriverError("the original Qt popup opener changed during preparation", code: .staleTarget)
+            }
+            if opener != nil, !preparingDocument, facts.enabled == false {
+                throw DriverError("the Qt popup opener became disabled", code: .inputUnavailable)
+            }
             try boundary.checkConditions()
         }
         try validateAction()
         let outcome = try await unit.prepare(
+            requirement: opener == nil ? .optional : .activeWhenKnownInactive,
             check: validateAction, onPreparation: receipt.recordPreparation,
             onCleanupUnknown: receipt.recordCleanupUnknown, onNativePreparation: evidence.record)
         try validateAction()
         evidence.observeActionContext(outcome)
+        if opener != nil { try NativeQtPopupOpener.requirePrepared(outcome) }
     }
 }

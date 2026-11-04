@@ -34,7 +34,7 @@ import ApplicationServices
             }
             try boundary.checkConditions()
         }
-        if let context = plan.actionContext {
+        if let context = plan.actionContext, plan.qtPopupOpener == nil {
             try await PrepareNativeActionContextPass.run(
                 context, plan: plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: objects)
         }
@@ -49,6 +49,12 @@ import ApplicationServices
                 authorizeForeground: { try AuthorizeNativeClickForegroundPass.run(plan) }, check: checkDocumentAction,
                 onPreparation: receipt.recordPreparation, onCleanupUnknown: receipt.recordCleanupUnknown,
                 onNativePreparation: evidence.record, onWait: evidence.recordWait)
+        }
+        // Qt's native popup is created by the requested action. Establish local
+        // activity after any document/foreground restitution that could undo it.
+        if let context = plan.actionContext, plan.qtPopupOpener != nil {
+            try await PrepareNativeActionContextPass.run(
+                context, plan: plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: objects)
         }
         if case .menu(let unit, _, _, _) = plan.target {
             let foreground = plan.command.foreground && !BackgroundTarget(unit.application).isForeground

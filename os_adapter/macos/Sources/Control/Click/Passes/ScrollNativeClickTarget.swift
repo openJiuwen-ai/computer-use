@@ -26,7 +26,7 @@ import AppKit
                     try NativeWindowScrollExposure.requirePassiveReceiver(
                         at: exposure.point, application: unit.application, window: unit.window, mapping: exposure.mapping)
                 }
-            },
+            }, guardOperation: boundary.checkConditions,
             onDispatch: {
                 if !entered {
                     entered = true

@@ -5,6 +5,7 @@ import ApplicationServices
 
 @MainActor protocol NativeApplicationContextInput {
     func prepare(
+        requirement: NativeApplicationContextUnit.Requirement,
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
@@ -19,9 +20,11 @@ import ApplicationServices
         var reportedActive: Bool?
     }
     enum Outcome: String { case skipped, unavailable, posted, activityObserved }
+    enum Requirement { case optional, activeWhenKnownInactive }
     let application: NSRunningApplication
 
     func prepare(
+        requirement: Requirement,
         check: @escaping @MainActor () throws -> Void, onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
@@ -33,11 +36,11 @@ import ApplicationServices
         let root = AXUIElementCreateApplication(application.processIdentifier)
         AXUIElementSetMessagingTimeout(root, 0.1)
         let coordinator = SyntheticFocusCoordinator.shared
-        return try await NativeBackgroundPreparationScope.perform(
-            target: target, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown
+        let outcome = try await NativeBackgroundPreparationScope.perform(
+            target: target, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown
         ) {
           try await Self.prepare(
-            pid: application.processIdentifier,
+            pid: application.processIdentifier, requirement: requirement,
             sample: {
                 State(
                     foregroundPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
@@ -72,12 +75,21 @@ import ApplicationServices
             },
             wait: { try await Task.sleep(for: .milliseconds(5)) })
         }
+        if requirement == .activeWhenKnownInactive, outcome == .activityObserved {
+            // Returning the real foreground is an actual state boundary. Do not
+            // reuse an active sample that preceded a required restitution.
+            try check()
+            try target.validate(input: true)
+            if AXAccess.read(root, kAXFrontmostAttribute).value as? Bool == false { return .posted }
+        }
+        return outcome
     }
 
     /// Optional construction and provider observations never authorize a new
     /// foreground route or prove input readiness.
     static func prepare(
-        pid: pid_t, sample: () throws -> State, alreadyPosted: () -> Bool, make: () -> CGEvent?,
+        pid: pid_t, requirement: Requirement = .optional,
+        sample: () throws -> State, alreadyPosted: () -> Bool, make: () -> CGEvent?,
         post: (CGEvent) -> Void, check: () throws -> Void, pollCheck: () throws -> Void = {},
         onPreparation: (String) -> Void, onNativePreparation: (NativePreparationEffect) -> Void,
         wait: () async throws -> Void
@@ -89,8 +101,13 @@ import ApplicationServices
         try check()
         let initial = try sample()
         try check()
-        guard let front = initial.foregroundPID, front != pid, initial.reportedActive != true else {
-            return try finish(.skipped)
+        if requirement == .activeWhenKnownInactive {
+            if initial.reportedActive == true { return try finish(.activityObserved) }
+            if initial.reportedActive == nil { return try finish(.skipped) }
+        } else {
+            guard let front = initial.foregroundPID, front != pid, initial.reportedActive != true else {
+                return try finish(.skipped)
+            }
         }
         if initial.reportedActive == nil && alreadyPosted() { return try finish(.skipped) }
         guard let event = make() else { return try finish(.unavailable) }
@@ -100,16 +117,18 @@ import ApplicationServices
         onNativePreparation(.init(kind: .focusNotification, phase: .willSend, detail: detail, window: nil))
         post(event)
         onNativePreparation(.init(kind: .focusNotification, phase: .returned, detail: detail, window: nil))
-        // This optional notification is not a readiness gate. Give the target
-        // two short queue turns; the real receiver is sampled after preparation
-        // and again at dispatch. An unimplemented ACK must not burn 275 ms.
+        // At most two queue turns under the original budget. Ordinary optional
+        // context never becomes a readiness gate; a proven inactive Qt opener
+        // separately consumes the observed outcome before dispatch.
         for attempt in 0..<3 {
             try pollCheck()
             let current = try sample()
             try pollCheck()
             if current.reportedActive == true { return try finish(.activityObserved) }
             // A missing provider report cannot turn optional context into a gate.
-            if current.reportedActive == nil || current.foregroundPID == pid { return try finish(.posted) }
+            if current.reportedActive == nil || requirement == .optional && current.foregroundPID == pid {
+                return try finish(.posted)
+            }
             if attempt < 2 { try await wait() }
         }
         return try finish(.posted)

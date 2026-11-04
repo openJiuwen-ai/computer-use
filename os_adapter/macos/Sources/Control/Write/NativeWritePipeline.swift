@@ -63,6 +63,7 @@ import ApplicationServices
                         }
                     }
                     AgentPointer.current?.recordOutcome(success: receipt.succeeded)
+                    NativeForegroundResponsibility.current?.report(to: activity)
                     receipt.impact = activity.finish(dispatch: receipt.dispatch, cleanup: receipt.cleanup)
                     return receipt.wire
                 }

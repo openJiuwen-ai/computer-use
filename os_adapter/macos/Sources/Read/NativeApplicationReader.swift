@@ -895,6 +895,18 @@ import ApplicationServices
                 if hints[index]?.id == native.mapping.id, let ref = remapped[item.ref] {
                     exactNativeIDs[ref] = native.mapping.id
                 }
+            } else if matches.isEmpty, let id = hints[index]?.id, let process,
+                hints.filter({ $0?.id == id }).count == 1
+            {
+                // The onscreen projection was sampled before this AX root.
+                // A reappearing popup can already report its exact physical
+                // ID while that earlier projection still omits it. Rejoin its
+                // already-proven identity rather than publish an AX-only ref
+                // that would disappear when the next native list arrives.
+                // This is not native presence/parent/input evidence: only a
+                // current native match above enters exactNativeIDs.
+                remapped[item.ref] = registry.knownWindowReference(
+                    nativeID: id, process: process, owner: app, element: item.element)
             }
         }
         try RequestDiagnostics.checkCancellation()

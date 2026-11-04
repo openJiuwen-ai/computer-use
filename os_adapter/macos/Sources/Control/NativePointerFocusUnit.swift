@@ -109,7 +109,8 @@ import ApplicationServices
                     unit: "pointer_sequence", kind: "click", parameters: ["button": "left", "count": 1],
                     foreground: false, element: true)
                 try await pointer.deliver(
-                    click, check: checkEffect, onDispatch: { onPreparation("verified editor pointer focus") },
+                    click, check: checkEffect, guardOperation: checkEffect,
+                    onDispatch: { onPreparation("verified editor pointer focus") },
                     onPosted: {}, onCleanupUnknown: onCleanupUnknown)
             },
             receives: {
@@ -180,12 +181,13 @@ import ApplicationServices
                 let click = try NativePointerIntent(
                     unit: "pointer_sequence", kind: "click", parameters: ["button": "left", "count": 1],
                     foreground: false, element: true)
+                let checkPoint: @MainActor @Sendable () throws -> Void = {
+                    try checkEffect()
+                    try scalar.validate(selected)
+                }
                 try await scalarPointer(selected).deliver(
                     click, from: selected.point, to: nil, viewport: selected.mapping.frame.size,
-                    check: {
-                        try checkEffect()
-                        try scalar.validate(selected)
-                    }, onDispatch: {
+                    check: checkPoint, guardOperation: checkPoint, onDispatch: {
                         clickStarted = true
                         onPreparation("verified scalar text-point focus")
                     }, onPosted: {},

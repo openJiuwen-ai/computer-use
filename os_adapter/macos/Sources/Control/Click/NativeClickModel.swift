@@ -26,6 +26,7 @@ import ApplicationServices
     var actionDocument: NativeActionDocumentContract? = nil
     var documentScope: NativeActionDocumentContexts.Scope? = nil
     var actionContext: (any NativeApplicationContextInput)? = nil
+    var qtPopupOpener: NativeQtPopupOpener? = nil
 }
 
 @MainActor struct NativeClickWindowPreparation {

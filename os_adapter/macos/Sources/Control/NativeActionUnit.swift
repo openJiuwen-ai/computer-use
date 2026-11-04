@@ -26,6 +26,7 @@ extension NativeElementControl {
         /// Current native leaf membership, separate from the observed owner.
         var popupElementWindowID: UInt32? = nil
         var qtComboChoice: NativeQtComboChoice? = nil
+        var qtPopupOpener: NativeQtPopupOpener? = nil
 
         /// Ordinary physical windows are now resolved from the stable scope,
         /// rather than retained AXWindow ancestors. Only a document-dependent
@@ -72,6 +73,11 @@ extension NativeElementControl {
             applicationMenuContext: [kAXMenuBarRole, kAXMenuBarItemRole].contains(role ?? "")
                 || target.ancestors.contains { inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole },
             foreground: BackgroundTarget(target.application).isForeground)
+        if [kAXMenuButtonRole, kAXPopUpButtonRole, kAXComboBoxRole].contains(role ?? "") {
+            let identifier = inspection.attribute(target.element, kAXIdentifierAttribute) as? String
+            let openerActions = try explicitRequest == nil ? actions : declaredActions(target.element)
+            facts.qtPopupOpener = NativeQtPopupOpener.query(role: role, identifier: identifier, actions: openerActions)
+        }
         // AXPress can resolve a nil-target AppKit action through the key/main
         // document, even though the AX object itself is addressed exactly.
         // Other explicit actions retain their independent object semantics.

@@ -11,7 +11,7 @@ import Foundation
         onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
         try await plan.pointer.deliver(
-            plan.activation, check: check, onDispatch: onActivation, onPosted: {},
+            plan.activation, check: check, guardOperation: check, onDispatch: onActivation, onPosted: {},
             onCleanupUnknown: onCleanupUnknown)
     }
 }

@@ -24,7 +24,8 @@ import AppKit
         var fixed = element
         fixed.frozenGeometry = qualification.geometry
         try await fixed.deliver(
-            request, check: check, onDispatch: onDispatch, onPosted: onPosted, onCleanupUnknown: onCleanupUnknown,
+            request, check: check, guardOperation: check, onDispatch: onDispatch, onPosted: onPosted,
+            onCleanupUnknown: onCleanupUnknown,
             delivery: .systemPointer)
     }
 }

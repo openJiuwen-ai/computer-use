@@ -45,6 +45,7 @@ import Foundation
     }
     private var clickAuthorities = [ClickAuthority]()
     private var clickPreparationRequiresObservation = false
+    private var foregroundResponsibility: NativeForegroundResponsibility?
     private let cancelActive: () -> Void
     private let now: () -> TimeInterval
 
@@ -52,6 +53,7 @@ import Foundation
         timeoutMs: Int, writable: Bool, intent: NativeIntent, target: [String: Any], clickContract: String? = nil,
         appChangeBaseline: NativeAppObserver.Stamp? = nil,
         sampleAppChange: @escaping @MainActor () -> NativeAppObserver.Stamp? = { nil },
+        foregroundResponsibility: NativeForegroundResponsibility? = nil,
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, release: @escaping () -> Void,
         cancelActive: @escaping () -> Void
     ) {
@@ -63,6 +65,7 @@ import Foundation
         self.clickContract = clickContract
         self.appChangeBaseline = appChangeBaseline
         self.sampleAppChange = sampleAppChange
+        self.foregroundResponsibility = foregroundResponsibility
         self.release = release
         self.cancelActive = cancelActive
         timer = Task { @MainActor [weak self] in
@@ -96,6 +99,7 @@ import Foundation
         // Compound keys/pointer trains retain the first requested-input epoch.
         // Preparation records never enter this barrier.
         inputStarted = true
+        foregroundResponsibility?.recordRequestedInput()
     }
 
     /// Preparation owns helper cleanup even when no requested input is sent.
@@ -300,7 +304,17 @@ import Foundation
             busy = false
             if state == .stopping { close() }
         }
-        let result = await body()
+        if foregroundResponsibility == nil {
+            foregroundResponsibility = NativeForegroundResponsibility(check: { [weak self] in
+                guard let self else { throw CancellationError() }
+                try self.check(write: true)
+                try RequestDiagnostics.checkCancellation()
+            })
+        }
+        foregroundResponsibility?.beginCandidate()
+        let result = await NativeForegroundResponsibility.$current.withValue(foregroundResponsibility) {
+            await body()
+        }
         // Defensive sealing also covers a unit that reported dispatch but
         // omitted its early barrier. Invalid results quarantine the executor.
         guard let dispatch = result["dispatch"] as? String,
@@ -349,6 +363,7 @@ import Foundation
     private func close() {
         guard !busy, state != .closed else { return }
         state = .closed
+        foregroundResponsibility?.stop()
         actionDocuments.clear()
         timer?.cancel()
         timer = nil

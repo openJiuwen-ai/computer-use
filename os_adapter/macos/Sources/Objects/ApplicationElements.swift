@@ -233,18 +233,40 @@ import ApplicationServices
     }
 
     func windowReference(_ window: NativeWindows.Window, element: AXUIElement? = nil) -> String {
+        windowReference(
+            nativeID: window.mapping.id, process: window.process, owner: window.application, element: element)
+    }
+
+    /// Identity continuity does not prove current visibility, geometry, or
+    /// input readiness; those stay with their native query owners.
+    func windowReference(
+        nativeID: CGWindowID, process: NativeProcessIdentity, owner: NSRunningApplication, element: AXUIElement?
+    ) -> String {
         let aliases =
             element.map {
                 [
                     Identity(
-                        pid: window.process.pid, launched: window.application.launchDate, element: $0,
-                        incarnation: window.process.incarnation)
+                        pid: process.pid, launched: owner.launchDate, element: $0,
+                        incarnation: process.incarnation)
                 ]
             } ?? []
         return references.reference(
             for: Identity(
-                pid: window.process.pid, launched: nil, element: nil, nativeWindow: window.mapping.id,
-                incarnation: window.process.incarnation), aliases: aliases)
+                pid: process.pid, launched: nil, element: nil, nativeWindow: nativeID,
+                incarnation: process.incarnation), aliases: aliases)
+    }
+
+    /// Rejoin an already-proven physical identity when the AX root is newer
+    /// than this collection's onscreen projection. Never allocate a physical
+    /// key without the native evidence that also owns its lifetime cleanup.
+    func knownWindowReference(
+        nativeID: CGWindowID, process: NativeProcessIdentity, owner: NSRunningApplication, element: AXUIElement
+    ) -> String? {
+        guard references.knownReference(for: Identity(
+            pid: process.pid, launched: nil, element: nil, nativeWindow: nativeID,
+            incarnation: process.incarnation)) != nil
+        else { return nil }
+        return windowReference(nativeID: nativeID, process: process, owner: owner, element: element)
     }
 
     func retireWindowReference(_ window: NativeWindows.Window) {
