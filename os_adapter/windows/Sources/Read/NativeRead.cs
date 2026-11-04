@@ -1033,7 +1033,7 @@ namespace ComputerUse.Windows
                     {
                         row.Statuses[field] = Wire.Obj(
                             "state", "notProbed", "detail",
-                            "Default line hints probe the visible requested root, documents or focused objects only; read an observed Element to inspect another text object.");
+                            "Default line-hint scope: visible requested root, documents and focused objects.");
                         continue;
                     }
 

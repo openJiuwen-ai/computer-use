@@ -36,13 +36,22 @@ def image_pairs(request):
 
 
 def run_script(server, tmp_path):
+    events = []
+
     async def run():
-        async with create_agent(server.model(), config=AgentConfig(workspace=str(tmp_path))) as agent:
+        async with create_agent(
+            server.model(),
+            config=AgentConfig(workspace=str(tmp_path)),
+            on_event=lambda kind, data: events.append({"kind": kind, **data}),
+        ) as agent:
             await agent.invoke({"query": "Inspect the prepared fixture and perform the requested operation."})
 
     asyncio.run(run())
     request = server.requests[-1]
     (tmp_path / "model-request.json").write_text(json.dumps(request, ensure_ascii=False, indent=2))
+    (tmp_path / "mcp-results.json").write_text(
+        json.dumps([event for event in events if event["kind"] == "tool_result"], ensure_ascii=False, indent=2)
+    )
     return request
 
 

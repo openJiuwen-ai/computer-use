@@ -21,11 +21,11 @@ namespace ComputerUse.Windows
             if (after.TextValueKnown && after.TextValue == plan.Text)
             {
                 result["confirmation"] = "confirmed";
-                result["detail"] = "Native replacement returned; the requested control value was observed. Submission still requires a separate action.";
+                result["detail"] = "Native replacement returned; the requested control value was observed.";
             }
             else if (state.TextValueKnown && after.TextValueKnown && after.TextValue == state.TextValue)
             {
-                result["detail"] = "Native replacement returned, but the control value remains unchanged and the requested literal text was not observed. No alternate input was sent; inspect the control or use its visible editing controls.";
+                result["detail"] = "Native replacement returned. Control value: unchanged. Requested literal text: unobserved. Alternate input: not sent.";
             }
             else
             {
