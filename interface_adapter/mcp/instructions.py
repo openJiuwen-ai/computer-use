@@ -7,10 +7,25 @@ Preloaded: computer, print, print_image. SDK methods return results directly;
 variables persist across calls. App selectors and paths refer to this host.
 
 Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
-Prefer observed elements for semantic actions: app.element(name).click(),
-element.type_text(text, replace=True), element.open_menu(). The SDK handles
-target preparation and delivery. Use screenshot coordinates for regions without
-a usable semantic target. Each window/page has its own accessibility coverage.
+Choose the interaction method for each operation using this preference:
+1. Prefer clearly identified elements: app.element(name).click(),
+   element.type_text(text, replace=True), element.open_menu().
+2. When the target has no usable element, element interaction encounters
+   problems, or the target, UI state or outcome is unclear, promptly inspect
+   the relevant App/Window screenshot.
+   Reuse an adequate current image; obtain an updated image with
+   app.read(view='image') or window.read(view='image') when needed. Use that
+   App/Window's coordinate or keyboard methods as appropriate, such as
+   window.click(at=(x, y)) or window.press_key('Return').
+3. If App/Window operations still cannot advance the task, inspect the desktop
+   with computer.read(view='image') and use desktop-level mouse or keyboard
+   methods, such as computer.click(at=(x, y)) or computer.press_key('Return').
+Apply this preference anew to every subsequent operation, including after
+desktop input. Reuse established behavior for the corresponding control and
+context; prefer usable elements for the next target. Choose another method
+directly when current evidence makes it more direct, reliable or efficient.
+The SDK handles target preparation, delivery routes and technical recovery.
+Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.
 For double-click: from computer_use import ClickOption;
 app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
@@ -47,7 +62,7 @@ dispatched means input was sent; verified identifies the stated local check.
 Assess task completion from observed UI content. On failure, use execution
 progress and attached observations. Correct an invalid argument when its input
 was not dispatched. For unknown input progress, inspect the affected scope
-before deciding the remaining actions. The SDK handles technical recovery.
+before deciding the remaining actions.
 Key examples: 'super+a', 'Return', 'Escape'; modifiers: super, ctrl, alt, shift.
 Timeout/cancellation clears this Python session; a subsequent call starts fresh.
 """
