@@ -247,6 +247,9 @@ import ApplicationServices
             }
             atomicText = events
         }
+        let textFragments =
+            atomicText == nil && !text.isEmpty
+            ? try Input.prepareTextFragments(text, foreground: delivery.isGlobal) : nil
         // An existing full AX range can have been set without the editor's
         // Select All command. Establish keyboard editing even in that case.
         if selection.usesWindowCommand || !before.full {
@@ -291,15 +294,17 @@ import ApplicationServices
         }
         var contentStarted = false
         func beforeContent() async throws {
-            try await validate()
-            if !contentStarted, !selected() {
-                throw DriverError(
-                    selection == .selectAll
-                        ? """
-                        Select All did not produce a stable selection inside the addressed editor; no \
-                        replacement text sent
-                        """ : "the target does not have a confirmed full-text selection; no replacement text sent",
-                    code: .inputUnavailable)
+            if !contentStarted {
+                try await validate()
+                if !selected() {
+                    throw DriverError(
+                        selection == .selectAll
+                            ? """
+                            Select All did not produce a stable selection inside the addressed editor; no \
+                            replacement text sent
+                            """ : "the target does not have a confirmed full-text selection; no replacement text sent",
+                        code: .inputUnavailable)
+                }
             }
             // Selection/parent queries can call into application code. A valid
             // range is not authority to use a receiver sampled before them.
@@ -317,6 +322,12 @@ import ApplicationServices
             try await Input.preparedAtomicText(
                 atomicText, delivery: delivery, applicationPID: applicationPID, validate: beforeContent,
                 onDispatch: onDispatch, onPosted: posted, onCleanupUnknown: onCleanupUnknown)
+        } else if let textFragments {
+            for fragment in textFragments {
+                try await Input.preparedAtomicText(
+                    fragment, delivery: delivery, applicationPID: applicationPID, validate: beforeContent,
+                    onDispatch: onDispatch, onPosted: posted, onCleanupUnknown: onCleanupUnknown)
+            }
         } else {
             try await Input.preparedText(
                 text, delivery: delivery, applicationPID: applicationPID, validate: beforeContent,

@@ -41,10 +41,13 @@ struct NativeKeyboardSelection {
             guard let value = selected().value, CFGetTypeID(value) == AXTextMarkerRangeGetTypeID() else { return nil }
             return unsafeDowncast(value, to: AXTextMarkerRange.self)
         }
-        guard let before = numeric(), before.contiguous, before.location == 0, let length = before.length,
-            // The count field is a scalar native character extent, not a collection.
-            // swiftlint:disable:next empty_count
-            before.count == 0 || length > 0, let selection = range(), owns(AXTextMarkerRangeCopyStartMarker(selection)),
+        // This recipe has sent the editor's Select All command. Generated or
+        // non-editable prefix text still contributes to the AX extent: a valid
+        // editing selection can start later, and an empty editing region can
+        // remain a caret there. Prove its ownership and stability rather than
+        // imposing the separate numeric full-range recipe on this command.
+        guard let before = numeric(), before.contiguous, before.location != nil, before.length != nil,
+            let selection = range(), owns(AXTextMarkerRangeCopyStartMarker(selection)),
             owns(AXTextMarkerRangeCopyEndMarker(selection)), let after = numeric(), after.contiguous,
             after.count == before.count, after.location == before.location, after.length == before.length,
             let current = range(), CFEqual(selection, current)

@@ -62,7 +62,14 @@ def scope_plan(
     owners = {ref: child for child in keys for ref in block_sources(child, blocks)}
     if not owners or not same_scope(draft, tuple(owners)):
         return None
-    measured = measured_units(keys, draft, blocks)
+    # The parent already presents its label. Keep that original child directly
+    # under the parent so a visual column cannot present it again as content.
+    # Other children remain eligible for the same local geometric analysis.
+    measured = measured_units(
+        tuple(child for child in keys if parent.label_ref is None or blocks[child].primary_ref != parent.label_ref),
+        draft,
+        blocks,
+    )
     measured_keys = tuple(child for child in keys if child in measured)
     if not measured_keys:
         return None

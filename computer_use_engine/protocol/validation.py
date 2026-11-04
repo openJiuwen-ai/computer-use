@@ -21,7 +21,10 @@ def _unicode(value):
 
 def validate_text(value):
     if not isinstance(value, str) or re.search("[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]", value):
-        raise ValueError("typeText expects one line of text; control characters are unsupported.")
+        raise ValueError(
+            "typeText expects one line of text; use paste for multiline content or tabs, "
+            "and press_key for control keys."
+        )
     if not _unicode(value):
         raise ValueError("typeText expects valid Unicode")
 

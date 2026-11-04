@@ -9,6 +9,7 @@ variables persist across calls. App selectors and paths refer to this host.
 Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
 list_apps() entries expose id, display_name, and is_running. app() selects a
 scope; the first app.read() starts a nonrunning installed app when needed.
+app.read() discovers numbered windows; app.window(ref) binds one observed window.
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
@@ -29,6 +30,8 @@ directly when current evidence makes it more direct, reliable or efficient.
 The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.
+type_text() accepts one line. For multiline text or tabs, use element.paste(text)
+or window.paste(text); paste inserts at the target's current selection.
 For double-click: from computer_use import ClickOption;
 app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
 to its Element: app.element(ref).perform_action('raise'), including a window root.
@@ -40,7 +43,7 @@ Reads and action observations automatically present text and images; action
 receipts also appear automatically. Combined calls keep each receipt and the
 latest automatic observation per scope; explicitly printed views are retained.
 print() is for other values; print_image()
-is for custom images. A subtree or read_text() bounds text content. The first
+is for custom images. A subtree or element.read_text() bounds text content. The first
 observation presents collected content; later observations use diff by default.
 diff lists changes against that window's delivered baseline; unchanged means
 the observed scope matches that baseline. read(full=True) presents the complete

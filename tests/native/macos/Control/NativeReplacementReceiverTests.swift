@@ -6,6 +6,8 @@ import ApplicationServices
 @main enum NativeReplacementReceiverTests {
     @MainActor static func main() throws {
         scalarRecipeRequiresTextCapability()
+        richEditorSelectionUsesScopedCommand()
+        try richTextFragmentsPreserveInput()
         let window = AXUIElementCreateApplication(1_000_001)
         let element = AXUIElementCreateApplication(1_000_002)
         let other = AXUIElementCreateApplication(1_000_003)
@@ -75,6 +77,66 @@ import ApplicationServices
             preconditionFailure("whole-string encoding silently introduced a submit/control key")
         } catch let error as DriverError { precondition(error.code == .invalidRequest) }
         print("PASS replacement receiver, scalar text contract and atomic encoding regressions")
+    }
+
+    static func richEditorSelectionUsesScopedCommand() {
+        func marker(_ value: UInt8) -> AXTextMarker {
+            var bytes = [UInt8](repeating: value, count: 32)
+            return AXTextMarkerCreate(nil, &bytes, bytes.count)
+        }
+        let start = marker(1), end = marker(2)
+        let caret = AXTextMarkerRangeCreate(nil, start, start)
+        let selected = AXTextMarkerRangeCreate(nil, start, end)
+        func scoped(_ state: NativeTextSelection, range: AXTextMarkerRange, owns: Bool = true) -> Bool {
+            NativeKeyboardSelection.isScoped(numeric: { state }, selected: { .value(range) }, owns: { _ in owns })
+        }
+        // A CSS placeholder is exposed as 23 characters although the editable
+        // region is empty. Select All legitimately leaves a caret after it.
+        precondition(scoped(.init(count: 23, location: 23, length: 0), range: caret))
+        // Non-editable leading content can precede the actual editing range.
+        precondition(scoped(.init(count: 30, location: 23, length: 7), range: selected))
+        precondition(scoped(.init(count: 7, location: 0, length: 7), range: selected))
+        precondition(!scoped(.init(count: 23, location: 23, length: 0), range: caret, owns: false))
+        precondition(!scoped(.init(count: 7, location: 0, length: 7, contiguous: false), range: selected))
+        precondition(!scoped(.init(count: 7, location: nil, length: nil), range: selected))
+        var reads = 0
+        precondition(!NativeKeyboardSelection.isScoped(
+            numeric: {
+                reads += 1
+                return .init(count: 30, location: reads == 1 ? 23 : 24, length: reads == 1 ? 7 : 6)
+            }, selected: { .value(selected) }, owns: { _ in true }))
+        reads = 0
+        precondition(!NativeKeyboardSelection.isScoped(
+            numeric: { .init(count: 30, location: 23, length: 7) },
+            selected: {
+                reads += 1
+                return .value(reads == 1 ? selected : caret)
+            }, owns: { _ in true }))
+    }
+
+    @MainActor static func richTextFragmentsPreserveInput() throws {
+        let text = String(repeating: "a", count: 19) + "🙂中文 e\u{301} " + String(repeating: "test🙂", count: 30)
+        let fragments = try Input.prepareTextFragments(text, foreground: true)!
+        precondition(fragments.count > 1)
+        var complete = ""
+        for fragment in fragments {
+            var pair = [String]()
+            for event in [fragment.down, fragment.up] {
+                var count = 0
+                event.keyboardGetUnicodeString(maxStringLength: 0, actualStringLength: &count, unicodeString: nil)
+                precondition(count > 0 && count <= 20)
+                var units = [UniChar](repeating: 0, count: count)
+                event.keyboardGetUnicodeString(maxStringLength: count, actualStringLength: &count, unicodeString: &units)
+                let value = String(decoding: units, as: UTF16.self)
+                precondition(Array(value.utf16) == units, "a Unicode scalar was split between fragments")
+                pair.append(value)
+            }
+            precondition(pair[0] == pair[1])
+            complete += pair[0]
+        }
+        precondition(complete == text, "fragmentation must retain every original character exactly once")
+        let empty = try Input.prepareTextFragments("", foreground: false)
+        precondition(empty?.isEmpty == true)
     }
 
     @MainActor static func scalarRecipeRequiresTextCapability() {

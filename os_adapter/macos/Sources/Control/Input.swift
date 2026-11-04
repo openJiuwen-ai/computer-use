@@ -213,6 +213,29 @@ import Carbon
         return try atomicTextEvents(text, source: source(), key: asciiKeys()[String(first)], foreground: foreground)
     }
 
+    /// Prepare bounded Unicode payloads before changing a rich editor's
+    /// selection. Keep surrogate pairs together and verify every event's exact
+    /// payload; delivery still revalidates the receiver before each fragment.
+    static func prepareTextFragments(_ text: String, foreground: Bool) throws -> [AtomicTextEvents]? {
+        var fragments = [AtomicTextEvents](), pending = "", units = 0
+        for scalar in text.unicodeScalars {
+            let width = scalar.value > 0xffff ? 2 : 1
+            if units + width > 20 {
+                guard let events = try prepareAtomicText(pending, foreground: foreground) else { return nil }
+                fragments.append(events)
+                pending = ""
+                units = 0
+            }
+            pending.unicodeScalars.append(scalar)
+            units += width
+        }
+        if !pending.isEmpty {
+            guard let events = try prepareAtomicText(pending, foreground: foreground) else { return nil }
+            fragments.append(events)
+        }
+        return fragments
+    }
+
     /// One selected Unicode string, with the same receiver, mutation barrier,
     /// paired release and delivery settling as ordinary keyboard text.
     static func preparedAtomicText(
