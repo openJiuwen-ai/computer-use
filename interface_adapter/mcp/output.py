@@ -153,7 +153,7 @@ class ObservationOutput:
         key = self.presenter.key(observation)
         if key not in self._pending and len(self._pending) >= 32:
             raise RuntimeError(
-                "Too many observation scopes in one call; inspect the collected results before reading more."
+                "Too many observation scopes in one call (limit: 32)."
             )
         self._pending[key] = observation
 

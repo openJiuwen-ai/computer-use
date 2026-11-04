@@ -112,7 +112,7 @@ namespace ComputerUse.Windows
                 if (scanned.Add(NativeReadStore.Runtime(layout)))
                     CollectEditors(layout, found, new HashSet<string>(), r);
             if (found.Count > 1)
-                throw new Failure("ambiguous_target", "The selected composite contains more than one independent text editor; select a specific editor. No text was sent.");
+                throw new Failure("ambiguous_target", "The selected composite contains multiple independent text editors. No text was sent.");
             foreach (var element in found.Values)
             {
                 if (!OwnedEditor(element, owner, r))

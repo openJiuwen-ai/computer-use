@@ -206,5 +206,3 @@ def render_observation(observation: Record, observed: Record | None = None) -> R
         contextRefs=rendered["contextRefs"] if rendered is not None else {},
         imageContext=image_context,
     )
-
-

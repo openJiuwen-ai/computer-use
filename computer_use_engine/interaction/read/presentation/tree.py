@@ -191,7 +191,6 @@ def interaction_view(root: SemanticNode, include_background: bool) -> SemanticNo
                 "partialReason": (
                     f"background blocked by "
                     f"{', '.join(root['blockedBy'])}"
-                    f"; select this window explicitly to inspect its background"
                 ),
             }
             node.pop("childrenRead", None)

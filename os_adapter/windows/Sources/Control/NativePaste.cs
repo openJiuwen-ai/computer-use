@@ -76,12 +76,12 @@ namespace ComputerUse.Windows
                 var handoff = lease.Handoff(r);
                 result["detail"] =
                     handoff == NativePasteHandoff.TargetRead
-                        ? "The original native consumer retrieved the clipboard payload; observe the control to verify the application effect."
+                        ? "The original native consumer retrieved the clipboard payload."
                     : handoff == NativePasteHandoff.OwnershipLost
-                        ? "Paste chord was sent, but clipboard ownership changed before target delivery was confirmed. Observe the target; no input was replayed."
+                        ? "Paste chord sent. Clipboard ownership changed; target delivery unconfirmed."
                     : handoff == NativePasteHandoff.TargetLost
-                        ? "Paste chord was sent, but the original native consumer ended before delivery was confirmed. Its application effect remains unconfirmed; no input was replayed."
-                        : "Paste chord was sent; target clipboard delivery remains unconfirmed after the bounded handoff wait. A pending paste may still run. Observe the target before further input; nothing was replayed.";
+                        ? "Paste chord sent. Original native consumer ended; target delivery unconfirmed."
+                        : "Paste chord sent. Clipboard handoff wait expired; target delivery and paste completion unknown.";
             }
             finally
             {

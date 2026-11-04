@@ -209,12 +209,12 @@ class NativeCapture:
         expected = image.keyboard
         require(
             expected is not None and expected.instance.alive,
-            "The observed desktop keyboard window is unknown or expired; read the desktop before keys.",
+            "The observed desktop keyboard window is unknown or expired.",
             "stale_target",
         )
         current = self.keyboard_snapshot(ctx)
         require(
-            current == expected, "The desktop keyboard window changed; read the desktop before keys.", "stale_target"
+            current == expected, "The desktop keyboard window changed.", "stale_target"
         )
         return expected
 
@@ -266,7 +266,7 @@ class NativeCapture:
         retained = self.entries.get(target["capture"])
         require(
             retained is not None and retained.target == target,
-            "The original image binding expired or changed scope; read before using coordinates.",
+            "The original image binding expired or changed scope.",
             "stale_target",
         )
         return retained

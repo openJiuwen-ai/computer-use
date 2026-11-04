@@ -32,7 +32,7 @@ import CoreGraphics
         func validate(_ current: Self?) throws {
             guard let current else {
                 throw DriverError(
-                    "desktop keyboard destination is unavailable; observe before input", code: .inputUnavailable)
+                    "desktop keyboard destination is unavailable", code: .inputUnavailable)
             }
             guard current.process == process, current.window == window,
                 focusedWindow == nil || current.focusedWindow == nil || focusedWindow == current.focusedWindow

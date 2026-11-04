@@ -239,7 +239,6 @@ class InterfaceReadPipeline:
             choices = controller.interfaces.windows.choices(directory, state.name or str(instance.selector))
             lines = [
                 DisplayText("interface_header", (capture_header(controller, ui, directory, parts=()),)),
-                "Select a window with computer.window(id) or app.window(id).",
                 "Tree: not expanded; no unique observation window was selected.",
             ]
             if not choices:

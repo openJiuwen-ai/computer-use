@@ -39,9 +39,7 @@ class X11WindowCaptures:
     FIRST_UPDATE_WAIT = 0.7
     UPDATE_COALESCE = 0.02
     WAIT_NOTE = (
-        "The window image was sampled before an update after capture storage initialization "
-        "was confirmed. It may omit content; the bounded wait ended. Read again "
-        "if the required content is missing."
+        "Window update after capture storage initialization: unconfirmed at capture deadline."
     )
 
     def __init__(self, owner):
@@ -327,7 +325,7 @@ class X11WindowCaptures:
             lease.parents_dirty = False
         require(
             lease.fault is None,
-            "Window update observation failed; read the desktop instead.",
+            "Window update observation failed.",
             "observation_unavailable",
         )
         if lease.storage_dirty:

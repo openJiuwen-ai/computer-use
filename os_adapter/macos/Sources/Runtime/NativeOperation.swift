@@ -263,7 +263,7 @@ import Foundation
             }
             guard !clickPreparationRequiresObservation else {
                 throw DriverError(
-                    "preparation changed or may have changed the original click context; observe before continuing",
+                    "preparation changed or may have changed the original click context",
                     code: .executionUnknown, effect: .possible)
             }
         } catch {

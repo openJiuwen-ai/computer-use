@@ -14,7 +14,7 @@ from computer_use_linux.contracts.protocol import Failure
 def send_native_unit(method, obj, args, native_call):
     ok = native_call("EditableText", method, obj, *args)
     if not ok:
-        raise Failure("The native text call did not confirm success; inspect before continuing.", "execution_unknown")
+        raise Failure("Native text call success was not confirmed.", "execution_unknown")
 
 
 CONTRACT = {

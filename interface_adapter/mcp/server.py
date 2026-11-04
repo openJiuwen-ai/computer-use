@@ -103,11 +103,7 @@ class ComputerUseServer:
                         content=[
                             dict(
                                 type="text",
-                                text=(
-                                    "No active execution session or capture streams. The next computer_use call "
-                                    "starts a fresh "
-                                    "environment."
-                                ),
+                                text="Execution session: inactive. Capture streams: inactive.",
                             )
                         ]
                     )

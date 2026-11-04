@@ -542,11 +542,9 @@ class ExecutionSession:
                         type="text",
                         text=(
                             "Execution session reset. Python variables, App/Element handles and "
-                            "observations cleared; session capture streams stopped and preview reset "
-                            "requested. Apps, documents, files and completed actions are unchanged. The "
-                            "next computer_use call starts a fresh "
-                            "environment."
-                        ),
+                            "observations cleared. Capture streams stopped."
+                        )
+                        + (" Preview reset requested." if self.on_preview is not None else ""),
                     )
                 ]
             )
