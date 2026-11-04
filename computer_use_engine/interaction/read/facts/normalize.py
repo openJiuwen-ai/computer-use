@@ -62,6 +62,22 @@ _VALUE_FIELDS = {
 }
 _STRUCTURAL_FIELDS = {"text.source", "text.unit", "text.content_field"}
 _ISSUES_PRESERVING_CONTENT = {"partial", "error", "timeout", "unavailable", "redacted", "stale", "conflict"}
+_CHILD_CONTENT_ROLES = frozenset(
+    (
+        "window",
+        "dialog",
+        "alert",
+        "sheet",
+        "popover",
+        "browser",
+        "scroll_area",
+        "web_area",
+        "document",
+        "list",
+        "table",
+        "tree",
+    )
+)
 
 
 def presentation_role(role: str | None) -> str:
@@ -408,6 +424,18 @@ def _project_facts(
         complete = relation["state"] == "complete"
         confirmed = relation["certainty"] == "confirmed"
         if relation["state"] in ("absent", "unsupported"):
+            # Unsupported children are normal on leaves, but do not establish
+            # that a content region is empty. Preserve this local gap unless a
+            # separately reported children view already accounts for coverage.
+            if (
+                kind == "children"
+                and relation["state"] == "unsupported"
+                and value.nodes[token].role in _CHILD_CONTENT_ROLES
+                and not child_views.get(token)
+            ):
+                source["partialReason"] = "child enumeration unsupported; contents unknown"
+                source["childEnumerationUnsupported"] = True
+                source["preserveGroup"] = True
             extra_edges.append(relation)
             continue
         if kind == "children" and confirmed:

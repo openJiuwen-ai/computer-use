@@ -90,6 +90,13 @@ def image_metadata(png):
     return known["metadata"] if known is not None else None
 
 
+def register_image_delivery(png, callback):
+    """Attach accounting to the existing exact-image delivery acknowledgement."""
+    known = _source(png)
+    if known is not None:
+        known.setdefault("delivery_callbacks", []).append(callback)
+
+
 def image_delivered(png, coordinates: ImageCoordinates | None = None):
     known = _source(png)
     if known is not None and known["source"].get("current", lambda: True)() is not False:
@@ -103,3 +110,5 @@ def image_delivered(png, coordinates: ImageCoordinates | None = None):
                 delivered()
             else:
                 delivered(coordinates)
+        for callback in known.pop("delivery_callbacks", ()):
+            callback()

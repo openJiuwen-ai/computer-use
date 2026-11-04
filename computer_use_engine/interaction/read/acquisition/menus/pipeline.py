@@ -33,9 +33,6 @@ from computer_use.interaction.read.acquisition.menus.model import (
 from computer_use.interaction.read.acquisition.menus.passes.assemble_menu_sources import (
     stage as assemble_menu_sources,
 )
-from computer_use.interaction.read.acquisition.menus.passes.check_menu_collection_budget import (
-    stage as check_menu_collection_budget,
-)
 from computer_use.interaction.read.acquisition.menus.passes.collect_menu_level import (
     stage as collect_menu_level,
 )
@@ -392,7 +389,6 @@ class MenuCollectionPipeline(Pipeline["MenuCollectionRequest", "MenuRead"]):
                     selector=select_menu_source_kind(port=port),
                     branches={False: window, True: application},
                 ),
-                check_menu_collection_budget(),
                 assemble_menu_sources(),
             ],
         )

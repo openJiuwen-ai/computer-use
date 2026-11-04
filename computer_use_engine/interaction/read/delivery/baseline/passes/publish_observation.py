@@ -19,12 +19,7 @@ if TYPE_CHECKING:
 
 def create(*, store: BaselineStore) -> Callable[[BaselineDraft, Control], None]:
     def publish(value: BaselineDraft, control: Control) -> None:
-        """Store the prepared delivery baseline within the configured capacity limits.
-
-        Skip a baseline larger than the byte limit; otherwise evict oldest entries until scope
-        and byte capacity permit insertion. Update the retained-byte total with the stored
-        baseline.
-        """
+        """Replace the delivered baseline; the owner manages memory and spill storage."""
         store.publish_baseline(value)
 
     return publish

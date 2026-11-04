@@ -19,7 +19,6 @@ from mcp.server.lowlevel import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
-from .history import HISTORY_KEY, history_request
 from .session import ExecutionSession
 
 DESCRIPTION = (
@@ -30,7 +29,8 @@ DESCRIPTION = (
     "call them without await, including app.element(name).click(). Variables survive calls. "
     "Prefer one computer_use call for multiple operations whose targets and steps are "
     "already confirmed and require no intermediate observation. Each operation finishes or "
-    "raises before the next statement runs. Use the related observation returned after each action to assess its effect; "
+    "raises before the next statement runs. Use the related observation returned after each action "
+    "to assess its effect; "
     "read again when more or newer evidence is needed. "
     "Stop and observe before continuing if an operation fails, the state needed for the "
     "next operation is uncertain, or the next decision requires fresh UI evidence. "
@@ -38,10 +38,12 @@ DESCRIPTION = (
     "The receipt remains valid if that observation fails; do not replay input to repair a read. "
     "Reads default to tree for "
     "App/Window and both for Computer; view='image' or 'both' requests images. "
-    "Reads automatically present text; diffs require host-confirmed retained "
-    "history, otherwise full text is used. state.text is always complete for its "
+    "Reads automatically present text: first observations are complete, then changes "
+    "are shown by default within this session. state.text is always complete for its "
     "bounded view. Use read(full=True) for full presentation, print() for other "
-    "values, and print_image() for images. print_image labels dimensions and "
+    "values, and print_image() for images. Printing an observation, its text, or a direct text slice "
+    "reuses its automatic presentation instead of printing a second full view. "
+    "Use a subtree or read_text to bound observation content. print_image labels dimensions and "
     "source without reading again. One tool call at a time; 45 s without native "
     "command progress; command starts/completions renew the watchdog, printing "
     "does not. Individual commands keep their own deadlines. "
@@ -73,7 +75,6 @@ def capabilities():
             "computer-use-host": dict(version=1, platform=platform),
             "computer-use-preview": dict(version=2),
             "computer-use-demo-foreground": dict(version=1),
-            HISTORY_KEY: dict(version=1),
         },
     )
 
@@ -199,7 +200,6 @@ class ComputerUseServer:
 
             result = await self.session.execute(
                 args["code"],
-                history=history_request(metadata.get(HISTORY_KEY)) if _supports(experimental, HISTORY_KEY, 1) else None,
                 title=args.get("title"),
                 on_progress=report_progress if progress_token is not None else None,
             )
@@ -241,7 +241,9 @@ async def main(*, allow_global_input=True):
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Computer Use stdio MCP host")
     parser.add_argument(
-        "--allow-global-input", action=argparse.BooleanOptionalAction, default=True,
+        "--allow-global-input",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Allow global mouse and keyboard input (default: enabled); qualified low-impact routes remain preferred",
     )
     args = parser.parse_args(argv)

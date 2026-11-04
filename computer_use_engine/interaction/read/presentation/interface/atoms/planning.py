@@ -215,6 +215,7 @@ def _coverage(node: NodeView) -> AtomCoverage:
         node.get("nextChildOffset"),
         tuple(node.get("childOmissions", ())),
         unexpanded_menu(node),
+        node.get("childEnumerationUnsupported", False),
     )
 
 

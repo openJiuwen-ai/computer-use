@@ -247,7 +247,7 @@ class InterfaceWriter:
             if coverage.next_offset is not None:
                 count += "; cursor below"
             result.append("Children: " + count)
-            if coverage.next_offset is None:
+            if coverage.next_offset is None and not coverage.enumeration_unsupported:
                 result.append(f"Inspect subtree: app.element({atom.ref}).read()")
         result.extend("Omitted: " + field(item) for item in coverage.omissions)
         return tuple(result)
@@ -727,6 +727,8 @@ class InterfaceWriter:
             self.lines.append(heading)
             if label is not None:
                 self.lines.extend(indent + line for line in self.atom_lines(label, shared=True)[1:])
+                if self.request.coverage is None or label not in self.request.coverage.omitted_refs:
+                    self.lines.extend(indent + "\t" + line for line in self.coverage_lines(self.atoms[label]))
             context = (*context, (key, heading))
             for child in block.children:
                 member = self.document.blocks[child]

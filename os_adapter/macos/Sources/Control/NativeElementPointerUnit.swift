@@ -18,10 +18,12 @@ import ApplicationServices
     /// retain their existing fresh gesture geometry and exposure preparation.
     var frozenGeometry: Geometry? = nil
     var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
+    var requiresForegroundGeometry = false
 
-    func requiring(_ requirement: NativePointerReadiness.Requirement) -> Self {
+    func requiring(_ requirement: NativePointerReadiness.Requirement, foregroundGeometry: Bool = false) -> Self {
         var unit = self
         unit.pointerRequirement = requirement
+        unit.requiresForegroundGeometry = foregroundGeometry
         return unit
     }
 
@@ -29,7 +31,9 @@ import ApplicationServices
     /// requirement. New local window units cannot silently restore the default.
     func pointerUnit(mapping: WindowGeometry.WindowMapping) -> NativePointerUnit {
         NativePointerUnit(
-            application: application, window: mapping, nativeWindow: window, pointerRequirement: pointerRequirement)
+            application: application, window: mapping, nativeWindow: window,
+            pointerRequirement: requiresForegroundGeometry ? .foregroundWindowPoint : pointerRequirement,
+            recipientElement: member ?? element)
     }
 
     static func allowsDispatchBasis(

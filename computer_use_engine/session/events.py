@@ -92,6 +92,12 @@ def observations_invalidated(source):
         _observation_handler(dict(kind="invalidate", source=source))
 
 
-def pending_observations_discarded(source):
+def observations_before_write(source):
+    """Publish earlier captured facts before the next operation can change them.
+
+    Observation delivery is a history of facts, not a cache cleared by a later
+    action's failure. A host may buffer reads, but must retain their position
+    before this write, including when that write is refused or interrupted.
+    """
     if _observation_handler:
-        _observation_handler(dict(kind="discard-pending", source=source))
+        _observation_handler({"kind": "before-write", "source": source})

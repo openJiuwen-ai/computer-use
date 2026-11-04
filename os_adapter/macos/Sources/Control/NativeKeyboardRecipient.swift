@@ -6,7 +6,7 @@ import ApplicationServices
 /// A call-local event endpoint and its independent focused-object/window proof.
 /// Every new event rechecks the retained proof; cleanup keeps the captured PID.
 @MainActor struct NativeKeyboardRecipient {
-    typealias Endpoint = NativeKeyboardEndpoint.Candidate<AXUIElement>
+    typealias Endpoint = NativeEventEndpoint.Candidate<AXUIElement>
     /// Read-only OS leaves used by resolution and the final dispatch proof.
     @MainActor struct Queries {
         var focus: @MainActor (pid_t) -> AXUIElement? = {
@@ -21,7 +21,7 @@ import ApplicationServices
         var process: @MainActor (pid_t) -> NativeProcessIdentity? = NativeProcessIdentity.read
         var windowID: @MainActor (AXUIElement) -> CGWindowID? = BackgroundEvents.nativeWindowID
         var role: @MainActor (AXUIElement) -> String? = { AXAccess.read($0, kAXRoleAttribute).value as? String }
-        var endpoint: @MainActor (AXUIElement) throws -> Endpoint? = NativeKeyboardEndpoint.read
+        var endpoint: @MainActor (AXUIElement) throws -> Endpoint? = NativeEventEndpoint.read
         var webArea: @MainActor (AXUIElement, WindowGeometry.WindowMapping, pid_t) -> AXUIElement? = {
             BackgroundEvents.hostedWebArea($0, in: $1, actual: $2)
         }

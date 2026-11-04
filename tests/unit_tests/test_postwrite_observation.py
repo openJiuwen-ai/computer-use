@@ -104,6 +104,16 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertIs(result.observation, self.observation)
         self.assertEqual(result.window_lifecycle, "observed")
 
+    async def test_failed_optional_refresh_keeps_first_content_and_reports_its_gap(self):
+        gap = ObservationGap("refresh", "observation_refresh_failed", "first capture retained", "read again if needed")
+        retain_observation_data(self.observation, (), (), partial=True, directory=self.directory, gaps=(gap,))
+        result = await self.run_action()
+        self.assertIs(result.observation, self.observation)
+        self.assertEqual(result.observation_status, "partial")
+        self.assertEqual(result.observation_error.code, gap.code)
+        self.assertEqual(result.status, "dispatched")
+        self.execute.assert_awaited_once()
+
     async def test_available_text_without_original_window_directory_keeps_lifecycle_unknown(self):
         retain_observation_data(self.observation, (), ())
         result = await self.run_action()

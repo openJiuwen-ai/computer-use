@@ -240,15 +240,15 @@ def test_known_number_cannot_cross_application_or_session():
 
 
 @pytest.mark.parametrize("effect", ["none", "partial", "possible"])
-def test_host_discard_failure_cannot_replace_original_action_error(effect):
+def test_failed_write_preserves_observation_history_and_original_error(effect):
     async def run():
         controller, app, _, snapshot, observation = scenario()
         error = failure(effect=effect)
         controller.engine.execute.side_effect = error
+        delivered = []
 
         def handler(event):
-            if event["kind"] == "discard-pending":
-                raise ValueError("host discard failed")
+            delivered.append(event["kind"])
 
         set_observation_handler(handler)
         try:
@@ -258,7 +258,9 @@ def test_host_discard_failure_cannot_replace_original_action_error(effect):
             set_observation_handler(None)
         assert caught.value is error and error.effect == effect
         assert error.__cause__.args == ("native evidence",)
-        assert "host discard failed" in " ".join(error.__notes__)
+        # Earlier facts are published before input. A later failure must not
+        # issue the removed discard event or erase the native outcome.
+        assert delivered == ["before-write"]
         assert error.observation is observation
         controller.engine.execute.assert_awaited_once()
         controller.interfaces.read.assert_awaited_once()

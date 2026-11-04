@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.content import render_text
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
@@ -18,7 +18,7 @@ from computer_use.interaction.read.presentation.rendering.output import (
     RenderedLiteral,
     RenderedSection,
 )
-from computer_use.protocol.primitives import trim_start, utf16_length
+from computer_use.protocol.primitives import trim_start
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.delta import DeltaPlan, TreeDelta
@@ -48,7 +48,7 @@ def _section_delta(section: RenderedSection, delta: TreeDelta, missing: tuple[st
         lines.append("Not observed in this read (not proof of removal): " + ", ".join(unobserved))
     layout: tuple[tuple[str, str], ...] = ()
     for node in section.nodes:
-        if node.ref in delta.changes or node.ref in delta.context:
+        if section.refresh or node.ref in delta.changes or node.ref in delta.context:
             common = 0
             for previous, current in zip(layout, node.layout):
                 if previous != current:
@@ -56,11 +56,11 @@ def _section_delta(section: RenderedSection, delta: TreeDelta, missing: tuple[st
                 common += 1
             lines.extend(text for _, text in node.layout[common:])
             layout = node.layout
-        if node.ref in delta.changes:
-            lines.append(delta.changes[node.ref] + node.text)
+        if section.refresh or node.ref in delta.changes:
+            lines.append(delta.changes.get(node.ref, "~") + node.text)
         elif node.ref in delta.context:
             lines.append(" " + (node.text if node.ref in delta.expanded else node.text.split("\n", 1)[0]))
-        if node.ref not in delta.changes and node.ref not in delta.expanded:
+        if not section.refresh and node.ref not in delta.changes and node.ref not in delta.expanded:
             lines.extend(
                 f"Element {node.ref}: {trim_start(hint)}" if hint.lstrip("\t").startswith("Omitted: ") else hint
                 for hint in node.hints
@@ -95,7 +95,7 @@ def format_document(
     *,
     public_api: bool = False,
 ) -> str:
-    """Render captured fields once and choose the shorter complete or incremental view.
+    """Render captured fields once using the selected complete or incremental view.
 
     Args:
         document: Immutable observation with prepared projections and captured text fields.
@@ -110,6 +110,7 @@ def format_document(
     diff_parts: list[str] = []
     detail_roots: list[str] = []
     incremental = plan is not None and plan.mode != "full"
+    refreshed = False
     directories, payloads = [], []
     catalogue_sources = set()
     for part in document.parts:
@@ -132,38 +133,35 @@ def format_document(
         rendered = snapshots[id(part.prepared)]
         full = rendered.get("detailSupplement", rendered["details"]) if part.details else rendered["text"]
         full_parts.append(_indent(full, part.indent))
+        if not incremental:
+            continue
+        if incremental and tree_index < len(plan.trees) and plan.trees[tree_index] is None:
+            diff_parts.append("Full tree for this scope:\n" + _indent(full, part.indent))
+            tree_index += 1
+            continue
         output = getattr(rendered, "document", None)
-        matches_incremental = (
-            True
-            if not incremental
-            or tree_index >= len(plan.trees)
-            or part.details
-            or not isinstance(output, RenderedDocument)
-            else False
-        )
-        if matches_incremental:
-            incremental = False
+        if part.details:
+            # This part is an explicit request for captured native details.
+            # It cannot force unrelated compact trees back to full delivery.
+            diff_parts.append(_indent(full, part.indent))
+            tree_index += 1
+            continue
+        if tree_index >= len(plan.trees) or not isinstance(output, RenderedDocument):
+            # A malformed terminal part must remain visible without discarding
+            # the independently planned deltas of other windows.
+            diff_parts.append("Presentation refresh for this scope:\n" + _indent(full, part.indent))
+            refreshed = True
             tree_index += 1
             continue
         for _ in range(part.indent):
             output = output.indented()
 
-        def _iter_section(_source_items: Iterator[Any]) -> Iterator[Any]:
-            for section in _source_items:
-                if isinstance(section, RenderedSection):
-                    for node in section.nodes:
-                        yield node.ref
-
-        displayed = set(_iter_section(iter(output.parts)))
-        if displayed != {node.ref for node in part.nodes}:
-            incremental = False
-            tree_index += 1
-            continue
+        refreshed |= any(isinstance(section, RenderedSection) and section.refresh for section in output.parts)
         diff_parts.append(_tree_delta(output, plan.trees[tree_index], plan))
         tree_index += 1
     footer = detail_footer(detail_roots)
     full_text = ("\n\n".join((*directories, *payloads)) + "\n\n" if directories else "") + "".join(full_parts) + footer
-    if not incremental or tree_index != len(plan.trees):
+    if not incremental:
         return full_text
-    diff_text = _header("".join(diff_parts) + footer, plan.mode, public_api)
-    return diff_text if utf16_length(diff_text) < utf16_length(full_text) else full_text
+    diff_text = _header("".join(diff_parts) + footer, "diff" if refreshed else plan.mode, public_api)
+    return diff_text

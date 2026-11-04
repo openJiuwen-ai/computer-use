@@ -122,6 +122,12 @@ SDK 接口是同步的：每个操作返回结果或抛出异常后，再执行�
 通过 `computer.app(id)` 选择应用，用 `app.read(view="both")` 观察界面，再用 `app.element(name_or_path)` 定位控件。
 目标已经明确时可以直接链式操作，例如 `app.element("保存").click()`。
 
+MCP 中观察自动展示：首次给完整视图，后续默认显示变化（diff），包括写后观察及同一次调用中的连续操作。
+需要重新获得完整上下文时调用 `app.read(full=True)` 或 `window.read(full=True)`；不需要客户端接入私有历史协议。
+SDK 返回的 `state.text` 始终是本次读取范围的完整文字，展示 diff 不改变元素绑定和截图坐标。
+MCP 中打印观察、观察的 `.text` 或直接文字切片，都复用自动展示，不额外输出全文；
+SDK 内切片值及文件输出仍保持原意。需要限制读取范围时使用子树或 `read_text`。
+
 读取默认不为刷新画面而激活或提升窗口。在 macOS 上，调用方可显式使用
 `app.read(view="both", allow_foreground=True)`，允许 SDK 在已确认的原窗口范围内准备观察；
 `Window.read()` 同样支持该选项。

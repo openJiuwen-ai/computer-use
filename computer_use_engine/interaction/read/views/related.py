@@ -12,8 +12,8 @@ from weakref import ReferenceType
 from computer_use.native.contracts import Binding
 from computer_use.session.interfaces import WindowIdentity
 
-
 if TYPE_CHECKING:
+    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.interaction.records import UIHandle
 
 
@@ -29,30 +29,34 @@ class RelatedRead:
     known_windows: tuple[WindowIdentity, ...]
     context_owner: ReferenceType[UIHandle] | None = None
     context_root: WindowIdentity | None = None
+    before_tree: SemanticSnapshot | None = None
+    settle: bool = False
 
     @property
     def original_window(self) -> WindowIdentity | None:
         return next((item for item in self.known_windows if item.window == self.original.root_window), None)
 
-    def recovery_window(self, directory) -> str | None:
+    def recovery_window(self, directory, unavailable: frozenset[str] = frozenset()) -> str | None:
         """Find a surviving original scope after collection updates its directory.
 
         A closing modal can be present during initial selection and absent by
-        the component recheck. A fixed owner only permits its retained exact
-        lifetime. An App may instead observe a fresh focused or sole window;
-        that choice grants no input context until its content is delivered.
+        the component recheck. Prefer its surviving fixed parent, then the
+        App's current window. This widens the follow-up observation only;
+        publication separately prevents rebinding the original fixed handle.
         """
         current = {WindowIdentity.of(item) for item in directory["surfaces"]}
         for identity in (self.original_window, self.context_root):
-            if identity is not None and identity in current:
+            if identity is not None and identity in current and identity.window not in unavailable:
                 return identity.window
-        if self.context_root is None:
-            windows = [item["window"] for item in directory["surfaces"] if item["kind"] != "menu"]
-            focused = directory.get("focusedWindow")
-            if focused in windows:
-                return focused
-            if len(windows) == 1:
-                return windows[0]
+        windows = [
+            item["window"] for item in directory["surfaces"]
+            if item["kind"] != "menu" and item["window"] not in unavailable
+        ]
+        focused = directory.get("focusedWindow")
+        if focused in windows:
+            return focused
+        if len(windows) == 1:
+            return windows[0]
         return None
 
     def new_windows(self, directory) -> tuple[str, ...]:
@@ -67,8 +71,12 @@ class RelatedRead:
         focused = directory.get("focusedWindow")
         if focused in newly_seen:
             return focused
-        if len(newly_seen) == 1:
-            return newly_seen[0]
+        independent = [
+            item["window"] for item in directory["surfaces"]
+            if item["window"] in newly_seen and (item["modal"] is True or item["parentState"] != "known")
+        ]
+        if len(independent) == 1:
+            return independent[0]
         if any(item["window"] == self.original.root_window for item in directory["surfaces"]):
             return self.original.root_window
         if self.context_root is not None and any(

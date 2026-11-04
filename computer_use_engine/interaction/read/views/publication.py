@@ -5,13 +5,15 @@
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import asdict
 from typing import TYPE_CHECKING, cast
-import weakref
 
-from computer_use.interaction.query.instances.scope import allowed
+from computer_use.diagnostics import diagnostic
 from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.query.instances.scope import allowed
 from computer_use.interaction.read.presentation.content import DisplayText, template
+from computer_use.interaction.read.delivery.coverage import document_coverage
 from computer_use.interaction.read.presentation.content import json_value as quoted
 from computer_use.interaction.read.presentation.details import captured_details_document
 from computer_use.interaction.read.presentation.document import DisplayDocument
@@ -22,7 +24,7 @@ from computer_use.protocol.primitives import frozen
 from computer_use.session.events import observation_completed, register_observation_delivery
 from computer_use.session.interfaces import ApplicationEntry, LookupContext, WindowIdentity
 from computer_use.session.observation import lazy_observation
-from computer_use.session.observation_data import retain_observation_data
+from computer_use.session.observation_data import component_delivered, retain_observation_data
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -115,6 +117,8 @@ def publish(
     preparation: dict | None = None,
     context_owner=None,
     lookup_context: LookupContext | None = None,
+    on_observation=None,
+    window_coverage=(),
 ) -> Observation:
     """Publish the combined interface observation and retain its source data.
 
@@ -128,7 +132,8 @@ def publish(
         scope: Observed native scope; defaults to the desktop label.
         view: Scope label attached to the publication event, such as window or desktop.
         directory: Current application window catalogue, when available.
-        lookup_context: Exact source context for explicit subtree publication; ordinary UI reads capture their staged view.
+        lookup_context: Exact source context for explicit subtree publication; ordinary reads capture their staged view.
+        on_observation: Internal sink for deferring delivery while one optional refresh is attempted.
     """
     document = text if isinstance(text, DisplayDocument) else DisplayDocument.join((text,))
     roots = [root for _, snapshot in trees for root in snapshot.roots]
@@ -224,7 +229,20 @@ def publish(
         content_available=content_available,
         gaps=gaps,
         directory=directory,
+        window_coverage=window_coverage,
     )
+    if window_coverage:
+        diagnostic({"kind": "observation_member_coverage", "windows": window_coverage})
+    retained_result = weakref.ref(result)
+    if screenshot is not None and window_coverage:
+        from computer_use.session.images import register_image_delivery
+
+        def pixels_delivered():
+            observed = retained_result()
+            if observed is not None:
+                component_delivered(observed, "image")
+
+        register_image_delivery(screenshot, pixels_delivered)
     if owner is not None:
         # Publication proposes a context. Only actual delivery changes the
         # canonical application's convenience-input receiver, including when
@@ -262,6 +280,9 @@ def publish(
             fixed_lookup = LookupContext(captured, captured_lookup.menu_only, tuple(fixed_menus))
 
         def delivered() -> None:
+            observed = retained_result()
+            if observed is not None:
+                component_delivered(observed, "tree")
             state, runtime = retained_state(), retained_controller()
             if state is None or runtime is None or runtime.transport.session != native_session:
                 return
@@ -283,7 +304,7 @@ def publish(
                 image_delivered(captured_image.png)
 
         register_observation_delivery(result, delivered)
-    observation_completed(
+    (on_observation or observation_completed)(
         dict(
             source=controller,
             owner=owner,
@@ -294,6 +315,7 @@ def publish(
             full=full,
             publicApi=True,
             document=document,
+            coverage=document_coverage(document),
             **(dict(observed=directory["observed"]) if directory else {}),
         )
     )
@@ -307,6 +329,7 @@ def capture_header(
     *,
     parts: Sequence[tuple[str, WindowPart]],
     delivered_gaps: Sequence[tuple[DirectoryFacts, tuple[ObservationGap, ...]]] = (),
+    image_windows: tuple[str, ...] | None = None,
 ) -> InterfaceHeader:
     """Freeze normal-read scope, member headings and each original directory source.
 
@@ -336,7 +359,10 @@ def capture_header(
                 item["parentState"],
                 item["modal"],
                 key in permitted,
-                part is not None,
+                part is not None and (
+                    part.tree is not None
+                    or part.image is not None and (image_windows is None or key in image_windows)
+                ),
                 asdict(part.target) if part is not None else None,
                 asdict(source.target) if source is not None else None,
                 source.applications if source is not None else None,

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.compression.projection import prepare_tree
+from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
 from computer_use.protocol.primitives import frozen
 
 if TYPE_CHECKING:
@@ -13,6 +14,45 @@ if TYPE_CHECKING:
 
     from computer_use.interaction.read.presentation.records import NodeView
     from computer_use.protocol.records import Record
+
+
+def document_coverage(document: DisplayDocument) -> Mapping[str, Any]:
+    """Retain collection evidence from the same captured facts as the delivered tree.
+
+    Complete child collections are deliberately not inferred from formatted
+    child counts: normalization omits those counts for complete collections.
+    Related roots and partial/unread children remain absence, not proven removal.
+    """
+    parents, complete = {}, set()
+    for tree in document.parts:
+        if not isinstance(tree, DisplayTree):
+            continue
+        snapshot = tree.prepared.snapshot
+        pending = [(root, None) for root in snapshot.roots]
+        while pending:
+            node, parent = pending.pop()
+            parents[node["ref"]] = parent
+            pending.extend((child, node["ref"]) for child in node["children"])
+        aliases = {native: ref for ref, native in snapshot.refs.items()}
+        children = {}
+        for relation in snapshot.facts["relations"]:
+            if relation["kind"] == "children" and relation["certainty"] == "confirmed":
+                children.setdefault(relation["source"], []).append(relation)
+        unread = set(snapshot.facts.get("unread", ()))
+        for source, relations in children.items():
+            if len(relations) != 1:
+                continue
+            relation = relations[0]
+            targets = relation["targets"]
+            if (
+                relation["state"] == "complete"
+                and relation.get("offset", 0) == 0
+                and relation.get("total", len(targets)) == len(targets)
+                and not unread.intersection(targets)
+                and source in aliases
+            ):
+                complete.add(aliases[source])
+    return frozen({"parents": frozen(parents), "complete": tuple(sorted(complete))})
 
 
 def observation_coverage(observation: Record, roots: Sequence[NodeView] | None = None) -> Mapping[str, Any]:

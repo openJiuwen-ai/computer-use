@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Parent-process supervisor: worker lifetime, execution watchdog, history gate, and journal."""
+"""Parent-process supervisor: worker lifetime, execution watchdog and journal."""
 
 import asyncio
 import logging
@@ -12,7 +12,6 @@ import sys
 from computer_use.native.preview import is_preview_event
 from computer_use.session.operations import eager
 
-from .history import HISTORY_KEY, HistoryGate
 from .diagnostics import Journal
 from .output import OutputBuffer, is_output
 from .worker_lifecycle import EXIT_SETTLE_SECONDS, READY_ENV, WorkerLifecycle, WorkerStartupFailure
@@ -47,7 +46,7 @@ class ExecutionSession:
         self._worker = None
         self._generation = 0
         self._next_id = 1
-        self._journal, self._history = Journal(allow_global_input=allow_global_input), HistoryGate()
+        self._journal = Journal(allow_global_input=allow_global_input)
         self._tasks = set()
 
     def _track(self, coroutine):
@@ -57,12 +56,12 @@ class ExecutionSession:
         return task
 
     @eager
-    async def execute(self, code, signal=None, history=None, title=None, on_progress=None):
+    async def execute(self, code, signal=None, title=None, on_progress=None):
         if self._closed:
             return execution_error("Execution session is closed.")
         if self._resetting is not None:
             result = await asyncio.shield(self._resetting)
-            return result if result.get("isError") else await self.execute(code, signal, history, title, on_progress)
+            return result if result.get("isError") else await self.execute(code, signal, title, on_progress)
         if self._retiring is not None:
             return execution_error(
                 ("Native cleanup is still pending. Call computer_use_reset before continuing; no code was executed.")
@@ -141,14 +140,12 @@ class ExecutionSession:
             return execution_error("Call cancelled before execution.")
         id_ = self._next_id
         self._next_id += 1
-        policy = self._history.begin(history)
         self._journal.record(
             dict(
                 kind="execution_start",
                 executionId=id_,
                 title=title,
                 code=code,
-                history=policy,
             )
         )
         loop = asyncio.get_running_loop()
@@ -207,7 +204,6 @@ class ExecutionSession:
                     dict(
                         code=code,
                         executionId=id_,
-                        history=policy,
                     ),
                 )
                 await self._writer.drain()
@@ -446,7 +442,6 @@ class ExecutionSession:
                 "durationMs": duration,
                 **({"title": pending["title"]} if pending["title"] else {}),
             },
-            HISTORY_KEY: self._history.complete(),
         }
         pending["cleanup"]()
         if not pending["future"].done():
@@ -537,7 +532,6 @@ class ExecutionSession:
             ]
             self._journal.record(dict(kind="execution_reset", reason=reason, complete=failure is None))
             self._finish(result)
-            self._history = HistoryGate()
             if failure is not None:
                 return execution_error(failure)
             try:

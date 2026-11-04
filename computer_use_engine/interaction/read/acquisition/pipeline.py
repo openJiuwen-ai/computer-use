@@ -147,7 +147,8 @@ class _AppMenuCollection(Node["CollectedAttempt", "CollectedAttempt"]):
         services = self.services
         state, components = value.state, value.components
         if (
-            state.plan.limits.get("view") == "image"
+            not state.plan.include_menus
+            or state.plan.limits.get("view") == "image"
             or "nativeApplicationRoots" not in services.port.connection.capabilities
         ):
             return value
@@ -286,14 +287,36 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 value: Read-attempt inputs paired with the components actually captured.
             """
             state, components = value.state, value.components
-            # pylint: disable-next=protected-access
-            _, directory = await services._discover(
-                state.plan.selection,
-                cast("Callable[[], int]", control.remaining),
-                accessibility=state.plan.profile is SurfaceReadProfile.ACCESSIBILITY
-                and "nativeReadIsolation" not in services.port.connection.capabilities,
-                _control=control,
-            )
+            generation = services.port.connection.session_identity
+            try:
+                # pylint: disable-next=protected-access
+                _, directory = await services._discover(
+                    state.plan.selection,
+                    cast("Callable[[], int]", control.remaining),
+                    accessibility=state.plan.profile is SurfaceReadProfile.ACCESSIBILITY
+                    and "nativeReadIsolation" not in services.port.connection.capabilities,
+                    _control=control,
+                )
+            except TimeoutError as error:
+                if services.port.calls.retired or services.port.connection.session_identity != generation:
+                    raise
+                # Preserve the capture's own catalogue and fixed target. A
+                # failed newer lookup cannot establish a different current
+                # window or erase facts/pixels already acquired. Identity
+                # failures still propagate their newer directory evidence.
+                gap = ObservationGap(
+                    "directory", "observation_incomplete",
+                    f"Window directory recheck budget exhausted: {error}",
+                    "use the available capture; inspect the current directory if needed",
+                )
+                return RecheckedAttempt(
+                    value,
+                    components.source_directory,
+                    state.target,
+                    None,
+                    False,
+                    state.gaps + (gap,),
+                )
             # pylint: disable-next=protected-access
             confirmed, gaps = services._complete_scope(directory), state.gaps
             try:

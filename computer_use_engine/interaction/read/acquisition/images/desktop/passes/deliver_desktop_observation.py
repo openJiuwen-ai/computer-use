@@ -16,8 +16,7 @@ if TYPE_CHECKING:
 
 
 def deliver(value: DesktopLease, control: Control) -> Record:
-    """Check the native operation deadline and return the completed desktop capture payload."""
-    value.read.remaining()
+    """Return the completed desktop capture without starting any further query."""
     return cast("Record", value.result)
 
 

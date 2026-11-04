@@ -59,7 +59,6 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
             dict(
                 code=code,
                 executionId=1,
-                history=dict(resetText=False, resetImages=False, incremental=True),
             )
         )
 

@@ -9,8 +9,10 @@ import ApplicationServices
     /// A route sampled as ready may lose foreground before execution. Its
     /// retained requirement still excludes local background preparation; the
     /// existing Gate owns any later explicitly selected foreground attempt.
-    static func requireBackgroundPreparation(_ requirement: NativePointerReadiness.Requirement) throws {
-        guard requirement != .foregroundWindowPoint else {
+    static func requireBackgroundPreparation(
+        _ requirement: NativePointerReadiness.Requirement, requiresForegroundGeometry: Bool = false
+    ) throws {
+        guard requirement != .foregroundWindowPoint && !requiresForegroundGeometry else {
             throw NativePreparationUnavailable(
                 description: "the original point needs foreground preparation; no background preparation was sent")
         }
@@ -66,7 +68,8 @@ import ApplicationServices
                     preparation, boundary: boundary, receipt: receipt, evidence: evidence)
             case .windowDirected:
                 let pointer = preparation.pointer
-                try requireBackgroundPreparation(pointer.pointerRequirement)
+                try requireBackgroundPreparation(
+                    pointer.pointerRequirement, requiresForegroundGeometry: plan.offer.requiresForegroundGeometry)
                 try pointer.validateWindowIdentity()
                 do {
                     let outcome = try await NativeFocusPipeline.prepare(

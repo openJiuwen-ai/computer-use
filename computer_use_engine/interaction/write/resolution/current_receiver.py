@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.write.resolution.text_evidence import owner_editing_role
 from computer_use.native.contracts import Knowledge
 from computer_use.native.query.graph import UNKNOWN, NativeGraph
-from computer_use.native.semantics import EDITING_FIELDS, LAYOUT_ROLES, editing_evidence, role_name
+from computer_use.native.semantics import EDITING_FIELDS, LAYOUT_ROLES, keyboard_input_evidence, role_name
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
@@ -36,7 +36,7 @@ class CurrentReceiverQuery(NativeGraph):
         """Resolve the container's single focused receiver and its ancestor constraints.
 
         Args:
-            intent: Operation whose insertion or paste semantics require an editable receiver.
+            intent: Operation whose insertion or paste semantics require a text-input receiver.
 
         Returns:
             The receiver binding and its path of containing native tokens.
@@ -67,7 +67,8 @@ class CurrentReceiverQuery(NativeGraph):
         # Native evidence already identifies the current recipient and its
         # scope. A focused canvas may expose a layout or unknown role without
         # declaring text editing. Key/focus routes validate their own live
-        # capability after this selection; only text input needs editing facts.
+        # capability after this selection; text input also needs text-receiver
+        # semantics, independently of whether its AX buffer can be replaced.
         if intent.kind in ("insert", "paste"):
             await self._node(token, depth=0)
             raw = await self._field(token, "role")
@@ -78,8 +79,8 @@ class CurrentReceiverQuery(NativeGraph):
                 self.fail("observation_incomplete", "The current receiver role is unknown.")
             if role in (LAYOUT_ROLES - {"unknown"}) | {"window", "sheet", "dialog"}:
                 self.fail("input_unavailable", "The reported focus is a container, not a confirmed keyboard recipient.")
-            if declared is None:
-                self.fail("input_unavailable", "The current receiver does not declare text-editing semantics.")
+            if declared is None and keyboard_input_evidence(role, values, platform=self.platform) is not True:
+                self.fail("input_unavailable", "The current receiver does not declare text-input semantics.")
         # Freeze the requested boundary, not every incidental wrapper in the
         # observation path. Native inspection and dispatch recheck containment.
         return replace(self.root, node=token), (() if token == self.root.node else (self.root.node,))
@@ -126,6 +127,6 @@ class CurrentReceiverQuery(NativeGraph):
         token, path, role = leaves[0]
         if intent.kind in ("insert", "paste"):
             values = await self._control_values(token)
-            if editing_evidence(role, values, platform=self.platform) is not True:
-                self.fail("input_unavailable", "The current receiver does not declare text-editing semantics.")
+            if keyboard_input_evidence(role, values, platform=self.platform) is not True:
+                self.fail("input_unavailable", "The current receiver does not declare text-input semantics.")
         return replace(self.root, node=token), path

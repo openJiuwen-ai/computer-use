@@ -122,11 +122,12 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not been returned", str(failure.exception))
 
     async def execute(self, code, *, reset_images=False):
+        if reset_images:
+            self.runtime.executor.call(images_state.reset_image_delivery)
         return await self.runtime.execute(
             dict(
                 code=code,
                 executionId=len(self.events) + 1,
-                history=dict(resetText=False, resetImages=reset_images, incremental=True),
             )
         )
 
@@ -161,7 +162,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(memoryview(state.screenshot).tobytes(), original_png)
 
     async def test_explicit_observation_and_full_text_prints_use_delivery_geometry(self):
-        for print_code in ("print(obs)", "print(obs.text)"):
+        for print_code in ("print(obs)", "print(obs.text)", "print(obs.text[:20])", "print(obs.text[-20:])"):
             with self.subTest(print_code=print_code):
                 self.deliveries.clear()
                 _, _, state = self.capture()

@@ -91,5 +91,4 @@ class NativeImages:
             result["observed"],
             frozen(result["coordinates"]),
         )
-        read.remaining()
         return value

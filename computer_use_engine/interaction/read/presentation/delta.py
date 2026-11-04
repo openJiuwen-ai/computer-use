@@ -26,12 +26,13 @@ class DeltaPlan:
 
     Attributes:
         mode: Complete delivery, changed elements, or an unchanged-tree summary.
-        trees: Per-tree changes in current document order.
+        trees: Per-tree changes in current document order; None means this tree is first observed or replaced.
         not_observed: Missing references whose removal is not proved by collection.
         retained: References still bound in the observation, including folded nodes.
     """
 
     mode: Literal["full", "diff", "unchanged"] = "full"
-    trees: tuple[TreeDelta, ...] = ()
+    trees: tuple[TreeDelta | None, ...] = ()
     not_observed: frozenset[str] = frozenset()
     retained: frozenset[str] = frozenset()
+    reason: str = "initial-observation"

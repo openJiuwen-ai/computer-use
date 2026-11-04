@@ -201,7 +201,8 @@ import ApplicationServices
     }
 
     @MainActor static func post(
-        _ event: CGEvent, window: WindowGeometry.WindowMapping, point: CGPoint? = nil, clickGroup: Int64 = 0
+        _ event: CGEvent, window: WindowGeometry.WindowMapping, point: CGPoint? = nil, clickGroup: Int64 = 0,
+        presenterPID: pid_t? = nil
     ) {
         // prepare() resolves routing functions even when foreground targets skip activation.
         setField!(event, 40, Int64(window.pid))
@@ -217,7 +218,7 @@ import ApplicationServices
         // One delivery, never duplicate through a second route after an uncertain result.
         let activity = NativeInputActivity.begin(
             device: .mouse, transport: .process, mechanism: "CGEvent.postToPid", pid: window.pid, window: window.id,
-            event: event)
+            event: event, presenterPID: presenterPID)
         event.postToPid(window.pid)
         activity?.returned()
     }

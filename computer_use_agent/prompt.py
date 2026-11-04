@@ -17,6 +17,9 @@ or screenshot coordinates. Reads present observations
 automatically; use print for other values. Use view='image' for a visual check,
 or view='both' when both the tree and image are needed. Coordinate spaces belong
 to the object that supplied the screenshot.
+Do not print observation.text or its slices again to shorten an observation;
+these share automatic presentation. Use a relevant subtree or read_text for a
+bounded view, and read(full=True) only when a complete view is needed.
 Prefer one computer_use call for multiple operations whose targets and steps are
 already confirmed and require no intermediate observation. Each operation finishes or
 raises before the next statement runs. Use each action's related observation to assess its effect;

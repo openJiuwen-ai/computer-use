@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.delivery.diff.formatting import DeltaPlan
+from computer_use.interaction.read.presentation.delta import DeltaPlan
 from computer_use.interaction.read.delivery.diff.model import PURE, DeliverySelection, PlannedDelivery
 from computer_use.pipeline import Contract, Pass
 
@@ -17,7 +17,13 @@ if TYPE_CHECKING:
 
 def execute(value: DeliverySelection, control: Control) -> PlannedDelivery:
     """Retain the observation with a complete-view decision."""
-    return PlannedDelivery(value.observation, DeltaPlan())
+    observation = value.observation
+    reason = (
+        "explicit-full"
+        if observation["full"]
+        else ("non-window-view" if observation["view"] != "window" else "initial-observation")
+    )
+    return PlannedDelivery(observation, DeltaPlan(reason=reason))
 
 
 stage = Pass.define(

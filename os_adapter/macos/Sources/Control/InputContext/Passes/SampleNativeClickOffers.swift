@@ -60,13 +60,16 @@ import ApplicationServices
             let requirement = receiver.requirement(captured: captured)
             let directedPointer = pointer.requiring(requirement ?? .contentReceiver)
             let directedAvailable = transport && requirement != nil
+            let foregroundGeometryRequired = receiver.requiresForegroundGeometry
             let backgroundAvailable =
-                directedAvailable && !foregroundHitRequired && directedPointer.backgroundPreparationAvailable()
+                directedAvailable && !foregroundHitRequired && !foregroundGeometryRequired
+                && directedPointer.backgroundPreparationAvailable()
             // The same existing HID readiness query retains its provenance;
             // do not sample readiness again to manufacture a preference.
             let physical = pointer.physicalClickSample(at: point)
             let systemReady = physical.ready
             let directedReady = directedAvailable && !exposure && !foregroundHitRequired
+                && (!foregroundGeometryRequired || foreground)
                 && directedPointer.ready(at: point, delivery: .windowDirected)
             var directed = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
@@ -81,7 +84,8 @@ import ApplicationServices
                 preparationOptions: directedAvailable
                     ? (backgroundAvailable ? ["background", "foreground"] : ["foreground"]) : [],
                 backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !backgroundAvailable,
-                pointerRequirement: requirement ?? .contentReceiver)
+                pointerRequirement: requirement ?? .contentReceiver,
+                requiresForegroundGeometry: foregroundGeometryRequired)
             try RequestDiagnostics.checkCancellation()
             var system = NativeClickContract(
                 routeFamily: "macos.hid.v1", delivery: .systemPointer,
@@ -255,17 +259,19 @@ import ApplicationServices
                         let addressedReceiver: NativeAddressedPointerReceiver.Qualification?
                         if unit.qtComboChoice != nil {
                             addressedReceiver = .declaredInteraction
-                        } else if plan.actuator == nil, unit.member == nil, sampled.basis == .exactHit,
-                            let hit = sampled.hit, CFEqual(hit, unit.element)
-                        {
-                            let declared = NativeAddressedPointerReceiver.query(
-                                unit.element, role: role, actions: facts.actions?.map { $0.name },
-                                focusWritable: facts.focusWritable).supported
-                            // An exact original element supplies a point even
-                            // when it declares no semantic mouse action. Keep
-                            // popup/member/exposure qualifications independent.
-                            addressedReceiver = declared ? .declaredInteraction
-                                : facts.popupContext == nil ? .originalElementExactHit : .unconfirmed
+                        } else if plan.actuator == nil, unit.member == nil {
+                            // Only an exact hit needs semantic declarations.
+                            // A preparable coarse hit retains the original
+                            // geometry obligation instead of querying setters.
+                            let receiver = sampled.basis == .exactHit
+                                ? NativeAddressedPointerReceiver.query(
+                                    unit.element, role: role, actions: facts.actions?.map { $0.name },
+                                    focusWritable: facts.focusWritable)
+                                : NativeAddressedPointerReceiver(role: role, actions: facts.actions?.map { $0.name })
+                            addressedReceiver = receiver.retainedElementQualification(
+                                    basis: sampled.basis, preparation: sampled.preparation,
+                                    exactOriginalHit: sampled.hit.map { CFEqual($0, unit.element) } == true,
+                                    popup: facts.popupContext != nil)
                         } else { addressedReceiver = nil }
                         try pointerOffers(
                             pointer, at: geometry.point, addressedReceiver: addressedReceiver,

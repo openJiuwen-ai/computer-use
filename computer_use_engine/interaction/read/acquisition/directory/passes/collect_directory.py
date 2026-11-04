@@ -20,10 +20,8 @@ if TYPE_CHECKING:
 
 def create(*, port: NativePort) -> Callable[[DirectoryPlan, Control], Awaitable[DirectoryFacts]]:
     async def collect(plan: DirectoryPlan, control: Control) -> DirectoryFacts:
-        """Read the requested native catalogue and check the enclosing operation's deadline."""
-        result = await port.directory(plan.read.token, plan.read.target, plan.query, plan.read.remaining())
-        plan.read.remaining()
-        return result
+        """Read the requested catalogue within the operation's remaining query budget."""
+        return await port.directory(plan.read.token, plan.read.target, plan.query, plan.read.remaining())
 
     return collect
 

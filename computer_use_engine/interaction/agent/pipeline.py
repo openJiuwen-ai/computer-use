@@ -208,10 +208,7 @@ class AgentInterfacePipeline:
                 observed = await self.controller.desktop_reader.read()
                 self.controller.desktop.record(observed)
             except BaseException:
-                from computer_use.session.events import pending_observations_discarded
-
                 self.controller.desktop.reset()
-                pending_observations_discarded(self.controller)
                 raise
             screenshot = observed["screenshot"]
             # Publish the same public reference namespace as list_apps, without

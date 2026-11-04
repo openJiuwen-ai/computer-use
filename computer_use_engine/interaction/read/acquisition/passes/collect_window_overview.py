@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
+from computer_use.interaction.read.acquisition.components.support import collect_component
 from computer_use.interaction.read.acquisition.model import CollectedAttempt
 from computer_use.pipeline import Contract, Effect, Pass
 
@@ -24,14 +25,21 @@ def create(*, services: NativeAppReader) -> Callable[[CollectedAttempt, Control]
         state, components = value.state, value.components
         if not state.plan.limits.get("overview", True):
             return value
-        overview = await services.overviews.collect(
-            components.source_directory,
-            services.window_aliases(components.source_directory),
-            cast("Callable[[], int]", control.remaining),
-            current=components.image,
-            root=state.plan.selection.root.root_window,
+        overview, gap = await collect_component(
+            services.port,
+            "overview",
+            lambda: services.overviews.collect(
+                components.source_directory,
+                services.window_aliases(components.source_directory),
+                cast("Callable[[], int]", control.remaining),
+                current=components.image,
+                root=state.plan.selection.root.root_window,
+            ),
         )
-        return replace(value, components=replace(components, overview=overview))
+        return replace(
+            value,
+            components=replace(components, overview=overview, gaps=components.gaps + ((gap,) if gap else ())),
+        )
 
     return overview
 

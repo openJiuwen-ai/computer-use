@@ -298,9 +298,7 @@ class NativeOverview:
                 if gap:
                     error = gap.detail
             previews.append(WindowPreview(aliases[entry["window"]], entry["window"], entry["title"], image, error))
-        remaining()
         overview = compose_overview(
             previews, [aliases[item["window"]] for item in entries[6:]], scope="catalogue:" + directory["application"]
         )
-        remaining()
         return overview

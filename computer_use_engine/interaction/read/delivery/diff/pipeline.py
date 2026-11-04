@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from computer_use.diagnostics import diagnostic
+
 from computer_use.interaction.read.delivery.diff.model import PURE, PlannedDelivery
 from computer_use.interaction.read.delivery.diff.passes.plan_full_delivery import (
     stage as plan_full_delivery,
@@ -42,6 +44,25 @@ class _RenderPlannedDelivery(Node["PlannedDelivery", "str"]):
 
     def _run(self, value: PlannedDelivery, control: Control) -> str:
         observation = value.observation
+        diagnostic(
+            {
+                "kind": "observation_delivery_plan",
+                "scope": observation["scope"],
+                "mode": value.plan.mode,
+                "reason": value.plan.reason,
+                "trees": [
+                    {"mode": "full", "reason": "new-or-replaced-native-scope"}
+                    if tree is None
+                    else {
+                        "mode": "diff" if tree.changes or tree.missing else "unchanged",
+                        "changed": len(tree.changes),
+                        "missing": len(tree.missing),
+                        "context": len(tree.context),
+                    }
+                    for tree in value.plan.trees
+                ],
+            }
+        )
         document = observation.get("document")
         if isinstance(document, DisplayDocument):
             request = DocumentRenderRequest(document, value.plan, observation.get("publicApi", False))

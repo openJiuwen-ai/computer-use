@@ -1,6 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+from ..diagnostics import diagnostic
 from ..identity import WeakIdentityMap
 from ..protocol.primitives import frozen
 
@@ -19,6 +20,7 @@ def retain_observation_data(
     content_available=True,
     gaps=(),
     directory=None,
+    window_coverage=(),
 ):
     # JS Set iteration preserves the observed order (notably window enums).
     data = dict(
@@ -28,6 +30,7 @@ def retain_observation_data(
         partial=partial,
         content_available=content_available,
         gaps=tuple(gaps),
+        window_coverage=tuple(frozen(record) for record in window_coverage),
         directory=frozen(
             {
                 **directory,
@@ -49,3 +52,18 @@ def retain_observation_data(
 
 def observation_data(state):
     return _views.get(state)
+
+
+def component_delivered(state, component):
+    """Acknowledge only components included in this exact returned object."""
+    data = _views.get(state)
+    if data is None:
+        return
+    data["window_coverage"] = tuple(
+        frozen({**record, "delivered": tuple(sorted(set(record["delivered"]) | {component}))})
+        if component in record["included"] else record
+        for record in data["window_coverage"]
+    )
+    delivered = tuple(record for record in data["window_coverage"] if component in record["delivered"])
+    if delivered:
+        diagnostic({"kind": "observation_member_delivery", "component": component, "windows": delivered})
