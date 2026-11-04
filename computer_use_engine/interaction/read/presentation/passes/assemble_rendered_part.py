@@ -41,6 +41,71 @@ if TYPE_CHECKING:
     from computer_use.pipeline.core import Control
 
 
+class _DeferredDetails(RenderedResult):
+    """One render with capture-local detail fields materialized on explicit access.
+
+    Ordinary text/diff delivery consumes ``text`` and ``document`` only. Whole
+    record iteration and serialization still expose the complete rendering.
+    The factory retains captured values, never a live provider or query.
+    """
+
+    def __init__(self, values, *, document, detail_keys, details):
+        super().__init__(values, document=document)
+        self._detail_keys = frozenset(detail_keys)
+        self._details = details
+
+    def _materialize(self):
+        if self._details is not None:
+            values = self._details()
+            super().update(values)
+            self._details = None
+            self._detail_keys = frozenset()
+
+    def __getitem__(self, key):
+        if key in self._detail_keys:
+            self._materialize()
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        if key in self._detail_keys:
+            self._materialize()
+        return super().get(key, default)
+
+    def __contains__(self, key):
+        return key in self._detail_keys or super().__contains__(key)
+
+    def __len__(self):
+        return super().__len__() + len(self._detail_keys)
+
+    def __iter__(self):
+        self._materialize()
+        return super().__iter__()
+
+    def keys(self):
+        self._materialize()
+        return super().keys()
+
+    def items(self):
+        self._materialize()
+        return super().items()
+
+    def values(self):
+        self._materialize()
+        return super().values()
+
+    def copy(self):
+        self._materialize()
+        return super().copy()
+
+    def __repr__(self):
+        self._materialize()
+        return super().__repr__()
+
+    def __deepcopy__(self, memo):
+        self._materialize()
+        return super().__deepcopy__(memo)
+
+
 def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> RenderedTree:
     """Combine ordered root presentations into one snapshot rendering.
 
@@ -98,7 +163,6 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
     if snapshot.annotations:
         parts.append("Native facts:\n" + "\n".join("\t" + line for line in snapshot.annotations))
     document = RenderedDocument.join(parts, separator="\n\n")
-    native_issues, issue_records = captured_read_issues(snapshot)
     diagnostic_parts: list[str] = []
     content_directories = [
         part.rendered["capturedContentDirectory"]
@@ -234,13 +298,34 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
             primary.extend(original_notes)
         document = RenderedDocument.join(primary, separator="\n\n")
         parts.extend(detailed_notes)
-    if native_issues:
-        diagnostic_parts.append(native_issues)
-    detail_supplement = RenderedDocument.join((*diagnostic_parts, *parts), separator="\n\n").text
     content_directory = "\n\n".join(content_directories)
     content_payload = "\n\n".join(content_payloads)
     content_catalogue = content_directory + "\n\n" + content_payload if content_directory else ""
-    details = (content_catalogue + "\n\n" if content_catalogue else "") + detail_supplement
+
+    # Formatting every raw read issue can dominate a small compact view. Keep
+    # these immutable captured records until a caller actually asks for details.
+    retained_diagnostics, retained_parts = tuple(diagnostic_parts), tuple(parts)
+
+    def materialize_details():
+        native_issues, issue_records = captured_read_issues(snapshot)
+        diagnostics = (*retained_diagnostics, native_issues) if native_issues else retained_diagnostics
+        supplement = RenderedDocument.join((*diagnostics, *retained_parts), separator="\n\n").text
+        values = {"details": (content_catalogue + "\n\n" if content_catalogue else "") + supplement}
+        if content_catalogue:
+            values["detailSupplement"] = supplement
+        if issue_records:
+            values["capturedReadIssues"] = [
+                dict(
+                    record,
+                    visibility="details",
+                    representation="Native read issues",
+                    session=snapshot.native.session,
+                    observation=snapshot.native.id,
+                )
+                for record in issue_records
+            ]
+        return values
+
     # The unchanged native-fact groups are now part of the retained detail text.
     # Mark only identifiers whose exact source/ref supplement was actually built.
     for records in collect_identifiers(snapshot, rendered_parts):
@@ -276,36 +361,27 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
                 path=tuple(snapshot.fields[entry["ref"], entry["property"]]["path"]),
                 representation="Additional native facts",
             )
-    result = RenderedResult(
+    result = _DeferredDetails(
         dict(
             text=document.text,
-            details=details,
             refs=dict(snapshot.refs),
             projections=projections,
-            fields=dict(snapshot.fields),
+            fields=thaw(snapshot.fields),
             textRefs=dict(snapshot.text_refs),
             relationSources=relation_sources,
             inlineChildRefs=[ref for part in projections for ref in part.get("inlineChildRefs", ())],
         ),
         document=document,
+        detail_keys=("details",)
+        + (("detailSupplement",) if content_catalogue else ())
+        + (("capturedReadIssues",) if snapshot.native.issues else ()),
+        details=materialize_details,
     )
     if content_catalogue:
         result.update(
             capturedContentDirectory=content_directory,
             capturedContentPayload=content_payload,
-            detailSupplement=detail_supplement,
         )
-    if issue_records:
-        result["capturedReadIssues"] = [
-            dict(
-                record,
-                visibility="details",
-                representation="Native read issues",
-                session=snapshot.native.session,
-                observation=snapshot.native.id,
-            )
-            for record in issue_records
-        ]
     if column_coverage:
         result["compactTableContainment"] = [
             dict(column.to_record(), representation="table-column", statement=column.statement())

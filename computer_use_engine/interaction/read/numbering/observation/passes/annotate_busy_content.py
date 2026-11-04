@@ -30,7 +30,6 @@ def add_busy_gap(acquired: AcquiredObservation, control: Control) -> AcquiredObs
         "content",
         "observation_incomplete",
         "The provider reports elements " + references + " are busy; their contents may still change.",
-        "use the available regions; read again when the loading region is needed",
     )
     return replace(acquired, gaps=acquired.gaps + (gap,))
 

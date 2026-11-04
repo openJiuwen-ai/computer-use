@@ -44,6 +44,7 @@ import ApplicationServices
     }
     private let windowServices: WindowServices
     private var surfaces = [String: Surface]()
+    private var endedWindows = [String: (owner: NSRunningApplication, value: [String: Any])]()
     struct ApplicationRoot {
         let owner: NSRunningApplication
         let element: AXUIElement
@@ -464,6 +465,11 @@ import ApplicationServices
             return nativePresence(.init(id: window.mapping.id, process: window.process), current: native).presence == .ended
         }
         for surface in ended {
+            let instance = state.appSelections.get(owner: surface.owner, root: surface.window)
+            endedWindows[surface.scope] = (surface.owner, [
+                "window": surface.window, "instance": instance.id, "surface": surface.scope
+            ])
+            if let native = surface.native { state.applications.retireWindowReference(native) }
             state.applications.retireScope(owner: surface.owner, scope: surface.scope)
             surfaces.removeValue(forKey: surface.scope)
         }
@@ -675,6 +681,13 @@ import ApplicationServices
         var value = result("surfaces", began: began, reasons: reasons)
         value["application"] = application
         value["surfaces"] = entries
+        // These are positive lifetime facts, not inferred from a visible-only
+        // projection's missing rows. Keep compact tombstones for later readers
+        // which did not consume the collection that first detected the end.
+        value["endedWindows"] = endedWindows.keys.sorted().compactMap { key -> [String: Any]? in
+            guard let entry = endedWindows[key], entry.owner.isEqual(app) else { return nil }
+            return entry.value
+        }.suffix(4096).map { $0 }
         value["rootDiscoveryComplete"] = rootDiscoveryComplete
         value["provider"] = provider
         value["focusedWindow"] = focusedWindow as Any? ?? NSNull()

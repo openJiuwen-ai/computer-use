@@ -43,10 +43,10 @@ class OriginalAncestry:
     stop_reason: Literal["root", "unknown", "conflict", "cycle", "missing", "semantic"]
 
 
-def _semantic_index(roots: tuple[NodeView, ...] | list[NodeView]) -> dict[str, NodeView]:
+def _semantic_index(roots: tuple[NodeView, ...] | list[NodeView], *, frozen: bool = False) -> dict[str, NodeView]:
     """Index acquired semantic views without inventing an ownership edge for them."""
     nodes: dict[str, NodeView] = {}
-    pending = list(reversed(freeze(roots)))
+    pending = list(reversed(roots if frozen else freeze(roots)))
     while pending:
         node = pending.pop()
         ref = node["ref"]
@@ -139,6 +139,34 @@ def _native_parents(refs: Mapping[str, str], relations: tuple[Mapping[str, Any],
 
 
 @dataclass(frozen=True)
+class GeometricSourceIndex:
+    """Capture-wide evidence, independent of any root's layout permission."""
+
+    semantic_nodes: Mapping[str, NodeView]
+    refs: Mapping[str, str]
+    facts: Mapping[str, Any]
+    fields: Mapping[tuple[str, str], Mapping[str, Any]]
+    captured_order: tuple[str, ...]
+    parents: Mapping[str, OriginalParent]
+
+    @classmethod
+    def capture(cls, snapshot) -> GeometricSourceIndex:
+        from computer_use.interaction.read.presentation.preparation import CapturedSnapshot
+
+        immutable = isinstance(snapshot, CapturedSnapshot)
+        semantic = _semantic_index(snapshot.roots, frozen=immutable)
+        refs = snapshot.refs if immutable else MappingProxyType(dict(snapshot.refs))
+        if len(set(refs.values())) != len(refs) or not semantic.keys() <= refs.keys() or not set(refs.values()) <= snapshot.native.nodes.keys():
+            raise ValueError("Geometric captured aliases do not identify the same source observation")
+        facts = snapshot.facts if immutable else freeze(snapshot.facts)
+        fields = snapshot.fields if immutable else freeze(snapshot.fields)
+        aliases = {token: ref for ref, token in refs.items()}
+        captured = tuple(aliases[node["node"]] for node in facts.get("nodes", ()) if node["node"] in aliases)
+        return cls(MappingProxyType(semantic), refs, facts, fields, captured,
+                   _native_parents(refs, tuple(facts.get("relations", ()))))
+
+
+@dataclass(frozen=True)
 class PreparedGeometricSources:
     """Immutable facts available to final layout, with a separate permitted scope.
 
@@ -205,21 +233,24 @@ class PreparedGeometricSources:
         if len(order) != len(set(order)) or set(order) != allowed or not allowed <= source.native_nodes.keys():
             raise ValueError("Geometric source order must enumerate each permitted source once")
         projected = _projected_refs(projection)
-        semantic = _semantic_index(snapshot.roots) if snapshot is not None else {}
+        index = (
+            getattr(snapshot, "geometric_index", None) or GeometricSourceIndex.capture(snapshot)
+            if snapshot is not None else None
+        )
+        semantic = dict(index.semantic_nodes) if index is not None else {}
         semantic.update(source.native_nodes)
-        refs = dict(snapshot.refs) if snapshot is not None else {}
+        refs = index.refs if index is not None else {}
         if snapshot is not None and (
             len(set(refs.values())) != len(refs)
             or not semantic.keys() <= refs.keys()
             or not set(refs.values()) <= snapshot.native.nodes.keys()
         ):
             raise ValueError("Geometric captured aliases do not identify the same source observation")
-        facts = freeze(snapshot.facts) if snapshot is not None else MappingProxyType({})
-        fields = freeze(snapshot.fields) if snapshot is not None else MappingProxyType({})
-        aliases = {token: ref for ref, token in refs.items()}
-        captured = tuple(aliases[node["node"]] for node in facts.get("nodes", ()) if node["node"] in aliases)
-        if snapshot is not None:
-            parents = _native_parents(refs, tuple(facts.get("relations", ())))
+        facts = index.facts if index is not None else MappingProxyType({})
+        fields = index.fields if index is not None else MappingProxyType({})
+        captured = index.captured_order if index is not None else ()
+        if index is not None:
+            parents = index.parents
         else:
             parents = MappingProxyType({ref: OriginalParent(source.parents.get(ref), "semantic") for ref in semantic})
             captured = tuple(dict.fromkeys((*order, *semantic)))

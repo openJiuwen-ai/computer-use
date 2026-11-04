@@ -46,7 +46,6 @@ def _expired(value: FixedImageAttempt, error: TimeoutError) -> FixedImageAttempt
             "image",
             "observation_incomplete",
             f"Image observation budget exhausted: {error}",
-            "read this same Window when another image is needed",
         ),
     )
 

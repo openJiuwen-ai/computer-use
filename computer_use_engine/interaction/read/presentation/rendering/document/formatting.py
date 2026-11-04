@@ -126,14 +126,15 @@ def format_document(
             retained, roots = separate_details(part, snapshots)
             detail_roots.extend(roots)
             value = render_text(retained, snapshots=snapshots)
-            shortened = full_header_text(document, position, snapshots)
-            full_parts.append(value if shortened is None else shortened)
+            if not incremental:
+                shortened = full_header_text(document, position, snapshots)
+                full_parts.append(value if shortened is None else shortened)
             diff_parts.append(value)
             continue
         rendered = snapshots[id(part.prepared)]
         full = rendered.get("detailSupplement", rendered["details"]) if part.details else rendered["text"]
-        full_parts.append(_indent(full, part.indent))
         if not incremental:
+            full_parts.append(_indent(full, part.indent))
             continue
         if incremental and tree_index < len(plan.trees) and plan.trees[tree_index] is None:
             diff_parts.append("Full tree for this scope:\n" + _indent(full, part.indent))

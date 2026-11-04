@@ -75,17 +75,17 @@ def setup_pipeline(monkeypatch, *, target_size=(100, 80), members=(ROOT, CHILD),
             item[0]: dict(zip(("window", "surface", "parent", "parentState", "modal"), item)) for item in members
         },
     )
-    ui = SimpleNamespace(_image=image, _anchor="root")
+    ui = SimpleNamespace(_image=image, _anchor="root", _instance=SimpleNamespace(window_images={}))
     return InterfacePointerPipeline(controller, write), ui, write, queried, root.target
 
 
 @pytest.mark.parametrize(
     "intent,points", [("click", ((20, 30),)), ("scroll", ((20, 30),)), ("drag", ((20, 30), (40, 50)))]
 )
-def test_gesture_queries_only_its_original_member(monkeypatch, intent, points):
+def test_gesture_reuses_original_capture_without_redundant_screenshot(monkeypatch, intent, points):
     pipeline, ui, write, queried, target = setup_pipeline(monkeypatch)
     assert asyncio.run(pipeline.run(ui, intent, points, {}, None)) == "dispatched"
-    assert write.arun.call_args.args[0].target == target and queried == [target]
+    assert write.arun.call_args.args[0].target == target and queried == []
     assert not ui._image.expired
 
 
@@ -103,7 +103,7 @@ def test_new_or_replaced_independent_peer_keeps_original_app_image_target(monkey
         monkeypatch, members=(ROOT, CHILD, peer), captured_members=(ROOT, CHILD, *original_peer)
     )
     assert asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None)) == "dispatched"
-    assert write.arun.call_args.args[0].target == target and queried == [target]
+    assert write.arun.call_args.args[0].target == target and queried == []
     assert not ui._image.expired
 
 
@@ -111,7 +111,7 @@ def test_new_or_replaced_independent_peer_keeps_original_app_image_target(monkey
 def test_unaddressed_member_lifetime_does_not_expire_the_original_root_capture(monkeypatch, members):
     pipeline, ui, write, queried, target = setup_pipeline(monkeypatch, members=members)
     assert asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None)) == "dispatched"
-    assert write.arun.call_args.args[0].target == target and queried == [target]
+    assert write.arun.call_args.args[0].target == target and queried == []
     assert not ui._image.expired
 
 
@@ -127,12 +127,14 @@ def test_addressed_member_or_its_original_ancestor_cannot_be_replaced(monkeypatc
 
 
 @pytest.mark.parametrize("size", [(101, 80), (100, 81)])
-def test_addressed_member_resize_still_requires_fresh_pixels(monkeypatch, size):
-    pipeline, ui, write, _, _ = setup_pipeline(monkeypatch, target_size=size)
-    with pytest.raises(ComputerUseError, match="window changed size"):
-        asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None))
-    write.arun.assert_not_awaited()
-    assert ui._image.expired
+def test_native_boundary_receives_original_capture_without_size_preflight_recapture(monkeypatch, size):
+    pipeline, ui, write, queried, target = setup_pipeline(monkeypatch, target_size=size)
+    # Native inputMapping performs the final current-size check atomically with
+    # dispatch. Another Python screenshot must not replace the model's capture.
+    assert asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None)) == "dispatched"
+    assert write.arun.call_args.args[0].target == target
+    assert queried == []
+    assert not ui._image.expired
 
 
 def test_drag_cannot_cross_original_member_mappings(monkeypatch):

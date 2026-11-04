@@ -220,7 +220,12 @@ import ApplicationServices
         onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void = {}, body: () async throws -> T
     ) async throws -> T {
-        if let current, current.target == target.capturedProcessIdentity { return try await body() }
+        // A completed restitution cannot own a later local-activity request.
+        // Give that request its own scope so any actual activation is still
+        // returned and any unsettled return continues to block requested input.
+        if let current, !current.finished, current.target == target.capturedProcessIdentity {
+            return try await body()
+        }
         let scope = NativeBackgroundPreparationScope(
             target: target, check: check, onPreparation: onPreparation,
             onCleanupUnknown: onCleanupUnknown)

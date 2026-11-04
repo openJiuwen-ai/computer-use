@@ -340,7 +340,10 @@ enum NativePointerDeliveryPolicy {
         ])
     }
 
-    func addressedPointerReceiver(at point: CGPoint) throws -> NativeAddressedPointerReceiver.Qualification {
+    func addressedPointerReceiver(
+        at point: CGPoint,
+        mechanismQualification: ((AXUIElement, String?) throws -> NativeAddressedPointerReceiver.Qualification?)? = nil
+    ) throws -> NativeAddressedPointerReceiver.Qualification {
         // This unit already retains the original WindowServer identity and
         // capture mapping. Without a concrete AX child, a captured point may
         // still use addressed transport after exact foreground-window hit
@@ -361,6 +364,10 @@ enum NativePointerDeliveryPolicy {
             return .originalWindowPoint
         }
         let role = AXAccess.read(hit, kAXRoleAttribute).value as? String
+        // Specialized receiver mechanisms consume this same fixed-point hit.
+        // They may prove the original popup's forward ownership when Qt's
+        // reverse AXWindow names its document, without another AX hit query.
+        if let qualified = try mechanismQualification?(hit, role) { return qualified }
         var rawActions: CFArray?
         let actionStatus = AXUIElementCopyActionNames(hit, &rawActions)
         let actions = actionStatus == .success ? rawActions as? [String] : nil
@@ -417,7 +424,11 @@ enum NativePointerDeliveryPolicy {
 
     func ready(at point: CGPoint? = nil, kind: NativePointerIntent.Kind = .click, delivery: NativeClickDelivery? = nil)
         -> Bool
-    { sampleReadiness(at: point, kind: kind, delivery: delivery).ready }
+    {
+        let readiness = sampleReadiness(at: point, kind: kind, delivery: delivery)
+        if let point { diagnoseReadiness(readiness, at: point, phase: "selectedClickPreparation") }
+        return readiness.ready
+    }
 
     enum WindowPreparationOutcome: Equatable { case alreadyReady, contextPrepared }
 
@@ -431,10 +442,10 @@ enum NativePointerDeliveryPolicy {
     ) async throws -> WindowPreparationOutcome {
         try check()
         try target.validate(input: true)
-        try BackgroundTarget.validateReleasedInput()
         try validateWindowIdentity()
         let selected = try resolvedDelivery(delivery, at: point, kind: kind)
         if selected == .systemPointer { try NativeInputAuthorization.requireGlobalInput("system pointer") }
+        try await NativePhysicalInput.wait(NativePhysicalInput.dependency(for: selected), check: check)
         let initial = sampleReadiness(at: point, kind: kind, delivery: selected)
         diagnoseReadiness(initial, at: point, phase: "beforePreparation")
         try check()
@@ -459,7 +470,6 @@ enum NativePointerDeliveryPolicy {
             } catch let error as DriverError where error.code == .inputUnavailable {
                 try check()
                 try target.validate(input: true)
-                try BackgroundTarget.validateReleasedInput()
                 throw NativePreparationUnavailable(description: error.description)
             }
         }
@@ -558,10 +568,10 @@ enum NativePointerDeliveryPolicy {
     ) async throws {
         try check()
         try target.validate(input: true)
-        try BackgroundTarget.validateReleasedInput()
         try validateWindowIdentity()
         let selected = try resolvedDelivery(delivery, at: start, kind: request.kind)
         if selected == .systemPointer { try NativeInputAuthorization.requireGlobalInput("system pointer") }
+        try await NativePhysicalInput.wait(NativePhysicalInput.dependency(for: selected), check: check)
         let initial = sampleReadiness(at: start, kind: request.kind, delivery: selected)
         try check()
         guard initial.ready else { throw DriverError("pointer route changed before dispatch", code: .inputUnavailable) }
@@ -626,7 +636,8 @@ enum NativePointerDeliveryPolicy {
             else { eventWindow = hostEventWindow }
             let button: CGMouseButton =
                 request.button == "right" ? .right : request.button == "middle" ? .center : .left
-            try BackgroundTarget.validateReleasedInput(allowing: global && held ? button : nil)
+            try NativePhysicalInput.validate(
+                NativePhysicalInput.dependency(for: selected), allowing: global && held ? button : nil)
             if continuingDrag {
                 // The original down fixed this drag's receiving window. Scope,
                 // document/modal, process and live window identity were checked

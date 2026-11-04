@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, fields
+from functools import cached_property
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -52,6 +53,16 @@ class _MaterializedSnapshot:
     value_fields: dict[str, str]
     driver_features: frozenset[str]
     collection: DriverReadMetadata | None = None
+
+    @cached_property
+    def presentation_nodes(self):
+        return {node["node"]: node for node in self.facts["nodes"]}
+
+    @cached_property
+    def presentation_relations(self):
+        from .accounting.relations import RelationPresentation
+
+        return RelationPresentation(self.facts, self.refs)
 
 
 def _copy_collections(value: Any, *, immutable: bool) -> Any:
@@ -155,6 +166,13 @@ class CapturedSnapshot:
     driver_features: frozenset[str]
     collection: DriverReadMetadata | None = None
 
+    @cached_property
+    def geometric_index(self):
+        """Capture-wide immutable evidence; each layout keeps its own scope."""
+        from .interface.geometric.source import GeometricSourceIndex
+
+        return GeometricSourceIndex.capture(self)
+
     @classmethod
     def capture(cls, snapshot: SnapshotFacts) -> CapturedSnapshot:
         """Copy and freeze the facts needed by compression and source accounting."""
@@ -165,21 +183,22 @@ class CapturedSnapshot:
         # One memo covers aliases shared by the fact, field and tree indexes.
         return cls(**_copy_collections(values, immutable=True))
 
-    def materialize(self, *, read_only_facts: bool = False) -> SnapshotFacts:
-        """Copy the local display view, optionally sharing its frozen source facts.
+    def materialize(self, *, read_only_sources: bool = False) -> SnapshotFacts:
+        """Copy the editable display forest, sharing proven immutable sources.
 
-        Presentation never edits the source index. The default retains the
-        detached mutable-copy contract for callers that need an editable copy.
+        The default remains a detached editable snapshot. Internal pure display
+        passes only edit roots: aliases, provenance, fields and native facts all
+        remain capture-owned read-only inputs rather than being recopied for
+        every preparation and rendering pass.
         """
-        # Display edits must not change the independent normalization ledger,
-        # even when both originally referenced the same nested source value.
         values = {
-            item.name: _copy_collections(getattr(self, item.name), immutable=False)
+            item.name: (
+                getattr(self, item.name)
+                if read_only_sources and item.name != "roots"
+                else _copy_collections(getattr(self, item.name), immutable=False)
+            )
             for item in fields(self)
-            if not read_only_facts or item.name != "facts"
         }
-        if read_only_facts:
-            values["facts"] = self.facts
         values["driver_features"] = self.driver_features
         return _MaterializedSnapshot(**values)
 
@@ -400,7 +419,7 @@ def prepared_nodes(
     group_layouts = {}
     readable_layouts = {}
     selections = (
-        selection_summary_plan(thaw(snapshot.facts), snapshot.refs, roots=snapshot.roots)
+        selection_summary_plan(snapshot.facts, snapshot.refs, roots=snapshot.roots)
         if defer_inactive_selections
         else None
     )

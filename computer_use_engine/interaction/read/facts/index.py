@@ -10,30 +10,45 @@ from collections.abc import Iterator, Mapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
+from functools import cache
+from types import MappingProxyType
 from typing import Any
 
 from computer_use.protocol.observation import ElementValue, NativeNode, NativeObservation, ReadIssue
-from computer_use.protocol.observation.issues import ReadIssueIndex as _IssueIndex
+
+_DATA_ATOMS = frozenset((str, bool, int, bytes, type(None)))
+
+
+@cache
+def _record_names(record_type: type) -> tuple[str, ...]:
+    return tuple(item.name for item in fields(record_type))
 
 
 def data(value: Any) -> Any:
     """Return a JSON-safe semantic value without native wrappers or object copies."""
+    kind = type(value)
+    if kind in _DATA_ATOMS:
+        return value
+    if kind is float:
+        if math.isfinite(value):
+            return value
+        return {"number": "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"}
+    if kind is dict or kind is MappingProxyType:
+        return {str(key): data(item) for key, item in value.items()}
+    if kind is tuple or kind is list:
+        return [data(item) for item in value]
     if isinstance(value, ElementValue):
         return {"element": str(value.node)}
     if isinstance(value, datetime):
         return {"datetime": value.isoformat()}
     if isinstance(value, Enum):
         return value.value
-    # Exact types preserve scalar validation and identity contracts.
-    # pylint: disable-next=unidiomatic-typecheck
-    if type(value) is float and not math.isfinite(value):
-        return {"number": "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"}
     if is_dataclass(value):
         result = {}
-        for item in fields(value):
-            content = getattr(value, item.name)
+        for name in _record_names(kind):
+            content = getattr(value, name)
             if content is not None:
-                result[item.name] = data(content)
+                result[name] = data(content)
         return result
     if isinstance(value, Mapping):
         return {str(key): data(item) for key, item in value.items()}
@@ -137,7 +152,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
     display accounting and contain no platform-property interpretation.
     """
     rows, edges, unread = [], [], []
-    issue_index = _IssueIndex(observation.issues)
+    issue_index = observation.issue_index
     for token, node in observation.nodes.items():
         indexed = node_fields(node)
         values = {name: value for name, (_, value) in indexed.items()}

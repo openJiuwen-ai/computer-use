@@ -41,6 +41,10 @@ import ApplicationServices
         return registry.windowReference(window, element: element)
     }
 
+    func retireWindowReference(_ window: NativeWindows.Window) {
+        registry.retireWindowReference(window)
+    }
+
     func nativeScope(_ window: NativeWindows.Window, owner: NSRunningApplication) -> String {
         return registry.nativeScope(window, owner: owner)
     }

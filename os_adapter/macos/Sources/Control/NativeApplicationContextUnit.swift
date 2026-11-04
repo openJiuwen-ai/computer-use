@@ -100,6 +100,9 @@ import ApplicationServices
         onNativePreparation(.init(kind: .focusNotification, phase: .willSend, detail: detail, window: nil))
         post(event)
         onNativePreparation(.init(kind: .focusNotification, phase: .returned, detail: detail, window: nil))
+        // Keep a bounded opportunity for the target's activity to settle.
+        // Pointer readiness may consume this fact after foreground restitution;
+        // returning before a slow acknowledgement would trigger needless fallback.
         for attempt in 0..<12 {
             try pollCheck()
             let current = try sample()

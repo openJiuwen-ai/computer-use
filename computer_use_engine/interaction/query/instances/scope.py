@@ -19,11 +19,9 @@ from computer_use.native.scopes import (
     StartingApplication,
 )
 from computer_use.session.interfaces import (
-    DirectoryMembership,
     SurfaceOwner,
     WindowIdentity,
     WindowLifetime,
-    WindowMembership,
 )
 from computer_use.session.state import AppState
 
@@ -120,13 +118,6 @@ def adopt(controller, ui, directory, selection=None):
     instance = controller.interfaces.windows.application(directory["session"], directory["application"], name)
     if ui._instance is not instance:
         ui._instance = instance
-    instance.reconcile(
-        directory,
-        DirectoryMembership(
-            not directory["stopReasons"],
-            tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in directory["surfaces"]),
-        ),
-    )
     aliases = controller.interfaces.windows.register_directory(directory, name)
     instance.windows = {int(ref): key for ref, key in aliases.items() if key in instance.members}
     state.running = RunningApplication(directory["application"], name, directory["session"])

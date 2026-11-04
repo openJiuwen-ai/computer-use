@@ -117,11 +117,20 @@ import ApplicationServices
                     routeFamily: "macos.hid.desktop.v1", delivery: .systemPointer, admission: .ready, reason: nil,
                     preparationOptions: []))
         } else if binding.wire["capture"] is String {
-            let pointer = NativePointerUnit(capture: try access.captures.input(binding.wire))
+            let captured = try access.captures.input(binding.wire)
+            let pointer = NativePointerUnit(capture: captured)
             let request = try NativePointerIntent(
                 unit: "pointer_sequence", kind: "click", parameters: op.request.parameters, foreground: false)
             try pointer.validateParameters(request)
-            try pointerOffers(pointer, at: pointer.point(request.start!), captured: true)
+            let point = try pointer.point(request.start!)
+            var choice: NativeQtComboChoice?
+            let receiver = try pointer.addressedPointerReceiver(at: point) { hit, role in
+                choice = try NativeQtComboChoice.captured(captured, pixels: request.start!, hit: hit, role: role)
+                return choice != nil ? .declaredInteraction : nil
+            }
+            try pointerOffers(
+                pointer, at: point, addressedReceiver: receiver,
+                captured: true, qtComboChoice: choice)
         } else if let node = binding.node {
             let facts = try access.objects.nativeActionFacts(node).resolvingDocument {
                 try access.scopes.fixedInputWindow(binding.wire)

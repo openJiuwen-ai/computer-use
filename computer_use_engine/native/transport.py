@@ -172,6 +172,7 @@ class ConnectionPort:
         self.connection, self.policy = connection, policy
         self._operations = {}
         self._continuations = {}
+        self.capture_references: frozenset[str] = frozenset()
         self.calls = CallLifecycle(self)
 
     @staticmethod
@@ -746,9 +747,17 @@ class ConnectionPort:
 
     async def capture(self, operation, target, max_dimension, timeout_ms, *, kind="window"):
         self._check(operation)
+        parameters = {
+            "operation": operation,
+            "target": encode_fields(target, _BINDING),
+            "kind": kind,
+            "maxDimension": max_dimension,
+        }
+        if "nativeCaptureRetention" in self.capabilities:
+            parameters["retainedCaptures"] = sorted(self.capture_references)
         value = await self.connection.request(
             "capture",
-            dict(operation=operation, target=encode_fields(target, _BINDING), kind=kind, maxDimension=max_dimension),
+            parameters,
             dict(timeoutMs=timeout_ms),
         )
         if (

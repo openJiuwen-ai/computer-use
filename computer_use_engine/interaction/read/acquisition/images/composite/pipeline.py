@@ -75,7 +75,8 @@ class InterfaceImagePipeline:
         if not images:
             return None, [
                 text(
-                    'Screenshot: unavailable; use member-window reads or Computer.read(view="image") for visual observation.'
+                    "Screenshot: unavailable; use member-window reads or "
+                    'Computer.read(view="image") for visual observation.'
                 ),
                 DisplayText("image_header", (ImageHeader("unavailable", (), False, (), None),)),
             ]
@@ -231,9 +232,18 @@ class InterfaceImagePipeline:
         # pylint: disable-next=protected-access
         state = ui._instance
         fixed_window = ui._anchor is not None
-        previous = ui._image if fixed_window else state.delivered_image
+        previous = (
+            self.controller.interfaces.windows.delivered_image(state, ui) if fixed_window else state.delivered_image
+        )
         state.image_generation += 1
         generation = state.image_generation
+        canvas.generation = generation
+        from computer_use.session.interfaces import WindowIdentity
+
+        for piece in canvas.pieces:
+            identity = WindowIdentity(piece.window, piece.image.target.surface, piece.image.target.instance)
+            state.sampled_window_images[identity] = canvas
+        self.controller.transport.capture_references = self.controller.interfaces.windows.capture_references()
 
         def sources(value: Any) -> tuple[Any, ...]:
             return tuple((piece.window, replace(piece.image.target, capture=None), piece.box) for piece in value.pieces)
@@ -256,30 +266,50 @@ class InterfaceImagePipeline:
             # command still dispatches through its new native token and map.
             canvas.delivered = previous.delivered
             canvas.delivered_coordinates = previous.delivered_coordinates
-        owner, value, application = weakref.ref(ui), weakref.ref(canvas), weakref.ref(state)
+        value, application = weakref.ref(canvas), weakref.ref(state)
         # pylint: disable-next=protected-access
         session = target.session
         controller = weakref.ref(self.controller)
 
-        def current() -> bool:
-            target, image, native, state = owner(), value(), controller(), application()
-            if (
+        def valid() -> bool:
+            image, native, state = value(), controller(), application()
+            return not (
                 image is None
                 or native is None
                 or state is None
                 or image.expired
                 or native.transport.session != session
                 or hashlib.sha256(image.png).digest() != image.digest
-            ):
-                return False
-            if state.delivered_image is image:
-                return True
-            if fixed_window:
-                return target is not None and target._image is image
-            # An unprinted sample does not revoke the delivered App image.
-            # An older App alias cannot become current again after a newer
-            # image has actually been delivered through any alias.
-            return generation > state.delivered_image_generation
+            )
+
+        def coordinate_windows() -> tuple[int, ...]:
+            if not valid():
+                return ()
+            image, state = value(), application()
+            identities = {
+                piece.window: (piece.image.target.surface, piece.image.target.instance) for piece in image.pieces
+            }
+            available = []
+            from computer_use.session.interfaces import WindowIdentity, WindowLifetime
+
+            for ref, window in state.windows.items():
+                if window not in identities:
+                    continue
+                surface, instance = identities[window]
+                identity = WindowIdentity(window, surface, instance)
+                evidence = state.evidence.get(identity)
+                member = state.members.get(window)
+                retained = evidence is not None and evidence.lifetime is not WindowLifetime.RETIRED
+                captured_member = member is not None and WindowIdentity.of(member) == identity
+                if (retained or (evidence is None and captured_member)) and (
+                    generation >= state.window_image_generations.get(identity, -1)
+                ):
+                    available.append(ref)
+            return tuple(available)
+
+        def current() -> bool:
+            image = value()
+            return valid() and (image.unavailable_mapping or bool(coordinate_windows()))
 
         def delivered(coordinates: ImageCoordinates | None = None) -> None:
             if current():
@@ -290,6 +320,7 @@ class InterfaceImagePipeline:
                     state.delivered_image = image
                     state.delivered_image_generation = generation
                 native.interfaces.windows.retain_image(state, image, generation=generation)
+                native.transport.capture_references = native.interfaces.windows.capture_references()
 
         adapters.register_image(
             canvas.png,
@@ -308,5 +339,6 @@ class InterfaceImagePipeline:
                 ),
                 current=current,
                 delivered=delivered,
+                coordinate_windows=coordinate_windows,
             ),
         )

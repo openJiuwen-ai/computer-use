@@ -102,7 +102,6 @@ class _CollectComponents(Node["ReadRunState", "CollectedAttempt"]):
                     "tree",
                     "observation_incomplete",
                     "The content refresh failed; the earlier tree and its capture interval are retained.",
-                    "read again if newer content is needed",
                 ),
             )
         return CollectedAttempt(
@@ -265,7 +264,6 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                         "applications",
                         "observation_incomplete",
                         reason,
-                        "use the exact observed application identity",
                     )
                     for reason in plan.applications["stopReasons"]
                 )
@@ -307,7 +305,6 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 gap = ObservationGap(
                     "directory", "observation_incomplete",
                     f"Window directory recheck budget exhausted: {error}",
-                    "use the available capture; inspect the current directory if needed",
                 )
                 return RecheckedAttempt(
                     value,

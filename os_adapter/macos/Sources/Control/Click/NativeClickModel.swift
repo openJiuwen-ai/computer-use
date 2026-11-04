@@ -32,4 +32,5 @@ import ApplicationServices
     let pointer: NativePointerUnit
     let point: CGPoint
     let needed: Bool
+    var kind: NativePointerIntent.Kind = .click
 }

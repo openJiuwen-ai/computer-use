@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from time import monotonic
 from typing import TYPE_CHECKING, cast
@@ -251,7 +252,9 @@ class AgentInterfacePipeline:
             for index, item in enumerate(desktop["windows"]):
                 if "window" in item and item.get("selector") in aliases:
                     by_window = {window: int(ref) for ref, window in aliases[item["selector"]].items()}
-                    window_refs[str(index)] = by_window[item["window"]["window"]]
+                    reference = by_window.get(item["window"]["window"])
+                    if reference is not None:
+                        window_refs[str(index)] = reference
             document = observed["document"]
             lines.append(
                 replace(
@@ -437,17 +440,23 @@ class AgentInterfacePipeline:
             # child seen only as pixels is not a new required AX search scope;
             # every previously AX-observed descendant still participates.
         end = monotonic() + timeout_ms / 1000
-        for owner in owners:
-            try:
-                snapshot = await self.lookup.arun(
-                    FindElement(owner, path, max(0, round((end - monotonic()) * 1000)), False), control
-                )
-            except ComputerUseError as error:
-                if error.code == "element_not_found":
-                    continue
-                raise
-            binding = snapshot["binding"]
-            matched[(binding.session, binding.surface, binding.node)] = snapshot
+        # Waiting belongs to the complete lookup, not its first member. A
+        # toolbar with no match must not consume the deadline before the
+        # already-observed document has even been searched.
+        while True:
+            matched.clear()
+            for owner in dict.fromkeys(owners):
+                try:
+                    snapshot = await self.lookup.arun(FindElement(owner, path, 0, False), control)
+                except ComputerUseError as error:
+                    if error.code == "element_not_found":
+                        continue
+                    raise
+                binding = snapshot["binding"]
+                matched[(binding.session, binding.surface, binding.node)] = snapshot
+            if matched or incomplete or monotonic() >= end:
+                break
+            await asyncio.sleep(min(0.1, max(0, end - monotonic())))
         if len(matched) > 1:
             raise local_failure(
                 "the name/path matches controls in several member windows",

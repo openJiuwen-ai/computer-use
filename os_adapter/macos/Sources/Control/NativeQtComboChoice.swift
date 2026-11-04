@@ -12,6 +12,12 @@ import ApplicationServices
 /// choices have separate action semantics and do not inherit this exclusion.
 struct NativeQtComboChoice {
     enum Kind: Equatable { case tableCell, widget }
+    /// The original delivered capture fixes the point's coordinate space. This
+    /// does not turn a coordinate intent into an element click or move its point.
+    struct CapturedPoint: Equatable {
+        let capture: String
+        let pixels: CGPoint
+    }
 
     let element: AXUIElement
     let list: AXUIElement
@@ -25,6 +31,7 @@ struct NativeQtComboChoice {
     let observedWindowID: CGWindowID
     let ownerStamp: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>?
     let kind: Kind
+    var capturedPoint: CapturedPoint? = nil
 
     nonisolated static func kind(
         role: String?, identifier: String?, listIdentifier: String?, rowIdentifier: String?, hasRow: Bool
@@ -101,7 +108,8 @@ struct NativeQtComboChoice {
     }
 
     @MainActor static func query(
-        element: AXUIElement, role: String?, observedWindow: AXUIElement?, ancestors: [AXUIElement], pid: pid_t
+        element: AXUIElement, role: String?, observedWindow: AXUIElement?, ancestors: [AXUIElement], pid: pid_t,
+        capturedPoint: CapturedPoint? = nil
     ) throws -> Self? {
         guard role == kAXStaticTextRole,
             let identifier = AXAccess.read(element, kAXIdentifierAttribute).value as? String,
@@ -134,8 +142,14 @@ struct NativeQtComboChoice {
         // QComboBox instead reverses through the combo; its popup is discoverable
         // through AXWindows and must publish this exact list as its only child.
         var candidates = [AXUIElement]()
-        if let direct = AXAccess.element(list, kAXParentAttribute) { candidates.append(direct) }
-        candidates += AXAccess.elements(AXUIElementCreateApplication(pid), kAXWindowsAttribute, limit: 64) ?? []
+        if capturedPoint != nil {
+            // A captured popup already identifies its exact physical window.
+            // Never search for a different popup to justify this pixel intent.
+            candidates = [observedWindow]
+        } else {
+            if let direct = AXAccess.element(list, kAXParentAttribute) { candidates.append(direct) }
+            candidates += AXAccess.elements(AXUIElementCreateApplication(pid), kAXWindowsAttribute, limit: 64) ?? []
+        }
         var seen = [AXUIElement](), matches = [Self]()
         for popup in candidates where !seen.contains(where: { CFEqual($0, popup) }) {
             seen.append(popup)
@@ -145,11 +159,13 @@ struct NativeQtComboChoice {
                 let popupID = BackgroundEvents.nativeWindowID(popup)
             else { continue }
             let ownerStamp = try sampleOwner(popup: popup, list: list, pid: pid)
-            let ownerID = ownerStamp?.ownerWindowID ?? observedWindowID
-            let proof = Self(
+            let ownerID = ownerStamp?.ownerWindowID
+                ?? (capturedPoint != nil ? BackgroundEvents.nativeWindowID(list) : nil) ?? observedWindowID
+            var proof = Self(
                 element: element, list: list, row: row, popup: popup, observedWindow: observedWindow,
                 ancestors: ancestors, pid: pid, popupID: popupID, ownerID: ownerID,
                 observedWindowID: observedWindowID, ownerStamp: ownerStamp, kind: kind)
+            proof.capturedPoint = capturedPoint
             let confirmed = try proof.confirms()
             diagnose([
                 "kind": "qt_combo_choice_receiver", "pid": pid, "popupWindow": popupID, "ownerWindow": ownerID,
@@ -159,6 +175,44 @@ struct NativeQtComboChoice {
             if confirmed { matches.append(proof) }
         }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// A specific native hit and the same existing forward Qt membership qualify
+    /// the capture route. Missing/coarse AX leaves ordinary visual routes intact.
+    @MainActor static func captured(
+        _ input: NativeCapture.Input, pixels: CGPoint, hit: AXUIElement, role: String?
+    ) throws -> Self? {
+        guard let observed = input.entry.surface.element,
+            let capture = input.entry.binding["capture"] as? String
+        else { return nil }
+        let proof = try query(
+            element: hit, role: role,
+            observedWindow: observed, ancestors: [], pid: input.mapping.pid,
+            capturedPoint: .init(capture: capture, pixels: pixels))
+        guard let proof, proof.popupID == input.mapping.id else { return nil }
+        return proof
+    }
+
+    @MainActor private static func hit(pid: pid_t, at point: CGPoint) throws -> AXUIElement? {
+        try RequestDiagnostics.checkCancellation()
+        var value: AXUIElement?
+        let status = AXUIElementCopyElementAtPosition(
+            AXUIElementCreateApplication(pid), Float(point.x), Float(point.y), &value)
+        try RequestDiagnostics.checkCancellation()
+        return status == .success ? value : nil
+    }
+
+    /// Revalidate this exact pixel after translation and preparation. List
+    /// membership alone cannot authorize a point now occupied by another row.
+    @MainActor func confirmsCaptured(_ input: NativeCapture.Input) throws -> Bool {
+        guard let point = capturedPoint,
+            point.capture == input.entry.binding["capture"] as? String,
+            input.mapping.pid == pid, input.mapping.id == popupID,
+            let observed = input.entry.surface.element, CFEqual(observed, observedWindow),
+            let current = try Self.hit(pid: pid, at: NativePointerUnit(capture: input).point(point.pixels)),
+            CFEqual(current, element)
+        else { return false }
+        return try confirms()
     }
 
     /// Recheck the retained popup and exact choice before geometry/preparation
@@ -226,7 +280,8 @@ struct NativeQtComboChoice {
         case (let a?, let b?): sameRow = CFEqual(a, b)
         default: sameRow = false
         }
-        return sameOwner && sameRow && pid == other.pid && popupID == other.popupID && ownerID == other.ownerID
+        return capturedPoint == other.capturedPoint && sameOwner && sameRow && pid == other.pid
+            && popupID == other.popupID && ownerID == other.ownerID
             && observedWindowID == other.observedWindowID && kind == other.kind
             && CFEqual(element, other.element) && CFEqual(list, other.list) && CFEqual(popup, other.popup)
             && CFEqual(observedWindow, other.observedWindow) && ancestors.count == other.ancestors.count

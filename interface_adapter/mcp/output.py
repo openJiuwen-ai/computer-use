@@ -159,7 +159,15 @@ class ObservationOutput:
             raise RuntimeError(
                 "Too many observation scopes in one call; inspect the collected results before reading more."
             )
+        # Replacement belongs at its actual acquisition position. In particular,
+        # a later parent capture must not move ahead of an earlier popup.
+        self._pending.pop(key, None)
         self._pending[key] = observation
+
+    def take(self):
+        observations = tuple(self._pending.values())
+        self._pending.clear()
+        return observations
 
     def invalidate(self, source):
         self.presenter.invalidate(source)
@@ -176,15 +184,3 @@ class ObservationOutput:
             value.get("sourceState", value["state"]) is state or value["state"] is state
             for value in self._pending.values()
         )
-
-    def flush(self, emit, emit_image=None):
-        for observation in self._pending.values():
-            emit(self.presenter.text(observation), observation)
-            self.presenter.delivered(observation)
-            if (
-                observation["view"] in ("window", "desktop")
-                and observation["state"].get("screenshot") is not None
-                and emit_image is not None
-            ):
-                emit_image(observation["state"]["screenshot"])
-        self._pending.clear()

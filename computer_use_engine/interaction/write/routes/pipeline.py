@@ -72,10 +72,6 @@ class RouteSelectionPipeline(Sequence["Any", "Any"]):
                 last = view.last_route_failure
                 raise failure(
                     last.error_code, target.facts.target_label, last.detail, view.dispatched, view.preparation,
-                    next_step=(
-                        "obtain permission from the caller before creating a session with allow_global_input=True"
-                        if last.error_code == "permission_required" else None
-                    ),
                 ) from unavailable
             raise
         return RoutePlan(resolved, command.primitive, command.prepare, command.foreground, command.click_selection)

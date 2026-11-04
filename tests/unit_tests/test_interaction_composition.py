@@ -143,8 +143,9 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             raise ValueError("delivery failed")
 
         set_action_handler(fail)
-        with self.assertRaisesRegex(RuntimeError, "do not replay"):
+        with self.assertRaisesRegex(RuntimeError, "Action completed, but its receipt could not be displayed") as caught:
             await self.controller.run(ActOnElement(self.ui, self.snapshot, "click", {}))
+        self.assertIn("Effect: test element: sent once", str(caught.exception))
         self.engine.assert_awaited_once()
 
     async def test_pointer_maps_coordinates_and_dispatches_once(self):
@@ -193,13 +194,13 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                 lookup.side_effect = results
                 if error:
                     with self.assertRaises(ComputerUseError) as caught:
-                        await self.controller.run(ResolveElement(self.ui, "button", 1000))
+                        await self.controller.run(ResolveElement(self.ui, "button", 0))
                     self.assertEqual(caught.exception.code, error)
                 else:
-                    self.assertIs(await self.controller.run(ResolveElement(self.ui, "button", 1000)), self.snapshot)
+                    self.assertIs(await self.controller.run(ResolveElement(self.ui, "button", 0)), self.snapshot)
                 requests = [call.args[0] for call in lookup.call_args_list]
                 self.assertEqual([request.owner for request in requests], list(self.ui._lookup_scopes))
-                self.assertLessEqual(requests[1].timeout_ms, requests[0].timeout_ms)
+                self.assertEqual([request.timeout_ms for request in requests], [0, 0])
                 self.assertEqual(tuple(dict(segment) for segment in requests[0].path), ({"name": "button"},))
         self.engine.assert_not_awaited()
 

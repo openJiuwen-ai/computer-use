@@ -124,6 +124,9 @@ The SDK is synchronous: each operation returns its result or raises before the n
 Select an application with `computer.app(id)`, observe it with `app.read(view="both")`, and resolve a control with
 `app.element(name_or_path)`. A confirmed target can be used directly, for example `app.element("Save").click()`.
 
+Within one tool call, every action receipt is retained while superseded automatic observations of the same scope are
+coalesced into the final state. Distinct popups and explicitly printed or full observations are preserved.
+Window coordinate actions retain visual feedback and collect available accessibility information independently.
 MCP automatically presents a full initial observation and then changes (diffs) by default, including observations after
 writes and consecutive operations in one call. Use `app.read(full=True)` or `window.read(full=True)` to restore full
 context; no private client history protocol is required. The SDK's `state.text` remains complete for the captured scope;

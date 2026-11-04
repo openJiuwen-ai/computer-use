@@ -409,11 +409,21 @@ class ClickReceipt:
     @property
     def permits_replanning(self) -> bool:
         return self.continuation.kind in ("sameCandidateRefresh", "reselectWithinScope") and all(
-            p.effect == "contextOnly"
-            and (
-                p.continuation == "withinScope"
-                or self.continuation.kind == "sameCandidateRefresh"
-                and p.continuation == "sameCandidate"
+            (
+                p.effect == "contextOnly"
+                and (
+                    p.continuation == "withinScope"
+                    or self.continuation.kind == "sameCandidateRefresh"
+                    and p.continuation == "sameCandidate"
+                )
+            )
+            or (
+                p.kind == "pointerPreparation"
+                and not self.transport_evidence.call_entered
+                and p.effect == "contentPossible"
+                and p.dispatch == Dispatch.DISPATCHED
+                and p.continuation == "withinScope"
+                and "originalTargetViewportProgress=confirmed" in p.observations
             )
             for p in self.preparation_evidence
         )

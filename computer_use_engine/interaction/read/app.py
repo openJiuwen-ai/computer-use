@@ -501,7 +501,6 @@ class NativeAppReader:
                 "directory",
                 "observation_incomplete",
                 reason,
-                "inspect the directory again if the required window is missing",
             )
             for reason in directory["stopReasons"]
         ]
@@ -511,7 +510,6 @@ class NativeAppReader:
                     "directory",
                     "observation_incomplete",
                     "Some window parent relationships are unknown.",
-                    "select an observed window explicitly when needed",
                 )
             )
         return gaps

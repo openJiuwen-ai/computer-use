@@ -62,6 +62,7 @@ _schemas = {
             application=identity,
             surfaces=array(surface_schema, max=512),
             rootDiscoveryComplete=boolean(),
+            endedWindows=array(obj({"window": identity, "instance": identity, "surface": identity}), max=4096).optional(),
             focusedWindow=identity.nullable().optional(),
             provider=obj(
                 dict(status=identity, attribute=identity.nullable(), writeStatus=number(integer=True).nullable())
@@ -148,6 +149,11 @@ def decode_directory(value):
                 raise ValueError("protocol: duplicate surface identity")
         for item in entries:
             validate_surface(item)
+        ended = result.get("endedWindows", ())
+        ended_keys = [(item["window"], item["surface"], item["instance"]) for item in ended]
+        live_keys = {(item["window"], item["surface"], item["instance"]) for item in entries}
+        if len(ended_keys) != len(set(ended_keys)) or live_keys.intersection(ended_keys):
+            raise ValueError("protocol: conflicting ended window lifetime evidence")
         # Unknown parents and cycles are provider facts, not an excuse to drop
         # windows or guess another document. Selection handles them explicitly.
     return result

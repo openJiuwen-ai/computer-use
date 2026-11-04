@@ -247,6 +247,12 @@ import ApplicationServices
                 incarnation: window.process.incarnation), aliases: aliases)
     }
 
+    func retireWindowReference(_ window: NativeWindows.Window) {
+        references.retire(Identity(
+            pid: window.process.pid, launched: nil, element: nil, nativeWindow: window.mapping.id,
+            incarnation: window.process.incarnation))
+    }
+
     func nativeScope(_ window: NativeWindows.Window, owner: NSRunningApplication) -> String {
         observationScope(owner, window: nil, reference: windowReference(window))
     }

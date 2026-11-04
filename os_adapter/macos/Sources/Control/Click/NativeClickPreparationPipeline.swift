@@ -60,7 +60,7 @@ import ApplicationServices
                 onCleanupUnknown: receipt.recordCleanupUnknown, onNativePreparation: evidence.record,
                 onFocusOutcome: evidence.observe, onPreparationWait: evidence.recordWait, observeOutcome: true)
         }
-        if let preparation = try SampleNativeClickPreparationPass.run(plan, boundary: boundary), preparation.needed {
+        func prepareReceiver(_ preparation: NativeClickWindowPreparation) async throws {
             switch plan.offer.delivery {
             case .windowDirected where plan.command.foreground:
                 try AuthorizeNativeClickForegroundPass.run(plan)
@@ -74,7 +74,8 @@ import ApplicationServices
                 do {
                     let outcome = try await NativeFocusPipeline.prepare(
                         BackgroundTarget(pointer.application), window: pointer.window,
-                        nativeWindow: pointer.nativeWindow, onPreparation: receipt.recordPreparation,
+                        nativeWindow: pointer.nativeWindow, needsKeyWindow: preparation.kind != .scroll,
+                        onPreparation: receipt.recordPreparation,
                         onCleanupUnknown: receipt.recordCleanupUnknown, beforeAction: boundary.checkConditions,
                         onNativePreparation: evidence.record, observeOutcome: true)
                     evidence.observe(outcome)
@@ -88,11 +89,20 @@ import ApplicationServices
             case .objectAction, .objectSelection: break
             }
         }
-        try await NativeClickExposurePipeline.run(plan, boundary: boundary, receipt: receipt, evidence: evidence)
+        if let preparation = try SampleNativeClickPreparationPass.run(plan, boundary: boundary), preparation.needed {
+            try await prepareReceiver(preparation)
+        }
+        let exposed = try await NativeClickExposurePipeline.run(
+            plan, boundary: boundary, receipt: receipt, evidence: evidence)
         try ConfirmNativeClickPreparationPass.run(boundary)
-        if let current = try SampleNativeClickPreparationPass.run(plan, boundary: boundary, afterPreparation: true),
-            current.needed
-        {
+        var current = try SampleNativeClickPreparationPass.run(plan, boundary: boundary, afterPreparation: true)
+        if exposed, let preparation = current, preparation.needed {
+            // Scrolling can create/change a control receiver. Only now prepare
+            // the actual click, retaining the original target and request.
+            try await prepareReceiver(preparation)
+            current = try SampleNativeClickPreparationPass.run(plan, boundary: boundary, afterPreparation: true)
+        }
+        if current?.needed == true {
             throw NativePreparationUnavailable(
                 description: "selected click delivery remains unprepared; requested input was not sent")
         }

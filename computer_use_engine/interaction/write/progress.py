@@ -170,7 +170,6 @@ class WriteRunState:
                 "The selected receiver still needs preparation after the receiver preparation allowance was consumed.",
                 self.dispatched,
                 self.preparation,
-                next_step="read the original target after its editor settles",
             )
         self.attempts.preparation_pairs.add((command.actuator, command.receiver))
 
@@ -290,7 +289,11 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
         # The native continuation is a constraint, never an independent retry
         # authorization. Only this Gate consumes its finite history/budget.
         can_replan = (
-            step.dispatch == Dispatch.NOT_DISPATCHED and step.cleanup.value == "complete" and click.permits_replanning
+            step.dispatch == Dispatch.NOT_DISPATCHED
+            and step.cleanup.value == "complete"
+            and not progress.requested_input_possible
+            and not _receipt_has_requested_input(step)
+            and click.permits_replanning
         )
         if can_replan and step.retry_reason == "preconditionChanged" and progress.history.precondition_changes < 1:
             return WriteDecision("reinspect", action="precondition_changed")
@@ -324,7 +327,6 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
                 step.detail,
                 progress.dispatched,
                 progress.preparation,
-                next_step="obtain permission from the caller before creating a session with allow_global_input=True",
             ),
         )
     if command.prepare and (progress.requested_input_possible or _receipt_has_requested_input(step)):

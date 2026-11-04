@@ -107,4 +107,13 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
                 lines=[dict(line, rect=coordinates.delivered_rect(line["rect"])) for line in visual["lines"]],
             )
     caption = render_image_caption(size["width"], size["height"], facts)
+    coordinate_windows = source.get("coordinate_windows") if source is not None else None
+    if callable(coordinate_windows) and not facts.get("stale") and facts.get("mappingAvailable", True):
+        refs = coordinate_windows()
+        if refs:
+            caption += (
+                "\nCoordinate inputs for this displayed canvas: "
+                + ", ".join(f"computer.window({ref})" for ref in refs)
+                + ". Use the whole displayed image's pixels; each Window accepts only its own region."
+            )
     return caption

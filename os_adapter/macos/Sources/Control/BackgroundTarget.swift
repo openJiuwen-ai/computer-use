@@ -65,18 +65,6 @@ import ApplicationServices
         }
     }
 
-    static func validateReleasedInput(allowing button: CGMouseButton? = nil) throws {
-        let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
-        guard CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty,
-            ![CGMouseButton.left, .right, .center].contains(where: {
-                $0 != button && CGEventSource.buttonState(.combinedSessionState, button: $0)
-            })
-        else {
-            throw DriverError(
-                "mouse buttons or modifiers are already held; release them before input", code: .inputUnavailable)
-        }
-    }
-
     enum MenuRecipient { case window(AXUIElement), application }
 
     func validateWindowlessMenu() throws {

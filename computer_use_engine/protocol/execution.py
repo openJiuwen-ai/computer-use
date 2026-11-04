@@ -225,6 +225,7 @@ _capture_request = obj(
         target=binding,
         kind=enum("window", "desktop"),
         maxDimension=number(integer=True, min=1, max=4096),
+        retainedCaptures=array(identity).optional(),
     )
 )
 

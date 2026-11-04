@@ -105,7 +105,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertEqual(result.window_lifecycle, "observed")
 
     async def test_failed_optional_refresh_keeps_first_content_and_reports_its_gap(self):
-        gap = ObservationGap("refresh", "observation_refresh_failed", "first capture retained", "read again if needed")
+        gap = ObservationGap("refresh", "observation_refresh_failed", "first capture retained")
         retain_observation_data(self.observation, (), (), partial=True, directory=self.directory, gaps=(gap,))
         result = await self.run_action()
         self.assertIs(result.observation, self.observation)
@@ -128,7 +128,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
             (),
             partial=True,
             content_available=False,
-            gaps=(ObservationGap("image", "stale_target", "Window disappeared during capture", "read again"),),
+            gaps=(ObservationGap("image", "stale_target", "Window disappeared during capture"),),
         )
         result = await self.run_action(target=replace(self.target, node=None, capture="capture"))
         self.assertEqual(result.observation_status, "unavailable")
@@ -138,9 +138,9 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertIs(result.observation, self.observation)
         self.execute.assert_awaited_once()
 
-    async def test_image_input_gets_image_without_accessibility_prerequisite(self):
+    async def test_image_input_keeps_visual_and_accessibility_observation_available(self):
         await self.run_action(target=replace(self.target, node=None, capture="capture"))
-        self.assertEqual(self.read.call_args.args[1], "image")
+        self.assertEqual(self.read.call_args.args[1], "both")
         self.assertEqual(self.read.call_args.kwargs, {})  # default read never activates
 
     async def test_desktop_input_keeps_desktop_observation(self):
@@ -156,7 +156,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertEqual(result.observation_status, "unavailable")
         self.assertEqual(result.observation_error.code, "observation_timeout")
         self.assertTrue(result.observation_error.session_usable)
-        self.assertIn("do not replay", result.observation_error.next)
+        self.assertEqual(result.observation_error.detail, "read budget exhausted")
         self.execute.assert_awaited_once()
 
     async def test_closed_root_offers_exact_new_choices_without_rebinding(self):
@@ -185,7 +185,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError) as caught:
             await self.run_action()
         self.assertIs(caught.exception, cancelled)
-        self.assertIn("do not replay", " ".join(cancelled.__notes__))
+        self.assertIn("Action already dispatched: Input sent once.", cancelled.__notes__)
         self.assertEqual(self.events, [self.receipt])
         self.execute.assert_awaited_once()
 
@@ -217,8 +217,8 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
                     await self.run_action()
                 self.assertIs(caught.exception, failure)
                 self.assertEqual(
-                    (failure.code, failure.effect, failure.detail, failure.next),
-                    ("execution_unknown", effect, "uncertain", "observe"),
+                    (failure.code, failure.effect, failure.detail),
+                    ("execution_unknown", effect, "uncertain"),
                 )
                 self.assertIs(failure._failure_context, context)
                 self.assertIs(failure.impact, impact)

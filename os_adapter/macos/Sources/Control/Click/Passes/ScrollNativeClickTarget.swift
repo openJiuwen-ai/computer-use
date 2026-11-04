@@ -57,7 +57,10 @@ import AppKit
             let progressed = NativeElementViewport.progressed(
                 frame: sampled.frame, clipped: sampled.clipped, window: sampled.mapping.frame,
                 from: exposure.frame, originalWindow: exposure.mapping.frame, viewport: exposure.viewport)
-            if progressed && now - changedAt >= 0.06 { return }
+            if progressed && now - changedAt >= 0.06 {
+                evidence.confirmViewportProgress(window: exposure.mapping.id)
+                return
+            }
             try await Task.sleep(for: .milliseconds(20))
         } while ProcessInfo.processInfo.systemUptime < waitUntil
         throw DriverError(

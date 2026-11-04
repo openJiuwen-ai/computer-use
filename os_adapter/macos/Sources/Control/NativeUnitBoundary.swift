@@ -54,7 +54,8 @@ struct NativeUnitBoundary {
                 }
                 if let proof = contract.click?.qtComboChoice {
                     guard case .pointer(.click) = contract.unit, contract.actuator == nil, contract.receiver == nil,
-                        binding.node != nil, !(binding.wire["capture"] is String),
+                        (binding.node != nil && proof.capturedPoint == nil && !(binding.wire["capture"] is String))
+                            || (binding.node == nil && proof.capturedPoint != nil && binding.wire["capture"] is String),
                         [.windowDirected, .systemPointer].contains(contract.click!.delivery)
                     else { throw DriverError("Qt choice proof used by another route", code: .invalidRequest) }
                     return try access.scopes.qtComboChoiceBoundary(command.value["target"], qualification: proof)

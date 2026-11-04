@@ -136,10 +136,26 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
                 combined = await call("write('First write')\nlast = write('Second write')")
                 self.assertEqual(combined.count("Action [dispatched]"), 2)
-                self.assertEqual(combined.count("Tree: diff"), 2)
+                self.assertEqual(combined.count("Tree: diff"), 1)
                 self.assertIn("First write", combined)
                 self.assertIn("Second write", combined)
                 self.assertNotIn("Unchanged unrelated control", combined)
+                # Only the final observation becomes the next diff baseline;
+                # both action receipts remain in chronological order.
+                self.assertLess(combined.index("First write"), combined.index("Second write"))
+                self.assertIn("Tree: unchanged", await call("observe('Second write')"))
+                pinned = await call("observe('Requested full', full=True)\nwrite('After full')")
+                self.assertIn("Requested full", pinned)
+                self.assertIn("After full", pinned)
+                self.assertEqual(pinned.count("Unchanged unrelated control"), 1)
+                distinct = await call(
+                    "observe('Parent intermediate')\nobserve('Popup content', scope='popup')\n"
+                    "observe('Parent final')"
+                )
+                self.assertNotIn("Parent intermediate", distinct)
+                self.assertIn("Popup content", distinct)
+                self.assertIn("Parent final", distinct)
+                self.assertLess(distinct.index("Popup content"), distinct.index("Parent final"))
                 aliased = await call("observe('Through App', stream='app-tree')")
                 self.assertIn("Tree: diff", aliased)
                 self.assertNotIn("Unchanged unrelated control", aliased)
@@ -153,7 +169,7 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 # Retained SDK text remains complete, but reprinting the capture
                 # does not republish an old full view or roll back the baseline.
                 explicit_text = await call("print(last.text)")
-                self.assertIn("retained observation", explicit_text)
+                self.assertIn("Retained observation", explicit_text)
                 self.assertNotIn("Unchanged unrelated control", explicit_text)
                 await call("assert 'Unchanged unrelated control' in last.text")
                 other = await call("observe('New window', scope='window-two')")
@@ -221,7 +237,7 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
                         )
                         self.assertEqual(changed.count("Tree: diff"), 1)
                         self.assertNotIn("Unchanged unrelated control", changed)
-                        self.assertNotIn("retained observation", changed)
+                        self.assertNotIn("Retained observation", changed)
 
                 full = await call("state = observe('Explicit full', full=True)\nprint(state.text[:5])")
                 self.assertEqual(full.count("Unchanged unrelated control"), 1)
@@ -230,7 +246,7 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 # A stale object's print must neither move the live baseline
                 # backward nor claim that the old capture has been refreshed.
                 retained = await call("print(old.text)\nobserve('Explicit full')")
-                self.assertIn("retained observation", retained)
+                self.assertIn("Retained observation", retained)
                 self.assertIn("Tree: unchanged", retained)
                 self.assertNotIn("Initial", retained)
 

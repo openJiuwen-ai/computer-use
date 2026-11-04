@@ -58,7 +58,6 @@ async def collect_component(
             name,
             "observation_incomplete",
             f"Observation budget exhausted: {error}",
-            "use the available content; read again if this component is needed",
         )
     except ComputerUseError as error:
         invalid_generation = (

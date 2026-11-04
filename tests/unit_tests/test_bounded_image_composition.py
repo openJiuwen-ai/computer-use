@@ -19,6 +19,7 @@ from computer_use.protocol.captures import capture_metadata, decode_capture
 from computer_use.session.image_coordinates import ImageCoordinates
 from computer_use.session.interface_images import signature
 from computer_use.session.interfaces import InstanceState
+from computer_use.session.windows import WindowReferences
 from PIL import Image
 
 
@@ -70,6 +71,7 @@ def fixture(*, fixed=False):
     ui = Record(_instance=state, _anchor="root" if fixed else None, _image=None)
     controller = Record(
         transport=Record(session="session"),
+        interfaces=SimpleNamespace(windows=WindowReferences()),
         adapters=SimpleNamespace(register_image=register_image, image_delivery_epoch=image_delivery_epoch),
     )
     return ui, controller, InterfaceImagePipeline(controller)
@@ -105,7 +107,7 @@ def test_missing_a_selected_capture_still_returns_an_explicit_unclickable_partia
     with pytest.raises(ComputerUseError, match="partial image"):
         canvas.hit((20, 30))
     caption = image_label(canvas.png, coordinates=ImageCoordinates((100, 80), (100, 80)))
-    assert "no executable coordinate mapping" in caption
+    assert "Coordinate mapping: unavailable." in caption
     assert "Use this displayed image's pixels" not in caption
     assert "Window reference: 0" in caption
     assert "Window references" not in caption

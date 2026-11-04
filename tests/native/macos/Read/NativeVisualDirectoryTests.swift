@@ -22,6 +22,8 @@ import ApplicationServices
         var focused: AXUIElement?
         var nativeAvailable = true
         var nativeIDs: [CGWindowID] = [380]
+        var hiddenNativeIDs = Set<CGWindowID>()
+        var nativePresenceUnavailable = false
         var failedApplications = Set<String>()
         var locations = [String]()
         var elapsed = 100.0
@@ -50,8 +52,15 @@ import ApplicationServices
             }
             services.owner = { _ in }
             services.process = { _ in self.process }
-            services.info = { id in self.nativeIDs.contains(id)
+            services.info = { id in self.nativeIDs.contains(id) || self.hiddenNativeIDs.contains(id)
                 ? [kCGWindowOwnerPID as String: self.app.processIdentifier, kCGWindowNumber as String: id] : nil }
+            services.presence = { id in
+                if self.nativePresenceUnavailable { return .unavailable }
+                guard self.nativeIDs.contains(id) || self.hiddenNativeIDs.contains(id) else { return .absent }
+                return .present([kCGWindowOwnerPID as String: self.app.processIdentifier,
+                                 kCGWindowNumber as String: id,
+                                 kCGWindowIsOnscreen as String: self.nativeIDs.contains(id)])
+            }
             services.role = { self.value($0, kAXRoleAttribute) as? String }
             return NativeDirectory(state: state, session: "visual-scene", windowServices: services)
         }()
@@ -157,6 +166,8 @@ import ApplicationServices
         try visualWindowFacts()
         try rootCoverageIsIndependentOfDescendantGaps()
         try nativeOnlyRefreshRetainsBinding()
+        try hiddenAndUnknownNativeLifetimesCanReappear()
+        try endedNativeLifetimeNeverReusesWindowOrScope()
         try declaredControlRootDoesNotOpenItsContents()
         try legacyContentPositiveControl()
         try visualBatchesRetainProfileFailuresAndDeadline()
@@ -355,6 +366,56 @@ import ApplicationServices
         let reasons = try scene.collect()["stopReasons"] as! [String]
         precondition(!reasons.isEmpty)
         precondition(scene.content.isEmpty)
+    }
+
+    @MainActor static func hiddenAndUnknownNativeLifetimesCanReappear() throws {
+        for unavailable in [false, true] {
+            let scene = Scene()
+            scene.trusted = false
+            let original = (try scene.collect()["surfaces"] as! [[String: Any]])[0]
+            let scope = original["surface"] as! String
+            scene.nativeIDs = []
+            scene.hiddenNativeIDs = [380]
+            scene.nativePresenceUnavailable = unavailable
+            let absent = try scene.collect()
+            precondition((absent["surfaces"] as! [[String: Any]]).isEmpty)
+            precondition((absent["endedWindows"] as! [[String: Any]]).isEmpty,
+                         "hidden or unavailable WindowServer evidence retired an existing native lifetime")
+            precondition(scene.directory.surface(scope) != nil)
+            scene.nativeIDs = [380]
+            scene.hiddenNativeIDs = []
+            scene.nativePresenceUnavailable = false
+            let reappeared = (try scene.collect()["surfaces"] as! [[String: Any]])[0]
+            for key in ["window", "surface", "instance"] {
+                precondition(original[key] as? String == reappeared[key] as? String,
+                             "reappearing native window changed its exact binding")
+            }
+        }
+    }
+
+    @MainActor static func endedNativeLifetimeNeverReusesWindowOrScope() throws {
+        let scene = Scene()
+        scene.trusted = false
+        let original = (try scene.collect()["surfaces"] as! [[String: Any]])[0]
+        scene.nativeIDs = []
+        let ended = try scene.collect()
+        let tombstones = ended["endedWindows"] as! [[String: Any]]
+        precondition(tombstones.count == 1)
+        for key in ["window", "surface", "instance"] {
+            precondition(tombstones[0][key] as? String == original[key] as? String)
+        }
+        precondition(scene.directory.surface(original["surface"] as! String) == nil)
+        // A WindowServer numeric slot may be reused in the same process. It
+        // cannot inherit a positively ended SDK/native lifetime or scope.
+        scene.nativeIDs = [380]
+        let recreated = try scene.collect()
+        let fresh = (recreated["surfaces"] as! [[String: Any]])[0]
+        for key in ["window", "surface", "instance"] {
+            precondition(fresh[key] as? String != original[key] as? String,
+                         "new native lifetime rebound an ended reference")
+        }
+        precondition((recreated["endedWindows"] as! [[String: Any]]).count == 1,
+                     "later directory lost positive end evidence consumed by an earlier read")
     }
 
     @MainActor static func legacyContentPositiveControl() throws {

@@ -229,7 +229,9 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.capture()
         result = await self.execute("obs = read()\nprint_image(obs.screenshot)\nprint(obs.text)")
         self.assert_delivery(result)
-        self.assertEqual([block["type"] for block in result["content"]], ["text", "image", "text"])
+        # Caption/observation now precede the image, rather than printing an
+        # explicit image first and an automatic copy after its text.
+        self.assertEqual([block["type"] for block in result["content"]], ["text", "text", "image"])
 
     async def test_only_the_latest_buffered_capture_commits_its_observation_context(self):
         _, _, first = self.capture()

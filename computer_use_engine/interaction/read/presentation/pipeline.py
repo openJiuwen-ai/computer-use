@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.accounting.pipeline import AccountingPipeline
-from computer_use.interaction.read.presentation.accounting.relations import RelationPresentation
 from computer_use.interaction.read.presentation.compression.pipeline import CompressionPipeline
 from computer_use.interaction.read.presentation.fallback import UncompressedFacts, branch_references
 from computer_use.interaction.read.presentation.interface.geometric.presentation.pipeline import (
@@ -83,8 +82,8 @@ class PresentationPipeline(Pipeline["SemanticNode", "ProjectionResult"]):
 
 def _branch_facts(snapshot: SnapshotFacts, request: SnapshotRenderRequest, root: SemanticNode) -> BranchFacts:
     """Build the exact source indexes shared by preparation and final accounting."""
-    native_nodes = {node["node"]: node for node in snapshot.facts["nodes"]}
-    relations = RelationPresentation(snapshot.facts, snapshot.refs)
+    native_nodes = snapshot.presentation_nodes
+    relations = snapshot.presentation_relations
     members = branch_references(root, snapshot.refs)
     readable_text = set()
     for ref in members:
@@ -113,7 +112,7 @@ class _BranchCollection(Node["SnapshotRenderRequest", "PreparedSnapshot"]):
         from dataclasses import replace
 
         captured = CapturedSnapshot.capture(request.snapshot)
-        snapshot = captured.materialize(read_only_facts=True)
+        snapshot = captured.materialize(read_only_sources=True)
         local_request = replace(request, snapshot=snapshot)
         roots = []
         recovery_prefix = request.recovery_prefix_units
@@ -172,7 +171,7 @@ class _RenderPreparedRoots(Node["PreparedSnapshot", "SnapshotParts"]):
     def _run(self, prepared: PreparedSnapshot, control: Control) -> SnapshotParts:
         from dataclasses import replace
 
-        snapshot = prepared.snapshot.materialize(read_only_facts=True)
+        snapshot = prepared.snapshot.materialize(read_only_sources=True)
         request = replace(prepared.request, snapshot=snapshot)
         parts, uncompressed = [], None
         visible = set(prepared.refs)

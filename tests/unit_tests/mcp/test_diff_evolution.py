@@ -180,13 +180,14 @@ def test_terminal_failure_refreshes_only_its_root(presenter, monkeypatch):
     assert "Full tree" not in text and "Unchanged unrelated control" not in text
 
 
-def test_failed_output_does_not_advance_baseline(presenter):
+def test_draining_unpublished_capture_does_not_advance_baseline(presenter):
     observations = Observations()
     deliver(presenter, observations.read())
     output = ObservationOutput(presenter)
     output.observe(observations.read("Undelivered"))
-    with pytest.raises(RuntimeError, match="rejected"):
-        output.flush(lambda *_: (_ for _ in ()).throw(RuntimeError("rejected")))
+    retained = output.take()
+    assert len(retained) == 1
+    assert "Undelivered" in presenter.text(retained[0])
     assert "Tree: unchanged" in presenter.text(observations.read())
     assert "Undelivered" in presenter.text(observations.read("Undelivered"))
 

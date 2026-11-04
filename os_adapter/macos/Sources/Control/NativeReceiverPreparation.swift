@@ -75,7 +75,6 @@ import ApplicationServices
             try cellEditor?.requireAssociation(element: element, window: window)
         }
         try validate()
-        try BackgroundTarget.validateReleasedInput()
         if try ready() { return }
         if foreground {
             let mapping = try NativeWindowUnit(application: application, window: keyboardWindow).mapping()

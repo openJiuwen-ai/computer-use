@@ -6,8 +6,15 @@ from collections import OrderedDict
 from dataclasses import dataclass
 
 from computer_use.diagnostics import local_failure
-from computer_use.identity import FrozenRecord, WeakIdentityMap
-from computer_use.session.interfaces import InstanceState, WindowIdentity, WindowLifetime
+from computer_use.identity import FrozenRecord
+from computer_use.native.contracts import Knowledge
+from computer_use.session.interfaces import (
+    DirectoryMembership,
+    InstanceState,
+    WindowIdentity,
+    WindowLifetime,
+    WindowMembership,
+)
 
 
 @dataclass(frozen=True)
@@ -33,7 +40,6 @@ class WindowReferences:
         self._applications = {}
         self._physical = {}
         self._variants = {}
-        self._shared_images = WeakIdentityMap()
 
     def application(self, session, application, name):
         key = (session, application)
@@ -46,11 +52,25 @@ class WindowReferences:
         return state
 
     def register_directory(self, directory, name=""):
+        # App reads and desktop rows feed the same lifetime authority. Visible
+        # positive evidence can restore membership after hiding; an already
+        # ended native generation can never be republished as a usable ref.
+        state = self.application(directory["session"], directory["application"], name)
+        state.reconcile(
+            directory,
+            DirectoryMembership(
+                not directory.get("stopReasons", ()),
+                tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in directory["surfaces"]),
+                tuple(WindowIdentity.of(item) for item in directory.get("endedWindows", ())),
+            ),
+        )
         aliases = {}
         for item in directory["surfaces"]:
             entry = WindowEntry(
                 directory["session"], directory["application"], name, WindowIdentity.of(item), directory
             )
+            if self._retired(entry):
+                continue
             ref = self._aliases.get(entry.key)
             physical = (entry.session, item["window"]) if item["nativeWindow"] else None
             if ref is None and physical is not None:
@@ -100,42 +120,63 @@ class WindowReferences:
         return entry
 
     def retain_image(self, state, image, generation=0):
-        """Reuse only an unchanged single-window canvas and its delivery proof."""
-        from computer_use.protocol.captures import capture_metadata
+        """Retain exact delivered pixels independently for every fixed window.
 
-        if image.expired or image.unavailable_mapping or len(image.pieces) != 1:
+        A member view uses the same canvas coordinates as the model saw. It
+        cannot click a peer's pixels and does not become an unseen crop/local
+        image. Reconstructing a Window therefore never revives an older map.
+        """
+        if image.expired or image.unavailable_mapping or image.delivered is None:
             return
-        piece = image.pieces[0]
-        if image.png != piece.image.image:
-            return
-        metadata = capture_metadata(image.png)
-        if piece.box != (0, 0, metadata["width"], metadata["height"]):
-            return
-        target = piece.image.target
-        identity = WindowIdentity(piece.window, target.surface, target.instance)
-        evidence = state.evidence.get(identity)
-        if (
-            target.session != state.session
-            or target.root_window != piece.window
-            or evidence is None
-            or evidence.lifetime is WindowLifetime.RETIRED
-        ):
-            return
-        if generation < state.window_image_generations.get(identity, -1):
-            return
-        state.window_images[identity] = image
-        state.window_image_generations[identity] = generation
-        view = state.views.get((identity.window, identity.surface, identity.instance))
-        if view is not None and (view._image is None or view._image is self._shared_images.get(view)):
-            view._image = image
-            self._shared_images.set(view, image)
+        generation = generation or image.generation
+        for piece in image.pieces:
+            target = piece.image.target
+            identity = WindowIdentity(piece.window, target.surface, target.instance)
+            evidence = state.evidence.get(identity)
+            if (
+                target.session != state.session
+                or target.root_window != piece.window
+                or evidence is None
+                or evidence.lifetime is WindowLifetime.RETIRED
+                or generation < state.window_image_generations.get(identity, -1)
+            ):
+                continue
+            retained = image.for_window(piece.window)
+            if retained is None:
+                continue
+            state.window_images[identity] = retained
+            state.window_image_generations[identity] = generation
+            view = state.views.get((identity.window, identity.surface, identity.instance))
+            if view is not None:
+                view._image = retained
 
     def attach_image(self, state, identity, view):
         """Bootstrap an unobserved Window from an exact actually delivered map."""
         image = state.window_images.get(identity)
-        if image is not None and not image.expired and view._image is None:
+        if image is not None and not image.expired:
             view._image = image
-            self._shared_images.set(view, image)
+
+    @staticmethod
+    def delivered_image(state, view):
+        """Pending sampling does not replace a fixed window's delivered view."""
+        binding = getattr(view, "_window_identity", None)
+        if binding is not None:
+            identity = WindowIdentity(binding.root_window, binding.surface, binding.instance)
+            image = state.window_images.get(identity)
+            if image is not None:
+                return image
+        return view._image
+
+    def capture_references(self):
+        """Live delivered/pending canvas maps, piggybacked on native captures."""
+        return frozenset(
+            piece.image.target.capture
+            for state in self._applications.values()
+            for image in (*state.window_images.values(), *state.sampled_window_images.values())
+            if not image.expired
+            for piece in image.pieces
+            if piece.image.target.capture is not None
+        )
 
     def choices(self, directory, name=""):
         aliases = self.register_directory(directory, name)

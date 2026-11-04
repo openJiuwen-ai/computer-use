@@ -6,14 +6,14 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 from computer_use.diagnostics import local_failure
 from computer_use.protocol.captures import capture_metadata
-from PIL import Image
 from computer_use.session.image_coordinates import ImageCoordinates
+from PIL import Image
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -73,6 +73,8 @@ class InterfaceImage:
         expired: Whether the existing mapping has been invalidated.
         unavailable_mapping: Whether partial pixels lack an overall coordinate map.
         delivered_coordinates: Actual model-image pixels mapped to this retained canvas.
+        generation: Acquisition order within the owning application.
+        source_canvas: Shared original canvas kept alive by its fixed-window views.
     """
 
     png: PNG
@@ -85,6 +87,37 @@ class InterfaceImage:
     expired: bool = False
     unavailable_mapping: bool = False
     delivered_coordinates: ImageCoordinates | None = None
+    generation: int = 0
+    source_canvas: InterfaceImage | None = field(default=None, repr=False)
+
+    def for_window(self, window: str) -> InterfaceImage | None:
+        """Keep this displayed canvas, restricted to one fixed window's scope.
+
+        Pixel coordinates stay in the original displayed PNG, including any
+        composition offsets and delivery scaling. Other members' pixels do not
+        acquire input authority merely because they occur in that same PNG.
+        """
+        members = {item[0]: item for item in self.membership}
+
+        def within(key: str) -> bool:
+            seen = set()
+            while key not in seen:
+                if key == window:
+                    return True
+                seen.add(key)
+                item = members.get(key)
+                if item is None or item[3] != "known" or item[2] is None:
+                    return False
+                key = item[2]
+            return False
+
+        pieces = tuple(piece for piece in self.pieces if within(piece.window))
+        if not pieces or not any(piece.window == window for piece in pieces):
+            return None
+        membership = tuple(item for item in self.membership if within(item[0]))
+        if pieces == self.pieces and membership == self.membership:
+            return self
+        return replace(self, pieces=pieces, membership=membership, source_canvas=self.source_canvas or self)
 
     def hit(self, point: Point) -> tuple[ImagePiece, Point]:
         if self.unavailable_mapping:

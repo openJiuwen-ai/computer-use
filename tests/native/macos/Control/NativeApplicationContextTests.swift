@@ -52,6 +52,16 @@ import ApplicationServices
                 reported = true
             }, check: {}, onPreparation: { _ in }, onNativePreparation: { _ in }, wait: {})
         precondition(outcome == .activityObserved && posts == 1)
+        for settlesAfter in [2, 8] {
+            var turns = 0
+            let eventual = try await NativeApplicationContextUnit.prepare(
+                pid: 101, sample: { .init(foregroundPID: 999, reportedActive: turns == settlesAfter) },
+                alreadyPosted: { false }, make: { SyntheticFocusEvents.applicationActivation() },
+                post: { _ in }, check: {}, onPreparation: { _ in }, onNativePreparation: { _ in },
+                wait: { turns += 1 })
+            precondition(eventual == .activityObserved && turns == settlesAfter,
+                         "a slow but bounded activity acknowledgement must not cause needless foreground fallback")
+        }
         let ordinary = NativeActionDocumentPolicy.preparation(
             action: "AXPress", exactStandardWindow: true, otherDocument: false)
         let other = NativeActionDocumentPolicy.preparation(

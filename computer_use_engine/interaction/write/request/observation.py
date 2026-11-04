@@ -15,7 +15,7 @@ from computer_use.identity import FrozenRecord
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.interaction.write.request.model import ObservedAction
-from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
+from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.session.interfaces import WindowIdentity
@@ -150,8 +150,14 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                         request.target.node is None and getattr(owner, "_image", None) is not None
                     )
                     options = dict(related=related) if related is not None else {}
+                    # A pointer target explains how input was addressed, not
+                    # which observation capabilities the application has. Keep
+                    # visual feedback and acquire the independent semantic
+                    # component so the next intent can use AX references/diff.
+                    # Component gaps remain local: unavailable AX must not
+                    # discard pixels or make the completed write fail.
                     observed = await self.controller.interfaces.read(
-                        related_owner, "image" if visual else "tree", False, None, **options
+                        related_owner, "both" if visual else "tree", False, None, **options
                     )
             metadata = observation_data(observed) or {}
             partial = metadata.get("partial", False)
@@ -224,15 +230,13 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                         session_usable=self.session_usable(request, session_identity),
                     )
                 ),
-                window_lifecycle=original_lifecycle(
-                    request.target, directory, related.original_window if related is not None else None
-                )
-                if directory is not None
-                else "closed"
-                if closed
-                and error.binding.root_window == request.target.root_window
-                and error.binding.instance == request.target.instance
-                else "unknown",
+                window_lifecycle=(
+                    "closed"
+                    if closed and window_binding(error.binding) == window_binding(request.target)
+                    else original_lifecycle(
+                        request.target, directory, related.original_window if related is not None else None
+                    )
+                ),
                 choices=choices,
             )
 

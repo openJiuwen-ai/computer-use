@@ -33,7 +33,7 @@ class FixedWindowInvalidated(ComputerUseError):
 
 
 class FixedWindowUnconfirmed(ComputerUseError):
-    """A partial directory could not observe the fixed root; identity is retained."""
+    """The current catalogue did not observe the fixed root; identity is retained."""
 
     def __init__(self, binding: Binding, *, directory=None):
         self.binding = binding
@@ -43,7 +43,7 @@ class FixedWindowUnconfirmed(ComputerUseError):
                 code="observation_incomplete",
                 effect="none",
                 target="working window",
-                detail="The fixed working window is missing from the partial current directory.",
+                detail="The fixed working window is not present in the current observed catalogue; its lifetime is unconfirmed.",
                 next="read this App/Window again to refresh its evidence",
             )
         )

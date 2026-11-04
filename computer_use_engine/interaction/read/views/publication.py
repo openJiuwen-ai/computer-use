@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """One bounded public body and optional image, retaining native read evidence."""
@@ -12,8 +11,8 @@ from typing import TYPE_CHECKING, cast
 from computer_use.diagnostics import diagnostic
 from computer_use.interaction.query.instances.membership import ancestor
 from computer_use.interaction.query.instances.scope import allowed
-from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.delivery.coverage import document_coverage
+from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.content import json_value as quoted
 from computer_use.interaction.read.presentation.details import captured_details_document
 from computer_use.interaction.read.presentation.document import DisplayDocument
@@ -27,18 +26,56 @@ from computer_use.session.observation import lazy_observation
 from computer_use.session.observation_data import component_delivered, retain_observation_data
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.read.acquisition.components.support import ObservationGap
     from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
     from computer_use.interaction.read.views.pipeline import WindowPart
+    from computer_use.interaction.read.views.related import RelatedRead
     from computer_use.interaction.records import UIHandle
     from computer_use.native.contracts import Binding
     from computer_use.protocol.png import PNG
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
     from computer_use.types import Observation
+
+
+def related_window_summary(
+    related: RelatedRead,
+    directory: DirectoryFacts,
+    aliases: Mapping[int, str],
+    *,
+    refresh_incomplete: bool = False,
+) -> DisplayText:
+    """Describe catalogue evidence after input, without interpreting its UI effect.
+
+    A retained popup may disappear and reappear, and a menu can live inside an
+    existing window. Compare identities with the pre-action catalogue, never
+    treating newly observed membership as creation or absence as menu failure.
+    """
+    newly_observed = {
+        item["window"] for item in directory["surfaces"]
+        if WindowIdentity.of(item) not in related.known_windows
+    }
+    refs = [f"computer.window({ref})" for ref, key in aliases.items() if key in newly_observed]
+    discovered = directory.get("rootDiscoveryComplete")
+    coverage = (
+        "partial" if refresh_incomplete or directory["stopReasons"] or discovered is False
+        else "complete" if discovered is True
+        else "unconfirmed"
+    )
+    membership = (
+        "newly observed window entries: " + ", ".join(refs)
+        if refs
+        else "newly observed window entries have no published references"
+        if newly_observed
+        else "no newly observed window entries"
+    )
+    return template(
+        "After action: {0}; catalogue {1}. This reports observation changes, not whether a menu opened.",
+        membership, coverage,
+    )
 
 
 def tree_text(
@@ -155,7 +192,7 @@ def publish(
             windows = {str(ref): key for ref, key in state.windows.items() if key in permitted}
             alias = {key: ref for ref, key in windows.items()}
             current = lookup_context.window.window if lookup_context.window is not None else None
-            identity = dict(current=alias.get(current), windows=[])
+            identity = {"current": alias.get(current), "windows": []}
             for ref, key in windows.items():
                 window_data = dict(
                     ref=ref,
@@ -316,7 +353,7 @@ def publish(
             publicApi=True,
             document=document,
             coverage=document_coverage(document),
-            **(dict(observed=directory["observed"]) if directory else {}),
+            **({"observed": directory["observed"]} if directory else {}),
         )
     )
     return cast("Observation", result)

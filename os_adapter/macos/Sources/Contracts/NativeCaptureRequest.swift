@@ -10,9 +10,20 @@ struct NativeCaptureRequest {
     let target: [String: Any]
     let kind: Kind
     let maxDimension: Int
+    let retainedCaptures: Set<String>?
 
     init(_ raw: Any?) throws {
-        let p = try object(raw, keys: ["operation", "target", "kind", "maxDimension"])
+        var keys: Set<String> = ["operation", "target", "kind", "maxDimension"]
+        if (raw as? [String: Any])?["retainedCaptures"] != nil { keys.insert("retainedCaptures") }
+        let p = try object(raw, keys: keys)
+        if let values = p["retainedCaptures"] {
+            guard let values = values as? [Any] else {
+                throw DriverError("retainedCaptures must be an array of image references", code: .invalidRequest)
+            }
+            retainedCaptures = Set(try values.map { try string($0, label: "retainedCaptures") })
+        } else {
+            retainedCaptures = nil
+        }
         operation = try string(p["operation"], label: "operation")
         guard let kind = Kind(rawValue: try string(p["kind"], label: "capture.kind")) else {
             throw DriverError("unsupported capture kind", code: .invalidRequest)

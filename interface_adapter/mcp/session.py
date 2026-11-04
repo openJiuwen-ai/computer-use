@@ -396,7 +396,7 @@ class ExecutionSession:
         if self._child is not child:
             return
         detail = f"Worker communication failed ({type(error).__name__})." if error is not None else None
-        reason = worker.failure(detail, sent=sent)
+        reason = worker.failure(detail, sent=sent, include_dispatch=False)
         self._journal.record(
             dict(
                 kind="worker_failure",
@@ -446,6 +446,16 @@ class ExecutionSession:
     def reset(self, reason="Execution reset requested."):
         if self._resetting is not None:
             return self._resetting
+        # Once code was sent, resetting Python state cannot prove how far that
+        # code ran. Keep that execution fact alongside any streamed receipts.
+        pending = self._pending
+        dispatch = (
+            "Code dispatch: sent. Completion: unknown."
+            if pending is not None and pending["sent"]
+            else "Code dispatch: not sent."
+            if pending is not None
+            else None
+        )
         self._generation += 1
         worker, self._worker = self._worker, None
         if worker is not None:
@@ -520,7 +530,10 @@ class ExecutionSession:
                         self._retiring = None
 
                 retired.add_done_callback(clear)
-            result = execution_error(reason + "\n" + (failure if failure is not None else RESET_NOTICE))
+            result = execution_error("\n".join(
+                part for part in (reason, dispatch, failure if failure is not None else RESET_NOTICE)
+                if part is not None
+            ))
             result["content"] = (self._pending["output"].content.copy() if self._pending is not None else []) + result[
                 "content"
             ]

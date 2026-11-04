@@ -4,10 +4,12 @@ import Foundation
 
 /// PURE: preserve an established editor and notify only a missing window context.
 enum PlanFocusPreparationPass {
-    static func run(_ state: NativeFocusSnapshot, window: UInt32) -> NativeFocusPlan {
+    static func run(_ state: NativeFocusSnapshot, window: UInt32, needsKeyWindow: Bool = true) -> NativeFocusPlan {
         NativeFocusPlan(
             notify: !state.foreground
                 && (state.reportedActive == false || (state.reportedActive == nil && !state.prepared)),
-            selectWindow: !state.prepared || state.focusedWindow != window)
+            // A missing transport receipt does not undo a positive native
+            // receiver fact. Rewriting AXMain/AXFocused can activate the app.
+            selectWindow: needsKeyWindow && state.focusedWindow != window)
     }
 }

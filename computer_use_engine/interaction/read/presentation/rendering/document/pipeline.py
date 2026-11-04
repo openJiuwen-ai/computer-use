@@ -8,6 +8,7 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from computer_use.identity import WeakIdentityMap
 from computer_use.interaction.read.presentation.content import DisplayText
 from computer_use.interaction.read.presentation.document import DisplayTree
 from computer_use.interaction.read.presentation.model import PURE
@@ -25,6 +26,8 @@ from computer_use.interaction.read.presentation.rendering.document.passes.plan_c
 )
 from computer_use.pipeline import Contract, Pipeline, Sequence
 from computer_use.pipeline.core import Node
+
+_rendered_sources = WeakIdentityMap()
 
 if TYPE_CHECKING:
     from computer_use.pipeline.core import Control, Step
@@ -65,7 +68,32 @@ class _RenderSnapshotSources(Node["DocumentRenderRequest", "RenderedDocumentInpu
                     previous = sections.setdefault(group.section_key, signature)
                     if previous != signature:
                         raise ValueError("Content directory section identifies different captured fields")
-        snapshots = {key: self.presentation.run(source, control) for key, source in sources.items()}
+        unchanged = {}
+        tree_index = 0
+        for part in request.document.parts:
+            if not isinstance(part, DisplayTree):
+                continue
+            delta = request.plan.trees[tree_index] if request.plan is not None and tree_index < len(request.plan.trees) else None
+            eligible = (
+                request.plan is not None and request.plan.mode != "full" and not part.details
+                and delta is not None and not delta.changes and not delta.missing and not delta.context
+            )
+            unchanged[id(part.prepared)] = unchanged.get(id(part.prepared), True) and eligible
+            tree_index += 1
+        snapshots = {}
+        for key, source in sources.items():
+            if unchanged.get(key):
+                from .unchanged import unchanged_snapshot
+
+                rendered = unchanged_snapshot(source)
+                if rendered is not None:
+                    snapshots[key] = rendered
+                    continue
+            rendered = _rendered_sources.get(source)
+            if rendered is None:
+                rendered = self.presentation.run(source, control)
+                _rendered_sources.set(source, rendered)
+            snapshots[key] = rendered
         return RenderedDocumentInput(request, MappingProxyType(snapshots))
 
     async def _arun(self, request: DocumentRenderRequest, control: Control) -> RenderedDocumentInput:

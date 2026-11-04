@@ -34,7 +34,6 @@ def image_notes(image: WindowImage | None) -> tuple[ObservationGap, ...]:
             "image",
             "observation_incomplete",
             reason,
-            "use clearly visible content; read again if required content is missing",
         )
         for reason in capture_metadata(image.image).get("stopReasons", ())
     )

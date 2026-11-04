@@ -58,3 +58,13 @@ class RootCoverageTests(TestCase):
         for value in (None, 1, "true"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 decode_directory({**payload, "rootDiscoveryComplete": value})
+
+    def test_ended_lifetime_evidence_is_exact_and_separate_from_visible_coverage(self):
+        live, closed = window("live"), window("closed")
+        ended = {key: closed[key] for key in ("window", "surface", "instance")}
+        payload = {**directory(live, reasons=["partial AX"]), "endedWindows": [ended]}
+        self.assertEqual(decode_directory(payload)["endedWindows"], [ended])
+        for invalid in ([ended, ended], [{key: live[key] for key in ("window", "surface", "instance")}],
+                        [{"window": "closed"}]):
+            with self.subTest(ended=invalid), self.assertRaises(ValueError):
+                decode_directory({**payload, "endedWindows": invalid})
