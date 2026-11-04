@@ -328,8 +328,11 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 # the later directory remains authoritative for current scope.
                 gap = ObservationGap(
                     "scope", "window_closed" if isinstance(error, FixedWindowInvalidated) else "observation_incomplete",
-                    ("The captured window ended before the later directory; " if isinstance(error, FixedWindowInvalidated)
-                     else "The captured window is unconfirmed in the later directory; ")
+                    (
+                        "The captured window ended before the later directory; "
+                        if isinstance(error, FixedWindowInvalidated)
+                        else "The captured window is unconfirmed in the later directory; "
+                    )
                     +
                     "its original facts, pixels and capture intervals are retained.",
                 )

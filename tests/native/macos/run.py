@@ -47,6 +47,7 @@ GROUPS = (
     "NativeUnifiedPointerPolicy",
     "NativeForegroundPreparation",
     "NativeForegroundRestoration",
+    "NativeForegroundAfterInput",
     "NativeForegroundResponsibility",
     "NativeInputWindowScope",
     "NativeVisualDirectory",

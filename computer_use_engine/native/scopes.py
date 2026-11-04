@@ -42,7 +42,10 @@ class FixedWindowUnconfirmed(ComputerUseError):
                 code="observation_incomplete",
                 effect="none",
                 target="working window",
-                detail="The fixed working window is not present in the current observed catalogue; its lifetime is unconfirmed.",
+                detail=(
+                    "The fixed working window is not present in the current observed catalogue; "
+                    "its lifetime is unconfirmed."
+                ),
             )
         )
 

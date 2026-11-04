@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord
+from computer_use.interaction.read.acquisition.loading import window_content_unexposed
 from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
@@ -80,6 +81,10 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 tuple(WindowIdentity.of(item) for item in prior["surfaces"]),
                 weakref.ref(request.owner) if fixed is not None else None,
                 WindowIdentity(fixed.root_window, fixed.surface, fixed.instance) if fixed is not None else None,
+                changes=(
+                    PostwriteChanges(None, before_tree, before_image)
+                    if before_tree is not None or before_image is not None else None
+                ),
             )
             if prior is not None
             else None
@@ -163,8 +168,12 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 if owner is None:
                     observed = await self.controller.interfaces.read_desktop("image", False)
                 else:
+                    prior_tree = (
+                        related.changes.before_tree if related is not None and related.changes is not None else None
+                    )
                     visual = request.target.capture is not None or (
                         request.target.node is None and getattr(owner, "_image", None) is not None
+                        and (prior_tree is None or window_content_unexposed(prior_tree))
                     )
                     options = dict(related=related) if related is not None else {}
                     # A pointer target explains how input was addressed, not

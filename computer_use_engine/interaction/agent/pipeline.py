@@ -394,7 +394,10 @@ class AgentInterfacePipeline:
         # Application aliases share the last actually delivered lookup scope.
         # A fixed Window retains its own menu view and always bounds window
         # lookup by its original root. Pending reads grant neither alias a new
-        # name/path context.
+        # name/path context while that scope is live. A retired popup is not
+        # the App's lifetime: a fresh name query may use the App's already
+        # actually delivered current primary. Fixed handles and numbered references do
+        # not acquire this recovery, and no input/image delivery is advanced.
         lookup_context = instance.lookup_context if ui._anchor is None else ui._lookup_context
         if ui._anchor is None and lookup_context is None:
             raise local_failure(

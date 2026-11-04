@@ -72,7 +72,9 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
         return [json.loads(line) for line in self.session._journal.path.read_text().splitlines()]
 
     async def test_file_shim_preserves_worker_ipc_and_inheritable_native_lifetime(self):
-        with patch("computer_use_mcp.session.asyncio.create_subprocess_exec", wraps=asyncio.create_subprocess_exec) as spawn:
+        with patch(
+            "computer_use_mcp.session.asyncio.create_subprocess_exec", wraps=asyncio.create_subprocess_exec
+        ) as spawn:
             result = await self.session.execute(
                 "import os, stat\n"
                 "print('fds', stat.S_ISSOCK(os.fstat(3).st_mode), "

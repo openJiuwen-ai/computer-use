@@ -37,11 +37,13 @@ class NativePort(Protocol):
         policy: Host-owned desktop/foreground policy.
         calls: Sole owner of native call admission, deadlines, and cleanup.
         connection: Driver session and capability metadata used by scope checks.
+        capture_references: Exact native image tokens retained by delivered and pending window maps.
     """
 
     policy: HostPolicy
     calls: "CallLifecycle"
     connection: "Connection"
+    capture_references: frozenset[str]
 
     @property
     def platform(self) -> str:

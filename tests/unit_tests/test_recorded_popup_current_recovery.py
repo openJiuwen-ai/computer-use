@@ -103,7 +103,10 @@ def test_recorded_disappearing_popup_retains_all_facts_and_recovers_current_tree
     assert captured.native.interval_ns == initial.tree.native.interval_ns
     coverage = {item["window"]: item for item in metadata["window_coverage"]}
     assert coverage["4"]["lifecycle"] == "unknown" and coverage["4"]["captured"] == ("tree",)
-    assert coverage["4"]["included"] == () and coverage["4"]["treeCollection"]["intervalNs"] == captured.native.interval_ns
+    assert (
+        coverage["4"]["included"] == ()
+        and coverage["4"]["treeCollection"]["intervalNs"] == captured.native.interval_ns
+    )
     assert coverage["2"]["requested"] == coverage["2"]["included"] == ("tree",)
     assert state.evidence[WindowIdentity.of(popup)].lifetime is not WindowLifetime.RETIRED
     assert budget.elapsed_ms == pytest.approx(1240)

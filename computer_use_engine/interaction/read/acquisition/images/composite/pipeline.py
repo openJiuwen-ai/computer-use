@@ -356,7 +356,7 @@ class InterfaceImagePipeline:
                 continue
             identity = WindowIdentity(piece.window, piece.image.target.surface, piece.image.target.instance)
             state.sampled_window_images[identity] = canvas
-        self.controller.transport.capture_references = self.controller.interfaces.windows.capture_references()
+        self.controller.port.capture_references = self.controller.interfaces.windows.capture_references()
 
         def sources(value: Any) -> tuple[Any, ...]:
             return tuple(
@@ -452,7 +452,7 @@ class InterfaceImagePipeline:
                     state.delivered_image = image
                     state.delivered_image_generation = generation
                 native.interfaces.windows.retain_image(state, image, generation=generation)
-                native.transport.capture_references = native.interfaces.windows.capture_references()
+                native.port.capture_references = native.interfaces.windows.capture_references()
 
         adapters.register_image(
             canvas.png,

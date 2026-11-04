@@ -54,7 +54,9 @@ def _root_document(root: PreparedRoot, nodes=()) -> RenderedDocument:
     return RenderedDocument((RenderedSection("", nodes, prefix=prefix, suffix=suffix),))
 
 
-def incremental_snapshot(prepared: PreparedSnapshot, selected_refs: frozenset[str], *, checkpoint=None) -> RenderedResult | None:
+def incremental_snapshot(
+    prepared: PreparedSnapshot, selected_refs: frozenset[str], *, checkpoint=None
+) -> RenderedResult | None:
     """Render the structurally selected nodes and independent current notes.
 
     Selection applies only when no per-element continuation or recovery hints
@@ -64,7 +66,9 @@ def incremental_snapshot(prepared: PreparedSnapshot, selected_refs: frozenset[st
     available. Full text and captured details always use the complete renderer.
     """
     options = prepared.request
-    if not (options.compact and options.public_api and options.share_descriptions and omit_public_details_hint(prepared)):
+    if not (
+        options.compact and options.public_api and options.share_descriptions and omit_public_details_hint(prepared)
+    ):
         return None
     if not selected_refs.issubset(prepared.refs):
         return None

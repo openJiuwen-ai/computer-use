@@ -19,14 +19,24 @@ def element_path(value):
         )
         if not invalid and "role" in item:
             try:
-                role.parse(item["role"])
+                # Rendered role words and camelCase are the same selector
+                # vocabulary. Normalize once at the public argument boundary;
+                # native queries continue to compare exact canonical roles.
+                words = item["role"].split(" ")
+                normalized = words[0] + "".join(word[:1].upper() + word[1:] for word in words[1:])
+                if any(not word for word in words):
+                    raise ValueError("empty role word")
+                role.parse(normalized)
+                item = {**item, "role": normalized}
             except ValueError:
-                invalid = True
+                raise ValueError(
+                    f"Invalid role {item['role']!r}; use a role such as 'menu item' or 'menuItem'"
+                ) from None
         if invalid:
             raise ValueError(
                 (
-                    "find segments use nonempty name/identifier and canonical role (for example "
-                    "button or textField), up to 256 characters "
+                    "find segments use nonempty name/identifier and a role (for example "
+                    "button, textField or 'text field'), up to 256 characters "
                     "each"
                 )
             )

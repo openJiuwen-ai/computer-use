@@ -6,10 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from computer_use.client.computer import computer_for_controller
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.query.instances.scope import adopt
+from computer_use.interaction.query.instances.scope import adopt, display_selection
 from computer_use.interaction.read.views.pipeline import WindowPart, remember
 from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Binding
@@ -89,6 +88,54 @@ def test_pending_read_on_other_alias_does_not_change_delivered_lookup():
         assert roots[-1].root_window == "a"
     finally:
         set_observation_handler(None)
+
+
+@pytest.mark.parametrize("observed,current,closed", [
+    (True, True, True), (False, True, True), (True, False, True), (True, True, False),
+])
+def test_app_name_lookup_after_popup_closure_uses_only_observed_current_primary(observed, current, closed):
+    from computer_use.interaction.read.presentation.document import DisplayDocument
+    from unit_tests.test_app_current_scope_recovery import rendered_tree
+
+    candidates = (surface("next"),) if current else (surface("next"), surface("peer"))
+    controller, app = setup(surface("a"), *candidates)
+    fixed = app.window(ref(app, "a"))
+    original = fixed._window_identity
+    observed_query_roots(controller, app)
+    app._context = "a"
+    # Sampling the current root is not caller delivery. Publish the form's
+    # actual semantic tree before opening/closing the popup; the negative case
+    # retains only its pending query root, without granting fallback authority.
+    shown = [app._instance.members["a"]] + (list(candidates) if observed else [])
+    targets = tuple(Binding("session", item["instance"], item["window"], item["surface"], item["node"])
+                    for item in shown)
+    rendered = tuple((target, *rendered_tree(target)) for target in targets)
+    publish(
+        controller, app, DisplayDocument.join(document for _, _, document in rendered),
+        directory=app._instance.directory,
+        trees=tuple((target, snapshot) for target, snapshot, _ in rendered),
+    )
+    delivered = app._instance.lookup_context
+    facts = directory(*candidates, focus="next" if current else None, ended=(surface("a"),) if closed else ())
+    adopt(controller, app, facts)
+    app._instance.anchor = display_selection(controller, app._instance, facts) if current else None
+    input_before = app._instance.input_context
+    roots = finder(controller)
+    if observed and current:
+        result = asyncio.run(controller.interfaces.element(app, "OK", 0, None))
+        assert result["binding"].root_window == "next"
+        assert [root.root_window for root in roots] == ["next"]
+        # Semantic query recovery does not acknowledge model delivery or
+        # rebind the original popup handle/its existing element references.
+        assert app._instance.lookup_context is delivered
+        assert app._instance.input_context == input_before
+        assert fixed._window_identity == original
+        with pytest.raises(ComputerUseError):
+            asyncio.run(controller.interfaces.element(fixed, "OK", 0, None))
+    else:
+        with pytest.raises(ComputerUseError):
+            asyncio.run(controller.interfaces.element(app, "OK", 0, None))
+        assert roots == []
 
 
 def menu_owner(controller, app, key):

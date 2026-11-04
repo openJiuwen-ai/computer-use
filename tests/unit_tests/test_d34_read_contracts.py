@@ -468,6 +468,7 @@ def test_menu_source_window_identity_survives_later_same_surface_menu_read():
 
 @pytest.mark.parametrize("invalidated", [False, True])
 def test_sheet_closes_during_related_capture_then_surviving_fixed_parent_is_delivered(monkeypatch, invalidated):
+    monkeypatch.setattr("computer_use.interaction.read.views.collection.window_content_unexposed", lambda _: False)
     import weakref
 
     from computer_use.interaction.read.model import AppObservation
@@ -559,6 +560,7 @@ def test_related_recovery_prefers_exact_parent_then_observes_current_app_window(
 
 
 def test_rootless_fixed_popup_observes_current_app_window_without_rebinding_popup(monkeypatch):
+    monkeypatch.setattr("computer_use.interaction.read.views.collection.window_content_unexposed", lambda _: False)
     import weakref
 
     from computer_use.interaction.read.model import AppObservation
@@ -587,7 +589,10 @@ def test_rootless_fixed_popup_observes_current_app_window_without_rebinding_popu
     ))
     pipeline = InterfaceReadPipeline(controller)
     tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
-    pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, b), tree=tree))
+    async def member(owner, item, view, **kwargs):
+        return WindowPart(member_target(state, item), tree=tree if item["window"] == "B" else None)
+
+    pipeline.member = AsyncMock(side_effect=member)
     pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
     monkeypatch.setattr(
@@ -596,7 +601,9 @@ def test_rootless_fixed_popup_observes_current_app_window_without_rebinding_popu
     )
     result = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
     assert "Parent form content" in result.text
-    assert pipeline.member.call_args.args[1]["window"] == "B"
+    assert any(call.args[1]["window"] == "B" for call in pipeline.member.call_args_list)
+    assert sum(call.args[1]["window"] == "Popup" and call.args[2] == "image"
+               for call in pipeline.member.call_args_list) == 1
     assert fixed._window_identity is original
     assert fixed._input_context == WindowIdentity.of(popup)
     assert state.input_context == WindowIdentity.of(b)
@@ -607,6 +614,7 @@ def test_app_scope_observes_fresh_primary_when_old_principal_closes_during_colle
     from computer_use.interaction.read.presentation.document import DisplayDocument
     from computer_use.native.scopes import FixedWindowInvalidated
     from computer_use.session.interfaces import LookupContext
+    from unit_tests.test_dynamic_observation import tree as observed_tree
 
     b, other, sheet = window("B"), window("Other"), window("Sheet", parent="B")
     menu = {**window("Menu"), "kind": "menu"}
@@ -622,7 +630,7 @@ def test_app_scope_observes_fresh_primary_when_old_principal_closes_during_colle
         side_effect=FixedWindowInvalidated(original, "old principal closed", directory=after)
     )
     pipeline = InterfaceReadPipeline(controller)
-    tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
+    tree = observed_tree(b, "B input")
     pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, b), tree=tree))
     pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)

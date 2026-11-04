@@ -12,7 +12,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from computer_use.client.computer import computer_for_controller
+from computer_use.client.computer import App, computer_for_controller
 from computer_use.client.execution import execution_scope
 from computer_use.client.host import (
     set_action_handler,
@@ -30,13 +30,17 @@ from computer_use.interaction.read.views.collection import CollectionPlan
 from computer_use.interaction.read.views.pipeline import WindowPart
 from computer_use.interaction.read.views.publication import publish
 from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
-from computer_use.native.contracts import Binding
-from computer_use.protocol.captures import decode_capture
+from computer_use.native.contracts import Binding, HostPolicy
+from computer_use.native.scopes import RunningApplication
+from computer_use.native.transport import ConnectionPort
+from computer_use.protocol.captures import capture_metadata, decode_capture
+from computer_use.protocol.execution import decode_capture_request
 from computer_use.session import images as images_state
 from computer_use.session.images import register_image_delivery
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
 from computer_use.session.operations import OperationBudget
+from computer_use.session.state import AppState
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
@@ -340,9 +344,65 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         delivered = self.window._image.pieces[0].image.target.capture
         await self.execute("pending = capture(window, 'a', (200, 160))")
         pending = self.window._image.pieces[0].image.target.capture
-        self.assertEqual(self.controller.transport.capture_references, frozenset((delivered, pending)))
+        self.assertEqual(self.controller.port.capture_references, frozenset((delivered, pending)))
         await self.execute("print_image(pending.png)")
-        self.assertEqual(self.controller.transport.capture_references, frozenset((pending,)))
+        self.assertEqual(self.controller.port.capture_references, frozenset((pending,)))
+
+    async def test_cross_app_retention_reaches_the_real_capture_port_for_one_hundred_other_images(self):
+        connection, wire = self.controller.transport, []
+        connection.protocol_version = 6
+        connection.capabilities = ("nativeCaptureRetention",)
+
+        async def capture_request(method, parameters, options):
+            self.assertEqual(method, "capture")
+            decoded = decode_capture_request(parameters)
+            wire.append(decoded)
+            target, token = decoded["target"], f"wire-{len(wire)}"
+            buffer = BytesIO()
+            with Image.new("RGB", (100, 80), "red" if target["rootWindow"] == "a" else "blue") as image:
+                image.save(buffer, format="PNG")
+            png = decode_capture(dict(
+                id=token, kind="window", scope=target["surface"], startedAt=1, completedAt=2,
+                width=100, height=80, png=base64.b64encode(buffer.getvalue()).decode(),
+            ), "window")
+            return dict(kind="capture", binding=target, image=png)
+
+        connection.request = AsyncMock(side_effect=capture_request)
+        port = self.controller.port = ConnectionPort(connection, HostPolicy())
+        port._operations["read"] = (connection.session_identity, "read", None)
+        other = App(self.controller, dict(
+            selector="other",
+            _nativeState=AppState("other", running=RunningApplication("other", "Other", "session")),
+        ), _internal=True)
+        adopt(self.controller, other, directory(surface("c", scope="other"), application="other", focus="c"))
+
+        async def wire_read(ui, key):
+            member = ui._instance.members[key]
+            target = Binding("session", member["instance"], key, member["surface"])
+            captured = await port.capture("read", target, 1024, 500)
+            original = WindowImage(
+                replace(target, capture=capture_metadata(captured["image"])["id"]), captured["image"], {},
+                dict(nativeSpace="screen", toNative=(1, 0, 0, 1, 0, 0)),
+            )
+            canvas, _ = InterfaceImagePipeline(self.controller).run(ui, [WindowPart(target, image=original)])
+            ui._image, ui._context = canvas, key
+            return publish(self.controller, ui, "Captured " + key, canvas.png)
+
+        self.runtime.task_namespace.update(
+            other=other,
+            wire_read=lambda ui, key: self.runtime.executor.run(lambda: wire_read(ui, key)),
+        )
+        await self.execute("first = wire_read(app, 'a')")
+        original = self.app._instance.delivered_image.pieces[0].image.target
+        self.assertEqual(wire[0]["retainedCaptures"], [])
+        for index in range(100):
+            await self.execute("wire_read(other, 'c')")
+            expected = {original.capture} | ({f"wire-{index + 1}"} if index else set())
+            self.assertEqual(set(wire[-1]["retainedCaptures"]), expected)
+        self.assertEqual(connection.request.await_count, 101)
+        self.assertFalse(hasattr(connection, "capture_references"), "retention has one I/O owner, no shadow writes")
+        await self.click(self.window)
+        self.assertEqual(self.last_target(), original)
 
     async def test_repeated_explicit_and_automatic_image_outputs_share_one_exact_picture(self):
         result = await self.execute(
@@ -436,7 +496,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(identity, state.sampled_window_images)
         self.assertNotIn("a", state.members)
         self.assertNotIn("a", state.windows.values())
-        self.assertNotIn("historical", self.controller.transport.capture_references)
+        self.assertNotIn("historical", self.controller.port.capture_references)
         with self.assertRaisesRegex(ComputerUseError, "current scope is unconfirmed"):
             canvas.hit((20, 30))
 
@@ -478,7 +538,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.last_target(), current.image.target)
         with self.assertRaisesRegex(ComputerUseError, "current scope is unconfirmed"):
             await self.click(self.app, (20, 30))
-        self.assertEqual(set(self.controller.transport.capture_references), {"current"})
+        self.assertEqual(set(self.controller.port.capture_references), {"current"})
 
     async def test_budget_fallback_delivers_only_the_shown_window_mapping_and_coverage(self):
         clock = SimpleNamespace(now=0.0)

@@ -73,6 +73,7 @@ def fixture(*, fixed=False):
     ui = Record(_instance=state, _anchor="root" if fixed else None, _image=None)
     controller = Record(
         transport=Record(session="session"),
+        port=Record(capture_references=frozenset()),
         interfaces=SimpleNamespace(windows=WindowReferences()),
         adapters=SimpleNamespace(register_image=register_image, image_delivery_epoch=image_delivery_epoch),
     )

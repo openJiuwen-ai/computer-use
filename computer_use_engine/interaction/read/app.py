@@ -412,7 +412,9 @@ class NativeAppReader:
                     directory=directory,
                 )
             raise failure(
-                "observation_incomplete" if directory["stopReasons"] or directory["platform"] == "macos" else "stale_target",
+                "observation_incomplete"
+                if directory["stopReasons"] or directory["platform"] == "macos"
+                else "stale_target",
                 "The fixed working window is missing from the current directory; another document was not selected.",
             )
         root = window_binding(select_surface(directory, root_id, follow_modal=False))

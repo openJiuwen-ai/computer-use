@@ -37,7 +37,7 @@ import ApplicationServices
             receipt.confirmation = "confirmed"
             receipt.detail =
                 launch.launched
-                ? "The selected application started; window and content readiness require an explicit read."
+                ? "The selected application started."
                 : "The selected installation is already running; no launch or activation was sent."
         } catch { receipt.recordFailure(error) }
         return receipt

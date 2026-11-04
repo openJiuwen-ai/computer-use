@@ -148,6 +148,19 @@ def test_completion_allowance_does_not_extend_optional_notification_wait(monkeyp
     controller.port.app_changes.assert_not_awaited()
 
 
+def test_captured_prior_content_without_an_epoch_never_invents_a_native_wait(monkeypatch):
+    a = window("A")
+    before = tree(a, "Existing body")
+    changes = PostwriteChanges(None, before)
+    controller = SimpleNamespace(port=SimpleNamespace(app_changes=AsyncMock()))
+    monkeypatch.setattr(
+        "computer_use.interaction.read.views.changes.current_operation_budget", lambda: OperationBudget(),
+    )
+    assert asyncio.run(changes.wait(controller, {"appChange": STAMP}, collection_ms=50)) == ()
+    assert changes.before_tree is before and not changes.input_sampled
+    controller.port.app_changes.assert_not_awaited()
+
+
 def test_changed_content_and_capture_clocks_are_distinguished():
     a = window("A")
     before, unchanged, changed = tree(a, "Before"), tree(a, "Before"), tree(a, "After")

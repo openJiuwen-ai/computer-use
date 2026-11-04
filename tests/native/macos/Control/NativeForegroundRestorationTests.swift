@@ -5,6 +5,11 @@ import AppKit
 @main enum NativeForegroundRestorationTests {
     static func expect(_ condition: Bool) { precondition(condition) }
     @MainActor static func main() async {
+        precondition(NativeForegroundResult.persistentWindow(role: kAXWindowRole, subrole: kAXStandardWindowSubrole, modal: nil))
+        precondition(NativeForegroundResult.persistentWindow(role: kAXWindowRole, subrole: kAXDialogSubrole, modal: true))
+        precondition(!NativeForegroundResult.persistentWindow(role: kAXWindowRole, subrole: kAXDialogSubrole, modal: false))
+        precondition(!NativeForegroundResult.persistentWindow(role: kAXMenuRole, subrole: nil, modal: nil))
+        precondition(!NativeForegroundResult.persistentWindow(role: kAXWindowRole, subrole: nil, modal: nil))
         await returnsOnlyOwnedForeground()
         await preservesNewOwner()
         await noReplayAfterUnconfirmedActivation()
@@ -94,7 +99,7 @@ import AppKit
         expect(await lostReceipt.run() == .restored)
         precondition(lostReceipt.activations == 1 && !lostReceipt.unsettled)
         do {
-            try NativeBackgroundPreparationScope.requireSettledActivation(true)
+            try NativeForegroundRestorationScope.requireSettledActivation(true)
             preconditionFailure("unsettled activation must stop before new input opens a popup")
         } catch let failure as DriverError {
             precondition(failure.code == .executionUnknown && failure.effect == .possible)
@@ -103,7 +108,7 @@ import AppKit
 }
 
 @MainActor private final class RestorationProbe {
-    var state = NativeBackgroundPreparationScope.State(
+    var state = NativeForegroundRestorationScope.State(
         foregroundPID: 200, originalCurrent: true, targetCurrent: true, activity: [0], externalActivation: false)
     var activations = 0, waits = 0
     var unsettled = false
@@ -111,8 +116,8 @@ import AppKit
     var onActivate: () throws -> Bool = { true }
     var onWait: () -> Void = {}
 
-    func run(touched: Bool = true, original: pid_t = 100) async -> NativeBackgroundPreparationScope.Outcome {
-        await NativeBackgroundPreparationScope.restore(
+    func run(touched: Bool = true, original: pid_t = 100) async -> NativeForegroundRestorationScope.Outcome {
+        await NativeForegroundRestorationScope.restore(
             originalPID: original, targetPID: 200, touched: touched, initialActivity: [0], sample: { self.state },
             check: onCheck, activate: {
                 self.activations += 1

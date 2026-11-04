@@ -4,7 +4,7 @@ import AppKit
 import ApplicationServices
 
 /// One operation owns its original foreground across every selected candidate.
-/// This journal does not restore after input or qualify unrelated AX routes.
+/// Restoration phases borrow this one owner; it never qualifies AX input.
 @MainActor final class NativeForegroundResponsibility {
     @TaskLocal static var current: NativeForegroundResponsibility?
 
@@ -12,9 +12,13 @@ import ApplicationServices
         var foregroundPID: pid_t?
         var activity: [UInt32]
     }
+    enum ActivityState { case settled, ownInputPending, userActivity }
 
     private(set) var original: NativeProcessIdentity?
     private(set) var initialActivity = [UInt32]()
+    private var ownInput = [UInt32]()
+    var expectedActivity: [UInt32] { zip(initialActivity, ownInput).map { $0 &+ $1 } }
+    var hasForegroundObligation: Bool { touched && foregroundObligation }
     private let snapshot: @MainActor () -> Snapshot
     private let process: @MainActor (pid_t) -> NativeProcessIdentity?
     private let check: @MainActor () throws -> Void
@@ -27,6 +31,7 @@ import ApplicationServices
     private var inputStarted = false
     private var ownershipLost = false
     private var restored = false
+    private var lastRestoration: NativeForegroundRestorationScope.Outcome?
     private(set) var retainsForegroundForInput = false
 
     init(
@@ -47,6 +52,7 @@ import ApplicationServices
         let initial = snapshot()
         original = initial.foregroundPID.flatMap(process)
         initialActivity = initial.activity
+        ownInput = Array(repeating: 0, count: initial.activity.count)
         if watchActivation {
             activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -65,6 +71,28 @@ import ApplicationServices
             [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .flagsChanged, .scrollWheel].map {
                 CGEventSource.counterForEventType(.hidSystemState, eventType: $0)
             })
+    }
+    static let activityTypes: [CGEventType] = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .flagsChanged, .scrollWheel]
+
+    func activityState(_ values: [UInt32]) -> ActivityState {
+        guard values.count == initialActivity.count, ownInput.count == initialActivity.count else { return .ownInputPending }
+        var pending = false
+        for index in values.indices {
+            let delta = values[index] &- initialActivity[index]
+            if delta > ownInput[index] { return .userActivity }
+            if delta < ownInput[index] { pending = true }
+        }
+        return pending ? .ownInputPending : .settled
+    }
+
+    /// Count only our actual unconditional global post. A queued own event
+    /// not reflected in HID counters is pending, never invented user activity.
+    func willPostGlobalInput(_ type: CGEventType) {
+        guard touched else { return }
+        let current = snapshot()
+        observeForeground(current.foregroundPID)
+        if foregroundObligation, activityState(current.activity) == .userActivity { ownershipLost = true }
+        if let index = Self.activityTypes.firstIndex(of: type), ownInput.indices.contains(index) { ownInput[index] &+= 1 }
     }
 
     func recordPreparation(target: NativeProcessIdentity?, foreground: Bool = false) {
@@ -107,12 +135,10 @@ import ApplicationServices
         return !ownershipLost
     }
 
-    func state(target: NativeProcessIdentity?) -> NativeBackgroundPreparationScope.State {
+    func state(target: NativeProcessIdentity?) -> NativeForegroundRestorationScope.State {
         let current = snapshot()
         observeForeground(current.foregroundPID)
-        // A requested global event may itself change HID counters. The
-        // before-input owner can use them; no post-input restoration is claimed.
-        if foregroundObligation, !inputStarted, current.activity != initialActivity { ownershipLost = true }
+        if foregroundObligation, activityState(current.activity) == .userActivity { ownershipLost = true }
         if foregroundObligation, let pid = current.foregroundPID, pid != original?.pid,
             !targets.contains(where: { $0.pid == pid }) { ownershipLost = true }
         return .init(
@@ -126,7 +152,8 @@ import ApplicationServices
     /// provider query and no change to dispatch/confirmation authority.
     func recordRequestedInput() { inputStarted = true }
 
-    func recordRestoration(_ outcome: NativeBackgroundPreparationScope.Outcome) {
+    func recordRestoration(_ outcome: NativeForegroundRestorationScope.Outcome) {
+        lastRestoration = outcome
         if outcome == .restored {
             restored = true
             foregroundObligation = true
@@ -145,6 +172,8 @@ import ApplicationServices
         if current.externalActivation { outcome = "ownershipLost" }
         else if !current.originalCurrent { outcome = "unknown" }
         else if current.foregroundPID == original?.pid { outcome = restored ? "restored" : "notNeeded" }
+        else if inputStarted && activityState(current.activity) == .ownInputPending { outcome = "unknown" }
+        else if let value = lastRestoration, [.failed, .unknown, .unavailable].contains(value) { outcome = value.rawValue }
         else if current.foregroundPID == target?.pid, current.targetCurrent { outcome = "retained" }
         else { outcome = "unknown" }
         activity.recordForegroundRestoration(outcome, originalPID: original?.pid, targetPID: target?.pid)

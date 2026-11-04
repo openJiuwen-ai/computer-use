@@ -36,7 +36,9 @@ def sharing_snapshot(*, ordinary=False, incomplete=False):
     if incomplete:
         from computer_use.protocol.observation import ReadIssue
 
-        native = replace(native, issues=(*native.issues, ReadIssue(("nodes", root, "relations", "children"), "partial")))
+        native = replace(
+            native, issues=(*native.issues, ReadIssue(("nodes", root, "relations", "children"), "partial"))
+        )
     return normalize_facts(native, DisplayReferences("session"))
 
 
@@ -81,7 +83,9 @@ def scenario(
 @pytest.mark.parametrize(("related_read", "view"), [(True, "tree"), (False, "both")],
                          ids=["related-read", "initial-app-both"])
 def test_recorded_sharing_status_uses_one_small_tree_and_retains_parent_pixels(monkeypatch, related_read, view):
-    controller, _app, state, child, _pipeline, result, calls = scenario(monkeypatch, related_read=related_read, view=view)
+    controller, _app, state, child, _pipeline, result, calls = scenario(
+        monkeypatch, related_read=related_read, view=view
+    )
 
     assert controller.reader.read.await_args.kwargs["view"] == view
     assert len(calls) == 1 and calls[0][0] == "tree"

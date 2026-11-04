@@ -88,7 +88,11 @@ class _RenderSnapshotSources(Node["DocumentRenderRequest", "RenderedDocumentInpu
         for part in request.document.parts:
             if not isinstance(part, DisplayTree):
                 continue
-            delta = request.plan.trees[tree_index] if request.plan is not None and tree_index < len(request.plan.trees) else None
+            delta = (
+                request.plan.trees[tree_index]
+                if request.plan is not None and tree_index < len(request.plan.trees)
+                else None
+            )
             eligible = (
                 request.plan is not None and request.plan.mode != "full" and not part.details
                 and delta is not None

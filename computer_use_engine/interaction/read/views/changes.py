@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PostwriteChanges:
-    """A pre-armed native watcher plus the actual pre-input observed content."""
+    """Captured pre-input content and an optional pre-armed native watcher."""
 
-    baseline: Mapping[str, str]
+    baseline: Mapping[str, str] | None
     before_tree: SemanticSnapshot | None = None
     before_image: PNG | None = None
     input_sampled: bool = False
@@ -56,7 +56,8 @@ class PostwriteChanges:
         budget = current_operation_budget()
         sampled = directory.get("appChange")
         unavailable = (
-            "missing_operation_budget" if budget is None else "missing_read_epoch" if sampled is None
+            "missing_operation_budget" if budget is None else "missing_write_epoch" if self.baseline is None
+            else "missing_read_epoch" if sampled is None
             else "different_app_incarnation" if any(
                 sampled.get(key) != self.baseline.get(key) for key in ("session", "application", "incarnation")
             ) else None

@@ -648,7 +648,9 @@ class ConnectionPort:
         self._check(operation)
         if "nativeAppChangeEvents" not in self.capabilities:
             raise ValueError("Application change observation requires nativeAppChangeEvents")
-        if any(getattr(target, field) is not None for field in ("instance", "root_window", "surface", "node", "capture")):
+        if any(
+            getattr(target, field) is not None for field in ("instance", "root_window", "surface", "node", "capture")
+        ):
             raise ValueError("Application changes require a session discovery scope")
         query = dict(kind="appChanges", application=application)
         if after is not None:
@@ -659,7 +661,10 @@ class ConnectionPort:
             "inspect", dict(operation=operation, target=encode_fields(target, _BINDING), query=query),
             dict(timeoutMs=timeout_ms),
         )
-        if result["kind"] != query["kind"] or result["session"] != target.session or result["application"] != application:
+        if (
+            result["kind"] != query["kind"] or result["session"] != target.session
+            or result["application"] != application
+        ):
             raise ValueError("Application change observation changed its session or application")
         return result
 

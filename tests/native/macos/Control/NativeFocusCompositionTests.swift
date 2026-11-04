@@ -330,7 +330,7 @@ import ApplicationServices
                 self.rememberedNeedsKey.append($0.needsKeyWindow)
                 if self.reportCleanupUnknown { $0.onCleanupUnknown() }
             }, finishPreparation: { _ in
-                try NativeBackgroundPreparationScope.requireSettledActivation(self.restorationUnsettled)
+                try NativeForegroundRestorationScope.requireSettledActivation(self.restorationUnsettled)
                 guard self.returnForeground else { return false }
                 self.trace.append("restore")
                 self.foregroundPID = self.pid + 1

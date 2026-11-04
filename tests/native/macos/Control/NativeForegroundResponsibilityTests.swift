@@ -29,8 +29,8 @@ import AppKit
                 emit: { _ in })
         }
 
-        func restore(_ owner: NativeForegroundResponsibility) async -> NativeBackgroundPreparationScope.Outcome {
-            await NativeBackgroundPreparationScope.restore(
+        func restore(_ owner: NativeForegroundResponsibility) async -> NativeForegroundRestorationScope.Outcome {
+            await NativeForegroundRestorationScope.restore(
                 originalPID: owner.original!.pid, targetPID: target.pid, touched: true,
                 initialActivity: owner.initialActivity, sample: { owner.state(target: self.target) },
                 check: owner.checkRestoration,
@@ -148,11 +148,11 @@ import AppKit
                 target: [:], globalInputAllowed: false,
                 snapshot: { ["foregroundPID": scene.foreground as Any? ?? NSNull()] }, emit: { events.append($0) })
             await NativeInputActivity.$current.withValue(preparationActivity) {
-                try! await NativeBackgroundPreparationScope.perform(target: BackgroundTarget(NSRunningApplication.current),
+                try! await NativeForegroundRestorationScope.perform(target: BackgroundTarget(NSRunningApplication.current),
                     onPreparation: { _ in preconditionFailure("a foreground-dependent scope cannot restore before input") }) {
-                        NativeBackgroundPreparationScope.current!.record(.init(kind: .windowSelection, phase: .willSend,
+                        NativeForegroundRestorationScope.current!.record(.init(kind: .windowSelection, phase: .willSend,
                             detail: "foreground menu receiver", window: nil))
-                        NativeBackgroundPreparationScope.current!.record(.init(kind: .windowSelection, phase: .returned,
+                        NativeForegroundRestorationScope.current!.record(.init(kind: .windowSelection, phase: .returned,
                             detail: "foreground menu receiver", window: nil))
                     }
             }

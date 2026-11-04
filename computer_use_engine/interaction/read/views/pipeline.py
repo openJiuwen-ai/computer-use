@@ -47,7 +47,7 @@ from .collection import CollectionPlan, components
 from .menus import InterfaceMenuPipeline, remember_menu
 from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
 from .publication import capture_header, publish, related_window_summary, tree_document
-from .related import RelatedRead, window_lifecycle
+from .related import RelatedRead, original_lifecycle, window_lifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -240,7 +240,10 @@ class InterfaceReadPipeline:
         if instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
             matches_view = (
-                bool(not directory["surfaces"] and not directory["stopReasons"] and state.running is not None and view != "image" and "nativeApplicationRoots" in controller.transport.capabilities)
+                bool(
+                    not directory["surfaces"] and not directory["stopReasons"] and state.running is not None
+                    and view != "image" and "nativeApplicationRoots" in controller.transport.capabilities
+                )
             )
             if matches_view:
                 return await InterfaceMenuPipeline(controller).run(
@@ -291,7 +294,8 @@ class InterfaceReadPipeline:
             if work is None:
                 if (
                     not recheck_pending and not change_waited and related is not None
-                    and related.changes is not None and not related.new_windows(directory)
+                    and related.changes is not None and related.changes.baseline is not None
+                    and not related.new_windows(directory)
                 ):
                     change_waited = True
                     original = next((part for part in parts if (
@@ -520,6 +524,9 @@ class InterfaceReadPipeline:
                     principal_error = None
                     plan.anchor, plan.principal, plan.selection_error = old["window"], old["window"], None
                     notes.append(
+                        "The action's original window closed; the current related window is shown."
+                        if original_lifecycle(related.original, directory, related.original_window) == "closed"
+                        else
                         "Preferred related-window detail was unavailable; the original window is shown."
                         if old["window"] == related.original.root_window
                         else "The previous detail could not be delivered; the surviving fixed Window is shown."
@@ -572,7 +579,8 @@ class InterfaceReadPipeline:
         summarized_history = {
             id(part) for _, part in displayed_parts
             if has_current_capture
-            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance) not in current_identities
+            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+            not in current_identities
         }
         delivered_gaps = tuple(
             (part.source.directory, part.gaps)
@@ -711,7 +719,8 @@ class InterfaceReadPipeline:
                 if prepared is None:
                     collection_gaps.append(ObservationGap(
                         "presentation", "observation_incomplete",
-                        f"Window {ref}: facts were captured but its tree presentation exceeded the original operation budget.",
+                        f"Window {ref}: facts were captured but its tree presentation exceeded "
+                        "the original operation budget.",
                     ))
                 else:
                     trees.append((part.target, part.tree))
@@ -773,7 +782,9 @@ class InterfaceReadPipeline:
         lines += [_gap_line(gap) for gap in collection_gaps]
         lines += notes
         if presentation_exhausted:
-            lines[tree_heading] = "Tree: partial (presentation budget exhausted; unprepared captured facts not expanded)"
+            lines[tree_heading] = (
+                "Tree: partial (presentation budget exhausted; unprepared captured facts not expanded)"
+            )
             prepared_windows = {target.root_window for target, _tree in trees}
             header = replace(header, windows=tuple(
                 replace(member, expanded=member.expanded and (

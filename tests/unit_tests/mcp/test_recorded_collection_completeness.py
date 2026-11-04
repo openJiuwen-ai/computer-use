@@ -90,7 +90,9 @@ async def run_replay(log_directory):
             assert not result.isError, result
             text = '\n'.join(block.text for block in result.content if block.type == 'text')
             results.append({'case': name, 'text': text})
-    events = [json.loads(line) for path in Path(log_directory).glob('*.jsonl') for line in path.read_text().splitlines()]
+    events = [
+        json.loads(line) for path in Path(log_directory).glob('*.jsonl') for line in path.read_text().splitlines()
+    ]
     ends = [event for event in events if event.get('kind') == 'sdk_operation_end']
     return results, ends, events
 
@@ -117,7 +119,9 @@ class RecordedCollectionCompletenessTests(unittest.IsolatedAsyncioTestCase):
         evidence = captures[0]['windows'][0]['treeCollection']
         from computer_use.protocol.observation import decode_observation
 
-        original = json.loads((Path(__file__).parents[2] / 'fixtures/recorded/live7-window-observations.json').read_text())
+        original = json.loads(
+            (Path(__file__).parents[2] / 'fixtures/recorded/live7-window-observations.json').read_text()
+        )
         native = decode_observation(original['before_budget'])
         self.assertEqual(evidence['session'], native.session)
         self.assertEqual(evidence['observation'], native.id)

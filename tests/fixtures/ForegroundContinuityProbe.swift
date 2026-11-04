@@ -61,7 +61,7 @@ import ApplicationServices
         UnsafeMutablePointer<UInt32>, UnsafeMutablePointer<UInt32>
     ) -> Int32
 
-    private struct Failure: Error {
+    @MainActor private struct Failure: Error {
         let code: String
         let detail: String
         var evidence: [String: Any] = [:]
@@ -191,7 +191,7 @@ import ApplicationServices
     /// Same exact native-window hit used by the owned Qt A/B helper. AX's
     /// application-wide hit may be redirected by a popup; it is not authority
     /// for whether this disposable guard window is physically uncovered.
-    private static func exactWindowHit(
+    @MainActor private static func exactWindowHit(
         _ window: AXUIElement, pid: pid_t, point: CGPoint, original: CGWindowID? = nil
     ) throws -> [String: Any] {
         guard let accessibility = dlopen(

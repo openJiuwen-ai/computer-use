@@ -64,7 +64,9 @@ _schemas = {
             appChange=app_change.nullable().optional(),
             surfaces=array(surface_schema, max=512),
             rootDiscoveryComplete=boolean(),
-            endedWindows=array(obj({"window": identity, "instance": identity, "surface": identity}), max=4096).optional(),
+            endedWindows=array(
+                obj({"window": identity, "instance": identity, "surface": identity}), max=4096
+            ).optional(),
             focusedWindow=identity.nullable().optional(),
             provider=obj(
                 dict(status=identity, attribute=identity.nullable(), writeStatus=number(integer=True).nullable())

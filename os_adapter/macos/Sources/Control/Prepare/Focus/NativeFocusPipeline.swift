@@ -17,12 +17,12 @@ import ApplicationServices
             target: target, window: window, element: nativeWindow, needsKeyWindow: needsKeyWindow, check: beforeAction,
             onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
             onNativePreparation: { event in
-                NativeBackgroundPreparationScope.current?.record(event)
+                NativeForegroundRestorationScope.current?.record(event)
                 onNativePreparation(event)
             })
         let metric = RequestDiagnostics.metrics?.start(.windowPreparation)
         defer { metric?.end() }
-        return try await NativeBackgroundPreparationScope.perform(
+        return try await NativeForegroundRestorationScope.perform(
             target: target, onPreparation: onPreparation,
             onCleanupUnknown: onCleanupUnknown
         ) {
@@ -35,7 +35,7 @@ import ApplicationServices
                 }, applicationContext: PrepareFocusApplicationContextPass.run, sample: SampleFocusStatePass.run,
                 notify: PrepareSyntheticApplicationPass.run, selectWindow: PrepareTargetWindowPass.run,
                 settle: { _ in try await Task.sleep(for: .milliseconds(30)) }, confirm: ConfirmFocusPreparationPass.run,
-                finishPreparation: { _ in try await NativeBackgroundPreparationScope.current?.finish() ?? false })
+                finishPreparation: { _ in try await NativeForegroundRestorationScope.current?.finish() ?? false })
           )
         }
     }
