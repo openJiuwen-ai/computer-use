@@ -28,7 +28,9 @@ def create(*, services: NativeAppReader) -> Callable[[RenderedObservation, Contr
         target, directory = acquired.target, acquired.directory
         refs = {
             ref: replace(target, node=node, capture=None)
-            for ref, node in (components.tree.refs.items() if components.tree is not None else ())
+            for ref, node in (
+                components.tree.refs.items() if components.tree is not None and value.snapshots_numbered else ()
+            )
         }
         windows = services.window_aliases(directory)
         if plan.scope_managed:

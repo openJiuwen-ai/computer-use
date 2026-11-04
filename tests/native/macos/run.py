@@ -37,6 +37,7 @@ GROUPS = (
     "NativeQtInlineListHit",
     "NativeCapturedPointerPlan",
     "NativeCapturedPointerSequence",
+    "NativePointerActivityRecovery",
     "NativeExplicitActionSelection",
     "NativeApplicationContext",
     "NativeFocusComposition",

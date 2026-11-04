@@ -74,7 +74,9 @@ class PostwriteChanges:
                 "inputToken": self.baseline["token"], "readToken": sampled["token"],
             })
             return ()
-        available = budget.available_ms()
+        # Optional settling must not grow merely because a slow but useful
+        # collection may finish after the one-second latency target.
+        available = budget.target_available_ms()
         # Retain at least the actual first collection's cost, and half the
         # remaining call for new facts/pixels/publication. This is a reserve,
         # never a duration we deliberately sleep or a fresh operation deadline.

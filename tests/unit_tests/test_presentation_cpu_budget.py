@@ -36,7 +36,7 @@ class WorkMeter:
         return self.reads * 0.004
 
     def budget(self, reason):
-        return OperationBudget(clock=self.clock, cancelled=lambda: reason == "cancel" and self.reads >= 150)
+        return OperationBudget(1000, clock=self.clock, cancelled=lambda: reason == "cancel" and self.reads >= 150)
 
 
 class MeteredMapping(Mapping):

@@ -9,7 +9,7 @@ import Foundation
         kind: NativePointerIntent.Kind, continuingDrag: Bool,
         guardOperation: () throws -> Void, checkTarget: () throws -> Void,
         queryRecipient: () throws -> Void, queryReadiness: () throws -> Bool,
-        checkPhysicalInput: () throws -> Void, unavailable: () -> DriverError
+        checkPhysicalInput: () throws -> Void, unavailable: () -> Error
     ) throws {
         // Click queries neither prepare nor dispatch. Their final original
         // target check remains after those queries; do not repeat it before.

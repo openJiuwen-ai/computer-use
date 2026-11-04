@@ -20,14 +20,14 @@ from computer_use.interaction.write.engine import Engine
 from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
 from computer_use.native.transport import ConnectionPort
+from computer_use.pipeline import Control
 from computer_use.protocol.observation import NativeNode
 from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
 from computer_use.session.bindings import SessionBindings
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
 from computer_use.session.events import observations_invalidated
-from computer_use.session.operations import current_operation_budget, operation_budget
 from computer_use.session.observation_data import observation_data
-from computer_use.pipeline import Control
+from computer_use.session.operations import current_operation_budget, operation_budget
 
 if TYPE_CHECKING:
     from computer_use.interaction.model import ControllerAdapters
@@ -147,6 +147,7 @@ class SessionController:
                         "operationId": budget.operation_id,
                         "operationType": request_type,
                         "budgetMs": budget.timeout_ms,
+                        "targetMs": budget.target_ms,
                     }
                 )
             result = None
@@ -173,6 +174,8 @@ class SessionController:
                             "operationType": request_type,
                             "durationMs": budget.elapsed_ms,
                             "budgetMs": budget.timeout_ms,
+                            "targetMs": budget.target_ms,
+                            "targetExceeded": budget.target_exceeded,
                             "overrun": budget.expired,
                             "status": "error" if error is not None else "ok",
                             **(

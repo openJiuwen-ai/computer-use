@@ -75,13 +75,16 @@ enum NativeObservationEncoding {
     {
         var property: Record = ["key": [namespace, key], "value": value ?? NSNull()]
         guard let status else { return property }
-        let original = status["state"] as? String ?? "error"
-        property["state"] =
-            value == nil
-            ? (["absent", "unsupported", "not_read", "error", "timeout", "unavailable", "redacted"].contains(original)
-                ? original : "error") : "value"
+        property["state"] = propertyState(value: value, status: status)
         property["read"] = ["complete": false, "issues": [metadata.encodeIssue(status) { issue(status) }]]
         return property
+    }
+
+    private static func propertyState(value: Record?, status: Record) -> String {
+        let original = status["state"] as? String ?? "error"
+        return value == nil
+            ? (["absent", "unsupported", "not_read", "error", "timeout", "unavailable", "redacted"].contains(original)
+                ? original : "error") : "value"
     }
 
     static func encode(_ batch: Record) -> Record {
@@ -197,8 +200,11 @@ enum NativeObservationEncoding {
             }
             // The acquisition encoder constructs this internal field with the asserted type.
             // swiftlint:disable:next force_cast
-            var entry = property(
-                relation["property"] as! String, value: payload, status: hasPayload ? nil : relation, metadata: &metadata)
+            // Relations own their final read evidence below. Constructing a
+            // field failure first would intern status/continuation values that
+            // this relation read replaces, leaving unreferenced pool entries.
+            var entry: Record = ["key": ["macos.ax", relation["property"] as! String], "value": payload ?? NSNull()]
+            if !hasPayload { entry["state"] = propertyState(value: nil, status: relation) }
             if hasPayload, payload == nil { entry["state"] = "not_read" }
             var read: Record = ["complete": ["complete", "absent"].contains(state), "details": details(meta)]
             if let nativeAPI { read["api"] = nativeAPI }

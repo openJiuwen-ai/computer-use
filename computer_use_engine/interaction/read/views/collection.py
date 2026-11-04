@@ -49,15 +49,10 @@ class CollectionPlan:
     order: tuple[WindowIdentity, ...] = ()
     principal: str | None = None
     selection_error: ComputerUseError | None = None
-    captured_principal: WindowIdentity | None = None
     capture_status: set[WindowIdentity] = field(default_factory=set)
 
     def update(self, directory: NativeDirectory, permitted: dict[str, SurfaceInfo]) -> None:
         anchor = self.related.preferred(directory, self.anchor) if self.related is not None else self.anchor
-        if self.captured_principal is not None and window_lifecycle(self.captured_principal, directory) == "unknown":
-            # Keep the fixed scope already captured in this call. A later
-            # omission cannot turn its acquisition into a fresh parent read.
-            anchor = self.captured_principal.window
         self.selection_error = None
         try:
             selected = select_surface(directory, anchor)
@@ -93,7 +88,7 @@ class CollectionPlan:
             requested = components(self.view)
             if self.related is not None and (
                 identity not in self.related.known_windows
-                or identity.window == self.principal
+                or item["modal"] is True and identity.window == self.principal
                 and identity != self.related.original_window
             ):
                 requested = components("both")
@@ -180,6 +175,13 @@ class CollectionPlan:
                     if identity in self.order and lifecycle != "closed"
                     else (),
                     "lifecycle": lifecycle,
+                    **({
+                        "treeCollection": {
+                            "session": part.tree.native.session,
+                            "observation": part.tree.native.id,
+                            "intervalNs": part.tree.native.interval_ns,
+                        },
+                    } if part is not None and part.tree is not None and "tree" not in included else {}),
                     **({"historical": included} if identity not in current and included else {}),
                 }
             )

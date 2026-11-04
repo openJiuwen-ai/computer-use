@@ -144,6 +144,7 @@ def publish(
     screenshot: PNG | None = None,
     *,
     trees: tuple[tuple[Binding, SemanticSnapshot], ...] = (),
+    captured_trees: tuple[tuple[Binding, SemanticSnapshot], ...] = (),
     full: bool = False,
     scope: str | None = None,
     view: str = "window",
@@ -311,6 +312,7 @@ def publish(
         gaps=gaps,
         directory=directory,
         window_coverage=window_coverage,
+        captured_trees=captured_trees,
     )
     if window_coverage:
         diagnostic({"kind": "observation_member_coverage", "windows": window_coverage})

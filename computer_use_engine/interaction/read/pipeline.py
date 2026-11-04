@@ -14,6 +14,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.control import scope_control
+from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.acquisition.pipeline import AcquisitionPipeline
 from computer_use.interaction.read.app_read.model import (
     ApplicationSelection,
@@ -28,17 +29,17 @@ from computer_use.interaction.read.limits import DEFAULT_MENU_MAX_NODES
 from computer_use.interaction.read.numbering.observation.pipeline import NumberedPresentationPipeline
 from computer_use.interaction.read.passes.parse_read_request import stage as parse_read_request
 from computer_use.interaction.read.passes.plan_read_components import stage as plan_read_components
-from computer_use.interaction.read.passes.select_read_components import stage as select_read_components
 from computer_use.interaction.read.passes.reject_windowless_image import stage as reject_windowless_image
+from computer_use.interaction.read.passes.select_read_components import stage as select_read_components
 from computer_use.pipeline import Contract, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
-from computer_use.session.operations import current_operation_budget
+from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 
 if TYPE_CHECKING:
     from typing import AsyncIterator, NoReturn
 
-    from computer_use.interaction.read.app import NativeAppReader
     from computer_use.interaction.read.acquisition.model import AcquiredObservation
+    from computer_use.interaction.read.app import NativeAppReader
     from computer_use.interaction.read.app_read.model import ReadRequest
     from computer_use.interaction.read.model import AppObservation, MenuAppObservation
     from computer_use.interaction.read.numbering.observation.model import RenderedObservation
@@ -62,7 +63,20 @@ class _PrepareCapturedObservation(Node["AcquiredObservation", "RenderedObservati
     def _run(self, value: AcquiredObservation, control: Control) -> RenderedObservation:
         budget = current_operation_budget()
         cpu_control = replace(control, remaining=budget.remaining if budget is not None else None)
-        return self.presentation.run(value, cpu_control)
+        try:
+            return self.presentation.run(value, cpu_control)
+        except OperationDeadlineExceeded:
+            # Acquisition already completed under this exact binding. A CPU
+            # cutoff must not discard those facts or independent pixels, nor
+            # expose the source's internal references as public aliases.
+            from computer_use.interaction.read.numbering.observation.model import RenderedObservation
+
+            gap = ObservationGap(
+                "presentation", "observation_incomplete",
+                "Captured facts retained with their original scope and times; display numbering and tree "
+                "presentation did not complete within the original operation budget.",
+            )
+            return RenderedObservation(replace(value, gaps=(*value.gaps, gap)), None, snapshots_numbered=False)
 
     async def _arun(self, value: AcquiredObservation, control: Control) -> RenderedObservation:
         return self._run(value, control)

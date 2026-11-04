@@ -482,7 +482,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_budget_fallback_delivers_only_the_shown_window_mapping_and_coverage(self):
         clock = SimpleNamespace(now=0.0)
-        budget = OperationBudget(clock=lambda: clock.now)
+        budget = OperationBudget(1000, clock=lambda: clock.now)
         clock.now = 1.001
         with patch(
             "computer_use.interaction.read.acquisition.images.composite.pipeline.current_operation_budget",
@@ -518,7 +518,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         original = self.app._instance.delivered_image
         old_target = original.pieces[1].image.target
         clock = SimpleNamespace(now=0.0)
-        budget = OperationBudget(clock=lambda: clock.now)
+        budget = OperationBudget(1000, clock=lambda: clock.now)
         clock.now = 1.001
         with patch(
             "computer_use.interaction.read.acquisition.images.composite.pipeline.current_operation_budget",

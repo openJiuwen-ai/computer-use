@@ -230,7 +230,7 @@ def test_capture_drafts_rebase_against_actual_delivery_after_their_original_budg
     source, references = Record(), DisplayReferences("render-work")
     presenter = ObservationPresenter()
     now = [0.0]
-    budget = OperationBudget(clock=lambda: now[0])
+    budget = OperationBudget(1000, clock=lambda: now[0])
     try:
         zero = observation(source, references, related=True, label="Zero")
         presenter.text(zero)

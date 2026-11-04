@@ -241,10 +241,12 @@ or incomplete, not that nothing happened. Even complete coverage describes only
 that native execution step; it excludes separate reads, later session cleanup,
 and the application's asynchronous consequences.
 
-The execution pipeline creates one 1000ms budget per SDK operation. Nested lookup,
+Each SDK operation targets roughly 1000ms, with one 2000ms completion budget. Nested lookup,
 preparation, native requests, post-action observation and delivery preparation share
-that clock. Returned native outcomes are retained before subsequent observation or
-cleanup. `sdk_operation_end` diagnostics record elapsed time, overruns, observation
+that clock. Optional notification waits still use only the 1000ms target window;
+the remaining time finishes necessary collection and delivery without renewing retries.
+Returned native outcomes are retained before subsequent observation or
+cleanup. `sdk_operation_end` diagnostics record elapsed time, target overruns, deadline overruns, observation
 completeness and gaps. MCP metadata separately records the whole tool call, including
 startup, multiple SDK operations and final delivery.
 

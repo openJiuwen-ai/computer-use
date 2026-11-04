@@ -179,7 +179,8 @@ def test_member_preserves_successful_tree_when_image_budget_expires(monkeypatch)
     port, images, _, _, _, _ = setup(monkeypatch, [TimeoutError("pixel deadline")])
     tree = object()
     reader = SimpleNamespace(
-        images=images, reader=SimpleNamespace(read=AsyncMock(return_value=tree)), number_snapshots=lambda values: values
+        images=images, reader=SimpleNamespace(read=AsyncMock(return_value=tree)),
+        number_snapshots=lambda values, **_kwargs: values,
     )
     controller = SimpleNamespace(port=port, reader=reader)
     ui = SimpleNamespace(_instance=SimpleNamespace(directory={"session": "session"}))

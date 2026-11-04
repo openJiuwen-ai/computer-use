@@ -42,6 +42,7 @@ def assemble(draft: ObservationDraft, control: Control) -> AppObservation:
         launch=plan.launch,
         menus=components.menus,
         overview=draft.overview,
+        snapshots_numbered=draft.source.snapshots_numbered,
     )
 
 

@@ -19,7 +19,8 @@ _revision = 0
 _active = 0
 _budget = ContextVar("computer_use_operation_budget", default=None)
 _cancellation_source = ContextVar("computer_use_operation_cancellation", default=None)
-OPERATION_BUDGET_MS = 1000
+OPERATION_TARGET_MS = 1000
+OPERATION_BUDGET_MS = 2000
 
 
 class OperationDeadlineExceeded(TimeoutError):
@@ -41,6 +42,8 @@ class OperationBudget:
         self.started = clock()
         self.deadline = self.started + timeout_ms / 1000
         self.timeout_ms = timeout_ms
+        self.target_ms = min(OPERATION_TARGET_MS, timeout_ms)
+        self.target_deadline = self.started + self.target_ms / 1000
         self.operation_id = uuid4().hex
         self.cancelled = cancelled or (lambda: False)
 
@@ -51,6 +54,16 @@ class OperationBudget:
     @property
     def expired(self):
         return self._clock() >= self.deadline
+
+    @property
+    def target_exceeded(self):
+        return self._clock() >= self.target_deadline
+
+    def target_available_ms(self):
+        """Optional settling uses the latency target, without renewing the call."""
+        if self.cancelled():
+            raise asyncio.CancelledError("SDK operation cancelled")
+        return max(0, int((self.target_deadline - self._clock()) * 1000))
 
     def available_ms(self):
         """Return optional-work time; an explicit host stop is never hidden."""

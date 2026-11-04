@@ -14,6 +14,7 @@ from computer_use.interaction.controller import SessionController
 from computer_use.native.lifecycle import CallLifecycle
 from computer_use.session.observation_data import retain_observation_data
 from computer_use.session.operations import (
+    OPERATION_BUDGET_MS,
     OperationBudget,
     OperationDeadlineExceeded,
     cancellation_scope,
@@ -30,9 +31,23 @@ class Clock:
 
 
 class OperationBudgetTests(TestCase):
+    def test_latency_target_does_not_cut_off_useful_completion(self):
+        clock = Clock()
+        budget = OperationBudget(clock=clock)
+        self.assertEqual(budget.timeout_ms, 2000)
+        self.assertEqual(budget.target_ms, 1000)
+        clock.now = 1.1
+        self.assertTrue(budget.target_exceeded)
+        self.assertFalse(budget.expired)
+        self.assertEqual(budget.target_available_ms(), 0)
+        self.assertAlmostEqual(budget.remaining(), 900, delta=1)
+        clock.now = 2.1
+        with self.assertRaises(OperationDeadlineExceeded):
+            budget.remaining()
+
     def test_single_absolute_deadline_and_original_stop_predicate(self):
         clock, stop = Clock(), threading.Event()
-        budget = OperationBudget(clock=clock, cancelled=stop.is_set)
+        budget = OperationBudget(1000, clock=clock, cancelled=stop.is_set)
         self.assertEqual(budget.remaining(), 1000)
         clock.now = 0.4
         self.assertEqual(budget.remaining(), 600)
@@ -121,7 +136,7 @@ class ControllerBudgetTests(IsolatedAsyncioTestCase):
         controller = SessionController.__new__(SessionController)
         outer, inner = object(), object()
         clock = Clock()
-        budget = OperationBudget(clock=clock)
+        budget = OperationBudget(1000, clock=clock)
         seen, events = [], []
         receipt = FrozenRecord({"status": "dispatched", "detail": "input already sent"})
 
@@ -153,7 +168,7 @@ class ControllerBudgetTests(IsolatedAsyncioTestCase):
         stop = threading.Event()
         with cancellation_scope(stop.is_set), operation_budget() as budget, calls.limit(5000):
             with calls.claim(30000) as remaining:
-                self.assertLessEqual(remaining(), 1000)
+                self.assertLessEqual(remaining(), OPERATION_BUDGET_MS)
                 self.assertLessEqual(calls._limit[1], budget.deadline)
                 self.assertEqual(calls.control(remaining).call_id, budget.operation_id)
                 stop.set()

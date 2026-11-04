@@ -41,6 +41,7 @@ from computer_use.session.interfaces import (
     WindowIdentity,
     WindowLifetime,
 )
+from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 from computer_use.session.windows import WindowReferences
 
 from .requests import (
@@ -401,6 +402,24 @@ class AgentInterfacePipeline:
                 "stale_target",
             )
         menu_only = lookup_context.menu_only if lookup_context is not None else False
+
+        def lookup_remaining():
+            # This adapter also owns pure-Python polling. A loop with no native
+            # query must not escape the parent operation's original clock.
+            cancelled = getattr(control, "cancelled", None)
+            if cancelled is not None and cancelled():
+                raise asyncio.CancelledError("Element lookup cancelled")
+            remaining = getattr(control, "remaining", None)
+            if remaining is not None:
+                available = remaining()
+            elif (budget := current_operation_budget()) is not None:
+                available = budget.remaining()
+            else:
+                return None
+            if available < 1:
+                raise OperationDeadlineExceeded("Element lookup exhausted its original operation budget")
+            return available
+
         def observed_query(item):
             owner = instance.owners.get(item["window"])
             query = self.controller.state(owner).query_target if owner is not None else None
@@ -412,10 +431,13 @@ class AgentInterfacePipeline:
             context = ui._anchor or (lookup_context.window.window if lookup_context.window is not None else None)
             owners = list(lookup_context.menus) if lookup_context is not None else []
 
-            if ui._anchor is None and not menu_only and lookup_context.window is not None:
+            if ui._anchor is None and not menu_only:
                 reselected = False
                 old = instance.members.get(context)
-                if old is None or WindowIdentity.of(old) != lookup_context.window or not observed_query(old):
+                if (
+                    lookup_context.window is None or old is None
+                    or WindowIdentity.of(old) != lookup_context.window or not observed_query(old)
+                ):
                     # A delivered popup image/old child is not the App's lifetime.
                     # Use a current display root only if its semantic query scope
                     # was actually delivered, never an unseen pending observation.
@@ -429,7 +451,7 @@ class AgentInterfacePipeline:
                         context = replacement["window"]
                         owners = []
                         reselected = True
-                if not reselected:
+                if not reselected and lookup_context.window is not None:
                     from computer_use.interaction.query.instances.scope import require_identity
 
                     require_identity(ui, lookup_context.window)
@@ -440,6 +462,8 @@ class AgentInterfacePipeline:
                 if context is not None and ancestor(instance.directory, key, context)
             }
             incomplete = []
+            if not menu_only and context is None:
+                incomplete.append("application")
             if not menu_only and context is not None and context not in choices:
                 incomplete.append(context)
             for key, item in choices.items():
@@ -458,6 +482,7 @@ class AgentInterfacePipeline:
                 # every previously AX-observed descendant still participates.
             return owners, incomplete
 
+        lookup_remaining()
         owners, incomplete = lookup_sources()
         matched = {}
         end = monotonic() + timeout_ms / 1000
@@ -466,9 +491,11 @@ class AgentInterfacePipeline:
         # already-observed document has even been searched.
         reconciled = False
         while True:
+            lookup_remaining()
             matched.clear()
             recovery = None
             for owner in dict.fromkeys(owners):
+                lookup_remaining()
                 try:
                     snapshot = await self.lookup.arun(FindElement(owner, path, 0, False), control)
                 except QueryRootUnavailable as error:
@@ -494,6 +521,7 @@ class AgentInterfacePipeline:
                 # pure lookup has dispatched no input; reuse the original
                 # budget for one current App catalogue and exact-root retry.
                 self.controller.state(owner).query_target = None
+                lookup_remaining()
                 await refresh(self.controller, ui, accessibility=True)
                 current = instance.members.get(error.binding.root_window)
                 if (
@@ -508,9 +536,13 @@ class AgentInterfacePipeline:
                 if not owners or incomplete:
                     raise error
                 continue
-            if matched or incomplete or monotonic() >= end:
+            if matched or incomplete or not owners or monotonic() >= end:
                 break
-            await asyncio.sleep(min(0.025, max(0, end - monotonic())))
+            delay = min(0.025, max(0, end - monotonic()))
+            remaining = lookup_remaining()
+            if remaining is not None:
+                delay = min(delay, remaining / 1000)
+            await asyncio.sleep(delay)
         if len(matched) > 1:
             raise local_failure(
                 "the name/path matches controls in several member windows",

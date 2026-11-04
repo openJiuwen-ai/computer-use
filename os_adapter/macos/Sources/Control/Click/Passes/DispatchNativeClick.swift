@@ -69,14 +69,16 @@ import ApplicationServices
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
                 onDispatch: pointerBoundary, onPosted: posted,
-                onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery)
+                onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery,
+                onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record)
         case .element(let unit):
             // This samples the original element after preparation. Only this
             // ensuing gesture freezes geometry; no new screenshot RPC is needed.
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
                 onDispatch: pointerBoundary, onPosted: posted,
-                onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery)
+                onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery,
+                onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record)
         case .popupPointer(let unit):
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,

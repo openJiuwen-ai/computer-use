@@ -20,7 +20,8 @@ _LIMITATIONS = [
         "uncovered commands and uninstrumented native work make it a lower bound, not complete attribution."
     ),
     (
-        "Native read/capture intervals include elapsed time inside their instrumented native operation, including waits; "
+        "Native read/capture intervals include elapsed time inside their instrumented native operation, "
+        "including waits; "
         "they are not CPU time or a count of individual OS calls."
     ),
     (
@@ -34,11 +35,13 @@ _LIMITATIONS = [
     ),
     (
         "Input preparation/cleanup and resource initialization are reported separately and excluded from primary work. "
-        "Command durationMs, input activity begin/end envelopes, SDK processing, transport and output delivery are excluded."
+        "Command durationMs, input activity begin/end envelopes, SDK processing, transport and output delivery "
+        "are excluded."
     ),
     (
         "SDK durations are recorded monotonic elapsed times, summed only for uniquely ended operations with valid "
-        "durationMs. Missing starts/ends are explicit gaps; this sum does not replace full MCP wall time or native work. "
+        "durationMs. Missing starts/ends are explicit gaps; this sum does not replace full MCP wall time "
+        "or native work. "
         "SDK epoch timestamps have millisecond resolution (approximately +/-1 ms). The final delivery tail runs from "
         "the last SDK end to caller completion, including encoding, presentation, transport and parent collection."
     ),
@@ -161,6 +164,8 @@ def _account_sdk_operations(report, events, completed_epoch_ns, wall_ns):
                     for key in (
                         "durationMs",
                         "budgetMs",
+                        "targetMs",
+                        "targetExceeded",
                         "status",
                         "overrun",
                         "outcome",

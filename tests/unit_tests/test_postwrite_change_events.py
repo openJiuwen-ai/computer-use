@@ -64,9 +64,13 @@ def test_queued_new_window_arrives_without_a_second_old_window_read(monkeypatch,
     wait = AsyncMock(return_value=("AXWindowCreated",) if event else ())
     monkeypatch.setattr(PostwriteChanges, "wait", wait)
     pipeline = InterfaceReadPipeline(controller)
-    pipeline.member = AsyncMock(return_value=WindowPart(
-        member_target(state, form), tree=tree(form, "Meeting title"), image=pixels(state, form),
-    ))
+    pipeline.member = AsyncMock(
+        return_value=WindowPart(
+            member_target(state, form),
+            tree=tree(form, "Meeting title"),
+            image=pixels(state, form),
+        )
+    )
 
     async def recheck(*args, **kwargs):
         adopt(controller, app, after)
@@ -104,10 +108,14 @@ def test_wait_uses_read_epoch_and_original_budget_with_collection_reserve(monkey
         yield SimpleNamespace(token="read", target=Binding("session", None, None, None), remaining=remaining)
 
     controller.port.calls.operation = lease
-    controller.port.app_changes = AsyncMock(return_value={
-        **STAMP, "token": "event-epoch", "reason": reason,
-        "events": ["AXWindowCreated"] if reason == "event" else [],
-    })
+    controller.port.app_changes = AsyncMock(
+        return_value={
+            **STAMP,
+            "token": "event-epoch",
+            "reason": reason,
+            "events": ["AXWindowCreated"] if reason == "event" else [],
+        }
+    )
     changes = PostwriteChanges({**STAMP, "token": "before-input"})
     result = asyncio.run(changes.wait(controller, {"appChange": STAMP}, collection_ms=100))
     assert result == (("AXWindowCreated",) if reason == "event" else ())
@@ -122,10 +130,21 @@ def test_no_wait_when_original_budget_cannot_reserve_useful_collection(monkeypat
     controller = SimpleNamespace(port=SimpleNamespace(app_changes=AsyncMock()))
     monkeypatch.setattr(
         "computer_use.interaction.read.views.changes.current_operation_budget",
-        lambda: SimpleNamespace(available_ms=lambda: remaining, operation_id="test"),
+        lambda: SimpleNamespace(target_available_ms=lambda: remaining, operation_id="test"),
     )
     result = asyncio.run(PostwriteChanges(STAMP).wait(controller, {"appChange": STAMP}, collection_ms=collection))
     assert result == ()
+    controller.port.app_changes.assert_not_awaited()
+
+
+def test_completion_allowance_does_not_extend_optional_notification_wait(monkeypatch):
+    clock = [100.0]
+    budget = OperationBudget(clock=lambda: clock[0])
+    clock[0] += 1.1
+    assert budget.available_ms() > 0 and budget.target_available_ms() == 0
+    controller = SimpleNamespace(port=SimpleNamespace(app_changes=AsyncMock()))
+    monkeypatch.setattr("computer_use.interaction.read.views.changes.current_operation_budget", lambda: budget)
+    assert asyncio.run(PostwriteChanges(STAMP).wait(controller, {"appChange": STAMP}, collection_ms=50)) == ()
     controller.port.app_changes.assert_not_awaited()
 
 
@@ -155,7 +174,8 @@ def test_recorded_live8_covered_input_generation_does_not_wait_for_a_second_even
     value = json.loads((Path(__file__).parents[1] / "fixtures/recorded/live8-app-change-epochs.json").read_text())
     controller = SimpleNamespace(port=SimpleNamespace(app_changes=AsyncMock()))
     monkeypatch.setattr(
-        "computer_use.interaction.read.views.changes.current_operation_budget", lambda: OperationBudget(),
+        "computer_use.interaction.read.views.changes.current_operation_budget",
+        lambda: OperationBudget(),
     )
     # The captured read is later than the effective requested-input baseline.
     changes = PostwriteChanges(value["begin"], input_sampled=True)
@@ -170,7 +190,8 @@ def test_preparation_only_epoch_does_not_discharge_unconfirmed_requested_input(m
     a = window("A")
     controller, _app, _state = setup(directory(a))
     monkeypatch.setattr(
-        "computer_use.interaction.read.views.changes.current_operation_budget", lambda: OperationBudget(),
+        "computer_use.interaction.read.views.changes.current_operation_budget",
+        lambda: OperationBudget(),
     )
 
     @asynccontextmanager
@@ -197,9 +218,18 @@ def test_reconciliation_epoch_cannot_claim_that_an_earlier_capture_covered_input
     monkeypatch.setattr(PostwriteChanges, "wait", wait)
     related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),), changes=changes)
 
-    result = asyncio.run(InterfaceReadPipeline(controller)._collect(
-        app, "tree", False, None, before, None, None, related,
-    ))
+    result = asyncio.run(
+        InterfaceReadPipeline(controller)._collect(
+            app,
+            "tree",
+            False,
+            None,
+            before,
+            None,
+            None,
+            related,
+        )
+    )
 
     assert "Parent content" in result.text
     assert wait.await_count == 1
@@ -215,9 +245,12 @@ def test_missing_original_capture_can_receive_window_created_and_deliver_new_for
     missing["appChange"] = STAMP
     after["appChange"] = {**STAMP, "token": "new-form-epoch"}
     controller, app, state = setup(before)
-    controller.reader.read = AsyncMock(side_effect=FixedWindowUnconfirmed(
-        member_target(state, a), directory=missing,
-    ))
+    controller.reader.read = AsyncMock(
+        side_effect=FixedWindowUnconfirmed(
+            member_target(state, a),
+            directory=missing,
+        )
+    )
     budget = OperationBudget(clock=lambda: 100)
     monkeypatch.setattr("computer_use.interaction.read.views.changes.current_operation_budget", lambda: budget)
 
@@ -227,13 +260,22 @@ def test_missing_original_capture_can_receive_window_created_and_deliver_new_for
         yield SimpleNamespace(token="read", target=Binding("session", None, None, None), remaining=remaining)
 
     controller.port.calls.operation = lease
-    controller.port.app_changes = AsyncMock(return_value={
-        **STAMP, "token": "new-form-epoch", "reason": "event", "events": ["AXWindowCreated"],
-    })
+    controller.port.app_changes = AsyncMock(
+        return_value={
+            **STAMP,
+            "token": "new-form-epoch",
+            "reason": "event",
+            "events": ["AXWindowCreated"],
+        }
+    )
     pipeline = InterfaceReadPipeline(controller)
-    pipeline.member = AsyncMock(return_value=WindowPart(
-        member_target(state, form), tree=tree(form, "Meeting title"), image=pixels(state, form),
-    ))
+    pipeline.member = AsyncMock(
+        return_value=WindowPart(
+            member_target(state, form),
+            tree=tree(form, "Meeting title"),
+            image=pixels(state, form),
+        )
+    )
 
     async def recheck(*args, **kwargs):
         adopt(controller, app, after)
@@ -241,7 +283,9 @@ def test_missing_original_capture_can_receive_window_created_and_deliver_new_for
 
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", AsyncMock(side_effect=recheck))
     related = RelatedRead(
-        member_target(state, a), (WindowIdentity.of(a),), changes=PostwriteChanges(STAMP, input_sampled=True),
+        member_target(state, a),
+        (WindowIdentity.of(a),),
+        changes=PostwriteChanges(STAMP, input_sampled=True),
     )
 
     result = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
@@ -256,33 +300,47 @@ def test_missing_original_capture_can_receive_window_created_and_deliver_new_for
     assert coverage["A"]["captured"] == ()
 
 
-def test_later_unconfirmed_popup_keeps_its_capture_without_rereading_the_parent(monkeypatch):
+def test_later_unconfirmed_popup_keeps_its_capture_and_observes_the_current_parent(monkeypatch):
     from dataclasses import replace
 
     a, popup = window("A"), window("Popup")
     before, later = directory(a, popup), directory(a)
     controller, app, state = setup(before)
     initial = replace(
-        parent_result(state, popup, before, later), scope_confirmed=False,
-        tree=tree(popup, "Captured hour choices"), image=pixels(state, popup),
-        gaps=(ObservationGap("scope", "observation_incomplete", "Captured scope is unconfirmed in the later directory"),),
+        parent_result(state, popup, before, later),
+        scope_confirmed=False,
+        tree=tree(popup, "Captured hour choices"),
+        image=pixels(state, popup),
+        gaps=(
+            ObservationGap("scope", "observation_incomplete", "Captured scope is unconfirmed in the later directory"),
+        ),
     )
     controller.reader.read = AsyncMock(return_value=initial)
     pipeline = InterfaceReadPipeline(controller)
-    pipeline.member = AsyncMock(side_effect=AssertionError("Do not replace the completed popup capture with a parent read"))
+    parent = tree(a, "Current parent content")
+    pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, a), tree=parent))
+    monkeypatch.setattr(
+        "computer_use.interaction.read.views.pipeline.refresh", AsyncMock(return_value=later),
+    )
     related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),))
 
     result = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
 
-    assert "Captured hour choices" in result.text and result.screenshot is not None
+    assert "Current parent content" in result.text and result.screenshot is not None
+    assert "outside current read scope, tree not expanded" in result.text
     assert "scope is unconfirmed" in result.text
     assert initial.tree.native.interval_ns == (1, 2)
-    assert app._context is None
+    assert app._context == "A"
     assert state.directory is later
     controller.reader.read.assert_awaited_once()
-    pipeline.member.assert_not_awaited()
+    pipeline.member.assert_awaited_once()
+    assert pipeline.member.call_args.args[1]["window"] == "A"
+    assert pipeline.member.call_args.args[2] == "tree"
     metadata = observation_data(result)
     coverage = {item["window"]: item for item in metadata["window_coverage"]}
     assert metadata["partial"] and coverage["Popup"]["lifecycle"] == "unknown"
-    assert set(coverage["Popup"]["included"]) == {"tree", "image"}
+    assert coverage["Popup"]["captured"] == ("tree", "image")
+    assert coverage["Popup"]["included"] == ("image",)
+    assert coverage["A"]["included"] == ("tree",)
+    assert any(source is initial.tree for _, source in metadata["captured_trees"])
     assert "Window 1:" in result.text  # Captured popup receives its own heading, not the parent's.

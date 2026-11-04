@@ -22,7 +22,9 @@ class RenderedObservation:
     Attributes:
         acquired: Window acquisition result before numbering and presentation.
         rendered: Frozen semantic projection with display order and captured source facts.
+        snapshots_numbered: Whether component snapshots received public display aliases.
     """
 
     acquired: AcquiredObservation
     rendered: PreparedSnapshot | None
+    snapshots_numbered: bool = True

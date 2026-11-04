@@ -488,7 +488,9 @@ import ApplicationServices
     func deliver(
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void,
         guardOperation: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
-        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
+        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil,
+        onPreparation: @escaping @MainActor (String) -> Void = { _ in },
+        onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in }
     ) async throws {
         guard request.kind == kind, request.start == nil, request.end == nil else {
             throw DriverError("element pointer contract requires its original addressed intent", code: .invalidRequest)
@@ -500,6 +502,7 @@ import ApplicationServices
             request, from: selected.point, to: nil, viewport: selected.visible.size,
             check: { try validate(selected, check: check) }, guardOperation: guardOperation,
             onDispatch: onDispatch, onPosted: onPosted,
-            onCleanupUnknown: onCleanupUnknown, delivery: delivery)
+            onCleanupUnknown: onCleanupUnknown, delivery: delivery,
+            onPreparation: onPreparation, onNativePreparation: onNativePreparation)
     }
 }

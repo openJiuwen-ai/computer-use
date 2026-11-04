@@ -40,7 +40,10 @@ def sharing_snapshot(*, ordinary=False, incomplete=False):
     return normalize_facts(native, DisplayReferences("session"))
 
 
-def scenario(monkeypatch, *, ordinary=False, incomplete=False, parent_image=True, full=False, rootless=False):
+def scenario(
+    monkeypatch, *, ordinary=False, incomplete=False, parent_image=True, full=False, rootless=False,
+    related_read=True, view="tree",
+):
     a, child = window("A"), {**window("C", parent="A"), "kind": "dialog", "modal": False}
     snapshot = sharing_snapshot(ordinary=ordinary, incomplete=incomplete)
     child["node"] = None if rootless else snapshot.native.roots[0]
@@ -70,14 +73,17 @@ def scenario(monkeypatch, *, ordinary=False, incomplete=False, parent_image=True
         return after
 
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", AsyncMock(side_effect=refresh))
-    related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),))
-    result = asyncio.run(pipeline._collect(app, "tree", full, None, before, None, None, related))
+    related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),)) if related_read else None
+    result = asyncio.run(pipeline._collect(app, view, full, None, before, None, None, related))
     return controller, app, state, child, pipeline, result, calls
 
 
-def test_recorded_sharing_status_uses_one_small_tree_and_retains_parent_pixels(monkeypatch):
-    controller, _app, state, child, _pipeline, result, calls = scenario(monkeypatch)
+@pytest.mark.parametrize(("related_read", "view"), [(True, "tree"), (False, "both")],
+                         ids=["related-read", "initial-app-both"])
+def test_recorded_sharing_status_uses_one_small_tree_and_retains_parent_pixels(monkeypatch, related_read, view):
+    controller, _app, state, child, _pipeline, result, calls = scenario(monkeypatch, related_read=related_read, view=view)
 
+    assert controller.reader.read.await_args.kwargs["view"] == view
     assert len(calls) == 1 and calls[0][0] == "tree"
     assert calls[0][1]["fields"] == list(SHARING_CONTROL_FIELDS)
     assert calls[0][1]["max_nodes"] == 8 and calls[0][1]["max_depth"] == 2
@@ -96,10 +102,13 @@ def test_recorded_sharing_status_uses_one_small_tree_and_retains_parent_pixels(m
 
 
 @pytest.mark.parametrize("case", ["ordinary", "incomplete", "no_parent_pixels", "explicit_full", "rootless"])
-def test_unknown_ordinary_and_explicit_requests_keep_normal_window_capabilities(monkeypatch, case):
+@pytest.mark.parametrize(("related_read", "view"), [(True, "tree"), (False, "both")],
+                         ids=["related-read", "initial-app-both"])
+def test_unknown_ordinary_and_explicit_requests_keep_normal_window_capabilities(monkeypatch, case, related_read, view):
     _controller, _app, state, child, _pipeline, result, calls = scenario(
         monkeypatch, ordinary=case == "ordinary", incomplete=case == "incomplete",
         parent_image=case != "no_parent_pixels", full=case == "explicit_full", rootless=case == "rootless",
+        related_read=related_read, view=view,
     )
 
     assert calls[-1][0] == "both" and "fields" not in calls[-1][1]

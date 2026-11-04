@@ -73,6 +73,7 @@ class WindowPart:
         menus: Menu snapshots collected for the same application scope.
         gaps: Explicit collection failures or omissions retained in the observation.
         source: Full application observation used to construct this window part, when available.
+        snapshots_numbered: Whether tree and menu refs may be registered and publicly presented.
     """
 
     target: Binding
@@ -83,6 +84,7 @@ class WindowPart:
     source: AppObservation | None = None
     image_directory: NativeDirectory | None = None
     capture_companion: CapturedSharingControl | None = None
+    snapshots_numbered: bool = True
 
 
 def member_target(instance: InstanceState, item: SurfaceInfo) -> Binding:
@@ -136,7 +138,7 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     # The interface branch reconciles membership itself; an old current-modal
     # observation must not retarget a fixed member during a semantic lookup.
     state.selection, state.observation = None, None
-    if part.tree is not None:
+    if part.tree is not None and part.snapshots_numbered:
         # pylint: disable-next=protected-access
         controller._remember(state, part.target, part.tree)
         identity = WindowIdentity.of(instance.members[window])
@@ -384,15 +386,6 @@ class InterfaceReadPipeline:
                 if observed is not None:
                     adopt(controller, ui, observed.directory, instance.anchor)
                     directory, permitted = observed.directory, allowed(ui)
-                    captured_identity = WindowIdentity(
-                        observed.target.root_window, observed.target.surface, observed.target.instance
-                    )
-                    if (
-                        not observed.scope_confirmed
-                        and (observed.tree is not None or observed.image is not None)
-                        and window_lifecycle(captured_identity, directory) == "unknown"
-                    ):
-                        plan.captured_principal = captured_identity
                 plan.update(directory, permitted)
                 if observed is not None:
                     item = next(
@@ -415,6 +408,7 @@ class InterfaceReadPipeline:
                             observed.target, observed.tree, observed.image,
                             observed.menus, observed.gaps, observed,
                             image_directory=observed.source_directory if observed.image is not None else None,
+                            snapshots_numbered=observed.snapshots_numbered,
                         )
                         parts.append(part)
                         plan.captured(item, part)
@@ -445,7 +439,10 @@ class InterfaceReadPipeline:
                     ui, item, "tree", max_nodes=8, max_depth=2, fields=list(SHARING_CONTROL_FIELDS),
                     component_budget_ms=2000 if related is not None else None,
                 )
-                signature = sharing_control_signature(probe.tree.native, probe.target.node) if probe.tree else None
+                signature = (
+                    sharing_control_signature(probe.tree.native, probe.target.node)
+                    if probe.tree is not None and probe.snapshots_numbered else None
+                )
                 if signature is not None:
                     probe.capture_companion = CapturedSharingControl(companion, *signature)
                     plan.fold_capture_status(identity)
@@ -471,6 +468,7 @@ class InterfaceReadPipeline:
                     # retain the old no-root target or its source observation's
                     # collection gaps as this new tree's source.
                     previous.target, previous.source = part.target, part.source
+                    previous.snapshots_numbered = part.snapshots_numbered
                 previous.tree = part.tree if part.tree is not None else previous.tree
                 previous.image = part.image if part.image is not None else previous.image
                 if part.image is not None:
@@ -490,15 +488,16 @@ class InterfaceReadPipeline:
                 refresh_incomplete=any(gap.component == "directory" for gap in collection_gaps),
             ))
         captured = {part.target.surface for part in parts}
+        current_identities = {WindowIdentity.of(item) for item in directory["surfaces"]}
         if related is not None and not any(
-            (part.tree is not None or part.image is not None) and window_lifecycle(
-                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), directory
-            ) != "closed"
+            (part.tree is not None or part.image is not None)
+            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance) in current_identities
             for part in parts
         ):
-            # Selection and acquisition can straddle a modal's closure. Use
-            # the rechecked catalogue to recover the exact original target or
-            # its still-live fixed owner within the same observation budget.
+            # Historical content proves acquisition, not a current App view.
+            # A popup can remain alive while leaving the current directory.
+            # Keep its facts and observe the actual surviving scope using the
+            # same deadline and original requested components, without input replay.
             unavailable = frozenset(part.target.root_window for part in parts)
             old = permitted.get(related.recovery_window(directory, unavailable))
             if old is not None and old["surface"] not in captured and len(parts) < 6:
@@ -508,6 +507,8 @@ class InterfaceReadPipeline:
                 plan.requested[identity] = components(fallback_view)
                 plan.attempted[identity] = components(fallback_view)
                 parts.append(fallback)
+                plan.captured(old, fallback)
+                plan.order = tuple(dict.fromkeys((*plan.order, identity)))
                 remember(controller, ui, fallback)
                 captured.add(old["surface"])
                 if fallback.tree is not None or fallback.image is not None:
@@ -517,6 +518,7 @@ class InterfaceReadPipeline:
                             directory["application"], instance.name, directory, old["window"]
                         )
                     principal_error = None
+                    plan.anchor, plan.principal, plan.selection_error = old["window"], old["window"], None
                     notes.append(
                         "Preferred related-window detail was unavailable; the original window is shown."
                         if old["window"] == related.original.root_window
@@ -562,6 +564,16 @@ class InterfaceReadPipeline:
                 shown.add(identity)
                 displayed_parts.append((key, part))
         displayed_parts.sort(key=lambda entry: entry[0] != plan.principal)
+        has_current_capture = any(
+            (part.tree is not None or part.image is not None)
+            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance) in current_identities
+            for _, part in displayed_parts
+        )
+        summarized_history = {
+            id(part) for _, part in displayed_parts
+            if has_current_capture
+            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance) not in current_identities
+        }
         delivered_gaps = tuple(
             (part.source.directory, part.gaps)
             for _, part in displayed_parts
@@ -602,7 +614,7 @@ class InterfaceReadPipeline:
             lines.insert(1, template("Launch: {0}", first.launch["detail"]))
         trees = []
         included_tree_surfaces = set()
-        presentation_exhausted = False
+        presentation_exhausted = any(not part.snapshots_numbered for _, part in displayed_parts)
         tree_heading = len(lines)
         if any(part.tree is not None for _, part in displayed_parts):
             lines.append("Tree: full")
@@ -664,7 +676,12 @@ class InterfaceReadPipeline:
                         ),
                     )
                 )
-            if part.tree is not None:
+            if part.tree is not None and id(part) in summarized_history:
+                lines.append(template(
+                    "Captured AX source retained: {0}, intervalNs={1}; outside current read scope, tree not expanded.",
+                    part.tree.native.id, part.tree.native.interval_ns,
+                ))
+            elif part.tree is not None and part.snapshots_numbered:
                 member = next(window for window in header.windows if window.ref == ref)
                 window_context = WindowDisclosureContext(
                     ref,
@@ -709,7 +726,7 @@ class InterfaceReadPipeline:
                         default=recovery_prefix,
                     )
                     lines.append(tree_document(controller, part.target, part.tree, prepared=prepared))
-            if part.menus is not None:
+            if part.menus is not None and part.snapshots_numbered:
                 lines.append("Application menu:")
                 owners, menu_trees = remember_menu(controller, ui, part.menus, key)
                 ui._lookup_scopes += owners
@@ -778,6 +795,7 @@ class InterfaceReadPipeline:
             DisplayDocument.join(lines),
             screenshot,
             trees=tuple(trees),
+            captured_trees=tuple((part.target, part.tree) for part in parts if part.tree is not None),
             full=full,
             scope=scope,
             directory=directory,
@@ -813,6 +831,7 @@ class InterfaceReadPipeline:
         target = member_target(ui._instance, item)
         source_directory = ui._instance.directory
         tree = image = None
+        snapshots_numbered = True
         gaps = []
         generation = controller.port.connection.session_identity
 
@@ -850,7 +869,20 @@ class InterfaceReadPipeline:
                 if gap:
                     gaps.append(gap)
                 if tree is not None:
-                    (tree,) = controller.reader.number_snapshots((tree,))
+                    budget = current_operation_budget()
+                    try:
+                        (tree,) = controller.reader.number_snapshots((tree,), _control=Control(
+                            remaining=budget.remaining if budget is not None else None,
+                            cancelled=budget.cancelled if budget is not None else None,
+                            call_id=budget.operation_id if budget is not None else None,
+                        ))
+                    except OperationDeadlineExceeded:
+                        snapshots_numbered = False
+                        gaps.append(ObservationGap(
+                            "presentation", "observation_incomplete",
+                            "Captured window facts retained with their original scope and times; display numbering "
+                            "did not complete within the original operation budget.",
+                        ))
             except Exception as error:  # noqa: BLE001 - independent optional component, preserving pixels and other windows
                 tree = None
                 failed("tree", error)
@@ -870,4 +902,5 @@ class InterfaceReadPipeline:
             await capture_image()
         return WindowPart(
             target, tree, image, gaps=tuple(gaps), image_directory=source_directory if image is not None else None,
+            snapshots_numbered=snapshots_numbered,
         )

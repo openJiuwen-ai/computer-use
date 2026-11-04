@@ -543,7 +543,9 @@ enum NativePointerDeliveryPolicy {
     func deliver(
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void,
         guardOperation: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
-        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
+        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil,
+        onPreparation: @escaping @MainActor (String) -> Void = { _ in },
+        onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in }
     ) async throws {
         try check()
         let current = try resolvingCaptureTranslation()
@@ -556,7 +558,8 @@ enum NativePointerDeliveryPolicy {
             request, from: current.point(request.start!), to: request.end.map(current.point),
             viewport: current.window.frame.size, check: check, guardOperation: guardOperation,
             captureGeometry: sampleGeometry,
-            onDispatch: onDispatch, onPosted: onPosted, onCleanupUnknown: onCleanupUnknown, delivery: delivery)
+            onDispatch: onDispatch, onPosted: onPosted, onCleanupUnknown: onCleanupUnknown, delivery: delivery,
+            onPreparation: onPreparation, onNativePreparation: onNativePreparation)
     }
 
     /// Geometry has one owner: an immutable image transform or a freshly
@@ -567,7 +570,9 @@ enum NativePointerDeliveryPolicy {
         guardOperation: @escaping @MainActor () throws -> Void,
         captureGeometry: (@MainActor (Bool) throws -> WindowGeometry.WindowMapping)? = nil,
         onDispatch: () throws -> Void, onPosted: () -> Void,
-        onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil
+        onCleanupUnknown: @escaping () -> Void, delivery: NativeClickDelivery? = nil,
+        onPreparation: @escaping @MainActor (String) -> Void = { _ in },
+        onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in }
     ) async throws {
         try check()
         try target.validate(input: true)
@@ -627,22 +632,24 @@ enum NativePointerDeliveryPolicy {
                     event, window: eventWindow, point: point, clickGroup: sequence.group, presenterPID: window.pid)
             }
         }
+        func queryRecipient(continuingDrag: Bool) throws {
+            try target.validate(input: true)
+            guard NativeProcessIdentity.read(window.pid) == process else {
+                throw DriverError("pointer recipient changed", code: .staleTarget)
+            }
+            if let captureGeometry { hostEventWindow = try captureGeometry(continuingDrag) }
+            if let recipient { eventWindow = try recipient.validate(host: hostEventWindow) }
+            else { eventWindow = hostEventWindow }
+        }
         func validate(_ point: CGPoint, held: Bool) throws {
             let continuingDrag = capturedDrag && held
+            var readiness: Readiness?
             let button: CGMouseButton =
                 request.button == "right" ? .right : request.button == "middle" ? .center : .left
             try ValidateNativePointerEventPass.run(
                 kind: request.kind, continuingDrag: continuingDrag,
                 guardOperation: guardOperation, checkTarget: check,
-                queryRecipient: {
-                    try target.validate(input: true)
-                    guard NativeProcessIdentity.read(window.pid) == process else {
-                        throw DriverError("pointer recipient changed", code: .staleTarget)
-                    }
-                    if let captureGeometry { hostEventWindow = try captureGeometry(continuingDrag) }
-                    if let recipient { eventWindow = try recipient.validate(host: hostEventWindow) }
-                    else { eventWindow = hostEventWindow }
-                }, queryReadiness: {
+                queryRecipient: { try queryRecipient(continuingDrag: continuingDrag) }, queryReadiness: {
                     if global {
                         guard target.isForeground else {
                             throw DriverError(
@@ -671,19 +678,68 @@ enum NativePointerDeliveryPolicy {
                             foreground: true, kind: request.kind, declaredWindow: initial.windowKind,
                             initialFocus: initial.focus).ready
                     }
-                    return contentReadiness(
+                    let current = contentReadiness(
                         foreground: foregroundWindow(at: point), kind: request.kind,
-                        declaredWindow: initial.windowKind, initialFocus: initial.focus).ready
+                        declaredWindow: initial.windowKind, initialFocus: initial.focus)
+                    readiness = current
+                    return current.ready
                 }, checkPhysicalInput: {
                     try NativePhysicalInput.validate(
                         NativePhysicalInput.dependency(for: selected), allowing: global && held ? button : nil)
                 }, unavailable: {
-                    global
-                        ? DriverError(
+                    if let current = readiness, let missing = NativePointerActivityRecovery.missing(
+                        window: window.id, kind: request.kind, delivery: selected,
+                        requirement: pointerRequirement, remote: recipient?.isRemote == true,
+                        initialReady: initial.ready, initialFocus: initial.focus,
+                        initialForeground: initial.foreground, initialPrepared: initial.backgroundPrepared,
+                        currentReady: current.ready, currentForeground: current.foreground,
+                        windowKind: current.windowKind, currentFocus: current.focus,
+                        currentActive: current.backgroundReportedActive)
+                    { return missing }
+                    return global ? DriverError(
                             "the target window is no longer prepared for content pointer input", code: .inputUnavailable,
                             next: "read the target window before continuing")
                         : DriverError("background pointer route changed", code: .inputUnavailable)
                 })
+        }
+        func restoreLocalActivity(_ point: CGPoint, _ missing: NativePointerActivityRecovery.Missing) async throws {
+            guard missing.window == window.id else { throw missing }
+            func checkOriginal() throws {
+                try guardOperation()
+                try queryRecipient(continuingDrag: false)
+                try check()
+            }
+            try checkOriginal()
+            diagnose(["kind": "pointer_activity_recovery", "phase": "prepare", "window": window.id,
+                      "requestedMouseDownAttempted": false, "replayedPointerEvents": 0,
+                      "selectedDelivery": "windowDirected", "reason": "knownLocalActivityLost"])
+            var outcome = "failed"
+            defer {
+                diagnose(["kind": "pointer_activity_recovery", "phase": "completed", "window": window.id,
+                          "outcome": outcome, "requestedMouseDownAttempted": false,
+                          "replayedPointerEvents": 0,
+                          "foregroundPID": NSWorkspace.shared.frontmostApplication?.processIdentifier as Any? ?? NSNull()])
+            }
+            let active = try await NativeApplicationContextUnit(application: application).prepare(
+                requirement: .activeWhenKnownInactive, check: checkOriginal,
+                onPreparation: onPreparation, onCleanupUnknown: { onCleanupUnknown() },
+                onNativePreparation: { event in
+                    onNativePreparation(.init(
+                        kind: event.kind, phase: event.phase,
+                        detail: "beforeFirstMouseDown; requestedMouseDownAttempted=false; replayedPointerEvents=0; " + event.detail,
+                        window: window.id))
+                })
+            try checkOriginal()
+            // No window selection/raise is permitted here. A local activation
+            // must restore this same receiver itself; another document or an
+            // absent/unknown key window stops the still-unpressed gesture.
+            guard active == .activityObserved, !target.isForeground,
+                reportedActive() == true, windowFocus() == .target
+            else { throw missing }
+            try BackgroundEvents.requirePointerRoute(window: window)
+            try SyntheticFocusCoordinator.shared.remember(target, window: window, needsKeyWindow: true)
+            try checkOriginal()
+            outcome = "localActivityAndOriginalReceiverConfirmed"
         }
         func canRelease() -> Bool {
             if capturedDrag, !global, let captureGeometry,
@@ -702,7 +758,7 @@ enum NativePointerDeliveryPolicy {
         try await sequence.deliver(
             entry: entry, check: validate, post: post,
             canRelease: canRelease, skipped: onCleanupUnknown,
-            onDispatch: onDispatch, onPosted: onPosted)
+            onDispatch: onDispatch, onPosted: onPosted, recoverLocalActivity: restoreLocalActivity)
     }
 }
 
@@ -803,10 +859,13 @@ enum NativePointerDeliveryPolicy {
     func deliver(
         entry: CGEvent? = nil, check: (CGPoint, Bool) throws -> Void, post: @escaping (CGEvent, CGPoint) -> Void,
         canRelease: @escaping () -> Bool, skipped: @escaping () -> Void, onDispatch: () throws -> Void,
-        onPosted: () -> Void
+        onPosted: () -> Void,
+        recoverLocalActivity: ((CGPoint, NativePointerActivityRecovery.Missing) async throws -> Void)? = nil
     ) async throws {
         var lastPoint = items[0].point
         var releaseMetric: NativeMetrics.Interval?
+        var requestedMouseDownAttempted = false
+        var localActivityRecoveryAttempted = false
         // Time the existing release eligibility + post/skip path. Its bounded
         // settling interval remains included in the enclosing clickDispatch.
         func endReleaseMetric() {
@@ -832,10 +891,23 @@ enum NativePointerDeliveryPolicy {
             defer { metric?.end() }
             try check(point, held)
         }
+        func recover(_ missing: NativePointerActivityRecovery.Missing, at point: CGPoint, held: Bool) async throws {
+            guard isClick, !held, !requestedMouseDownAttempted, !localActivityRecoveryAttempted,
+                let recoverLocalActivity
+            else { throw missing }
+            // Consume once before awaiting: no requested-down outcome, failed
+            // preparation, or later click may reopen this allowance.
+            localActivityRecoveryAttempted = true
+            try await recoverLocalActivity(point, missing)
+        }
         try await pair.run {
             var held = false
             if let entry {
-                try validate(lastPoint, false)
+                do { try validate(lastPoint, false) }
+                catch let missing as NativePointerActivityRecovery.Missing {
+                    try await recover(missing, at: lastPoint, held: false)
+                    try validate(lastPoint, false)
+                }
                 try onDispatch()
                 post(entry, lastPoint)
                 onPosted()
@@ -850,8 +922,15 @@ enum NativePointerDeliveryPolicy {
                     held = false
                     continue
                 }
-                try validate(item.point, held)
+                do { try validate(item.point, held) }
+                catch let missing as NativePointerActivityRecovery.Missing {
+                    try await recover(missing, at: item.point, held: held)
+                    try validate(item.point, held)
+                }
                 lastPoint = item.point
+                if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
+                    requestedMouseDownAttempted = true
+                }
                 try onDispatch()
                 if let release = item.release {
                     pair.press(event, release: release)

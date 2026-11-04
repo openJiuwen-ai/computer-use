@@ -179,9 +179,9 @@ class PurePresentationCheckpointTests(unittest.TestCase):
 
 class PresentationBudgetBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_cpu_stage_uses_sdk_clock_and_keeps_original_control_metadata(self):
+        from computer_use.interaction.read.acquisition.model import AcquiredObservation, Components
         from computer_use.interaction.read.pipeline import _PrepareCapturedObservation
         from computer_use.pipeline.core import Control
-        from computer_use.session.operations import OperationDeadlineExceeded
 
         flow = _PrepareCapturedObservation(object())
         cancelled = lambda: False
@@ -189,7 +189,7 @@ class PresentationBudgetBoundaryTests(unittest.IsolatedAsyncioTestCase):
             remaining=lambda: (_ for _ in ()).throw(AssertionError("native component clock reused")),
             cancelled=cancelled, call_id="original-call", path=("parent",),
         )
-        marker = object()
+        marker = AcquiredObservation(None, None, None, Components(None), (), False)
 
         def inspect(value, control):
             self.assertIs(value, marker)
@@ -202,8 +202,10 @@ class PresentationBudgetBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(flow.presentation, "run", side_effect=inspect), operation_budget() as budget:
             self.assertIs(flow.run(marker, original), marker)
             budget._clock = lambda: budget.deadline + 1
-            with self.assertRaises(OperationDeadlineExceeded):
-                flow.run(marker, original)
+            retained = flow.run(marker, original)
+            self.assertFalse(retained.snapshots_numbered)
+            self.assertIs(retained.acquired.components, marker.components)
+            self.assertEqual(retained.acquired.gaps[-1].component, "presentation")
 
     async def test_private_reader_component_expiry_does_not_invent_a_cpu_deadline(self):
         from computer_use.interaction.read.pipeline import _PrepareCapturedObservation

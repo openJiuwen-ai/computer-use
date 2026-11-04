@@ -135,7 +135,7 @@ def test_fixed_window_composite_needs_no_prior_app_primary_or_anchor():
 
 def expired_budget(monkeypatch):
     clock = SimpleNamespace(now=0.0)
-    budget = OperationBudget(clock=lambda: clock.now)
+    budget = OperationBudget(1000, clock=lambda: clock.now)
     clock.now = 1.001
     monkeypatch.setattr(
         "computer_use.interaction.read.acquisition.images.composite.pipeline.current_operation_budget", lambda: budget
@@ -167,7 +167,7 @@ def test_expiry_inside_a_piece_stops_before_more_pieces_or_png_encoding(monkeypa
     ui, _, pipeline = fixture()
     root, child = captured_part("root"), captured_part("child", x=120)
     clock = SimpleNamespace(now=0.0)
-    budget = OperationBudget(clock=lambda: clock.now)
+    budget = OperationBudget(1000, clock=lambda: clock.now)
     monkeypatch.setattr(
         "computer_use.interaction.read.acquisition.images.composite.pipeline.current_operation_budget", lambda: budget
     )
