@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from computer_use.interaction.query.instances.scope import adopt
+from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.acquisition.content import has_content_progress
 from computer_use.interaction.read.facts.normalize import normalize_facts
 from computer_use.interaction.read.numbering.references import DisplayReferences
@@ -253,3 +254,35 @@ def test_missing_original_capture_can_receive_window_created_and_deliver_new_for
     coverage = {item["window"]: item for item in observation_data(result)["window_coverage"]}
     assert set(coverage["Form"]["included"]) == {"tree", "image"}
     assert coverage["A"]["captured"] == ()
+
+
+def test_later_unconfirmed_popup_keeps_its_capture_without_rereading_the_parent(monkeypatch):
+    from dataclasses import replace
+
+    a, popup = window("A"), window("Popup")
+    before, later = directory(a, popup), directory(a)
+    controller, app, state = setup(before)
+    initial = replace(
+        parent_result(state, popup, before, later), scope_confirmed=False,
+        tree=tree(popup, "Captured hour choices"), image=pixels(state, popup),
+        gaps=(ObservationGap("scope", "observation_incomplete", "Captured scope is unconfirmed in the later directory"),),
+    )
+    controller.reader.read = AsyncMock(return_value=initial)
+    pipeline = InterfaceReadPipeline(controller)
+    pipeline.member = AsyncMock(side_effect=AssertionError("Do not replace the completed popup capture with a parent read"))
+    related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),))
+
+    result = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
+
+    assert "Captured hour choices" in result.text and result.screenshot is not None
+    assert "scope is unconfirmed" in result.text
+    assert initial.tree.native.interval_ns == (1, 2)
+    assert app._context is None
+    assert state.directory is later
+    controller.reader.read.assert_awaited_once()
+    pipeline.member.assert_not_awaited()
+    metadata = observation_data(result)
+    coverage = {item["window"]: item for item in metadata["window_coverage"]}
+    assert metadata["partial"] and coverage["Popup"]["lifecycle"] == "unknown"
+    assert set(coverage["Popup"]["included"]) == {"tree", "image"}
+    assert "Window 1:" in result.text  # Captured popup receives its own heading, not the parent's.

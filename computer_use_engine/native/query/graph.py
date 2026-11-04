@@ -10,6 +10,7 @@ from dataclasses import replace
 
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import SelectionDependency
+from computer_use.native.scopes import QueryRootUnavailable
 from computer_use.native.semantics import (
     EDITING_FIELDS,
     FIELDS,
@@ -117,7 +118,18 @@ class NativeGraph:
                 self.fail("observation_incomplete", "Query exhausted its native node budget.")
             batch = await self._collect_nodes(token, available, self.max_depth if depth is None else depth)
             self._remember_nodes(batch)
-        return self.nodes[token]
+        node = self.nodes[token]
+        if self.platform == "macos" and token == self.root.node:
+            status = node["fieldStatus"].get(self.properties.get("role"), {})
+            if (
+                status.get("state") == "error" and status.get("nativeDomain") == "AXError"
+                and status.get("nativeCode") == -25202  # kAXErrorInvalidUIElement
+            ):
+                # Failed descendants/optional fields remain ordinary incomplete
+                # evidence. Only this exact root proxy has been disproved;
+                # neither its physical Window nor its App has ended.
+                raise QueryRootUnavailable(self.root, native_domain="AXError", native_code=-25202)
+        return node
 
     async def _collect_nodes(self, token, available, depth, *, relation_page=None):
         options = dict(self.query_options)

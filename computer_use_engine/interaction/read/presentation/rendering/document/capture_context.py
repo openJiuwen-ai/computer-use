@@ -9,10 +9,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import math
 
+from computer_use.interaction.read.facts.capture_companion import sharing_control_signature
 from computer_use.interaction.read.presentation.content import DisplayText
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
 from computer_use.interaction.read.presentation.headers import ImageHeader, InterfaceHeader, MemberHeading
-from computer_use.protocol.observation import Geometry, NativeNode, Relation
+from computer_use.protocol.observation import Geometry, NativeNode
 
 
 @dataclass(frozen=True)
@@ -53,20 +54,6 @@ def _bounds(node: NativeNode) -> Geometry | None:
     ):
         return None
     return value
-
-
-def _complete(relation: Relation | None, count: int) -> bool:
-    """Require a full reported child list rather than a candidate or sampled view."""
-    return (
-        relation is not None
-        and relation.kind == "children"
-        and relation.evidence in ("reported", "verified")
-        and relation.enumeration == "enumerated"
-        and relation.offset in (None, 0)
-        and relation.total == count
-        and len(relation.targets) == count
-        and relation.positions in (None, tuple(range(count)))
-    )
 
 
 def _body(document: DisplayDocument, position: int, window: MemberHeading) -> DisplayTree | None:
@@ -130,14 +117,6 @@ def _directory_members(directory: Mapping[str, object] | None) -> tuple[Mapping[
     return tuple(members)
 
 
-def _empty_payload(node: NativeNode) -> bool:
-    """Leave business text, URLs and independently valued dialogs in their normal scope."""
-    return all(
-        getattr(node, key) is None
-        for key in ("description", "help", "placeholder", "url", "control_value", "numeric_value", "text")
-    )
-
-
 def _signature(tree: DisplayTree, window: MemberHeading) -> tuple[str, str] | None:
     """Check the complete small AppKit sharing-control signature without application names."""
     snapshot = tree.prepared.snapshot
@@ -145,33 +124,12 @@ def _signature(tree: DisplayTree, window: MemberHeading) -> tuple[str, str] | No
     if native.backend != "macos" or native.session != (window.target or {}).get("session") or len(native.roots) != 1:
         return None
     token = native.roots[0]
-    root = native.nodes.get(token)
-    if (
-        root is None
-        or token != (window.target or {}).get("node")
-        or root.role != "dialog"
-        or root.name != "Window"
-        or root.states.modal is not False
-        or root.states.focused is not False
-        or not _empty_payload(root)
-        or not _complete(root.relations.get("children"), 1)
-    ):
+    signature = sharing_control_signature(native, token)
+    if signature is None or token != (window.target or {}).get("node"):
         return None
-    (button_token,) = root.relations["children"].targets
-    button = native.nodes.get(button_token)
-    if (
-        button is None
-        or button.role != "button"
-        or button.name != "WindowSharingSessionButton"
-        or button.states.enabled is not True
-        or button.states.focused is not False
-        or not _empty_payload(button)
-        or not _complete(button.relations.get("children"), 0)
-        or not any(
-            action.kind == "invoke" and action.key == "AXPress" and action.available is not False
-            for action in button.actions or ()
-        )
-    ):
+    _, button_token = signature
+    root, button = native.nodes[token], native.nodes[button_token]
+    if root.name != "Window":
         return None
     for issue in native.issues:
         path = tuple(issue.path)
@@ -180,15 +138,7 @@ def _signature(tree: DisplayTree, window: MemberHeading) -> tuple[str, str] | No
         if path[1] not in (token, button_token):
             continue
         relative = path[2:]
-        if not relative or relative[0] in ("role", "name", "geometry", "actions"):
-            return None
-        required_states = ("focused", "modal") if path[1] == token else ("focused", "enabled")
-        if (
-            relative[0] == "states"
-            and (len(relative) == 1 or relative[1] in required_states)
-            or relative[0] == "relations"
-            and (len(relative) == 1 or relative[1] == "children")
-        ):
+        if not relative or relative[0] in ("name", "geometry", "actions"):
             return None
     frame, hit = _bounds(root), _bounds(button)
     if (

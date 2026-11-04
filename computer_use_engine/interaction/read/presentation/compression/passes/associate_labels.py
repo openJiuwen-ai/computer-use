@@ -101,4 +101,7 @@ def associate_labels(state: ProjectionView, edit: ProjectionEditor) -> None:
         for child in node["children"]:
             remove_consumed(child)
 
-    remove_consumed(state.view)
+    try:
+        remove_consumed(state.view)
+    finally:
+        remove_consumed = None

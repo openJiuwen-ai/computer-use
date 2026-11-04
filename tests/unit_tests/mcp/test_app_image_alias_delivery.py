@@ -23,6 +23,7 @@ from computer_use.client.host import (
     set_text_page_handler,
 )
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.query.instances.scope import adopt
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
 from computer_use.interaction.read.views.collection import CollectionPlan
@@ -32,12 +33,13 @@ from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
 from computer_use.native.contracts import Binding
 from computer_use.protocol.captures import decode_capture
 from computer_use.session import images as images_state
+from computer_use.session.images import register_image_delivery
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
 from computer_use.session.operations import OperationBudget
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
-from unit_tests.test_application_window_lifetimes import ref, setup
+from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
 
 
 class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
@@ -111,6 +113,20 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
     def observe(self, ui, key):
         image = self.capture(ui, key)
         return publish(self.controller, ui, "Observed " + key, image.png)
+
+    def source_part(self, key, token, color):
+        item = self.app._instance.members[key]
+        target = Binding("session", item["instance"], key, item["surface"], capture=token)
+        buffer = BytesIO()
+        with Image.new("RGB", (100, 80), color) as pixels:
+            pixels.save(buffer, format="PNG")
+        png = decode_capture(dict(
+            id=token, kind="window", scope=target.surface, startedAt=1, completedAt=2,
+            width=100, height=80, png=base64.b64encode(buffer.getvalue()).decode(),
+        ), "window")
+        return WindowPart(target, image=WindowImage(
+            target, png, {}, dict(nativeSpace="screen", toNative=(1, 0, 0, 1, 0, 0)),
+        ))
 
     def compose(self, ui, keys):
         parts = []
@@ -385,6 +401,84 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual([event["coalesced"] for event in outputs], [False, True, False])
         self.assertEqual(len({event["capture"]["id"] for event in outputs}), 3)
+
+    async def historical_capture_is_displayed_without_new_input_authority(self, *, ended):
+        state = self.app._instance
+        original, original_directory = dict(state.members["a"]), state.directory
+        number, identity = ref(self.app, "a"), WindowIdentity.of(original)
+        part = self.source_part("a", "historical", "red")
+        part.source = SimpleNamespace(scope_confirmed=False, source_directory=original_directory)
+        adopt(self.controller, self.app, directory(
+            surface("b"), focus="b", partial=not ended, ended=(original,) if ended else (),
+        ))
+        canvas, notes = InterfaceImagePipeline(self.controller).run(self.app, [part])
+        self.assertIs(canvas.png, part.image.image)
+        self.assertFalse(canvas.pieces[0].scope_confirmed)
+        self.assertIsNone(canvas.for_window("a"))
+        self.assertEqual(notes[-1].values[0].captures[0]["ref"], number)
+        self.assertFalse(notes[-1].values[0].mapping_available)
+        displayed = []
+        register_image_delivery(canvas.png, lambda: displayed.append("pixels"))
+        self.runtime.task_namespace["historical"] = canvas
+        result = await self.execute("print_image(historical.png)")
+        images = [block for block in result["content"] if block["type"] == "image"]
+        self.assertEqual(
+            [base64.b64decode(block["data"]) for block in images], [memoryview(part.image.image).tobytes()],
+        )
+        caption = images[0]["_meta"]["computer-use"]["caption"]
+        self.assertIn(f"Window {number} image: historical capture (1–2 native ns)", caption)
+        self.assertIn("current scope unconfirmed", caption)
+        self.assertNotIn("Coordinate target=", caption)
+        self.assertEqual(displayed, ["pixels"])
+        self.assertIsNone(canvas.delivered)
+        self.assertIsNone(state.delivered_image)
+        self.assertNotIn(identity, state.window_images)
+        self.assertNotIn(identity, state.sampled_window_images)
+        self.assertNotIn("a", state.members)
+        self.assertNotIn("a", state.windows.values())
+        self.assertNotIn("historical", self.controller.transport.capture_references)
+        with self.assertRaisesRegex(ComputerUseError, "current scope is unconfirmed"):
+            canvas.hit((20, 30))
+
+    async def test_unconfirmed_capture_keeps_exact_historical_pixels_without_current_mapping(self):
+        await self.historical_capture_is_displayed_without_new_input_authority(ended=False)
+
+    async def test_authoritatively_ended_capture_keeps_exact_historical_pixels_without_current_mapping(self):
+        await self.historical_capture_is_displayed_without_new_input_authority(ended=True)
+
+    async def test_reused_native_slot_displays_both_lifetimes_without_rebinding_the_historical_region(self):
+        original_directory = self.app._instance.directory
+        old_number = ref(self.app, "a")
+        historical = self.source_part("a", "historical", "red")
+        historical.source = SimpleNamespace(scope_confirmed=False, source_directory=original_directory)
+        adopt(self.controller, self.app, directory(surface("a", scope="replacement"), surface("b")))
+        current_number = ref(self.app, "a")
+        self.assertNotEqual(current_number, old_number)
+        current = self.source_part("a", "current", "blue")
+        gaps = []
+        canvas, notes = InterfaceImagePipeline(self.controller).run(
+            self.app, [historical, current], on_gap=gaps.append,
+        )
+        self.assertEqual(len(canvas.pieces), 2)
+        self.assertEqual([piece.scope_confirmed for piece in canvas.pieces], [False, True])
+        self.assertEqual([capture["ref"] for capture in notes[-1].values[0].captures], [old_number, current_number])
+        with Image.open(BytesIO(canvas.png)) as pixels:
+            self.assertEqual(pixels.getpixel((20, 30))[:3], (255, 0, 0))
+            self.assertEqual(pixels.getpixel((136, 30))[:3], (0, 0, 255))
+        self.assertEqual(len(gaps), 1)
+        self.runtime.task_namespace["states"] = canvas
+        result = await self.execute("print_image(states.png)")
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn(f"Coordinate inputs for this displayed canvas: computer.window({current_number}).", text)
+        self.assertNotIn(f"Coordinate inputs for this displayed canvas: computer.window({old_number})", text)
+        image = next(block for block in result["content"] if block["type"] == "image")
+        self.assertIn("arrangement is not a live window layout", image["_meta"]["computer-use"]["caption"])
+        self.assertIn("separate", gaps[0].detail)
+        await self.click(self.app, (136, 30))
+        self.assertEqual(self.last_target(), current.image.target)
+        with self.assertRaisesRegex(ComputerUseError, "current scope is unconfirmed"):
+            await self.click(self.app, (20, 30))
+        self.assertEqual(set(self.controller.transport.capture_references), {"current"})
 
     async def test_budget_fallback_delivers_only_the_shown_window_mapping_and_coverage(self):
         clock = SimpleNamespace(now=0.0)

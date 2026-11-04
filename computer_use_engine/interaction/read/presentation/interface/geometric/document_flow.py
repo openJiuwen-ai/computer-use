@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Recognize source-supported prose flow independently of WebView implementation."""
@@ -8,8 +7,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from computer_use.identity import WeakIdentityMap
 from computer_use.interaction.read.presentation.interface.model import InterfaceBlock, InterfaceDraft
 from computer_use.interaction.read.presentation.interface.regions.scope import block_sources
+
+_source_indexes = WeakIdentityMap()
+_PROSE_ROLES = frozenset(("heading", "staticText", "paragraph", "list", "code", "group"))
+_BODY_ROLES = frozenset(("staticText", "paragraph", "list", "code"))
 
 
 def _child_refs(node: Mapping[str, Any]) -> tuple[str, ...]:
@@ -17,42 +21,89 @@ def _child_refs(node: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(child["ref"] if isinstance(child, Mapping) else child for child in node.get("children", ()))
 
 
-def _unwrap(ref: str, draft: InterfaceDraft) -> Mapping[str, Any] | None:
-    """Follow a passive single-child wrapper without flattening separate cards."""
-    seen = set()
-    while ref not in seen:
-        seen.add(ref)
-        node = draft.source.native_nodes.get(ref)
-        if node is None:
-            return None
-        children = _child_refs(node)
-        if (
-            node["role"] not in ("group", "webArea")
-            or len(children) != 1
-            or node.get("actions")
-            or node.get("selected")
-            or node.get("editable")
-        ):
-            return node
-        ref = children[0]
-    return None
+class _DocumentFlowIndex:
+    """Reuse source-only predicates while display blocks change between passes.
 
+    The weak registry keys the exact immutable ProjectionInput. Its value retains
+    only the source maps, never that key or a display draft. Layout eligibility
+    and each block's starting reference are still resolved from current blocks.
+    """
 
-def _declares_prose(ref: str, draft: InterfaceDraft) -> bool:
-    """Recognize direct heading/body sequences while preserving card boundaries."""
-    scope = _unwrap(ref, draft)
-    if scope is None:
-        return False
-    children = tuple(_unwrap(child, draft) for child in _child_refs(scope))
-    children = tuple(child for child in children if child is not None)
-    if sum(child["role"] == "heading" for child in children) < 2:
-        return False
-    # A document outline is heading + prose/list/code. Native selectable rows,
-    # form controls and app navigation establish a different local structure.
-    allowed = {"heading", "staticText", "paragraph", "list", "code", "group"}
-    if any(child["role"] not in allowed for child in children):
-        return False
-    return any(child["role"] in ("staticText", "paragraph", "list", "code") for child in children)
+    def __init__(self, source):
+        self.nodes, self.parents = source.native_nodes, source.parents
+        self.children, self.unwrapped, self.prose, self.scopes = {}, {}, {}, {}
+
+    def _children(self, node):
+        ref = node["ref"]
+        if ref not in self.children:
+            self.children[ref] = _child_refs(node)
+        return self.children[ref]
+
+    def _unwrap(self, ref):
+        """Follow passive wrappers once, preserving cards and wrapper cycles."""
+        path, seen = [], set()
+        while ref not in self.unwrapped and ref not in seen:
+            seen.add(ref)
+            path.append(ref)
+            node = self.nodes.get(ref)
+            if node is None:
+                result = None
+                break
+            children = self._children(node)
+            if (
+                node["role"] not in ("group", "webArea")
+                or len(children) != 1
+                or node.get("actions")
+                or node.get("selected")
+                or node.get("editable")
+            ):
+                result = node
+                break
+            ref = children[0]
+        else:
+            result = self.unwrapped.get(ref)
+        for member in path:
+            self.unwrapped[member] = result
+        return result
+
+    def _declares_prose(self, ref):
+        """Recognize direct heading/body sequences without flattening cards."""
+        if ref not in self.prose:
+            scope = self._unwrap(ref)
+            if scope is None:
+                self.prose[ref] = False
+            else:
+                children = tuple(self._unwrap(child) for child in self._children(scope))
+                roles = tuple(child["role"] for child in children if child is not None)
+                self.prose[ref] = (
+                    roles.count("heading") >= 2
+                    and all(role in _PROSE_ROLES for role in roles)
+                    and any(role in _BODY_ROLES for role in roles)
+                )
+        return self.prose[ref]
+
+    def contains(self, ref):
+        """Resolve immutable ancestry once, including negative and cyclic paths."""
+        path, seen = [], set()
+        while ref is not None and ref not in self.scopes and ref not in seen:
+            seen.add(ref)
+            path.append(ref)
+            node = self.nodes.get(ref)
+            if node is None:
+                result = False
+                break
+            if node["role"] == "document" or self._declares_prose(ref):
+                result = True
+                break
+            if node["role"] in ("window", "sheet"):
+                result = False
+                break
+            ref = self.parents.get(ref)
+        else:
+            result = self.scopes.get(ref, False)
+        for member in path:
+            self.scopes[member] = result
+        return result
 
 
 def document_flow_scope(key: str, draft: InterfaceDraft, blocks: Mapping[str, InterfaceBlock]) -> bool:
@@ -70,15 +121,8 @@ def document_flow_scope(key: str, draft: InterfaceDraft, blocks: Mapping[str, In
     block = blocks[key]
     refs = block_sources(key, blocks)
     current = block.primary_ref or block.label_ref or (refs[0] if refs else None)
-    seen = set()
-    while current is not None and current not in seen:
-        seen.add(current)
-        node = draft.source.native_nodes.get(current)
-        if node is None:
-            return False
-        if node["role"] == "document" or _declares_prose(current, draft):
-            return True
-        if node["role"] in ("window", "sheet"):
-            return False
-        current = draft.source.parents.get(current)
-    return False
+    index = _source_indexes.get(draft.source)
+    if index is None:
+        index = _DocumentFlowIndex(draft.source)
+        _source_indexes.set(draft.source, index)
+    return index.contains(current)

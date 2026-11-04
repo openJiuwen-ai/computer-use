@@ -106,7 +106,7 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
             context=context,
             identity=identity,
             stale=stale,
-            omitContext=context_already_shown,
+            omitContext=context_already_shown and not source.get("historical", False),
             coordinateTarget=coordinate_target,
         )
     if source is not None and known["metadata"] is not None:

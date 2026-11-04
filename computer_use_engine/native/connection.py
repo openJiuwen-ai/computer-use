@@ -20,6 +20,7 @@ from pathlib import Path
 
 from computer_use.diagnostics import SDK_VERSION, diagnostic, local_failure
 from computer_use.errors import ComputerUseError
+from computer_use.native import driver_exec
 from computer_use.native.preview import get_preview_handler, read_previews
 from computer_use.paths import native_driver
 from computer_use.protocol.captures import capture_metadata
@@ -173,8 +174,7 @@ class Connection:
                 env["COMPUTER_USE_PREVIEW_FD"] = "3" if preview is not None else ""
                 program = [
                     sys.executable,
-                    "-m",
-                    "computer_use.native.driver_exec",
+                    driver_exec.__file__,
                     str(write_fd),
                     str(lifetime),
                     command,

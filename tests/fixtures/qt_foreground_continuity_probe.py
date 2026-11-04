@@ -38,34 +38,34 @@ class ContinuityProbe(Probe):
                 return key
         return super().object_label(obj)
 
-    def publish(self):
+    def capture_state(self):
         popup = QtWidgets.QApplication.activePopupWidget()
-        write_json(
-            self.output / "state.json",
-            {
-                "pid": os.getpid(),
-                "title": self.title,
-                "platform": "cocoa",
-                "qt_version": QtCore.qVersion(),
-                "visible": self.isVisible(),
-                "active": self.isActiveWindow(),
-                "failure": self.failure,
-                "topic": self.topic.text(),
-                "date": self.value(),
-                "date_model": self.model,
-                "date_changes": self.date_changes,
-                "submissions": self.submissions,
-                "hour": self.hour.currentText(),
-                "hour_activations": self.hour_activations,
-                "duration": self.duration.currentText(),
-                "duration_activations": self.duration_activations,
-                "guard": self.guard.text(),
-                "popup": self.object_label(popup),
-                "focus_state": self.focus_state(),
-                "event_count": self.event_count,
-                "events": self.events,
-            },
-        )
+        return {
+            "pid": os.getpid(),
+            "title": self.title,
+            "platform": "cocoa",
+            "qt_version": QtCore.qVersion(),
+            "visible": self.isVisible(),
+            "active": self.isActiveWindow(),
+            "failure": self.failure,
+            "topic": self.topic.text(),
+            "date": self.value(),
+            "date_model": self.model,
+            "date_changes": self.date_changes,
+            "submissions": self.submissions,
+            "hour": self.hour.currentText(),
+            "hour_activations": self.hour_activations,
+            "duration": self.duration.currentText(),
+            "duration_activations": self.duration_activations,
+            "guard": self.guard.text(),
+            "popup": self.object_label(popup),
+            "focus_state": self.focus_state(),
+            "event_count": self.event_count,
+            "events": self.events,
+        }
+
+    def publish(self):
+        write_json(self.output / "state.json", self.capture_state())
 
 
 def main():

@@ -17,7 +17,7 @@ from computer_use.interaction.read.acquisition.images.desktop.pipeline import De
 from computer_use.interaction.read.app import NativeAppReader
 from computer_use.native.contracts import Binding, Cleanup, OpenedOperation
 from computer_use.native.lifecycle import CallLifecycle
-from computer_use.native.scopes import FixedWindowInvalidated, WorkingWindow
+from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, WorkingWindow
 from computer_use.protocol.observation import NativeNode, NativeObservation, ReadIssue, Relation
 from computer_use.protocol.observation.adapters.records import DriverObservationReply, DriverReadMetadata
 from test_bounded_image_composition import captured_part
@@ -67,6 +67,56 @@ class Port:
         return DriverObservationReply(
             native, DriverReadMetadata("surface:A", None, {}, {}, (), {}),
         )
+
+
+@pytest.mark.parametrize("isolated", [False, True])
+def test_sequential_facts_and_pixels_can_use_the_original_deadline_without_repeated_slices(monkeypatch, isolated):
+    """Both components fit the call; neither may be denied by an unrelated fraction."""
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("computer_use.native.lifecycle.time.monotonic", lambda: clock.now)
+    port = Port(clock, isolated=isolated, expired_at="none")
+    original_nodes = port.nodes
+
+    async def nodes(token, target, fields, max_nodes, max_depth, timeout, **options):
+        # Model a provider that needs 140 ms for this unchanged two-node tree.
+        # A 400/3 ms slice fails even though tree+pixels fit the original call.
+        if timeout < 140:
+            raise TimeoutError("The provider cannot complete this tree within the artificial slice")
+        clock.now += 0.140
+        returned = await original_nodes(token, target, fields, max_nodes, max_depth, timeout, **options)
+        return replace(returned, observation=replace(returned.observation, issues=()))
+
+    port.nodes = nodes
+    reader = NativeAppReader(port)
+    image = captured_part("A").image
+    image_budgets = []
+
+    async def capture(read, **options):
+        image_budgets.append(read.remaining())
+        if read.remaining() < 180:
+            raise TimeoutError("The window needs 180 ms for its pixels")
+        clock.now += 0.180
+        return image
+
+    reader.images.collect = AsyncMock(side_effect=capture)
+    selected = WorkingWindow("application", "Fixture", Binding("session", "instance:A", "A", "surface:A"))
+    current = directory(window("A"))
+    reader._discover = AsyncMock(return_value=(selected, current))
+
+    async def run():
+        with port.calls.limit(400):
+            return await reader.read(
+                selected, view="both", overview=False, include_menus=False, source_directory=current,
+            )
+
+    observed = asyncio.run(run())
+
+    assert observed.tree is not None and "Search" in observed.document.text
+    assert observed.image is image and not observed.gaps
+    assert 398 <= port.queries[0][1] <= 400
+    assert 258 <= image_budgets[0] <= 260
+    assert clock.now == pytest.approx(100.320)
+    assert not port.calls.busy and not port.calls.retired
 
 
 @pytest.mark.parametrize("isolated", [False, True])
@@ -130,14 +180,41 @@ def test_directory_identity_failure_retains_its_new_catalogue(monkeypatch):
     failure = FixedWindowInvalidated(selected.root, "Original window closed", directory=replacement)
     reader._discover = AsyncMock(side_effect=failure)
 
-    with pytest.raises(FixedWindowInvalidated) as caught:
-        asyncio.run(reader.read(
-            selected, view="tree", overview=False, include_menus=False,
-            source_directory=directory(window("A")),
-        ))
+    observed = asyncio.run(reader.read(
+        selected, view="tree", overview=False, include_menus=False,
+        source_directory=directory(window("A")),
+    ))
 
-    assert caught.value is failure and caught.value.directory is replacement
+    assert observed.directory is replacement and not observed.scope_confirmed
+    assert observed.target.root_window == "A" and "Search" in observed.document.text
+    assert any(gap.component == "scope" and gap.code == "window_closed" for gap in observed.gaps)
     assert len(port.queries) == 1 and not port.calls.retired
+
+
+@pytest.mark.parametrize("scope_managed", [False, True])
+def test_postcapture_unconfirmed_window_keeps_its_exact_facts_pixels_and_intervals(monkeypatch, scope_managed):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("computer_use.native.lifecycle.time.monotonic", lambda: clock.now)
+    port = Port(clock, expired_at="none")
+    reader = NativeAppReader(port)
+    selected = WorkingWindow("application", "Fixture", Binding("session", "instance:A", "A", "surface:A"))
+    original, later = directory(window("A")), directory()
+    image = captured_part("A").image
+    reader.images.collect = AsyncMock(return_value=image)
+    reader._discover = AsyncMock(side_effect=FixedWindowUnconfirmed(selected.root, directory=later))
+
+    observed = asyncio.run(reader.read(
+        selected, view="both", overview=False, include_menus=False, source_directory=original,
+        scope_managed=scope_managed,
+    ))
+
+    assert observed.target.root_window == "A" and observed.target.surface == "surface:A"
+    assert observed.source_directory is original and observed.directory is later
+    assert observed.tree.native.interval_ns == (1, 2)
+    assert any(node.name == "Search" for node in observed.tree.native.nodes.values())
+    assert observed.image is image and not observed.scope_confirmed
+    assert any(gap.component == "scope" and "original facts, pixels" in gap.detail for gap in observed.gaps)
+    assert len(port.queries) == 1 and reader.images.collect.await_count == 1
 
 
 def test_overview_timeout_does_not_erase_window_content(monkeypatch):

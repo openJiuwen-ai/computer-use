@@ -137,8 +137,11 @@ def compact_text_parts(
                 candidates[node["ref"]] = dict(parent=parent, index=index, node=node)
             collect(node, in_table)
 
-    for root in roots:
-        collect(root)
+    try:
+        for root in roots:
+            collect(root)
+    finally:
+        collect = None
 
     def part(line: str) -> Record | None:
         match = regex.match(r"^(\t*)([0-9]+) ([\p{L}\p{N} _-]+) Value: (.+)\Z", line)

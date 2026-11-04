@@ -11,7 +11,7 @@ from typing import Any
 from computer_use.interaction.read.facts.documents import document_projection
 from computer_use.interaction.read.facts.groups import render_properties
 from computer_use.interaction.read.facts.index import data, field_name, observation_index
-from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+from computer_use.interaction.read.facts.snapshot import SemanticSnapshot, _seal_projection_sources
 from computer_use.interaction.read.facts.states import (
     PUBLIC_STATES,
     READ_ONLY_FIELDS,
@@ -24,7 +24,6 @@ from computer_use.interaction.read.presentation.records import ReferenceAllocato
 from computer_use.protocol.observation import FieldPath, NativeNode, NativeObservation
 from computer_use.protocol.primitives import required_item, safe_integer
 from computer_use.protocol.records import FactCollection
-
 
 _ROLES = {
     "checkbox": "checkBox",
@@ -91,9 +90,9 @@ def _value_text(value: Any, aliases: dict[str, str]) -> str:
     """Format a public scalar while preserving element-valued identity."""
     if isinstance(value, str):
         return value
-    if isinstance(value, dict) and set(value) == {"element"}:
+    if isinstance(value, Mapping) and set(value) == {"element"}:
         return "element " + aliases[value["element"]]
-    if isinstance(value, dict) and set(value) in ({"datetime"}, {"number"}):
+    if isinstance(value, Mapping) and set(value) in ({"datetime"}, {"number"}):
         return next(iter(value.values()))
     return literal(value)
 
@@ -167,8 +166,6 @@ def normalize_facts(
 
 def renumber_snapshot(snapshot: SemanticSnapshot, references: ReferenceAllocator) -> SemanticSnapshot:
     """Apply aliases to the display view without rebuilding its source fact index."""
-    from dataclasses import replace
-
     if references.session != snapshot.native.session:
         raise ValueError("Native display references belong to another session")
     projected = _project_facts(
@@ -181,7 +178,8 @@ def renumber_snapshot(snapshot: SemanticSnapshot, references: ReferenceAllocator
         snapshot.collection.diagnostic_fields if snapshot.collection is not None else None,
         snapshot.collection.field_sources if snapshot.collection is not None else None,
     )
-    return replace(projected, collection=snapshot.collection)
+    projected.collection = snapshot.collection
+    return projected
 
 
 def _project_facts(
@@ -308,7 +306,9 @@ def _project_facts(
                     and item["key"] in ("item_status", "item_type")
                     and bool(item["value"])
                 )
-                invalid_geometry = key.startswith("geometry.") and isinstance(item, dict) and item.get("valid") is False
+                invalid_geometry = (
+                    key.startswith("geometry.") and isinstance(item, Mapping) and item.get("valid") is False
+                )
                 matches_provider_fact = (
                     True
                     if (
@@ -541,16 +541,18 @@ def _project_facts(
     annotations.extend("Collection: " + literal(reason) for reason in batch["stopReasons"])
     if value.coordinate_spaces:
         annotations.append("Coordinate spaces: " + literal(data(value.coordinate_spaces)))
-    return SemanticSnapshot(
-        value,
-        batch,
-        roots,
-        refs,
-        annotations,
-        sources,
-        text_refs,
-        scope_kind,
-        root_contexts,
-        value_fields,
-        frozenset(driver_features),
+    return _seal_projection_sources(
+        SemanticSnapshot(
+            value,
+            batch,
+            roots,
+            refs,
+            annotations,
+            sources,
+            text_refs,
+            scope_kind,
+            root_contexts,
+            value_fields,
+            frozenset(driver_features),
+        )
     )

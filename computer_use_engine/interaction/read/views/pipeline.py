@@ -42,11 +42,12 @@ from computer_use.pipeline.core import Control
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 
+from .capture_companions import CapturedSharingControl, companion_capture
 from .collection import CollectionPlan, components
 from .menus import InterfaceMenuPipeline, remember_menu
 from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
 from .publication import capture_header, publish, related_window_summary, tree_document
-from .related import RelatedRead
+from .related import RelatedRead, window_lifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -56,7 +57,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.menus.query import MenuRead
     from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.interaction.records import UIHandle
-    from computer_use.protocol.records import SurfaceInfo
+    from computer_use.protocol.records import NativeDirectory, SurfaceInfo
     from computer_use.session.interfaces import InstanceState
     from computer_use.types import Observation
 
@@ -80,6 +81,8 @@ class WindowPart:
     menus: MenuRead | None = None
     gaps: tuple[ObservationGap, ...] = ()
     source: AppObservation | None = None
+    image_directory: NativeDirectory | None = None
+    capture_companion: CapturedSharingControl | None = None
 
 
 def member_target(instance: InstanceState, item: SurfaceInfo) -> Binding:
@@ -381,19 +384,43 @@ class InterfaceReadPipeline:
                 if observed is not None:
                     adopt(controller, ui, observed.directory, instance.anchor)
                     directory, permitted = observed.directory, allowed(ui)
+                    captured_identity = WindowIdentity(
+                        observed.target.root_window, observed.target.surface, observed.target.instance
+                    )
+                    if (
+                        not observed.scope_confirmed
+                        and (observed.tree is not None or observed.image is not None)
+                        and window_lifecycle(captured_identity, directory) == "unknown"
+                    ):
+                        plan.captured_principal = captured_identity
                 plan.update(directory, permitted)
                 if observed is not None:
                     item = next(
                         (member for member in permitted.values() if member["surface"] == observed.target.surface), None
                     )
+                    if item is None and not observed.scope_confirmed:
+                        # A post-capture catalogue omission is not proof that
+                        # the fixed object ended. Keep this call's actual
+                        # captured member, separately from current App scope.
+                        identity = WindowIdentity(
+                            observed.target.root_window, observed.target.surface, observed.target.instance
+                        )
+                        if window_lifecycle(identity, directory) in ("unknown", "closed"):
+                            item = next((
+                                member for member in observed.source_directory["surfaces"]
+                                if WindowIdentity.of(member) == identity
+                            ), None)
                     if item is not None:
                         part = WindowPart(
-                            member_target(instance, item), observed.tree, observed.image,
+                            observed.target, observed.tree, observed.image,
                             observed.menus, observed.gaps, observed,
+                            image_directory=observed.source_directory if observed.image is not None else None,
                         )
                         parts.append(part)
                         plan.captured(item, part)
-                        remember(controller, ui, part)
+                        current_member = permitted.get(item["window"])
+                        if current_member is not None and WindowIdentity.of(current_member) == WindowIdentity.of(item):
+                            remember(controller, ui, part)
                         ui._context = item["window"] if observed.scope_confirmed else None
                     else:
                         # Exact old objects never acquire a replacement's body.
@@ -406,10 +433,28 @@ class InterfaceReadPipeline:
             if key not in permitted or WindowIdentity.of(permitted[key]) != identity:
                 continue
             item = permitted[key]
-            part = await self.member(
-                ui, item, member_view, max_nodes=DEFAULT_WINDOW_MAX_NODES if not parts else 200,
-                component_budget_ms=2000 if related is not None else None,
-            )
+            companion = companion_capture(item, directory, parts) if ui._anchor is None and not full else None
+            part = None
+            if companion is not None:
+                from computer_use.interaction.read.facts.capture_companion import (
+                    SHARING_CONTROL_FIELDS,
+                    sharing_control_signature,
+                )
+
+                probe = await self.member(
+                    ui, item, "tree", max_nodes=8, max_depth=2, fields=list(SHARING_CONTROL_FIELDS),
+                    component_budget_ms=2000 if related is not None else None,
+                )
+                signature = sharing_control_signature(probe.tree.native, probe.target.node) if probe.tree else None
+                if signature is not None:
+                    probe.capture_companion = CapturedSharingControl(companion, *signature)
+                    plan.fold_capture_status(identity)
+                    part = probe
+            if part is None:
+                part = await self.member(
+                    ui, item, member_view, max_nodes=DEFAULT_WINDOW_MAX_NODES if not parts else 200,
+                    component_budget_ms=2000 if related is not None else None,
+                )
             previous = next((old for old in parts if old.target.surface == part.target.surface), None)
             if previous is not None:
                 # A late discovery may add image work to an already captured tree.
@@ -428,6 +473,8 @@ class InterfaceReadPipeline:
                     previous.target, previous.source = part.target, part.source
                 previous.tree = part.tree if part.tree is not None else previous.tree
                 previous.image = part.image if part.image is not None else previous.image
+                if part.image is not None:
+                    previous.image_directory = part.image_directory
                 previous.gaps += part.gaps
                 part = previous
             else:
@@ -443,9 +490,10 @@ class InterfaceReadPipeline:
                 refresh_incomplete=any(gap.component == "directory" for gap in collection_gaps),
             ))
         captured = {part.target.surface for part in parts}
-        current_surfaces = {item["surface"] for item in permitted.values()}
         if related is not None and not any(
-            part.target.surface in current_surfaces and (part.tree is not None or part.image is not None)
+            (part.tree is not None or part.image is not None) and window_lifecycle(
+                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), directory
+            ) != "closed"
             for part in parts
         ):
             # Selection and acquisition can straddle a modal's closure. Use
@@ -496,11 +544,22 @@ class InterfaceReadPipeline:
         # Select the actual document parts once. Header coverage and body delivery
         # must use the same windows, including their original collection objects.
         displayed_parts: list[tuple[str, WindowPart]] = []
-        shown: set[str] = set()
+        shown: set[WindowIdentity] = set()
         for part in parts:
-            key = next((key for key, item in permitted.items() if item["surface"] == part.target.surface), None)
-            if key is not None and key not in shown:
-                shown.add(key)
+            identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+            key = next((key for key, item in permitted.items() if WindowIdentity.of(item) == identity), None)
+            if key is None and part.source is not None and not part.source.scope_confirmed:
+                retained = next((
+                    item for item in part.source.source_directory["surfaces"]
+                    if WindowIdentity.of(item) == identity
+                ), None)
+                if (
+                    retained is not None
+                    and window_lifecycle(identity, directory) in ("unknown", "closed")
+                ):
+                    key = identity.window
+            if key is not None and identity not in shown:
+                shown.add(identity)
                 displayed_parts.append((key, part))
         displayed_parts.sort(key=lambda entry: entry[0] != plan.principal)
         delivered_gaps = tuple(
@@ -553,13 +612,30 @@ class InterfaceReadPipeline:
             lines.append("Tree: not requested")
         recovery_prefix = 0
         for key, part in displayed_parts:
-            ref = next(ref for ref, window in instance.windows.items() if window == key)
-            if len(header.scoped) != 1:
+            ref = controller.interfaces.windows.reference(
+                part.target.session, directory["application"],
+                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance),
+            )
+            if len(header.scoped) != 1 or header.scoped[0].native_window != key:
                 lines.append(
                     DisplayText("member_heading", (next(window for window in header.windows if window.ref == ref),))
                 )
             if part.source is not None:
                 lines.extend(part.source.context_notes)
+            if part.capture_companion is not None:
+                from computer_use.interaction.read.presentation.rendering.document.capture_context import (
+                    CaptureCompanion,
+                )
+
+                proof = part.capture_companion
+                aliases = {node: ref for ref, node in part.tree.refs.items()}
+                parent_ref = controller.interfaces.windows.reference(
+                    part.target.session, directory["application"], proof.context.parent,
+                )
+                lines.append(DisplayText("capture_status", (CaptureCompanion(
+                    ref, parent_ref, aliases[proof.root], aliases[proof.button],
+                    proof.context.capture, proof.context.before, proof.context.after,
+                ),)))
             requested = plan.requested.get(
                 WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
             )
@@ -722,6 +798,7 @@ class InterfaceReadPipeline:
     async def member(
         self, ui: UIHandle, item: SurfaceInfo, view: str, *, max_nodes: int = 200,
         component_budget_ms: int | None = None,
+        fields: list[str] | None = None, max_depth: int | None = None,
     ) -> WindowPart:
         """Collect one confirmed window member of the interface scope.
 
@@ -734,6 +811,7 @@ class InterfaceReadPipeline:
         controller = self.controller
         # pylint: disable-next=protected-access
         target = member_target(ui._instance, item)
+        source_directory = ui._instance.directory
         tree = image = None
         gaps = []
         generation = controller.port.connection.session_identity
@@ -765,7 +843,9 @@ class InterfaceReadPipeline:
                 ):
                     tree, gap = await collect_component(
                         controller.port, "tree",
-                        lambda: controller.reader.reader.read(target, max_nodes=max_nodes, scope_kind="window"),
+                        lambda: controller.reader.reader.read(
+                            target, max_nodes=max_nodes, scope_kind="window", fields=fields, max_depth=max_depth,
+                        ),
                     )
                 if gap:
                     gaps.append(gap)
@@ -788,4 +868,6 @@ class InterfaceReadPipeline:
                     gaps.append(_collection_gap("coverage", error))
         if view != "tree" and not image_first:
             await capture_image()
-        return WindowPart(target, tree, image, gaps=tuple(gaps))
+        return WindowPart(
+            target, tree, image, gaps=tuple(gaps), image_directory=source_directory if image is not None else None,
+        )

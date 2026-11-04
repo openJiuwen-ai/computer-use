@@ -91,6 +91,12 @@ def display_selection(controller, instance, directory):
         key = focused
     elif len(entries) == 1:
         key = next(iter(entries))
+    elif len(roots := [key for key, item in entries.items() if item.get("parentState") == "none"]) == 1 and all(
+        ancestor(directory, key, roots[0]) for key in entries
+    ):
+        # An attached panel does not turn its sole confirmed document family
+        # into several independent App observation choices.
+        key = roots[0]
     elif len(readable := {key: item for key, item in entries.items() if item.get("node") is not None}) == 1 and (
         instance.anchor is None
         or entries.get(instance.anchor.root.root_window, {}).get("node") is None

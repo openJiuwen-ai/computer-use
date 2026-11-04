@@ -63,7 +63,10 @@ class NativeFactCollectionAdapter(Node["ComponentLease", "SemanticSnapshot"]):
     async def _arun(self, value: ComponentLease, control: Control) -> SemanticSnapshot:
         request, read = value.request, value.read
         limits = request.limits
-        query = read.bounded(max(1, cast("Callable[[], int]", control.remaining)() // 3))
+        # Sequential tree/pixel collection already shares one enclosing
+        # operation deadline. Dividing its remainder again can deny a small
+        # tree any collection time after the driver's own publication reserve.
+        query = read.bounded(cast("Callable[[], int]", control.remaining)())
         return await self.reader.collect(
             read,
             node=request.target.node,

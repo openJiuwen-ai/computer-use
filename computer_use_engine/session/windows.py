@@ -109,6 +109,10 @@ class WindowReferences:
         """Application ownership comes from observed catalogues, never labels."""
         return application in self._variants.get(ref, {})
 
+    def reference(self, session, application, identity):
+        """Return an existing exact alias without publishing scope or reviving a lifetime."""
+        return self._aliases.get((session, application, identity))
+
     def resolve(self, ref, session):
         entry = self._entries.get(ref)
         if entry is None or entry.session != session:
@@ -129,6 +133,8 @@ class WindowReferences:
             return
         generation = generation or image.generation
         for piece in image.pieces:
+            if not piece.scope_confirmed:
+                continue
             target = piece.image.target
             identity = WindowIdentity(piece.window, target.surface, target.instance)
             evidence = state.evidence.get(identity)
@@ -174,7 +180,7 @@ class WindowReferences:
             for image in (*state.window_images.values(), *state.sampled_window_images.values())
             if not image.expired
             for piece in image.pieces
-            if piece.image.target.capture is not None
+            if piece.scope_confirmed and piece.image.target.capture is not None
         )
 
     def choices(self, directory, name=""):

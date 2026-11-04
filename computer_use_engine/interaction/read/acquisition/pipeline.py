@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.errors import ComputerUseError
 from computer_use.native.query.directory import SurfaceReadProfile
+from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
 from computer_use.interaction.read.acquisition.choices.pipeline import WindowChoiceServiceNode
 from computer_use.interaction.read.acquisition.components.model import ComponentRequest
 from computer_use.interaction.read.acquisition.components.pipeline import ComponentPipeline
@@ -311,6 +312,29 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                     accessibility=state.plan.profile is SurfaceReadProfile.ACCESSIBILITY
                     and "nativeReadIsolation" not in services.port.connection.capabilities,
                     _control=control,
+                )
+            except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
+                directory = error.directory
+                if (
+                    directory is None
+                    or directory["session"] != components.source_directory["session"]
+                    or directory["application"] != components.source_directory["application"]
+                    or window_binding(error.binding) != window_binding(state.target)
+                    or components.tree is None and components.image is None
+                ):
+                    raise
+                # A later lifetime/confirmation result does not erase what was
+                # actually captured. Keep it as history with its original clock;
+                # the later directory remains authoritative for current scope.
+                gap = ObservationGap(
+                    "scope", "window_closed" if isinstance(error, FixedWindowInvalidated) else "observation_incomplete",
+                    ("The captured window ended before the later directory; " if isinstance(error, FixedWindowInvalidated)
+                     else "The captured window is unconfirmed in the later directory; ")
+                    +
+                    "its original facts, pixels and capture intervals are retained.",
+                )
+                return RecheckedAttempt(
+                    value, directory, state.target, None, False, state.gaps + (gap,),
                 )
             except TimeoutError as error:
                 if services.port.calls.retired or services.port.connection.session_identity != generation:

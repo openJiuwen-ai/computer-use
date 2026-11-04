@@ -24,12 +24,12 @@ from computer_use.interaction.query.instances.scope import (
 from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.ir import freeze
-from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline
+from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, member_target
 from computer_use.interaction.read.views.publication import publish
 from computer_use.interaction.requests import ExecuteAction, FindElement
 from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
 from computer_use.native.contracts import Binding, Intent, Knowledge
-from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
+from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, QueryRootUnavailable
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.protocol.element_path import element_path
@@ -400,10 +400,7 @@ class AgentInterfacePipeline:
                 "this App has no delivered lookup scope",
                 "stale_target",
             )
-        context = ui._anchor or (lookup_context.window.window if lookup_context.window is not None else None)
         menu_only = lookup_context.menu_only if lookup_context is not None else False
-        owners = list(lookup_context.menus) if lookup_context is not None else []
-
         def observed_query(item):
             owner = instance.owners.get(item["window"])
             query = self.controller.state(owner).query_target if owner is not None else None
@@ -411,65 +408,106 @@ class AgentInterfacePipeline:
                 query.session, query.instance, query.root_window, query.surface
             ) == (instance.session, item["instance"], item["window"], item["surface"])
 
-        if ui._anchor is None and not menu_only and lookup_context.window is not None:
-            reselected = False
-            old = instance.members.get(context)
-            if old is None or WindowIdentity.of(old) != lookup_context.window or not observed_query(old):
-                # A delivered popup image/old child is not the App's lifetime.
-                # Use a current display root only if its semantic query scope
-                # was actually delivered, never an unseen pending observation.
-                current = display_selection(self.controller, instance, instance.directory)
-                replacement = instance.members.get(current.root.root_window) if current is not None else None
-                if (
-                    replacement is not None
-                    and WindowIdentity.of(replacement) in instance.delivered_lookup_windows
-                    and observed_query(replacement)
-                ):
-                    context = replacement["window"]
-                    owners = []
-                    reselected = True
-            if not reselected:
-                from computer_use.interaction.query.instances.scope import require_identity
+        def lookup_sources():
+            context = ui._anchor or (lookup_context.window.window if lookup_context.window is not None else None)
+            owners = list(lookup_context.menus) if lookup_context is not None else []
 
-                require_identity(ui, lookup_context.window)
-        choices = {} if menu_only else allowed(ui)
-        choices = {
-            key: item
-            for key, item in choices.items()
-            if context is not None and ancestor(instance.directory, key, context)
-        }
-        matched, incomplete = {}, []
-        if not menu_only and context is not None and context not in choices:
-            incomplete.append(context)
-        for key, item in choices.items():
-            owner = instance.owners.get(key)
-            # A visual catalogue reports window geometry and identity without
-            # asking AX for a node. Its node=None does not revoke the observed
-            # query root held by this exact window lifetime. Native lookup
-            # revalidates that root and still searches every relevant scope.
-            query_available = observed_query(item)
-            if query_available:
-                owners.append(owner)
-            elif key == context:
-                incomplete.append(key)
-            # Ancillary name scopes come from owned AX query evidence. A new
-            # child seen only as pixels is not a new required AX search scope;
-            # every previously AX-observed descendant still participates.
+            if ui._anchor is None and not menu_only and lookup_context.window is not None:
+                reselected = False
+                old = instance.members.get(context)
+                if old is None or WindowIdentity.of(old) != lookup_context.window or not observed_query(old):
+                    # A delivered popup image/old child is not the App's lifetime.
+                    # Use a current display root only if its semantic query scope
+                    # was actually delivered, never an unseen pending observation.
+                    current = display_selection(self.controller, instance, instance.directory)
+                    replacement = instance.members.get(current.root.root_window) if current is not None else None
+                    if (
+                        replacement is not None
+                        and WindowIdentity.of(replacement) in instance.delivered_lookup_windows
+                        and observed_query(replacement)
+                    ):
+                        context = replacement["window"]
+                        owners = []
+                        reselected = True
+                if not reselected:
+                    from computer_use.interaction.query.instances.scope import require_identity
+
+                    require_identity(ui, lookup_context.window)
+            choices = {} if menu_only else allowed(ui)
+            choices = {
+                key: item
+                for key, item in choices.items()
+                if context is not None and ancestor(instance.directory, key, context)
+            }
+            incomplete = []
+            if not menu_only and context is not None and context not in choices:
+                incomplete.append(context)
+            for key, item in choices.items():
+                owner = instance.owners.get(key)
+                # A visual catalogue reports window geometry and identity without
+                # asking AX for a node. Its node=None does not revoke the observed
+                # query root held by this exact window lifetime. Native lookup
+                # revalidates that root and still searches every relevant scope.
+                query_available = observed_query(item)
+                if query_available:
+                    owners.append(owner)
+                elif key == context:
+                    incomplete.append(key)
+                # Ancillary name scopes come from owned AX query evidence. A new
+                # child seen only as pixels is not a new required AX search scope;
+                # every previously AX-observed descendant still participates.
+            return owners, incomplete
+
+        owners, incomplete = lookup_sources()
+        matched = {}
         end = monotonic() + timeout_ms / 1000
         # Waiting belongs to the complete lookup, not its first member. A
         # toolbar with no match must not consume the deadline before the
         # already-observed document has even been searched.
+        reconciled = False
         while True:
             matched.clear()
+            recovery = None
             for owner in dict.fromkeys(owners):
                 try:
                     snapshot = await self.lookup.arun(FindElement(owner, path, 0, False), control)
+                except QueryRootUnavailable as error:
+                    failed = self.controller.state(owner).query_target
+                    if (
+                        reconciled or ui._anchor is not None or menu_only or failed != error.binding
+                        or instance.owners.get(error.binding.root_window) is not owner
+                        or error.binding.session != instance.session
+                    ):
+                        raise
+                    recovery = owner, error
+                    break
                 except ComputerUseError as error:
                     if error.code == "element_not_found":
                         continue
                     raise
                 binding = snapshot["binding"]
                 matched[(binding.session, binding.surface, binding.node)] = snapshot
+            if recovery is not None:
+                reconciled = True
+                owner, error = recovery
+                # Disprove only this AX proxy, not its physical Window. The
+                # pure lookup has dispatched no input; reuse the original
+                # budget for one current App catalogue and exact-root retry.
+                self.controller.state(owner).query_target = None
+                await refresh(self.controller, ui, accessibility=True)
+                current = instance.members.get(error.binding.root_window)
+                if (
+                    current is not None and current.get("node") is not None
+                    and current["node"] != error.binding.node
+                    and (current["instance"], current["surface"])
+                    == (error.binding.instance, error.binding.surface)
+                    and WindowIdentity.of(current) in instance.delivered_lookup_windows
+                ):
+                    self.controller.state(owner).query_target = member_target(instance, current)
+                owners, incomplete = lookup_sources()
+                if not owners or incomplete:
+                    raise error
+                continue
             if matched or incomplete or monotonic() >= end:
                 break
             await asyncio.sleep(min(0.025, max(0, end - monotonic())))

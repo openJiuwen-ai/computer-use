@@ -110,5 +110,8 @@ def image_delivered(png, coordinates: ImageCoordinates | None = None):
                 delivered()
             else:
                 delivered(coordinates)
+    # Display accounting is independent of current input authority: an exact
+    # historical image can be shown without renewing its native coordinate map.
+    if known is not None:
         for callback in known.pop("delivery_callbacks", ()):
             callback()

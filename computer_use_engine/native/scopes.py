@@ -47,6 +47,18 @@ class FixedWindowUnconfirmed(ComputerUseError):
         )
 
 
+class QueryRootUnavailable(ComputerUseError):
+    """The exact AX query proxy failed; this has no Window lifetime authority."""
+
+    def __init__(self, binding: Binding, *, native_domain: str, native_code: int):
+        self.binding = binding
+        self.native_domain, self.native_code = native_domain, native_code
+        super().__init__({
+            "code": "observation_incomplete", "effect": "none", "target": "element path",
+            "detail": "The retained native query root is unavailable.",
+        })
+
+
 def window_binding(binding):
     return replace(binding, node=None, capture=None)
 

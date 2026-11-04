@@ -1028,52 +1028,62 @@ def render_projection_lines(
                     lines_value.append(heading)
             visit(child, depth + 1, node.get("blockedBy"), child_help, in_menu, node["ref"], child_layout)
 
-    if "app" in context:
-        windows = [node for node in roots if is_window(node)]
-        header_value, title_omission = f"App: {field(context['app'])}.", None
-        if len(windows) == 1 and windows[0].get("name"):
-            part = shortened(windows[0]["name"], 500)
-            header_value = f"Window: {quoted(part['head'] + part['tail'])}, {header_value}"
-            if part["omitted"]:
-                title_omission = f"Window title omitted: {part['omitted']} characters"
-        lines_value.extend(
-            [
-                header_value,
-                (f"Tree: full (subtree {context['subtreeRef']} only; ancestors and other window contents not expanded)")
-                if context.get("subtreeRef")
-                else "Tree: full (native menu query)"
-                if context.get("menuQuery")
-                else "Tree: full (current UI only)",
-            ]
-        )
-        interactions = []
+    try:
+        if "app" in context:
+            windows = [node for node in roots if is_window(node)]
+            header_value, title_omission = f"App: {field(context['app'])}.", None
+            if len(windows) == 1 and windows[0].get("name"):
+                part = shortened(windows[0]["name"], 500)
+                header_value = f"Window: {quoted(part['head'] + part['tail'])}, {header_value}"
+                if part["omitted"]:
+                    title_omission = f"Window title omitted: {part['omitted']} characters"
+            lines_value.extend(
+                [
+                    header_value,
+                    (
+                        f"Tree: full (subtree {context['subtreeRef']} only; "
+                        "ancestors and other window contents not expanded)"
+                    )
+                    if context.get("subtreeRef")
+                    else "Tree: full (native menu query)"
+                    if context.get("menuQuery")
+                    else "Tree: full (current UI only)",
+                ]
+            )
+            interactions = []
 
-        def contexts(node: NodeView, window: NodeView | None = None) -> None:
-            """Contexts.
+            def contexts(node: NodeView, window: NodeView | None = None) -> None:
+                """Contexts.
 
-            Args:
-                node: Source/projected node in this exact view; its native identity is
-                    unchanged.
-            """
-            owner = node["ref"] if is_window(node) else window
-            if is_active_modal(node):
-                interactions.append(
-                    node["ref"] + " modal" + (f" in window {window}" if window else " (owner in window relations)")
-                )
-            for child in node["children"]:
-                contexts(child, owner)
+                Args:
+                    node: Source/projected node in this exact view; its native identity is
+                        unchanged.
+                """
+                owner = node["ref"] if is_window(node) else window
+                if is_active_modal(node):
+                    interactions.append(
+                        node["ref"] + " modal" + (f" in window {window}" if window else " (owner in window relations)")
+                    )
+                for child in node["children"]:
+                    contexts(child, owner)
 
+            try:
+                for node in roots:
+                    contexts(node)
+            finally:
+                contexts = None
+            if interactions:
+                lines_value.append("Interaction: " + "; ".join(interactions))
+            if title_omission:
+                lines_value.append(title_omission)
+        if share_index_basis:
+            lines_value.append(index_basis)
+        tree_start = len(lines_value)
         for node in roots:
-            contexts(node)
-        if interactions:
-            lines_value.append("Interaction: " + "; ".join(interactions))
-        if title_omission:
-            lines_value.append(title_omission)
-    if share_index_basis:
-        lines_value.append(index_basis)
-    tree_start = len(lines_value)
-    for node in roots:
-        visit(node, 0)
+            visit(node, 0)
+    finally:
+        # Release the recursive visitor and its captured render/source graph.
+        visit = None
     url_plan = (
         select_deferred_native_urls(
             native_url_sources,

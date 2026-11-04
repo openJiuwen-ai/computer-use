@@ -97,6 +97,9 @@ class ObservationReuseTests(TestCase):
         snapshot = normalize_facts(observation(), DisplayReferences("session"))
         shared = {"items": ["original"]}
         snapshot.roots[0]["fixture"] = shared
+        # This fixture adds its own mutable source graph. Replacing the sealed
+        # source index must restore full detachment rather than inherit trust.
+        snapshot.fields = dict(snapshot.fields)
         snapshot.fields[("0", "fixture")] = {"normalized": shared}
         captured = CapturedSnapshot.capture(snapshot)
         first, second = captured.materialize(read_only_sources=True), captured.materialize(read_only_sources=True)

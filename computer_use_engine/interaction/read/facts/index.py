@@ -14,6 +14,7 @@ from functools import cache
 from types import MappingProxyType
 from typing import Any
 
+from computer_use.interaction.read.facts.snapshot import _FactIndex
 from computer_use.protocol.observation import ElementValue, NativeNode, NativeObservation, ReadIssue
 
 _DATA_ATOMS = frozenset((str, bool, int, bytes, type(None)))
@@ -32,15 +33,15 @@ def data(value: Any) -> Any:
     if kind is float:
         if math.isfinite(value):
             return value
-        return {"number": "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"}
+        return MappingProxyType({"number": "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"})
     if kind is dict or kind is MappingProxyType:
-        return {str(key): data(item) for key, item in value.items()}
+        return MappingProxyType({str(key): data(item) for key, item in value.items()})
     if kind is tuple or kind is list:
-        return [data(item) for item in value]
+        return tuple(data(item) for item in value)
     if isinstance(value, ElementValue):
-        return {"element": str(value.node)}
+        return MappingProxyType({"element": str(value.node)})
     if isinstance(value, datetime):
-        return {"datetime": value.isoformat()}
+        return MappingProxyType({"datetime": value.isoformat()})
     if isinstance(value, Enum):
         return value.value
     if is_dataclass(value):
@@ -49,12 +50,51 @@ def data(value: Any) -> Any:
             content = getattr(value, name)
             if content is not None:
                 result[name] = data(content)
-        return result
+        return MappingProxyType(result)
     if isinstance(value, Mapping):
-        return {str(key): data(item) for key, item in value.items()}
+        return MappingProxyType({str(key): data(item) for key, item in value.items()})
     if isinstance(value, (tuple, list)):
-        return [data(item) for item in value]
+        return tuple(data(item) for item in value)
     return value
+
+
+class _ReadIssueValue(Mapping):
+    """Complete immutable JSON-semantic view over one captured native issue.
+
+    Body consumers usually need only path/state. Explicit details still read
+    every original field using the same semantic encoder as other source data.
+    """
+
+    __slots__ = ("_issue",)
+
+    def __init__(self, issue):
+        object.__setattr__(self, "_issue", issue)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("captured issue values are immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError("captured issue values are immutable")
+
+    def __iter__(self):
+        yield "path"
+        yield "state"
+        if self._issue.detail is not None:
+            yield "detail"
+        if self._issue.continuation is not None:
+            yield "continuation"
+        yield "alternatives"
+
+    def __len__(self):
+        return 3 + (self._issue.detail is not None) + (self._issue.continuation is not None)
+
+    def __getitem__(self, key):
+        if key not in ("path", "state", "detail", "continuation", "alternatives"):
+            raise KeyError(key)
+        value = getattr(self._issue, key)
+        if value is None and key in ("detail", "continuation"):
+            raise KeyError(key)
+        return value if key in ("path", "state", "detail") else data(value)
 
 
 def field_name(path: tuple[str | int, ...]) -> str:
@@ -104,7 +144,7 @@ def node_values(node: NativeNode) -> dict[str, Any]:
     return {name: value for name, (_, value) in node_fields(node).items()}
 
 
-def status_record(issues: list[ReadIssue], encoded_issues: Mapping[int, dict[str, Any]]) -> dict[str, Any] | None:
+def status_record(issues: list[ReadIssue], encoded_issues: Mapping[int, Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """Retain every applicable restriction, with a compact state for view consumers."""
     if not issues:
         return None
@@ -121,7 +161,7 @@ def status_record(issues: list[ReadIssue], encoded_issues: Mapping[int, dict[str
         "absent": 0,
     }
     primary = max(issues, key=lambda issue: priority.get(issue.state, 0))
-    result = {"state": primary.state, "issues": [encoded_issues[id(issue)] for issue in issues]}
+    result = {"state": primary.state, "issues": tuple(encoded_issues[id(issue)] for issue in issues)}
     if primary.detail:
         result["detail"] = primary.detail
 
@@ -142,10 +182,10 @@ def status_record(issues: list[ReadIssue], encoded_issues: Mapping[int, dict[str
         result.update(
             textRef=captured.token, unit=captured.unit, totalUnits=captured.total, delivered=data(captured.delivered)
         )
-    return result
+    return MappingProxyType(result)
 
 
-def observation_index(observation: NativeObservation) -> dict[str, Any]:
+def observation_index(observation: NativeObservation) -> _FactIndex:
     """Build derived indexes using only public paths and relationship meanings.
 
     The immutable observation stays authoritative. These indexes serve existing
@@ -156,7 +196,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
     # A source restriction can apply to several fields and also appears in the
     # complete issue list. Preserve that shared source identity when deriving
     # facts, instead of copying its nested metadata at every occurrence.
-    encoded_issues = {id(issue): data(issue) for issue in observation.issues}
+    encoded_issues = {id(issue): _ReadIssueValue(issue) for issue in observation.issues}
     for token, node in observation.nodes.items():
         indexed = node_fields(node)
         values = {name: value for name, (_, value) in indexed.items()}
@@ -179,29 +219,31 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
         action_issues = issue_index.applicable((*base, "actions"))
         if node.actions is None:
             actions = dict(
-                state=status_record(action_issues, encoded_issues)["state"] if action_issues else "not_read", items=[]
+                state=status_record(action_issues, encoded_issues)["state"] if action_issues else "not_read", items=()
             )
             if action_issues:
-                actions["issues"] = [encoded_issues[id(issue)] for issue in action_issues]
+                actions["issues"] = tuple(encoded_issues[id(issue)] for issue in action_issues)
         else:
             actions = dict(
                 state="complete" if not action_issues else status_record(action_issues, encoded_issues)["state"],
-                items=[data(action) for action in node.actions],
+                items=tuple(data(action) for action in node.actions),
             )
             if action_issues:
-                actions["issues"] = [encoded_issues[id(issue)] for issue in action_issues]
+                actions["issues"] = tuple(encoded_issues[id(issue)] for issue in action_issues)
         observed = bool(values or node.actions is not None or node.relations)
         if not observed:
             unread.append(token)
         rows.append(
-            dict(
-                node=token,
-                values=values,
-                fieldPaths=paths,
-                fieldStatus=statuses,
-                requestedFields=list(dict.fromkeys((*values, *statuses))),
-                actions=actions,
-                observed=observed,
+            MappingProxyType(
+                dict(
+                    node=token,
+                    values=MappingProxyType(values),
+                    fieldPaths=MappingProxyType(paths),
+                    fieldStatus=MappingProxyType(statuses),
+                    requestedFields=tuple(dict.fromkeys((*values, *statuses))),
+                    actions=MappingProxyType(actions),
+                    observed=observed,
+                )
             )
         )
         for key, relation in node.relations.items():
@@ -212,7 +254,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
                 property=key,
                 recordKey=key,
                 kind=relation.kind,
-                targets=list(relation.targets),
+                targets=tuple(relation.targets),
                 state=state["state"] if state else "complete",
                 certainty="unknown" if relation.evidence == "candidate" else "confirmed",
             )
@@ -221,7 +263,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
             if relation.view is not None:
                 edge["view"] = relation.view
             if relation.positions is not None:
-                edge["positions"] = list(relation.positions)
+                edge["positions"] = tuple(relation.positions)
                 if relation.positions and relation.positions == tuple(
                     range(relation.positions[0], relation.positions[0] + len(relation.positions))
                 ):
@@ -231,7 +273,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
             if relation.total is not None:
                 edge["total"] = relation.total
             if issues:
-                edge["issues"] = [encoded_issues[id(issue)] for issue in issues]
+                edge["issues"] = tuple(encoded_issues[id(issue)] for issue in issues)
                 if state.get("detail"):
                     edge["detail"] = state["detail"]
                 continuation = next(
@@ -239,25 +281,30 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
                 )
                 if continuation is not None:
                     edge.update(cursor=continuation.token, consistency=continuation.consistency)
-            edges.append(edge)
-    return dict(
-        kind="nodes",
-        session=observation.session,
-        platform=observation.backend,
-        observed=dict(
-            id=observation.id,
-            startedAt=observation.interval_ns[0] // 1_000_000,
-            completedAt=observation.interval_ns[1] // 1_000_000,
+            edges.append(MappingProxyType(edge))
+    return _FactIndex(
+        observation,
+        dict(
+            kind="nodes",
+            session=observation.session,
+            platform=observation.backend,
+            observed=MappingProxyType(
+                dict(
+                    id=observation.id,
+                    startedAt=observation.interval_ns[0] // 1_000_000,
+                    completedAt=observation.interval_ns[1] // 1_000_000,
+                )
+            ),
+            roots=tuple(observation.roots),
+            nodes=tuple(rows),
+            relations=tuple(edges),
+            unread=tuple(unread),
+            stopReasons=tuple(
+                (field_name(issue.path) + ": " if issue.path else "") + (issue.detail or issue.state)
+                for issue in observation.issues
+                if len(issue.path) < 2 or issue.path[0] != "nodes"
+            ),
+            coordinateSpaces=data(observation.coordinate_spaces),
+            issues=tuple(encoded_issues[id(issue)] for issue in observation.issues),
         ),
-        roots=list(observation.roots),
-        nodes=rows,
-        relations=edges,
-        unread=unread,
-        stopReasons=[
-            (field_name(issue.path) + ": " if issue.path else "") + (issue.detail or issue.state)
-            for issue in observation.issues
-            if len(issue.path) < 2 or issue.path[0] != "nodes"
-        ],
-        coordinateSpaces=data(observation.coordinate_spaces),
-        issues=[encoded_issues[id(issue)] for issue in observation.issues],
     )

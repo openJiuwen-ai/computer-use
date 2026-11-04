@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+from computer_use.native import driver_exec
 from computer_use.native.connection import Connection
 from computer_use.runtime_provenance import startup_provenance
 
@@ -92,13 +94,20 @@ def test_connection_collects_startup_evidence_once_per_spawn_not_per_request(tmp
             lambda: None, driver={"command": sys.executable, "args": [str(driver), str(tmp_path / "spawns")]}
         )
         events = []
+        original_spawn = asyncio.create_subprocess_exec
         with (
             patch("computer_use.native.connection.startup_provenance", return_value={"startup": "frozen"}) as collect,
             patch("computer_use.native.connection.diagnostic", events.append),
+            patch("computer_use.native.connection.asyncio.create_subprocess_exec", wraps=original_spawn) as spawn,
         ):
             try:
                 await connection.connect(3000)
                 await connection.connect(3000)
+                arguments = spawn.await_args.args
+                assert arguments[0] == sys.executable
+                assert Path(arguments[1]).resolve() == (
+                    driver if os.name == "nt" else Path(driver_exec.__file__).resolve()
+                )
                 collect.assert_called_once_with(sys.executable)
                 assert next(event for event in events if event["kind"] == "connection")["runtime"] == {
                     "startup": "frozen"
@@ -114,3 +123,27 @@ def test_connection_collects_startup_evidence_once_per_spawn_not_per_request(tmp
                 await asyncio.gather(*tuple(connection._readers), return_exceptions=True)
 
     asyncio.run(run())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows launches directly without inherited POSIX FDs")
+def test_packaged_file_shim_keeps_fd_contract_without_importing_sdk_package(tmp_path):
+    package = tmp_path / "installed package" / "computer_use"
+    native = package / "native"
+    native.mkdir(parents=True)
+    for initializer in (package / "__init__.py", native / "__init__.py"):
+        initializer.write_text("raise AssertionError('The FD shim must not initialize the SDK package')\n")
+    shim = native / "driver_exec.py"
+    shim.write_bytes(Path(driver_exec.__file__).read_bytes())
+    preview_read, preview_write = os.pipe()
+    lifetime_read, lifetime_write = os.pipe()
+    try:
+        subprocess.run(
+            [sys.executable, "-I", str(shim), str(preview_write), str(lifetime_write), sys.executable, "-I", "-c",
+             "import os; os.write(3, b'preview'); os.write(4, b'lifetime')"],
+            check=True, capture_output=True, pass_fds=(preview_write, lifetime_write),
+        )
+        assert os.read(preview_read, 7) == b"preview"
+        assert os.read(lifetime_read, 8) == b"lifetime"
+    finally:
+        for descriptor in (preview_read, preview_write, lifetime_read, lifetime_write):
+            os.close(descriptor)

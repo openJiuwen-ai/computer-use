@@ -36,8 +36,11 @@ def finalize_sources(view: ProjectionView, edit: ProjectionEditor) -> None:
         for child in node["children"]:
             actions(child)
 
-    for root in view.roots:
-        actions(root)
+    try:
+        for root in view.roots:
+            actions(root)
+    finally:
+        actions = None
     edit.finalize_folds()
     for group in folded_source_roles(view):
         edit.declare_source_roles(group)

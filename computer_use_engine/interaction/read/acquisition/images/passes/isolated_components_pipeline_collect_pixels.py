@@ -20,10 +20,10 @@ if TYPE_CHECKING:
 
 def create(*, services: NativeAppReader) -> Callable[[ComponentLease, Control], Awaitable[WindowImage]]:
     async def image_read(value: ComponentLease, control: Control) -> WindowImage:
-        """Capture window pixels using half the remaining budget in the isolated image lease."""
+        """Capture window pixels within the existing isolated image lease and call deadline."""
         return await services.images.collect(
             cast("OperationLease[Binding]", value.read).bounded(
-                max(1, cast("Callable[[], int]", control.remaining)() // 2)
+                cast("Callable[[], int]", control.remaining)()
             ),
             max_dimension=value.request.limits["max_dimension"],
         )

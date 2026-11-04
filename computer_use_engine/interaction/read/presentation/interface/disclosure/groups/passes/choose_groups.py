@@ -49,15 +49,18 @@ def execute(classified: ClassifiedGroups, control: Control) -> SelectedGroups:
                 visit(children[offset])
                 offset += 1
 
-    for root in request.interface.roots:
-        background, reason = background_candidate(classified, root, recovery_prefix)
-        if background is not None:
-            groups.append(background)
-            recovery_prefix = background.recovery_units
-            assessments.append(GroupAssessment(root, background.child_keys, reason, True))
-        else:
-            visit(root)
-    return SelectedGroups(classified, tuple(groups), tuple(assessments))
+    try:
+        for root in request.interface.roots:
+            background, reason = background_candidate(classified, root, recovery_prefix)
+            if background is not None:
+                groups.append(background)
+                recovery_prefix = background.recovery_units
+                assessments.append(GroupAssessment(root, background.child_keys, reason, True))
+            else:
+                visit(root)
+        return SelectedGroups(classified, tuple(groups), tuple(assessments))
+    finally:
+        visit = None
 
 
 stage = Pass.define(

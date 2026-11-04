@@ -173,9 +173,9 @@ def _copy_collections(value: Any, *, immutable: bool, checkpoint: Callable[[], o
 class CapturedSnapshot:
     """Freeze the captured facts and aliases used to prepare one display.
 
-    Every collection is detached from its originating snapshot. Rendering creates
-    local display copies over the captured immutable facts, retaining this view
-    independently of later observations and caller edits.
+    Immutable source graphs closed by their producer are shared, and unproven
+    collections are detached. Rendering creates local display copies, retaining
+    this capture independently of later observations and caller edits.
     """
 
     native: NativeObservation
@@ -200,7 +200,17 @@ class CapturedSnapshot:
 
     @classmethod
     def capture(cls, snapshot: SnapshotFacts, *, checkpoint: Callable[[], object] | None = None) -> CapturedSnapshot:
-        """Copy and freeze the facts needed by compression and source accounting."""
+        """Retain proven immutable sources and detach the editable display forest."""
+        from computer_use.interaction.read.facts.snapshot import _captured_sources
+
+        sources = _captured_sources(snapshot)
+        if sources is not None:
+            if checkpoint is not None:
+                checkpoint()
+            values = {item.name: getattr(sources, item.name) for item in fields(sources)}
+            values["roots"] = _copy_collections(snapshot.roots, immutable=True, checkpoint=checkpoint)
+            values["collection"] = getattr(snapshot, "collection", None)
+            return cls(**values)
         values = {
             item.name: getattr(snapshot, item.name, None) if item.name == "collection" else getattr(snapshot, item.name)
             for item in fields(cls)
@@ -564,28 +574,40 @@ def prepared_nodes(
             fields["_interfaceDisclosure"] = group_layouts[node["ref"]]
         if node["ref"] in readable_layouts:
             fields["_interfaceReadable"] = readable_layouts[node["ref"]]
-        result.append(
-            PreparedNode(node["ref"], parent, depth, _copy_collections(fields, immutable=True, checkpoint=checkpoint))
-        )
+        # _interfaceLayout is produced as a recursively immutable tuple of
+        # layout scalars/tuples. Recopying its shared ancestor path for every
+        # descendant adds no isolation. Other fields retain normal detachment.
+        layout = fields.pop("_interfaceLayout") if node["ref"] in layouts else None
+        captured_fields = _copy_collections(fields, immutable=True, checkpoint=checkpoint)
+        if layout is not None:
+            captured_fields = MappingProxyType({**captured_fields, "_interfaceLayout": layout})
+        result.append(PreparedNode(node["ref"], parent, depth, captured_fields))
         for child in checked(node["children"]):
             visit(child, node["ref"], depth + 1)
 
-    for root in checked(roots):
-        if root.projection is None:
-            for ref in checked(root.members):
-                facts = {key: value for key, value in checked(display_node_facts(native[snapshot.refs[ref]]).items())}
-                facts["_relations"] = tuple(
-                    relation
-                    for relation in checked(snapshot.facts["relations"])
-                    if relation["source"] == snapshot.refs[ref]
-                )
-                result.append(
-                    PreparedNode(ref, None, 0, _copy_collections(facts, immutable=True, checkpoint=checkpoint))
-                )
-        else:
-            for node in checked(root.projection["roots"]):
-                visit(node, None, 0)
-    return tuple(result)
+    try:
+        for root in checked(roots):
+            if root.projection is None:
+                for ref in checked(root.members):
+                    facts = {
+                        key: value for key, value in checked(display_node_facts(native[snapshot.refs[ref]]).items())
+                    }
+                    facts["_relations"] = tuple(
+                        relation
+                        for relation in checked(snapshot.facts["relations"])
+                        if relation["source"] == snapshot.refs[ref]
+                    )
+                    result.append(
+                        PreparedNode(ref, None, 0, _copy_collections(facts, immutable=True, checkpoint=checkpoint))
+                    )
+            else:
+                for node in checked(root.projection["roots"]):
+                    visit(node, None, 0)
+        return tuple(result)
+    finally:
+        # The self-referential closure also owns the full captured snapshot;
+        # stop retaining it as soon as this comparison traversal is complete.
+        visit = None
 
 
 def prepare_snapshot(

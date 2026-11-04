@@ -12,11 +12,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
+from computer_use.native import driver_exec
 from computer_use_mcp.session import ExecutionSession
 from computer_use_mcp.worker_lifecycle import STDERR_BYTES
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / "tests/fixtures/mcp_worker_errors.py"
@@ -70,6 +70,17 @@ class WorkerFailureTests(unittest.IsolatedAsyncioTestCase):
 
     def events(self):
         return [json.loads(line) for line in self.session._journal.path.read_text().splitlines()]
+
+    async def test_file_shim_preserves_worker_ipc_and_inheritable_native_lifetime(self):
+        with patch("computer_use_mcp.session.asyncio.create_subprocess_exec", wraps=asyncio.create_subprocess_exec) as spawn:
+            result = await self.session.execute(
+                "import os, stat\n"
+                "print('fds', stat.S_ISSOCK(os.fstat(3).st_mode), "
+                "stat.S_ISFIFO(os.fstat(4).st_mode), os.get_inheritable(4))"
+            )
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(text(result), "fds True True True")
+        self.assertEqual(Path(spawn.await_args.args[1]).resolve(), Path(driver_exec.__file__).resolve())
 
     async def test_public_stdio_tool_reports_deep_import_failure_without_executing_code(self):
         params = StdioServerParameters(

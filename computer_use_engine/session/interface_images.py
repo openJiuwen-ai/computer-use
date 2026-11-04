@@ -51,11 +51,13 @@ class ImagePiece:
         window: Exact member-window identity.
         image: Original capture and its retained native coordinate map.
         box: Placement rectangle in composed-image pixels.
+        scope_confirmed: Whether this capture can contribute current coordinate authority.
     """
 
     window: str
     image: CapturedWindow
     box: ImageBox
+    scope_confirmed: bool = True
 
 
 @dataclass
@@ -112,7 +114,7 @@ class InterfaceImage:
             return False
 
         pieces = tuple(piece for piece in self.pieces if within(piece.window))
-        if not pieces or not any(piece.window == window for piece in pieces):
+        if not pieces or not any(piece.window == window and piece.scope_confirmed for piece in pieces):
             return None
         membership = tuple(item for item in self.membership if within(item[0]))
         if pieces == self.pieces and membership == self.membership:
@@ -130,6 +132,8 @@ class InterfaceImage:
         for piece in reversed(self.pieces):
             x, y, width, height = piece.box
             if x <= point[0] < x + width and y <= point[1] < y + height:
+                if not piece.scope_confirmed:
+                    raise local_failure("the captured window's current scope is unconfirmed", "observation_incomplete")
                 metadata = capture_metadata(piece.image.image)
                 mapped = ((point[0] - x) * metadata["width"] / width, (point[1] - y) * metadata["height"] / height)
                 with Image.open(BytesIO(piece.image.image)) as pixels:

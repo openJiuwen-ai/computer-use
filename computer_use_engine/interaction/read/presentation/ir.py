@@ -213,7 +213,10 @@ class ProjectionInput:
             for child in node["children"]:
                 source(child)
 
-        source(freeze(root))
+        try:
+            source(freeze(root))
+        finally:
+            source = None
 
         def display(node: NodeView, scope: str) -> None:
             """Index display fields, source parents, and the nearest window or menu scope.
@@ -235,12 +238,15 @@ class ProjectionInput:
                 parents[child["ref"]] = ref
                 display(child, scope)
 
-        display(
-            interaction_view(
-                with_interactions(root, context.get("inheritedBlocks")), bool(context.get("includeBackground"))
-            ),
-            root["ref"],
-        )
+        try:
+            display(
+                interaction_view(
+                    with_interactions(root, context.get("inheritedBlocks")), bool(context.get("includeBackground"))
+                ),
+                root["ref"],
+            )
+        finally:
+            display = None
         return cls(
             MappingProxyType(native),
             MappingProxyType(nodes),
@@ -837,9 +843,12 @@ class ProjectionEditor:
             resolved[ref] = result
             return result
 
-        for ref in self._ir.elisions:
-            destinations(ref)
-        self._ir.resolved_elisions = resolved
+        try:
+            for ref in self._ir.elisions:
+                destinations(ref)
+            self._ir.resolved_elisions = resolved
+        finally:
+            destinations = None
 
     def run(self, step: Callable[..., T], view: ProjectionView, *args: object) -> T:
         """Apply one compression rule within its provenance and diagnostic scope.
@@ -1038,19 +1047,25 @@ def export_projection(ir: PresentationIR) -> ProjectionResult:
         for child in node["children"]:
             index_native(child)
 
-    index_native(thaw(view.native_nodes[ir.source.root]))
+    try:
+        index_native(thaw(view.native_nodes[ir.source.root]))
+    finally:
+        index_native = None
 
     def materialize(node: ViewNode) -> SemanticNode:
         result = {key: thaw(value) for key, value in node.items() if key not in ("children", "native")}
         result.update(native=native_nodes[node["ref"]], children=[materialize(child) for child in node["children"]])
         return result
 
-    result = dict(
-        roots=[materialize(node) for node in view.roots],
-        foldedInto=dict(ir.folded_into),
-        nativeNodes=native_nodes,
-        changes=thaw(ir.changes),
-    )
+    try:
+        result = dict(
+            roots=[materialize(node) for node in view.roots],
+            foldedInto=dict(ir.folded_into),
+            nativeNodes=native_nodes,
+            changes=thaw(ir.changes),
+        )
+    finally:
+        materialize = None
     if view.context.get("recordStages"):
         result["stages"] = [
             dict(name=name, **{**record, "affectedRefs": sorted(record["affectedRefs"])})

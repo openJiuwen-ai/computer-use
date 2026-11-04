@@ -167,9 +167,12 @@ def block_members(request: GroupDisclosureRequest) -> Mapping[str, tuple[str, ..
         result[key] = tuple(dict.fromkeys(refs))
         return result[key]
 
-    for root in request.interface.roots:
-        visit(root)
-    return result
+    try:
+        for root in request.interface.roots:
+            visit(root)
+        return result
+    finally:
+        visit = None
 
 
 def permits_descendants(request: GroupDisclosureRequest, key: str, protections: Mapping[str, tuple[str, ...]]) -> bool:

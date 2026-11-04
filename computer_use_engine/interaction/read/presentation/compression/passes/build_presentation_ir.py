@@ -25,13 +25,18 @@ def build_presentation_ir(source: ProjectionInput, control: Control) -> Compress
     reference.
     """
     ir = PresentationIR.build(source)
-    view, edit = ProjectionView(ir), ProjectionEditor(ir)
-    for node in view.nodes.values():
-        if node.get("control", {}).get("kind") == "textInput":
-            for member in node["control"]["members"]:
-                if member["part"] == "editor" and member["ref"] in view.nodes:
-                    edit.annotate(view.nodes[member["ref"]], "editorOwnerRef", node["ref"])
-    return CompressionRun(ir, view, edit)
+    try:
+        view, edit = ProjectionView(ir), ProjectionEditor(ir)
+        for node in view.nodes.values():
+            if node.get("control", {}).get("kind") == "textInput":
+                for member in node["control"]["members"]:
+                    if member["part"] == "editor" and member["ref"] in view.nodes:
+                        edit.annotate(view.nodes[member["ref"]], "editorOwnerRef", node["ref"])
+        return CompressionRun(ir, view, edit)
+    except BaseException:
+        # Admission failed before the enclosing IR lifetime could take over.
+        ir.views.clear()
+        raise
 
 
 stage = Pass.define(

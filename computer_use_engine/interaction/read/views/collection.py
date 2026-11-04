@@ -49,9 +49,15 @@ class CollectionPlan:
     order: tuple[WindowIdentity, ...] = ()
     principal: str | None = None
     selection_error: ComputerUseError | None = None
+    captured_principal: WindowIdentity | None = None
+    capture_status: set[WindowIdentity] = field(default_factory=set)
 
     def update(self, directory: NativeDirectory, permitted: dict[str, SurfaceInfo]) -> None:
         anchor = self.related.preferred(directory, self.anchor) if self.related is not None else self.anchor
+        if self.captured_principal is not None and window_lifecycle(self.captured_principal, directory) == "unknown":
+            # Keep the fixed scope already captured in this call. A later
+            # omission cannot turn its acquisition into a fresh parent read.
+            anchor = self.captured_principal.window
         self.selection_error = None
         try:
             selected = select_surface(directory, anchor)
@@ -91,6 +97,8 @@ class CollectionPlan:
                 and identity != self.related.original_window
             ):
                 requested = components("both")
+            if identity in self.capture_status:
+                requested = components("tree")
             self.requested[identity] = self.requested.get(identity, frozenset()) | requested
 
     def next(self) -> tuple[WindowIdentity, str] | None:
@@ -114,6 +122,17 @@ class CollectionPlan:
         """Schedule only event-invalidated components, preserving attempt history."""
         if identity in self.order:
             self.changed_components[identity] = self.requested[identity] & requested
+
+    def fold_capture_status(self, identity: WindowIdentity) -> None:
+        """A positively classified automatic status companion needs its tree summary.
+
+        Its Window entry and explicit read capabilities remain intact. The
+        planner had scheduled both components before the small source probe;
+        no image was attempted, and accounting must not claim otherwise.
+        """
+        self.requested[identity] = frozenset({"tree"})
+        self.capture_status.add(identity)
+        self.attempted[identity] = self.attempted.get(identity, frozenset()) & {"tree"}
 
     def captured(self, item, part) -> None:
         """An inner collector may already have captured the newly selected modal."""
@@ -139,14 +158,13 @@ class CollectionPlan:
                 None,
             )
             captured = tuple(name for name in ("tree", "image") if part is not None and getattr(part, name) is not None)
+            lifecycle = window_lifecycle(identity, directory)
             included = tuple(
                 name
                 for name in captured
-                if identity in current
-                and (name != "image" or identity.window in included_images)
+                if (name != "image" or identity.window in included_images)
                 and (name != "tree" or included_trees is None or identity.surface in included_trees)
             )
-            lifecycle = window_lifecycle(identity, directory)
             records.append(
                 {
                     "window": identity.window,
@@ -162,6 +180,7 @@ class CollectionPlan:
                     if identity in self.order and lifecycle != "closed"
                     else (),
                     "lifecycle": lifecycle,
+                    **({"historical": included} if identity not in current and included else {}),
                 }
             )
         return tuple(records)

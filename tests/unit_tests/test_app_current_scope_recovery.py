@@ -10,17 +10,36 @@ from unittest.mock import AsyncMock
 import pytest
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.scope import adopt, display_selection
+from computer_use.interaction.read.facts.normalize import normalize_facts
+from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.interaction.read.presentation.document import DisplayDocument
+from computer_use.interaction.read.presentation.preparation import prepare_snapshot
 from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, WindowPart, member_target, remember
 from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Knowledge
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
+from computer_use.protocol.observation import NativeNode, NativeObservation
 from computer_use.session.events import observation_delivered, set_observation_handler
 from computer_use.session.interfaces import LookupContext, WindowIdentity, WindowLifetime
 from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
 from unit_tests.test_d34_read_contracts import directory as read_directory
 from unit_tests.test_d34_read_contracts import setup as read_setup
 from unit_tests.test_d34_read_contracts import window
+
+
+def rendered_tree(target):
+    native = NativeObservation(
+        "macos",
+        target.session,
+        "delivered:" + target.node,
+        (1, 2),
+        (target.node,),
+        {target.node: NativeNode(role="window", name="Observed form")},
+    )
+    snapshot = normalize_facts(native, DisplayReferences(target.session))
+    return snapshot, DisplayDocument.tree(prepare_snapshot(snapshot, compact=True, public_api=True)).scoped(
+        (target.session, target.instance, target.root_window, target.surface)
+    )
 
 
 def test_app_display_selects_new_ax_form_over_historical_native_only_launcher():
@@ -87,14 +106,13 @@ def test_app_lookup_after_native_only_popup_uses_only_actually_delivered_current
     app._context = "form"
     set_observation_handler(lambda _event: None)
     try:
+        rendered = tuple((query, *rendered_tree(query)) for query in targets)
         pending = publish(
             controller,
             app,
-            "Form controls",
+            DisplayDocument.join(document for _query, _snapshot, document in rendered),
             directory=current,
-            trees=tuple(
-                (query, SimpleNamespace(roots=(), refs={}, native=SimpleNamespace(issues=()))) for query in targets
-            ),
+            trees=tuple((query, snapshot) for query, snapshot, _document in rendered),
         )
         if delivered:
             observation_delivered(pending)
@@ -144,12 +162,13 @@ def test_app_lookup_reselects_a_delivered_new_lifetime_in_the_same_window_slot_w
     remember(controller, app, WindowPart(target))
     # A retained observation source can name the prior generation while the
     # caller has also received the current generation's semantic query root.
+    snapshot, document = rendered_tree(target)
     publish(
         controller,
         app,
-        "Current slot content",
+        document,
         directory=current,
-        trees=((target, SimpleNamespace(roots=(), refs={}, native=SimpleNamespace(issues=()))),),
+        trees=((target, snapshot),),
         lookup_context=LookupContext(old_identity),
     )
     controller.interfaces.lookup = SimpleNamespace(

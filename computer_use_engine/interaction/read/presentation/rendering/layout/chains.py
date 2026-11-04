@@ -53,8 +53,11 @@ def compact_tree_chains(
         for child in node["children"]:
             collect(child)
 
-    for root in roots:
-        collect(root)
+    try:
+        for root in roots:
+            collect(root)
+    finally:
+        collect = None
 
     def anonymous(node: NodeView) -> bool:
         return node["role"] == "group" and not any(

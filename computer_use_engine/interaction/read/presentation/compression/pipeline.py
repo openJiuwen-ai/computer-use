@@ -9,6 +9,7 @@ editor, never the input graph or execution ports as mutable shared state.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -58,6 +59,7 @@ from computer_use.interaction.read.presentation.spatial.passes.protect_regions i
 from computer_use.interaction.read.presentation.spatial.pipeline import SpatialOrganizationPipeline
 from computer_use.interaction.read.presentation.tree import is_window
 from computer_use.pipeline import Contract, Effect, Pass, Pipeline, Sequence
+from computer_use.pipeline import Scope as PipelineScope
 from computer_use.pipeline.core import Node
 
 if TYPE_CHECKING:
@@ -185,6 +187,17 @@ def _rule_map() -> dict[Callable[..., Any], Rule]:
 RULES = _rule_map()
 
 
+@contextmanager
+def _compression_lifetime(run: CompressionRun, control: Control):
+    """Keep node views cached for this run, then release their reverse IR links."""
+    try:
+        yield run
+    finally:
+        # Exported facts/provenance contain no live ViewNode. The completed
+        # private IR must not await cyclic GC through IR -> views -> IR.
+        run.ir.views.clear()
+
+
 def apply_rule(step: Callable[..., Any], view: ProjectionView, edit: ProjectionEditor, *arguments: object) -> Any:
     return RULES[step].pass_node().run(RuleInvocation(view, edit, arguments))
 
@@ -254,17 +267,22 @@ class CompressionTraversal(Node["CompressionRun", "CompressionRun"]):
                     return replacement
             return [node]
 
-        if "app" in view.context and view.view["role"] == "application" and not view.context.get("subtreeRef"):
-            edit.roots([item for child in view.view["children"] for item in visit(child)])
-        else:
-            edit.roots(visit(view.view))
-        if "app" in view.context:
-            edit.roots(
-                [node for node in view.roots if is_window(node)]
-                + [node for node in view.roots if not is_window(node) and node["role"] != "menuBar"]
-                + [node for node in view.roots if node["role"] == "menuBar"]
-            )
-        return run
+        try:
+            if "app" in view.context and view.view["role"] == "application" and not view.context.get("subtreeRef"):
+                edit.roots([item for child in view.view["children"] for item in visit(child)])
+            else:
+                edit.roots(visit(view.view))
+            if "app" in view.context:
+                edit.roots(
+                    [node for node in view.roots if is_window(node)]
+                    + [node for node in view.roots if not is_window(node) and node["role"] != "menuBar"]
+                    + [node for node in view.roots if node["role"] == "menuBar"]
+                )
+            return run
+        finally:
+            # A recursive local function otherwise retains its own closure,
+            # including this run's view/editor, after the traversal returns.
+            visit = None
 
     async def _arun(self, run: CompressionRun, control: Control) -> CompressionRun:
         return self._run(run, control)
@@ -286,19 +304,28 @@ class CompressionPipeline(Pipeline["ProjectionInput", "ProjectionResult"]):
             name="CompressionPipeline",
             steps=[
                 build_presentation_ir(),
-                whole_rule(share_empty_descriptions),
-                whole_rule(associate_labels),
-                protect_spatial_regions(),
-                compose_passive_text_lines(),
-                CompressionTraversal(),
-                whole_rule(reconstruct_outlines),
-                SpatialOrganizationPipeline(),
-                whole_rule(deduplicate_row_captions),
-                whole_rule(deduplicate_derived_container_captions),
-                whole_rule(fold_native_caption_components),
-                whole_rule(merge_owned_passive_content),
-                whole_rule(finalize_sources),
-                validate_projection(),
+                PipelineScope(
+                    name="CompressionIRLifetime",
+                    using=_compression_lifetime,
+                    body=Sequence(
+                        name="CompressAndExport",
+                        steps=[
+                            whole_rule(share_empty_descriptions),
+                            whole_rule(associate_labels),
+                            protect_spatial_regions(),
+                            compose_passive_text_lines(),
+                            CompressionTraversal(),
+                            whole_rule(reconstruct_outlines),
+                            SpatialOrganizationPipeline(),
+                            whole_rule(deduplicate_row_captions),
+                            whole_rule(deduplicate_derived_container_captions),
+                            whole_rule(fold_native_caption_components),
+                            whole_rule(merge_owned_passive_content),
+                            whole_rule(finalize_sources),
+                            validate_projection(),
+                        ],
+                    ),
+                ),
             ],
         )
 

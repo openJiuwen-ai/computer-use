@@ -181,6 +181,33 @@ def test_new_lifetime_in_same_native_slot_has_new_reference():
     assert registry.resolve(int(next(iter(first))), "session").identity.surface == "surface:a"
 
 
+@pytest.mark.parametrize("retired", [False, True])
+def test_exact_alias_lookup_retains_unknown_or_retired_identity_without_reviving_scope(retired):
+    registry = WindowReferences()
+    original = surface("a")
+    identity = WindowIdentity.of(original)
+    number = int(next(iter(registry.register_directory(directory(original)))))
+    registry.register_directory(directory(focus=None, partial=not retired, ended=(original,) if retired else ()))
+    state = registry.application("session", "editor", "")
+    assert state.members == {}
+    assert state.evidence[identity].membership is (Knowledge.NO if retired else Knowledge.UNKNOWN)
+    assert state.evidence[identity].lifetime is (WindowLifetime.RETIRED if retired else WindowLifetime.RETAINED)
+    evidence, members, aliases = dict(state.evidence), dict(state.members), dict(registry._aliases)
+    applications, next_number = dict(registry._applications), registry._next
+    for _ in range(2):
+        assert registry.reference("session", "editor", identity) == number
+        assert registry.reference("other-session", "editor", identity) is None
+        assert registry.reference("session", "other-application", identity) is None
+        for different in (
+            WindowIdentity("other-window", identity.surface, identity.instance),
+            WindowIdentity(identity.window, "other-surface", identity.instance),
+            WindowIdentity(identity.window, identity.surface, "other-instance"),
+        ):
+            assert registry.reference("session", "editor", different) is None
+    assert state.evidence == evidence and state.members == members
+    assert registry._aliases == aliases and registry._applications == applications and registry._next == next_number
+
+
 def test_complete_onscreen_absence_reappears_with_same_reference_and_fixed_binding():
     controller, app = setup()
     number = ref(app, "a")

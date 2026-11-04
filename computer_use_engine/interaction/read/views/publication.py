@@ -332,7 +332,8 @@ def publish(
         captured_lookup = lookup_context
         captured_query_windows = frozenset(
             WindowIdentity(target.root_window, target.surface, target.instance)
-            for target, _snapshot in trees if target.root_window is not None
+            for target, snapshot in trees
+            if target.root_window is not None and any(source is snapshot.native for source in shown)
         )
         captured = captured_lookup.window if content_available else None
         captured_image = getattr(owner, "_image", None) if screenshot is not None else None
@@ -429,25 +430,47 @@ def capture_header(
     anchor = instance.anchor
     aliases = {key: ref for ref, key in instance.windows.items()}
     permitted = allowed(ui)
-    displayed = dict(parts)
     focus = directory.get("focusedWindow")
     windows = []
-    for ref, key in instance.windows.items():
-        item = instance.members[key]
-        part = displayed.get(key)
+    entries = {ref: (key, instance.members[key]) for ref, key in instance.windows.items()}
+    for key, part in parts:
+        if part.source is None:
+            continue
+        identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+        ref = controller.interfaces.windows.reference(part.target.session, directory["application"], identity)
+        item = next((
+            member for member in part.source.source_directory["surfaces"]
+            if WindowIdentity.of(member) == identity
+        ), None)
+        if ref is not None and item is not None and ref not in entries:
+            entries[ref] = (key, item)
+    for ref, (key, item) in entries.items():
+        part = next((part for _, part in parts if WindowIdentity(
+            part.target.root_window, part.target.surface, part.target.instance
+        ) == WindowIdentity.of(item)), None)
         source = part.source if part is not None else None
+        current_member = permitted.get(key)
+        current_member = current_member is not None and WindowIdentity.of(current_member) == WindowIdentity.of(item)
+        parent_ref = aliases.get(item["parent"])
+        if not current_member and source is not None:
+            parent = next((
+                member for member in source.source_directory["surfaces"] if member["window"] == item["parent"]
+            ), None)
+            parent_ref = controller.interfaces.windows.reference(
+                source.target.session, directory["application"], WindowIdentity.of(parent),
+            ) if parent is not None else None
         windows.append(
             MemberHeading(
                 ref,
                 item["title"],
                 key,
                 key == ui._anchor,
-                key == getattr(ui, "_context", None),
-                key == focus,
-                aliases.get(item["parent"]),
+                current_member and key == getattr(ui, "_context", None),
+                current_member and key == focus,
+                parent_ref,
                 item["parentState"],
                 item["modal"],
-                key in permitted,
+                current_member,
                 part is not None and (
                     part.tree is not None
                     or part.image is not None and (image_windows is None or key in image_windows)

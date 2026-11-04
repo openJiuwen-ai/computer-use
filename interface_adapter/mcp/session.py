@@ -9,13 +9,14 @@ import os
 import socket
 import sys
 
+from computer_use.native import driver_exec
 from computer_use.native.preview import is_preview_event
 from computer_use.session.operations import eager
 
 from .diagnostics import Journal
 from .output import OutputBuffer, is_output
 from .worker_lifecycle import EXIT_SETTLE_SECONDS, READY_ENV, WorkerLifecycle, WorkerStartupFailure
-from .worker_transport import EncodedObservationDiagnostic, FRAMED_PROTOCOL, read_message, write_message
+from .worker_transport import FRAMED_PROTOCOL, EncodedObservationDiagnostic, read_message, write_message
 
 CLEANUP_TIMEOUT_SECONDS = 5
 
@@ -273,8 +274,7 @@ class ExecutionSession:
         try:
             child = await asyncio.create_subprocess_exec(
                 sys.executable,
-                "-m",
-                "computer_use.native.driver_exec",
+                driver_exec.__file__,
                 str(child_socket.fileno()),
                 str(life_write),
                 sys.executable,
