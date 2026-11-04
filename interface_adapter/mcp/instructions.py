@@ -7,6 +7,8 @@ Preloaded: computer, print, print_image. SDK methods return results directly;
 variables persist across calls. App selectors and paths refer to this host.
 
 Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
+list_apps() entries expose id, display_name, and is_running. app() selects a
+scope; the first app.read() starts a nonrunning installed app when needed.
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
