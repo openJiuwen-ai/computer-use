@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from time import monotonic
 from typing import TYPE_CHECKING, cast
@@ -13,7 +14,13 @@ from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor, ancestry, in_scope
 from computer_use.interaction.query.instances.pipeline import ApplicationDiscoveryPipeline
-from computer_use.interaction.query.instances.scope import allowed, refresh, retain_fixed_failure, validate_session
+from computer_use.interaction.query.instances.scope import (
+    allowed,
+    display_selection,
+    refresh,
+    retain_fixed_failure,
+    validate_session,
+)
 from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.ir import freeze
@@ -251,7 +258,9 @@ class AgentInterfacePipeline:
             for index, item in enumerate(desktop["windows"]):
                 if "window" in item and item.get("selector") in aliases:
                     by_window = {window: int(ref) for ref, window in aliases[item["selector"]].items()}
-                    window_refs[str(index)] = by_window[item["window"]["window"]]
+                    reference = by_window.get(item["window"]["window"])
+                    if reference is not None:
+                        window_refs[str(index)] = reference
             document = observed["document"]
             lines.append(
                 replace(
@@ -400,13 +409,38 @@ class AgentInterfacePipeline:
                 "read the intended App/Window before locating controls",
                 "stale_target",
             )
-        if ui._anchor is None and lookup_context.window is not None:
-            from computer_use.interaction.query.instances.scope import require_identity
-
-            require_identity(ui, lookup_context.window)
         context = ui._anchor or (lookup_context.window.window if lookup_context.window is not None else None)
         menu_only = lookup_context.menu_only if lookup_context is not None else False
         owners = list(lookup_context.menus) if lookup_context is not None else []
+
+        def observed_query(item):
+            owner = instance.owners.get(item["window"])
+            query = self.controller.state(owner).query_target if owner is not None else None
+            return query is not None and query.node is not None and (
+                query.session, query.instance, query.root_window, query.surface
+            ) == (instance.session, item["instance"], item["window"], item["surface"])
+
+        if ui._anchor is None and not menu_only and lookup_context.window is not None:
+            reselected = False
+            old = instance.members.get(context)
+            if old is None or WindowIdentity.of(old) != lookup_context.window or not observed_query(old):
+                # A delivered popup image/old child is not the App's lifetime.
+                # Use a current display root only if its semantic query scope
+                # was actually delivered, never an unseen pending observation.
+                current = display_selection(self.controller, instance, instance.directory)
+                replacement = instance.members.get(current.root.root_window) if current is not None else None
+                if (
+                    replacement is not None
+                    and WindowIdentity.of(replacement) in instance.delivered_lookup_windows
+                    and observed_query(replacement)
+                ):
+                    context = replacement["window"]
+                    owners = []
+                    reselected = True
+            if not reselected:
+                from computer_use.interaction.query.instances.scope import require_identity
+
+                require_identity(ui, lookup_context.window)
         choices = {} if menu_only else allowed(ui)
         choices = {
             key: item
@@ -418,17 +452,11 @@ class AgentInterfacePipeline:
             incomplete.append(context)
         for key, item in choices.items():
             owner = instance.owners.get(key)
-            query = self.controller.state(owner).query_target if owner is not None else None
             # A visual catalogue reports window geometry and identity without
             # asking AX for a node. Its node=None does not revoke the observed
             # query root held by this exact window lifetime. Native lookup
             # revalidates that root and still searches every relevant scope.
-            query_available = (
-                query is not None
-                and query.node is not None
-                and (query.session, query.instance, query.root_window, query.surface)
-                == (instance.session, item["instance"], key, item["surface"])
-            )
+            query_available = observed_query(item)
             if query_available:
                 owners.append(owner)
             elif key == context:
@@ -437,17 +465,23 @@ class AgentInterfacePipeline:
             # child seen only as pixels is not a new required AX search scope;
             # every previously AX-observed descendant still participates.
         end = monotonic() + timeout_ms / 1000
-        for owner in owners:
-            try:
-                snapshot = await self.lookup.arun(
-                    FindElement(owner, path, max(0, round((end - monotonic()) * 1000)), False), control
-                )
-            except ComputerUseError as error:
-                if error.code == "element_not_found":
-                    continue
-                raise
-            binding = snapshot["binding"]
-            matched[(binding.session, binding.surface, binding.node)] = snapshot
+        # Waiting belongs to the complete lookup, not its first member. A
+        # toolbar with no match must not consume the deadline before the
+        # already-observed document has even been searched.
+        while True:
+            matched.clear()
+            for owner in dict.fromkeys(owners):
+                try:
+                    snapshot = await self.lookup.arun(FindElement(owner, path, 0, False), control)
+                except ComputerUseError as error:
+                    if error.code == "element_not_found":
+                        continue
+                    raise
+                binding = snapshot["binding"]
+                matched[(binding.session, binding.surface, binding.node)] = snapshot
+            if matched or incomplete or monotonic() >= end:
+                break
+            await asyncio.sleep(min(0.025, max(0, end - monotonic())))
         if len(matched) > 1:
             raise local_failure(
                 "the name/path matches controls in several member windows",

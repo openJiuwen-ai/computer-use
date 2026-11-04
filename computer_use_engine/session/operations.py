@@ -2,8 +2,12 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import asyncio
+import time
+import weakref
+from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
+from uuid import uuid4
 
 # Private variables hold mutable session state.
 # pylint: disable-next=invalid-name
@@ -13,6 +17,93 @@ _nested = ContextVar("computer_use_nested", default=False)
 _revision = 0
 # pylint: disable-next=invalid-name
 _active = 0
+_budget = ContextVar("computer_use_operation_budget", default=None)
+_cancellation_source = ContextVar("computer_use_operation_cancellation", default=None)
+OPERATION_BUDGET_MS = 1000
+
+
+class OperationDeadlineExceeded(TimeoutError):
+    """The original SDK operation deadline expired, not a new component timer."""
+
+
+class OperationBudget:
+    """One absolute clock and original cancellation source for an SDK operation.
+
+    Native claims may have shorter local limits, but never extend this clock.
+    Completed receipts and mandatory cleanup remain publishable after expiry;
+    a late completed result is recorded as an overrun rather than erased.
+    """
+
+    def __init__(self, timeout_ms=OPERATION_BUDGET_MS, *, cancelled=None, clock=time.monotonic):
+        if type(timeout_ms) is not int or timeout_ms < 1:
+            raise ValueError("Invalid SDK operation budget")
+        self._clock = clock
+        self.started = clock()
+        self.deadline = self.started + timeout_ms / 1000
+        self.timeout_ms = timeout_ms
+        self.operation_id = uuid4().hex
+        self.cancelled = cancelled or (lambda: False)
+
+    @property
+    def elapsed_ms(self):
+        return (self._clock() - self.started) * 1000
+
+    @property
+    def expired(self):
+        return self._clock() >= self.deadline
+
+    def available_ms(self):
+        """Return optional-work time; an explicit host stop is never hidden."""
+        if self.cancelled():
+            raise asyncio.CancelledError("SDK operation cancelled")
+        return max(0, int((self.deadline - self._clock()) * 1000))
+
+    def remaining(self):
+        value = self.available_ms()
+        if value < 1:
+            raise OperationDeadlineExceeded(f"SDK operation exhausted its original {self.timeout_ms} ms budget")
+        return value
+
+    def checkpoint(self):
+        """Check before new work or within a bounded pure-work batch."""
+        self.remaining()
+
+
+def current_operation_budget():
+    """Return this call's clock without creating or extending a deadline."""
+    return _budget.get()
+
+
+@contextmanager
+def cancellation_scope(cancelled):
+    """Borrow the host's original thread-safe cancellation event predicate."""
+    token = _cancellation_source.set(cancelled or _cancellation_source.get())
+    try:
+        yield
+    finally:
+        _cancellation_source.reset(token)
+
+
+@contextmanager
+def operation_budget():
+    """Nested controller operations inherit the same call and original clock."""
+    existing = current_operation_budget()
+    if existing is not None:
+        yield existing
+        return
+    source = _cancellation_source.get()
+    task = asyncio.current_task()
+    task_ref = weakref.ref(task) if task is not None else lambda: None
+
+    def cancelled():
+        active = task_ref()
+        return bool(source is not None and source() or active is not None and active.cancelling())
+
+    token = _budget.set(OperationBudget(cancelled=cancelled))
+    try:
+        yield current_operation_budget()
+    finally:
+        _budget.reset(token)
 
 
 def eager(function):

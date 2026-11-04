@@ -16,6 +16,19 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
 
 
+def tree_collection_issues(snapshot):
+    """Return explicit whole-tree collection gaps from this exact native capture.
+
+    Optional field support and unrelated referenced parent objects are not tree
+    collection failures. A returned root also cannot turn a native nodes/roots
+    partial or timeout record into a complete observation.
+    """
+    return tuple(
+        issue for issue in snapshot.native.issues
+        if issue.path in ((), ("nodes",), ("roots",)) and issue.state not in ("absent", "unsupported")
+    )
+
+
 def document_coverage(document: DisplayDocument) -> Mapping[str, Any]:
     """Retain collection evidence from the same captured facts as the delivered tree.
 

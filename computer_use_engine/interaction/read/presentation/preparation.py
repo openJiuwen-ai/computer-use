@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, fields
+from functools import cached_property
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,8 @@ from computer_use.interaction.read.presentation.model import SnapshotRenderReque
 from computer_use.interaction.read.presentation.selection_summary import selection_summary_plan
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from computer_use.interaction.read.presentation.interface.atoms.model import AtomDocument
     from computer_use.interaction.read.presentation.interface.collections.model import CollectionDocument
     from computer_use.interaction.read.presentation.interface.composition.content.model import FieldContentPlan
@@ -53,8 +56,18 @@ class _MaterializedSnapshot:
     driver_features: frozenset[str]
     collection: DriverReadMetadata | None = None
 
+    @cached_property
+    def presentation_nodes(self):
+        return {node["node"]: node for node in self.facts["nodes"]}
 
-def _copy_collections(value: Any, *, immutable: bool) -> Any:
+    @cached_property
+    def presentation_relations(self):
+        from .accounting.relations import RelationPresentation
+
+        return RelationPresentation(self.facts, self.refs)
+
+
+def _copy_collections(value: Any, *, immutable: bool, checkpoint: Callable[[], object] | None = None) -> Any:
     """Detach nested fact collections while retaining their shared-child identity.
 
     Iterative traversal supports deep captured trees and rejects collection cycles.
@@ -65,6 +78,7 @@ def _copy_collections(value: Any, *, immutable: bool) -> Any:
         value: Captured facts or a nested collection to copy. Mapping keys stay intact.
         immutable: Produce mapping proxies, tuples, and frozen sets when true;
             otherwise produce dictionaries, lists, and sets.
+        checkpoint: Original call-budget check, consulted within bounded work batches.
 
     Returns:
         A detached collection graph, or the original value when it is atomic.
@@ -72,6 +86,16 @@ def _copy_collections(value: Any, *, immutable: bool) -> Any:
     Raises:
         ValueError: A collection contains itself through its descendants.
     """
+    if checkpoint is not None:
+        checkpoint()
+    work = 0
+
+    def progress() -> None:
+        nonlocal work
+        work += 1
+        if checkpoint is not None and work % 128 == 0:
+            checkpoint()
+
     mapping, sequence, setlike = 1, 2, 3
     categories: dict[type, int] = {
         dict: mapping,
@@ -105,6 +129,7 @@ def _copy_collections(value: Any, *, immutable: bool) -> Any:
     active: set[int] = set()
     pending = [(value, category(value), None, None)]
     while pending:
+        progress()
         current, kind, local, children = pending.pop()
         identity = id(current)
         if identity in completed:
@@ -113,15 +138,26 @@ def _copy_collections(value: Any, *, immutable: bool) -> Any:
             if identity in active:
                 raise ValueError("Captured presentation facts contain a collection cycle")
             active.add(identity)
-            local = dict(current) if kind == mapping else list(current)
-            items = local.items() if kind == mapping else enumerate(local)
-            # Atomic values already have their final identity in the shallow
-            # copy. Visit only nested collections, once per original edge.
-            children = [(key, child, child_kind) for key, child in items if (child_kind := category(child))]
+            local = {} if kind == mapping else []
+            items = current.items() if kind == mapping else enumerate(current)
+            children = []
+            # Scan even a single large container in bounded batches. Atomic
+            # fields retain their identity and never enter the traversal stack.
+            for key, child in items:
+                progress()
+                if kind == mapping:
+                    local[key] = child
+                else:
+                    local.append(child)
+                if child_kind := category(child):
+                    children.append((key, child, child_kind))
             pending.append((current, kind, local, children))
-            pending.extend((child, child_kind, None, None) for _, child, child_kind in reversed(children))
+            for _, child, child_kind in reversed(children):
+                progress()
+                pending.append((child, child_kind, None, None))
             continue
         for key, child, _ in children:
+            progress()
             local[key] = completed[id(child)]
         if kind == mapping:
             completed[identity] = MappingProxyType(local) if immutable else local
@@ -155,31 +191,41 @@ class CapturedSnapshot:
     driver_features: frozenset[str]
     collection: DriverReadMetadata | None = None
 
+    @cached_property
+    def geometric_index(self):
+        """Capture-wide immutable evidence; each layout keeps its own scope."""
+        from .interface.geometric.source import GeometricSourceIndex
+
+        return GeometricSourceIndex.capture(self)
+
     @classmethod
-    def capture(cls, snapshot: SnapshotFacts) -> CapturedSnapshot:
+    def capture(cls, snapshot: SnapshotFacts, *, checkpoint: Callable[[], object] | None = None) -> CapturedSnapshot:
         """Copy and freeze the facts needed by compression and source accounting."""
         values = {
             item.name: getattr(snapshot, item.name, None) if item.name == "collection" else getattr(snapshot, item.name)
             for item in fields(cls)
         }
         # One memo covers aliases shared by the fact, field and tree indexes.
-        return cls(**_copy_collections(values, immutable=True))
+        return cls(**_copy_collections(values, immutable=True, checkpoint=checkpoint))
 
-    def materialize(self, *, read_only_facts: bool = False) -> SnapshotFacts:
-        """Copy the local display view, optionally sharing its frozen source facts.
+    def materialize(
+        self, *, read_only_sources: bool = False, checkpoint: Callable[[], object] | None = None
+    ) -> SnapshotFacts:
+        """Copy the editable display forest, sharing proven immutable sources.
 
-        Presentation never edits the source index. The default retains the
-        detached mutable-copy contract for callers that need an editable copy.
+        The default remains a detached editable snapshot. Internal pure display
+        passes only edit roots: aliases, provenance, fields and native facts all
+        remain capture-owned read-only inputs rather than being recopied for
+        every preparation and rendering pass.
         """
-        # Display edits must not change the independent normalization ledger,
-        # even when both originally referenced the same nested source value.
         values = {
-            item.name: _copy_collections(getattr(self, item.name), immutable=False)
+            item.name: (
+                getattr(self, item.name)
+                if read_only_sources and item.name != "roots"
+                else _copy_collections(getattr(self, item.name), immutable=False, checkpoint=checkpoint)
+            )
             for item in fields(self)
-            if not read_only_facts or item.name != "facts"
         }
-        if read_only_facts:
-            values["facts"] = self.facts
         values["driver_features"] = self.driver_features
         return _MaterializedSnapshot(**values)
 
@@ -268,11 +314,12 @@ class PreparedRoot:
         text_slices: TextSliceDocument | None = None,
         groups: GroupDisclosurePlan | None = None,
         readable: ReadablePlan | None = None,
+        checkpoint: Callable[[], object] | None = None,
     ) -> PreparedRoot:
         return cls(
             root_ref,
             members,
-            _copy_collections(projection, immutable=True),
+            _copy_collections(projection, immutable=True, checkpoint=checkpoint),
             projection.source,
             projection.provenance,
             interface=interface,
@@ -287,12 +334,14 @@ class PreparedRoot:
             readable=readable,
         )
 
-    def materialize(self) -> ProjectionResult:
+    def materialize(self, *, checkpoint: Callable[[], object] | None = None) -> ProjectionResult:
         """Copy the retained projection without repeating semantic or compression passes."""
         if self.projection is None or self.source is None:
             raise ValueError("An uncompressed branch has no display projection")
         return ProjectionResult(
-            _copy_collections(self.projection, immutable=False), self.source, dict(self.provenance or {})
+            _copy_collections(self.projection, immutable=False, checkpoint=checkpoint),
+            self.source,
+            _copy_collections(self.provenance or {}, immutable=False, checkpoint=checkpoint),
         )
 
 
@@ -373,7 +422,11 @@ class PreparedSnapshot:
 
 
 def prepared_nodes(
-    roots: tuple[PreparedRoot, ...], snapshot: CapturedSnapshot, *, defer_inactive_selections: bool = False
+    roots: tuple[PreparedRoot, ...],
+    snapshot: CapturedSnapshot,
+    *,
+    defer_inactive_selections: bool = False,
+    checkpoint: Callable[[], object] | None = None,
 ) -> tuple[PreparedNode, ...]:
     """Index the fields and containment used to compare the final display.
 
@@ -383,32 +436,45 @@ def prepared_nodes(
         defer_inactive_selections: Match the default compact delivery policy. A
             complete unfocused collapsed range may be excluded from comparison
             only when its exact atom claim is delivered through captured details.
+        checkpoint: Original call-budget check, consulted within bounded work batches.
 
     Returns:
         Ordered display-comparison nodes. Original projections, atoms, native
         facts and the positions available through details remain unchanged.
     """
+    if checkpoint is not None:
+        checkpoint()
+    work = 0
+
+    def checked(items):
+        nonlocal work
+        for item in items:
+            work += 1
+            if checkpoint is not None and work % 128 == 0:
+                checkpoint()
+            yield item
+
     result: list[PreparedNode] = []
-    native = {node["node"]: node for node in snapshot.facts["nodes"]}
+    native = {node["node"]: node for node in checked(snapshot.facts["nodes"])}
     layouts = {
         ref: signature
-        for root in roots
+        for root in checked(roots)
         if root.interface is not None
-        for ref, signature in interface_layout_signatures(root.interface).items()
+        for ref, signature in checked(interface_layout_signatures(root.interface, checkpoint=checkpoint).items())
     }
     field_layouts = {}
     group_layouts = {}
     readable_layouts = {}
     selections = (
-        selection_summary_plan(thaw(snapshot.facts), snapshot.refs, roots=snapshot.roots)
+        selection_summary_plan(snapshot.facts, snapshot.refs, roots=snapshot.roots)
         if defer_inactive_selections
         else None
     )
     detail_selections: set[str] = set()
 
-    for root in roots:
+    for root in checked(roots):
         if root.atoms is not None and selections is not None:
-            for claim in root.atoms.field_claims:
+            for claim in checked(root.atoms.field_claims):
                 entry = selections.entries.get(claim.ref)
                 if (
                     claim.kind == "text-selection-summary"
@@ -421,7 +487,7 @@ def prepared_nodes(
                 ):
                     detail_selections.add(claim.ref)
         if root.readable is not None:
-            for ref, style in root.readable.nodes.items():
+            for ref, style in checked(root.readable.nodes.items()):
                 readable_layouts[ref] = (
                     (
                         style.note_slots,
@@ -441,18 +507,20 @@ def prepared_nodes(
                             heading.shared_index,
                             heading.transparent,
                         )
-                        for key, heading in root.readable.headings.items()
+                        for key, heading in checked(root.readable.headings.items())
                         if heading.ref == ref or ref in heading.sources
                     ),
                 )
         if root.groups is not None:
-            for group in root.groups.groups:
+            for group in checked(root.groups.groups):
                 signature = (
                     group.kind,
                     group.projected_refs,
                     group.captured_records,
-                    tuple((part.ref, part.slot_key, part.start, part.end) for part in (*group.head, *group.tail)),
-                    tuple((entry.ref, entry.slot_key) for entry in group.outline),
+                    tuple(
+                        (part.ref, part.slot_key, part.start, part.end) for part in checked((*group.head, *group.tail))
+                    ),
+                    tuple((entry.ref, entry.slot_key) for entry in checked(group.outline)),
                 )
                 if isinstance(group, BackgroundOverview):
                     signature += (
@@ -464,13 +532,14 @@ def prepared_nodes(
                         group.nested_windows,
                         group.state_facts,
                     )
-                group_layouts.update((ref, signature) for ref in group.projected_refs)
+                group_layouts.update((ref, signature) for ref in checked(group.projected_refs))
         if root.fields is not None:
-            for plan in root.fields.fields.values():
+            for plan in checked(root.fields.fields.values()):
                 field_layouts[plan.target_ref] = tuple(
-                    (slot.key, slot.label, slot.value, slot.format, slot.placement) for slot in plan.target_slots
+                    (slot.key, slot.label, slot.value, slot.format, slot.placement)
+                    for slot in checked(plan.target_slots)
                 )
-                for member in plan.members:
+                for member in checked(plan.members):
                     field_layouts[member.ref] = (plan.target_ref, member.mode, member.consumed_slots)
         # Table prefix sharing and packing only affect the full view. The
         # terminal renderer retains complete, unshared atoms for each diff
@@ -478,7 +547,7 @@ def prepared_nodes(
         # not mark every otherwise unchanged cell as modified.
 
     def visit(node: Mapping[str, Any], parent: str | None, depth: int) -> None:
-        fields = {key: value for key, value in node.items() if key not in ("children", "native")}
+        fields = {key: value for key, value in checked(node.items()) if key not in ("children", "native")}
         selection = fields.get("selectionRange")
         if (
             node["ref"] in detail_selections
@@ -495,20 +564,26 @@ def prepared_nodes(
             fields["_interfaceDisclosure"] = group_layouts[node["ref"]]
         if node["ref"] in readable_layouts:
             fields["_interfaceReadable"] = readable_layouts[node["ref"]]
-        result.append(PreparedNode(node["ref"], parent, depth, freeze(fields)))
-        for child in node["children"]:
+        result.append(
+            PreparedNode(node["ref"], parent, depth, _copy_collections(fields, immutable=True, checkpoint=checkpoint))
+        )
+        for child in checked(node["children"]):
             visit(child, node["ref"], depth + 1)
 
-    for root in roots:
+    for root in checked(roots):
         if root.projection is None:
-            for ref in root.members:
-                facts = dict(display_node_facts(native[snapshot.refs[ref]]))
+            for ref in checked(root.members):
+                facts = {key: value for key, value in checked(display_node_facts(native[snapshot.refs[ref]]).items())}
                 facts["_relations"] = tuple(
-                    relation for relation in snapshot.facts["relations"] if relation["source"] == snapshot.refs[ref]
+                    relation
+                    for relation in checked(snapshot.facts["relations"])
+                    if relation["source"] == snapshot.refs[ref]
                 )
-                result.append(PreparedNode(ref, None, 0, freeze(facts)))
+                result.append(
+                    PreparedNode(ref, None, 0, _copy_collections(facts, immutable=True, checkpoint=checkpoint))
+                )
         else:
-            for node in root.projection["roots"]:
+            for node in checked(root.projection["roots"]):
                 visit(node, None, 0)
     return tuple(result)
 

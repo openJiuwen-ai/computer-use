@@ -44,6 +44,7 @@ import ApplicationServices
     }
     private let windowServices: WindowServices
     private var surfaces = [String: Surface]()
+    private var endedWindows = [String: (owner: NSRunningApplication, value: [String: Any])]()
     struct ApplicationRoot {
         let owner: NSRunningApplication
         let element: AXUIElement
@@ -95,6 +96,56 @@ import ApplicationServices
     }
     func applicationRoot(_ id: String) -> ApplicationRoot? { applicationRoots[id] }
 
+    private func changeStatus(_ owner: NSRunningApplication, application: String,
+                              arm: Bool = true) throws -> NativeAppObserver.Status {
+        guard windowServices.trusted() else { return .init(stamp: nil, notifications: []) }
+        return try state.appObserver.status(owner: owner, application: application, session: session,
+            expected: windowServices.process(owner.processIdentifier), arm: arm)
+    }
+
+    func appChangeBaseline(_ binding: [String: Any]) throws -> NativeAppObserver.Stamp? {
+        guard let instance = binding["instance"] as? String else { return nil }
+        let owner = try state.appSelections.entry(instance).owner
+        guard let application = state.discovery.selector(for: owner) else { return nil }
+        return try changeStatus(owner, application: application).stamp
+    }
+
+    func latestAppChange(_ armed: NativeAppObserver.Stamp) -> NativeAppObserver.Stamp? {
+        state.appObserver.latest(armed)
+    }
+
+    private func changeOwner(_ application: String) throws -> NSRunningApplication {
+        guard ApplicationInstances<NSRunningApplication>.isInstanceSelector(application),
+            case .running(let owner) = try state.discovery.locate(application) else {
+            throw DriverError("App change queries require an observed running-application id", code: .invalidRequest)
+        }
+        return owner
+    }
+
+    func appChanges(_ application: String) throws -> [String: Any] {
+        let status = try changeStatus(changeOwner(application), application: application)
+        return ["kind": "appChanges", "session": session, "application": application,
+            "incarnation": status.stamp?.incarnation as Any? ?? NSNull(),
+            "token": status.stamp?.token as Any? ?? NSNull(), "available": status.available,
+            "notifications": status.notifications]
+    }
+
+    func waitAppChange(_ application: String, after: String, timeoutMs: Int) async throws -> [String: Any] {
+        let owner = try changeOwner(application)
+        let status = try changeStatus(owner, application: application)
+        let change: NativeAppObserver.Change
+        if status.available {
+            change = try await state.appObserver.wait(owner: owner, application: application, session: session,
+                after: after, timeoutMs: timeoutMs)
+        } else { change = .init(stamp: nil, reason: "unavailable", events: [], elapsedMs: 0) }
+        try windowServices.owner(owner)
+        try RequestDiagnostics.checkCancellation()
+        return ["kind": "waitAppChange", "session": session, "application": application,
+            "incarnation": change.stamp?.incarnation as Any? ?? NSNull(),
+            "token": change.stamp?.token as Any? ?? NSNull(), "reason": change.reason,
+            "events": change.events, "elapsedMs": change.elapsedMs]
+    }
+
     /// Application UI such as the menu bar is not a document window. When a
     /// caller has selected a document, keep that binding and its lifetime; a
     /// read of a global root cannot revive a closed working window.
@@ -123,6 +174,7 @@ import ApplicationServices
             case .running(let app) = try state.discovery.locate(application)
         else { throw DriverError("root discovery requires an observed running-application id", code: .invalidRequest) }
         let began = Int64(Date().timeIntervalSince1970 * 1000)
+        let appChange = try changeStatus(app, application: application).stamp
         var roots = [[String: Any]](), reasons = [String]()
         if AXIsProcessTrusted() {
             _ = state.accessibilityActivation.ensure(app)
@@ -148,6 +200,7 @@ import ApplicationServices
         var value = result("roots", began: began, reasons: reasons)
         value["application"] = application
         value["roots"] = roots
+        if let appChange { value["appChange"] = appChange.wire }
         return value
     }
 
@@ -464,6 +517,11 @@ import ApplicationServices
             return nativePresence(.init(id: window.mapping.id, process: window.process), current: native).presence == .ended
         }
         for surface in ended {
+            let instance = state.appSelections.get(owner: surface.owner, root: surface.window)
+            endedWindows[surface.scope] = (surface.owner, [
+                "window": surface.window, "instance": instance.id, "surface": surface.scope
+            ])
+            if let native = surface.native { state.applications.retireWindowReference(native) }
             state.applications.retireScope(owner: surface.owner, scope: surface.scope)
             surfaces.removeValue(forKey: surface.scope)
         }
@@ -519,6 +577,7 @@ import ApplicationServices
         }
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         var reasons = [String]()
+        let appChange = try changeStatus(app, application: application, arm: profile == .accessibility).stamp
         var rootDiscoveryComplete = true
         var provider: [String: Any] = [
             "status": "permissionUnavailable", "attribute": NSNull(), "writeStatus": NSNull()
@@ -574,21 +633,43 @@ import ApplicationServices
             if !reasons.contains(issue) { reasons.append(issue) }
             rootDiscoveryComplete = false
         }
-        var entries = [[String: Any]](), known = Set<String>()
+        var entries = [[String: Any]](), known = Set<String>(), entryLimited = false
         func append(
             window: String, title: String, kind: String, parent: String?, parentUnknown: Bool = false,
             applicationParent: Bool = false, modal: Bool?,
             element: AXUIElement?
         ) throws {
             guard known.insert(window).inserted else { return }
-            guard entries.count < 512 else { return }
+            guard entries.count < 512 else { entryLimited = true; return }
             try RequestDiagnostics.checkCancellation()
             let parent = profile == .visual && parentUnknown ? nil : parent
             let scope = state.applications.observationScope(app, window: element, reference: window)
             let instance = state.appSelections.get(owner: app, root: window)
-            let node = try (profile == .visual ? nil : element).map {
-                try windowServices.registerRoot?($0, app, scope)
-                    ?? state.applications.registerNativeRoot($0, app: app, scope: scope)
+            let node: String?
+            do {
+                node = try (profile == .visual ? nil : element).map {
+                    try windowServices.registerRoot?($0, app, scope)
+                        ?? state.applications.registerNativeRoot($0, app: app, scope: scope)
+                }
+            } catch let error as DriverError where error.code == .staleTarget {
+                try RequestDiagnostics.rethrowCancellation(error)
+                try windowServices.owner(app)
+                reasons.append("AX root unavailable for window \(window), surface \(scope): \(error.code.rawValue): \(error.description)")
+                let matching = visual[window] ?? []
+                if matching.count == 1,
+                    nativePresence(.init(id: matching[0].mapping.id, process: matching[0].process), current: []).presence == .live
+                {
+                    // A stale AX proxy does not end the physical window. Let
+                    // the existing native loop publish its exact visual row,
+                    // without claiming the invalid root or its AX properties.
+                    known.remove(window)
+                } else {
+                    // There is no current native proof for this failed root.
+                    // Keep other windows; neither invent an AX capability nor
+                    // retire the old lifetime from this local read failure.
+                    rootDiscoveryComplete = false
+                }
+                return
             }
             // AXApplication may contain a native attached window. Confirmed
             // native edges supplement AX; conflicts remain explicit unknowns.
@@ -664,7 +745,7 @@ import ApplicationServices
                 if matches.count == 1 { focusedWindow = matches[0] }
             }
         }
-        if known.count > entries.count {
+        if entryLimited {
             reasons.append("surface catalogue entry limit")
             rootDiscoveryComplete = false
         }
@@ -675,9 +756,17 @@ import ApplicationServices
         var value = result("surfaces", began: began, reasons: reasons)
         value["application"] = application
         value["surfaces"] = entries
+        // These are positive lifetime facts, not inferred from a visible-only
+        // projection's missing rows. Keep compact tombstones for later readers
+        // which did not consume the collection that first detected the end.
+        value["endedWindows"] = endedWindows.keys.sorted().compactMap { key -> [String: Any]? in
+            guard let entry = endedWindows[key], entry.owner.isEqual(app) else { return nil }
+            return entry.value
+        }.suffix(4096).map { $0 }
         value["rootDiscoveryComplete"] = rootDiscoveryComplete
         value["provider"] = provider
         value["focusedWindow"] = focusedWindow as Any? ?? NSNull()
+        if let appChange { value["appChange"] = appChange.wire }
         return value
     }
 }

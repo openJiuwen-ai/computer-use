@@ -9,7 +9,7 @@ import math
 from .action_context import decode_action_context
 from .captures import capture_metadata, decode_capture, decode_stamp
 from .desktop import decode_desktop_observation
-from .directory import _application, decode_directory
+from .directory import _application, app_change, decode_directory
 from .observation.adapters import validate_driver_payload
 from .primitives import required_item
 from .schema import array, boolean, enum, identity, number, obj, string, union, unknown
@@ -225,6 +225,7 @@ _capture_request = obj(
         target=binding,
         kind=enum("window", "desktop"),
         maxDimension=number(integer=True, min=1, max=4096),
+        retainedCaptures=array(identity).optional(),
     )
 )
 
@@ -325,6 +326,15 @@ _inspect_queries = {
         )
     ),
     "roots": obj(dict(kind=enum("roots"), application=identity)),
+    "appChanges": obj({"kind": enum("appChanges"), "application": identity}),
+    "waitAppChange": obj(
+        {
+            "kind": enum("waitAppChange"),
+            "application": identity,
+            "after": identity,
+            "timeoutMs": number(integer=True, min=1, max=400),
+        }
+    ),
     "inputContext": obj(
         dict(
             kind=enum("inputContext"),
@@ -341,6 +351,7 @@ _inspect_queries = {
             fields=array(identity, min=1, max=128),
             advertisedFields=array(identity, min=1, max=128).optional(),
             textContent=boolean().optional(),
+            actionDetail=enum("none", "names", "full").optional(),
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),
             primaryFields=array(enum("Text.LineRanges"), min=1, max=1).optional(),
@@ -516,6 +527,7 @@ _schemas = {
             target=operation_target,
             remainingMs=number(integer=True, min=0, max=120000),
             clickContract=enum("v1", "v2").optional(),
+            appChangeBaseline=app_change.nullable().optional(),
         )
     ),
     "inspect": obj(
@@ -554,6 +566,7 @@ _schemas = {
             application=_application.optional(),
             click=click_receipt.optional(),
             impact=input_impact.optional(),
+            appChangeInputBaseline=app_change.nullable().optional(),
         )
     ),
     "finish": obj(dict(cleanup=cleanup)),
@@ -595,6 +608,29 @@ _launch_facts = obj(
     )
 )
 _captured_text = obj(dict(kind=enum("capturedText"), session=identity, textRef=identity, page=unknown()))
+_app_changes = obj(
+    {
+        "kind": enum("appChanges"),
+        "session": identity,
+        "application": identity,
+        "incarnation": nullable_id,
+        "token": nullable_id,
+        "available": boolean(),
+        "notifications": array(identity, max=32),
+    }
+)
+_wait_app_change = obj(
+    {
+        "kind": enum("waitAppChange"),
+        "session": identity,
+        "application": identity,
+        "incarnation": nullable_id,
+        "token": nullable_id,
+        "reason": enum("event", "timeout", "unavailable"),
+        "events": array(identity, max=32),
+        "elapsedMs": number(min=0).optional(),
+    }
+)
 _read_change = obj(
     dict(
         kind=enum("readChange"),
@@ -620,6 +656,20 @@ _desktop_capture = obj(
 
 
 def decode_execution_result(method, value, *, retain_observation=False):
+    if method == "inspect" and isinstance(value, dict) and value.get("kind") == "appChanges":
+        result = _app_changes.parse(value)
+        if result["available"] and any(result[key] is None for key in ("incarnation", "token")):
+            raise ValueError("protocol: available application changes require an observer incarnation and token")
+        return result
+    if method == "inspect" and isinstance(value, dict) and value.get("kind") == "waitAppChange":
+        result = _wait_app_change.parse(value)
+        if len(set(result["events"])) != len(result["events"]) or (result["reason"] == "event") != bool(
+            result["events"]
+        ):
+            raise ValueError("protocol: application event hints contradict their wake reason")
+        if result["reason"] == "event" and any(result[key] is None for key in ("incarnation", "token")):
+            raise ValueError("protocol: application events require an observer incarnation and token")
+        return result
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "readChange":
         result = _read_change.parse(value)
         if len(set(result["events"])) != len(result["events"]) or (result["reason"] == "event") != bool(
@@ -675,6 +725,12 @@ def decode_execution_result(method, value, *, retain_observation=False):
     )
     if invalid_bound:
         raise ValueError("protocol: unbound discovery cannot contain window or element identities")
+    baseline = result.get("appChangeBaseline") if method == "begin" else result.get("appChangeInputBaseline")
+    if baseline is not None and (
+        baseline["session"] != bound["session"]
+        or "application" in bound and baseline["application"] != bound["application"]
+    ):
+        raise ValueError("protocol: application change baseline changed the operation scope")
     if method == "execute" and "application" in result:
         if "application" not in bound or not result["application"]["isRunning"]:
             raise ValueError("protocol: only an installation operation can return a running application")

@@ -8,6 +8,7 @@ from functools import cached_property
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
+from computer_use.identity import WeakIdentityMap
 from computer_use.interaction.read.presentation.document import DisplayTree
 from computer_use.interaction.read.presentation.sizing import DocumentSize
 
@@ -22,6 +23,8 @@ STATE_FIELDS = frozenset(
     ("enabled", "selected", "focused", "busy", "toggleState", "expanded", "disclosing", "visible", "showing", "modal")
 )
 
+_comparison_trees = WeakIdentityMap()
+
 
 class _Signatures:
     """Hash structured facts, sharing work for immutable layout records.
@@ -31,10 +34,14 @@ class _Signatures:
     independent of mapping insertion order without parsing rendered text.
     """
 
-    def __init__(self):
+    def __init__(self, checkpoint=None):
         self.memo = {}
+        self.checkpoint, self._steps = checkpoint, 0
 
     def of(self, value):
+        self._steps += 1
+        if self.checkpoint is not None and self._steps % 128 == 1:
+            self.checkpoint()
         if isinstance(value, (Mapping, tuple, list, set, frozenset)):
             cached = self.memo.get(id(value))
             if cached is not None and cached[0] is value:
@@ -87,10 +94,16 @@ class ComparisonTree:
     failed: bool
 
     @classmethod
-    def capture(cls, tree: DisplayTree):
+    def capture(cls, tree: DisplayTree, *, checkpoint=None):
+        # Planning and baseline publication consume the same frozen DisplayTree.
+        # Cache its small hash/ref record, never the native capture or a render.
+        # WeakIdentityMap checks the live key object, including after id reuse.
+        cached = _comparison_trees.get(tree)
+        if cached is not None:
+            return cached
         prepared = tree.prepared
-        signatures = _Signatures()
-        return cls(
+        signatures = _Signatures(checkpoint)
+        comparison = cls(
             tree.scope,
             tuple(ComparisonNode.capture(node, signatures) for node in tree.nodes),
             tree.details,
@@ -102,6 +115,8 @@ class ComparisonTree:
             ),
             any(root.failure is not None for root in prepared.roots),
         )
+        _comparison_trees.set(tree, comparison)
+        return comparison
 
 
 @dataclass(frozen=True)
@@ -109,8 +124,11 @@ class ComparisonDocument:
     trees: tuple[ComparisonTree, ...]
 
     @classmethod
-    def capture(cls, document: DisplayDocument):
-        return cls(tuple(ComparisonTree.capture(part) for part in document.parts if isinstance(part, DisplayTree)))
+    def capture(cls, document: DisplayDocument, *, checkpoint=None):
+        return cls(tuple(
+            ComparisonTree.capture(part, checkpoint=checkpoint)
+            for part in document.parts if isinstance(part, DisplayTree)
+        ))
 
     @cached_property
     def estimated_bytes(self):

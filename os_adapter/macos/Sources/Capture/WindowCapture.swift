@@ -28,57 +28,149 @@ import ApplicationServices
     ) async throws -> (image: CapturedImage, window: WindowMapping) {
         let metric = RequestDiagnostics.metrics?.start(.windowCapture)
         defer { metric?.end() }
+        let queryTiming = NativeWindowQueryTiming.start(enabled: RequestDiagnostics.metrics != nil) {
+            ["source": "windowCapture", "pid": app.processIdentifier]
+        }
+        var outcome = "error"
+        defer { queryTiming?.finish(outcome: outcome) }
         try RequestDiagnostics.checkObservationBudget()
-        guard CGPreflightScreenCaptureAccess() else {
+        let permitted: Bool
+        do {
+            let metric = RequestDiagnostics.metrics?.start(.capturePermissionPreflight)
+            defer { metric?.end() }
+            permitted = CGPreflightScreenCaptureAccess()
+        }
+        guard permitted else {
             throw DriverError("screen recording permission denied", code: .desktopUnavailable)
         }
-        // Retry observations only, never input. Modal transitions can leave a brief
-        // mismatch between AX and ScreenCaptureKit's window lists.
-        for attempt in 0..<4 {
-            try RequestDiagnostics.checkObservationBudget()
+        let application: BackgroundTarget
+        let retainedTarget: AXUIElement?
+        let originalDocument: String?
+        var retainedWindow: CGWindowID?
+        do {
+            let metric = RequestDiagnostics.metrics?.start(.captureStartupScope)
+            defer { metric?.end() }
+            application = NativeWindowQueryTiming.measure(queryTiming, "startup.processIdentity") { BackgroundTarget(app) }
             do {
-                let result = try await captureWindowOnce(
-                    app, target: target, nativeTarget: nativeTarget, maxDimension: maxDimension)
-                try RequestDiagnostics.checkCancellation()
-                return result
-            } catch {
-                try RequestDiagnostics.rethrowCancellation(error)
-                if error is ObservationBudgetExceeded { throw error }
-                try RequestDiagnostics.checkObservationBudget()
-                // A supplied native mapping cannot become current again by
-                // recapturing it; the enclosing read must rediscover windows.
-                if nativeTarget != nil && error is ObservationChanged { throw error }
-                if attempt == 3 { throw error }
-                try RequestDiagnostics.checkObservationBudget()
-                try await Task.sleep(for: .milliseconds(80 * (1 << attempt)))
-                try RequestDiagnostics.checkObservationBudget()
+                let metric = RequestDiagnostics.metrics?.start(.captureTargetResolution)
+                defer { metric?.end() }
+                retainedTarget = target ?? (nativeTarget == nil
+                    ? WindowGeometry.inputWindow(pid: app.processIdentifier, queryTiming: queryTiming) : nil)
+            }
+            do {
+                let metric = RequestDiagnostics.metrics?.start(.captureDocumentIdentity)
+                defer { metric?.end() }
+                originalDocument = WindowGeometry.documentIdentity(retainedTarget, queryTiming: queryTiming)
+            }
+            do {
+                let metric = RequestDiagnostics.metrics?.start(.captureWindowHint)
+                defer { metric?.end() }
+                if let nativeTarget {
+                    retainedWindow = nativeTarget.id
+                } else if let retainedTarget {
+                    let hint: WindowSelection.Hint? = NativeWindowQueryTiming.measure(
+                        queryTiming, "startup.windowHint", root: retainedTarget
+                    ) { @MainActor in
+                        WindowGeometry.hint(retainedTarget, onWindowsRead: nil, queryTiming: queryTiming)
+                    }
+                    retainedWindow = hint?.id
+                } else {
+                    retainedWindow = nil
+                }
             }
         }
-        throw DriverError("window capture unavailable")
+        func validateOriginalScope() throws {
+            let metric = RequestDiagnostics.metrics?.start(.captureRetryScope)
+            defer { metric?.end() }
+            try RequestDiagnostics.checkCancellation()
+            try sharing?.checkAvailable()
+            try application.validate()
+            if let originalDocument {
+                let metric = RequestDiagnostics.metrics?.start(.captureDocumentIdentity)
+                defer { metric?.end() }
+                if WindowGeometry.documentIdentity(retainedTarget, queryTiming: queryTiming) != originalDocument {
+                    throw DriverError("the screenshot target changed document", code: .staleTarget)
+                }
+            }
+            if let retainedWindow {
+                guard let info = WindowServerInfo.window(retainedWindow) else {
+                    throw DriverError("the original screenshot window is no longer confirmed", code: .observationIncomplete)
+                }
+                guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == app.processIdentifier else {
+                    throw ObservationChanged("the original screenshot window changed owner")
+                }
+            }
+            // A supplied mapping cannot be repaired by adopting a new geometry.
+            if let nativeTarget { try observation.validate(nativeTarget) }
+        }
+        let result = try await WindowCaptureRetry.run(
+            maximumAttempts: RequestDiagnostics.deadline == nil ? 4 : Int.max,
+            check: RequestDiagnostics.checkObservationBudget, validateOriginalScope: validateOriginalScope,
+            permits: { WindowCaptureRetry.permits($0, originalWindowKnown: retainedWindow != nil) },
+            onRetry: { error, attempt in
+                RequestDiagnostics.metrics?.count(.observationRetry)
+                diagnose(["kind": "window_capture_retry", "attempt": attempt,
+                          "window": retainedWindow as Any? ?? NSNull(), "reason": String(describing: error)])
+            }
+        ) {
+            let result = try await self.captureWindowOnce(
+                app, target: retainedTarget, nativeTarget: nativeTarget, retainedWindow: retainedWindow,
+                maxDimension: maxDimension, queryTiming: queryTiming, selected: { retainedWindow = $0 })
+            try validateOriginalScope()
+            return result
+        }
+        outcome = "ok"
+        return result
     }
 
     private func captureWindowOnce(
-        _ app: NSRunningApplication, target: AXUIElement?, nativeTarget: WindowMapping?, maxDimension: Int?
+        _ app: NSRunningApplication, target: AXUIElement?, nativeTarget: WindowMapping?, retainedWindow: CGWindowID?,
+        maxDimension: Int?, queryTiming: NativeWindowQueryTiming?, selected: (CGWindowID) -> Void
     ) async throws -> (image: CapturedImage, window: WindowMapping) {
         try RequestDiagnostics.checkObservationBudget()
         let interval = CaptureInterval()
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        let content: SCShareableContent
+        do {
+            let metric = RequestDiagnostics.metrics?.start(.captureEnumeration)
+            defer { metric?.end() }
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        }
         try RequestDiagnostics.checkObservationBudget()
         var windows = content.windows.filter {
             $0.owningApplication?.processID == app.processIdentifier && $0.frame.width > 1 && $0.frame.height > 1
         }
+        if let retainedWindow { windows = windows.filter { $0.windowID == retainedWindow } }
         if let nativeTarget {
             guard nativeTarget.pid == app.processIdentifier else {
                 throw DriverError("native screenshot target belongs to another process", code: .staleTarget)
             }
-            try observation.validate(nativeTarget)
+            do {
+                let metric = RequestDiagnostics.metrics?.start(.captureIdentityValidation)
+                defer { metric?.end() }
+                try observation.validate(nativeTarget)
+            }
             windows = windows.filter { $0.windowID == nativeTarget.id }
         }
         // A popup can own the focused control while AXFocusedWindow still names
         // its underlying dialog. Capture the window containing the actual focus.
-        let hint =
-            nativeTarget.map { WindowSelection.Hint(frame: $0.frame, title: $0.title ?? "", id: $0.id) }
-            ?? (target ?? WindowGeometry.inputWindow(pid: app.processIdentifier)).flatMap { WindowGeometry.hint($0) }
+        let hint: WindowSelection.Hint?
+        do {
+            let metric = RequestDiagnostics.metrics?.start(.captureWindowHint)
+            defer { metric?.end() }
+            if let nativeTarget {
+                hint = WindowSelection.Hint(frame: nativeTarget.frame, title: nativeTarget.title ?? "", id: nativeTarget.id)
+            } else {
+                let resolvedTarget: AXUIElement? = target
+                    ?? WindowGeometry.inputWindow(pid: app.processIdentifier, queryTiming: queryTiming)
+                if let resolvedTarget {
+                    hint = NativeWindowQueryTiming.measure(queryTiming, "attempt.windowHint", root: resolvedTarget) { @MainActor in
+                        WindowGeometry.hint(resolvedTarget, onWindowsRead: nil, queryTiming: queryTiming)
+                    }
+                } else {
+                    hint = nil
+                }
+            }
+        }
         if target != nil && hint == nil { throw DriverError("selected window has no usable screenshot identity") }
         // Native modal panels may be above layer 0. Include them when AX (or an
         // existing observation) identifies the window, not as arbitrary fallbacks.
@@ -91,7 +183,7 @@ import ApplicationServices
         else {
             if let conflict = WindowSelection.geometryConflict(candidates, hint: hint), let expected = hint?.frame {
                 let source = nativeTarget == nil ? "accessibility" : "observed"
-                throw DriverError(
+                throw WindowCapturePending(description:
                     """
                     window screenshot geometry disagrees for native window \(conflict.id): \
                     \(source)=\(expected), ScreenCaptureKit=\(conflict.frame); window identity is known, but \
@@ -103,13 +195,14 @@ import ApplicationServices
                 "\($0.id):\(String(reflecting: $0.title)) \($0.frame) visible=\($0.visible)"
             }.joined(separator: "; ")
             let focused = hint.map { " focused=\(String(reflecting: $0.title)) \(String(describing: $0.frame));" } ?? ""
-            throw DriverError(
-                """
+            let description = """
                 \(windows.isEmpty
                     ? "no capturable application window"
                     : "window screenshot target is ambiguous or not ready")\
                 ;\(focused) candidates=\(candidates.count) [\(details)]
-                """)
+                """
+            if retainedWindow != nil { throw WindowCapturePending(description: description) }
+            throw DriverError(description)
         }
         // SCWindow comes from the enumeration above; foreground is a separate
         // sample. sampledAt bounds completion of these non-atomic state reads,
@@ -145,21 +238,79 @@ import ApplicationServices
         let mapping = WindowMapping(
             id: window.windowID, pid: app.processIdentifier, frame: window.frame, title: window.title,
             width: configuration.width, height: configuration.height)
+        selected(mapping.id)
         try RequestDiagnostics.checkObservationBudget()
-        observation.observeCapturedWindow(mapping, target: target)
-        try observation.validateObservation()
+        do {
+            let metric = RequestDiagnostics.metrics?.start(.captureIdentityValidation)
+            defer { metric?.end() }
+            observation.observeCapturedWindow(mapping, target: target)
+            try observation.validateObservation()
+        }
         try RequestDiagnostics.checkObservationBudget()
-        try await sharing?.include(window)
+        let image: CGImage
+        do {
+            let metric = RequestDiagnostics.metrics?.start(.captureJoin)
+            let began = ProcessInfo.processInfo.systemUptime
+            var outcome = "error"
+            defer {
+                metric?.end()
+                diagnose(["kind": "window_capture_join", "phase": "joined", "window": mapping.id,
+                          "outcome": outcome, "durationMs": (ProcessInfo.processInfo.systemUptime - began) * 1000])
+            }
+            // Both branches consume this same fresh SCWindow on MainActor.
+            // They share no pixels/filter result, and their intervals overlap:
+            // captureJoin is elapsed time; sharing + pixels must not be summed.
+            image = try await WindowCaptureJoin.run(check: {
+                try RequestDiagnostics.checkObservationBudget()
+                try self.sharing?.checkAvailable()
+            }, include: {
+                let metric = RequestDiagnostics.metrics?.start(.captureSharing)
+                let began = ProcessInfo.processInfo.systemUptime
+                var outcome = "error"
+                diagnose(["kind": "window_capture_join", "phase": "sharingBegan", "window": mapping.id,
+                          "uptime": began])
+                defer {
+                    metric?.end()
+                    diagnose(["kind": "window_capture_join", "phase": "sharingEnded", "window": mapping.id,
+                              "uptime": ProcessInfo.processInfo.systemUptime, "outcome": outcome])
+                }
+                try await self.sharing?.include(window)
+                outcome = "ok"
+            }, pixels: {
+                let metric = RequestDiagnostics.metrics?.start(.capturePixels)
+                let began = ProcessInfo.processInfo.systemUptime
+                var outcome = "error"
+                diagnose(["kind": "window_capture_join", "phase": "pixelsBegan", "window": mapping.id,
+                          "uptime": began])
+                defer {
+                    metric?.end()
+                    diagnose(["kind": "window_capture_join", "phase": "pixelsEnded", "window": mapping.id,
+                              "uptime": ProcessInfo.processInfo.systemUptime, "outcome": outcome])
+                }
+                let pixels = try await SCScreenshotManager.captureImage(
+                    contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
+                outcome = "ok"
+                return pixels
+            })
+            outcome = "ok"
+        }
         try RequestDiagnostics.checkObservationBudget()
-        let image = try await SCScreenshotManager.captureImage(
-            contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
-        try RequestDiagnostics.checkObservationBudget()
-        try observation.validate(mapping)
+        do {
+            let metric = RequestDiagnostics.metrics?.start(.captureIdentityValidation)
+            defer { metric?.end() }
+            try observation.validate(mapping)
+        }
         guard image.width == mapping.width, image.height == mapping.height else {
             throw DriverError("unexpected window screenshot dimensions")
         }
         try RequestDiagnostics.checkObservationBudget()
-        let result = try CapturedImage.encodePNG(image)
+        let result: String
+        do {
+            // Includes ImageIO PNG finalization and its wire base64 conversion.
+            let metric = RequestDiagnostics.metrics?.start(.capturePNGEncoding)
+            defer { metric?.end() }
+            result = try CapturedImage.encodePNG(image)
+        }
         // Completed pixels and their validated identity can be published during
         // the request's finalization reserve without starting another capture.
         try RequestDiagnostics.checkCancellation()

@@ -11,7 +11,10 @@ import Foundation
         var dispatch: String
         var observations: [String]
         var wait = "notNeeded"
-        var continuation: String { effect == "contextOnly" ? "withinScope" : "sameCandidate" }
+        var window: UInt32?
+        var viewportProgressConfirmed = false
+        var permitsContinuation: Bool { effect == "contextOnly" || viewportProgressConfirmed }
+        var continuation: String { permitsContinuation ? "withinScope" : "sameCandidate" }
     }
     let target: [String: Any]
     private(set) var routeFamily: String
@@ -27,8 +30,9 @@ import Foundation
         routeFamily = family
     }
     func select(_ family: String) { routeFamily = family }
-    var hasContentPossible: Bool { preparation.contains { $0.effect != "contextOnly" } }
-    var permitsReselection: Bool { !hasContentPossible && pendingPreparation == nil }
+    var permitsReselection: Bool {
+        !entered && pendingPreparation == nil && preparation.allSatisfy(\.permitsContinuation)
+    }
 
     func record(_ event: NativePreparationEffect) {
         let kind: String, effect: String
@@ -50,7 +54,8 @@ import Foundation
             effect = "contentPossible"
         }
         if event.phase == .willSend {
-            preparation.append(.init(kind: kind, effect: effect, dispatch: "unknown", observations: [event.detail]))
+            preparation.append(
+                .init(kind: kind, effect: effect, dispatch: "unknown", observations: [event.detail], window: event.window))
             pendingPreparation = preparation.count - 1
         } else if let index = pendingPreparation, preparation[index].kind == kind {
             preparation[index].dispatch = "dispatched"
@@ -58,10 +63,23 @@ import Foundation
         }
     }
 
+    /// Only a fully returned wheel with observed progress of the retained
+    /// element can continue. The effect remains contentPossible in the receipt.
+    func confirmViewportProgress(window: UInt32) {
+        guard pendingPreparation == nil,
+            let index = preparation.lastIndex(where: {
+                $0.kind == "pointerPreparation" && $0.window == window && $0.dispatch == "dispatched"
+            })
+        else { return }
+        preparation[index].viewportProgressConfirmed = true
+        preparation[index].observations.append("originalTargetViewportProgress=confirmed")
+    }
+
     func observe(_ outcome: NativeFocusOutcome) {
         let active = outcome.final.reportedActive.map { $0 ? "yes" : "no" } ?? "unknown"
         let observations = [
             "applicationActive=\(active)", "systemForeground=\(outcome.final.foreground)",
+            "transportPrepared=\(outcome.final.prepared)",
             "focusedWindow=\(outcome.final.focusedWindow.map(String.init) ?? "unknown")"
         ]
         let wait: String
@@ -100,7 +118,7 @@ import Foundation
     func markReturned() { returned = true }
     func complete() { continuation = "stop" }
     func fail(dispatch: String, cleanup: String, retryReason: String?) {
-        if hasContentPossible || pendingPreparation != nil {
+        if !permitsReselection {
             continuation = "observe"
         } else if dispatch == "notDispatched", cleanup == "complete", let retryReason {
             continuation = retryReason == "preconditionChanged" ? "sameCandidateRefresh" : "reselectWithinScope"

@@ -10,30 +10,45 @@ from collections.abc import Iterator, Mapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
+from functools import cache
+from types import MappingProxyType
 from typing import Any
 
 from computer_use.protocol.observation import ElementValue, NativeNode, NativeObservation, ReadIssue
-from computer_use.protocol.observation.issues import ReadIssueIndex as _IssueIndex
+
+_DATA_ATOMS = frozenset((str, bool, int, bytes, type(None)))
+
+
+@cache
+def _record_names(record_type: type) -> tuple[str, ...]:
+    return tuple(item.name for item in fields(record_type))
 
 
 def data(value: Any) -> Any:
     """Return a JSON-safe semantic value without native wrappers or object copies."""
+    kind = type(value)
+    if kind in _DATA_ATOMS:
+        return value
+    if kind is float:
+        if math.isfinite(value):
+            return value
+        return {"number": "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"}
+    if kind is dict or kind is MappingProxyType:
+        return {str(key): data(item) for key, item in value.items()}
+    if kind is tuple or kind is list:
+        return [data(item) for item in value]
     if isinstance(value, ElementValue):
         return {"element": str(value.node)}
     if isinstance(value, datetime):
         return {"datetime": value.isoformat()}
     if isinstance(value, Enum):
         return value.value
-    # Exact types preserve scalar validation and identity contracts.
-    # pylint: disable-next=unidiomatic-typecheck
-    if type(value) is float and not math.isfinite(value):
-        return {"number": "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"}
     if is_dataclass(value):
         result = {}
-        for item in fields(value):
-            content = getattr(value, item.name)
+        for name in _record_names(kind):
+            content = getattr(value, name)
             if content is not None:
-                result[item.name] = data(content)
+                result[name] = data(content)
         return result
     if isinstance(value, Mapping):
         return {str(key): data(item) for key, item in value.items()}
@@ -89,7 +104,7 @@ def node_values(node: NativeNode) -> dict[str, Any]:
     return {name: value for name, (_, value) in node_fields(node).items()}
 
 
-def status_record(issues: list[ReadIssue]) -> dict[str, Any] | None:
+def status_record(issues: list[ReadIssue], encoded_issues: Mapping[int, dict[str, Any]]) -> dict[str, Any] | None:
     """Retain every applicable restriction, with a compact state for view consumers."""
     if not issues:
         return None
@@ -106,7 +121,7 @@ def status_record(issues: list[ReadIssue]) -> dict[str, Any] | None:
         "absent": 0,
     }
     primary = max(issues, key=lambda issue: priority.get(issue.state, 0))
-    result = {"state": primary.state, "issues": [data(issue) for issue in issues]}
+    result = {"state": primary.state, "issues": [encoded_issues[id(issue)] for issue in issues]}
     if primary.detail:
         result["detail"] = primary.detail
 
@@ -137,7 +152,11 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
     display accounting and contain no platform-property interpretation.
     """
     rows, edges, unread = [], [], []
-    issue_index = _IssueIndex(observation.issues)
+    issue_index = observation.issue_index
+    # A source restriction can apply to several fields and also appears in the
+    # complete issue list. Preserve that shared source identity when deriving
+    # facts, instead of copying its nested metadata at every occurrence.
+    encoded_issues = {id(issue): data(issue) for issue in observation.issues}
     for token, node in observation.nodes.items():
         indexed = node_fields(node)
         values = {name: value for name, (_, value) in indexed.items()}
@@ -146,7 +165,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
         statuses = {}
         for name, path in paths.items():
             matching = issue_index.applicable((*base, *path))
-            status = status_record(matching)
+            status = status_record(matching, encoded_issues)
             if status is not None:
                 statuses[name] = status
         for issue in issue_index.for_node(token):
@@ -156,19 +175,21 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
             name = field_name(path) or "node"
             paths.setdefault(name, path)
             if name not in statuses:
-                statuses[name] = status_record(issue_index.applicable(issue.path))
+                statuses[name] = status_record(issue_index.applicable(issue.path), encoded_issues)
         action_issues = issue_index.applicable((*base, "actions"))
         if node.actions is None:
-            actions = dict(state=status_record(action_issues)["state"] if action_issues else "not_read", items=[])
+            actions = dict(
+                state=status_record(action_issues, encoded_issues)["state"] if action_issues else "not_read", items=[]
+            )
             if action_issues:
-                actions["issues"] = [data(issue) for issue in action_issues]
+                actions["issues"] = [encoded_issues[id(issue)] for issue in action_issues]
         else:
             actions = dict(
-                state="complete" if not action_issues else status_record(action_issues)["state"],
+                state="complete" if not action_issues else status_record(action_issues, encoded_issues)["state"],
                 items=[data(action) for action in node.actions],
             )
             if action_issues:
-                actions["issues"] = [data(issue) for issue in action_issues]
+                actions["issues"] = [encoded_issues[id(issue)] for issue in action_issues]
         observed = bool(values or node.actions is not None or node.relations)
         if not observed:
             unread.append(token)
@@ -185,7 +206,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
         )
         for key, relation in node.relations.items():
             issues = issue_index.applicable((*base, "relations", key))
-            state = status_record(issues)
+            state = status_record(issues, encoded_issues)
             edge = dict(
                 source=token,
                 property=key,
@@ -210,7 +231,7 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
             if relation.total is not None:
                 edge["total"] = relation.total
             if issues:
-                edge["issues"] = [data(issue) for issue in issues]
+                edge["issues"] = [encoded_issues[id(issue)] for issue in issues]
                 if state.get("detail"):
                     edge["detail"] = state["detail"]
                 continuation = next(
@@ -238,5 +259,5 @@ def observation_index(observation: NativeObservation) -> dict[str, Any]:
             if len(issue.path) < 2 or issue.path[0] != "nodes"
         ],
         coordinateSpaces=data(observation.coordinate_spaces),
-        issues=[data(issue) for issue in observation.issues],
+        issues=[encoded_issues[id(issue)] for issue in observation.issues],
     )

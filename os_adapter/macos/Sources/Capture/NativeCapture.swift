@@ -26,6 +26,17 @@ import ApplicationServices
     private let sharing: WindowSharing
     private var entries = [String: Entry]()
     private var order = [String]()
+    private var retainedReferences = Set<String>()
+
+    /// A delivered image remains usable while the SDK still presents its map.
+    /// The ordinary history budget applies only to unreferenced observations;
+    /// reading another window must not expire an unchanged delivered image.
+    nonisolated static func retirements(
+        _ order: [String], retaining references: Set<String>, historyLimit: Int = 64
+    ) -> Set<String> {
+        let unreferenced = order.filter { !references.contains($0) }
+        return Set(unreferenced.prefix(max(0, unreferenced.count - historyLimit)))
+    }
 
     init(directory: NativeDirectory, sharing: WindowSharing) {
         self.directory = directory
@@ -65,7 +76,9 @@ import ApplicationServices
         return Input(entry: current.entry, mapping: mapping, blocked: current.blocked)
     }
 
-    func capture(binding: [String: Any], maxDimension: Int) async throws -> [String: Any] {
+    func capture(
+        binding: [String: Any], maxDimension: Int, retainedCaptures: Set<String>? = nil
+    ) async throws -> [String: Any] {
         let instance = try string(binding["instance"], label: "instance")
         let root = try string(binding["rootWindow"], label: "rootWindow")
         let scope = try string(binding["surface"], label: "surface")
@@ -111,7 +124,14 @@ import ApplicationServices
             binding: imageBinding, surface: selected, screen: screen, mapping: captured.window,
             windowAttributes: attributes)
         order.append(captured.image.id)
-        while order.count > 64 { entries.removeValue(forKey: order.removeFirst()) }
+        if let retainedCaptures {
+            // Only already-issued native references can hold mappings alive.
+            // An empty current delivery set explicitly releases earlier pins.
+            retainedReferences = retainedCaptures.intersection(entries.keys)
+        }
+        let retired = Self.retirements(order, retaining: retainedReferences)
+        order.removeAll { retired.contains($0) }
+        for id in retired { entries.removeValue(forKey: id) }
         let frame = captured.window.frame
         return [
             "kind": "capture", "binding": binding, "observed": interval.observation(),

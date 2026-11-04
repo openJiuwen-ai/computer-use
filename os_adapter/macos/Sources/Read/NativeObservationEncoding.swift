@@ -67,7 +67,10 @@ enum NativeObservationEncoding {
         return result
     }
 
-    private static func property(_ key: String, value: Record?, status: Record?, namespace: String = "macos.ax")
+    private static func property(
+        _ key: String, value: Record?, status: Record?, namespace: String = "macos.ax",
+        metadata: inout NativeReadMetadataPool
+    )
         -> Record
     {
         var property: Record = ["key": [namespace, key], "value": value ?? NSNull()]
@@ -77,13 +80,14 @@ enum NativeObservationEncoding {
             value == nil
             ? (["absent", "unsupported", "not_read", "error", "timeout", "unavailable", "redacted"].contains(original)
                 ? original : "error") : "value"
-        property["read"] = ["complete": false, "issues": [issue(status)]]
+        property["read"] = ["complete": false, "issues": [metadata.encodeIssue(status) { issue(status) }]]
         return property
     }
 
     static func encode(_ batch: Record) -> Record {
         precondition(["nodes", "relation"].contains(batch["kind"] as? String ?? ""))
         let records = batch["nodes"] as? [Record] ?? []
+        var metadata = NativeReadMetadataPool()
         let relations = batch["relations"] as? [Record] ?? (batch["relation"] as? Record).map { [$0] } ?? []
         var nodes = [String: Record](), order = [String]()
         func declare(_ id: String) {
@@ -97,7 +101,9 @@ enum NativeObservationEncoding {
         }
         func declareReferences(_ raw: Any) {
             if let map = raw as? Record {
-                if map.count == 1, let id = map["ref"] as? String {
+                if let shared = metadata.resolved(map) {
+                    declareReferences(shared)
+                } else if map.count == 1, let id = map["ref"] as? String {
                     declare(id)
                 } else {
                     for item in map.values { declareReferences(item) }
@@ -125,7 +131,7 @@ enum NativeObservationEncoding {
             for key in record["requestedFields"] as? [String] ?? [] {
                 let typed = values[key] ?? rawValues[key].map(scalar)
                 if let typed { declareReferences(typed) }
-                var entry = property(key, value: typed, status: statuses[key])
+                var entry = property(key, value: typed, status: statuses[key], metadata: &metadata)
                 if var read = reads[key] {
                     if let failure = entry["read"] as? Record { read.merge(failure) { _, failure in failure } }
                     entry["read"] = read
@@ -136,7 +142,8 @@ enum NativeObservationEncoding {
             // swiftlint:disable:next force_cast
             let actions = record["actions"] as! Record
             let catalogue = scalar(actions["items"] ?? [Record]())
-            var actionProperty = property("actions", value: catalogue, status: nil, namespace: "toolkit")
+            var actionProperty = property(
+                "actions", value: catalogue, status: nil, namespace: "toolkit", metadata: &metadata)
             var actionDetails = actions
             actionDetails.removeValue(forKey: "items")
             actionProperty["read"] = [
@@ -190,12 +197,13 @@ enum NativeObservationEncoding {
             }
             // The acquisition encoder constructs this internal field with the asserted type.
             // swiftlint:disable:next force_cast
-            var entry = property(relation["property"] as! String, value: payload, status: hasPayload ? nil : relation)
+            var entry = property(
+                relation["property"] as! String, value: payload, status: hasPayload ? nil : relation, metadata: &metadata)
             if hasPayload, payload == nil { entry["state"] = "not_read" }
             var read: Record = ["complete": ["complete", "absent"].contains(state), "details": details(meta)]
             if let nativeAPI { read["api"] = nativeAPI }
             if !["complete", "absent", "unsupported"].contains(state) || relation["wrappedNativeValue"] != nil {
-                read["issues"] = [issue(relation)]
+                read["issues"] = [metadata.encodeIssue(relation) { issue(relation) }]
             }
             if let issues = read["issues"] { declareReferences(issues) }
             entry["read"] = read
@@ -231,9 +239,11 @@ enum NativeObservationEncoding {
                 ((observed["completedAt"] as! NSNumber).int64Value * 1_000_000)
             ], "complete": reasons.isEmpty, "issues": reasons.map { ["reason": $0] }, "details": details(meta)
         ]
+        let publishedNodes = order.map { metadata.encodeNode(nodes[$0]!) }
+        let publishedRead = metadata.encodeRead(read)
         return [
             "kind": "observation", "session": batch["session"]!, "platform": "macos", "roots": roots,
-            "nodes": order.map { nodes[$0]! }, "read": read
+            "nodes": publishedNodes, "read": publishedRead, "metadataValues": metadata.values
         ]
     }
 }

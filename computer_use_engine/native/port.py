@@ -116,6 +116,13 @@ class NativePort(Protocol):
     ) -> "Record":
         pass
 
+    async def app_changes(
+        self, operation: str, target: Binding, application: str, timeout_ms: int,
+        *, after: str | None = None, delay_ms: int | None = None,
+    ) -> "Record":
+        """Read or wait for the observed App generation, independently of old Windows."""
+        pass
+
     async def relation(
         self, operation: str, target: Binding, relation_property: str, cursor: str | None, limit: int, timeout_ms: int
     ) -> "DriverObservationReply":

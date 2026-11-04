@@ -231,6 +231,20 @@ or incomplete, not that nothing happened. Even complete coverage describes only
 that native execution step; it excludes separate reads, later session cleanup,
 and the application's asynchronous consequences.
 
+The execution pipeline creates one 1000ms budget per SDK operation. Nested lookup,
+preparation, native requests, post-action observation and delivery preparation share
+that clock. Returned native outcomes are retained before subsequent observation or
+cleanup. `sdk_operation_end` diagnostics record elapsed time, overruns, observation
+completeness and gaps. MCP metadata separately records the whole tool call, including
+startup, multiple SDK operations and final delivery.
+
+On macOS, post-action observation can use application change notifications to collect
+new windows or missing components within the original budget. Image-only observation
+does not initialize accessibility for this feature. Fixed windows retain their own
+delivered image mappings; hiding and reappearing are distinct from destruction.
+These notification, native input and capture improvements currently target macOS;
+the corresponding Windows/Linux implementations and desktop validation are follow-up work.
+
 ### Option 2: integrate DeepAgent
 
 Use Python 3.12 or 3.13 and install the agent dependencies:

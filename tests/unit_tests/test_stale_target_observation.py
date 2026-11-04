@@ -78,11 +78,12 @@ def test_preflight_window_loss_is_inside_observation_boundary():
         old = snapshot["window_identity"]
         replacement = window("replacement")
         current = directory(replacement)
+        current["endedWindows"] = [{"window": old.window, "surface": old.surface, "instance": old.instance}]
         retain_observation_data(observation, (), (), directory=current)
 
         async def close_during_refresh(_controller, owner):
             assert owner is app
-            instance.reconcile(current, DirectoryMembership(True, ()))
+            instance.reconcile(current, DirectoryMembership(True, (), (old,)))
 
         with patch(
             "computer_use.interaction.write.request.passes.validate_element_scope.refresh",

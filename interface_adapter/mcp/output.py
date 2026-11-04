@@ -8,14 +8,21 @@ ObservationPresenter and per-execution ObservationOutput; co-location does not
 share their state across processes. Delivered baselines persist for this session.
 """
 
+from computer_use.client.images import image_output_scope
 from computer_use.identity import WeakIdentityMap
 from computer_use.interaction.read.delivery.baseline.model import BaselineInput
+from computer_use.interaction.read.delivery.baseline.passes.assemble_baseline import stage as assemble_baseline
+from computer_use.interaction.read.delivery.baseline.passes.publish_observation import stage as publish_observation
 from computer_use.interaction.read.delivery.baseline.pipeline import BaselinePublicationPipeline
 from computer_use.interaction.read.delivery.diff.baseline import ComparisonDocument
 from computer_use.interaction.read.delivery.diff.model import DeliverySelection
 from computer_use.interaction.read.delivery.diff.pipeline import DeliverySelectionPipeline
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
+from computer_use.interaction.read.presentation.rendering.document import prepare_document
+from computer_use.interaction.read.presentation.rendering.document.formatting import format_document
 from computer_use.json import dumps, utf8
+from computer_use.pipeline.core import Control
+from computer_use.session.observation_data import observation_data
 
 from .baseline_store import DeliveredBaselineStore
 
@@ -102,7 +109,54 @@ class ObservationPresenter:
     def close(self):
         self._baselines.close()
 
+    def prepare(self, observation, budget=None):
+        """Prepare source chunks and small baseline drafts, without delivery authority.
+
+        The actual diff is deliberately not retained here: pending captures may
+        later be superseded or flushed in another valid combination. Complete
+        compact nodes allow that decision without another full renderer after
+        the originating SDK operation has ended.
+        """
+        control = Control(
+            remaining=budget.remaining if budget is not None else None,
+            cancelled=budget.cancelled if budget is not None else None,
+            call_id=budget.operation_id if budget is not None else None,
+        )
+
+        def checkpoint():
+            if budget is not None:
+                budget.checkpoint()
+
+        checkpoint()
+        document = observation.get("document")
+        prepared = (
+            prepare_document(document, public_api=observation.get("publicApi", False), control=control)
+            if isinstance(document, DisplayDocument)
+            else None
+        )
+        if prepared is not None and any(
+            isinstance(part, DisplayTree) and part.details for part in prepared.request.document.parts
+        ):
+            # Explicit diagnostics must also be complete before delivery. Normal
+            # full reads request the compact tree and keep raw details deferred.
+            format_document(prepared.request.document, prepared.snapshots, public_api=observation.get("publicApi", False))
+        checkpoint()
+        baselines = []
+        for value in self.baseline_inputs(observation):
+            checkpoint()
+            baselines.append(assemble_baseline().run(value, control))
+        checkpoint()
+        return dict(
+            observation,
+            presentationDraft=prepared,
+            baselineDrafts=tuple(baselines),
+            draftState=observation["state"],
+            operationBudget=budget,
+        )
+
     def text(self, observation):
+        if "draftState" in observation and observation["draftState"] is not observation["state"]:
+            raise ValueError("Prepared delivery belongs to another captured observation")
         trees = self.trees(observation)
         previous = self._baselines.get(self.key(observation)) if not trees else None
         if trees:
@@ -127,9 +181,20 @@ class ObservationPresenter:
         return DeliverySelectionPipeline().run(DeliverySelection(observation, previous))
 
     def delivered(self, observation):
+        if "baselineDrafts" in observation:
+            if observation["draftState"] is not observation["state"]:
+                raise ValueError("Prepared baseline belongs to another captured observation")
+            for draft in observation["baselineDrafts"]:
+                publish_observation(store=self).run(draft)
+            return
+        for value in self.baseline_inputs(observation):
+            BaselinePublicationPipeline(self).run(value)
+
+    def baseline_inputs(self, observation):
+        """Describe exact comparison scopes without committing any of them."""
         trees = self.trees(observation)
         if not trees:
-            BaselinePublicationPipeline(self).run(BaselineInput(self.key(observation), observation))
+            yield BaselineInput(self.key(observation), observation)
             return
         for tree in trees:
             refs = {ref: observation["refs"][ref] for ref in tree.prepared.snapshot.refs if ref in observation["refs"]}
@@ -145,7 +210,7 @@ class ObservationPresenter:
                 if coverage is not None
                 else None,
             )
-            BaselinePublicationPipeline(self).run(BaselineInput(self.tree_key(observation, tree), component))
+            yield BaselineInput(self.tree_key(observation, tree), component)
 
     def publish_baseline(self, draft):
         baseline = {key: value for key, value in draft.baseline.items() if key != "source"}
@@ -158,12 +223,49 @@ class ObservationOutput:
         self._pending = {}
 
     def observe(self, observation):
+        # App/Window aliases and tree/both views can describe the exact same
+        # native components. Supersede only fully covered, unprinted captures;
+        # a narrower view cannot erase a popup, retained image, gap or explicit
+        # complete view. before-write/explicit-print boundaries still flush.
+        incoming = {self.presenter.tree_key(observation, tree) for tree in self.presenter.trees(observation)}
+        for previous_key, previous in tuple(self._pending.items()):
+            if self.superseded(previous, observation, incoming):
+                self._pending.pop(previous_key)
         key = self.presenter.key(observation)
+        if observation.get("full") and observation["view"] != "desktop":
+            key = key, id(observation.get("sourceState", observation["state"]))
+        previous = self._pending.get(key)
+        if previous is not None and self.presenter.trees(previous):
+            # Same public scope is not proof that the new capture includes all
+            # of its former native components (for example, a transient popup).
+            old_key = key, id(previous.get("sourceState", previous["state"]))
+            self._pending[old_key] = self._pending.pop(key)
         if key not in self._pending and len(self._pending) >= 32:
             raise RuntimeError(
                 "Too many observation scopes in one call; inspect the collected results before reading more."
             )
         self._pending[key] = observation
+
+    def superseded(self, previous, observation, incoming):
+        trees = self.presenter.trees(previous)
+        if (
+            not trees or previous.get("full") or previous["state"].get("preparation")
+            or previous.get("presentationGap") or observation.get("presentationGap")
+        ):
+            return False
+        data = observation_data(previous.get("sourceState", previous["state"]))
+        if data is not None and (data["partial"] or data["gaps"]):
+            return False
+        if not all(self.presenter.tree_key(previous, tree) in incoming for tree in trees):
+            return False
+        png = previous["state"].get("screenshot")
+        if png is None:
+            return True
+        replacement = observation["state"].get("screenshot")
+        if replacement is png:
+            return True
+        scope = image_output_scope(png)
+        return replacement is not None and scope is not None and image_output_scope(replacement) == scope
 
     def invalidate(self, source):
         self.presenter.invalidate(source)
@@ -183,8 +285,11 @@ class ObservationOutput:
 
     def flush(self, emit, emit_image=None):
         for observation in self._pending.values():
-            emit(self.presenter.text(observation), observation)
-            self.presenter.delivered(observation)
+            if gap := observation.get("presentationGap"):
+                emit(gap, observation)
+            else:
+                emit(self.presenter.text(observation), observation)
+                self.presenter.delivered(observation)
             if (
                 observation["view"] in ("window", "desktop")
                 and observation["state"].get("screenshot") is not None

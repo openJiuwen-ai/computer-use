@@ -104,7 +104,8 @@ import ApplicationServices
     }
 
     private func refresh(
-        _ branches: [Branch], check: () throws -> Void, onPreparation: (String) -> Void, onCleanupUnknown: () -> Void,
+        _ branches: [Branch], check: @MainActor () throws -> Void, onPreparation: (String) -> Void,
+        onCleanupUnknown: () -> Void,
         onNativePreparation: (NativePreparationEffect) -> Void
     ) async throws {
         guard let process = NativeProcessIdentity.read(application.processIdentifier) else {
@@ -115,7 +116,7 @@ import ApplicationServices
             for branch in branches {
                 try check()
                 try validatePath()
-                try BackgroundTarget.validateReleasedInput()
+                try await NativePhysicalInput.wait(.menuTracking, check: check)
                 guard try receiverReady(), AXAccess.read(branch.opener, kAXEnabledAttribute).value as? Bool != false,
                     declares(kAXPressAction, on: branch.opener), declares(kAXCancelAction, on: branch.menu)
                 else {
@@ -162,7 +163,6 @@ import ApplicationServices
         try check()
         let branches = try branches()
         guard let window else { return }
-        try BackgroundTarget.validateReleasedInput()
         if foreground {
             guard let id = BackgroundEvents.nativeWindowID(window) else {
                 throw DriverError(
@@ -196,7 +196,6 @@ import ApplicationServices
             func set(_ object: AXUIElement, _ attribute: String, _ value: CFTypeRef) throws -> Bool {
                 guard AXAccess.writable(object, attribute).value == true else { return false }
                 try check()
-                try BackgroundTarget.validateReleasedInput()
                 onPreparation("menu context " + attribute)
                 onNativePreparation(
                     .init(kind: .windowSelection, phase: .willSend, detail: "menu context " + attribute, window: nil))
@@ -231,7 +230,6 @@ import ApplicationServices
                 if observeOutcome { onFocusOutcome(outcome) }
             } catch let error as DriverError where error.code == .inputUnavailable {
                 try check()
-                try BackgroundTarget.validateReleasedInput()
                 if !foreground { throw NativePreparationUnavailable(description: error.description) }
                 throw error
             }
@@ -283,6 +281,7 @@ import ApplicationServices
             throw DriverError("the selected menu item no longer opens a submenu", code: .inputUnavailable)
         }
         if isOpener {
+            try await NativePhysicalInput.wait(.menuTracking, check: check)
             // A requested submenu needs its live ancestor menus. Opening a
             // detached item can leave AppKit in an invisible tracking loop.
             // These opens are part of the requested effect, not temporary
@@ -291,7 +290,7 @@ import ApplicationServices
             for branch in try branches() {
                 try check()
                 try validatePath()
-                try BackgroundTarget.validateReleasedInput()
+                try await NativePhysicalInput.wait(.menuTracking, check: check)
                 guard try receiverReady(), AXAccess.read(branch.opener, kAXEnabledAttribute).value as? Bool != false,
                     declares(kAXPressAction, on: branch.opener)
                 else { throw DriverError("the requested menu path changed while opening", code: .inputUnavailable) }

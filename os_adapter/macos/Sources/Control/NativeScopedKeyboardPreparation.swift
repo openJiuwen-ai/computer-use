@@ -10,7 +10,6 @@ import ApplicationServices
         _ scoped: NativeScopedKeyboardDelivery, check: () throws -> Void, onPreparation: (String) -> Void
     ) throws {
         try check()
-        try BackgroundTarget.validateReleasedInput()
         try scoped.requireCurrentBoundary()
         // A popover or attached editor retains its smaller original surface;
         // raising/selecting a parent document could dismiss that current UI.

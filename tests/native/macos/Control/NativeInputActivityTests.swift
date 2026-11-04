@@ -42,20 +42,27 @@ import Foundation
         let before = snapshots
         precondition(activity.finish(dispatch: "dispatched", cleanup: "complete") as NSDictionary == impact as NSDictionary)
         precondition(snapshots == before && log.last?["phase"] as? String == "end")
+        precondition(log.last?["foregroundChanged"] as? String == "yes",
+                     "end log must retain transient foreground change with the same meaning as the receipt")
+        precondition(log.last?["foregroundNetChanged"] as? String == "no",
+                     "returning to the initial app has no net change but still changed foreground in between")
         let receipt = NativeExecutionReceipt(target: [:], onEffect: {})
         receipt.dispatch = "partial"
         receipt.impact = impact
         precondition((receipt.wire["impact"] as? NSDictionary) == impact as NSDictionary)
         precondition(receipt.wire["dispatch"] as? String == "partial", "impact must not overwrite execution progress")
 
+        var unknownLog = [[String: Any]]()
         let unknown = NativeInputActivity(
             operation: "unknown", step: 1, command: "native_action", intent: "action", target: [:],
-            globalInputAllowed: false, snapshot: { [:] }, emit: { _ in })
+            globalInputAllowed: false, snapshot: { [:] }, emit: { unknownLog.append($0) })
         let unavailable = unknown.finish(dispatch: "notDispatched", cleanup: "complete")
         precondition(unavailable["foregroundChanged"] as? String == "unknown")
         precondition(unavailable["coverage"] as? String == "complete")
         precondition(unavailable["clipboardRestoration"] as? String == "notUsed")
         precondition(unavailable["foregroundRestoration"] as? String == "notUsed")
+        precondition(unknownLog.last?["foregroundNetChanged"] as? String == "unknown",
+                     "missing PID evidence cannot prove no net foreground change")
 
         let many = NativeInputActivity(
             operation: "many", step: 1, command: "native_action", intent: "action", target: [:],

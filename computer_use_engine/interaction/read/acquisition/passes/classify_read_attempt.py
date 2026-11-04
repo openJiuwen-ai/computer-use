@@ -31,7 +31,7 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
     """Select the next collection action from the scope recheck and component evidence.
 
     A first attempt may refresh a confirmed changed scope, stale image geometry, or eligible
-    initializing/busy content when budget remains. Return that decision or keep the
+    busy or positively unexposed content when budget remains. Return that decision or keep the
     collected components, annotating an unresolved scope change as a gap.
     """
     state, components = attempt.collected.state, attempt.collected.components
@@ -75,8 +75,7 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
             and target.node is not None
             and refreshable(components.tree)
             and (
-                state.initializing
-                or busy_nodes(components.tree)
+                busy_nodes(components.tree)
                 or limits["fields"] is None
                 and limits["max_depth"] is None
                 and window_content_unexposed(components.tree)

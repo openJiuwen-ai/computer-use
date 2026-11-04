@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedNode, RenderedSection
 
 if TYPE_CHECKING:
-    from typing import Any, Iterable
+    from collections.abc import Callable, Iterable
+    from typing import Any
 
     from computer_use.interaction.read.presentation.records import NodeView, RenderedTree
     from computer_use.protocol.records import FactCollection, FactNode
@@ -39,22 +40,35 @@ def literal(value: Any) -> str:
     return re.sub(r"[\x7f-\x9f\ud800-\udfff\u2028\u2029]", lambda match: f"\\u{ord(match[0]):04x}", encoded)
 
 
-def branch_references(root: NodeView, refs: Mapping[str, str]) -> tuple[str, ...]:
+def branch_references(
+    root: NodeView, refs: Mapping[str, str], *, checkpoint: Callable[[], object] | None = None
+) -> tuple[str, ...]:
     """Capture membership before calling a fallible presentation transform.
 
     Args:
         root: Root of the requested semantic view; native bindings remain separate.
         refs: Display-to-native identity map owned by the observation/session service.
+        checkpoint: Original call-budget check, consulted within bounded work batches.
     """
+    if checkpoint is not None:
+        checkpoint()
+    work = 0
     members, seen, pending = [], set(), [root]
     while pending:
+        work += 1
+        if checkpoint is not None and work % 128 == 0:
+            checkpoint()
         node = pending.pop()
         reference = node["ref"]
         if reference not in refs or reference in seen:
             raise ValueError("Invalid source-tree identity before presentation")
         seen.add(reference)
         members.append(reference)
-        pending.extend(reversed(node["children"]))
+        for child in reversed(node["children"]):
+            work += 1
+            if checkpoint is not None and work % 128 == 0:
+                checkpoint()
+            pending.append(child)
     return tuple(members)
 
 

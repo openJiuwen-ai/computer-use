@@ -76,4 +76,24 @@ enum AXIdentity {
         }
         return decoded
     }
+
+    /// One observation's full batch can establish identity without a second
+    /// getter. Only an intact native batch qualifies; malformed/failed batches
+    /// leave the caller's existing identity-read fallback available.
+    static func fromObservationBatch(
+        status: AXError, raw: CFArray?, fields: [String], catalogueStatus: AXError, catalogue: CFArray?
+    ) -> AXRead<ElementIdentity.Facts>? {
+        if catalogueStatus == .invalidUIElement || status == .invalidUIElement { return .invalid }
+        guard status == .success, let values = raw as? [Any], values.count == fields.count else { return nil }
+        let requested = positionRequest(ElementIdentity.keys, status: catalogueStatus, names: catalogue)
+        let indices = Dictionary(uniqueKeysWithValues: fields.enumerated().map { ($0.element, $0.offset) })
+        guard requested.keys.allSatisfy({ indices[$0] != nil }) else { return nil }
+        let selected = requested.keys.map { values[indices[$0]!] }
+        let decoded = decode(.success, selected as CFArray, keys: requested.keys)
+        if case .value(var facts) = decoded {
+            facts.absent.formUnion(requested.absent)
+            return .value(facts)
+        }
+        return decoded
+    }
 }

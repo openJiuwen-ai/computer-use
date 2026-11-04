@@ -7,19 +7,35 @@ from __future__ import annotations
 
 import base64
 import math
+from types import MappingProxyType
 from typing import Any, Mapping, NamedTuple
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 _SOURCES = {"macos": "macos.ax", "windows": "windows.uia", "linux": "linux.atspi"}
 _STATES = {"value", "absent", "unsupported", "not_read", "error", "timeout", "unavailable", "redacted"}
 _KINDS = {"element", "text_range", "text_marker", "text_marker_range", "native_value", "unknown"}
+_VALUE_REQUIRED = frozenset(("nativeType", "data"))
+_VALUE_OPTIONAL = frozenset(("metadata", "raw"))
+_READ_FIELDS = frozenset(("api", "producer", "cached", "intervalNs", "complete", "issues", "details"))
+_ISSUE_REQUIRED = frozenset(("reason",))
+_ISSUE_OPTIONAL = frozenset(("path", "detail", "nativeStatus", "continuation"))
+_PROPERTY_REQUIRED = frozenset(("key", "value"))
+_PROPERTY_OPTIONAL = frozenset(("state", "arguments", "read"))
+_METADATA_REFERENCE = frozenset(("metadataValue",))
+_EMPTY_FIELDS = frozenset()
 
 
-def record(value: Any, required: set[str], optional: set[str] = frozenset()) -> dict[str, Any]:
+def record(
+    value: Any, required: set[str] | frozenset[str], optional: set[str] | frozenset[str] = _EMPTY_FIELDS
+) -> dict[str, Any]:
     """Require one transport record with its declared fields."""
     # Exact types preserve scalar validation and identity contracts.
     # pylint: disable-next=unidiomatic-typecheck
-    if type(value) is not dict or not required <= value.keys() or value.keys() - required - optional:
+    if type(value) is not dict or not required.issubset(value):
+        raise ValueError("driver observation: unexpected or missing record fields")
+    # Most native values have exactly their required fields. Avoid allocating
+    # two transient sets for every scalar in a large fact batch.
+    if len(value) != len(required) and any(key not in required and key not in optional for key in value):
         raise ValueError("driver observation: unexpected or missing record fields")
     return value
 
@@ -39,6 +55,15 @@ def array(value: Any) -> list[Any]:
     return value
 
 
+def _freeze_metadata(value: Any) -> Any:
+    """Detach one validated pool value into request-local immutable containers."""
+    if type(value) is dict:
+        return MappingProxyType({key: _freeze_metadata(item) for key, item in value.items()})
+    if type(value) is list:
+        return tuple(_freeze_metadata(item) for item in value)
+    return value
+
+
 class DecodedProperty(NamedTuple):
     """Decoded field identity, payload, status, arguments, and read evidence."""
 
@@ -53,11 +78,12 @@ class DriverWire:
     """Validate a bounded response and decode transient query evidence.
 
     The original JSON remains owned by this call. Decoded values are ordinary
-    Python values used by the query boundary and the platform normalizer.
+    Python values used by the query boundary and the platform normalizer. Shared
+    ReadMetadata pool entries are detached, immutable request-local values.
     """
 
     def __init__(self, value: Any, *, semantic_values: bool = False) -> None:
-        self.raw = record(value, {"kind", "session", "platform", "roots", "nodes", "read"})
+        self.raw = record(value, {"kind", "session", "platform", "roots", "nodes", "read"}, {"metadataValues"})
         if (
             self.raw["kind"] != "observation"
             or not isinstance(self.raw["platform"], str)
@@ -86,6 +112,18 @@ class DriverWire:
             raise ValueError("driver observation: missing or duplicate root")
         if any(self.nodes[x]["kind"] != "element" for x in roots):
             raise ValueError("driver observation: an observation root must be an element")
+        # Entries contain full NativeValue records, never metadata references.
+        # Decode each once after all native node references have been declared;
+        # shared read slots then perform only the exact index/budget check.
+        self._metadata_depth = -1
+        metadata_values, metadata_depths = [], []
+        for item in array(self.raw["metadataValues"]) if "metadataValues" in self.raw else ():
+            self._metadata_depth = 0
+            metadata_values.append(_freeze_metadata(self.value(item)))
+            metadata_depths.append(self._metadata_depth)
+        self._metadata_depth = -1
+        self.metadata_values = tuple(metadata_values)
+        self.metadata_depths = tuple(metadata_depths)
         self.read = self.read_info(self.raw["read"])
         self.details = self.read["details"]
         self.interval = self.read.get("intervalNs")
@@ -94,26 +132,51 @@ class DriverWire:
         text(self.details["observation_id"])
         text(self.details.get("surface"))
 
-    def pairs(self, values: Any, depth: int = 0) -> list[tuple[str, Any]]:
+    def pairs(self, values: Any, depth: int = 0, *, metadata_values: bool = False) -> list[tuple[str, Any]]:
         """Decode ordered metadata fields while rejecting malformed pairs."""
         result = []
+        decode = self.metadata_value if metadata_values else self.value
         for pair in array(values):
             # pylint: disable-next=unidiomatic-typecheck
             if type(pair) is not list or len(pair) != 2:
                 raise ValueError("driver observation: invalid metadata pair")
-            result.append((text(pair[0]), self.value(pair[1], depth + 1)))
+            result.append((text(pair[0]), decode(pair[1], depth + 1)))
         return result
+
+    def metadata_value(self, value: Any, depth: int = 0) -> Any:
+        """Resolve a pool index only in a declared ReadMetadata NativeValue slot."""
+        if type(value) is dict and "metadataValue" in value:
+            self.remaining -= 1
+            if self.remaining < 0 or depth > 96:
+                raise ValueError("driver observation: value budget exceeded")
+            index = record(value, _METADATA_REFERENCE)["metadataValue"]
+            if type(index) is not int or not 0 <= index < len(self.metadata_values):
+                raise ValueError("driver observation: invalid metadata value reference")
+            if depth + self.metadata_depths[index] > 96:
+                raise ValueError("driver observation: value budget exceeded")
+            return self.metadata_values[index]
+        return self.value(value, depth)
 
     def value(self, value: Any, depth: int = 0) -> Any:
         """Decode one wire value to request-local query evidence."""
         self.remaining -= 1
         if self.remaining < 0 or depth > 96:
             raise ValueError("driver observation: value budget exceeded")
-        v = record(value, {"nativeType", "data"}, {"metadata", "raw"})
+        if self._metadata_depth >= 0 and depth > self._metadata_depth:
+            self._metadata_depth = depth
+        v = record(value, _VALUE_REQUIRED, _VALUE_OPTIONAL)
         native_type = text(v["nativeType"])
-        metadata = dict(self.pairs(v.get("metadata", []), depth + 1))
-        raw_bytes = self.bytes(v["raw"]) if "raw" in v else None
         data = v["data"]
+        scalar = type(data)
+        if "metadata" not in v and "raw" not in v and native_type != "CFDate":
+            if scalar in (str, bool, int, type(None)):
+                return data
+            if scalar is float:
+                if not math.isfinite(data):
+                    raise ValueError("driver observation: special float needs a tag")
+                return data
+        metadata = dict(self.pairs(v["metadata"], depth + 1)) if "metadata" in v else {}
+        raw_bytes = self.bytes(v["raw"]) if "raw" in v else None
         # pylint: disable-next=unidiomatic-typecheck
         if type(data) is dict:
             if len(data) != 1:
@@ -191,7 +254,7 @@ class DriverWire:
     def item(self, value: Any, depth: int) -> Any:
         """Keep an unsuccessful collection slot at its original index."""
         # pylint: disable-next=unidiomatic-typecheck
-        if type(value) is dict and set(value) == {"issue"}:
+        if type(value) is dict and len(value) == 1 and "issue" in value:
             return {"issue": self.issue(value["issue"], depth + 1)}
         return self.value(value, depth + 1)
 
@@ -205,9 +268,9 @@ class DriverWire:
         except ValueError as error:
             raise ValueError("driver observation: invalid base64 data") from error
 
-    def issue(self, value: Any, depth: int = 0) -> dict[str, Any]:
+    def issue(self, value: Any, depth: int = 0, *, metadata_values: bool = False) -> dict[str, Any]:
         """Decode acquisition status while retaining its existing query meaning."""
-        v = record(value, {"reason"}, {"path", "detail", "nativeStatus", "continuation"})
+        v = record(value, _ISSUE_REQUIRED, _ISSUE_OPTIONAL)
         result = {"reason": text(v["reason"])}
         if "path" in v:
             path = array(v["path"])
@@ -220,14 +283,15 @@ class DriverWire:
             result["detail"] = v["detail"]
         for key in ("nativeStatus", "continuation"):
             if v.get(key) is not None:
-                result[key] = self.value(v[key], depth + 1)
+                decode = self.metadata_value if metadata_values else self.value
+                result[key] = decode(v[key], depth + 1)
         return result
 
     def read_info(self, value: Any) -> dict[str, Any]:
         """Decode read scope and coverage separately from element properties."""
         if value is None:
             return {"details": {}, "issues": []}
-        v = record(value, set(), {"api", "producer", "cached", "intervalNs", "complete", "issues", "details"})
+        v = record(value, _EMPTY_FIELDS, _READ_FIELDS)
         for key in ("api", "producer"):
             if v.get(key) is not None:
                 text(v[key])
@@ -242,13 +306,13 @@ class DriverWire:
                 raise ValueError("driver observation: invalid capture interval")
         return {
             **v,
-            "details": dict(self.pairs(v.get("details", []))),
-            "issues": [self.issue(item) for item in array(v.get("issues", []))],
+            "details": dict(self.pairs(v["details"], metadata_values=True)) if "details" in v else {},
+            "issues": [self.issue(item, metadata_values=True) for item in array(v["issues"])] if "issues" in v else [],
         }
 
     def property(self, raw: Any) -> DecodedProperty:
         """Validate a field result and decode its query-local components."""
-        prop = record(raw, {"key", "value"}, {"state", "arguments", "read"})
+        prop = record(raw, _PROPERTY_REQUIRED, _PROPERTY_OPTIONAL)
         key = array(prop["key"])
         if len(key) != 2 or type(key[1]) not in (str, int):
             raise ValueError("driver observation: invalid property key")
@@ -259,7 +323,7 @@ class DriverWire:
             (text(key[0]), key[1]),
             self.value(prop["value"]) if prop["value"] is not None else None,
             state,
-            [self.value(x) for x in array(prop.get("arguments", []))],
+            [self.value(x) for x in array(prop["arguments"])] if "arguments" in prop else [],
             self.read_info(prop.get("read")),
         )
 
@@ -273,11 +337,11 @@ def field_status(state: str, read: Mapping[str, Any]) -> dict[str, Any] | None:
     else:
         return None
     for issue in read.get("issues", ()):
-        if isinstance(issue.get("nativeStatus"), dict):
+        if isinstance(issue.get("nativeStatus"), Mapping):
             result.update(issue["nativeStatus"])
         if issue.get("detail") is not None:
             result.setdefault("detail", issue["detail"])
-        if isinstance(issue.get("continuation"), dict):
+        if isinstance(issue.get("continuation"), Mapping):
             result.update(issue["continuation"])
     return result
 
@@ -337,7 +401,7 @@ def relation_record(
     membership = details.get("membershipObservedAt")
     if membership is not None:
         if (
-            not isinstance(membership, dict)
+            not isinstance(membership, Mapping)
             or set(membership) != {"id", "startedAt", "completedAt"}
             or not isinstance(membership["id"], str)
             or not membership["id"]
@@ -452,7 +516,7 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
             }
         )
     requested_relations = wire.details.get("requested_relations", [])
-    if not isinstance(requested_relations, list) or any(not isinstance(x, str) for x in requested_relations):
+    if not isinstance(requested_relations, (list, tuple)) or any(not isinstance(x, str) for x in requested_relations):
         raise ValueError("driver observation: invalid requested relationships")
     seen = set()
     for relation in relations:
@@ -475,7 +539,7 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
         "roots": list(wire.raw["roots"]),
         "nodes": rows,
         "relations": relations,
-        "requestedRelations": requested_relations,
+        "requestedRelations": list(requested_relations),
         "unread": unread,
         "stopReasons": [issue.get("detail") or issue["reason"] for issue in wire.read["issues"]],
         **({"changeToken": wire.details["change_token"]} if "change_token" in wire.details else {}),

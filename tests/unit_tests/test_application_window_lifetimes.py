@@ -2,10 +2,9 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-
 from computer_use.client.computer import App, computer_for_controller
 from computer_use.client.factory import session_controller
 from computer_use.errors import ComputerUseError
@@ -14,6 +13,7 @@ from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Binding, Knowledge
 from computer_use.native.scopes import RunningApplication
 from computer_use.session.events import observation_delivered, set_observation_handler
+from computer_use.session.interface_images import ImagePiece, InterfaceImage, signature
 from computer_use.session.interfaces import WindowIdentity, WindowLifetime
 from computer_use.session.state import AppState
 from computer_use.session.windows import WindowReferences
@@ -35,7 +35,7 @@ def surface(key, *, scope=None, parent=None, accessible=True, parent_state=None)
     )
 
 
-def directory(*items, focus="a", partial=False, application="editor"):
+def directory(*items, focus="a", partial=False, application="editor", ended=()):
     return dict(
         kind="surfaces",
         session="session",
@@ -46,6 +46,7 @@ def directory(*items, focus="a", partial=False, application="editor"):
         focusedWindow=focus,
         stopReasons=["incomplete"] if partial else [],
         rootDiscoveryComplete=not partial,
+        endedWindows=[{key: item[key] for key in ("window", "instance", "surface")} for item in ended],
         provider=dict(status="alreadyEnabled", attribute=None, writeStatus=None),
     )
 
@@ -103,7 +104,7 @@ def test_closing_display_primary_keeps_app_and_independent_window_alive():
     app._instance.input_context = identity
     app._instance.observed.update(("a", "b"))
     snapshot = dict(binding=Binding("session", "owner:a", "a", "surface:a", "node:a"), window_identity=identity)
-    adopt(controller, app, directory(surface("b"), focus="b"))
+    adopt(controller, app, directory(surface("b"), focus="b", ended=(surface("a"),)))
     validate_session(controller, app)
     validate_session(controller, b)
     for operation in (
@@ -162,7 +163,7 @@ def test_retired_physical_alias_is_not_reused_for_new_owner_scope():
     controller, app = setup(surface("a"))
     number = ref(app, "a")
     old = app.window(number)
-    adopt(controller, app, directory(focus=None))
+    adopt(controller, app, directory(focus=None, ended=(surface("a"),)))
     helper = directory(surface("a", scope="new-process"), application="helper")
     fresh = int(next(iter(controller.interfaces.windows.register_directory(helper))))
     assert fresh != number
@@ -178,6 +179,34 @@ def test_new_lifetime_in_same_native_slot_has_new_reference():
     changed = registry.register_directory(directory(surface("a", scope="replacement")))
     assert set(first) != set(changed)
     assert registry.resolve(int(next(iter(first))), "session").identity.surface == "surface:a"
+
+
+def test_complete_onscreen_absence_reappears_with_same_reference_and_fixed_binding():
+    controller, app = setup()
+    number = ref(app, "a")
+    fixed = app.window(number)
+    identity, binding = WindowIdentity.of(surface("a")), fixed._window_identity
+    adopt(controller, app, directory(surface("b"), focus="b"))
+    assert app._instance.evidence[identity].lifetime is WindowLifetime.RETAINED
+    assert app._instance.evidence[identity].membership is Knowledge.UNKNOWN
+    adopt(controller, app, directory(surface("a"), surface("b"), focus="a"))
+    assert ref(app, "a") == number
+    assert app.window(number) is fixed
+    validate_session(controller, fixed)
+    assert fixed._window_identity == binding
+
+
+def test_positively_ended_identity_is_never_republished_but_new_lifetime_is():
+    registry = WindowReferences()
+    original = surface("a")
+    first = registry.register_directory(directory(original))
+    old = int(next(iter(first)))
+    registry.register_directory(directory(focus=None, ended=(original,)))
+    assert registry.register_directory(directory(original)) == {}
+    fresh = registry.register_directory(directory(surface("a", scope="recreated")))
+    assert int(next(iter(fresh))) != old
+    state = registry.application("session", "editor", "")
+    assert state.evidence[WindowIdentity.of(original)].lifetime is WindowLifetime.RETIRED
 
 
 def test_keyboard_pins_delivered_context_before_refresh_and_never_follows_focus():
@@ -212,7 +241,9 @@ def test_target_disappearing_during_refresh_cannot_fall_back_to_other_document()
     controller, app = setup()
     app._instance.input_context = WindowIdentity.of(app._instance.members["a"])
     app._instance.observed.add("a")
-    controller.reader.directory._query = AsyncMock(return_value=directory(surface("b"), focus="b"))
+    controller.reader.directory._query = AsyncMock(
+        return_value=directory(surface("b"), focus="b", ended=(surface("a"),))
+    )
     dispatch = AsyncMock()
     controller.interfaces.write = SimpleNamespace(arun=dispatch)
     with pytest.raises(ComputerUseError) as caught:
@@ -257,10 +288,9 @@ def test_exact_single_window_image_reuse_keeps_delivery_expiry_object():
     controller, app = setup(surface("a"))
     identity = WindowIdentity.of(app._instance.members["a"])
     target = Binding("session", "owner:a", "a", "surface:a", None, capture="capture")
-    piece = SimpleNamespace(window="a", image=SimpleNamespace(target=target, image=b"png"), box=(0, 0, 100, 80))
-    image = SimpleNamespace(expired=False, unavailable_mapping=False, pieces=(piece,), png=b"png", delivered=7)
-    with patch("computer_use.protocol.captures.capture_metadata", return_value={"width": 100, "height": 80}):
-        controller.interfaces.windows.retain_image(app._instance, image)
+    piece = ImagePiece("a", SimpleNamespace(target=target, image=b"png"), (0, 0, 100, 80))
+    image = InterfaceImage(b"png", (piece,), signature(app._instance.members), delivered=7)
+    controller.interfaces.windows.retain_image(app._instance, image)
     window = computer_for_controller(controller).window(ref(app, "a"))
     assert window._image is image
     assert app._instance.window_images[identity] is image
@@ -268,15 +298,21 @@ def test_exact_single_window_image_reuse_keeps_delivery_expiry_object():
     assert window._image.expired
 
 
-def test_composite_or_reframed_pixels_are_not_shared_as_window_coordinates():
-    controller, app = setup(surface("a"))
-    target = Binding("session", "owner:a", "a", "surface:a", None, capture="capture")
-    for box, png, count in [((3, 0, 100, 80), b"png", 1), ((0, 0, 100, 80), b"other", 1), ((0, 0, 100, 80), b"png", 2)]:
-        piece = SimpleNamespace(window="a", image=SimpleNamespace(target=target, image=b"png"), box=box)
-        image = SimpleNamespace(expired=False, unavailable_mapping=False, pieces=(piece,) * count, png=png)
-        with patch("computer_use.protocol.captures.capture_metadata", return_value={"width": 100, "height": 80}):
-            controller.interfaces.windows.retain_image(app._instance, image)
-        assert not app._instance.window_images
+def test_composite_bootstrap_preserves_displayed_canvas_and_restricts_window_scope():
+    controller, app = setup()
+    targets = [Binding("session", f"owner:{key}", key, f"surface:{key}", None, capture=key) for key in ("a", "b")]
+    pieces = tuple(
+        ImagePiece(key, SimpleNamespace(target=target, image=b"png"), (index * 100, 0, 100, 80))
+        for index, (key, target) in enumerate(zip(("a", "b"), targets))
+    )
+    image = InterfaceImage(b"whole-displayed-canvas", pieces, signature(app._instance.members), delivered=7)
+    controller.interfaces.windows.retain_image(app._instance, image)
+    window = computer_for_controller(controller).window(ref(app, "b"))
+    assert window._image.png is image.png
+    assert window._image.pieces == (pieces[1],)
+    assert window._image.pieces[0].box == (100, 0, 100, 80)
+    with pytest.raises(ComputerUseError, match="gap outside"):
+        window._image.hit((20, 30))
 
 
 def test_fixed_window_keyboard_uses_delivered_modal_without_following_app_context():
@@ -293,7 +329,7 @@ def test_fixed_window_keyboard_uses_delivered_modal_without_following_app_contex
     assert target == Binding("session", "owner:sheet", "sheet", "surface:sheet", None)
     assert controller.interfaces.keyboard_context(app).root_window == "b"
     assert window._window_identity == original
-    adopt(controller, app, directory(surface("b"), child, focus="b"))
+    adopt(controller, app, directory(surface("b"), child, focus="b", ended=(surface("a"),)))
     with pytest.raises(ComputerUseError, match="no longer exists"):
         controller.interfaces.keyboard_context(window)
 
@@ -338,19 +374,21 @@ def test_modal_receiver_relationship_is_rechecked_after_target_pin():
 def image_for(key, marker):
     pixels = marker.encode()
     target = Binding("session", f"owner:{key}", key, f"surface:{key}", None, capture=marker)
-    piece = SimpleNamespace(window=key, image=SimpleNamespace(target=target, image=pixels), box=(0, 0, 100, 80))
-    return SimpleNamespace(expired=False, unavailable_mapping=False, pieces=(piece,), png=pixels, delivered=7)
+    piece = ImagePiece(key, SimpleNamespace(target=target, image=pixels), (0, 0, 100, 80))
+    member = surface(key)
+    return InterfaceImage(pixels, (piece,), signature({key: member}), delivered=7)
 
 
-def test_shared_image_bootstrap_does_not_replace_a_windows_own_later_read():
+def test_latest_delivered_canvas_replaces_older_window_image_but_pending_sample_does_not():
     controller, app = setup()
     window = app.window(ref(app, "a"))
     shared, new = image_for("a", "shared"), image_for("a", "new")
     own = image_for("a", "own-window-read")
-    with patch("computer_use.protocol.captures.capture_metadata", return_value={"width": 100, "height": 80}):
-        controller.interfaces.windows.retain_image(app._instance, shared, 1)
-        assert window._image is shared
-        window._image = own
-        controller.interfaces.windows.retain_image(app._instance, new, 2)
-        controller.interfaces.windows.retain_image(app._instance, image_for("b", "other"), 3)
-    assert window._image is own
+    controller.interfaces.windows.retain_image(app._instance, shared, 1)
+    assert window._image is shared
+    window._image = own  # A newer pending sample has not been delivered.
+    assert controller.interfaces.windows.delivered_image(app._instance, window) is shared
+    controller.interfaces.windows.retain_image(app._instance, new, 2)
+    controller.interfaces.windows.retain_image(app._instance, image_for("b", "other"), 3)
+    assert window._image is new
+    assert controller.interfaces.windows.delivered_image(app._instance, window) is new

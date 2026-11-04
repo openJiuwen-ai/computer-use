@@ -12,9 +12,19 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.document import DisplayDocument
 
 
-def render_document(document: DisplayDocument, plan: DeltaPlan | None = None, *, public_api: bool = False) -> str:
+def render_document(
+    document: DisplayDocument, plan: DeltaPlan | None = None, *, public_api: bool = False, prepared=None
+) -> str:
     """Render retained snapshot projections and format their selected delivery scope."""
     from computer_use.interaction.read.presentation.rendering.document.model import DocumentRenderRequest
     from computer_use.interaction.read.presentation.rendering.document.pipeline import DocumentRenderingPipeline
 
-    return DocumentRenderingPipeline().run(DocumentRenderRequest(document, plan, public_api))
+    return DocumentRenderingPipeline().run(DocumentRenderRequest(document, plan, public_api, prepared))
+
+
+def prepare_document(document: DisplayDocument, *, public_api: bool = False, control=None):
+    """Freeze complete compact source chunks without delivering or acknowledging them."""
+    from computer_use.interaction.read.presentation.rendering.document.model import DocumentRenderRequest
+    from computer_use.interaction.read.presentation.rendering.document.pipeline import PrepareDocumentRenderingPipeline
+
+    return PrepareDocumentRenderingPipeline().run(DocumentRenderRequest(document, public_api=public_api), control)

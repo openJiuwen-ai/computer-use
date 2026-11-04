@@ -7,7 +7,8 @@ import ApplicationServices
 @MainActor enum CollectNativeWindowPixelsPass {
     static func run(_ request: NativeCaptureRequest, scopes: NativeScopeResolver) async throws -> NativeCapturedWindow {
         let binding = try scopes.windowTarget(request.target)
-        let result = try await scopes.captures.capture(binding: binding, maxDimension: request.maxDimension)
+        let result = try await scopes.captures.capture(
+            binding: binding, maxDimension: request.maxDimension, retainedCaptures: request.retainedCaptures)
         return NativeCapturedWindow(binding: binding, result: result)
     }
 }

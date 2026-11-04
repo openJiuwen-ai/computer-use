@@ -20,6 +20,7 @@ import ApplicationServices
     }
 
     @MainActor static func main() throws {
+        try retainedDeliveredMappings()
         let original = mapping()
         let translated = mapping(frame: CGRect(x: 350, y: 310, width: 420, height: 220), width: 420, height: 220)
         let plan = try NativeCapturedPointerPlan.resolve(original: original, current: translated)
@@ -70,5 +71,46 @@ import ApplicationServices
         refuses { _ = try plan.point(CGPoint(x: 840, y: 0)) }
         refuses { _ = try plan.point(CGPoint(x: -1, y: 0)) }
         print("Captured pointer translation plan regressions passed")
+    }
+
+    @MainActor private static func retainedDeliveredMappings() throws {
+        let target: [String: Any] = [
+            "session": "session", "instance": "app", "rootWindow": "window", "surface": "surface",
+            "node": NSNull(), "capture": NSNull()
+        ]
+        var raw: [String: Any] = [
+            "operation": "read", "target": target, "kind": "window", "maxDimension": 1024
+        ]
+        let omitted = try NativeCaptureRequest(raw)
+        precondition(omitted.retainedCaptures == nil)
+        raw["retainedCaptures"] = ["shown-window", "pending-window", "shown-window"]
+        let request = try NativeCaptureRequest(raw)
+        precondition(request.retainedCaptures == ["shown-window", "pending-window"])
+
+        // Repeated observations in another window cannot expire a map still
+        // presented to the model, including a pending multi-window canvas.
+        var order = ["shown-window", "pending-window"]
+        let refs = request.retainedCaptures!
+        for index in 0..<100 {
+            order.append("other-window-\(index)")
+            let retired = NativeCapture.retirements(order, retaining: refs)
+            order.removeAll { retired.contains($0) }
+        }
+        precondition(order.contains("shown-window") && order.contains("pending-window"))
+        precondition(order.count == 66 && order.last == "other-window-99")
+        // Delivery replacement releases old references; the history budget
+        // still evicts them instead of accumulating permanent pins.
+        let retired = NativeCapture.retirements(order, retaining: ["other-window-99"])
+        precondition(retired == ["shown-window"])
+        order.removeAll { retired.contains($0) }
+        let released = NativeCapture.retirements(order, retaining: [])
+        precondition(released == ["pending-window"])
+        raw["retainedCaptures"] = [] as [String]
+        let empty = try NativeCaptureRequest(raw)
+        precondition(empty.retainedCaptures == [])
+        raw["retainedCaptures"] = "shown-window"
+        refuses { _ = try NativeCaptureRequest(raw) }
+        raw["retainedCaptures"] = [true]
+        refuses { _ = try NativeCaptureRequest(raw) }
     }
 }

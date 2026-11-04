@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
+from functools import cache
 from types import MappingProxyType
 from typing import Any, Literal, NewType, TypeAlias
 
@@ -25,19 +26,30 @@ RelationKind = NewType("RelationKind", str)  # Platform-neutral relation vocabul
 FieldPath: TypeAlias = tuple[str | int, ...]
 TextUnit: TypeAlias = Literal["unicode_codepoint", "utf16_code_unit", "provider"]
 
+_ATOMIC_TYPES = frozenset((str, bool, int, float, bytes, type(None), datetime))
+
 
 def _freeze(value: Any, active: set[int] | None = None) -> Any:
     """Detach public containers so published observations cannot change in place."""
-    if not isinstance(value, (Mapping, tuple, list)):
+    kind = type(value)
+    if kind in _ATOMIC_TYPES or isinstance(value, _Immutable):
+        return value
+    if kind is tuple and all(type(item) in _ATOMIC_TYPES or isinstance(item, _Immutable) for item in value):
+        return value
+    mapping = kind is dict or isinstance(value, Mapping)
+    if not mapping and kind not in (tuple, list):
         return value
     active = set() if active is None else active
     if id(value) in active:
         raise ValueError("observation: container values must be acyclic")
     active.add(id(value))
     try:
-        if isinstance(value, Mapping):
+        if mapping:
             return MappingProxyType({key: _freeze(item, active) for key, item in value.items()})
-        return tuple(_freeze(item, active) for item in value)
+        items = tuple(_freeze(item, active) for item in value)
+        # A tuple whose descendants were already immutable needs no new copy.
+        # Lists and external mappings still detach at the public boundary.
+        return value if kind is tuple and all(a is b for a, b in zip(value, items)) else items
     finally:
         active.remove(id(value))
 
@@ -69,7 +81,7 @@ class _Immutable:
     def __eq__(self, other: Any) -> bool:
         if type(self) is not type(other):
             return NotImplemented
-        return all(_equal(getattr(self, item.name), getattr(other, item.name)) for item in fields(self))
+        return all(_equal(getattr(self, item.name), getattr(other, item.name)) for item in fields(self) if item.compare)
 
     __hash__ = None
 
@@ -78,8 +90,17 @@ class _Immutable:
         return self
 
     def __post_init__(self) -> None:
-        for item in fields(self):
-            object.__setattr__(self, item.name, _freeze(getattr(self, item.name)))
+        for name in _immutable_fields(type(self)):
+            value = getattr(self, name)
+            frozen = _freeze(value)
+            if frozen is not value:
+                object.__setattr__(self, name, frozen)
+
+
+@cache
+def _immutable_fields(cls: type) -> tuple[str, ...]:
+    """Cache record layout rather than inspect it for every acquired issue."""
+    return tuple(item.name for item in fields(cls))
 
 
 class SpecialValue(Enum):
@@ -354,8 +375,14 @@ class NativeNode(_Immutable):
     supplements: tuple[Supplement, ...] = ()
 
 
+class _ObservationIndexes:
+    """Private capture caches are not protocol fields or equality inputs."""
+
+    __slots__ = ("_cached_issue_index",)
+
+
 @dataclass(frozen=True, slots=True, eq=False)
-class NativeObservation(_Immutable):
+class NativeObservation(_Immutable, _ObservationIndexes):
     """A platform-normalized accessibility graph for shared presentation passes."""
 
     backend: Backend
@@ -366,3 +393,12 @@ class NativeObservation(_Immutable):
     nodes: Mapping[NodeId, NativeNode]
     coordinate_spaces: Mapping[SpaceId, CoordinateSpace] = field(default_factory=dict)
     issues: tuple[ReadIssue, ...] = ()
+
+    @property
+    def issue_index(self):
+        """One index of this immutable capture, shared by all local consumers."""
+        if getattr(self, "_cached_issue_index", None) is None:
+            from .issues import ReadIssueIndex
+
+            object.__setattr__(self, "_cached_issue_index", ReadIssueIndex(self.issues))
+        return self._cached_issue_index

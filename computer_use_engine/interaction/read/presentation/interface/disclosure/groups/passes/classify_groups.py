@@ -9,7 +9,6 @@ from types import MappingProxyType
 
 from computer_use.pipeline import Contract, Effect, Pass
 from computer_use.pipeline.core import Control
-from computer_use.protocol.observation.issues import ReadIssueIndex
 
 from ..evidence import block_members, source_protections
 from ..model import CapturedGroupField, ClassifiedGroups, GroupAssessment, GroupDisclosureRequest
@@ -17,7 +16,7 @@ from ..model import CapturedGroupField, ClassifiedGroups, GroupAssessment, Group
 
 def execute(request: GroupDisclosureRequest, control: Control) -> ClassifiedGroups:
     """Capture explicit protections and assess available window-level evidence."""
-    issues = ReadIssueIndex(request.snapshot.native.issues)
+    issues = request.snapshot.native.issue_index
     protections = {
         ref: reasons for ref in request.interface.source.order if (reasons := source_protections(request, ref, issues))
     }

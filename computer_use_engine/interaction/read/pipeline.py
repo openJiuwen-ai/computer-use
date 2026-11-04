@@ -10,6 +10,7 @@ continuation to menu or window observation, never the preparation child.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.control import scope_control
@@ -31,14 +32,40 @@ from computer_use.interaction.read.passes.select_read_components import stage as
 from computer_use.interaction.read.passes.reject_windowless_image import stage as reject_windowless_image
 from computer_use.pipeline import Contract, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
+from computer_use.session.operations import current_operation_budget
 
 if TYPE_CHECKING:
     from typing import AsyncIterator, NoReturn
 
     from computer_use.interaction.read.app import NativeAppReader
+    from computer_use.interaction.read.acquisition.model import AcquiredObservation
     from computer_use.interaction.read.app_read.model import ReadRequest
     from computer_use.interaction.read.model import AppObservation, MenuAppObservation
+    from computer_use.interaction.read.numbering.observation.model import RenderedObservation
     from computer_use.pipeline.core import Control, Step
+
+
+class _PrepareCapturedObservation(Node["AcquiredObservation", "RenderedObservation"]):
+    """Use the operation's CPU budget after native acquisition has finished.
+
+    A shorter component lease can expire after returning useful partial facts.
+    Its clock controls further native acquisition, not whether those returned
+    facts may be numbered and presented. The SDK operation clock remains the
+    single authority for CPU work, with original cancellation metadata retained.
+    """
+
+    def __init__(self, services: NativeAppReader) -> None:
+        self.presentation = NumberedPresentationPipeline(services)
+        self.children = (self.presentation,)
+        super().__init__("PrepareCapturedObservation", self.presentation.contract)
+
+    def _run(self, value: AcquiredObservation, control: Control) -> RenderedObservation:
+        budget = current_operation_budget()
+        cpu_control = replace(control, remaining=budget.remaining if budget is not None else None)
+        return self.presentation.run(value, cpu_control)
+
+    async def _arun(self, value: AcquiredObservation, control: Control) -> RenderedObservation:
+        return self._run(value, control)
 
 
 class WindowObservationPipeline(Pipeline["ApplicationSelection", "AppObservation"]):
@@ -63,7 +90,7 @@ class WindowObservationPipeline(Pipeline["ApplicationSelection", "AppObservation
             name="ReadPipeline",
             steps=[
                 AcquisitionPipeline(services),
-                NumberedPresentationPipeline(services),
+                _PrepareCapturedObservation(services),
                 AppDeliveryPipeline(services),
             ],
         )

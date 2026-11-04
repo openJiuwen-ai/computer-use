@@ -92,7 +92,6 @@ class ReadRunState:
         plan: Fixed working scope and limits used by bounded component acquisition.
         target: Native identity of the element, window, or application being observed.
         directory: Observed application/window catalogue, including incomplete relationships.
-        initializing: Whether startup evidence permits the existing bounded refresh allowance.
         attempt: Zero-based attempt count consumed by the acquisition refresh gate.
         refresh_tree: Whether to refresh only the tree while retaining already captured pixels.
         components: Tree, image, menu, and overview results collected for this attempt.
@@ -102,7 +101,6 @@ class ReadRunState:
     plan: ReadPlan
     target: Binding
     directory: DirectoryFacts
-    initializing: bool
     attempt: int = 0
     refresh_tree: bool = False
     components: Components | None = None

@@ -23,7 +23,7 @@ def create(*, branch: BranchFacts, snapshot: SnapshotFacts) -> Callable[[Rendere
     def fields(rendered: RenderedTree, control: Control) -> FieldAccounting:
         """Record represented native fields/actions and return the values requiring supplements."""
         residuals, accounting = account_fields(
-            branch.members, snapshot.refs, snapshot.fields, branch.native_nodes, rendered
+            branch.members, snapshot.refs, snapshot.fields, branch.native_nodes, rendered, checkpoint=control.remaining
         )
         rendered["factAccounting"] = accounting
         return FieldAccounting(rendered, residuals)

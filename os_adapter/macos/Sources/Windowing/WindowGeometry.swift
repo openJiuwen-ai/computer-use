@@ -26,10 +26,14 @@ import ApplicationServices
     }
     /// This window's own raw AXDocument. Unknown metadata stays unknown; no
     /// parent lookup, URI normalization or filesystem access is performed.
-    static func documentIdentity(_ window: AXUIElement?) -> String? {
+    static func documentIdentity(_ window: AXUIElement?, queryTiming: NativeWindowQueryTiming? = nil) -> String? {
         guard let window else { return nil }
         var raw: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXDocumentAttribute as CFString, &raw) == .success else {
+        let status = NativeWindowQueryTiming.measure(queryTiming, "getter.documentIdentity", property: kAXDocumentAttribute, root: window) {
+            AXUIElementCopyAttributeValue(window, kAXDocumentAttribute as CFString, &raw)
+        }
+        queryTiming?.status(status, phase: "getter.documentIdentity", property: kAXDocumentAttribute, root: window)
+        guard status == .success else {
             return nil
         }
         if let value = raw as? String, !value.isEmpty { return value }

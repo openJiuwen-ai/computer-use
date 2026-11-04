@@ -8,6 +8,7 @@ from copy import deepcopy
 from .schema import array, boolean, count, enum, identity, number, obj, string, unknown
 
 _stamp = obj(dict(id=identity, startedAt=count, completedAt=count))
+app_change = obj({"session": identity, "application": identity, "incarnation": identity, "token": identity})
 _application = obj(
     dict(
         id=identity,
@@ -60,8 +61,10 @@ _schemas = {
         dict(
             kind=enum("surfaces"),
             application=identity,
+            appChange=app_change.nullable().optional(),
             surfaces=array(surface_schema, max=512),
             rootDiscoveryComplete=boolean(),
+            endedWindows=array(obj({"window": identity, "instance": identity, "surface": identity}), max=4096).optional(),
             focusedWindow=identity.nullable().optional(),
             provider=obj(
                 dict(status=identity, attribute=identity.nullable(), writeStatus=number(integer=True).nullable())
@@ -73,6 +76,7 @@ _schemas = {
         dict(
             kind=enum("roots"),
             application=identity,
+            appChange=app_change.nullable().optional(),
             roots=array(obj(dict(kind=identity, instance=identity, surface=identity, node=identity)), max=64),
             **_common,
         )
@@ -93,6 +97,9 @@ def decode_directory(value):
     result = parsed if value["kind"] == "surfaceBatch" else deepcopy(parsed)
     if result["observed"]["completedAt"] < result["observed"]["startedAt"]:
         raise ValueError("protocol: directory collection interval is reversed")
+    change = result.get("appChange")
+    if change is not None and any(change[key] != result[key] for key in ("session", "application")):
+        raise ValueError("protocol: application change evidence changed the directory scope")
     if result["kind"] == "surfaceBatch":
         from .session import decode_failure
 
@@ -148,6 +155,11 @@ def decode_directory(value):
                 raise ValueError("protocol: duplicate surface identity")
         for item in entries:
             validate_surface(item)
+        ended = result.get("endedWindows", ())
+        ended_keys = [(item["window"], item["surface"], item["instance"]) for item in ended]
+        live_keys = {(item["window"], item["surface"], item["instance"]) for item in entries}
+        if len(ended_keys) != len(set(ended_keys)) or live_keys.intersection(ended_keys):
+            raise ValueError("protocol: conflicting ended window lifetime evidence")
         # Unknown parents and cycles are provider facts, not an excuse to drop
         # windows or guess another document. Selection handles them explicitly.
     return result

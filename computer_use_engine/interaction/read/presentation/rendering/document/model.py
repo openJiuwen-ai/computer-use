@@ -29,6 +29,7 @@ class DocumentRenderRequest:
     document: DisplayDocument
     plan: DeltaPlan | None = None
     public_api: bool = False
+    prepared: RenderedDocumentInput | None = None
 
 
 @dataclass(frozen=True)

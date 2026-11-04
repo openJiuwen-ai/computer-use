@@ -164,8 +164,13 @@ def test_local_preparation_fallback_keeps_changes_and_other_roots_incremental(pr
 
 
 def test_terminal_failure_refreshes_only_its_root(presenter, monkeypatch):
+    from computer_use.interaction.read.presentation.rendering.document import incremental
+
     observations = Observations()
     deliver(presenter, observations.read(related="row"))
+    # Exercise the complete terminal fallback itself; selected delivery may
+    # correctly avoid formatting an unchanged root altogether.
+    monkeypatch.setattr(incremental, "incremental_snapshot", lambda *_: None)
     original = InterfaceTextPipeline.run
 
     def fail_one(self, value, control=None):

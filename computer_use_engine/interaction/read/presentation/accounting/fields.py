@@ -150,6 +150,8 @@ def account_fields(
     sources: Mapping[tuple[str, str], Record],
     native_nodes: Mapping[str, FactNode],
     rendered: RenderedTree,
+    *,
+    checkpoint=None,
 ) -> tuple[dict[str, list[str]], Record]:
     """Return grouped residuals and a destination for each collected value.
 
@@ -167,9 +169,18 @@ def account_fields(
     # Validate the exact field provenance against the immutable source view.
     # Legacy coverage still determines the established supplements; migrating
     # their compression policy would be a separate observable behavior change.
-    validate_source_emissions(rendered, members)
+    validate_source_emissions(rendered, members, checkpoint=checkpoint)
+    steps = 0
+
+    def check():
+        nonlocal steps
+        steps += 1
+        if checkpoint is not None and steps % 128 == 1:
+            checkpoint()
+
     claims = {}
     for claim in rendered.get("fieldCoverage", ()):
+        check()
         claims.setdefault((claim["ref"], claim["field"]), []).append(claim)
     groups, destinations, actions = {}, [], []
 
@@ -177,8 +188,10 @@ def account_fields(
         groups.setdefault(label, []).append(ref)
 
     for ref in members:
+        check()
         native = native_nodes[refs[ref]]
         for key, raw in native["values"].items():
+            check()
             source = sources[(ref, key)]
             if source["representation"] == "raw":
                 continue
@@ -243,7 +256,7 @@ def account_fields(
     return groups, dict(values=destinations, actions=actions)
 
 
-def validate_source_emissions(rendered: RenderedResult, members: Iterable[str]) -> None:
+def validate_source_emissions(rendered: RenderedResult, members: Iterable[str], *, checkpoint=None) -> None:
     """Check rendered emissions against the immutable source-fact ledger.
 
     Args:
@@ -253,7 +266,9 @@ def validate_source_emissions(rendered: RenderedResult, members: Iterable[str]) 
     source = getattr(rendered, "source_input", None)
     if source is None:
         return
-    for emission in rendered.source_emissions:
+    for index, emission in enumerate(rendered.source_emissions):
+        if checkpoint is not None and index % 128 == 0:
+            checkpoint()
         fact = emission.fact
         native = source.native_nodes.get(fact.source)
         invalid_members = (

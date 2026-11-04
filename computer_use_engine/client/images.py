@@ -60,6 +60,18 @@ def _context_text(value: str | DisplayDocument | DisplayText | None) -> str | No
     return value
 
 
+def image_output_scope(png):
+    """Return the exact coordinate domain suitable for same-call output reuse.
+
+    Equal pixels alone cannot equate two independent windows. Unregistered
+    images have no proved domain and may only reuse the exact source object.
+    """
+    known = _source(png)
+    if known is None or known["source"].get("current", lambda: True)() is False:
+        return None
+    return known["source"].get("coordinateScope")
+
+
 def image_label(png, context_already_shown=False, coordinates: ImageCoordinates | None = None):
     size = png_size(png)
     if coordinates is not None:
@@ -110,6 +122,15 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
     actionable = (
         facts["kind"] in ("desktop", "window") and not facts.get("stale") and facts.get("mappingAvailable", True)
     )
+    coordinate_windows = source.get("coordinate_windows") if source is not None else None
+    if callable(coordinate_windows) and actionable:
+        refs = coordinate_windows()
+        if refs:
+            caption += (
+                "\nCoordinate inputs for this displayed canvas: "
+                + ", ".join(f"computer.window({ref})" for ref in refs)
+                + ". Use the whole displayed image's pixels; each Window accepts only its own region."
+            )
     return caption + (
         "\nUse this displayed image's pixels for coordinates." if coordinates is not None and actionable else ""
     )

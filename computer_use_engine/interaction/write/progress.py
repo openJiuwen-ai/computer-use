@@ -297,7 +297,11 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
         # The native continuation is a constraint, never an independent retry
         # authorization. Only this Gate consumes its finite history/budget.
         can_replan = (
-            step.dispatch == Dispatch.NOT_DISPATCHED and step.cleanup.value == "complete" and click.permits_replanning
+            step.dispatch == Dispatch.NOT_DISPATCHED
+            and step.cleanup.value == "complete"
+            and not progress.requested_input_possible
+            and not _receipt_has_requested_input(step)
+            and click.permits_replanning
         )
         if can_replan and step.retry_reason == "preconditionChanged" and progress.history.precondition_changes < 1:
             return WriteDecision("reinspect", action="precondition_changed")

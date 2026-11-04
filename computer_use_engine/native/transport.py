@@ -172,6 +172,7 @@ class ConnectionPort:
         self.connection, self.policy = connection, policy
         self._operations = {}
         self._continuations = {}
+        self.capture_references: frozenset[str] = frozenset()
         self.calls = CallLifecycle(self)
 
     @staticmethod
@@ -256,7 +257,9 @@ class ConnectionPort:
         self._operations[value["operation"]] = (self.connection.session_identity, original, version)
         while len(self._operations) > 8:
             self._operations.pop(next(iter(self._operations)))
-        return OpenedOperation(value["operation"], decode_binding(value["target"]), version)
+        return OpenedOperation(
+            value["operation"], decode_binding(value["target"]), version, value.get("appChangeBaseline")
+        )
 
     async def inspect(
         self,
@@ -496,6 +499,12 @@ class ConnectionPort:
     ) -> tuple[Record, Record]:
         self._check(operation)
         query = dict(kind="nodes", fields=list(request.fields), maxNodes=request.max_nodes, maxDepth=request.max_depth)
+        if request.action_detail is not None:
+            if self.platform != "macos" or "nativeQueryActionProfile" not in self.connection.capabilities:
+                raise ValueError("This driver cannot select an action evidence profile")
+            if request.action_detail not in ("none", "names", "full"):
+                raise ValueError("Invalid action evidence profile")
+            query["actionDetail"] = request.action_detail
         if request.text_content is not None:
             if self.platform != "macos" or "nativeParameterizedText" not in self.connection.capabilities:
                 raise ValueError("This driver cannot capture parameterized native text")
@@ -637,6 +646,30 @@ class ConnectionPort:
             raise ValueError("Event-assisted wait changed its observed session, window or token")
         return result
 
+    async def app_changes(self, operation, target, application, timeout_ms, *, after=None, delay_ms=None):
+        """Observe one App's native generation through a session read lease.
+
+        The old input Window may have closed. This query neither admits input
+        nor relies on its node/geometry/lifetime to observe its owning App.
+        """
+        self._check(operation)
+        if "nativeAppChangeEvents" not in self.capabilities:
+            raise ValueError("Application change observation requires nativeAppChangeEvents")
+        if any(getattr(target, field) is not None for field in ("instance", "root_window", "surface", "node", "capture")):
+            raise ValueError("Application changes require a session discovery scope")
+        query = dict(kind="appChanges", application=application)
+        if after is not None:
+            if not isinstance(after, str) or not after or type(delay_ms) is not int or not 1 <= delay_ms <= 400:
+                raise ValueError("Invalid application change token or event-wait limit")
+            query = dict(kind="waitAppChange", application=application, after=after, timeoutMs=delay_ms)
+        result = await self.connection.request(
+            "inspect", dict(operation=operation, target=encode_fields(target, _BINDING), query=query),
+            dict(timeoutMs=timeout_ms),
+        )
+        if result["kind"] != query["kind"] or result["session"] != target.session or result["application"] != application:
+            raise ValueError("Application change observation changed its session or application")
+        return result
+
     def _children_property(self):
         from computer_use.native.semantics import RELATIONS
 
@@ -746,9 +779,17 @@ class ConnectionPort:
 
     async def capture(self, operation, target, max_dimension, timeout_ms, *, kind="window"):
         self._check(operation)
+        parameters = {
+            "operation": operation,
+            "target": encode_fields(target, _BINDING),
+            "kind": kind,
+            "maxDimension": max_dimension,
+        }
+        if "nativeCaptureRetention" in self.capabilities:
+            parameters["retainedCaptures"] = sorted(self.capture_references)
         value = await self.connection.request(
             "capture",
-            dict(operation=operation, target=encode_fields(target, _BINDING), kind=kind, maxDimension=max_dimension),
+            parameters,
             dict(timeoutMs=timeout_ms),
         )
         if (
@@ -891,6 +932,7 @@ class ConnectionPort:
             value.get("application"),
             decode_click_receipt(value.get("click")),
             decode_native_impact(value.get("impact")),
+            value.get("appChangeInputBaseline"),
         )
 
     async def finish(self, operation):

@@ -18,6 +18,15 @@ final class ElementReferences<Identity: Hashable> {
         return value
     }
 
+    /// Positive native lifetime end releases aliases but never reuses its number.
+    func retire(_ identity: Identity) {
+        references.removeValue(forKey: identity)
+        for alias in aliasOwners.compactMap({ $0.value == identity ? $0.key : nil }) {
+            references.removeValue(forKey: alias)
+            aliasOwners.removeValue(forKey: alias)
+        }
+    }
+
     func reference(for identity: Identity, aliases: [Identity] = []) -> String {
         let reference: String
         let unbound = aliases.filter { aliasOwners[$0] == nil || aliasOwners[$0] == identity }

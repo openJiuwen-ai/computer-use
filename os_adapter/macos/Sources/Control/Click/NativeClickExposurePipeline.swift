@@ -8,8 +8,8 @@ import AppKit
     static func run(
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
         evidence: NativeClickEvidence
-    ) async throws {
-        guard case .element(let unit) = plan.target else { return }
+    ) async throws -> Bool {
+        guard case .element(let unit) = plan.target else { return false }
         let deadline = min(RequestDiagnostics.deadline ?? .infinity, ProcessInfo.processInfo.systemUptime + 3)
         var steps = 0
         while let exposure = try unit.exposure() {
@@ -24,5 +24,6 @@ import AppKit
                 boundary: boundary, receipt: receipt, evidence: evidence)
             steps += 1
         }
+        return steps > 0
     }
 }

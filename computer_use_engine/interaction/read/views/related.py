@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Pure selection evidence for one bounded observation after an action."""
@@ -13,8 +12,9 @@ from computer_use.native.contracts import Binding
 from computer_use.session.interfaces import WindowIdentity
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.interaction.records import UIHandle
+
+    from .changes import PostwriteChanges
 
 
 @dataclass(frozen=True)
@@ -29,8 +29,7 @@ class RelatedRead:
     known_windows: tuple[WindowIdentity, ...]
     context_owner: ReferenceType[UIHandle] | None = None
     context_root: WindowIdentity | None = None
-    before_tree: SemanticSnapshot | None = None
-    settle: bool = False
+    changes: PostwriteChanges | None = None
 
     @property
     def original_window(self) -> WindowIdentity | None:
@@ -86,18 +85,25 @@ class RelatedRead:
         return fallback
 
 
+def window_lifecycle(identity: WindowIdentity, directory) -> str:
+    """Describe native lifetime facts without treating hidden macOS windows as ended."""
+    if any(WindowIdentity.of(item) == identity for item in directory.get("endedWindows", ())):
+        return "closed"
+    item = next((item for item in directory["surfaces"] if item["window"] == identity.window), None)
+    if item is not None:
+        return "observed" if WindowIdentity.of(item) == identity else "closed"
+    return (
+        "closed"
+        if not directory["stopReasons"] and directory.get("platform") in ("windows", "linux")
+        else "unknown"
+    )
+
+
 def original_lifecycle(target, directory, previous: WindowIdentity | None = None) -> str:
     """Compare the original window lifetime with one exact captured directory."""
     if target.root_window is None:
         return "not_applicable"
     if directory is None or directory["session"] != target.session:
         return "unknown"
-    item = next((item for item in directory["surfaces"] if item["window"] == target.root_window), None)
-    if item is not None:
-        return (
-            "observed"
-            if WindowIdentity.of(item)
-            == (previous or WindowIdentity(target.root_window, target.surface, target.instance))
-            else "closed"
-        )
-    return "unknown" if directory["stopReasons"] else "closed"
+    identity = previous or WindowIdentity(target.root_window, target.surface, target.instance)
+    return window_lifecycle(identity, directory)

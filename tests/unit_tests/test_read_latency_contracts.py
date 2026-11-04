@@ -7,9 +7,8 @@ import random
 import unittest
 from types import SimpleNamespace
 
-from computer_use.interaction.read.facts.index import _IssueIndex
 from computer_use.interaction.read.presentation.interface.collections.planning import _Source
-from computer_use.protocol.observation import ReadIssue
+from computer_use.protocol.observation import NativeObservation, ReadIssue
 from computer_use.protocol.observation.issues import ReadIssueIndex
 
 
@@ -35,7 +34,7 @@ class IssueIndexTests(unittest.TestCase):
             ReadIssue(("nodes", "b"), "unavailable"),
             ReadIssue(("nodes", "a", "text", "content"), "error"),
         )
-        index = _IssueIndex(issues)
+        index = ReadIssueIndex(issues)
         self.assertEqual(
             index.applicable(("nodes", "a", "text", "content")), [issues[0], issues[2], issues[3], issues[6]]
         )
@@ -61,7 +60,7 @@ class IssueIndexTests(unittest.TestCase):
         issues = tuple(
             ReadIssue(randomizer.choice(paths), randomizer.choice(("partial", "error", "absent"))) for _ in range(200)
         )
-        index = _IssueIndex(issues)
+        index = ReadIssueIndex(issues)
         for path in paths:
             expected = [
                 issue
@@ -78,7 +77,7 @@ class IssueIndexTests(unittest.TestCase):
                 for field in range(30)
             ]
         )
-        index = _IssueIndex(issues)
+        index = ReadIssueIndex(issues)
         self.assertEqual(issues.visits, 9000)
         for node in range(300):
             for field in range(30):
@@ -140,7 +139,7 @@ class OverlappingIssueIndexTests(unittest.TestCase):
             refs={str(i): str(i) for i in range(200)},
             interface=SimpleNamespace(projected_nodes={}),
             atoms=SimpleNamespace(atoms={}),
-            native=SimpleNamespace(issues=issues),
+            native=NativeObservation("macos", "fixture", "capture", (1, 2), (), {}, issues=issues),
         )
         source = _Source(request)
         for ref in request.refs:
@@ -157,7 +156,9 @@ class OverlappingIssueIndexTests(unittest.TestCase):
                         refs={"0": "native"},
                         interface=SimpleNamespace(projected_nodes={}),
                         atoms=SimpleNamespace(atoms={}),
-                        native=SimpleNamespace(issues=(ReadIssue(("nodes",), state),)),
+                        native=NativeObservation(
+                            "macos", "fixture", "capture", (1, 2), (), {}, issues=(ReadIssue(("nodes",), state),)
+                        ),
                     )
                 )
                 self.assertFalse(source.clean("0", "role"))

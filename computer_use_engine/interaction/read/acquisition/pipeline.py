@@ -14,9 +14,9 @@ from computer_use.interaction.read.acquisition.choices.pipeline import WindowCho
 from computer_use.interaction.read.acquisition.components.model import ComponentRequest
 from computer_use.interaction.read.acquisition.components.pipeline import ComponentPipeline
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
+from computer_use.interaction.read.acquisition.content import prefer_earlier_budget_capture
 from computer_use.interaction.read.acquisition.directory.service import select_surface
 from computer_use.interaction.read.acquisition.helpers import window_binding
-from computer_use.interaction.read.acquisition.loading import initialization_requested
 from computer_use.interaction.read.acquisition.model import (
     CollectedAttempt,
     Components,
@@ -94,9 +94,28 @@ class _CollectComponents(Node["ReadRunState", "CollectedAttempt"]):
             return CollectedAttempt(state, Components(state.directory, parts.tree, parts.image, gaps=parts.gaps))
         components, gaps = state.components, parts.gaps
         retained = components.gaps
-        if parts.tree is not None:
+        tree = parts.tree
+        if tree is not None and prefer_earlier_budget_capture(components.tree, tree):
+            try:
+                original = select_surface(components.source_directory, state.target.root_window)
+                same_binding = original == state.target and (
+                    components.source_directory["application"] == state.directory["application"]
+                )
+            except ComputerUseError:
+                same_binding = False
+            if same_binding:
+                tree = None
+                gaps += (
+                    ObservationGap(
+                        "tree", "observation_incomplete",
+                        "The newer content refresh had insufficient collection budget; the earlier more complete "
+                        "tree and its original capture interval are retained.",
+                        "use the retained captured content; read again if newer content is needed",
+                    ),
+                )
+        if tree is not None:
             retained = tuple(gap for gap in retained if gap.component not in ("tree", "view"))
-        elif components.tree is not None:
+        elif parts.tree is None and components.tree is not None:
             gaps += (
                 ObservationGap(
                     "tree",
@@ -109,9 +128,9 @@ class _CollectComponents(Node["ReadRunState", "CollectedAttempt"]):
             state,
             replace(
                 components,
-                tree=parts.tree if parts.tree is not None else components.tree,
+                tree=tree if tree is not None else components.tree,
                 gaps=retained + gaps,
-                image_precedes_tree=parts.tree is not None,
+                image_precedes_tree=tree is not None or components.image_precedes_tree,
             ),
         )
 
@@ -276,7 +295,6 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 plan,
                 target,
                 plan.directory,
-                initialization_requested(plan.directory, plan.launch),
                 gaps=gaps,
             )
 

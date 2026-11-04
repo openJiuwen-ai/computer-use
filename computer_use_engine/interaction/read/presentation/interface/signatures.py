@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
 
 from computer_use.interaction.read.presentation.interface.model import InterfaceBlock, InterfaceDocument
@@ -44,7 +44,9 @@ def _block_signature(block: InterfaceBlock) -> BlockLayoutSignature:
     )
 
 
-def interface_layout_signatures(document: InterfaceDocument) -> Mapping[str, InterfaceLayoutSignature]:
+def interface_layout_signatures(
+    document: InterfaceDocument, *, checkpoint: Callable[[], object] | None = None
+) -> Mapping[str, InterfaceLayoutSignature]:
     """Capture each real element's reading-block path for full/diff comparison.
 
     Signatures contain local layout and source identities along the exact block
@@ -55,25 +57,43 @@ def interface_layout_signatures(document: InterfaceDocument) -> Mapping[str, Int
 
     Args:
         document: Validated immutable interface organization for one projected root.
+        checkpoint: Original call-budget check, consulted within bounded work batches.
 
     Returns:
         Immutable mapping from every projected reference to its ordered block path.
     """
+    if checkpoint is not None:
+        checkpoint()
+    work = 0
+
+    def checked(items):
+        nonlocal work
+        for item in items:
+            work += 1
+            if checkpoint is not None and work % 128 == 0:
+                checkpoint()
+            yield item
+
     result: dict[str, InterfaceLayoutSignature] = {}
     patterns = {
         plan.owner_key: (
             ("pattern_kind", plan.kind),
             ("pattern_columns", plan.column_count),
-            ("pattern_rows", tuple((row.key, row.ref, row.members, row.slots) for row in plan.rows)),
+            ("pattern_rows", tuple((row.key, row.ref, row.members, row.slots) for row in checked(plan.rows))),
             ("pattern_remaining", plan.remaining_keys),
         )
-        for plan in document.geometric_patterns
+        for plan in checked(document.geometric_patterns)
     }
-    pending: list[tuple[str, InterfaceLayoutSignature]] = [(key, ()) for key in reversed(document.roots)]
+    pending: list[tuple[str, InterfaceLayoutSignature]] = [(key, ()) for key in checked(reversed(document.roots))]
     while pending:
+        work += 1
+        if checkpoint is not None and work % 128 == 0:
+            checkpoint()
+        # Each block and its possibly wide source/child containers share the
+        # same batch counter; a single synthetic group cannot evade the budget.
         key, ancestors = pending.pop()
         block = document.blocks[key]
         current = (*ancestors, (*_block_signature(block), *patterns.get(key, ())))
-        result.update((ref, current) for ref in block.source_refs)
-        pending.extend((child, current) for child in reversed(block.children))
+        result.update((ref, current) for ref in checked(block.source_refs))
+        pending.extend((child, current) for child in checked(reversed(block.children)))
     return MappingProxyType(result)

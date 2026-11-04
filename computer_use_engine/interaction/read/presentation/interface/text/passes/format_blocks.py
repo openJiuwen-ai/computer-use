@@ -13,7 +13,7 @@ from computer_use.pipeline.core import Control
 
 def execute(request: InterfaceTextRequest, control: Control) -> FormattedInterface:
     """Generate text from the frozen layout without invoking any layout selection pass."""
-    return format_interface_blocks(request)
+    return format_interface_blocks(request, checkpoint=control.remaining)
 
 
 stage = Pass.define(

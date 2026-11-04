@@ -10,12 +10,11 @@ queries inspect captured facts and never activate or send input to a window.
 from __future__ import annotations
 
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.protocol.observation import Geometry, NativeNode, NativeObservation
-    from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
 def _rect(geometry: Geometry | None) -> tuple[float, float, float, float] | None:
@@ -208,13 +207,4 @@ def refreshable(snapshot: SemanticSnapshot | None) -> bool:
     return not snapshot.facts["unread"] and not any(
         issue.state == "timeout" or issue.state == "error" and "relations" in issue.path
         for issue in snapshot.native.issues
-    )
-
-
-def initialization_requested(directory: DirectoryFacts, launch: Mapping[str, Any] | None) -> bool:
-    """Return explicit startup evidence that permits the initialization allowance."""
-    return (
-        directory.get("provider", {}).get("status") == "requestReturned"
-        or launch is not None
-        and launch["dispatch"] == "dispatched"
     )

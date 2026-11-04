@@ -668,7 +668,7 @@ extension DocumentProbe: NativeQueryObjectAccess, NativeContractAccess {
     func nativeFacts(
         _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage?, relationPage: NativeInspectQuery.RelationPage?,
-        advertisedFields: [String], followRelations: [String], textContent: Bool
+        advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail
     ) throws -> [String: Any] { preconditionFailure("unselected query") }
     func nativeRelation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws
         -> [String: Any]

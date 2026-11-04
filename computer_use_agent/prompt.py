@@ -13,8 +13,12 @@ App selectors and paths refer to the MCP host, which may be a different computer
 Resolve relative dates and times using the MCP host's Python clock and timezone,
 unless the user specifies another timezone.
 Discover apps, observe the relevant App/Window, and use observed element references
-or screenshot coordinates. Reads present observations
-automatically; use print for other values. Use view='image' for a visual check,
+or screenshot coordinates. Reads and actions' related observations are presented
+automatically; use print for other values. Do not routinely follow each action with
+read() and print_image(): first use the returned observation, including
+result.observation when inspecting the action result in code. Read again only to
+obtain missing or newer evidence, and print_image only for a retained image that
+was not already presented. Use view='image' for a visual check,
 or view='both' when both the tree and image are needed. Coordinate spaces belong
 to the object that supplied the screenshot.
 Do not print observation.text or its slices again to shorten an observation;
@@ -29,7 +33,9 @@ Stop and observe before continuing if an operation fails, the state needed for t
 next operation is uncertain, or the next decision requires fresh UI evidence.
 Wait again when that observation reports loading or an unfinished transition.
 Prefer the relevant window or subtree in the default tree view; request an image
-when visual information is needed.
+when visual information is needed. A missing tree in one new window does not
+mean the whole application lacks accessibility: use that window's available image
+and request its missing tree only if the task needs it.
 dispatched means input was sent; verified describes only the operation's stated
 verification. Neither alone proves that the user's overall task is complete.
 On failure, use the error's effect and current observation to decide the next step.

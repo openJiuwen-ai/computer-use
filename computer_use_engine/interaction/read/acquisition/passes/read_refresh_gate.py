@@ -58,7 +58,6 @@ def read_refresh_gate(
             state.plan,
             attempt.current if classified.refresh is Refresh.SCOPE else attempt.target,
             attempt.directory,
-            state.initializing,
             attempt=state.attempt + 1,
             refresh_tree=classified.refresh is Refresh.TREE,
             components=components,

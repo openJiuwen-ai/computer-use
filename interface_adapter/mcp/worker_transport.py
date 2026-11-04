@@ -8,14 +8,18 @@ exceed the stream's 12 MiB flow-control watermark. A length prefix separates
 message admission from that watermark without truncating observations or logs.
 The larger logical cap allows a native reply plus its diagnostic envelope.
 Public MCP stdio and the Windows worker authentication remain unchanged.
-An already imported older parent starts a worker without a version variable;
-that worker retains the original JSONL contract until the parent is upgraded.
+Large native diagnostic results stay encoded across this private channel; the
+parent validates their routing header and integrity before writing the journal.
 """
 
 import asyncio
+import hashlib
+import json
 import os
 import socket
 from asyncio import IncompleteReadError, get_running_loop
+from dataclasses import dataclass
+from types import MappingProxyType
 
 from computer_use.json import loads
 
@@ -25,32 +29,119 @@ MAX_MESSAGE_BYTES = 128 * 1024 * 1024
 HEADER_BYTES = 4
 DIAGNOSTIC_BATCH_BYTES = 64 * 1024
 PROTOCOL_ENV = "COMPUTER_USE_WORKER_PROTOCOL"
-FRAMED_PROTOCOL = "framed-v1"
-LEGACY_PROTOCOL = "jsonl-v1"
+FRAMED_PROTOCOL = "framed-v2"
+_OBSERVATION_FRAME = b"\x00"
+_DIGEST_BYTES = 32
+_MAX_DIAGNOSTIC_HEADER_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class EncodedObservationDiagnostic:
+    """Validated routing fields and the exact JSON bytes for one native result."""
+
+    event: MappingProxyType
+    header_json: bytes
+    result_json: memoryview
+
+
+def _validate_observation_header(event):
+    required = {"timestamp", "kind", "method", "status", "traceId", "id", "executionId"}
+    if (
+        not isinstance(event, dict)
+        or not required <= event.keys()
+        or "result" in event
+        or "error" in event
+        or "failure" in event
+        or event["kind"] != "command_end"
+        or event["method"] != "inspect"
+        or event["status"] != "ok"
+        or not isinstance(event["timestamp"], str)
+        or not event["timestamp"]
+        or not isinstance(event["traceId"], str)
+        or not event["traceId"]
+        or type(event["id"]) is not int
+        or event["id"] <= 0
+        or event["executionId"] is not None
+        and (type(event["executionId"]) is not int or event["executionId"] <= 0)
+    ):
+        raise ValueError("Invalid encoded native-observation diagnostic header.")
+
+
+def _observation_payload(message):
+    """Encode complete native facts once, separately from small routing fields."""
+    event = message.get("diagnostic") if isinstance(message, dict) else None
+    if (
+        not isinstance(event, dict)
+        or event.get("kind") != "command_end"
+        or event.get("method") != "inspect"
+        or event.get("status") != "ok"
+        or not isinstance(event.get("result"), dict)
+        or event["result"].get("kind") != "observation"
+        or message.keys() - {"diagnostic", "executionId"}
+    ):
+        return None
+    header = {key: value for key, value in event.items() if key != "result"}
+    header["executionId"] = message.get("executionId")
+    try:
+        _validate_observation_header(header)
+        header_json = json.dumps(header, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8", "backslashreplace"
+        )
+        if len(header_json) > _MAX_DIAGNOSTIC_HEADER_BYTES:
+            return None
+        result_json = json.dumps(event["result"], ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8", "backslashreplace"
+        )
+    except (TypeError, ValueError):
+        # A custom diagnostic still follows the ordinary serializer contract.
+        return None
+    header_size = len(header_json).to_bytes(HEADER_BYTES, "big")
+    digest = hashlib.sha256(header_size)
+    digest.update(header_json)
+    digest.update(result_json)
+    return _OBSERVATION_FRAME + digest.digest() + header_size + header_json + result_json
+
+
+def _decode_observation_payload(payload):
+    view = memoryview(payload)
+    body = view[len(_OBSERVATION_FRAME) + _DIGEST_BYTES :]
+    if len(body) < HEADER_BYTES:
+        raise ValueError("Truncated encoded native-observation diagnostic.")
+    digest = payload[len(_OBSERVATION_FRAME) : len(_OBSERVATION_FRAME) + _DIGEST_BYTES]
+    if hashlib.sha256(body).digest() != digest:
+        raise ValueError("Encoded native-observation diagnostic integrity mismatch.")
+    header_size = int.from_bytes(body[:HEADER_BYTES], "big")
+    if not 0 < header_size <= _MAX_DIAGNOSTIC_HEADER_BYTES or HEADER_BYTES + header_size >= len(body):
+        raise ValueError("Invalid encoded native-observation diagnostic header size.")
+    header_json = bytes(body[HEADER_BYTES : HEADER_BYTES + header_size])
+    event = loads(header_json)
+    _validate_observation_header(event)
+    # These exact header bytes become the journal's metadata. The result slice
+    # stays opaque; both were bound by the checked digest and enclosing frame.
+    return EncodedObservationDiagnostic(MappingProxyType(event), header_json, body[HEADER_BYTES + header_size :])
 
 
 def consume_protocol():
     """Consume the parent's version before opening the private channel.
 
-    Absence means an old, already imported parent using JSONL. Consuming the
-    variable prevents that inherited version from affecting nested workers.
-    Unknown versions are refused before reading or dispatching any code.
+    Consuming the variable prevents that inherited version from affecting
+    nested workers. Obsolete formats are refused before dispatching code.
     """
-    protocol = os.environ.pop(PROTOCOL_ENV, LEGACY_PROTOCOL)
-    if protocol not in (FRAMED_PROTOCOL, LEGACY_PROTOCOL):
+    protocol = os.environ.pop(PROTOCOL_ENV, FRAMED_PROTOCOL)
+    if protocol != FRAMED_PROTOCOL:
         raise RuntimeError("Unsupported internal worker protocol: " + protocol)
     return protocol
 
 
 def _encode_message(message, protocol):
-    payload = dumps(message).encode("utf-8", "backslashreplace")
+    if protocol != FRAMED_PROTOCOL:
+        raise RuntimeError("Unsupported internal worker protocol: " + protocol)
+    payload = _observation_payload(message)
+    if payload is None:
+        payload = dumps(message).encode("utf-8", "backslashreplace")
     if not 0 < len(payload) <= MAX_MESSAGE_BYTES:
         raise ValueError("Internal worker message exceeds the 128 MiB admission limit.")
-    if protocol == FRAMED_PROTOCOL:
-        return len(payload).to_bytes(HEADER_BYTES, "big") + payload
-    if protocol == LEGACY_PROTOCOL:
-        return payload + b"\n"
-    raise RuntimeError("Unsupported internal worker protocol: " + protocol)
+    return len(payload).to_bytes(HEADER_BYTES, "big") + payload
 
 
 def write_message(writer, message, *, protocol=FRAMED_PROTOCOL):
@@ -99,9 +190,6 @@ class WorkerMessageWriter:
 
 async def read_message(reader, *, protocol=FRAMED_PROTOCOL):
     """Read one admitted message; only an EOF between messages is a clean close."""
-    if protocol == LEGACY_PROTOCOL:
-        line = await reader.readline()
-        return loads(line) if line else None
     if protocol != FRAMED_PROTOCOL:
         raise RuntimeError("Unsupported internal worker protocol: " + protocol)
     try:
@@ -113,7 +201,10 @@ async def read_message(reader, *, protocol=FRAMED_PROTOCOL):
     size = int.from_bytes(header, "big")
     if not 0 < size <= MAX_MESSAGE_BYTES:
         raise ValueError("Invalid internal worker message size (maximum 128 MiB).")
-    message = loads(await reader.readexactly(size))
+    payload = await reader.readexactly(size)
+    if payload.startswith(_OBSERVATION_FRAME):
+        return _decode_observation_payload(payload)
+    message = loads(payload)
     if not isinstance(message, dict):
         raise TypeError("Internal worker message must be a JSON object.")
     return message

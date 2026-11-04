@@ -13,6 +13,7 @@ import Foundation
     var context: [String: Any]?
     var application: [String: Any]?
     var impact: [String: Any]?
+    var appChangeInputBaseline: NativeAppObserver.Stamp?
     private(set) var errorCode: FailureCode?
     private(set) var acceptedCount = 0
     private(set) var preparation = [String]()
@@ -74,6 +75,7 @@ import Foundation
         ]
         if let application { value["application"] = application }
         if let impact { value["impact"] = impact }
+        if let appChangeInputBaseline { value["appChangeInputBaseline"] = appChangeInputBaseline.wire }
         if let click { value["click"] = click.wire }
         return value
     }

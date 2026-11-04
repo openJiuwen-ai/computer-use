@@ -4,7 +4,10 @@
 """App aliases consume the same actually delivered image; fixed Windows keep theirs."""
 
 import base64
+import gc
 import unittest
+import weakref
+from dataclasses import replace
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -22,12 +25,16 @@ from computer_use.client.host import (
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
+from computer_use.interaction.read.views.collection import CollectionPlan
 from computer_use.interaction.read.views.pipeline import WindowPart
 from computer_use.interaction.read.views.publication import publish
 from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
 from computer_use.native.contracts import Binding
 from computer_use.protocol.captures import decode_capture
 from computer_use.session import images as images_state
+from computer_use.session.interfaces import WindowIdentity
+from computer_use.session.observation_data import observation_data
+from computer_use.session.operations import OperationBudget
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from unit_tests.test_application_window_lifetimes import ref, setup
@@ -49,11 +56,13 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.pointer = InterfacePointerPipeline(self.controller, self.write)
         self.runtime.task_namespace.update(
             app=self.app,
+            computer=computer_for_controller(self.controller),
+            compose=lambda *args: self.runtime.executor.call(self.compose, *args),
             alias=self.alias,
             window=self.window,
             observe=lambda *args: self.runtime.executor.call(self.observe, *args),
             capture=lambda *args: self.runtime.executor.call(self.capture, *args),
-            click=lambda ui: self.runtime.executor.run(lambda: self.click(ui)),
+            click=lambda ui, point=(20, 30): self.runtime.executor.run(lambda: self.click(ui, point)),
             publish_text=lambda ui: self.runtime.executor.call(publish, self.controller, ui, "Text only", None),
         )
 
@@ -70,11 +79,11 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             setter(None)
         images_state._delivery_required = self.previous_delivery
 
-    def capture(self, ui, key, size=(100, 80)):
+    def capture(self, ui, key, size=(100, 80), color=None):
         item = ui._instance.members[key]
         identity = "capture-" + str(len(self.captures))
         buffer = BytesIO()
-        with Image.new("RGB", size, "white" if key == "a" else "black") as pixels:
+        with Image.new("RGB", size, color or ("white" if key == "a" else "black")) as pixels:
             pixels.save(buffer, format="PNG")
         target = Binding("session", item["instance"], key, item["surface"], capture=identity)
         png = decode_capture(
@@ -103,10 +112,33 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         image = self.capture(ui, key)
         return publish(self.controller, ui, "Observed " + key, image.png)
 
-    async def click(self, ui):
+    def compose(self, ui, keys):
+        parts = []
+        for index, key in enumerate(keys):
+            image = self.capture(ui, key)
+            original = image.pieces[0].image
+            image = replace(original, coordinates={"nativeSpace": "screen", "toNative": (1, 0, 0, 1, index * 120, 0)})
+            parts.append(WindowPart(original.target, image=image))
+        self.composition_gaps = []
+        canvas, _ = InterfaceImagePipeline(self.controller).run(ui, parts, on_gap=self.composition_gaps.append)
+        ui._image = canvas
+        self.captures.append(canvas)
+        plan = CollectionPlan(keys[0], "image")
+        plan.order = tuple(WindowIdentity.of(ui._instance.members[key]) for key in keys)
+        for key, part in zip(keys, parts):
+            identity = WindowIdentity.of(ui._instance.members[key])
+            plan.requested[identity] = frozenset(("image",))
+            plan.captured(ui._instance.members[key], part)
+        coverage = plan.coverage(ui._instance.directory, parts, tuple(piece.window for piece in canvas.pieces))
+        return publish(
+            self.controller, ui, "Composite", canvas.png,
+            partial=bool(self.composition_gaps), window_coverage=coverage,
+        )
+
+    async def click(self, ui, point=(20, 30)):
         # Exercise actual image selection/mapping and dispatch target, without UI input.
         with patch("computer_use.interaction.write.ui.pipeline.refresh", new_callable=AsyncMock):
-            return await self.pointer.run(ui, "click", ((20, 30),), {}, None)
+            return await self.pointer.run(ui, "click", (point,), {}, None)
 
     async def execute(self, code, *, reset_images=False):
         if reset_images:
@@ -135,11 +167,12 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.last_target().root_window, "b")
         # Selection from the delivered single-window observation can reuse exactly its PNG.
         b = self.app.window(ref(self.app, "b"))
-        self.assertIs(b._image, second)
+        self.assertIs(b._image.png, second.png)
+        self.assertEqual(b._image.pieces, second.pieces)
 
     async def test_old_alias_png_cannot_renew_or_replace_the_newer_delivery(self):
         await self.execute("old = observe(app, 'a')")
-        await self.execute("new = observe(alias, 'b')")
+        await self.execute("new = observe(alias, 'a')")
         second = self.alias._image
         result = await self.execute("print_image(old.screenshot)", reset_images=True)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
@@ -198,6 +231,179 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(self.app._instance.delivered_image, second)
         await self.click(self.app)
         self.assertEqual(self.last_target(), second.pieces[0].image.target)
+
+    async def test_older_independent_popup_output_keeps_exact_mapping_without_replacing_app_canvas(self):
+        await self.execute("popup = capture(alias, 'b')\nparent = observe(app, 'a')")
+        parent = self.app._instance.delivered_image
+        popup = self.alias._image
+        result = await self.execute("print_image(popup.png)", reset_images=True)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertNotIn("stale", text)
+        self.assertIn(f"computer.window({ref(self.app, 'b')})", text)
+        self.assertIs(self.app._instance.delivered_image, parent)
+        b = self.app.window(ref(self.app, "b"))
+        await self.click(b)
+        self.assertEqual(self.last_target(), popup.pieces[0].image.target)
+        # Re-delivering B must not authorize unseen A in the reset model epoch.
+        with self.assertRaisesRegex(ComputerUseError, "not been delivered"):
+            await self.click(self.app)
+
+    async def test_composite_delivery_bootstraps_inline_window_with_whole_canvas_pixels(self):
+        await self.execute("old = observe(window, 'a')")
+        old = self.window._image
+        await self.execute("combined = compose(app, ('a', 'b'))")
+        canvas = self.app._image
+        self.assertIsNot(self.window._image, old)
+        self.assertIs(self.window._image.png, canvas.png)
+        b = self.app.window(ref(self.app, "b"))
+        self.assertIs(b._image.png, canvas.png)
+        await self.click(b, (140, 30))
+        self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
+        self.assertEqual(self.write.arun.call_args.args[0].intent.parameters["x"], 20)
+        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+            await self.click(b, (20, 30))
+        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+            await self.click(self.window, (140, 30))
+        await self.execute(f"click(computer.window({ref(self.app, 'b')}), (140, 30))")
+        self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
+
+    async def test_window_recreation_keeps_current_canvas_after_temporary_observer_dies(self):
+        await self.execute("combined = compose(app, ('a', 'b'))")
+        canvas = self.app._image
+        source = weakref.ref(canvas)
+        b = self.app.window(ref(self.app, "b"))
+        handle = weakref.ref(b)
+        del b
+        gc.collect()
+        self.assertIsNone(handle())
+        self.app._image = None
+        self.app._instance.delivered_image = None
+        self.captures.clear()
+        del canvas
+        gc.collect()
+        self.assertIsNotNone(source())
+        canvas = source()
+        b = self.app.window(ref(self.app, "b"))
+        self.assertIs(b._image.png, canvas.png)
+        await self.click(b, (140, 30))
+        self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
+
+    async def test_pending_fixed_window_sample_does_not_change_delivered_pointer_mapping(self):
+        await self.execute("old = observe(window, 'a')")
+        old = self.window._image
+        await self.execute("pending = capture(window, 'a', (200, 160))\nclick(window)")
+        self.assertEqual(self.last_target(), old.pieces[0].image.target)
+        await self.execute("print_image(pending.png)\nclick(window)")
+        self.assertEqual(self.last_target(), old.pieces[0].image.target)
+        await self.click(self.window)
+        self.assertEqual(self.last_target(), self.window._image.pieces[0].image.target)
+        self.assertNotEqual(self.last_target(), old.pieces[0].image.target)
+
+    async def test_native_retention_tracks_delivered_and_latest_pending_exact_captures(self):
+        await self.execute("old = observe(window, 'a')")
+        delivered = self.window._image.pieces[0].image.target.capture
+        await self.execute("pending = capture(window, 'a', (200, 160))")
+        pending = self.window._image.pieces[0].image.target.capture
+        self.assertEqual(self.controller.transport.capture_references, frozenset((delivered, pending)))
+        await self.execute("print_image(pending.png)")
+        self.assertEqual(self.controller.transport.capture_references, frozenset((pending,)))
+
+    async def test_repeated_explicit_and_automatic_image_outputs_share_one_exact_picture(self):
+        result = await self.execute(
+            "state = observe(window, 'a')\nprint_image(state.screenshot)\n"
+            "print_image(state.screenshot)\nprint(state)"
+        )
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
+        self.assertEqual(sum("Coordinate inputs" in block.get("text", "") for block in result["content"]), 1)
+        await self.click(self.window)
+        self.assertEqual(self.last_target(), self.window._image.pieces[0].image.target)
+
+    async def test_identical_same_window_pixels_acknowledge_new_native_capture_once_each(self):
+        result = await self.execute(
+            "first = capture(app, 'a')\nprint_image(first.png)\n"
+            "second = capture(alias, 'a')\nprint_image(second.png)"
+        )
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
+        self.assertIs(self.app._instance.delivered_image, self.alias._image)
+        await self.click(self.window)
+        self.assertEqual(self.last_target(), self.alias._image.pieces[0].image.target)
+        self.assertNotEqual(self.last_target(), self.captures[-2].pieces[0].image.target)
+        outputs = [
+            event["diagnostic"] for event in self.events
+            if event.get("diagnostic", {}).get("kind") == "image_output"
+        ]
+        self.assertEqual([event["coalesced"] for event in outputs], [False, True])
+        self.assertEqual(len({event["capture"]["id"] for event in outputs}), 2)
+
+    async def test_identical_pixels_in_independent_windows_keep_separate_coordinate_domains(self):
+        result = await self.execute(
+            "first = capture(app, 'a')\nprint_image(first.png)\n"
+            "second = capture(alias, 'b', (100, 80), 'white')\nprint_image(second.png)"
+        )
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 2)
+        self.assertEqual(self.captures[-2].png, self.captures[-1].png)
+        await self.click(self.window)
+        self.assertEqual(self.last_target().root_window, "a")
+        await self.click(self.app.window(ref(self.app, "b")))
+        self.assertEqual(self.last_target().root_window, "b")
+
+    async def test_budget_fallback_delivers_only_the_shown_window_mapping_and_coverage(self):
+        clock = SimpleNamespace(now=0.0)
+        budget = OperationBudget(clock=lambda: clock.now)
+        clock.now = 1.001
+        with patch(
+            "computer_use.interaction.read.acquisition.images.composite.pipeline.current_operation_budget",
+            return_value=budget,
+        ):
+            result = await self.execute("limited = compose(app, ('a', 'b'))")
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
+        state = self.runtime.task_namespace["limited"]
+        data = observation_data(state)
+        self.assertTrue(data["partial"])
+        coverage = {record["window"]: record for record in data["window_coverage"]}
+        self.assertEqual(coverage["a"]["captured"], ("image",))
+        self.assertEqual(coverage["a"]["included"], ("image",))
+        self.assertEqual(coverage["a"]["delivered"], ("image",))
+        self.assertEqual(coverage["b"]["captured"], ("image",))
+        self.assertEqual(coverage["b"]["included"], ())
+        self.assertEqual(coverage["b"]["delivered"], ())
+        self.assertEqual(coverage["b"]["missing"], ("image",))
+        self.assertEqual(len(self.composition_gaps), 1)
+        canvas = self.app._instance.delivered_image
+        self.assertIs(canvas.png, self.captures[0].png)
+        self.assertEqual([piece.window for piece in canvas.pieces], ["a"])
+        self.assertNotIn(WindowIdentity.of(self.app._instance.members["b"]), self.app._instance.window_images)
+        await self.click(self.window)
+        self.assertEqual(self.last_target(), canvas.pieces[0].image.target)
+        self.assertEqual(self.write.arun.call_args.args[0].intent.parameters, {"x": 20.0, "y": 30.0})
+        b = self.app.window(ref(self.app, "b"))
+        with self.assertRaisesRegex(ComputerUseError, "no current image mapping"):
+            await self.click(b)
+
+    async def test_fallback_raw_pixels_replace_composite_coordinates_only_after_delivery(self):
+        await self.execute("original = compose(app, ('a', 'b'))")
+        original = self.app._instance.delivered_image
+        old_target = original.pieces[1].image.target
+        clock = SimpleNamespace(now=0.0)
+        budget = OperationBudget(clock=lambda: clock.now)
+        clock.now = 1.001
+        with patch(
+            "computer_use.interaction.read.acquisition.images.composite.pipeline.current_operation_budget",
+            return_value=budget,
+        ):
+            await self.execute("limited = compose(app, ('b', 'a'))\nclick(app, (140, 30))")
+        self.assertEqual(self.last_target(), old_target)
+        self.assertEqual(original.pieces[1].box, (120, 0, 100, 80))
+        current = self.app._instance.delivered_image
+        self.assertEqual(current.pieces[0].window, "b")
+        self.assertEqual(current.pieces[0].box, (0, 0, 100, 80))
+        self.assertIsNot(current.png, original.png)
+        b = self.app.window(ref(self.app, "b"))
+        await self.click(b, (20, 30))
+        self.assertEqual(self.last_target(), current.pieces[0].image.target)
+        self.assertNotEqual(self.last_target(), old_target)
+        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+            await self.click(b, (140, 30))
 
     async def test_direct_sdk_return_commits_png_without_mcp_authorization(self):
         set_observation_handler(None)

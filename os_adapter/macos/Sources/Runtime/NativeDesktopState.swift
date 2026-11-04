@@ -12,6 +12,7 @@ import ApplicationServices
     let appSelections: AppSelections
     let applications: NativeApplicationAccess
     let sharing = WindowSharing()
+    let appObserver = NativeAppObserver()
     let pointer = AgentPointer()
     private(set) lazy var desktop = DesktopCapture(applications: discovery)
     let accessibilityActivation = AccessibilityActivation()

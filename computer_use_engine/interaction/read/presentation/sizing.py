@@ -23,9 +23,10 @@ class DocumentSize:
     still contribute their full encoded length, preserving cache admission.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, checkpoint=None) -> None:
         self.memo: dict[int, tuple[object, int]] = {}
         self.strings: dict[str, int] = {}
+        self.checkpoint, self._steps = checkpoint, 0
 
     def record(self, pairs: Iterable[tuple[str, object]]) -> int:
         size, separator = 2, 0
@@ -35,6 +36,9 @@ class DocumentSize:
         return size
 
     def data(self, value: Any) -> int:
+        self._steps += 1
+        if self.checkpoint is not None and self._steps % 128 == 1:
+            self.checkpoint()
         if isinstance(value, str):
             if value not in self.strings:
                 self.strings[value] = len(utf8(dumps(value)))

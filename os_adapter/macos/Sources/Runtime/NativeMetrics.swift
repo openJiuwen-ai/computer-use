@@ -10,11 +10,20 @@ import Foundation
         case targetValidation, documentValidation, recipientValidation, focusValidation, pointerValidation
         case preparedInputValidation, pointerFocusValidation, windowMembership, windowValidation, keyboardIntentCapture
         case observationWait, accessibilityRead, windowCapture, overviewCapture, capabilityEvaluation
+        case captureEnumeration, captureSharing, capturePixels, capturePNGEncoding, captureIdentityValidation
+        case sharingStreamStart, sharingStreamStop
+        case appObserverRegistration, appObserverWait
         case clickPlan, clickPreparation, clickTargetValidation, clickDispatch, clickRelease
+        case readPublication
+        case captureJoin
+        case capturePermissionPreflight, captureStartupScope, captureTargetResolution, captureDocumentIdentity
+        case captureWindowHint, captureRetryScope
+        case readCatalogue, readAttributes, readIdentityFallback
     }
     enum Counter: String {
         case alreadyForeground, cachedWindowPreparation, nativeWindowSelection, activationNotification
         case observationRetry
+        case sharingStreamReuse
         case editorForwardOnlyLink, editorHandoff, collectionEditorHandoff, capabilityQuery
     }
     struct Interval {

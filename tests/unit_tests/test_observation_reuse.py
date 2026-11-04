@@ -99,16 +99,22 @@ class ObservationReuseTests(TestCase):
         snapshot.roots[0]["fixture"] = shared
         snapshot.fields[("0", "fixture")] = {"normalized": shared}
         captured = CapturedSnapshot.capture(snapshot)
-        first, second = captured.materialize(read_only_facts=True), captured.materialize(read_only_facts=True)
+        first, second = captured.materialize(read_only_sources=True), captured.materialize(read_only_sources=True)
         self.assertIs(first.facts, captured.facts)
         self.assertIs(second.facts, captured.facts)
         with self.assertRaises(TypeError):
             first.facts["nodes"][0]["values"]["name"] = "changed"
         first.roots[0]["fixture"]["items"].append("edit")
-        self.assertEqual(first.fields[("0", "fixture")]["normalized"], {"items": ["original"]})
+        self.assertIs(first.fields, captured.fields)
+        self.assertIs(first.refs, captured.refs)
+        self.assertEqual(first.fields[("0", "fixture")]["normalized"]["items"], ("original",))
+        with self.assertRaises(TypeError):
+            first.fields[("0", "fixture")]["normalized"]["items"] = ()
         self.assertEqual(second.roots[0]["fixture"], {"items": ["original"]})
         mutable = captured.materialize()
         mutable.facts["nodes"][0]["values"]["name"] = "local edit"
+        mutable.fields[("0", "fixture")]["normalized"]["items"].append("editable")
+        self.assertEqual(first.fields[("0", "fixture")]["normalized"]["items"], ("original",))
         self.assertEqual(second.facts["nodes"][0]["values"]["name"], observation().nodes["root"].name)
 
     def test_byte_budget_counts_repeated_records_and_unicode_exactly(self):

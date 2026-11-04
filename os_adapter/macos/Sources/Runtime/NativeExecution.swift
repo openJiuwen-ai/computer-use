@@ -30,6 +30,7 @@ import ApplicationServices
         current?.stop("connection_closed")
         state.pointer.stop()
         SyntheticFocusCoordinator.shared.stop()
+        state.appObserver.stop()
     }
 
     lazy var scopes = NativeScopeResolver(

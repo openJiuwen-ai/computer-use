@@ -41,6 +41,10 @@ import ApplicationServices
         return registry.windowReference(window, element: element)
     }
 
+    func retireWindowReference(_ window: NativeWindows.Window) {
+        registry.retireWindowReference(window)
+    }
+
     func nativeScope(_ window: NativeWindows.Window, owner: NSRunningApplication) -> String {
         return registry.nativeScope(window, owner: owner)
     }
@@ -50,12 +54,13 @@ import ApplicationServices
     func nativeFacts(
         _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
-        advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false
+        advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false,
+        actionDetail: NativeActionDetail = .full
     ) throws -> [String: Any] {
         try facts.collect(
             ref, session: session, fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: childrenPage,
             relationPage: relationPage, advertisedFields: advertisedFields, followRelations: followRelations,
-            textContent: textContent)
+            textContent: textContent, actionDetail: actionDetail)
     }
 
     func nativeReadTarget(_ ref: String) throws -> ApplicationElements.Target { try facts.readTarget(ref) }

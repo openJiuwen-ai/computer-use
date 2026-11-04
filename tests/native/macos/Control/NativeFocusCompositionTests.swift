@@ -10,6 +10,7 @@ import ApplicationServices
         try await stoppedScopeDoesNotPrepareWindow()
         try await nonKeyPanelAndCallbacks()
         try await restoredStatePrecedesConfirmation()
+        try await restoredActivityIsReestablishedBeforeConfirmation()
         try await unsettledRestorationStopsBeforeConfirmation()
         print("PASS application activity precedes fresh native window planning without new readiness gates")
     }
@@ -19,9 +20,30 @@ import ApplicationServices
         probe.returnForeground = true
         let outcome = try await probe.run(observeOutcome: false)
         precondition(probe.trace.firstIndex(of: "restore")! < probe.trace.firstIndex(of: "confirm")!)
-        precondition(probe.trace.last == "sample", "restoration requires fresh final facts even without verbose evidence")
+        precondition(probe.trace.last == "confirm", "restoration facts must be sampled before confirmation")
         precondition(outcome.final.focusedWindow == 9 && !outcome.final.foreground)
         precondition(probe.samples == 2)
+    }
+
+    @MainActor static func restoredActivityIsReestablishedBeforeConfirmation() async throws {
+        for preservesWindow in [true, false] {
+            let probe = FocusCompositionProbe(mode: .restoreOther)
+            probe.returnForeground = true
+            probe.deactivateOnReturn = true
+            probe.returnFocusedWindow = 7
+            probe.preserveWindowOnReactivation = preservesWindow
+            let outcome = try await probe.run(observeOutcome: false)
+            precondition(probe.applicationCalls == 2 && probe.posts == 2)
+            precondition(outcome.final.reportedActive == true && !outcome.final.foreground)
+            precondition(outcome.final.focusedWindow == (preservesWindow ? 7 : 8),
+                         "local activation can change the receiver; expose its actual window, never manufacture readiness")
+            precondition(probe.selections == 1, "do not repeatedly activate and restore the window")
+            precondition(probe.trace.suffix(4) == ["application", "post13", "sample", "confirm"])
+            precondition(NativePointerReadiness.ready(
+                kind: .click, foreground: outcome.final.foreground, windowKind: .keyRequiring,
+                focus: outcome.final.focusedWindow == 7 ? .target : .otherWindow,
+                backgroundPrepared: true, backgroundReportedActive: outcome.final.reportedActive) == preservesWindow)
+        }
     }
 
     @MainActor static func unsettledRestorationStopsBeforeConfirmation() async throws {
@@ -65,7 +87,7 @@ import ApplicationServices
             precondition(probe.applicationCalls == 1 && probe.confirms == 1)
             precondition(probe.posts == (mode == .unavailable ? 0 : 1))
             precondition(
-                probe.notifications == 1 && probe.selections == 1 && probe.settles == 1,
+                probe.notifications == 1 && probe.selections == 0 && probe.settles == 1,
                 "ignored/unavailable/unknown optional activity must continue the unchanged window/key Plan")
             precondition(probe.trace.firstIndex(of: "application")! < probe.trace.firstIndex(of: "sample")!)
             precondition(probe.active != true, "confirmation cannot manufacture an activity acknowledgement")
@@ -76,7 +98,9 @@ import ApplicationServices
             precondition(
                 probe.applicationCalls == 1 && probe.posts == 0,
                 "an optional stage may run while its real application unit skips the native post")
-            precondition(probe.notifications == 0 && probe.selections == 1 && probe.confirms == 1)
+            precondition(probe.notifications == 0 && probe.selections == 0 && probe.confirms == 1)
+            precondition(probe.windowWrites == 0,
+                         "a positively selected target must not be activated merely to create a transport receipt")
         }
         let unchanged = FocusCompositionProbe(mode: .active)
         unchanged.prepared = true
@@ -124,8 +148,8 @@ import ApplicationServices
         let outcome = try await panel.run(needsKeyWindow: false, observeOutcome: true)
         precondition(panel.posts == 0 && panel.notifications == 0)
         precondition(
-            panel.selections == 1 && panel.windowWrites == 0,
-            "the parent may ask the panel pass; a non-key panel keeps its native selection semantics")
+            panel.selections == 0 && panel.windowWrites == 0,
+            "passive preparation does not require selecting a key window")
         precondition(panel.confirms == 1 && panel.rememberedNeedsKey == [false])
         precondition(panel.forwardedNeedsKey.allSatisfy { !$0 })
         precondition(outcome.initial.focusedWindow == nil && outcome.final.focusedWindow == nil)
@@ -165,6 +189,9 @@ import ApplicationServices
     var failAfterPost = false
     var reportCleanupUnknown = false
     var returnForeground = false
+    var deactivateOnReturn = false
+    var returnFocusedWindow: CGWindowID = 9
+    var preserveWindowOnReactivation = false
     var restorationUnsettled = false
     var trace = [String](), legacy = [String](), effects = [String]()
     var effectWindows = [UInt32?](), forwardedNeedsKey = [Bool](), rememberedNeedsKey = [Bool]()
@@ -218,7 +245,7 @@ import ApplicationServices
                 self.ownedPost = true
                 if self.mode == .restoreOther {
                     self.active = true
-                    self.focusedWindow = 8
+                    if self.posts == 1 || !self.preserveWindowOnReactivation { self.focusedWindow = 8 }
                 }
                 if self.mode == .unknown { self.active = nil }
             },
@@ -307,7 +334,8 @@ import ApplicationServices
                 guard self.returnForeground else { return false }
                 self.trace.append("restore")
                 self.foregroundPID = self.pid + 1
-                self.focusedWindow = 9
+                self.focusedWindow = self.returnFocusedWindow
+                if self.deactivateOnReturn { self.active = false }
                 return true
             })
         return try await NativeFocusPipeline.run(request, observeOutcome: observeOutcome, stages: stages)

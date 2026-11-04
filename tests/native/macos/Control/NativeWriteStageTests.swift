@@ -75,6 +75,33 @@ import ApplicationServices
                      && scalarFocus["globalInput"] as? String == "no",
                      "text-point preparation declares its actual window-directed transport")
         keyboardWindowPreparation()
+        viewportPreparationContinuation()
+    }
+
+    @MainActor static func viewportPreparationContinuation() {
+        func evidence() -> NativeClickEvidence {
+            NativeClickEvidence(target: ["surface": "original-window", "node": "original-checkbox"])
+        }
+        let pending = evidence()
+        pending.record(.init(kind: .viewport, phase: .willSend, detail: "wheel", window: 7))
+        pending.confirmViewportProgress(window: 7)
+        precondition(!pending.permitsReselection, "a pending native wheel cannot be recovered or replayed")
+
+        let noProgress = evidence()
+        noProgress.record(.init(kind: .viewport, phase: .willSend, detail: "wheel", window: 7))
+        noProgress.record(.init(kind: .viewport, phase: .returned, detail: "wheel", window: 7))
+        noProgress.confirmViewportProgress(window: 8)
+        precondition(!noProgress.permitsReselection, "another window's geometry is not original-target progress")
+        noProgress.confirmViewportProgress(window: 7)
+        precondition(noProgress.permitsReselection)
+        noProgress.fail(dispatch: "notDispatched", cleanup: "complete", retryReason: "preparationUnavailable")
+        let wire = noProgress.wire
+        let preparation = (wire["preparationEvidence"] as! [[String: Any]])[0]
+        precondition(preparation["effect"] as? String == "contentPossible")
+        precondition(preparation["continuation"] as? String == "withinScope")
+        precondition((wire["continuation"] as! [String: Any])["kind"] as? String == "reselectWithinScope")
+        noProgress.markCall("postToPid")
+        precondition(!noProgress.permitsReselection, "entered requested input can never continue as preparation")
     }
 
     @MainActor static func retainedElementPreparation(

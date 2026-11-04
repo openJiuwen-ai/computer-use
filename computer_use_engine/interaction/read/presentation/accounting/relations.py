@@ -36,7 +36,7 @@ class RelationPresentation:
             self.relations.setdefault(self.aliases[relation["source"]], []).append(relation)
 
     def render(
-        self, members: Iterable[str], rendered: RenderedTree
+        self, members: Iterable[str], rendered: RenderedTree, *, checkpoint=None
     ) -> tuple[dict[tuple[str, str], list[str]], list[Record]]:
         """Return grouped explicit edges and one destination per source edge.
 
@@ -49,10 +49,19 @@ class RelationPresentation:
             rendered: Current render and its retained source/emission accounting.
         """
         fallback = rendered.get("presentation") == "uncompressed"
+        steps = 0
+
+        def check():
+            nonlocal steps
+            steps += 1
+            if checkpoint is not None and steps % 128 == 1:
+                checkpoint()
+
         allowed = set(members)
         nodes, parents, windows = {}, {}, {}
         pending = [(root, None, None) for root in reversed(rendered.get("roots", ()))]
         while pending:
+            check()
             node, parent, window = pending.pop()
             ref = node["ref"]
             if ref not in allowed or ref in nodes:
@@ -64,7 +73,9 @@ class RelationPresentation:
 
         groups, sources = {}, []
         for ref in members:
+            check()
             for relation in self.relations.get(ref, ()):
+                check()
                 kind = relation["kind"]
                 targets = [self.aliases[token] for token in relation["targets"]]
                 plain = (

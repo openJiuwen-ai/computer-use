@@ -48,7 +48,7 @@ import ApplicationServices
         try stages.begin(request)
         try await stages.applicationContext(request)
         let state = try stages.sample(request)
-        let plan = PlanFocusPreparationPass.run(state, window: request.window.id)
+        let plan = PlanFocusPreparationPass.run(state, window: request.window.id, needsKeyWindow: request.needsKeyWindow)
         if plan.notify { try stages.notify(request) }
         if plan.selectWindow { try stages.selectWindow(request) }
         // Keep the existing bounded queue settle. The key-focus notification
@@ -57,8 +57,17 @@ import ApplicationServices
         // Foreground restitution belongs before confirmation/input. Its real
         // deactivation may change the key/main receiver and invalidate receipts.
         let restored = try await stages.finishPreparation(request)
+        var restoredState = restored ? try stages.sample(request) : nil
+        if let state = restoredState, !state.foreground && state.reportedActive == false {
+            // Returning the user's foreground can deactivate the target after
+            // selection. Reestablish local activity once, then use fresh facts:
+            // its notification may itself change the app's key window.
+            try await stages.applicationContext(request)
+            restoredState = try stages.sample(request)
+        }
         try stages.confirm(request)
         return NativeFocusOutcome(
-            initial: state, final: observeOutcome || restored ? try stages.sample(request) : state, waitEnd: .notNeeded)
+            initial: state, final: observeOutcome ? try stages.sample(request) : restoredState ?? state,
+            waitEnd: .notNeeded)
     }
 }

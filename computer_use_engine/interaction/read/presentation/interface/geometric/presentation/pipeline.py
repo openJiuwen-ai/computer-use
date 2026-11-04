@@ -119,6 +119,7 @@ class _ArrangePresentation(Node[ProjectionResult, PreparedRoot]):
             text_slices=text_slices,
             groups=groups,
             readable=readable,
+            checkpoint=control.remaining,
         )
 
     async def _arun(self, projection: ProjectionResult, control: Control) -> PreparedRoot:

@@ -169,6 +169,17 @@ class TargetQuery(NativeGraph):
         path = element_path(path)
         if self.root.node is None or self.root.capture is not None:
             raise ValueError("A path query needs an observed accessible root")
+        if self.platform == "macos" and "nativeQueryActionProfile" in getattr(self.port, "capabilities", ()):
+            self.query_options["action_detail"] = "none" if len(path) == 1 else "names"
+            if len(path) == 1:
+                # The first path step explores every candidate directly. Only
+                # later steps test anonymous wrappers through _transparent.
+                fields = ["role"]
+                if "name" in path[0]:
+                    fields.extend(("name", "description", "value"))
+                if "identifier" in path[0]:
+                    fields.append("identifier")
+                self.fields = tuple(fields)
         selected = self.root.node
         anchors = [selected]
         for step, condition in enumerate(path):

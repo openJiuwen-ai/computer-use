@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import diagnostic
-
 from computer_use.interaction.read.delivery.diff.model import PURE, PlannedDelivery
 from computer_use.interaction.read.delivery.diff.passes.plan_full_delivery import (
     stage as plan_full_delivery,
@@ -65,7 +64,9 @@ class _RenderPlannedDelivery(Node["PlannedDelivery", "str"]):
         )
         document = observation.get("document")
         if isinstance(document, DisplayDocument):
-            request = DocumentRenderRequest(document, value.plan, observation.get("publicApi", False))
+            request = DocumentRenderRequest(
+                document, value.plan, observation.get("publicApi", False), observation.get("presentationDraft")
+            )
             return self.rendering.run(request, control)
         return observation["state"]["text"]
 

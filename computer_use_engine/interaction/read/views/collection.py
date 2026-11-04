@@ -16,7 +16,7 @@ from computer_use.interaction.query.instances.membership import ancestor
 from computer_use.native.query.directory import select_surface
 from computer_use.session.interfaces import WindowIdentity
 
-from .related import RelatedRead
+from .related import RelatedRead, window_lifecycle
 
 if TYPE_CHECKING:
     from computer_use.protocol.records import NativeDirectory, SurfaceInfo
@@ -40,6 +40,12 @@ class CollectionPlan:
     limit: int = 6
     requested: dict[WindowIdentity, frozenset[str]] = field(default_factory=dict)
     attempted: dict[WindowIdentity, frozenset[str]] = field(default_factory=dict)
+    captured_components: dict[WindowIdentity, frozenset[str]] = field(default_factory=dict)
+    tree_roots: dict[WindowIdentity, str | None] = field(default_factory=dict)
+    attempted_tree_roots: dict[WindowIdentity, str | None] = field(default_factory=dict)
+    tree_upgrades: set[WindowIdentity] = field(default_factory=set)
+    pending_upgrades: set[WindowIdentity] = field(default_factory=set)
+    changed_components: dict[WindowIdentity, frozenset[str]] = field(default_factory=dict)
     order: tuple[WindowIdentity, ...] = ()
     principal: str | None = None
     selection_error: ComputerUseError | None = None
@@ -63,6 +69,21 @@ class CollectionPlan:
         keys = dict.fromkeys((self.principal, *attached, *newly_seen))
         self.order = tuple(WindowIdentity.of(permitted[key]) for key in keys if key in permitted)
         for identity in self.order:
+            item = permitted[identity.window]
+            root = item.get("node")
+            self.tree_roots[identity] = root
+            # A visual catalogue deliberately has no AX root. One attempted
+            # read under that evidence does not satisfy a tree obligation when
+            # this same lifetime subsequently supplies its accessible root.
+            if (
+                root is not None
+                and identity in self.attempted_tree_roots
+                and self.attempted_tree_roots[identity] is None
+                and "tree" not in self.captured_components.get(identity, ())
+                and identity not in self.tree_upgrades
+            ):
+                self.tree_upgrades.add(identity)
+                self.pending_upgrades.add(identity)
             requested = components(self.view)
             if self.related is not None and (
                 identity not in self.related.known_windows
@@ -78,18 +99,32 @@ class CollectionPlan:
             if identity not in self.attempted and len(self.attempted) >= self.limit:
                 continue
             missing = self.requested[identity] - attempted
+            missing |= self.changed_components.pop(identity, frozenset())
+            if identity in self.pending_upgrades and "tree" in self.requested[identity]:
+                missing |= {"tree"}
             if missing:
                 self.attempted[identity] = attempted | missing
+                if "tree" in missing:
+                    self.attempted_tree_roots[identity] = self.tree_roots.get(identity)
+                    self.pending_upgrades.discard(identity)
                 return identity, component_view(missing)
         return None
+
+    def changed(self, identity: WindowIdentity, requested: frozenset[str]) -> None:
+        """Schedule only event-invalidated components, preserving attempt history."""
+        if identity in self.order:
+            self.changed_components[identity] = self.requested[identity] & requested
 
     def captured(self, item, part) -> None:
         """An inner collector may already have captured the newly selected modal."""
         identity = WindowIdentity.of(item)
         captured = frozenset(name for name in ("tree", "image") if getattr(part, name) is not None)
         self.attempted[identity] = self.attempted.get(identity, frozenset()) | captured
+        self.captured_components[identity] = self.captured_components.get(identity, frozenset()) | captured
+        if "tree" in captured:
+            self.pending_upgrades.discard(identity)
 
-    def coverage(self, directory, parts, included_images=()):
+    def coverage(self, directory, parts, included_images=(), *, included_trees=None):
         """Account for each requested object; parent content cannot cover a child."""
         current = {WindowIdentity.of(item) for item in directory["surfaces"]}
         records = []
@@ -107,9 +142,11 @@ class CollectionPlan:
             included = tuple(
                 name
                 for name in captured
-                if identity in current and (name != "image" or identity.window in included_images)
+                if identity in current
+                and (name != "image" or identity.window in included_images)
+                and (name != "tree" or included_trees is None or identity.surface in included_trees)
             )
-            lifecycle = "observed" if identity in current else "unknown" if directory["stopReasons"] else "closed"
+            lifecycle = window_lifecycle(identity, directory)
             records.append(
                 {
                     "window": identity.window,

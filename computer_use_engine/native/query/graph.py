@@ -36,6 +36,7 @@ class NativeGraph:
         self.relations = {semantic: native for native, semantic in RELATIONS[self.platform].items()}
         self.fields = tuple(fields)
         self.follow_relations = tuple(follow_relations)
+        self.query_options = {}
         self.max_nodes, self.max_depth = max_nodes, max_depth
         invalid_max_nodes = (
             True
@@ -121,7 +122,9 @@ class NativeGraph:
         return self.nodes[token]
 
     async def _collect_nodes(self, token, available, depth, *, relation_page=None):
-        options = dict(follow_relations=self.follow_relations) if self.follow_relations else {}
+        options = dict(self.query_options)
+        if self.follow_relations:
+            options["follow_relations"] = self.follow_relations
         if relation_page is not None:
             options["relation_page"] = relation_page
         batch = await self.port.query_nodes(

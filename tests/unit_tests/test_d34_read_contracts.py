@@ -45,7 +45,7 @@ def window(key, *, title="Same title", parent=None):
     )
 
 
-def directory(*items, focused=None, reasons=()):
+def directory(*items, focused=None, reasons=(), ended=()):
     return dict(
         kind="surfaces",
         session="session",
@@ -56,6 +56,7 @@ def directory(*items, focused=None, reasons=()):
         focusedWindow=focused,
         stopReasons=list(reasons),
         rootDiscoveryComplete=not reasons,
+        endedWindows=[{key: item[key] for key in ("window", "instance", "surface")} for item in ended],
         provider=dict(status="notRequested", attribute=None, writeStatus=None),
     )
 
@@ -103,7 +104,10 @@ def test_related_selection_distinguishes_new_windows_from_old_focus_and_lifecycl
     assert related.preferred(after, "B") == "Child"
     assert related.new_windows(after) == ("Child",)
     assert original_lifecycle(related.original, after, related.original_window) == "observed"
-    assert original_lifecycle(related.original, directory(b, child)) == "closed"
+    assert original_lifecycle(related.original, directory(b, child)) == "unknown"
+    assert original_lifecycle(related.original, directory(b, child, ended=(a,))) == "closed"
+    replacement = {**a, "surface": "surface:A-new", "instance": "instance:A-new"}
+    assert original_lifecycle(related.original, directory(replacement, b)) == "closed"
     assert original_lifecycle(related.original, directory(b, child, reasons=("incomplete",))) == "unknown"
     assert original_lifecycle(related.original, directory({**a, "surface": "replacement"}, b)) == "closed"
 
@@ -199,7 +203,7 @@ def test_related_failed_new_detail_preserves_original_image_and_catalogue(monkey
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
     monkeypatch.setattr(
         "computer_use.interaction.read.acquisition.images.composite.pipeline.InterfaceImagePipeline.run",
-        lambda self, owner, parts: (SimpleNamespace(png=b"old pixels"), []),
+        lambda self, owner, parts, **_kw: (SimpleNamespace(png=b"old pixels"), []),
     )
     monkeypatch.setattr("computer_use.protocol.captures.capture_metadata", lambda _: {})
     monkeypatch.setattr(
@@ -268,7 +272,7 @@ def test_fixed_window_read_needs_no_application_display_primary(monkeypatch):
 
 def test_sheet_dismissal_restores_original_window_context_only_on_related_delivery():
     a, b, sheet = window("A"), window("B"), {**window("Sheet", parent="B"), "modal": True}
-    before, after = directory(a, b, sheet, focused="Sheet"), directory(a, b, focused="A")
+    before, after = directory(a, b, sheet, focused="Sheet"), directory(a, b, focused="A", ended=(sheet,))
     controller, app, state = setup(before)
     fixed = UI(
         _instance=state,
@@ -471,7 +475,7 @@ def test_sheet_closes_during_related_capture_then_surviving_fixed_parent_is_deli
 
     b, other = window("B"), window("Other")
     sheet = {**window("Sheet", parent="B"), "node": None, "modal": None, "accessibility": False}
-    before, after = directory(b, other, sheet, focused="B"), directory(b, other, focused="Other")
+    before, after = directory(b, other, sheet, focused="B"), directory(b, other, focused="Other", ended=(sheet,))
     controller, app, state = setup(before)
     parent = UI(
         _instance=state,
@@ -515,7 +519,7 @@ def test_sheet_closes_during_related_capture_then_surviving_fixed_parent_is_deli
     pipeline = InterfaceReadPipeline(controller)
     tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
     pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, b), tree=tree))
-    pipeline.preparation.run = lambda _: SimpleNamespace(roots=())
+    pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
     monkeypatch.setattr(
         "computer_use.interaction.read.views.pipeline.tree_document",
@@ -583,7 +587,7 @@ def test_rootless_fixed_popup_observes_current_app_window_without_rebinding_popu
     pipeline = InterfaceReadPipeline(controller)
     tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
     pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, b), tree=tree))
-    pipeline.preparation.run = lambda _: SimpleNamespace(roots=())
+    pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
     monkeypatch.setattr(
         "computer_use.interaction.read.views.pipeline.tree_document",
@@ -607,6 +611,7 @@ def test_app_scope_observes_fresh_primary_when_old_principal_closes_during_colle
     menu = {**window("Menu"), "kind": "menu"}
     before = directory(sheet, b, other, focused="Sheet")
     after = directory(b, menu) if case == "single" else directory(b, other, focused="B" if case == "focused" else None)
+    after["endedWindows"] = [{key: sheet[key] for key in ("window", "instance", "surface")}]
     controller, app, state = setup(before)
     original = member_target(state, sheet)
     state.input_context = WindowIdentity.of(sheet)
@@ -618,7 +623,7 @@ def test_app_scope_observes_fresh_primary_when_old_principal_closes_during_colle
     pipeline = InterfaceReadPipeline(controller)
     tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
     pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, b), tree=tree))
-    pipeline.preparation.run = lambda _: SimpleNamespace(roots=())
+    pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
     monkeypatch.setattr(
         "computer_use.interaction.read.views.pipeline.tree_document",

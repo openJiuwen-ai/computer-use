@@ -37,7 +37,11 @@ def scope_control(port: NativePort, remaining: Remaining, parent: Control) -> Co
     if not isinstance(current, Control):
         return parent.with_remaining(remaining)
     return replace(
-        parent, remaining=remaining, call_id=current.call_id, diagnostic=parent.diagnostic or current.diagnostic
+        parent,
+        remaining=remaining,
+        call_id=current.call_id,
+        diagnostic=parent.diagnostic or current.diagnostic,
+        cancelled=parent.cancelled or current.cancelled,
     )
 
 

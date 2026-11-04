@@ -16,6 +16,7 @@ from uuid import uuid4
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import Cleanup, OperationTarget
 from computer_use.pipeline import Control, Effect
+from computer_use.session.operations import current_operation_budget
 
 LeaseTarget = TypeVar("LeaseTarget", bound=OperationTarget)
 
@@ -33,6 +34,7 @@ class OperationLease(Generic[LeaseTarget]):
     token: str
     target: LeaseTarget
     remaining: Callable[[], int]
+    app_change_baseline: Mapping[str, str] | None = None
 
     def bounded(self, timeout_ms: int) -> Self:
         """Limit a component to the shorter of its timeout and the call budget.
@@ -48,6 +50,9 @@ class OperationLease(Generic[LeaseTarget]):
         if type(timeout_ms) is not int or timeout_ms < 1:
             raise ValueError("Invalid observation component budget")
         deadline = time.monotonic() + timeout_ms / 1000
+        budget = current_operation_budget()
+        if budget is not None:
+            deadline = min(deadline, budget.deadline)
 
         def remaining() -> int:
             value = min(self.remaining(), int((deadline - time.monotonic()) * 1000))
@@ -91,6 +96,9 @@ class CallLifecycle:
         if previous is not None and previous[0] is not owner:
             raise RuntimeError("Another task owns the observation budget")
         deadline = time.monotonic() + timeout_ms / 1000
+        budget = current_operation_budget()
+        if budget is not None:
+            deadline = min(deadline, budget.deadline)
         if previous is not None:
             deadline = min(deadline, previous[1])
         self._limit = (owner, deadline)
@@ -104,7 +112,13 @@ class CallLifecycle:
             sink = getattr(self.port, "pipeline_diagnostic", None)
         except BaseException:
             sink = None
-        return Control(remaining=remaining, diagnostic=sink if callable(sink) else None, call_id=self._call_id)
+        budget = current_operation_budget()
+        return Control(
+            remaining=remaining,
+            diagnostic=sink if callable(sink) else None,
+            call_id=self._call_id,
+            cancelled=budget.cancelled if budget is not None else None,
+        )
 
     @contextmanager
     def claim(self, timeout_ms: int) -> Iterator[Callable[[], int]]:
@@ -118,6 +132,9 @@ class CallLifecycle:
         self.busy = True
         self._owner = asyncio.current_task()
         deadline = time.monotonic() + timeout_ms / 1000
+        budget = current_operation_budget()
+        if budget is not None:
+            deadline = min(deadline, budget.deadline)
         if self._limit is not None:
             if self._limit[0] is not self._owner:
                 self.busy, self._owner = False, None
@@ -125,6 +142,8 @@ class CallLifecycle:
             deadline = min(deadline, self._limit[1])
 
         def remaining() -> int:
+            if budget is not None:
+                budget.remaining()
             value = int((deadline - time.monotonic()) * 1000)
             if value < 1:
                 raise TimeoutError("Native call budget exhausted")
@@ -133,7 +152,7 @@ class CallLifecycle:
         self._remaining = remaining
         # Every stage within this claim shares the same diagnostic call ID.
         try:
-            self._call_id = uuid4().hex
+            self._call_id = budget.operation_id if budget is not None else uuid4().hex
         except Exception:
             self._call_id = None
         trace = self.control(remaining).child("CallScope")
@@ -171,7 +190,9 @@ class CallLifecycle:
                     effect="none",
                     target="native call",
                     detail="The native session is retired." if self.retired else "Another native call owns this stage.",
-                    next="close the old driver and observe a new session" if self.retired else "wait for the active call to finish",
+                    next="close the old driver and observe a new session"
+                    if self.retired
+                    else "wait for the active call to finish",
                 )
             )
         self._admission = None
@@ -232,7 +253,7 @@ class CallLifecycle:
                 raise
             finally:
                 self._admission = None
-            yield OperationLease(operation, target, remaining)
+            yield OperationLease(operation, target, remaining, opened.app_change_baseline)
             # The query already consumed the original deadline. Exiting a
             # successful read must preserve returned evidence, including a
             # provider's partial batch at its deadline. Any later query checks
@@ -269,6 +290,7 @@ class CallLifecycle:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from typing import Any, AsyncIterator, Iterator
 
     from computer_use.native.contracts import Intent

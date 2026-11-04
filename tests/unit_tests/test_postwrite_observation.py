@@ -104,6 +104,41 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertIs(result.observation, self.observation)
         self.assertEqual(result.window_lifecycle, "observed")
 
+    async def test_dispatched_app_event_baseline_remains_internal_to_related_observation(self):
+        self.ui._instance.directory = self.directory
+        self.controller.transport.capabilities = ("nativeAppChangeEvents",)
+        baseline = dict(session="test", application="fixture", incarnation="process", token="before-input")
+        self.receipt["appChangeBaseline"] = baseline
+        result = await self.run_action()
+        related = self.read.call_args.kwargs["related"]
+        self.assertEqual(related.changes.baseline, baseline)
+        self.assertNotIn("appChangeBaseline", result_receipt(result))
+        self.execute.assert_awaited_once()
+
+    async def test_verified_write_does_not_wait_for_a_business_change(self):
+        self.ui._instance.directory = self.directory
+        self.receipt.update(
+            status="verified", appChangeBaseline=dict(
+                session="test", application="fixture", incarnation="process", token="before-input",
+            ),
+        )
+        result = await self.run_action()
+        self.assertIsNone(self.read.call_args.kwargs["related"].changes)
+        self.assertNotIn("appChangeBaseline", result_receipt(result))
+        self.execute.assert_awaited_once()
+
+    async def test_requested_input_epoch_overrides_arm_stamp_and_both_stay_internal(self):
+        self.ui._instance.directory = self.directory
+        before = dict(session="test", application="fixture", incarnation="process", token="before-preparation")
+        at_input = {**before, "token": "requested-input"}
+        self.receipt.update(appChangeBaseline=before, appChangeInputBaseline=at_input)
+        result = await self.run_action()
+        changes = self.read.call_args.kwargs["related"].changes
+        self.assertEqual(changes.baseline, at_input)
+        self.assertTrue(changes.input_sampled)
+        self.assertNotIn("appChangeBaseline", result_receipt(result))
+        self.assertNotIn("appChangeInputBaseline", result_receipt(result))
+
     async def test_failed_optional_refresh_keeps_first_content_and_reports_its_gap(self):
         gap = ObservationGap("refresh", "observation_refresh_failed", "first capture retained", "read again if needed")
         retain_observation_data(self.observation, (), (), partial=True, directory=self.directory, gaps=(gap,))

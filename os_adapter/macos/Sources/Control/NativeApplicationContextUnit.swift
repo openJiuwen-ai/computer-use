@@ -70,7 +70,7 @@ import ApplicationServices
                 NativeBackgroundPreparationScope.current?.record(event)
                 onNativePreparation(event)
             },
-            wait: { try await Task.sleep(for: .milliseconds(25)) })
+            wait: { try await Task.sleep(for: .milliseconds(5)) })
         }
     }
 
@@ -100,14 +100,17 @@ import ApplicationServices
         onNativePreparation(.init(kind: .focusNotification, phase: .willSend, detail: detail, window: nil))
         post(event)
         onNativePreparation(.init(kind: .focusNotification, phase: .returned, detail: detail, window: nil))
-        for attempt in 0..<12 {
+        // This optional notification is not a readiness gate. Give the target
+        // two short queue turns; the real receiver is sampled after preparation
+        // and again at dispatch. An unimplemented ACK must not burn 275 ms.
+        for attempt in 0..<3 {
             try pollCheck()
             let current = try sample()
             try pollCheck()
             if current.reportedActive == true { return try finish(.activityObserved) }
             // A missing provider report cannot turn optional context into a gate.
             if current.reportedActive == nil || current.foregroundPID == pid { return try finish(.posted) }
-            if attempt < 11 { try await wait() }
+            if attempt < 2 { try await wait() }
         }
         return try finish(.posted)
     }

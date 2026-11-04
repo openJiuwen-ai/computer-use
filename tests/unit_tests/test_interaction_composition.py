@@ -193,12 +193,13 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                 lookup.side_effect = results
                 if error:
                     with self.assertRaises(ComputerUseError) as caught:
-                        await self.controller.run(ResolveElement(self.ui, "button", 1000))
+                        await self.controller.run(ResolveElement(self.ui, "button", 0))
                     self.assertEqual(caught.exception.code, error)
                 else:
                     self.assertIs(await self.controller.run(ResolveElement(self.ui, "button", 1000)), self.snapshot)
                 requests = [call.args[0] for call in lookup.call_args_list]
                 self.assertEqual([request.owner for request in requests], list(self.ui._lookup_scopes))
+                self.assertTrue(all(request.timeout_ms == 0 for request in requests))
                 self.assertLessEqual(requests[1].timeout_ms, requests[0].timeout_ms)
                 self.assertEqual(tuple(dict(segment) for segment in requests[0].path), ({"name": "button"},))
         self.engine.assert_not_awaited()
@@ -212,7 +213,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             WindowIdentity("window", "surface", "app"), False, self.ui._lookup_scopes
         )
         with (
-            patch("computer_use.interaction.agent.pipeline.allowed", return_value={"window": {}}),
+            patch("computer_use.interaction.agent.pipeline.allowed", return_value=dict(self.ui._instance.members)),
             patch.object(FindElementPipeline, "arun", new_callable=AsyncMock, return_value=self.snapshot),
         ):
             with self.assertRaises(ComputerUseError) as caught:

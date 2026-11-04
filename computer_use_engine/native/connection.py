@@ -38,6 +38,7 @@ from computer_use.protocol.session import (
     decode_hello,
     failure_error,
 )
+from computer_use.runtime_provenance import startup_provenance
 
 requestCleanupGraceMs, driverTerminationGraceMs = 750, 1000
 
@@ -164,6 +165,7 @@ class Connection:
         lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
         if preview is not None:
             read_fd, write_fd = os.pipe()
+        provenance = startup_provenance(command)
         try:
             env = dict(os.environ)
             if windows:
@@ -215,6 +217,7 @@ class Connection:
                 globalInputAllowed=self.allow_global_input,
                 executable=command,
                 pid=child.pid,
+                runtime=provenance,
             )
         )
         atexit.register(self._on_exit)
@@ -333,7 +336,12 @@ class Connection:
         )
         self._handshake = dict(future=future, timer=timer)
         self._write(
-            dict(version=self.protocol_version, id=0, method="hello", params=dict(globalInputAllowed=self.allow_global_input))
+            dict(
+                version=self.protocol_version,
+                id=0,
+                method="hello",
+                params=dict(globalInputAllowed=self.allow_global_input),
+            )
         )
         # This future belongs to the caller. Cancellation closes the whole
         # connection; only driver retirement is independent cleanup work.
@@ -371,7 +379,9 @@ class Connection:
             try:
                 params = decode_observation_preparation_request(params)
             except (TypeError, ValueError) as error:
-                raise local_failure(str(error), "select the original window before preparation", "invalid_request", method) from error
+                raise local_failure(
+                    str(error), "select the original window before preparation", "invalid_request", method
+                ) from error
         if method == "execute":
             try:
                 params = {**params, "command": decode_unit_command(params.get("command"))}
@@ -856,6 +866,7 @@ class Connection:
                     }
                 elif pending["method"] == "capture" and result is not None:
                     summary = {**result, "image": dict(source="window", **(capture_metadata(result["image"]) or {}))}
+                diagnostic_started = _now()
                 diagnostic(
                     dict(
                         kind="command_end",
@@ -870,6 +881,16 @@ class Connection:
                             if error is not None
                             else dict(result=summary)
                         ),
+                    )
+                )
+                diagnostic_elapsed = _now() - diagnostic_started
+                diagnostic(
+                    dict(
+                        kind="command_diagnostic_end",
+                        traceId=pending["traceId"],
+                        id=pending["id"],
+                        method=pending["method"],
+                        diagnosticMs=diagnostic_elapsed,
                     )
                 )
                 pending["timer"].cancel()

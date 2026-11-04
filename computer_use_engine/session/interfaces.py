@@ -110,8 +110,8 @@ class WindowEvidence(WindowMembership):
     """Membership evidence never implicitly changes a retained object's lifetime.
 
     UNKNOWN permits another observation, never input. NO records a confirmed
-    scope exclusion. Only complete absence or a changed native identity retires
-    a lifetime; retirement is irreversible within the application session.
+    scope exclusion. Confirmed native end or replacement retires a lifetime;
+    absence from an on-screen catalogue does not. Retirement is irreversible.
     """
 
     lifetime: WindowLifetime = WindowLifetime.RETAINED
@@ -128,6 +128,7 @@ class DirectoryMembership:
 
     complete: bool
     windows: tuple[WindowMembership, ...]
+    ended: tuple[WindowIdentity, ...] = ()
 
 
 @dataclass
@@ -156,11 +157,15 @@ class InstanceState:
     anchor: WorkingWindow | None = None
     input_context: WindowIdentity | None = None
     lookup_context: LookupContext | None = None
+    # Semantic query roots actually delivered to the caller. A sampled or
+    # image-only window cannot become an unseen fallback name-lookup scope.
+    delivered_lookup_windows: set[WindowIdentity] = field(default_factory=set)
     delivered_image: InterfaceImage | None = None
     image_generation: int = 0
     delivered_image_generation: int = 0
     window_images: dict[WindowIdentity, Any] = field(default_factory=dict)
     window_image_generations: dict[WindowIdentity, int] = field(default_factory=dict)
+    sampled_window_images: dict[WindowIdentity, Any] = field(default_factory=dict)
     observation_generation: int = 0
     delivered_observation_generation: int = 0
     directory: NativeDirectory | None = None
@@ -171,6 +176,9 @@ class InstanceState:
     observed: set[str] = field(default_factory=set)
     views: weakref.WeakValueDictionary[tuple[str, str, str], Any] = field(default_factory=weakref.WeakValueDictionary)
     evidence: dict[WindowIdentity, WindowEvidence] = field(default_factory=dict)
+    # Index the retained generation in each native/public slot. Observation
+    # work depends on the active catalogue, not every window ever discovered.
+    _window_lifetimes: dict[str, WindowIdentity] = field(default_factory=dict, repr=False)
     owner_identities: dict[str, WindowIdentity] = field(default_factory=dict)
 
     def reconcile(self, directory: NativeDirectory, facts: DirectoryMembership) -> None:
@@ -182,13 +190,23 @@ class InstanceState:
         """
         current = {item.identity: item for item in facts.windows}
         by_window = {item.identity.window: item.identity for item in facts.windows}
+        ended = set(facts.ended)
+        absence_ends_lifetime = facts.complete and directory.get("platform") in ("windows", "linux")
+        changed = set(current) | ended | {WindowIdentity.of(item) for item in self.members.values()}
+        changed.update(self._window_lifetimes[key] for key in by_window if key in self._window_lifetimes)
+        if absence_ends_lifetime:
+            changed.update(self.evidence)
         retired = set()
-        for identity, previous in tuple(self.evidence.items()):
-            if previous.lifetime is WindowLifetime.RETIRED:
+        for identity in changed:
+            previous = self.evidence.get(identity)
+            if previous is None or previous.lifetime is WindowLifetime.RETIRED:
                 continue
-            if identity in current:
+            if identity in ended:
+                self.evidence[identity] = WindowEvidence(identity, Knowledge.NO, WindowLifetime.RETIRED)
+                retired.add(identity)
+            elif identity in current:
                 self.evidence[identity] = WindowEvidence(identity, current[identity].membership)
-            elif identity.window in by_window or facts.complete:
+            elif identity.window in by_window or absence_ends_lifetime:
                 self.evidence[identity] = WindowEvidence(identity, Knowledge.NO, WindowLifetime.RETIRED)
                 retired.add(identity)
             else:
@@ -196,8 +214,14 @@ class InstanceState:
         for identity, item in current.items():
             # Unknown or independent windows were never part of this instance;
             # do not manufacture retained ownership for them.
-            if identity not in self.evidence and item.membership is Knowledge.YES:
+            if identity not in self.evidence and item.membership is Knowledge.YES and identity not in ended:
                 self.evidence[identity] = WindowEvidence(identity, item.membership)
+            known = self.evidence.get(identity)
+            if known is not None and known.lifetime is WindowLifetime.RETAINED:
+                self._window_lifetimes[identity.window] = identity
+        for identity in ended:
+            if identity not in self.evidence:
+                self.evidence[identity] = WindowEvidence(identity, Knowledge.NO, WindowLifetime.RETIRED)
         self.directory = directory
 
         def _iter_item(_source_items: Iterator[Any]) -> Iterator[Any]:
@@ -238,8 +262,10 @@ class InstanceState:
             if identity in identities or snapshot.get("menu_window_identity") in identities:
                 self.refs[ref] = dict(snapshot, text=None, children=None)
         for identity in identities:
+            self.delivered_lookup_windows.discard(identity)
             self.window_images.pop(identity, None)
             self.window_image_generations.pop(identity, None)
+            self.sampled_window_images.pop(identity, None)
 
     def unconfirm(self, identity: WindowIdentity | None = None) -> None:
         """Suspend current membership after an incomplete fixed-root observation."""

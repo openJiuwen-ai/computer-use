@@ -20,6 +20,7 @@ import CoreGraphics
         self.state = state
         state.sharing.onUserStop = { [weak self] in
             self?.state.pointer.stop()
+            self?.state.appObserver.stop()
             self?.requests.cancelActive()
         }
     }
@@ -137,8 +138,11 @@ import CoreGraphics
                                 "nativeClickPipelineV1", "nativeClickPipelineV2", "nativeDirectory",
                                 "nativeVisualSurfaceQuery", "nativeSurfaceBatch", "nativeVisualSurfaceBatch",
                                 "nativeApplicationListing", "nativeApplicationRoots", "nativeMenuActions",
-                                "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeDesktopInput",
+                                "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeCaptureRetention",
+                                "nativeDesktopInput",
                                 "nativeObservationPreparation",
+                                "nativeAppChangeEvents",
+                                "nativeQueryActionProfile",
                                 "nativeRelations", "nativeNodePages", "nativeNodeDepthBudget", "nativeRelationPages",
                                 "nativeCapturedText", "nativeParameterizedText", "nativeRawNodeMetadata",
                                 "nativeAXAttributeQueries", "nativeActionIntents", "nativeWindowScope",
@@ -230,7 +234,7 @@ import CoreGraphics
     }
 
     private func perform(_ raw: [String: Any], id: Int64, deadline: TimeInterval) async {
-        let metrics = WindowGeometry.inputDiagnosticsEnabled ? NativeMetrics() : nil
+        let metrics = NativeMetrics()
         await RequestDiagnostics.$id.withValue(id) {
             await RequestDiagnostics.$metrics.withValue(metrics) {
                 await RequestDiagnostics.$deadline.withValue(deadline) {

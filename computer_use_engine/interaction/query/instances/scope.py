@@ -19,11 +19,9 @@ from computer_use.native.scopes import (
     StartingApplication,
 )
 from computer_use.session.interfaces import (
-    DirectoryMembership,
     SurfaceOwner,
     WindowIdentity,
     WindowLifetime,
-    WindowMembership,
 )
 from computer_use.session.state import AppState
 
@@ -96,6 +94,14 @@ def display_selection(controller, instance, directory):
         key = focused
     elif len(entries) == 1:
         key = next(iter(entries))
+    elif len(readable := {key: item for key, item in entries.items() if item.get("node") is not None}) == 1 and (
+        instance.anchor is None
+        or entries.get(instance.anchor.root.root_window, {}).get("node") is None
+    ):
+        # An App observation may discover a new usable form while the hidden
+        # launcher remains a native-only row. Historical display preference is
+        # not a fixed Window binding and must not force that obsolete root.
+        key = next(iter(readable))
     elif instance.anchor is not None and instance.anchor.root.root_window in entries:
         previous = entries[instance.anchor.root.root_window]
         key = (
@@ -120,13 +126,6 @@ def adopt(controller, ui, directory, selection=None):
     instance = controller.interfaces.windows.application(directory["session"], directory["application"], name)
     if ui._instance is not instance:
         ui._instance = instance
-    instance.reconcile(
-        directory,
-        DirectoryMembership(
-            not directory["stopReasons"],
-            tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in directory["surfaces"]),
-        ),
-    )
     aliases = controller.interfaces.windows.register_directory(directory, name)
     instance.windows = {int(ref): key for ref, key in aliases.items() if key in instance.members}
     state.running = RunningApplication(directory["application"], name, directory["session"])

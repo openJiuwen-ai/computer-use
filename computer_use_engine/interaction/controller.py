@@ -5,10 +5,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast, overload
 
-from computer_use.diagnostics import local_failure
+from computer_use.diagnostics import diagnostic, local_failure
 from computer_use.interaction.pipeline import SessionPipeline
 from computer_use.interaction.read.acquisition.images.desktop.service import NativeDesktopReader
 from computer_use.interaction.read.acquisition.reader import captured_children, captured_field
@@ -24,6 +25,9 @@ from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
 from computer_use.session.bindings import SessionBindings
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
 from computer_use.session.events import observations_invalidated
+from computer_use.session.operations import current_operation_budget, operation_budget
+from computer_use.session.observation_data import observation_data
+from computer_use.pipeline import Control
 
 if TYPE_CHECKING:
     from computer_use.interaction.model import ControllerAdapters
@@ -36,6 +40,41 @@ if TYPE_CHECKING:
     from computer_use.protocol.records import Record
     from computer_use.session.state import AppState
     from computer_use.types import ActionResult, Observation, TextPage
+
+
+def _observation_completion(result, error):
+    """Describe captured completeness without materializing observation text."""
+    values = vars(error) if error is not None else result if isinstance(result, Mapping) else {}
+    status = values.get("observation_status")
+    gap = values.get("observation_error")
+    observation = values.get("observation") if status is not None else result
+    metadata = observation_data(observation) if observation is not None else None
+    if status is None and metadata is None:
+        return {}
+    summary = {}
+    if status is not None:
+        summary["observationStatus"] = status
+    if gap is not None:
+        summary["observationErrorCode"] = gap.get("code")
+    if metadata is not None:
+        codes = tuple(item.code for item in metadata["gaps"])
+        missing = any(record["required"] and record["missing"] for record in metadata["window_coverage"])
+        summary.update(
+            observationPartial=metadata["partial"],
+            contentAvailable=metadata["content_available"],
+            observationGapCodes=codes,
+            observationComplete=(
+                not metadata["partial"]
+                and metadata["content_available"]
+                and not codes
+                and not missing
+                and gap is None
+                and status not in ("partial", "unavailable")
+            ),
+        )
+    elif status != "not_requested":
+        summary["observationComplete"] = status == "available" and gap is None
+    return summary
 
 
 class SessionController:
@@ -98,7 +137,52 @@ class SessionController:
         pass
 
     async def run(self, request: InteractionRequest) -> InteractionResult:
-        return await self.pipeline.arun(request)
+        owner = current_operation_budget() is None
+        with operation_budget() as budget:
+            request_type = type(request).__name__
+            if owner:
+                diagnostic(
+                    {
+                        "kind": "sdk_operation_start",
+                        "operationId": budget.operation_id,
+                        "operationType": request_type,
+                        "budgetMs": budget.timeout_ms,
+                    }
+                )
+            result = None
+            error = None
+            try:
+                control = Control(remaining=budget.remaining, cancelled=budget.cancelled, call_id=budget.operation_id)
+                result = await self.pipeline.arun(request, control)
+                return result
+            except BaseException as caught:
+                error = caught
+                raise
+            finally:
+                if owner:
+                    # The actual outcome remains authoritative. Expiry after
+                    # dispatch/receipt capture must not turn it into no input.
+                    try:
+                        completion = _observation_completion(result, error)
+                    except Exception as summary_error:  # noqa: BLE001 - diagnostics cannot replace captured effects
+                        completion = {"observationDiagnosticError": type(summary_error).__name__}
+                    diagnostic(
+                        {
+                            "kind": "sdk_operation_end",
+                            "operationId": budget.operation_id,
+                            "operationType": request_type,
+                            "durationMs": budget.elapsed_ms,
+                            "budgetMs": budget.timeout_ms,
+                            "overrun": budget.expired,
+                            "status": "error" if error is not None else "ok",
+                            **(
+                                {"errorType": type(error).__name__, "effect": getattr(error, "effect", None)}
+                                if error is not None
+                                else {"outcome": result.get("status") if isinstance(result, Mapping) else None}
+                            ),
+                            **completion,
+                        }
+                    )
 
     def register(self, owner: object, scope: Record) -> None:
         self.bindings.register(owner, scope)

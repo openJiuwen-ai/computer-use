@@ -88,10 +88,15 @@ class InterfaceWriter:
     independently addressable in the retained atoms even when they share a line.
     """
 
-    def __init__(self, request: InterfaceTextRequest) -> None:
+    def __init__(
+        self, request: InterfaceTextRequest, *, selected_refs: frozenset[str] | None = None, checkpoint=None
+    ) -> None:
         self.request = request
         self.document = request.interface
         self.atoms = request.atoms.atoms
+        self.checkpoint, self._steps = checkpoint, 0
+        self.selected_refs = selected_refs
+        self.format_refs = self._format_dependencies(selected_refs) if selected_refs is not None else None
         self.lines: list[str] = []
         self.nodes: dict[str, RenderedNode] = {}
         self.menus: list[str] = []
@@ -99,8 +104,43 @@ class InterfaceWriter:
         self.group_sections: list[str] = []
         self.background_content: dict[str, tuple[str, ...]] = {}
 
+    def _checkpoint(self) -> None:
+        self._steps += 1
+        if self.checkpoint is not None and self._steps % 128 == 1:
+            self.checkpoint()
+
+    def _format_dependencies(self, selected: frozenset[str]) -> frozenset[str]:
+        """Keep exact ancestor headings for selected nodes in the existing block traversal."""
+        parents = {child: key for key, block in self.document.blocks.items() for child in block.children}
+        pending = [self.document.ref_locations[ref] for ref in selected]
+        needed, visited = set(selected), set()
+        while pending:
+            self._checkpoint()
+            key = pending.pop()
+            if key in visited:
+                continue
+            visited.add(key)
+            block = self.document.blocks[key]
+            needed.update(
+                ref
+                for ref in (block.primary_ref, block.label_ref, block.shared_prefix_ref, block.field_target_ref)
+                if ref is not None
+            )
+            field_plan = self.request.fields.fields.get(key) if self.request.fields is not None else None
+            if field_plan is not None:
+                needed.update(ref for ref in (field_plan.heading_ref, field_plan.target_ref) if ref is not None)
+            heading = self.request.readable.headings.get(key) if self.request.readable is not None else None
+            if heading is not None:
+                needed.update((heading.ref, *heading.sources))
+            if key in parents:
+                pending.append(parents[key])
+        return frozenset(needed)
+
     def value(self, ref: str, slot: AtomSlot, *, shared: bool = False) -> str:
         """Render a preselected excerpt or the complete typed field value."""
+        self._checkpoint()
+        if self.format_refs is not None and ref not in self.format_refs:
+            return ""
         sliced = (
             self.request.text_slices.plan_by(ref, slot.key) if shared and self.request.text_slices is not None else None
         )
@@ -127,6 +167,8 @@ class InterfaceWriter:
         collection_prefix: CollectionPrefixPlan | None = None,
     ) -> tuple[str, ...]:
         """Serialize one complete real target; shared headers affect only explicit prefix slots."""
+        if self.format_refs is not None and ref not in self.format_refs:
+            return ("",)
         atom = self.atoms[ref]
         style = self.request.readable.nodes.get(ref) if self.request.readable is not None else None
         prefix = ref if short else ref + " " + _role(atom, states=states)
@@ -145,6 +187,7 @@ class InterfaceWriter:
         omitted_slots = sharing.omitted_slots.get(ref, ()) if sharing is not None else ()
         omitted_actions = sharing.omitted_actions.get(ref, ()) if sharing is not None else ()
         for slot in atom.slots if slots is None else slots:
+            self._checkpoint()
             if style is not None and (slot.key in style.note_slots or slot.key == style.toggle_slot):
                 continue
             if slot.key in omitted_slots or member is not None and slot.key in member.slot_keys:
@@ -185,6 +228,7 @@ class InterfaceWriter:
         if atom.actions:
             groups: dict[str, list[str]] = {}
             for action in atom.actions:
+                self._checkpoint()
                 if style is not None and action.catalogue_index in style.note_actions:
                     continue
                 if action.catalogue_index in omitted_actions:
@@ -201,6 +245,7 @@ class InterfaceWriter:
         if inline:
             prefix += (", " if captions else " ") + ", ".join(inline)
         for declaration in atom.declarations:
+            self._checkpoint()
             owners = reference_set(dict.fromkeys(fact.key.source for fact in declaration.facts))
             label = {
                 "valueDescription": "Value description",
@@ -256,6 +301,9 @@ class InterfaceWriter:
         self, ref: str, depth: int, context: tuple[tuple[str, str], ...], *, slots: tuple[AtomSlot, ...] | None = None
     ) -> None:
         """Keep unshared typed fields as exact per-target text for incremental delivery."""
+        self._checkpoint()
+        if self.selected_refs is not None and ref not in self.selected_refs:
+            return
         if ref in self.nodes:
             raise ValueError("A target appeared twice in the prepared interface traversal")
         atom = self.atoms[ref]
@@ -455,6 +503,7 @@ class InterfaceWriter:
         self, key: str, depth: int = 0, context: tuple[tuple[str, str], ...] = (), *, inherited_prefix: bool = False
     ) -> None:
         """Write a block and its preselected, source-explicit shared declarations."""
+        self._checkpoint()
         start = len(self.lines)
         self._write(key, depth, context, inherited_prefix=inherited_prefix)
         self.write_declarations(key, depth, at=start + 1)
@@ -746,9 +795,9 @@ class InterfaceWriter:
             self.write(child, depth, context)
 
 
-def format_interface_blocks(request: InterfaceTextRequest) -> FormattedInterface:
+def format_interface_blocks(request: InterfaceTextRequest, *, checkpoint=None) -> FormattedInterface:
     """Render a fully prepared block graph without invoking the legacy line layout pipeline."""
-    writer = InterfaceWriter(request)
+    writer = InterfaceWriter(request, checkpoint=checkpoint)
     for key in request.interface.roots:
         writer.write(key)
     writer.validate_declarations()

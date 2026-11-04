@@ -26,6 +26,24 @@ import Foundation
         let source = URL(fileURLWithPath: CommandLine.arguments[1])
         let cases = try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as! [[String: Any]]
         for test in cases { precondition(accepted(test["query"]!) == test["valid"] as! Bool, test["name"] as! String) }
+        let nodes: [String: Any] = ["kind": "nodes", "fields": ["AXRole"], "maxNodes": 1, "maxDepth": 0]
+        for requested in ["none", "names", "full"] {
+            var raw = nodes
+            raw["actionDetail"] = requested
+            guard case .nodes(_, _, _, _, _, _, _, _, let detail) = try NativeInspectQuery(raw) else {
+                preconditionFailure("lost explicit node action profile")
+            }
+            precondition(detail.rawValue == requested)
+        }
+        guard case .nodes(_, _, _, _, _, _, _, _, let defaultDetail) = try NativeInspectQuery(nodes) else {
+            preconditionFailure("lost ordinary observation profile")
+        }
+        precondition(defaultDetail == .full, "ordinary observations still collect complete action descriptions")
+        for invalid: Any in [NSNull(), false, 0, "partial"] {
+            var raw = nodes
+            raw["actionDetail"] = invalid
+            precondition(!accepted(raw))
+        }
         let within = (0..<17).map { "node-\($0)" }
         for visual in [false, true] {
             var raw: [String: Any] = ["kind": "surfaceBatch", "applications": ["first", "second"]]

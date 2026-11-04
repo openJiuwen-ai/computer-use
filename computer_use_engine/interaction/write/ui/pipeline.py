@@ -12,14 +12,14 @@ from computer_use.diagnostics import local_failure
 from computer_use.interaction.query.instances.scope import allowed, refresh, validate_session
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.native.contracts import Intent
-from computer_use.session.interface_images import frame, signature
+from computer_use.session.interface_images import signature
+from computer_use.session.windows import WindowReferences
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.records import UIHandle
     from computer_use.pipeline.core import Control, Step
     from computer_use.protocol.records import Record
-    from computer_use.session.interface_images import ImagePiece, InterfaceImage
     from computer_use.types import ActionResult, Point
 
 
@@ -30,8 +30,8 @@ class InterfacePointerPipeline:
     """Execute a gesture in an App or Window screenshot's coordinate space.
 
     Check the delivered image and current window membership, then map the gesture
-    to its captured native member window. Revalidate that member's pixel scale
-    before dispatch, then return the mapped window's action result.
+    to its captured native member window. Native dispatch validates the original
+    map against current geometry, then returns that window's action result.
 
     Attributes:
         controller: Supplies current UI membership and captured windows.
@@ -60,7 +60,10 @@ class InterfacePointerPipeline:
         validate_session(self.controller, ui)
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
-        image = ui._image if ui._anchor is not None else ui._instance.delivered_image
+        image = (
+            WindowReferences.delivered_image(ui._instance, ui)
+            if ui._anchor is not None else ui._instance.delivered_image
+        )
         if image is None or image.expired or hashlib.sha256(image.png).digest() != image.digest:
             raise local_failure(
                 "this UI has no current image mapping",
@@ -91,8 +94,6 @@ class InterfacePointerPipeline:
             raise local_failure(
                 "the window membership or modal layout changed", "read this UI image again", "snapshot_expired"
             )
-        if len(image.pieces) > 1:
-            await self.check_layout(image, piece)
         if intent == "drag":
             start, end = mapped[0][1], mapped[1][1]
             parameters = dict(fromX=start[0], fromY=start[1], toX=end[0], toY=end[1])
@@ -100,16 +101,3 @@ class InterfacePointerPipeline:
             x, y = mapped[0][1]
             parameters = dict(x=x, y=y, **options)
         return await self.write.arun(ExecuteAction(ui, Intent(intent, parameters), piece.image.target), control)
-
-    async def check_layout(self, image: InterfaceImage, piece: ImagePiece) -> None:
-        """Keep the addressed member's scale without depending on unrelated captures.
-
-        hit() already resolved the canvas to one retained member and local point.
-        Other members cannot change that map. Native dispatch still checks the
-        original capture geometry, current modality and physical hit.
-        """
-        current = await self.controller.reader.images.window(piece.image.target)
-        old, new = frame(piece.image), frame(current)
-        if any(abs(a - b) > 1e-6 for a, b in zip(old[2:], new[2:])):
-            image.expired = True
-            raise local_failure("the target window changed size", "read this UI image again", "snapshot_expired")

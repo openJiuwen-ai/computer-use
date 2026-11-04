@@ -22,7 +22,6 @@ from computer_use.interaction.read.presentation.interface.collections.model impo
 from computer_use.interaction.read.presentation.interface.collections.outline import select_outline_layout
 from computer_use.interaction.read.presentation.interface.collections.sharing import passive_cell_chain, share_prefixes
 from computer_use.protocol.observation import NativeNode
-from computer_use.protocol.observation.issues import ReadIssueIndex
 
 
 def _nonnegative(value: object) -> int | None:
@@ -38,7 +37,7 @@ class _Source:
         self.aliases = {token: ref for ref, token in request.refs.items() if counts[token] == 1}
         self.nodes = request.interface.projected_nodes
         self.atoms = request.atoms.atoms
-        self.issues = ReadIssueIndex(request.native.issues)
+        self.issues = request.native.issue_index
 
     def native(self, ref: str) -> NativeNode | None:
         token = self.request.refs.get(ref)

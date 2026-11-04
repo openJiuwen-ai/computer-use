@@ -30,6 +30,7 @@ from computer_use.client.images import (
     image_delivered,
     image_label,
     image_metadata,
+    image_output_scope,
     require_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
@@ -45,6 +46,7 @@ from computer_use.session.observation import (
     observation_document,
     peek_observation_text,
 )
+from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 
 from .image_delivery import prepare_image, project_document
 from .output import ObservationOutput, ObservationPresenter, OutputBuffer
@@ -125,13 +127,13 @@ class Runtime:
     def flush_observations(self, run):
         def emit(text, observation):
             self.emit(dict(type="text", text=text))
-            run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
+            if not observation.get("presentationGap"):
+                run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
             if observation["state"].get("screenshot") is not None:
                 run["imageContexts"].set(observation["state"]["screenshot"], True)
 
         def emit_image(png):
-            if not any(image.source is png for image in run["images"]):
-                self.print_image(png)
+            self.print_image(png)
 
         run["observations"].flush(emit, emit_image)
         self.log_observations(run)
@@ -191,14 +193,53 @@ class Runtime:
             self.emit(dict(type="text", text=message), True)
             return
         observation = event["observation"]
-        run["observations"].observe(self.present_observation(observation))
+        budget = current_operation_budget()
+        failure = None
+        try:
+            if budget is not None:
+                budget.checkpoint()
+            presented = self.present_observation(observation)
+            presented = self.presenter.prepare(presented, budget)
+        except OperationDeadlineExceeded as error:
+            # Source facts and an already encoded image remain usable evidence.
+            # This suffix neither acknowledges the unpublished tree nor grants
+            # another deadline to render it during finish().
+            failure = error
+            original = observation["state"]
+            png = original.get("screenshot")
+            cached = run["preparedImages"].get(id(png)) if png is not None else None
+            ready = png if cached is not None and cached[1].source is png and cached[0] == hashlib.sha256(png).digest() else None
+            document = observation.get("document") or observation_document(original)
+            presented = dict(
+                observation,
+                sourceState=original,
+                state=lazy_observation(document, ready),
+                presentationGap=(
+                    "Observation presentation incomplete [original operation deadline]: "
+                    + str(error)
+                    + ". Captured source facts remain retained; the tree was not delivered or acknowledged. "
+                    + ("The already prepared image follows. " if ready is not None else "No prepared image is available. ")
+                    + "Earlier action effects remain unchanged; do not replay an input to repair this output gap."
+                ),
+                operationBudget=budget,
+            )
+        run["presentations"][id(observation["state"])] = presented
+        run["observations"].observe(presented)
         run["observationLogs"].append(observation)
         data = dict(kind="observation_captured", scope=observation["scope"], view=observation["view"])
+        if budget is not None:
+            data.update(
+                operationId=budget.operation_id,
+                operationElapsedMs=budget.elapsed_ms,
+                presentationPrepared=failure is None,
+            )
         if observation.get("document") is not None:
             data["presentation"] = observation["document"].summary_data()
         if "observed" in observation:
             data["observed"] = observation["observed"]
         self.send(dict(diagnostic=dict(**data, elementRefs=list(observation["refs"])), executionId=run["id"]))
+        if failure is not None:
+            raise failure
 
     def log_observations(self, run, *, materializedOnly=False):
         """Record captured evidence in acquisition order at the text output boundary.
@@ -209,14 +250,23 @@ class Runtime:
         """
         while run["observationLogs"]:
             observation = run["observationLogs"][0]
-            if materializedOnly and peek_observation_text(observation["state"]) is None:
+            materialized = peek_observation_text(observation["state"])
+            if materializedOnly and materialized is None:
                 break
             data = dict(
                 kind="observation",
                 scope=observation["scope"],
                 view=observation["view"],
-                text=observation["state"]["text"],
             )
+            if materialized is not None:
+                data["text"] = materialized
+            else:
+                # The captured graph and actual delivery are logged separately.
+                # Logging a diff must not force another full-tree render.
+                data["textMaterialized"] = False
+                document = observation.get("document")
+                if document is not None:
+                    data["presentation"] = document.summary_data()
             if "observed" in observation:
                 data["observed"] = observation["observed"]
             self.send(dict(diagnostic=dict(**data, elementRefs=list(observation["refs"])), executionId=run["id"]))
@@ -230,8 +280,16 @@ class Runtime:
         fingerprint = hashlib.sha256(png).digest()
         cached = run["preparedImages"].get(id(png))
         if cached is None or cached[0] != fingerprint or cached[1].source is not png:
-            cached = fingerprint, prepare_image(png)
+            if run["phase"] == "draining":
+                raise RuntimeError("Image was not prepared within its originating operation; no late image encoding started")
+            budget = current_operation_budget()
+            if budget is not None:
+                budget.checkpoint()
+            delivery = prepare_image(png)
+            cached = fingerprint, delivery, base64.b64encode(delivery.png).decode("ascii")
             run["preparedImages"][id(png)] = cached
+            if budget is not None:
+                budget.checkpoint()
         return cached[1]
 
     def present_observation(self, observation):
@@ -318,8 +376,16 @@ class Runtime:
         if not isinstance(png, (bytes, bytearray, memoryview)):
             raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
         delivery = self.prepared_image(png)
-        data = base64.b64encode(delivery.png).decode("ascii")
         run = _runs.get()
+        scope = image_output_scope(png)
+        output_key = (scope if scope is not None else ("source", id(png)), hashlib.sha256(delivery.png).digest())
+        if run is not None and run["active"] and output_key in run["imageOutputs"]:
+            # Keep every exact native mapping in the acknowledgement set, even
+            # when identical pixels in this same coordinate domain need only
+            # one model-facing image. Never authorize a pending image early.
+            self.record_image(run, delivery, coalesced=True)
+            return
+        data = run["preparedImages"][id(png)][2] if run is not None else base64.b64encode(delivery.png).decode("ascii")
         self.emit(
             dict(
                 type="text",
@@ -328,8 +394,17 @@ class Runtime:
         )
         self.emit(dict(type="image", mimeType="image/png", data=data))
         if run is not None and run["active"]:
-            run["images"].append(delivery)
-            self.send(dict(diagnostic=dict(kind="image_output", capture=image_metadata(png)), executionId=run["id"]))
+            run["imageOutputs"].add(output_key)
+            self.record_image(run, delivery, coalesced=False)
+
+    def record_image(self, run, delivery, *, coalesced):
+        if any(image.source is delivery.source and image.png == delivery.png for image in run["images"]):
+            return
+        run["images"].append(delivery)
+        self.send({
+            "diagnostic": {"kind": "image_output", "capture": image_metadata(delivery.source), "coalesced": coalesced},
+            "executionId": run["id"],
+        })
 
     async def finish(self, error: BaseException | None = None):
         run = _runs.get()
@@ -456,6 +531,7 @@ class Runtime:
             output=OutputBuffer(),
             observations=ObservationOutput(self.presenter),
             images=[],
+            imageOutputs=set(),
             pending=set(),
             observationLogs=deque(),
             actions=ActionPresentation(),

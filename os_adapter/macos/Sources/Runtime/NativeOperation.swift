@@ -19,6 +19,9 @@ import Foundation
     private(set) var stopReason: String?
     private(set) var cleanup = "complete"
     private(set) var inputStarted = false
+    private(set) var appChangeInputBaseline: NativeAppObserver.Stamp?
+    private let appChangeBaseline: NativeAppObserver.Stamp?
+    private let sampleAppChange: @MainActor () -> NativeAppObserver.Stamp?
     /// Non-controlling observers follow the complete public operation, across
     /// its inspect/prepare/execute RPCs, including expiry and cancellation.
     var onClose: ((Bool) -> Void)?
@@ -47,6 +50,8 @@ import Foundation
 
     init(
         timeoutMs: Int, writable: Bool, intent: NativeIntent, target: [String: Any], clickContract: String? = nil,
+        appChangeBaseline: NativeAppObserver.Stamp? = nil,
+        sampleAppChange: @escaping @MainActor () -> NativeAppObserver.Stamp? = { nil },
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, release: @escaping () -> Void,
         cancelActive: @escaping () -> Void
     ) {
@@ -56,6 +61,8 @@ import Foundation
         self.request = intent
         self.target = target
         self.clickContract = clickContract
+        self.appChangeBaseline = appChangeBaseline
+        self.sampleAppChange = sampleAppChange
         self.release = release
         self.cancelActive = cancelActive
         timer = Task { @MainActor [weak self] in
@@ -80,7 +87,16 @@ import Foundation
     /// One public operation may prepare its receiver in several units, but may
     /// cross the requested-input barrier only once. A compound unit (drag, text
     /// sequence) owns all its events and releases inside that one dispatch.
-    func recordInputDispatch() { inputStarted = true }
+    func recordInputDispatch() {
+        if !inputStarted, let armed = appChangeBaseline, let current = sampleAppChange(),
+            current.session == armed.session, current.application == armed.application,
+            current.incarnation == armed.incarnation {
+            appChangeInputBaseline = current
+        }
+        // Compound keys/pointer trains retain the first requested-input epoch.
+        // Preparation records never enter this barrier.
+        inputStarted = true
+    }
 
     /// Preparation owns helper cleanup even when no requested input is sent.
     func recordUnconfirmedCleanup() { cleanup = "unknown" }

@@ -60,6 +60,8 @@ class WritePipeline:
 
     def __init__(self, native: NativePort) -> None:
         self.native, self.state = native, WriteRunState()
+        self.app_change_baseline = None
+        self.app_change_input_baseline = None
         self.intent = Sequence(name="IntentPipeline", steps=[parse_write_intent()])
         self.resolution = TargetResolutionPipeline(native)
         self.main = self.build()
@@ -154,7 +156,12 @@ class WritePipeline:
         request = self.intent.run((intent, target, path, query_timeout_ms, forward_current), control)
         try:
             result = await self.main.arun(request, control)
-            return {**result, "impact": action_impact(self.state, self.native.policy)}
+            receipt = {**result, "impact": action_impact(self.state, self.native.policy)}
+            if self.app_change_baseline is not None:
+                receipt["appChangeBaseline"] = self.app_change_baseline
+            if self.app_change_input_baseline is not None:
+                receipt["appChangeInputBaseline"] = self.app_change_input_baseline
+            return receipt
         except BaseException as caught:
             if isinstance(caught, asyncio.CancelledError):
                 error = caught
@@ -180,6 +187,8 @@ class WritePipeline:
                     minimum_effect="possible" if self.state.native_mutation_possible else "none",
                 )
             error.impact = freeze_result(action_impact(self.state, self.native.policy))
+            if self.app_change_baseline is not None:
+                error.app_change_baseline = self.app_change_baseline
             if error is caught:
                 raise
             for note in getattr(caught, "__notes__", ()):
@@ -192,12 +201,22 @@ class WritePipeline:
         async with self.native.calls.operation(
             request.target, cast("Callable[[], int]", control.remaining), intent=request.intent
         ) as lease:
+            self.app_change_baseline = lease.app_change_baseline
             yield OpenedWrite(request, lease)
 
     def consume_decision(
         self, outcome: AttemptOutcome, transition: Continue[BoundWrite] | Done[Record], _: object
     ) -> None:
         """Apply the Gate's transition to this write's shared attempt state."""
+        sampled = outcome.step.app_change_input_baseline if outcome.step is not None else None
+        if sampled is not None and self.app_change_baseline is not None and all(
+            sampled[key] == self.app_change_baseline[key] for key in ("session", "application", "incarnation")
+        ):
+            # Requested input is later than context preparation. Keep its first
+            # native barrier stamp, rather than treating preparation callbacks
+            # as evidence that this input has already been observed.
+            if self.app_change_input_baseline is None:
+                self.app_change_input_baseline = sampled
         self.state.consume(outcome, transition.reason)
 
 

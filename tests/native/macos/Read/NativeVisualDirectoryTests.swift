@@ -22,11 +22,15 @@ import ApplicationServices
         var focused: AXUIElement?
         var nativeAvailable = true
         var nativeIDs: [CGWindowID] = [380]
+        var hiddenNativeIDs = Set<CGWindowID>()
+        var nativePresenceUnavailable = false
         var failedApplications = Set<String>()
         var locations = [String]()
         var elapsed = 100.0
         var onLocate: (() -> Void)?
         var nextID: pid_t = 19100
+        var rootRegistration: ((AXUIElement, String) throws -> String)?
+        var ownerFailure: DriverError?
         lazy var access = NativeApplicationAccess(windowQuery: api())
         lazy var state = NativeDesktopState(applications: access, appSelections: AppSelections(validateOwner: { _ in }))
         lazy var directory: NativeDirectory = {
@@ -44,14 +48,22 @@ import ApplicationServices
             services.trusted = { self.trusted }
             services.activate = { _ in self.activation += 1; return .init(kind: .alreadyEnabled) }
             services.focusedWindow = { _ in self.focused }
-            services.registerRoot = { _, _, _ in
+            services.registerRoot = { element, _, scope in
+                if let register = self.rootRegistration { return try register(element, scope) }
                 self.content.append("root body registration poison")
                 throw DriverError("scripted content poison", code: .observationIncomplete)
             }
-            services.owner = { _ in }
+            services.owner = { _ in if let error = self.ownerFailure { throw error } }
             services.process = { _ in self.process }
-            services.info = { id in self.nativeIDs.contains(id)
+            services.info = { id in self.nativeIDs.contains(id) || self.hiddenNativeIDs.contains(id)
                 ? [kCGWindowOwnerPID as String: self.app.processIdentifier, kCGWindowNumber as String: id] : nil }
+            services.presence = { id in
+                if self.nativePresenceUnavailable { return .unavailable }
+                guard self.nativeIDs.contains(id) || self.hiddenNativeIDs.contains(id) else { return .absent }
+                return .present([kCGWindowOwnerPID as String: self.app.processIdentifier,
+                                 kCGWindowNumber as String: id,
+                                 kCGWindowIsOnscreen as String: self.nativeIDs.contains(id)])
+            }
             services.role = { self.value($0, kAXRoleAttribute) as? String }
             return NativeDirectory(state: state, session: "visual-scene", windowServices: services)
         }()
@@ -157,6 +169,11 @@ import ApplicationServices
         try visualWindowFacts()
         try rootCoverageIsIndependentOfDescendantGaps()
         try nativeOnlyRefreshRetainsBinding()
+        try hiddenAndUnknownNativeLifetimesCanReappear()
+        try endedNativeLifetimeNeverReusesWindowOrScope()
+        try staleRootRegistrationKeepsOtherWindowsAndNativeVisualBinding()
+        try staleAXOnlyRootIsOmittedWithoutHidingHealthyWindows()
+        try rootRegistrationCancellationAndOwnerFailureRemainFatal()
         try declaredControlRootDoesNotOpenItsContents()
         try legacyContentPositiveControl()
         try visualBatchesRetainProfileFailuresAndDeadline()
@@ -355,6 +372,145 @@ import ApplicationServices
         let reasons = try scene.collect()["stopReasons"] as! [String]
         precondition(!reasons.isEmpty)
         precondition(scene.content.isEmpty)
+    }
+
+    @MainActor static func hiddenAndUnknownNativeLifetimesCanReappear() throws {
+        for unavailable in [false, true] {
+            let scene = Scene()
+            scene.trusted = false
+            let original = (try scene.collect()["surfaces"] as! [[String: Any]])[0]
+            let scope = original["surface"] as! String
+            scene.nativeIDs = []
+            scene.hiddenNativeIDs = [380]
+            scene.nativePresenceUnavailable = unavailable
+            let absent = try scene.collect()
+            precondition((absent["surfaces"] as! [[String: Any]]).isEmpty)
+            precondition((absent["endedWindows"] as! [[String: Any]]).isEmpty,
+                         "hidden or unavailable WindowServer evidence retired an existing native lifetime")
+            precondition(scene.directory.surface(scope) != nil)
+            scene.nativeIDs = [380]
+            scene.hiddenNativeIDs = []
+            scene.nativePresenceUnavailable = false
+            let reappeared = (try scene.collect()["surfaces"] as! [[String: Any]])[0]
+            for key in ["window", "surface", "instance"] {
+                precondition(original[key] as? String == reappeared[key] as? String,
+                             "reappearing native window changed its exact binding")
+            }
+        }
+    }
+
+    @MainActor static func endedNativeLifetimeNeverReusesWindowOrScope() throws {
+        let scene = Scene()
+        scene.trusted = false
+        let original = (try scene.collect()["surfaces"] as! [[String: Any]])[0]
+        scene.nativeIDs = []
+        let ended = try scene.collect()
+        let tombstones = ended["endedWindows"] as! [[String: Any]]
+        precondition(tombstones.count == 1)
+        for key in ["window", "surface", "instance"] {
+            precondition(tombstones[0][key] as? String == original[key] as? String)
+        }
+        precondition(scene.directory.surface(original["surface"] as! String) == nil)
+        // A WindowServer numeric slot may be reused in the same process. It
+        // cannot inherit a positively ended SDK/native lifetime or scope.
+        scene.nativeIDs = [380]
+        let recreated = try scene.collect()
+        let fresh = (recreated["surfaces"] as! [[String: Any]])[0]
+        for key in ["window", "surface", "instance"] {
+            precondition(fresh[key] as? String != original[key] as? String,
+                         "new native lifetime rebound an ended reference")
+        }
+        precondition((recreated["endedWindows"] as! [[String: Any]]).count == 1,
+                     "later directory lost positive end evidence consumed by an earlier read")
+    }
+
+    @MainActor static func staleRootRegistrationKeepsOtherWindowsAndNativeVisualBinding() throws {
+        for nativeStillPresent in [true, false] {
+            let scene = Scene()
+            let healthy = scene.node(kAXWindowRole, parent: scene.application, nativeID: 207)
+            scene.declared = [scene.window, healthy]
+            let initial = try scene.collect()["surfaces"] as! [[String: Any]]
+            let original = initial.first { row in
+                scene.directory.surface(row["surface"] as! String)?.native?.mapping.id == 380
+            }!
+            let healthyRow = initial.first { row in
+                scene.directory.surface(row["surface"] as! String)?.native?.mapping.id == 207
+            }!
+            var attempted = [CFHashCode]()
+            scene.rootRegistration = { element, _ in
+                attempted.append(CFHash(element))
+                if CFEqual(element, scene.window) {
+                    if !nativeStillPresent { scene.nativeIDs.removeAll { $0 == 380 } }
+                    throw DriverError("native node no longer exists", code: .staleTarget)
+                }
+                return "healthy-root"
+            }
+            let result = try scene.collect(nil)
+            let rows = result["surfaces"] as! [[String: Any]]
+            precondition(attempted.contains(CFHash(scene.window)) && attempted.contains(CFHash(healthy)))
+            let surviving = rows.first { $0["window"] as? String == healthyRow["window"] as? String }!
+            precondition(surviving["node"] as? String == "healthy-root" && surviving["accessibility"] as? Bool == true,
+                         "one stale root hid an unrelated healthy accessibility window")
+            let affected = rows.first { $0["window"] as? String == original["window"] as? String }
+            if nativeStillPresent {
+                precondition(affected != nil && affected?["node"] is NSNull && affected?["accessibility"] as? Bool == false)
+                precondition(affected?["surface"] as? String == original["surface"] as? String)
+                precondition(affected?["instance"] as? String == original["instance"] as? String)
+                let scope = scene.directory.surface(original["surface"] as! String)
+                precondition(scope?.native?.mapping.id == 380 && scope?.element == nil,
+                             "native fallback retained an invalid AX proxy or rebound the visual window")
+            } else {
+                precondition(affected == nil, "a closed native window was republished from an earlier catalogue")
+                precondition(result["rootDiscoveryComplete"] as? Bool == false)
+            }
+            let gaps = result["stopReasons"] as! [String]
+            precondition(gaps.contains { $0.contains("AX root unavailable for window") && $0.contains("stale_target") })
+            precondition(!gaps.contains("surface catalogue entry limit"), "a skipped stale root became a false entry-limit gap")
+        }
+    }
+
+    @MainActor static func staleAXOnlyRootIsOmittedWithoutHidingHealthyWindows() throws {
+        let scene = Scene()
+        let ghost = scene.node(kAXWindowRole, parent: scene.application)
+        scene.declared = [scene.window, ghost]
+        let initial = try scene.collect()["surfaces"] as! [[String: Any]]
+        let ghostRow = initial.first { row in
+            scene.directory.surface(row["surface"] as! String)?.element.map { CFEqual($0, ghost) } == true
+        }!
+        scene.rootRegistration = { element, _ in
+            if CFEqual(element, ghost) { throw DriverError("native node no longer exists", code: .staleTarget) }
+            return "healthy-root"
+        }
+        let result = try scene.collect(nil)
+        let rows = result["surfaces"] as! [[String: Any]]
+        precondition(rows.count == 1 && rows[0]["node"] as? String == "healthy-root")
+        precondition(!rows.contains { $0["window"] as? String == ghostRow["window"] as? String },
+                     "an invalid AX-only root was advertised as a live window")
+        precondition(result["rootDiscoveryComplete"] as? Bool == false)
+        precondition((result["endedWindows"] as! [[String: Any]]).isEmpty,
+                     "a local AX registration failure invented permanent lifetime end evidence")
+    }
+
+    @MainActor static func rootRegistrationCancellationAndOwnerFailureRemainFatal() throws {
+        for failure in 0..<3 {
+            let scene = Scene()
+            scene.rootRegistration = { _, _ in
+                if failure == 0 { throw CancellationError() }
+                if failure == 1 { throw RequestDeadlineExceeded() }
+                throw DriverError("operation expired", code: .executionFailed)
+            }
+            do { _ = try scene.collect(nil); preconditionFailure("fatal root registration failure became a partial catalogue") }
+            catch is CancellationError { precondition(failure == 0) }
+            catch is RequestDeadlineExceeded { precondition(failure == 1) }
+            catch let error as DriverError { precondition(failure == 2 && error.code == .executionFailed) }
+        }
+        let scene = Scene()
+        scene.rootRegistration = { _, _ in
+            scene.ownerFailure = DriverError("application lifetime ended", code: .staleTarget)
+            throw DriverError("native node no longer exists", code: .staleTarget)
+        }
+        do { _ = try scene.collect(nil); preconditionFailure("ended application became a partial catalogue") }
+        catch let error as DriverError { precondition(error.description == "application lifetime ended") }
     }
 
     @MainActor static func legacyContentPositiveControl() throws {

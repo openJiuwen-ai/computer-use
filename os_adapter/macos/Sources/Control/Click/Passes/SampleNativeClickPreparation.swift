@@ -16,6 +16,7 @@ import ApplicationServices
         defer { metric?.end() }
         try boundary.checkConditions()
         let pointer: NativePointerUnit, point: CGPoint
+        var kind: NativePointerIntent.Kind = .click
         switch plan.target {
         case .captured(let unit):
             pointer = try unit.resolvingCaptureTranslation()
@@ -24,6 +25,9 @@ import ApplicationServices
             if !afterPreparation, let exposure = try unit.exposure() {
                 pointer = unit.pointerUnit(mapping: exposure.mapping)
                 point = exposure.point
+                // Exposure addresses a passive wheel receiver. A click/key
+                // receiver is prepared only after the target becomes visible.
+                kind = .scroll
             } else {
                 let geometry = try afterPreparation ? unit.geometry() : unit.preparationGeometry()
                 pointer = unit.pointerUnit(mapping: geometry.mapping)
@@ -33,14 +37,15 @@ import ApplicationServices
         }
         try pointer.validateWindowIdentity()
         try BackgroundTarget(pointer.application).validate(input: true)
-        try BackgroundTarget.validateReleasedInput()
         if plan.offer.delivery == .windowDirected {
             try BackgroundEvents.requirePointerRoute(window: pointer.window)
         }
         let needed = needed(
-            plan.offer, pointerReady: pointer.ready(at: point, delivery: plan.offer.delivery),
+            plan.offer, pointerReady: pointer.ready(at: point, kind: kind, delivery: plan.offer.delivery),
             foreground: !plan.offer.requiresForegroundGeometry || pointer.foregroundWindow(at: point))
-        try boundary.checkConditions()
-        return NativeClickWindowPreparation(pointer: pointer, point: point, needed: needed)
+        // These synchronous queries have no preparation effect or suspension.
+        // The selected preparation/event checks its own live boundary next.
+        try RequestDiagnostics.checkCancellation()
+        return NativeClickWindowPreparation(pointer: pointer, point: point, needed: needed, kind: kind)
     }
 }

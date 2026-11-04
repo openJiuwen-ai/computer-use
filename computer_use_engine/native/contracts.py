@@ -142,6 +142,7 @@ class OpenedOperation:
     token: str
     target: OperationTarget
     click_contract: str | None = None
+    app_change_baseline: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -409,11 +410,21 @@ class ClickReceipt:
     @property
     def permits_replanning(self) -> bool:
         return self.continuation.kind in ("sameCandidateRefresh", "reselectWithinScope") and all(
-            p.effect == "contextOnly"
-            and (
-                p.continuation == "withinScope"
-                or self.continuation.kind == "sameCandidateRefresh"
-                and p.continuation == "sameCandidate"
+            (
+                p.effect == "contextOnly"
+                and (
+                    p.continuation == "withinScope"
+                    or self.continuation.kind == "sameCandidateRefresh"
+                    and p.continuation == "sameCandidate"
+                )
+            )
+            or (
+                p.kind == "pointerPreparation"
+                and not self.transport_evidence.call_entered
+                and p.effect == "contentPossible"
+                and p.dispatch == Dispatch.DISPATCHED
+                and p.continuation == "withinScope"
+                and "originalTargetViewportProgress=confirmed" in p.observations
             )
             for p in self.preparation_evidence
         )
@@ -574,6 +585,7 @@ class StepResult:
     application: Mapping[str, Any] | None = None
     click: ClickReceipt | None = None
     impact: NativeImpact | None = None
+    app_change_input_baseline: Mapping[str, str] | None = None
 
     def __post_init__(self):
         if self.retry_reason not in (None, "routeUnavailable", "preparationUnavailable", "preconditionChanged"):

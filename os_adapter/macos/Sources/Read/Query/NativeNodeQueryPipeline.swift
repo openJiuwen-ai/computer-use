@@ -21,6 +21,8 @@ import ApplicationServices
                     access.scopes.observePointer(binding.wire)
                 }
             })
+        let publication = RequestDiagnostics.metrics?.start(.readPublication)
+        defer { publication?.end() }
         return NativeObservationEncoding.encode(collection)
     }
 }

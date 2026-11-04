@@ -115,6 +115,24 @@ class Journal:
         except Exception as error:
             self._error = str(error)
 
+    def record_observation(self, header_json, result_json):
+        """Append integrity-checked worker bytes without decoding native facts.
+
+        The worker transport validates the header and binds it to these exact
+        result bytes. All prior traces are published before the native result.
+        """
+        self.flush()
+        if self._error is not None:
+            return
+        try:
+            with self.path.open("ab") as file:
+                file.write(header_json[:-1])
+                file.write(b',"result":')
+                file.write(result_json)
+                file.write(b"}\n")
+        except Exception as error:
+            self._error = str(error)
+
     def flush(self, line=""):
         if self._scheduled is not None:
             self._scheduled.cancel()

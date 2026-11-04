@@ -43,7 +43,12 @@ import ApplicationServices
         case "capture": return try await CapturePipeline.collect(raw, operation: operation, scopes: resource.scopes)
         case "prepareObservation":
             return try await ObservationPreparationPipeline.run(raw, operation: operation, scopes: resource.scopes)
-        case "inspect": return try ReadPipeline.collect(raw, operation: operation, access: query)
+        case "inspect":
+            let kind = ((raw as? [String: Any])?["query"] as? [String: Any])?["kind"] as? String
+            if kind == "appChanges" || kind == "waitAppChange" {
+                return try await NativeAppChangePipeline.collect(raw, operation: operation, access: query)
+            }
+            return try ReadPipeline.collect(raw, operation: operation, access: query)
         case "execute":
             return try await ControlPipeline.execute(raw, operation: operation, access: control, launch: launch)
         case "finish": return try await NativeResourceScope.finish(raw, operation: operation)

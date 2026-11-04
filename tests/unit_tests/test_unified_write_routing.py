@@ -14,6 +14,7 @@ from computer_use.native.contracts import (
     Channel,
     ClickContinuation,
     ClickOffer,
+    ClickPreparationEvidence,
     ClickReceipt,
     ClickTransportEvidence,
     Dispatch,
@@ -141,7 +142,9 @@ def test_native_mechanism_can_require_pointer_before_any_action_is_dispatched():
 )
 def test_mouse_specific_requests_retain_pointer_semantics(parameters):
     native, pointer = click_route("object_action"), click_route("desktop_pointer")
-    selected = choose(facts(native, pointer), Intent("click", parameters), HostPolicy(allow_global_input=True), Attempts())
+    selected = choose(
+        facts(native, pointer), Intent("click", parameters), HostPolicy(allow_global_input=True), Attempts()
+    )
     assert selected.primitive == pointer
 
 
@@ -181,6 +184,77 @@ async def test_uncertain_addressed_click_never_replays_globally(dispatch):
         with pytest.raises(ComputerUseError):
             await operation
     assert len(port.commands) == 1 and port.commands[0].primitive == directed
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("progress_confirmed", [False, True])
+async def test_only_confirmed_original_viewport_progress_can_continue_an_unrequested_click(progress_confirmed):
+    directed = click_route("surface_pointer", "preparationRequired", ("background", "foreground"))
+    preparation = ClickPreparationEvidence(
+        "pointerPreparation",
+        TARGET,
+        Dispatch.DISPATCHED,
+        "contentPossible",
+        "withinScope",
+        ("originalTargetViewportProgress=confirmed",) if progress_confirmed else (),
+    )
+    failed = ClickReceipt(
+        (preparation,),
+        ClickTransportEvidence(),
+        ClickContinuation("reselectWithinScope", TARGET, directed.click.route_family),
+    )
+    completed = ClickReceipt(
+        (),
+        ClickTransportEvidence(call_entered=True, call_returned=True),
+        ClickContinuation("stop", TARGET, directed.click.route_family),
+    )
+    port = RecordingPort(
+        [facts(directed)],
+        [
+            StepResult(
+                TARGET,
+                Dispatch.NOT_DISPATCHED,
+                "original viewport moved but final background click receiver remained unavailable",
+                error_code="input_unavailable",
+                retry_reason="preparationUnavailable",
+                click=failed,
+            ),
+            StepResult(TARGET, Dispatch.DISPATCHED, "original click sent once", click=completed),
+        ],
+    )
+    operation = Engine(port).execute(CLICK, TARGET)
+    if progress_confirmed:
+        assert (await operation)["status"] == "dispatched"
+        assert len(port.commands) == 2
+        assert not port.commands[0].foreground and port.commands[1].foreground
+        assert all(command.target == TARGET and command.primitive == directed for command in port.commands)
+    else:
+        with pytest.raises(ComputerUseError):
+            await operation
+        assert len(port.commands) == 1
+
+
+@pytest.mark.parametrize("dispatch", [Dispatch.UNKNOWN, Dispatch.PARTIAL])
+def test_viewport_progress_never_covers_pending_native_preparation(dispatch):
+    preparation = ClickPreparationEvidence(
+        "pointerPreparation",
+        TARGET,
+        dispatch,
+        "contentPossible",
+        "withinScope",
+        ("originalTargetViewportProgress=confirmed",),
+    )
+    receipt = ClickReceipt(
+        (preparation,),
+        ClickTransportEvidence(),
+        ClickContinuation("reselectWithinScope", TARGET, "original-route"),
+    )
+    assert not receipt.permits_replanning
+    confirmed = replace(preparation, dispatch=Dispatch.DISPATCHED)
+    entered = replace(
+        receipt, preparation_evidence=(confirmed,), transport_evidence=ClickTransportEvidence(call_entered=True)
+    )
+    assert not entered.permits_replanning
 
 
 @pytest.mark.anyio

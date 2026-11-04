@@ -178,9 +178,9 @@ def test_partial_absence_keeps_identity_payload_and_can_recover_same_reference()
     assert state.evidence[identity].membership is Knowledge.YES
     assert state.refs["7"]["text"] == "retained"
 
-    # A complete absence is a different fact. Reappearance cannot revive the
-    # exact old lifetime; it needs a new native identity and a new public ref.
-    state.reconcile({"surfaces": []}, DirectoryMembership(True, ()))
+    # Positive native retirement is a different fact. Reappearance cannot revive
+    # the exact old lifetime; it needs a new native identity and a new public ref.
+    state.reconcile({"surfaces": []}, DirectoryMembership(True, (), (identity,)))
     state.reconcile(observed, known)
     assert state.evidence[identity].lifetime is WindowLifetime.RETIRED
     assert "window" not in state.members

@@ -400,15 +400,20 @@ class NativeAppReader:
             if previous is not None:
                 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
 
-                if directory["stopReasons"]:
+                explicitly_ended = any(
+                    (item["window"], item["surface"], item["instance"])
+                    == (previous.root.root_window, previous.root.surface, previous.root.instance)
+                    for item in directory.get("endedWindows", ())
+                )
+                if not explicitly_ended and (directory["stopReasons"] or directory["platform"] == "macos"):
                     raise FixedWindowUnconfirmed(previous.root, directory=directory)
                 raise FixedWindowInvalidated(
                     previous.root,
-                    "The fixed working window is absent from the complete current directory.",
+                    "The fixed working window lifetime ended.",
                     directory=directory,
                 )
             raise failure(
-                "observation_incomplete" if directory["stopReasons"] else "stale_target",
+                "observation_incomplete" if directory["stopReasons"] or directory["platform"] == "macos" else "stale_target",
                 "The fixed working window is missing from the current directory; another document was not selected.",
             )
         root = window_binding(select_surface(directory, root_id, follow_modal=False))

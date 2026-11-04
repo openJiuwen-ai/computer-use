@@ -25,16 +25,23 @@ import CoreMedia
                 code: .desktopUnavailable,
                 next: "ask whether to resume; if authorized, call computer_use_reset and read the app again")
         }
+        if closing { throw CancellationError() }
     }
 
     func include(_ window: SCWindow) async throws {
         try checkAvailable()
-        guard !closing else { throw CancellationError() }
         guard let pid = window.owningApplication?.processID, let owner = NSRunningApplication(processIdentifier: pid),
             !owner.isTerminated
         else { throw ObservationChanged("capture indicator target exited") }
-        if let entry = windows[window.windowID], entry.owner == owner, !entry.owner.isTerminated { return }
-        if let previous = windows.removeValue(forKey: window.windowID) { try await previous.stream.stopCapture() }
+        if let entry = windows[window.windowID], entry.owner == owner, !entry.owner.isTerminated {
+            RequestDiagnostics.metrics?.count(.sharingStreamReuse)
+            return
+        }
+        if let previous = windows.removeValue(forKey: window.windowID) {
+            let metric = RequestDiagnostics.metrics?.start(.sharingStreamStop)
+            defer { metric?.end() }
+            try await previous.stream.stopCapture()
+        }
         let config = SCStreamConfiguration()
         // A low-rate preview is enough for the system sharing UI. Full-resolution
         // screenshots continue through the existing one-shot observation route.
@@ -52,6 +59,8 @@ import CoreMedia
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         windows[window.windowID] = Entry(stream: stream, owner: owner)
         do {
+            let metric = RequestDiagnostics.metrics?.start(.sharingStreamStart)
+            defer { metric?.end() }
             try await stream.startCapture()
             diagnose(["kind": "window_sharing_started", "window": window.windowID, "pid": pid])
         } catch {
@@ -66,6 +75,8 @@ import CoreMedia
         windows.removeAll()
         for (id, entry) in entries {
             do {
+                let metric = RequestDiagnostics.metrics?.start(.sharingStreamStop)
+                defer { metric?.end() }
                 try await entry.stream.stopCapture()
                 diagnose(["kind": "window_sharing_stopped", "window": id])
             } catch {

@@ -7,7 +7,8 @@ import Foundation
     static func run(_ boundary: NativeUnitBoundary) throws {
         let metric = RequestDiagnostics.metrics?.start(.clickTargetValidation)
         defer { metric?.end() }
-        try boundary.checkConditions()
+        // The immediately following target/readiness sample owns the live
+        // scope query. Keep selection admission separate from that query.
         try boundary.checkSelection()
     }
 }

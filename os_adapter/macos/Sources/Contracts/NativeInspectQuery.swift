@@ -129,7 +129,7 @@ enum NativeInspectQuery {
         within: [String], actuator: Actuator?, receiver: Receiver?, basis: [Dependency], currentReceiver: Bool)
     case nodes(
         fields: [String], maxNodes: Int, maxDepth: Int, childrenPage: ChildrenPage?, relationPage: RelationPage?,
-        advertisedFields: [String], followRelations: [String], textContent: Bool)
+        advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail)
     case relation(property: String, cursor: String?, limit: Int)
     case capturedText(ref: String, offset: Int, length: Int)
 
@@ -218,12 +218,14 @@ enum NativeInspectQuery {
             let hasAdvertised = (raw as? [String: Any])?.keys.contains("advertisedFields") == true
             let hasFollow = (raw as? [String: Any])?.keys.contains("followRelations") == true
             let hasText = (raw as? [String: Any])?.keys.contains("textContent") == true
+            let hasActions = (raw as? [String: Any])?.keys.contains("actionDetail") == true
             let p = try object(
                 raw,
                 keys: Set(
                     ["kind", "fields", "maxNodes", "maxDepth"] + (hasPage ? ["childrenPage"] : [])
                         + (hasAdvertised ? ["advertisedFields"] : []) + (hasRelationPage ? ["relationPage"] : [])
-                        + (hasFollow ? ["followRelations"] : []) + (hasText ? ["textContent"] : [])))
+                        + (hasFollow ? ["followRelations"] : []) + (hasText ? ["textContent"] : [])
+                        + (hasActions ? ["actionDetail"] : [])))
             let fields = try Self.names(p["fields"], label: "fields", min: 1, max: 128)
             let advertised =
                 hasAdvertised ? try Self.names(p["advertisedFields"], label: "advertisedFields", min: 1, max: 128) : []
@@ -241,12 +243,19 @@ enum NativeInspectQuery {
                 throw DriverError(
                     "a relation page needs depth and space for its root and targets", code: .invalidRequest)
             }
+            let actionDetail: NativeActionDetail
+            if hasActions {
+                guard let selected = NativeActionDetail(rawValue: try string(p["actionDetail"], label: "actionDetail"))
+                else { throw DriverError("unsupported action detail profile", code: .invalidRequest) }
+                actionDetail = selected
+            } else { actionDetail = .full }
             self = .nodes(
                 fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: page, relationPage: relationPage,
                 advertisedFields: advertised,
                 followRelations: hasFollow
                     ? try Self.names(p["followRelations"], label: "followRelations", min: 1, max: 16) : [],
-                textContent: hasText ? try boolean(p["textContent"], label: "textContent") : false)
+                textContent: hasText ? try boolean(p["textContent"], label: "textContent") : false,
+                actionDetail: actionDetail)
         case "relation":
             let p = try object(raw, keys: ["kind", "property", "cursor", "limit"])
             self = .relation(

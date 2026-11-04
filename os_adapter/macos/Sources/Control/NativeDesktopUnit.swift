@@ -46,7 +46,7 @@ import CoreGraphics
         onDispatch: () throws -> Void, onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void
     ) async throws {
         let geometry = try pointer(request)
-        try BackgroundTarget.validateReleasedInput()
+        try await NativePhysicalInput.wait(.globalHID, check: boundary)
         let sequence = try NativePointerEvents(
             request: request, from: geometry.from, to: geometry.to, viewport: geometry.viewport, source: Input.source())
         var completed = false
@@ -57,7 +57,7 @@ import CoreGraphics
                 try check()
                 let button: CGMouseButton =
                     request.button == "right" ? .right : request.button == "middle" ? .center : .left
-                try BackgroundTarget.validateReleasedInput(allowing: held ? button : nil)
+                try NativePhysicalInput.validate(.globalHID, allowing: held ? button : nil)
                 let mapping = try desktop.mapping(ref)
                 if request.kind != .drag || !held { try desktop.validateHit(ref, point: point) }
                 // During a drag the OS owns mouse capture. Windows may move with
@@ -86,7 +86,7 @@ import CoreGraphics
         onCleanupUnknown: @escaping () -> Void
     ) async throws {
         try check()
-        try BackgroundTarget.validateReleasedInput()
+        try await NativePhysicalInput.wait(.globalHID, check: boundary)
         guard request.kind == .key || request.kind == .insert else {
             throw DriverError("desktop keyboard supports insertion and keys", code: .invalidRequest)
         }
@@ -109,7 +109,7 @@ import CoreGraphics
                 request.value!, delivery: .desktop, applicationPID: nil,
                 validate: {
                     try validate()
-                    try BackgroundTarget.validateReleasedInput()
+                    try NativePhysicalInput.validate(.globalHID)
                 }, onDispatch: onDispatch, onPosted: onPosted, onCleanupUnknown: onCleanupUnknown)
         }
         completed = true

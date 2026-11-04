@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """One bounded read suffix; its outcome never replaces the write receipt."""
@@ -12,10 +11,11 @@ from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord
+from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.interaction.write.request.model import ObservedAction
-from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
+from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.session.interfaces import WindowIdentity
@@ -61,14 +61,25 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         fixed = getattr(request.owner, "_window_identity", None)
         source_owner = getattr(instance, "owners", {}).get(getattr(request.target, "root_window", None))
         before_tree = self.controller.state(source_owner).query_snapshot if source_owner is not None else None
+        image_identity = WindowIdentity(
+            getattr(request.target, "root_window", None), getattr(request.target, "surface", None),
+            getattr(request.target, "instance", None),
+        )
+        canvas = getattr(instance, "sampled_window_images", {}).get(image_identity)
+        if canvas is None:
+            canvas = getattr(instance, "delivered_image", None)
+        before_image = next((
+            getattr(piece.image, "image", None) for piece in getattr(canvas, "pieces", ())
+            if piece.window == getattr(request.target, "root_window", None)
+            and (piece.image.target.session, piece.image.target.surface, piece.image.target.instance)
+            == (request.target.session, request.target.surface, request.target.instance)
+        ), None) if "nativeAppChangeEvents" in self.controller.transport.capabilities else None
         related = (
             RelatedRead(
                 request.target,
                 tuple(WindowIdentity.of(item) for item in prior["surfaces"]),
                 weakref.ref(request.owner) if fixed is not None else None,
                 WindowIdentity(fixed.root_window, fixed.surface, fixed.instance) if fixed is not None else None,
-                before_tree,
-                request.intent.kind == "click",
             )
             if prior is not None
             else None
@@ -100,6 +111,12 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
 
                 action_observation_completed(error)
             raise
+        baseline = receipt.pop("appChangeBaseline", None)
+        input_baseline = receipt.pop("appChangeInputBaseline", None)
+        if related is not None and baseline is not None and receipt["status"] == "dispatched":
+            related = replace(related, changes=PostwriteChanges(
+                input_baseline or baseline, before_tree, before_image, input_sampled=input_baseline is not None,
+            ))
         return await self.observe(
             request,
             ObservedAction(receipt),
@@ -118,8 +135,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
     ) -> ObservedAction:
         """Publish a bounded related read for a completed or uncertain write.
 
-        The read branch may refresh unchanged first content once; this suffix
-        never retries input or infers the application's business outcome.
+        This suffix reports the captured post-input facts. Unchanged content
+        does not authorize a fixed wait, another full read or input replay.
         """
         owner = request.owner
         # Internal non-UI owners and unobserved launch results have no acquired
@@ -136,12 +153,12 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             return replace(
                 outcome,
                 observation_error=FrozenRecord(
-                    dict(
-                        code="session_unavailable",
-                        detail="The original native session is retired or changed; no follow-up read was started.",
-                        next="The original action outcome is unchanged; do not replay it. Observe in a new session.",
-                        session_usable=False,
-                    )
+                    {
+                        "code": "session_unavailable",
+                        "detail": "The original native session is retired or changed; no follow-up read was started.",
+                        "next": "The original action outcome is unchanged; do not replay it. Observe in a new session.",
+                        "session_usable": False,
+                    }
                 ),
             )
         try:
@@ -155,7 +172,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     visual = request.target.capture is not None or (
                         request.target.node is None and getattr(owner, "_image", None) is not None
                     )
-                    options = dict(related=related) if related is not None else {}
+                    options = {"related": related} if related is not None else {}
                     observed = await self.controller.interfaces.read(
                         related_owner, "image" if visual else "tree", False, None, **options
                     )
@@ -175,16 +192,16 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     window_lifecycle=lifecycle,
                     choices=choices,
                     observation_error=FrozenRecord(
-                        dict(
-                            code=gaps[0].code if gaps else "observation_incomplete",
-                            detail="; ".join(gap.detail for gap in gaps)
+                        {
+                            "code": gaps[0].code if gaps else "observation_incomplete",
+                            "detail": "; ".join(gap.detail for gap in gaps)
                             or "The requested observation content is unavailable; only scope metadata was captured.",
-                            next=(
+                            "next": (
                                 "The original action outcome is unchanged; do not replay it. "
                                 "Read the original scope again."
                             ),
-                            session_usable=self.session_usable(request, session_identity),
-                        )
+                            "session_usable": self.session_usable(request, session_identity),
+                        }
                     ),
                 )
             return replace(
@@ -228,27 +245,25 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             return replace(
                 outcome,
                 observation_error=FrozenRecord(
-                    dict(
-                        code=code,
-                        detail=detail,
-                        next="The original action outcome is unchanged; do not replay it. "
+                    {
+                        "code": code,
+                        "detail": detail,
+                        "next": "The original action outcome is unchanged; do not replay it. "
                         + (
                             "Select a current window with computer.window(id) for further work."
                             if closed
                             else "Read the original scope when another observation is needed."
                         ),
-                        session_usable=self.session_usable(request, session_identity),
+                        "session_usable": self.session_usable(request, session_identity),
+                    }
+                ),
+                window_lifecycle=(
+                    "closed"
+                    if closed and window_binding(error.binding) == window_binding(request.target)
+                    else original_lifecycle(
+                        request.target, directory, related.original_window if related is not None else None
                     )
                 ),
-                window_lifecycle=original_lifecycle(
-                    request.target, directory, related.original_window if related is not None else None
-                )
-                if directory is not None
-                else "closed"
-                if closed
-                and error.binding.root_window == request.target.root_window
-                and error.binding.instance == request.target.instance
-                else "unknown",
                 choices=choices,
             )
 

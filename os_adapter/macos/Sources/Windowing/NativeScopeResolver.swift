@@ -509,6 +509,19 @@ import ApplicationServices
     func qtComboChoiceBoundary(_ raw: Any?, qualification proof: NativeQtComboChoice) throws -> [String] {
         let requested = try NativeTarget(raw)
         try requested.requireSession(session)
+        if requested.capture != nil {
+            guard requested.node == nil, let binding = raw as? [String: Any], proof.capturedPoint != nil else {
+                throw DriverError("Qt captured choice requires its original pixel binding", code: .invalidRequest)
+            }
+            let input = try captures.input(binding)
+            guard try proof.confirmsCaptured(input) else {
+                throw DriverError("the original captured Qt choice point changed", code: .staleTarget)
+            }
+            return input.blocked
+        }
+        guard proof.capturedPoint == nil else {
+            throw DriverError("Qt pixel proof cannot authorize an element intent", code: .invalidRequest)
+        }
         let read = try applications.readRoot(try string(requested.node, label: "node"))
         guard read.application.processIdentifier == proof.pid, CFEqual(read.element, proof.element),
             let observed = NativeQtComboChoice.observationAnchor(

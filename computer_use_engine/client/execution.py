@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 
+from computer_use.session.operations import cancellation_scope
+
 _executor = ContextVar("computer_use_executor", default=None)
 _cancellation = ContextVar("computer_use_cancellation", default=None)
 _executors = weakref.WeakSet()
@@ -36,7 +38,8 @@ def execution_scope(executor, cancellation=None):
     owner = _executor.set(executor)
     cancel = _cancellation.set(cancellation)
     try:
-        yield
+        with cancellation_scope(cancellation.cancelled.is_set if cancellation is not None else None):
+            yield
     finally:
         _cancellation.reset(cancel)
         _executor.reset(owner)

@@ -183,12 +183,12 @@ import ApplicationServices
         let resources = effect.fields["sharedResources"] as? [String] ?? []
         if nativeInvoked == true { shared.formUnion(resources) }
         if nativeInvoked == nil { possible.formUnion(resources) }
-        let changed = Self.foregroundChanged(effect.before, after)
+        let changed = Self.foregroundNetChanged(effect.before, after)
         record(
             "didReturn",
             effect.fields.merging([
                 "nativeInvoked": nativeInvoked as Any? ?? NSNull(), "nativeStatus": status as Any? ?? NSNull(),
-                "nativeAccepted": accepted as Any? ?? NSNull(), "after": after, "foregroundChanged": changed,
+                "nativeAccepted": accepted as Any? ?? NSNull(), "after": after, "foregroundNetChanged": changed,
                 "durationMs": max(0, clock() - effect.started) * 1000
             ]) { _, new in new })
     }
@@ -235,7 +235,8 @@ import ApplicationServices
                 "dispatch": dispatch, "cleanup": cleanup, "effectCount": effects,
                 "pendingEffects": pending.keys.sorted(), "sharedResources": shared.sorted(),
                 "possibleSharedResources": possible.sorted(), "foregroundReceiver": foregroundReceiver,
-                "desktop": final, "foregroundChanged": Self.foregroundChanged(initial, final),
+                "desktop": final, "foregroundNetChanged": Self.foregroundNetChanged(initial, final),
+                "foregroundChanged": impact["foregroundChanged"] as Any,
                 "durationMs": max(0, clock() - started) * 1000
             ])
         return impact
@@ -289,11 +290,11 @@ import ApplicationServices
             .first { foregroundRestorations.contains($0) } ?? "notUsed"
     }
 
-    private static func foregroundChanged(_ before: [String: Any], _ after: [String: Any]) -> Bool {
+    private static func foregroundNetChanged(_ before: [String: Any], _ after: [String: Any]) -> String {
         guard let first = before["foregroundPID"] as? Int32, let last = after["foregroundPID"] as? Int32 else {
-            return false
+            return "unknown"
         }
-        return first != last
+        return first != last ? "yes" : "no"
     }
 
     private func record(_ phase: String, _ fields: [String: Any]) {

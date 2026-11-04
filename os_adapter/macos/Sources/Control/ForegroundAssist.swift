@@ -185,7 +185,6 @@ import ApplicationServices
         onWait: (NativePreparationWait) -> Void = { _ in }, onCleanupUnknown: @escaping @MainActor () -> Void = {}
     ) async throws {
         try target.validate(input: true)
-        try BackgroundTarget.validateReleasedInput()
         _ = try Self.nativeWindow(target.application.processIdentifier, window)
         // Preserve the document's existing first responder when its exact
         // foreground context is already established. No activation is needed.

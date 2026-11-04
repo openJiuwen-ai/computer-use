@@ -14,7 +14,9 @@ from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotP
 from computer_use.native.scopes import RunningApplication
 from computer_use.native.contracts import Binding
 from computer_use.native.query.directory import select_surface
+from computer_use.pipeline.core import Control
 from computer_use.session.interfaces import SurfaceOwner, WindowIdentity
+from computer_use.session.operations import current_operation_budget
 from computer_use.session.state import AppState
 
 from .publication import directory_text, publish, tree_document
@@ -100,6 +102,12 @@ class InterfaceMenuPipeline:
         """
         # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
+        budget = current_operation_budget()
+        presentation_control = Control(
+            remaining=budget.remaining if budget is not None else None,
+            cancelled=budget.cancelled if budget is not None else None,
+            call_id=budget.operation_id if budget is not None else None,
+        )
         state = controller.state(ui)
         lines: list[str | DisplayText | DisplayDocument]
         if instance.anchor is None and ui._anchor is None and instance.members:
@@ -154,7 +162,9 @@ class InterfaceMenuPipeline:
         ui._menu_only = True
         lines.append("Tree: full; menu_path is read-only and does not open a menu.")
         for target, tree in trees:
-            prepared = self.preparation.run(SnapshotRenderRequest(tree, compact=True, public_api=True))
+            prepared = self.preparation.run(
+                SnapshotRenderRequest(tree, compact=True, public_api=True), presentation_control
+            )
             lines.append(tree_document(controller, target, tree, prepared=prepared))
         lines.extend(template("Menu discovery partial: {0}", gap) for gap in menu.discovery_gaps)
         if observed is not None and observed.launch:

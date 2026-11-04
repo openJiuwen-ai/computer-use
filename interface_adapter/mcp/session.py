@@ -15,7 +15,7 @@ from computer_use.session.operations import eager
 from .diagnostics import Journal
 from .output import OutputBuffer, is_output
 from .worker_lifecycle import EXIT_SETTLE_SECONDS, READY_ENV, WorkerLifecycle, WorkerStartupFailure
-from .worker_transport import FRAMED_PROTOCOL, read_message, write_message
+from .worker_transport import EncodedObservationDiagnostic, FRAMED_PROTOCOL, read_message, write_message
 
 CLEANUP_TIMEOUT_SECONDS = 5
 
@@ -340,6 +340,11 @@ class ExecutionSession:
                 if message is None:
                     break
                 if self._child is not child:
+                    continue
+                if isinstance(message, EncodedObservationDiagnostic):
+                    self._journal.record_observation(message.header_json, message.result_json)
+                    if self._pending is not None and message.event["executionId"] == self._pending["id"]:
+                        self._pending["progress"]()
                     continue
                 if not isinstance(message, dict):
                     raise ValueError("Execution process returned invalid output.")

@@ -190,6 +190,7 @@ def test_replacement_sheet_is_collected_without_rebinding_captured_old_identity(
     one = {**window("One", parent="A"), "modal": True}
     two = {**window("Two", parent="A"), "modal": True}
     before, first, last = directory(a), directory(a, one), directory(a, two)
+    last["endedWindows"] = [one]  # Native closure evidence is independent of visible membership.
     controller, app, state = setup(before)
     controller.reader.read = AsyncMock(return_value=parent_result(state, a, before, first))
     pipeline = InterfaceReadPipeline(controller)
@@ -452,3 +453,74 @@ def test_output_limit_acknowledges_only_observation_components_actually_emitted(
         assert ("Parent content" in buffer.content[-1]["text"]) == (failed_component == "image")
     finally:
         presenter.close()
+
+
+@pytest.mark.parametrize("root_available,tree_success", [(True, True), (False, False), (True, False)])
+def test_visual_first_window_uses_same_call_ax_upgrade_without_repeating_image(
+    monkeypatch, root_available, tree_success
+):
+    """Reproduce the delivered form image/no-root gap followed by a positive AX directory."""
+    form = window("Form", title="Booking")
+    visual = {**form, "node": None, "accessibility": False}
+    toolbar = window("Toolbar", title="Sharing", parent="Form")
+    first_catalog = directory(visual, toolbar, focused="Form")
+    upgraded = directory(form if root_available else visual, toolbar, focused="Form")
+    controller, app, state = setup(first_catalog)
+    original = member_target(state, visual)
+    image = pixels(state, visual)
+    unavailable = ObservationGap("tree", "observation_incomplete", "AX root is not available", "use image")
+    controller.reader.read = AsyncMock(return_value=AppObservation(
+        selection=WorkingWindow("application", "Fixture", original), target=original,
+        applications=None, source_directory=first_catalog, directory=upgraded, tree=None, image=image,
+        document=DisplayDocument.join(()), refs={}, windows={}, gaps=(unavailable,), scope_confirmed=True,
+    ))
+    pipeline = InterfaceReadPipeline(controller)
+    calls = []
+
+    async def member(owner, item, view, **kwargs):
+        calls.append((item["window"], view, item["node"]))
+        if item["window"] == "Form":
+            assert root_available and view == "tree"
+            assert item["node"] == form["node"]
+            return WindowPart(
+                member_target(state, item), tree=tree(form, "Meeting title") if tree_success else None,
+                gaps=() if tree_success else (
+                    ObservationGap("tree", "observation_incomplete", "tree budget exhausted", "use image"),
+                ),
+            )
+        return WindowPart(member_target(state, item), tree=tree(item, "Sharing button"))
+
+    async def recheck(*args, **kwargs):
+        adopt(controller, app, upgraded)
+        return upgraded
+
+    pipeline.member = member
+    recheck = AsyncMock(side_effect=recheck)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", recheck)
+    result = asyncio.run(pipeline._collect(
+        app, "both", False, None, first_catalog, None, None,
+        RelatedRead(original, (WindowIdentity.of(form), WindowIdentity.of(toolbar))),
+    ))
+    assert controller.reader.read.await_count == 1
+    assert [call for call in calls if call[0] == "Form"] == (
+        [("Form", "tree", form["node"])] if root_available else []
+    )
+    assert recheck.await_count == 1  # one recheck for the planned member batch
+    assert result.screenshot is not None
+    metadata = observation_data(result)
+    assert metadata["content_available"]
+    coverage = {record["window"]: record for record in metadata["window_coverage"]}
+    if tree_success:
+        assert "Meeting title" in result.text
+        assert "AX root is not available" not in result.text
+        assert not any(gap.component == "tree" for gap in metadata["gaps"])
+        assert set(coverage["Form"]["included"]) == {"tree", "image"}
+        assert controller.state(state.owners["Form"]).query_target.node == form["node"]
+    else:
+        assert "tree" in coverage["Form"]["missing"]
+        if root_available:
+            assert "AX root is not available" not in result.text
+            assert "tree budget exhausted" in result.text
+            assert controller.state(state.owners["Form"]).query_target.node == form["node"]
+        else:
+            assert "AX root is not available" in result.text

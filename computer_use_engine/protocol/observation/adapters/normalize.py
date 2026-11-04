@@ -58,7 +58,6 @@ from .schema import (
 )
 from .wire import DriverWire, query_facts
 
-
 _STATUS = {
     "not_read",
     "absent",
@@ -174,7 +173,7 @@ class NodeBuilder:
                 else:
                     items.append(converted)
             return tuple(items)
-        if isinstance(value, dict):
+        if isinstance(value, Mapping):
             if set(value) == {"nativeType", "node"}:
                 identity = value["node"]
                 if self.owner.wire.nodes[identity]["kind"] == "element":

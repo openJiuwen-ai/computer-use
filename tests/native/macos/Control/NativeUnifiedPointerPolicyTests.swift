@@ -9,6 +9,7 @@ import ApplicationServices
         backgroundDocumentReadiness()
         receiverSampling()
         qtComboChoice()
+        try await physicalInputDependencies()
         precondition(
             !Readiness.ready(
                 kind: .click, foreground: false, windowKind: .visualOnly, focus: .notRequired, backgroundPrepared: true)
@@ -66,6 +67,59 @@ import ApplicationServices
         print(
             "PASS addressed delivery survives foreground preparation; synthetic transport alone cannot admit content clicks"
         )
+    }
+
+    @MainActor private static func physicalInputDependencies() async throws {
+        typealias Physical = NativePhysicalInput
+        let held = Physical.State(modifiers: [.maskCommand, .maskShift], buttons: [.left, .right])
+        precondition(held.conflicts() == ["modifier.command", "modifier.shift", "mouse.button.0", "mouse.button.1"])
+        for delivery: NativeClickDelivery in [.objectAction, .objectSelection, .windowDirected] {
+            // A user dragging/typing elsewhere must not enter a session-state
+            // probe before this addressed action/selection or window event.
+            try Physical.validate(Physical.dependency(for: delivery), sample: {
+                preconditionFailure("addressed input cannot inherit a global held-state prerequisite")
+            })
+            try await Physical.wait(Physical.dependency(for: delivery), check: {
+                preconditionFailure("an unrelated physical wait cannot veto addressed input")
+            }, sample: { held })
+        }
+        precondition(Physical.dependency(for: .systemPointer) == .globalHID)
+        for dependency: Physical.Dependency in [.globalHID, .menuTracking] {
+            do {
+                try Physical.validate(dependency, sample: { held })
+                preconditionFailure("global input/tracking must retain the actual conflict barrier")
+            } catch let error as DriverError {
+                precondition(error.code == .inputUnavailable)
+                precondition(error.description.contains("modifier.command"))
+                precondition(error.description.contains("mouse.button.0"))
+            }
+        }
+        // An already-held synthetic drag can continue on its own button, but
+        // a second physical button or modifier is still a real HID conflict.
+        try Physical.validate(.globalHID, allowing: .left, sample: { .init(modifiers: [], buttons: [.left]) })
+        precondition(held.conflicts(allowing: .left) == ["modifier.command", "modifier.shift", "mouse.button.1"])
+        var now: TimeInterval = 0, pauses = 0, checks = 0
+        try await Physical.wait(.globalHID, check: { checks += 1 }, sample: {
+            pauses == 0 ? held : .init(modifiers: [], buttons: [])
+        }, clock: { now }, pause: { duration in
+            pauses += 1
+            now += duration
+        })
+        precondition(pauses == 1 && checks >= 2 && now <= 0.08,
+                     "one call must absorb a short user gesture instead of requiring model retries")
+        pauses = 0
+        try await Physical.wait(.globalHID, check: {}, sample: { .init(modifiers: [], buttons: []) }, pause: { _ in
+            preconditionFailure("no conflict must mean no physical-input delay")
+        })
+        now = 0
+        do {
+            try await Physical.wait(.menuTracking, check: {}, sample: { held }, clock: { now }, pause: { duration in
+                now += duration
+            })
+            preconditionFailure("a lasting tracking conflict cannot consume an unbounded wait")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable && now <= 0.080001)
+        }
     }
 
     @MainActor private static func qtComboChoice() {
@@ -155,6 +209,18 @@ import ApplicationServices
         changed.qtComboChoice = choice(combo: newCombo)
         precondition(original == unchanged)
         precondition(original != changed)
+        // A captured popup uses the existing Qt choice mechanism, but owns its
+        // original delivered pixel point. A new image or sibling row point
+        // cannot borrow the old contract even when the AX objects are equal.
+        original.qtComboChoice!.capturedPoint = .init(capture: "delivered", pixels: CGPoint(x: 20, y: 30))
+        unchanged.qtComboChoice!.capturedPoint = .init(capture: "delivered", pixels: CGPoint(x: 20, y: 30))
+        precondition(original == unchanged)
+        unchanged.qtComboChoice!.capturedPoint = .init(capture: "replacement", pixels: CGPoint(x: 20, y: 30))
+        precondition(original != unchanged)
+        unchanged.qtComboChoice!.capturedPoint = .init(capture: "delivered", pixels: CGPoint(x: 20, y: 31))
+        precondition(original != unchanged)
+        unchanged.qtComboChoice!.capturedPoint = nil
+        precondition(original != unchanged)
     }
 
     private static func receiverSampling() {

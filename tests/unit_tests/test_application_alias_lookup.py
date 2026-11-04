@@ -137,7 +137,7 @@ def test_old_menu_element_keeps_its_frozen_window_after_another_menu_observation
         assert snapshot["menu_window_identity"] == original
     finally:
         set_observation_handler(None)
-    adopt(controller, app, directory(surface("b"), focus="b"))
+    adopt(controller, app, directory(surface("b"), focus="b", ended=(surface("a"),)))
     with pytest.raises(ComputerUseError) as caught:
         controller.interfaces.validate_snapshot(app, snapshot)
     assert caught.value.code == "stale_target"

@@ -22,7 +22,7 @@ def create(*, branch: BranchFacts) -> Callable[[FieldAccounting, Control], Rende
         """Attach unrepresented native relation groups and their source records to the rendered
         part.
         """
-        groups, sources = branch.relations.render(branch.members, accounted.rendered)
+        groups, sources = branch.relations.render(branch.members, accounted.rendered, checkpoint=control.remaining)
         return RenderedPart(accounted.rendered, accounted.residuals, groups, sources)
 
     return relations

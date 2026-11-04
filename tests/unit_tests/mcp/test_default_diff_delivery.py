@@ -188,6 +188,64 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("Tree: diff", restarted)
                 self.assertIn("Unchanged unrelated control", restarted)
 
+    async def test_combined_alias_observations_keep_latest_components_and_explicit_full(self):
+        with tempfile.TemporaryDirectory(prefix="mcp-coalesced-") as directory:
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=["-m", "computer_use_mcp"],
+                cwd=Path(__file__).resolve().parents[3],
+                env={**os.environ, "COMPUTER_USE_LOG_DIR": directory},
+            )
+            async with (
+                stdio_client(params) as (read, write),
+                ClientSession(read, write, read_timeout_seconds=timedelta(seconds=20)) as client,
+            ):
+                await client.initialize()
+
+                async def call(code):
+                    result = await client.call_tool("computer_use", {"code": code})
+                    self.assertFalse(result.isError, result)
+                    return "\n".join(block.text for block in result.content if block.type == "text")
+
+                first = await call(inspect.getsource(fixture) + "\nfixture()\nobserve('Initial')")
+                self.assertIn("Unchanged unrelated control", first)
+                self.assertNotIn("Tree: diff", first)
+                combined = await call(
+                    "automatic = write('Automatic intermediate')\n"
+                    "latest = observe('Explicit latest', stream='same-native-window-other-view')\n"
+                    "print(latest)\nprint(latest.text)"
+                )
+                self.assertEqual(combined.count("Action [dispatched]"), 1)
+                self.assertEqual(combined.count("Tree: diff"), 1)
+                self.assertIn("Explicit latest", combined)
+                self.assertNotIn("Value: Automatic intermediate", combined)
+                self.assertIn("Subject. Automatic intermediate", combined)  # Keep the completed action receipt.
+                self.assertNotIn("Unchanged unrelated control", combined)
+
+                distinct = await call(
+                    "observe('Parent final')\nobserve('Independent popup', scope='popup')"
+                )
+                self.assertIn("Parent final", distinct)
+                self.assertIn("Independent popup", distinct)
+                self.assertIn("Tree: diff", distinct)
+                self.assertEqual(distinct.count("Unchanged unrelated control"), 1)  # First popup view remains full.
+
+                full = await call(
+                    "observe('Explicit full snapshot', full=True)\n"
+                    "observe('Later default snapshot', stream='same-native-window-other-view')"
+                )
+                self.assertIn("Explicit full snapshot", full)
+                self.assertIn("Later default snapshot", full)
+                self.assertEqual(full.count("Unchanged unrelated control"), 1)
+                self.assertEqual(full.count("Tree: diff"), 1)
+
+                preserved = await call(
+                    "observe('Earlier parent', extra='Unique toolbar', stream='application')\n"
+                    "observe('Latest parent', stream='narrower-window')"
+                )
+                self.assertIn("Unique toolbar", preserved)
+                self.assertIn("Latest parent", preserved)
+
     async def test_observation_prints_and_slices_share_automatic_presentation(self):
         with tempfile.TemporaryDirectory(prefix="mcp-print-diff-") as directory:
             params = StdioServerParameters(

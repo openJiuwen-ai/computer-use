@@ -32,6 +32,7 @@ class NativeNodeQuery:
         focused_fields: Optional fields restricted to focused native objects.
         primary_fields: Optional fields restricted to primary text objects.
         text_content: Optional negotiated, read-only capture of independent native text.
+        action_detail: Negotiated action evidence demand for internal matching; None retains full observation.
     """
 
     fields: Iterable[str]
@@ -44,3 +45,4 @@ class NativeNodeQuery:
     focused_fields: Iterable[str] | None = None
     primary_fields: Iterable[str] | None = None
     text_content: bool | None = None
+    action_detail: str | None = None

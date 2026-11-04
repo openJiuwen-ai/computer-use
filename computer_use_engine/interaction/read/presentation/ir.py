@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 
 SourceKey = NewType("SourceKey", str)
+_ATOMIC_TYPES = frozenset((str, bool, int, float, bytes, type(None)))
 
 
 @dataclass(frozen=True)
@@ -94,9 +95,12 @@ class SharedDescriptionDestination:
 
 
 def freeze(value: Any) -> Any:
-    if isinstance(value, Mapping):
+    kind = type(value)
+    if kind in _ATOMIC_TYPES:
+        return value
+    if kind is dict or kind is MappingProxyType or isinstance(value, Mapping):
         return MappingProxyType({key: freeze(item) for key, item in value.items()})
-    if isinstance(value, (tuple, list)):
+    if kind is tuple or kind is list or isinstance(value, (tuple, list)):
         return tuple(freeze(item) for item in value)
     if isinstance(value, set):
         return frozenset(value)
@@ -104,9 +108,12 @@ def freeze(value: Any) -> Any:
 
 
 def thaw(value: Any) -> Any:
-    if isinstance(value, Mapping):
+    kind = type(value)
+    if kind in _ATOMIC_TYPES:
+        return value
+    if kind is dict or kind is MappingProxyType or isinstance(value, Mapping):
         return {key: thaw(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
+    if kind is tuple or kind is list or isinstance(value, (tuple, list)):
         return [thaw(item) for item in value]
     if isinstance(value, frozenset):
         return set(value)

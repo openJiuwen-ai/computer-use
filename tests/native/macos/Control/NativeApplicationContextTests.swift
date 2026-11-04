@@ -39,8 +39,8 @@ import ApplicationServices
             precondition(posts == expected)
             if posts == 1 && active == false {
                 precondition(
-                    waits == 11 && fullChecks == 4 && pollChecks == 24,
-                    "read-only activity polls must not repeat full window/scope discovery")
+                    waits == 2 && fullChecks == 4 && pollChecks == 6,
+                    "an optional ignored ACK gets only two short queue turns, without repeated full scope discovery")
             }
         }
         var reported = false, posts = 0
@@ -52,6 +52,13 @@ import ApplicationServices
                 reported = true
             }, check: {}, onPreparation: { _ in }, onNativePreparation: { _ in }, wait: {})
         precondition(outcome == .activityObserved && posts == 1)
+        var turns = 0
+        let eventual = try await NativeApplicationContextUnit.prepare(
+            pid: 101, sample: { .init(foregroundPID: 999, reportedActive: turns == 2) }, alreadyPosted: { false },
+            make: { SyntheticFocusEvents.applicationActivation() }, post: { _ in }, check: {},
+            onPreparation: { _ in }, onNativePreparation: { _ in }, wait: { turns += 1 })
+        precondition(eventual == .activityObserved && turns == 2,
+                     "positive activity arriving on a short queue turn remains observable")
         let ordinary = NativeActionDocumentPolicy.preparation(
             action: "AXPress", exactStandardWindow: true, otherDocument: false)
         let other = NativeActionDocumentPolicy.preparation(

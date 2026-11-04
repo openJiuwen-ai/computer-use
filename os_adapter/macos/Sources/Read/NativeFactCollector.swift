@@ -31,6 +31,13 @@ import ApplicationServices
     private let inspection: NativeElementInspection
     private let relationReader = AXRelationReader()
     private let nativeResources = AXNativeValueResources()
+    private struct Acquisition {
+        let catalogue: (status: AXError, names: CFArray?)?
+        let sampleFields: [String]
+        let batchFields: [String]
+        let batch: AXAttributeReader.Result
+        let identity: AXRead<ElementIdentity.Facts>?
+    }
     init(registry: ApplicationElements, inspection: NativeElementInspection) {
         self.registry = registry
         self.inspection = inspection
@@ -94,13 +101,14 @@ import ApplicationServices
 
     private func register(
         _ element: AXUIElement, app: NSRunningApplication, scope: String, parent: Target? = nil,
-        diagnosticBudget: (() throws -> Bool)? = nil, observationDeadline: TimeInterval? = nil
+        diagnosticBudget: (() throws -> Bool)? = nil, observationDeadline: TimeInterval? = nil,
+        identityEvidence: AXRead<ElementIdentity.Facts>? = nil
     ) throws -> (String, Target) {
         try RequestDiagnostics.checkCancellation()
         AXMessaging.configure(element)
         let key = Identity(pid: app.processIdentifier, launched: app.launchDate, element: element, scope: scope)
         let previous = registry.observed(key)?.value
-        let read = AXIdentity.read(element)
+        let read = identityEvidence ?? AXIdentity.read(element)
         if case .invalid = read {
             registry.invalidate { $0.scope == scope && CFEqual($0.element, element) }
             throw DriverError("native node no longer exists", code: .staleTarget)
@@ -162,12 +170,13 @@ import ApplicationServices
 
     private func related(
         _ element: AXUIElement, app: NSRunningApplication, scope: String, parent: Target? = nil,
-        diagnosticBudget: (() throws -> Bool)? = nil, observationDeadline: TimeInterval? = nil
+        diagnosticBudget: (() throws -> Bool)? = nil, observationDeadline: TimeInterval? = nil,
+        identityEvidence: AXRead<ElementIdentity.Facts>? = nil
     ) throws -> (String, Target)? {
         do {
             return try register(
                 element, app: app, scope: scope, parent: parent, diagnosticBudget: diagnosticBudget,
-                observationDeadline: observationDeadline)
+                observationDeadline: observationDeadline, identityEvidence: identityEvidence)
         } catch let error as DriverError where error.code == .staleTarget { return nil }
     }
 
@@ -178,7 +187,8 @@ import ApplicationServices
     func collect(
         _ ref: String, session: String, fields requested: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
-        advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false
+        advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false,
+        actionDetail: NativeActionDetail = .full
     ) throws -> [String: Any] {
         var root = try readTarget(ref)
         // Only the path traversed in this collection is complete. Historical
@@ -247,16 +257,60 @@ import ApplicationServices
                 return reference
             }
         }
-        func sample(_ target: Target, nodeID: String) throws -> [String: [String: Any]] {
+        let needsCatalogue = !advertisedFields.isEmpty || !followRelations.isEmpty || textContent
+        func acquire(_ element: AXUIElement, includeIdentity: Bool) throws -> Acquisition {
+            AXMessaging.configure(element)
+            let catalogue: (status: AXError, names: CFArray?)?
+            if includeIdentity || needsCatalogue {
+                let metric = RequestDiagnostics.metrics?.start(.readCatalogue)
+                var names: CFArray?
+                let status = AXUIElementCopyAttributeNames(element, &names)
+                metric?.end()
+                catalogue = (status, names)
+            } else { catalogue = nil }
+            let names = advertisedFields.map { Self.writableFields[$0] ?? $0 }
+            let unavailable = catalogue.map {
+                AXFactEncoding.advertisedFieldFailures(Array(Set(names)), status: $0.status, names: $0.names)
+            } ?? [:]
+            let sampleFields = requested.filter {
+                Self.writableFields[$0] == nil
+                    && unavailable[Self.writableFields[$0] ?? $0]?["state"] as? String != "unsupported"
+            }
+            var fields = sampleFields
+            if includeIdentity, let catalogue {
+                let identity = AXIdentity.positionRequest(
+                    ElementIdentity.keys, status: catalogue.status, names: catalogue.names)
+                fields += identity.keys.filter { !fields.contains($0) }
+            }
+            let metric = RequestDiagnostics.metrics?.start(.readAttributes)
+            let batch = try AXAttributeReader.read(element, fields: fields, withinBudget: reading)
+            metric?.end()
+            var identity: AXRead<ElementIdentity.Facts>?
+            if includeIdentity, let catalogue {
+                identity = AXIdentity.fromObservationBatch(
+                    status: batch.status, raw: batch.raw, fields: fields,
+                    catalogueStatus: catalogue.status, catalogue: catalogue.names)
+                if identity == nil {
+                    let fallback = RequestDiagnostics.metrics?.start(.readIdentityFallback)
+                    identity = try reading() ? AXIdentity.read(element) : .unavailable(.cannotComplete)
+                    fallback?.end()
+                }
+            }
+            return Acquisition(
+                catalogue: catalogue, sampleFields: sampleFields, batchFields: fields, batch: batch, identity: identity)
+        }
+        func sample(_ target: Target, nodeID: String, acquisition: Acquisition? = nil) throws
+            -> [String: [String: Any]]
+        {
             AXMessaging.configure(target.element)
+            let acquisition = try acquisition ?? acquire(target.element, includeIdentity: false)
             var values = [String: Any](), missing = [String: Any]()
             var relationFailures = [String: [String: Any]]()
             var nativeProperties = [[String: Any]]()
             var nativeReads = [String: [String: Any]]()
             var textCountDeclared = false
-            if !advertisedFields.isEmpty || !followRelations.isEmpty || textContent {
-                var attributes: CFArray?
-                let status = AXUIElementCopyAttributeNames(target.element, &attributes)
+            if needsCatalogue, let catalogue = acquisition.catalogue {
+                let status = catalogue.status, attributes = catalogue.names
                 textCountDeclared =
                     status == .success && (attributes as? [String])?.contains("AXNumberOfCharacters") == true
                 // Preserve the actual catalogue already obtained for profile
@@ -289,8 +343,8 @@ import ApplicationServices
                 relationFailures = AXFactEncoding.advertisedFieldFailures(
                     followRelations, status: status, names: attributes)
             }
-            let keys = requested.filter { Self.writableFields[$0] == nil && missing[$0] == nil }
-            let batch = try AXAttributeReader.read(target.element, fields: keys, withinBudget: reading)
+            let keys = acquisition.batchFields
+            let batch = acquisition.batch
             let raw = batch.raw, status = batch.status
             let canReadFields = batch.queried
             if batch.fields.contains(where: { $0.timedOut }) { reasons.insert("collection time budget") }
@@ -315,6 +369,7 @@ import ApplicationServices
             }
             for field in batch.fields {
                 let name = field.name
+                guard acquisition.sampleFields.contains(name) else { continue }
                 if let position = field.batchIndex {
                     nativeReads[name] = NativeObservationEncoding.batchPropertyRead(owner: nodeID, index: position)
                 } else {
@@ -398,40 +453,20 @@ import ApplicationServices
                     previewBytes += text.utf8.count
                 }
             }
-            var actionNames: CFArray?
-            let canReadActions = try reading()
-            let actionStatus =
-                canReadActions ? AXUIElementCopyActionNames(target.element, &actionNames) : .cannotComplete
-            var actionFacts = AXFactEncoding.actions(actionStatus, actionNames)
-            if !canReadActions { actionFacts["detail"] = "collection time budget" }
-            if actionStatus == .success, let actionNames {
-                nativeProperties.append(["key": ["toolkit", "action_names"], "value": try encodeNative(actionNames)])
-            }
-            // The collector constructs this internal field with the asserted type.
-            // swiftlint:disable:next force_cast
-            var actions = actionFacts["items"] as! [[String: Any]]
-            for index in actions.indices {
-                // The collector constructs this internal field with the asserted type.
-                // swiftlint:disable:next force_cast
-                let name = actions[index]["name"] as! String
-                if try reading() {
-                    var description: CFString?
-                    let status = AXUIElementCopyActionDescription(target.element, name as CFString, &description)
-                    actions[index] = ["name": name].merging(AXFactEncoding.description(status, description)) { _, new in
-                        new
-                    }
-                    if status == .success, let description {
-                        // Description previews in the execution catalogue keep
-                        // their original full method result alongside them.
-                        nativeProperties.append([
-                            "key": ["toolkit", "action_description"],
-                            "arguments": [NativeObservationEncoding.value("CFString", name)],
-                            "value": try encodeNative(description)
-                        ])
-                    }
-                }
-            }
-            actionFacts["items"] = actions
+            let actionRead = try AXActionCatalogue.collect(
+                detail: actionDetail, withinBudget: reading,
+                names: {
+                    var names: CFArray?
+                    let status = AXUIElementCopyActionNames(target.element, &names)
+                    return (status, names)
+                },
+                description: { name in
+                    var value: CFString?
+                    let status = AXUIElementCopyActionDescription(target.element, name as CFString, &value)
+                    return (status, value)
+                }, encode: encodeNative)
+            let actionFacts = actionRead.facts
+            nativeProperties += actionRead.nativeProperties
             nodes.append([
                 "node": nodeID, "requestedFields": requested, "values": values, "fieldStatus": missing,
                 "actions": actionFacts, "nativeProperties": nativeProperties, "nativeReads": nativeReads,
@@ -515,11 +550,12 @@ import ApplicationServices
                             targets.append(previous)
                             continue
                         }
+                        let acquisition = try acquire(element, includeIdentity: true)
                         guard
                             let (life, child) = try related(
                                 element, app: root.application, scope: root.scope,
                                 parent: property == "AXChildren" ? target : nil, diagnosticBudget: reading,
-                                observationDeadline: deadline)
+                                observationDeadline: deadline, identityEvidence: acquisition.identity)
                         else {
                             expired = true
                             break
@@ -527,7 +563,7 @@ import ApplicationServices
                         known[nativeKey] = life
                         targets.append(life)
                         if queued.insert(life).inserted {
-                            if try reading() { sampled[life] = try sample(child, nodeID: life) }
+                            sampled[life] = try sample(child, nodeID: life, acquisition: acquisition)
                             queue.insert((child, life, depth + 1), at: childInsertion)
                             childInsertion += 1
                         }

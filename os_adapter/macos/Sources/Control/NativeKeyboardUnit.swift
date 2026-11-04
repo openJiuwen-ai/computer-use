@@ -317,7 +317,6 @@ import ApplicationServices
         }
         try check()
         try checkEnabled()
-        try BackgroundTarget.validateReleasedInput()
         let proposal = try textProposal(
             kind: request.kind, text: request.value, state: try initial ?? sample(), textPolicy: textPolicy)
         if proposal?.unavailable == true {
@@ -353,11 +352,10 @@ import ApplicationServices
                     background, window: mapping, nativeWindow: keyboardWindow, onPreparation: onPreparation,
                     onCleanupUnknown: onCleanupUnknown, beforeAction: check)
             } catch let error as DriverError where error.code == .inputUnavailable {
-                // An unavailable boundary, disabled control, held user input,
+                // An unavailable boundary, disabled control,
                 // cancellation or expired operation is not fallback permission.
                 try check()
                 try checkEnabled()
-                try BackgroundTarget.validateReleasedInput()
                 throw NativePreparationUnavailable(description: error.description)
             }
         }
@@ -407,7 +405,7 @@ import ApplicationServices
         try check()
         try checkEnabled()
         try delivery.requireAdmission()
-        try BackgroundTarget.validateReleasedInput()
+        try await NativePhysicalInput.wait(delivery.isGlobal ? .globalHID : nil, check: check)
         var initial = try sample()
         if case .scopedForegroundHID(let scoped) = delivery { initial = scoped.receiverState(initial) }
         guard

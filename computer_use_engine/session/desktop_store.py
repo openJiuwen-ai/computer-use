@@ -39,6 +39,7 @@ class DesktopStore:
                 png,
                 dict(
                     kind="desktop",
+                    coordinateScope=("desktop", desktop),
                     current=lambda: desktop() is not None and image() is not None and desktop().current(image()),
                     delivered=lambda coordinates=None: (
                         desktop().delivered(image(), coordinates)

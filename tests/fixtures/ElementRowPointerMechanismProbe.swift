@@ -215,7 +215,6 @@ import Darwin
             try BackgroundEvents.requirePointerRoute(window: before.geometry.mapping)
         }
         try checkIdentity()
-        try BackgroundTarget.validateReleasedInput()
         try await NativeInputActivity.$stage.withValue(.preparation) {
             try await pointer.prepare(
                 foreground: true, atNative: before.geometry.point, kind: .click, delivery: .windowDirected,

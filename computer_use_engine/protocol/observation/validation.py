@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import math
 import types
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
-from functools import lru_cache
+from functools import cache
 from typing import Any, ForwardRef, Literal, Union, get_args, get_origin, get_type_hints
 
 from . import model
@@ -29,13 +29,13 @@ from .model import (
 )
 
 
-@lru_cache(maxsize=None)
+@cache
 def record_types(cls: type) -> dict[str, Any]:
     """Resolve one public record's annotations, including recursive value aliases."""
     return get_type_hints(cls, vars(model), vars(model))
 
 
-@lru_cache(maxsize=None)
+@cache
 def resolved_type(expected: Any) -> Any:
     """Resolve aliases that remain nested inside recursive ExtraValue unions."""
     if isinstance(expected, str):
@@ -45,21 +45,21 @@ def resolved_type(expected: Any) -> Any:
     return expected.__supertype__ if hasattr(expected, "__supertype__") else expected
 
 
-@lru_cache(maxsize=None)
+@cache
 def _type_shape(expected: Any) -> tuple[Any, Any, tuple[Any, ...]]:
     """Cache schema analysis shared by every instance of a record field."""
     expected = resolved_type(expected)
     return expected, get_origin(expected), get_args(expected)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _record_fields(cls: type) -> tuple[tuple[str, Any], ...]:
     """Resolve field names and declared types once per immutable record class."""
     hints = record_types(cls)
     return tuple((item.name, hints[item.name]) for item in fields(cls))
 
 
-@lru_cache(maxsize=None)
+@cache
 def _union_choices(expected: Any, actual: type) -> tuple[Any, ...]:
     """Exclude impossible outer types before recursively validating a union.
 
@@ -93,62 +93,136 @@ def _type_error(path: FieldPath, message: str) -> ValueError:
     return ValueError(f"observation: {location}: {message}")
 
 
-def _check_type(value: Any, expected: Any, path: FieldPath = (), depth: int = 0) -> None:
-    if depth > 96:
-        raise _type_error(path, "record nesting budget exceeded")
+_TypeCheck = Callable[[Any, FieldPath, int, list[tuple[FieldPath, Any]]], None]
+
+
+@cache
+def _type_check(expected: Any) -> _TypeCheck:
+    """Compile schema dispatch once; each invocation still validates its value.
+
+    Recursive ExtraValue aliases are resolved when their actual container is
+    visited, so no observation data or validation result enters this cache.
+    """
+    declared = expected
     expected, origin, args = _type_shape(expected)
     if origin in (Union, types.UnionType):
-        for choice in _union_choices(expected, type(value)):
-            try:
-                _check_type(value, choice, path, depth + 1)
-                return
-            except ValueError:
-                pass
-        raise _type_error(path, "value does not match its declared type")
-    if origin is Literal:
-        if not any(type(value) is type(choice) and value == choice for choice in args):
-            raise _type_error(path, "unknown enum value")
-    # Exact types preserve scalar validation and identity contracts.
-    # pylint: disable-next=unidiomatic-typecheck
+
+        @cache
+        def choices(actual: type) -> tuple[_TypeCheck, ...]:
+            return tuple(_type_check(choice) for choice in _union_choices(declared, actual))
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            for choice in choices(type(value)):
+                before = len(records)
+                try:
+                    choice(value, path, depth + 1, records)
+                    return
+                except ValueError:
+                    del records[before:]
+            raise _type_error(path, "value does not match its declared type")
+    elif origin is Literal:
+        allowed = tuple((type(choice), choice) for choice in args)
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            if not any(type(value) is kind and value == choice for kind, choice in allowed):
+                raise _type_error(path, "unknown enum value")
     elif expected is type(None):
-        if value is not None:
-            raise _type_error(path, "expected None")
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            if value is not None:
+                raise _type_error(path, "expected None")
     elif expected in (str, bool, int, float):
         allowed = (int, float) if expected is float else (expected,)
-        if type(value) not in allowed:
-            raise _type_error(path, f"expected {expected.__name__}")
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            if type(value) not in allowed:
+                raise _type_error(path, f"expected {expected.__name__}")
     elif expected is datetime:
-        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
-            raise _type_error(path, "date must include a timezone")
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+                raise _type_error(path, "date must include a timezone")
     elif isinstance(expected, type) and issubclass(expected, Enum):
-        if not isinstance(value, expected):
-            raise _type_error(path, "unknown semantic value")
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            if not isinstance(value, expected):
+                raise _type_error(path, "unknown semantic value")
     elif origin is tuple:
-        # pylint: disable-next=unidiomatic-typecheck
-        if type(value) is not tuple:
-            raise _type_error(path, "expected tuple")
         if len(args) == 2 and args[1] is Ellipsis:
-            for index, item in enumerate(value):
-                _check_type(item, args[0], (*path, index), depth + 1)
+            # This lookup is deferred because tuple[ExtraValue, ...] is recursive.
+            def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+                if depth > 96:
+                    raise _type_error(path, "record nesting budget exceeded")
+                if type(value) is not tuple:
+                    raise _type_error(path, "expected tuple")
+                if value:
+                    item_check = _type_check(args[0])
+                    for index, item in enumerate(value):
+                        item_check(item, (*path, index), depth + 1, records)
         else:
-            if len(value) != len(args):
-                raise _type_error(path, "tuple length differs from its contract")
-            for index, (item, item_type) in enumerate(zip(value, args)):
-                _check_type(item, item_type, (*path, index), depth + 1)
+            checks = tuple(_type_check(item_type) for item_type in args)
+
+            def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+                if depth > 96:
+                    raise _type_error(path, "record nesting budget exceeded")
+                if type(value) is not tuple:
+                    raise _type_error(path, "expected tuple")
+                if len(value) != len(checks):
+                    raise _type_error(path, "tuple length differs from its contract")
+                for index, (item, item_check) in enumerate(zip(value, checks)):
+                    item_check(item, (*path, index), depth + 1, records)
     elif origin is Mapping:
-        if not isinstance(value, Mapping):
-            raise _type_error(path, "expected mapping")
-        for key, item in value.items():
-            _check_type(key, args[0], (*path, "<key>"), depth + 1)
-            _check_type(item, args[1], (*path, key), depth + 1)
+        key_check = _type_check(args[0])
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            if not isinstance(value, Mapping):
+                raise _type_error(path, "expected mapping")
+            if value:
+                item_check = _type_check(args[1])
+                for key, item in value.items():
+                    key_check(key, (*path, "<key>"), depth + 1, records)
+                    item_check(item, (*path, key), depth + 1, records)
     elif isinstance(expected, type) and is_dataclass(expected):
-        # pylint: disable-next=unidiomatic-typecheck
-        if type(value) is not expected:
-            raise _type_error(path, f"expected {expected.__name__}")
-        for name, item_type in _record_fields(expected):
-            _check_type(getattr(value, name), item_type, (*path, name), depth + 1)
+        checks = tuple((name, _type_check(item_type)) for name, item_type in _record_fields(expected))
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            if depth > 96:
+                raise _type_error(path, "record nesting budget exceeded")
+            if type(value) is not expected:
+                raise _type_error(path, f"expected {expected.__name__}")
+            records.append((path, value))
+            for name, item_check in checks:
+                item_check(getattr(value, name), (*path, name), depth + 1, records)
     else:
-        raise _type_error(path, "unsupported observation schema type")
+
+        def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
+            raise _type_error(path, "unsupported observation schema type")
+
+    return check
+
+
+def _check_type(
+    value: Any,
+    expected: Any,
+    path: FieldPath = (),
+    depth: int = 0,
+    records: list[tuple[FieldPath, Any]] | None = None,
+) -> None:
+    _type_check(expected)(value, path, depth, [] if records is None else records)
 
 
 def _nonempty(value: str, path: FieldPath) -> None:
@@ -165,20 +239,6 @@ def _field_path(path: tuple[str | int, ...], location: FieldPath) -> None:
     # pylint: disable-next=unidiomatic-typecheck
     if any(type(part) not in (str, int) or part == "" or type(part) is int and part < 0 for part in path):
         raise _type_error(location, "invalid field path")
-
-
-def _records(value: Any, path: FieldPath = ()) -> Iterator[tuple[FieldPath, Any]]:
-    """Visit records requiring semantic checks, including nested value records."""
-    if is_dataclass(value):
-        yield path, value
-        for name, _ in _record_fields(type(value)):
-            yield from _records(getattr(value, name), (*path, name))
-    elif isinstance(value, Mapping):
-        for key, item in value.items():
-            yield from _records(item, (*path, key))
-    elif isinstance(value, tuple):
-        for index, item in enumerate(value):
-            yield from _records(item, (*path, index))
 
 
 def _node_path(node: NativeNode, path: tuple[str | int, ...]) -> Any:
@@ -209,7 +269,11 @@ def validate_query_observation(observation: NativeObservation) -> None:
             ranges violate the unified contract. Unknown fields and partial
             observations remain valid when represented by None and ReadIssue.
     """
-    _check_type(observation, NativeObservation)
+    # Record the semantic-check destinations during the type traversal. A
+    # second recursive walk over every primitive/tuple in a large capture adds
+    # no evidence and can dominate the actual native collection.
+    records: list[tuple[FieldPath, Any]] = []
+    _check_type(observation, NativeObservation, records=records)
     _nonempty(observation.session, ("session",))
     _nonempty(observation.id, ("id",))
     began, ended = observation.interval_ns
@@ -240,7 +304,7 @@ def validate_query_observation(observation: NativeObservation) -> None:
             seen.add(current)
             current = observation.coordinate_spaces[current].parent
 
-    for path, value in _records(observation):
+    for path, value in records:
         if isinstance(value, ElementValue) and value.node not in observation.nodes:
             raise _type_error(path, "undeclared element-valued reference")
         elif isinstance(value, Geometry):
