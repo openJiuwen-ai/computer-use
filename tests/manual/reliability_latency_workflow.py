@@ -23,6 +23,7 @@ import re
 import sys
 import tempfile
 import time
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -30,6 +31,7 @@ from uuid import uuid4
 from computer_use.paths import native_driver
 from computer_use_mcp.session import ExecutionSession
 from d34_window_workflow import actual_modules, refs, source_fingerprint, window_point, window_with_content
+from PIL import Image
 from qt_cocoa_activation_workflow import DEFAULT_PYTHON, ROOT, sha, state
 from reliability_latency_trace import measure_work
 
@@ -281,7 +283,25 @@ async def verify(folder, python, *, offscreen_first="cloud", offscreen_only=Fals
                 choice = geometry["choices"].get("10:15")
                 assert choice and choice["visible"], geometry
                 popup_point = image_point(popup_image, geometry["frame"], choice["point"])
-                report["popup_geometry"] = {"ref": popup_ref, "oracle": geometry, "delivered_point": popup_point}
+                after_image = await state(fixture, process=child)
+                current_geometry = after_image.get("popup_geometry")
+                current_choice = (current_geometry or {}).get("choices", {}).get("10:15")
+                with Image.open(BytesIO(screenshots(popup_image)[0])) as picture:
+                    alpha = picture.convert("RGBA").getchannel("A")
+                    point = tuple(round(value) for value in popup_point)
+                    opaque = (0 <= point[0] < alpha.width and 0 <= point[1] < alpha.height
+                              and alpha.getpixel(point) != 0)
+                trial_valid = bool(
+                    current_geometry and current_geometry["frame"] == geometry["frame"]
+                    and current_choice and current_choice["visible"]
+                    and current_choice["point"] == choice["point"] and opaque
+                )
+                report["popup_geometry"] = {
+                    "ref": popup_ref, "oracle": geometry, "delivered_point": popup_point,
+                    "after_image_oracle": after_image, "target_pixel_opaque": opaque,
+                    "coordinate_trial_valid": trial_valid,
+                }
+                assert trial_valid, "Popup changed during observation; no click attempted using the earlier oracle"
                 await invoke("popup-coordinate", f"popup.click(at={popup_point!r})")
                 await effect("popup-coordinate", lambda s: s["hour_activations"] == ["10:00", "10:15"], callback="hour")
                 await invoke("open-duration", "app.element('30 minutes').click()")

@@ -44,6 +44,7 @@ GROUPS = (
     "NativeActionDocument",
     "NativeLocalActivationLease",
     "NativeWindowQueryTiming",
+    "NativeMetrics",
     "NativeUnifiedPointerPolicy",
     "NativeForegroundPreparation",
     "NativeForegroundRestoration",
