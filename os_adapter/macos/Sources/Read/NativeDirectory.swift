@@ -315,11 +315,17 @@ import ApplicationServices
                 Surface(
                     owner: app, window: window, scope: scope, parent: parent, element: element,
                     native: matching.count == 1 ? matching[0] : nil))
-            entries.append([
+            var entry: [String: Any] = [
                 "window": window, "instance": instance.id, "surface": scope, "node": node as Any? ?? NSNull(),
                 "title": title, "kind": kind, "parent": parent as Any? ?? NSNull(), "parentState": parentState,
                 "modal": modal as Any? ?? NSNull(), "nativeWindow": visual[window] != nil, "accessibility": node != nil
-            ])
+            ]
+            if matching.count == 1 {
+                entry["nativeIdentity"] = [
+                    "processId": Int(matching[0].process.pid), "windowId": Int(matching[0].mapping.id)
+                ]
+            }
+            entries.append(entry)
         }
         for item in ax {
             try append(

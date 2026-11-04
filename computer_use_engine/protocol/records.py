@@ -118,6 +118,7 @@ class ApplicationInfo(TypedDict):
         aliases: Additional names supplied by the provider.
         matchKeys: Application lookup keys supplied by the provider.
         windows: Additional selectable working-window choices.
+        nativeIdentity: Optional host-local process identity for scoped discovery.
     """
 
     id: str
@@ -128,6 +129,7 @@ class ApplicationInfo(TypedDict):
     aliases: NotRequired[list[str]]
     matchKeys: NotRequired[list[str]]
     windows: NotRequired[list[Record]]
+    nativeIdentity: NotRequired[Record]
 
 
 class SurfaceInfo(TypedDict):
@@ -145,6 +147,7 @@ class SurfaceInfo(TypedDict):
         modal: Reported modality; None means unknown.
         nativeWindow: Whether a native window identity was observed.
         accessibility: Whether an accessibility root was observed.
+        nativeIdentity: Optional host-local process/window IDs observed by the native provider.
     """
 
     window: str
@@ -158,6 +161,7 @@ class SurfaceInfo(TypedDict):
     modal: bool | None
     nativeWindow: bool
     accessibility: bool
+    nativeIdentity: NotRequired[Record]
 
 
 NativeDirectory: TypeAlias = Record

@@ -39,7 +39,13 @@ import AppKit
     }
 
     func nativeApplications(continuing: () -> Bool) -> [[String: Any]] {
-        catalogue(continuing: continuing).map(\.nativeJSON)
+        catalogue(continuing: continuing).map { entry in
+            var value = entry.nativeJSON
+            if entry.isRunning, let app = instances.instance(entry.id), !app.isTerminated {
+                value["nativeIdentity"] = ["processId": Int(app.processIdentifier)]
+            }
+            return value
+        }
     }
 
     func nativeEntry(for app: NSRunningApplication) -> [String: Any]? {
