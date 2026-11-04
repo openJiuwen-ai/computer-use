@@ -74,7 +74,6 @@ def error_record(error):
                 "effect",
                 "target",
                 "detail",
-                "next",
                 "impact",
                 "observation",
                 "observation_status",

@@ -120,7 +120,9 @@ class WindowSelectionRequired(ComputerUseError):
         overview: WindowOverview | None = None,
         selection: WorkingWindow | None = None,
     ) -> None:
-        super().__init__({key: getattr(error, key) for key in ("code", "effect", "target", "detail", "next")})
+        super().__init__(
+            {key: getattr(error, key) for key in ("code", "effect", "target", "detail", "impact")}, cause=error
+        )
         self.application, self.display_name, self.directory, self.launch = application, name, directory, launch
         self.overview = overview
         self.selection = selection

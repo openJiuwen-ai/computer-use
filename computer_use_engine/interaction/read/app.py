@@ -451,6 +451,7 @@ class NativeAppReader:
                 detail=detail
                 + " Observation failed: "
                 + (error.detail if isinstance(error, ComputerUseError) else str(error)),
+                impact=error.impact if isinstance(error, ComputerUseError) else None,
             ),
             cause=error,
         )
