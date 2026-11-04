@@ -74,9 +74,7 @@ class InterfaceImagePipeline:
                 images.append((key, part.image))
         if not images:
             return None, [
-                text(
-                    'Screenshot: unavailable; use member-window reads or Computer.read(view="image") for visual observation.'
-                ),
+                text("Screenshot: unavailable."),
                 DisplayText("image_header", (ImageHeader("unavailable", (), False, (), None),)),
             ]
         unique = dict(images)
@@ -162,17 +160,8 @@ class InterfaceImagePipeline:
             ref = next(ref for ref, window in ui._instance.windows.items() if window == key)
             displayed, kind = (key,), "partial"
             notes = [
-                template(
-                    "Screenshot: partial; shows only window {}, not the complete instance layout. {}", ref, str(error)
-                ),
-                template(
-                    (
-                        "Coordinates unavailable on this partial canvas; use "
-                        'app.window({}).read(view="image") or '
-                        'Computer.read(view="image").'
-                    ),
-                    ref,
-                ),
+                template("Screenshot: partial; window {}. {}", ref, str(error)),
+                "Coordinate mapping: unavailable.",
             ]
         summary = self.metadata(ui, canvas, collected, displayed, kind)
         self.register(ui, canvas, images[0][1].target, summary.windows)
@@ -299,6 +288,11 @@ class InterfaceImagePipeline:
                 mappingAvailable=not canvas.unavailable_mapping,
                 # pylint: disable-next=protected-access
                 selector=str(ui._instance.selector),
+                coordinateTarget=(
+                    f"computer.window({next(ref for ref, key in state.windows.items() if key == ui._anchor)})"
+                    if fixed_window
+                    else "computer.app(" + repr(str(ui._instance.selector)) + ")"
+                ),
                 context=template(
                     "App {}; {}",
                     # pylint: disable-next=protected-access

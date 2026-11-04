@@ -79,7 +79,6 @@ class SyncRuntimeTests(unittest.IsolatedAsyncioTestCase):
             {
                 "code": code,
                 "executionId": 1,
-                "history": {"resetText": False, "resetImages": False, "incremental": False},
             }
         )
 
@@ -100,7 +99,7 @@ class SyncRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.probe.calls, [])
         text = "\n".join(block["text"] for block in result["content"])
         self.assertIn("SyntaxError", text)
-        self.assertIn("no statements from this call ran", text)
+        self.assertIn("Code execution: not started.", text)
 
     async def test_cancellation_settles_cleanup_before_return_and_never_runs_suffix(self):
         active = asyncio.create_task(
@@ -121,7 +120,8 @@ class SyncRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([name for name, _ in self.probe.calls], ["before", "wait"])
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertEqual(text.count("Action [dispatched]"), 1)
-        self.assertIn("Earlier statements may have executed", text)
+        self.assertIn("Action [dispatched]", text)
+        self.assertNotIn("Earlier statements may have executed", text)
 
     async def test_cancellation_interrupts_a_python_loop_and_runtime_close_settles_it(self):
         active = asyncio.create_task(self.execute("print('loop started')\nwhile True:\n    pass"))

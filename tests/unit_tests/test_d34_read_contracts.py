@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from computer_use.client.factory import session_controller
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
@@ -186,7 +185,7 @@ def test_related_failed_new_detail_preserves_original_image_and_catalogue(monkey
         )
     )
     pipeline = InterfaceReadPipeline(controller)
-    gap = ObservationGap("image", "observation_incomplete", "child image unavailable", "read this window")
+    gap = ObservationGap("image", "observation_incomplete", "child image unavailable")
 
     async def member(owner, item, view, **kwargs):
         assert view == "both"  # new windows receive AX and visual fallback together
@@ -338,6 +337,7 @@ def test_related_independent_window_cannot_change_fixed_window_receiver():
 
 def test_visual_sampling_preserves_query_root_only_for_same_window_identity():
     from dataclasses import replace
+
     from computer_use.interaction.read.views.pipeline import remember
 
     item = window("A")
@@ -348,8 +348,11 @@ def test_visual_sampling_preserves_query_root_only_for_same_window_identity():
     original = member_target(state, item)
     native_state = controller.state(owner)
     native_state.query_target = original
+    before_tree = object()
+    native_state.query_snapshot = before_tree
     remember(controller, app, WindowPart(replace(original, node=None)))
     assert native_state.query_target is original
+    assert native_state.query_snapshot is before_tree
     # A real new AX root replaces old evidence; a reused owner cannot carry a
     # query root across a changed native identity even on a visual-only read.
     replacement = replace(original, node="replacement AX root")
@@ -357,6 +360,7 @@ def test_visual_sampling_preserves_query_root_only_for_same_window_identity():
     assert native_state.query_target == replacement
     native_state.query_target = replace(original, instance="retired instance")
     remember(controller, app, WindowPart(replace(original, node=None)))
+    assert native_state.query_snapshot is None
     assert native_state.query_target.node is None
     assert native_state.query_target.instance == original.instance
 
@@ -389,6 +393,7 @@ def test_application_lookup_context_captures_delivered_window_and_menu_configura
 
 def test_related_window_lookup_resets_menu_mode_and_excludes_unrelated_menus():
     import weakref
+
     from computer_use.session.interfaces import LookupContext
 
     a, b = window("A"), window("B")
@@ -459,6 +464,7 @@ def test_menu_source_window_identity_survives_later_same_surface_menu_read():
 @pytest.mark.parametrize("invalidated", [False, True])
 def test_sheet_closes_during_related_capture_then_surviving_fixed_parent_is_delivered(monkeypatch, invalidated):
     import weakref
+
     from computer_use.interaction.read.model import AppObservation
     from computer_use.interaction.read.presentation.document import DisplayDocument
     from computer_use.session.interfaces import LookupContext
@@ -532,15 +538,63 @@ def test_sheet_closes_during_related_capture_then_surviving_fixed_parent_is_deli
         set_observation_handler(None)
 
 
-def test_related_recovery_never_substitutes_another_focus_or_reused_parent_identity():
+def test_related_recovery_prefers_exact_parent_then_observes_current_app_window():
     a, b, sheet = window("A"), window("B"), window("Sheet", parent="B")
     _, _, state = setup(directory(a, b, sheet))
     identities = tuple(WindowIdentity.of(item) for item in state.directory["surfaces"])
     related = RelatedRead(member_target(state, sheet), identities, context_root=WindowIdentity.of(b))
     assert related.recovery_window(directory(a, b, focused="A")) == "B"
-    assert related.recovery_window(directory(a, {**b, "surface": "replacement-B"}, focused="A")) is None
+    assert related.recovery_window(directory(a, {**b, "surface": "replacement-B"}, focused="A")) == "A"
     closed_a = RelatedRead(member_target(state, a), identities, context_root=WindowIdentity.of(a))
-    assert closed_a.recovery_window(directory(b, focused="B")) is None
+    assert closed_a.recovery_window(directory(b, focused="B")) == "B"
+    # A still-enumerated but rootless popup must not select itself again.
+    rootless = {**sheet, "node": None, "accessibility": False}
+    fixed_popup = RelatedRead(member_target(state, sheet), identities, context_root=WindowIdentity.of(sheet))
+    assert fixed_popup.recovery_window(directory(rootless, b, focused="B"), frozenset({"Sheet"})) == "B"
+
+
+def test_rootless_fixed_popup_observes_current_app_window_without_rebinding_popup(monkeypatch):
+    import weakref
+
+    from computer_use.interaction.read.model import AppObservation
+    from computer_use.interaction.read.presentation.document import DisplayDocument
+    from computer_use.session.interfaces import LookupContext
+
+    b, popup = window("B"), window("Popup")
+    before = directory(popup, b, focused="Popup")
+    rootless = {**popup, "node": None, "accessibility": False}
+    after = directory(rootless, b, focused="B")
+    controller, app, state = setup(before)
+    original = member_target(state, popup)
+    fixed = UI(
+        _instance=state, _anchor="Popup", _window_identity=original,
+        _input_context=WindowIdentity.of(popup),
+        _lookup_context=LookupContext(WindowIdentity.of(popup), False, ()), _delivered_generation=0,
+    )
+    related = RelatedRead(
+        original, tuple(WindowIdentity.of(item) for item in before["surfaces"]),
+        weakref.ref(fixed), WindowIdentity.of(popup),
+    )
+    controller.reader.read = AsyncMock(return_value=AppObservation(
+        selection=WorkingWindow("application", "Fixture", original), target=original,
+        applications=None, source_directory=before, directory=after, tree=None, image=None,
+        document=DisplayDocument.join(()), refs={}, windows={}, gaps=(), scope_confirmed=False,
+    ))
+    pipeline = InterfaceReadPipeline(controller)
+    tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
+    pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, b), tree=tree))
+    pipeline.preparation.run = lambda _: SimpleNamespace(roots=())
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
+    monkeypatch.setattr(
+        "computer_use.interaction.read.views.pipeline.tree_document",
+        lambda *_a, **_kw: DisplayDocument.join(("Parent form content",)),
+    )
+    result = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
+    assert "Parent form content" in result.text
+    assert pipeline.member.call_args.args[1]["window"] == "B"
+    assert fixed._window_identity is original
+    assert fixed._input_context == WindowIdentity.of(popup)
+    assert state.input_context == WindowIdentity.of(b)
 
 
 @pytest.mark.parametrize("case", ["focused", "single", "ambiguous"])

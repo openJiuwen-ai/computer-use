@@ -34,9 +34,8 @@ def refuse(
     code: str,
     facts: Facts,
     detail: str,
-    next_step: str = "read the target and choose a supported operation",
 ) -> NoReturn:
-    raise ComputerUseError(dict(code=code, effect="none", target=facts.target_label, detail=detail, next=next_step))
+    raise ComputerUseError(dict(code=code, effect="none", target=facts.target_label, detail=detail))
 
 
 ReceiverPair = tuple[SelectedActuator | None, SelectedReceiver | None]
@@ -133,9 +132,7 @@ def validate_target(facts: Facts, policy: HostPolicy) -> None:
         and cast("Binding", facts.binding).surface is None
         and not cast("Binding", facts.binding).is_desktop
     ):
-        refuse(
-            "invalid_request", facts, "Session discovery has no input target; select a working window before writing."
-        )
+        refuse("invalid_request", facts, "Session discovery has no input target.")
     if facts.identity == Knowledge.NO or facts.within_scope == Knowledge.NO:
         refuse("stale_target", facts, "The original target identity or working-window boundary changed.")
     if facts.identity != Knowledge.YES or facts.within_scope != Knowledge.YES:
@@ -147,7 +144,6 @@ def validate_target(facts: Facts, policy: HostPolicy) -> None:
             "blocked_by_modal",
             facts,
             "A modal dialog blocks the requested target.",
-            "call app.read() to observe the dialog, then use the window or element references returned by that read",
         )
 
 

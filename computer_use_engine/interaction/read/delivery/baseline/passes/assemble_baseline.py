@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.json import dumps, utf8
 from computer_use.interaction.read.delivery.baseline.model import PURE, BaselineDraft, BaselineInput
+from computer_use.interaction.read.delivery.diff.baseline import ComparisonDocument
+from computer_use.interaction.read.presentation.document import DisplayDocument
+from computer_use.json import dumps, utf8
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:
@@ -16,13 +18,16 @@ if TYPE_CHECKING:
 
 
 def assemble_baseline(value: BaselineInput, control: Control) -> BaselineDraft:
-    """Retain the delivered document, bindings, and coverage within the cache budget.
+    """Capture the delivered comparison facts, bindings, coverage and retained size.
 
-    Structured observations retain their frozen document without requesting full text.
+    Structured observations retain immutable field signatures, not the capture
+    and rendering graphs used to create the delivered document.
     Text-only observations retain their already materialized historical presentation.
     """
     observation = value.observation
     document = observation.get("document")
+    if isinstance(document, DisplayDocument):
+        document = ComparisonDocument.capture(document)
     text = observation["state"]["text"] if document is None else None
     size = len(utf8(text)) if text is not None else document.estimated_bytes
     size += len(utf8(dumps(observation["refs"]))) + len(utf8(dumps(observation.get("coverage"))))

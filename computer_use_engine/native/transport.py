@@ -297,7 +297,6 @@ class ConnectionPort:
             if "nativeCurrentReceiver" not in self.capabilities:
                 raise local_failure(
                     "backend does not provide nativeCurrentReceiver",
-                    "update the driver before querying current receiver evidence",
                     "unsupported_operation",
                     "inspect",
                 )
@@ -317,7 +316,6 @@ class ConnectionPort:
             if actuator.relation == "controlPart" and "nativeControlParts" not in self.capabilities:
                 raise local_failure(
                     "backend does not provide nativeControlParts",
-                    "update the driver before selecting a pointer control member",
                     "unsupported_operation",
                     "inspect",
                 )
@@ -325,7 +323,6 @@ class ConnectionPort:
                 if "nativeElementScroll" not in self.capabilities:
                     raise local_failure(
                         "backend does not provide nativeElementScroll",
-                        "update the driver before selecting an element wheel route",
                         "unsupported_operation",
                         "inspect",
                     )
@@ -334,7 +331,6 @@ class ConnectionPort:
                 if actuator.content_path and "nativeScrollContentPath" not in self.capabilities:
                     raise local_failure(
                         "backend does not provide nativeScrollContentPath",
-                        "update the driver before selecting moving scroll content",
                         "unsupported_operation",
                         "inspect",
                     )
@@ -350,7 +346,6 @@ class ConnectionPort:
             if capability not in self.capabilities:
                 raise local_failure(
                     "backend does not provide " + capability,
-                    "update the driver before selecting a related receiver",
                     "unsupported_operation",
                     "inspect",
                 )
@@ -359,7 +354,6 @@ class ConnectionPort:
             if "nativeSelectionBasis" not in self.capabilities:
                 raise local_failure(
                     "backend does not provide nativeSelectionBasis",
-                    "update the driver before selecting a composed input target",
                     "unsupported_operation",
                     "inspect",
                 )
@@ -519,7 +513,7 @@ class ConnectionPort:
                 raise ValueError("This driver cannot query advertised native fields")
             query["advertisedFields"] = list(request.advertised_fields)
         if request.children_page is not None and request.relation_page is not None:
-            raise ValueError("Select one root relation page")
+            raise ValueError("Exactly one root relation page is required")
         page = request.relation_page if request.relation_page is not None else request.children_page
         property_name = (
             request.relation_page["property"] if request.relation_page is not None else self._children_property()
@@ -540,7 +534,6 @@ class ConnectionPort:
                         effect="none",
                         target="element content",
                         detail="The continuation is no longer retained for this element and relationship.",
-                        next="read the element again and use its reported continuation",
                     )
                 )
         result = await self.connection.request(
@@ -778,7 +771,6 @@ class ConnectionPort:
         if original != intent_key(dict(kind=command.intent.kind, parameters=dict(command.intent.parameters))):
             raise local_failure(
                 "The operation intent is already bound; a step cannot change its parameters",
-                "finish this operation before requesting a different action",
                 "invalid_request",
                 "execute",
             )
@@ -789,7 +781,6 @@ class ConnectionPort:
         ):
             raise local_failure(
                 "backend does not provide nativeTextReplacement",
-                "update the driver before selecting a contextual replacement unit",
                 "unsupported_operation",
                 "execute",
             )
@@ -800,7 +791,6 @@ class ConnectionPort:
         ):
             raise local_failure(
                 "backend does not provide nativeElementPointer",
-                "update the driver before selecting an element pointer unit",
                 "unsupported_operation",
                 "execute",
             )
@@ -811,7 +801,6 @@ class ConnectionPort:
         ):
             raise local_failure(
                 "backend does not provide nativeControlParts",
-                "update the driver before selecting a pointer control member",
                 "unsupported_operation",
                 "execute",
             )
@@ -822,7 +811,6 @@ class ConnectionPort:
         ):
             raise local_failure(
                 "backend does not provide nativeElementScroll",
-                "update the driver before selecting an element wheel route",
                 "unsupported_operation",
                 "execute",
             )
@@ -839,7 +827,6 @@ class ConnectionPort:
         if invalid_command:
             raise local_failure(
                 "backend does not provide nativeScrollContentPath",
-                "update the driver before selecting moving scroll content",
                 "unsupported_operation",
                 "execute",
             )

@@ -3,10 +3,10 @@
 import AppKit
 import ApplicationServices
 
-/// Resolve an event-capable process through the focused object's real parent
-/// chain. Public AX ownership, the hosting application and this endpoint are
+/// Resolve an event-capable process through an object's real parent chain.
+/// Public AX ownership, the hosting application and this endpoint are
 /// separate facts. The caller proves the original window's containment.
-enum NativeKeyboardEndpoint {
+enum NativeEventEndpoint {
     struct Candidate<Element> {
         let element: Element
         let pid: pid_t

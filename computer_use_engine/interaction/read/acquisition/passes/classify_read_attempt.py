@@ -36,15 +36,25 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
     """
     state, components = attempt.collected.state, attempt.collected.components
     target, current = attempt.target, attempt.current
+    try:
+        remaining_ms = cast("Callable[[], int]", control.remaining)()
+    except TimeoutError:
+        # Acquired components remain valid evidence at their capture interval.
+        # Deadline exhaustion prevents optional recollection, not delivery.
+        remaining_ms = 0
     if current != target:
-        if attempt.scope_confirmed and state.attempt == 0:
+        if state.plan.scope_managed:
+            # The interface collector consumes this new directory and reads
+            # exact members. Do not recollect a whole App or discard the parent
+            # here; catalogue completeness is not a member-read prerequisite.
+            return ClassifiedAttempt(replace(attempt, scope_confirmed=False), Refresh.KEEP)
+        if attempt.scope_confirmed and state.attempt == 0 and remaining_ms > 0:
             return ClassifiedAttempt(attempt, Refresh.SCOPE)
         gap = ObservationGap(
             "scope",
             "observation_incomplete",
             "The observed view changed or could not be confirmed after collection; "
             "the returned components retain their original view.",
-            "read again before acting on the current view",
         )
         return ClassifiedAttempt(replace(attempt, scope_confirmed=False, gaps=attempt.gaps + (gap,)), Refresh.KEEP)
     matches_attempt = can_refresh_image(
@@ -52,7 +62,7 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
         scope_confirmed=attempt.scope_confirmed,
         image=components.image,
         gaps=components.gaps,
-        remaining=cast("Callable[[], int]", control.remaining),
+        remaining=lambda: remaining_ms,
     )
     if matches_attempt:
         return ClassifiedAttempt(attempt, Refresh.IMAGE)
@@ -70,7 +80,7 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
                 and limits["max_depth"] is None
                 and window_content_unexposed(components.tree)
             )
-            and cast("Callable[[], int]", control.remaining)() >= 400
+            and remaining_ms >= 400
         )
         else False
     )

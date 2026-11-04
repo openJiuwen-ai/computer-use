@@ -62,6 +62,7 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
             allow_preparation="nativeEditorPreparation" in capabilities and intent.kind in ("insert", "paste"),
             focused=facts.input.focused_node if "nativeActuators" in capabilities else None,
             allow_internal="nativeActuators" in capabilities,
+            keyboard_input=intent.kind in ("insert", "paste"),
         )
         frame = replace(frame, facts=facts, needs_editing_evidence=receiver.needs_editing_evidence)
         if receiver.actuator is not None:

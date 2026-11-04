@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
-from computer_use.errors import ComputerUseError
 from computer_use.interaction.read.acquisition.components.helpers import image_notes, native_lease
 from computer_use.interaction.read.acquisition.components.model import (
     ComponentLease,
@@ -29,7 +28,6 @@ from computer_use.interaction.read.acquisition.components.passes.select_read_iso
 )
 from computer_use.interaction.read.acquisition.components.support import (
     collect_component,
-    observation_gap,
 )
 from computer_use.interaction.read.acquisition.facts.pipeline import (
     FactCollectionPipeline as NativeFactCollectionPipeline,
@@ -142,16 +140,8 @@ class _SharedScopeRecovery(Node["ComponentRequest", "ComponentParts"]):
         super().__init__("SharedReadComponents", self.scoped.contract)
 
     async def _arun(self, request: ComponentRequest, control: Control) -> ComponentParts:
-        try:
-            return await self.scoped.arun(request, control)
-        except ComputerUseError as error:
-            if (
-                self.services.port.calls.retired
-                or error.effect != "none"
-                or error.code not in ("stale_target", "observation_incomplete")
-            ):
-                raise
-            return ComponentParts(gaps=(observation_gap("view", error),))
+        parts, gap = await collect_component(self.services.port, "view", lambda: self.scoped.arun(request, control))
+        return parts if parts is not None else ComponentParts(gaps=(gap,) if gap else ())
 
     def _run(self, value: ComponentRequest, control: Control) -> ComponentParts:
         raise TypeError("Native component collection requires arun()")

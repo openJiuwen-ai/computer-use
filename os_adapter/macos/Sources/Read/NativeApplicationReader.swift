@@ -46,7 +46,7 @@ import ApplicationServices
 
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any] {
         guard let snapshot = registry.text(ref) else {
-            throw DriverError("snapshot expired; read the element again to capture a new Value", code: .snapshotExpired)
+            throw DriverError("text snapshot expired", code: .snapshotExpired)
         }
         guard let value = snapshot.value else {
             throw DriverError(

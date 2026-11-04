@@ -34,6 +34,8 @@ def plan(value: ApplicationSelection, control: Control) -> ReadPlan:
             overview=request.overview,
         ),
         request.directory_profile,
+        scope_managed=request.scope_managed,
+        include_menus=request.include_menus,
     )
 
 

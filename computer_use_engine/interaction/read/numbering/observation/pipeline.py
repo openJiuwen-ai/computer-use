@@ -112,7 +112,8 @@ class _PrepareSelectedSnapshot(Node["AcquiredObservation", "RenderedObservation"
     def _run(self, acquired: AcquiredObservation, control: Control) -> RenderedObservation:
         tree = acquired.components.tree
         rendered = (
-            self.preparation.run(SnapshotRenderRequest(tree, compact=True), control) if tree is not None else None
+            self.preparation.run(SnapshotRenderRequest(tree, compact=True), control)
+            if tree is not None and not acquired.plan.scope_managed else None
         )
         return RenderedObservation(acquired, rendered)
 

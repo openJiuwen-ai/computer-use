@@ -388,7 +388,7 @@ namespace ComputerUse.Windows
                                        string otherwise = "The original target point is obstructed or captured.")
         {
             return plan.Element != null && plan.Element.Hit.Conflicts
-                       ? "The selected point hits another UIA control in the original window; no remaining requested click was sent. Read the window to inspect coverage."
+                       ? "The selected point hits another UIA control in the original window; no remaining requested click was sent."
                    : plan.Element != null && plan.Element.RequiresConfirmedHit && !plan.Element.Hit.Confirmed
                        ? "The alternate element point no longer has a confirmed UIA hit; no remaining requested click was sent."
                        : otherwise;

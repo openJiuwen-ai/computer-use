@@ -59,12 +59,16 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         instance = getattr(request.owner, "_instance", None)
         prior = getattr(instance, "directory", None)
         fixed = getattr(request.owner, "_window_identity", None)
+        source_owner = getattr(instance, "owners", {}).get(getattr(request.target, "root_window", None))
+        before_tree = self.controller.state(source_owner).query_snapshot if source_owner is not None else None
         related = (
             RelatedRead(
                 request.target,
                 tuple(WindowIdentity.of(item) for item in prior["surfaces"]),
                 weakref.ref(request.owner) if fixed is not None else None,
                 WindowIdentity(fixed.root_window, fixed.surface, fixed.instance) if fixed is not None else None,
+                before_tree,
+                request.intent.kind == "click",
             )
             if prior is not None
             else None
@@ -86,11 +90,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
-            if error.code in TARGET_OBSERVATION_ERRORS and outcome.observation_status in ("available", "partial"):
-                error.next = (
-                    "Use the attached current observation to decide the next action; "
-                    "this command was not replayed and its original target was not rebound."
-                )
             if outcome.observation_error is not None:
                 from computer_use.session.events import action_observation_completed
 
@@ -112,7 +111,11 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         session_identity: tuple[int, str] | None,
         related: RelatedRead | None = None,
     ) -> ObservedAction:
-        """Observe once for a completed or uncertain write, preserving its outcome."""
+        """Publish a bounded related read for a completed or uncertain write.
+
+        The read branch may refresh unchanged first content once; this suffix
+        never retries input or infers the application's business outcome.
+        """
         owner = request.owner
         # Internal non-UI owners and unobserved launch results have no acquired
         # application scope. The suffix never launches an application.
@@ -131,7 +134,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     dict(
                         code="session_unavailable",
                         detail="The original native session is retired or changed; no follow-up read was started.",
-                        next="The original action outcome is unchanged; do not replay it. Observe in a new session.",
                         session_usable=False,
                     )
                 ),
@@ -158,6 +160,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 request.target, directory, related.original_window if related is not None else None
             )
             choices = self.window_choices(related_owner, directory)
+            refresh_gap = next((gap for gap in metadata.get("gaps", ()) if gap.component == "refresh"), None)
             if not metadata.get("content_available", True):
                 gaps = metadata.get("gaps", ())
                 return replace(
@@ -170,7 +173,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                             code=gaps[0].code if gaps else "observation_incomplete",
                             detail="; ".join(gap.detail for gap in gaps)
                             or "The requested observation content is unavailable; only scope metadata was captured.",
-                            next="The original action outcome is unchanged; do not replay it. Read the original scope again.",
                             session_usable=self.session_usable(request, session_identity),
                         )
                     ),
@@ -179,11 +181,22 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 outcome,
                 observation=observed,
                 observation_status="partial" if partial else "available",
+                observation_error=(
+                    FrozenRecord(
+                        {
+                            "code": refresh_gap.code,
+                            "detail": refresh_gap.detail,
+                            "session_usable": self.session_usable(request, session_identity),
+                        }
+                    )
+                    if refresh_gap is not None
+                    else None
+                ),
                 window_lifecycle=lifecycle,
                 choices=choices,
             )
         except asyncio.CancelledError as error:
-            error.add_note(progress + "; do not replay it.")
+            error.add_note(progress)
             raise
         except Exception as error:  # noqa: BLE001 - preserve the already-published input on every read failure
             closed = isinstance(error, FixedWindowInvalidated)
@@ -213,12 +226,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     dict(
                         code=code,
                         detail=detail,
-                        next="The original action outcome is unchanged; do not replay it. "
-                        + (
-                            "Select a current window with computer.window(id) for further work."
-                            if closed
-                            else "Read the original scope when another observation is needed."
-                        ),
                         session_usable=self.session_usable(request, session_identity),
                     )
                 ),

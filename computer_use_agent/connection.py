@@ -41,14 +41,14 @@ class McpConnection:
 
     async def start(self):
         if self._closed:
-            raise RuntimeError("Computer Use connection is closed; create a new toolkit.")
+            raise RuntimeError("Computer Use connection is closed.")
         if self._task is None:
             self._ready = asyncio.get_running_loop().create_future()
             self._task = asyncio.create_task(self._serve())
         await asyncio.shield(self._ready)
         if self._task.done():
             await self._task
-            raise RuntimeError("Computer Use connection ended; previous actions may have executed.")
+            raise RuntimeError("Computer Use connection ended.")
 
     async def _serve(self):
         environment = {
@@ -76,7 +76,7 @@ class McpConnection:
                 self._ready.set_exception(error)
             elif not isinstance(error, asyncio.CancelledError):
                 logger.exception("Computer Use MCP connection ended")
-                raise RuntimeError("Computer Use MCP connection ended; previous actions may have executed.") from error
+                raise RuntimeError("Computer Use MCP connection ended.") from error
         finally:
             self.session = None
 

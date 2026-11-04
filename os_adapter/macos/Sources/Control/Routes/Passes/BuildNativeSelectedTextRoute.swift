@@ -55,7 +55,7 @@ import ApplicationServices
                 ? (intentKind == "replace"
                     ? "The complete target text is already empty; no replacement input was sent."
                     : "Empty text; no input was sent.")
-                : "Native selected-text edit dispatched; application effect unconfirmed."
+                : "Native selected-text edit dispatched."
             if alreadySatisfied { receipt.confirmation = "confirmed" }
             return alreadySatisfied
         }

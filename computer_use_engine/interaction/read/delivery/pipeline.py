@@ -51,7 +51,7 @@ class _PrepareAppMenus(Node["ObservationDraft", "ObservationDraft"]):
         from computer_use.interaction.read.delivery.menu.model import MenuSourceRenderRequest
 
         menus = draft.source.acquired.components.menus
-        if menus is None:
+        if menus is None or draft.source.acquired.plan.scope_managed:
             return draft
         document = self.presentation.run(MenuSourceRenderRequest(menus, compact=True), control)
         refs = dict(draft.refs)

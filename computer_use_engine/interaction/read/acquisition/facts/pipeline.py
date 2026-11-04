@@ -14,9 +14,6 @@ from typing import TYPE_CHECKING
 
 from computer_use.interaction.control import NativeScopeBody
 from computer_use.interaction.read.acquisition.facts.model import OpenRelationRead
-from computer_use.interaction.read.acquisition.facts.passes.check_fact_budget import (
-    stage as check_fact_budget,
-)
 from computer_use.interaction.read.acquisition.facts.passes.collect_native_facts import (
     stage as collect_native_facts,
 )
@@ -53,7 +50,7 @@ class FactCollectionPipeline(Pipeline["FactReadRequest", "SemanticSnapshot"]):
 
     Resolve the native scope and choose fields and query options from provider capabilities.
     Read the batch, build semantic indexes with session aliases, and return the snapshot
-    under the original deadline.
+    without discarding facts already returned when the query budget expires.
 
     Attributes:
         reader: Native reader owning scope validation, fact collection, and session display
@@ -74,7 +71,6 @@ class FactCollectionPipeline(Pipeline["FactReadRequest", "SemanticSnapshot"]):
                 plan_fact_profile(reader=reader),
                 collect_native_facts(reader=reader),
                 normalize_native_facts(reader=reader),
-                check_fact_budget(),
             ],
         )
 

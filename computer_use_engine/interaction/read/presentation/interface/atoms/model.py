@@ -141,6 +141,7 @@ class AtomCoverage:
         next_offset: Reported continuation offset requiring further collection.
         omissions: Retained explanations of omitted child facts.
         unexpanded_menu: Whether this coverage describes a deliberately unexpanded menu.
+        enumeration_unsupported: This region has no supported child enumeration route in the captured facts.
     """
 
     reason: str | None = None
@@ -151,6 +152,7 @@ class AtomCoverage:
     next_offset: int | None = None
     omissions: tuple[str, ...] = ()
     unexpanded_menu: bool = False
+    enumeration_unsupported: bool = False
 
     @property
     def partial(self) -> bool:

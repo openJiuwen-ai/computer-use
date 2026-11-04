@@ -55,7 +55,8 @@ async def test_permission_is_preserved_when_no_permitted_alternative_remains():
     with pytest.raises(ComputerUseError) as caught:
         await Engine(port).execute(Intent("insert", {"text": "query"}), TARGET)
     assert caught.value.code == "permission_required" and caught.value.effect == "none"
-    assert "allow_global_input" in caught.value.next
+    assert caught.value.effect == "none"
+    assert "next" not in vars(caught.value)
     assert len(port.commands) == 1 and port.inspections == 2
 
 

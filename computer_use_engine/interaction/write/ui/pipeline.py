@@ -64,14 +64,12 @@ class InterfacePointerPipeline:
         if image is None or image.expired or hashlib.sha256(image.png).digest() != image.digest:
             raise local_failure(
                 "this UI has no current image mapping",
-                'read and inspect this App/Window with view="image" or "both"',
                 "snapshot_expired",
             )
         adapters = self.controller.adapters
         if adapters.image_delivery_required() and image.delivered != adapters.image_delivery_epoch():
             raise local_failure(
                 "this image has not been delivered to the model",
-                "return the screenshot and choose coordinates in the next call",
                 "input_unavailable",
             )
         mapped = tuple(image.hit(point) for point in points)
@@ -79,7 +77,6 @@ class InterfacePointerPipeline:
         if any(other.window != piece.window for other, point in mapped):
             raise local_failure(
                 "a UI drag must start and end in one captured member window",
-                "use a desktop image with explicit global input permission for a cross-window drag",
                 "unsupported_operation",
             )
         # This gesture addresses a retained image, not provider controls. Query
@@ -88,9 +85,7 @@ class InterfacePointerPipeline:
         await refresh(self.controller, ui, accessibility=False)
         if not compatible_membership(image.membership, signature(allowed(ui)), piece.window):
             image.expired = True
-            raise local_failure(
-                "the window membership or modal layout changed", "read this UI image again", "snapshot_expired"
-            )
+            raise local_failure("the window membership or modal layout changed", "snapshot_expired")
         if len(image.pieces) > 1:
             await self.check_layout(image, piece)
         if intent == "drag":
@@ -112,4 +107,4 @@ class InterfacePointerPipeline:
         old, new = frame(piece.image), frame(current)
         if any(abs(a - b) > 1e-6 for a, b in zip(old[2:], new[2:])):
             image.expired = True
-            raise local_failure("the target window changed size", "read this UI image again", "snapshot_expired")
+            raise local_failure("the target window changed size", "snapshot_expired")

@@ -44,7 +44,6 @@ class ApplicationDiscoveryPipeline:
         if not result and directory["stopReasons"]:
             raise local_failure(
                 "application discovery is incomplete: " + "; ".join(directory["stopReasons"]),
-                "retry discovery when the desktop is available",
                 "observation_incomplete",
             )
         return result

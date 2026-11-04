@@ -53,8 +53,5 @@ if TYPE_CHECKING:
         counter independently.
         """
 
-        def retire_baseline(self, key: str) -> None:
-            pass
-
         def publish_baseline(self, draft: BaselineDraft) -> None:
             pass

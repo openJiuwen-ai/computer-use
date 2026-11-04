@@ -168,7 +168,6 @@ class WritePipeline:
                     minimum_effect=(
                         "possible" if caught.effect == "none" and self.state.native_mutation_possible else caught.effect
                     ),
-                    next_step=caught.next,
                 )
             else:
                 error = failure(

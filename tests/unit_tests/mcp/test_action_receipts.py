@@ -59,7 +59,6 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
             dict(
                 code=code,
                 executionId=1,
-                history=dict(resetText=False, resetImages=False, incremental=True),
             )
         )
 
@@ -106,8 +105,10 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         text = "\n".join(block["text"] for block in result["content"])
         self.assertEqual(text.count("Action [dispatched]"), 1)
         self.assertIn("Related observation [unavailable]", text)
-        self.assertIn("do not replay", text)
-        self.assertIn("original Window is closed", text)
+        self.assertIn("Action: dispatched", text)
+        self.assertNotIn("do not replay", text)
+        self.assertNotIn("Choose a current instance", text)
+        self.assertIn("Original window: closed", text)
         self.assertIn("computer.window(7) Another document", text)
 
     async def test_suffix_delivery_failure_does_not_replace_returned_receipt(self):
@@ -151,7 +152,7 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         result = await self.execute("publish_gap(failure)\nraise failure")
         self.assertTrue(result.get("isError"), result)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
-        self.assertIn("Action effect remains partial", text)
+        self.assertIn("Effect: partial", text)
         self.assertIn("Related observation [unavailable] for Original field", text)
         self.assertNotIn("Action [dispatched]", text)
         self.assertNotIn("Action [verified]", text)

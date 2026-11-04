@@ -19,10 +19,10 @@ import ApplicationServices
 
     func inputTarget(_ ref: String) throws -> Target {
         guard let target = registry.target(ref) else {
-            throw DriverError("element reference expired; read the app again", code: .staleTarget)
+            throw DriverError("element reference expired", code: .staleTarget)
         }
         guard target.application.launchDate == target.launched else {
-            throw DriverError("target process changed; read the app again", code: .staleTarget)
+            throw DriverError("target process changed", code: .staleTarget)
         }
         try BackgroundTarget(target.application).validate(input: true)
         guard AXIsProcessTrusted() else {

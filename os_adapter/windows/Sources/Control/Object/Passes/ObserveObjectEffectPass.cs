@@ -29,7 +29,7 @@ namespace ComputerUse.Windows
             }
             else
             {
-                result["detail"] = "Native replacement returned; the requested literal value could not be confirmed (formatting or asynchronous updates may differ). No alternate input was sent; read the control to verify.";
+                result["detail"] = "Native replacement returned. Requested literal value: unconfirmed. Alternate input: not sent.";
             }
         }
     }

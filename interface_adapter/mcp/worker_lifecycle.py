@@ -150,9 +150,9 @@ class WorkerLifecycle:
         if detail:
             reason += " " + detail
         if not self.started:
-            reason += " This call's code was not sent. Check the worker installation and session log before continuing."
+            reason += " Code dispatch: not sent."
         elif sent:
-            reason += " Actions may already have executed; do not replay them automatically. Read again before acting."
+            reason += " Code dispatch: sent. Completion: unknown."
         else:
-            reason += " This call's code was not sent. Recreate variables and read again before acting."
+            reason += " Code dispatch: not sent."
         return reason

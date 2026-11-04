@@ -112,7 +112,7 @@ class InterfaceWriter:
                 raise ValueError("Prepared excerpt no longer matches its atomic source field")
             return (
                 " … ".join(field(fragment.text) for fragment in excerpt.fragments)
-                + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; read_details(element={ref})]"
+                + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; captured details: element {ref}]"
             )
         return slot_value(slot)
 
@@ -247,7 +247,7 @@ class InterfaceWriter:
             if coverage.next_offset is not None:
                 count += "; cursor below"
             result.append("Children: " + count)
-            if coverage.next_offset is None:
+            if coverage.next_offset is None and not coverage.enumeration_unsupported:
                 result.append(f"Inspect subtree: app.element({atom.ref}).read()")
         result.extend("Omitted: " + field(item) for item in coverage.omissions)
         return tuple(result)
@@ -267,7 +267,7 @@ class InterfaceWriter:
             indent
             + "\t"
             + f"Omitted: {excerpt.total - excerpt.shown} of "
-            + f"{excerpt.total} characters from {attribute}; read_details(element={ref})"
+            + f"{excerpt.total} characters from {attribute}; captured details: element {ref}"
             for (owner, attribute), excerpt in excerpts.items()
             if owner == ref
         )
@@ -277,7 +277,7 @@ class InterfaceWriter:
                 + "\t"
                 + "Omitted: captured content for elements "
                 + reference_set(group.projected_refs)
-                + f"; state.read_details(); section {group.section_key}"
+                + f"; captured details: section {group.section_key}"
                 for group in self.request.groups.groups
                 if group.projected_refs[0] == ref
             )
@@ -395,7 +395,7 @@ class InterfaceWriter:
         heading = indent + ("Outline: " if table.layout == "outline" else "Records: ") + separator.join(headings)
         self.lines.append(heading)
         if deferred:
-            self.lines.append(indent + "Structure details (indices and cell extents): observation.read_details()")
+            self.lines.append(indent + "Captured structure details: indices and cell extents")
         row_context = (*context, ("table:" + table.ref, heading))
         for row in table.rows:
             if table.layout == "rows":
@@ -727,6 +727,8 @@ class InterfaceWriter:
             self.lines.append(heading)
             if label is not None:
                 self.lines.extend(indent + line for line in self.atom_lines(label, shared=True)[1:])
+                if self.request.coverage is None or label not in self.request.coverage.omitted_refs:
+                    self.lines.extend(indent + "\t" + line for line in self.coverage_lines(self.atoms[label]))
             context = (*context, (key, heading))
             for child in block.children:
                 member = self.document.blocks[child]

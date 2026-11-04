@@ -179,7 +179,7 @@ def select_states(node: NodeView, *, compact: bool, focused_ref: str | None) -> 
             add("replace-only", "capabilities")
         if (
             caps.get("replaceText", "unknown") != caps.get("typeText", "unknown")
-            and caps.get("replaceText", "unknown") != "available"
+            and caps.get("replaceText") == "unavailable"
         ):
             add("replace " + caps.get("replaceText", "unknown"), "capabilities")
         if (

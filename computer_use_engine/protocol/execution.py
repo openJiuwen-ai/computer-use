@@ -387,7 +387,7 @@ def decode_inspect_query(value):
     if "primaryFields" in result and not set(result["primaryFields"]) <= set(result["fields"]):
         raise ValueError("protocol: primary fields must belong to the requested fields")
     if "childrenPage" in result and "relationPage" in result:
-        raise ValueError("protocol: select one root relation page")
+        raise ValueError("protocol: exactly one root relation page is required")
     page = result.get("relationPage", result.get("childrenPage"))
     if page is not None and (result["maxDepth"] < 1 or page["limit"] >= result["maxNodes"]):
         raise ValueError("protocol: a relation page needs depth and space for its root and targets")
@@ -474,7 +474,7 @@ def validate_click_receipt(value, target, dispatch, cleanup_result):
     if dispatch in ("dispatched", "partial") and not transport["callEntered"]:
         raise ValueError("protocol: submitted click requires transport entry evidence")
     if dispatch == "notDispatched" and transport["callEntered"] and not transport["callReturned"]:
-        raise ValueError("protocol: an unresolved input call cannot prove zero dispatch")
+        raise ValueError("protocol: zero dispatch conflicts with an unresolved input call")
     if (
         dispatch == "notDispatched"
         and transport["callEntered"]

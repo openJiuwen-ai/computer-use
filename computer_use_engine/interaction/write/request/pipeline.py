@@ -20,9 +20,10 @@ from computer_use.interaction.write.request.passes.publish_action_event import s
 from computer_use.interaction.write.request.passes.select_write_scope import stage as select_write_scope
 from computer_use.interaction.write.request.passes.validate_element_scope import stage as validate_element_scope
 from computer_use.interaction.write.request.passes.validate_write_binding import stage as validate_write_binding
+from computer_use.native.contracts import Binding
 from computer_use.pipeline import Contract, Effect, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
-from computer_use.session.events import pending_observations_discarded
+from computer_use.session.events import observations_before_write
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -56,15 +57,26 @@ class ExecuteNativeWrite(Node["ActionPlan", "Record"]):
         """Execute the action using either its reconciled call claim or a new engine claim."""
         (engine, request) = (self.controller.engine, plan.request)
         self.children = (engine.pipeline,)
+        label = _target_label(request, plan.target)
         try:
             options: Record = dict(path=request.path, query_timeout_ms=request.query_timeout_ms, _control=control)
             if request.forward_current:
                 options["forward_current"] = True
             if self.borrowed:
-                return await engine.execute_in_call(
+                receipt = await engine.execute_in_call(
                     request.intent, cast("OperationTarget", plan.target), cast("Remaining", plan.remaining), **options
                 )
-            return await engine.execute(request.intent, cast("OperationTarget", plan.target), **options)
+            else:
+                receipt = await engine.execute(request.intent, cast("OperationTarget", plan.target), **options)
+            receipt["intent"] = request.intent.kind
+            if label:
+                receipt["target"] = label
+            return receipt
+        except ComputerUseError as error:
+            error._method = request.intent.kind
+            if label:
+                error.target = f"{label} / {error.target}"
+            raise
         finally:
             self.children = ()
 
@@ -72,16 +84,36 @@ class ExecuteNativeWrite(Node["ActionPlan", "Record"]):
         raise TypeError("Writes require arun()")
 
 
-class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
-    """Reconcile observation state after a failed write.
+def _target_label(request: ExecuteAction, target: OperationTarget | None) -> str | None:
+    """Describe existing public bindings without querying or changing the target."""
+    if request.owner is None:
+        return "Computer"
+    instance = getattr(request.owner, "_instance", None)
+    if instance is None or not isinstance(target, Binding):
+        return None
+    window = next((ref for ref, key in getattr(instance, "windows", {}).items() if key == target.root_window), None)
+    if window is None:
+        return None
+    parts = [f"Window {window}"]
+    if request.snapshot is not None:
+        element = next(
+            (ref for ref, snapshot in getattr(instance, "refs", {}).items() if snapshot is request.snapshot), None
+        )
+        if element is not None:
+            parts.append(f"Element {element}")
+    return " / ".join(parts)
 
-    Run the enclosed action flow. On failure, discard pending observations,
+
+class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
+    """Publish earlier observations and reconcile a failed input scope.
+
+    Publish previous observations before entering the action. On failure,
     reset desktop-action state or expire a matching stale App capture as
-    applicable, and propagate the error.
+    applicable, and propagate the error without erasing earlier facts.
 
     Attributes:
-        controller: Owns the desktop, App observations, and pending delivery state.
-        body: Enclosed action flow whose failures require observation cleanup.
+        controller: Owns the desktop, App observations, and observation delivery.
+        body: Enclosed action flow whose failures reconcile affected input state.
     """
 
     def __init__(self, controller: SessionController, body: Step[ExecuteAction, ActionResult]) -> None:
@@ -89,7 +121,8 @@ class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
         super().__init__("WriteFailureBoundary", body.contract)
 
     async def _arun(self, request: ExecuteAction, control: Control) -> ActionResult:
-        """Run the write and reconcile stale image and pending-observation state on failure."""
+        """Order previous facts before input and reconcile only failed input state."""
+        observations_before_write(self.controller)
         try:
             return await self.body.arun(request, control)
         except BaseException as error:
@@ -107,10 +140,6 @@ class WriteFailureBoundary(Node["ExecuteAction", "ActionResult"]):
                     and (state.observation.image.target == cast("Binding", request.target))
                 ):
                     state.capture_expired = True
-            try:
-                pending_observations_discarded(self.controller)
-            except Exception as delivery_error:  # noqa: BLE001 - host cleanup cannot replace the action outcome
-                error.add_note(f"Pending observation delivery cleanup failed: {delivery_error}")
             raise
 
     def _run(self, value: ExecuteAction, control: Control) -> ActionResult:
@@ -191,5 +220,3 @@ class ControllerWritePipeline(HostOperation):
 if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import OperationTarget
-if TYPE_CHECKING:
-    from computer_use.native.contracts import Binding

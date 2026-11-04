@@ -20,7 +20,6 @@ def _refuse(code, detail, target="working window"):
             effect="none",
             target=target,
             detail=detail,
-            next="inspect the directory and explicitly select an observed " + target,
         )
     )
 
@@ -43,7 +42,7 @@ def _running_match(directory, installation):
     if directory["stopReasons"]:
         _refuse(
             "observation_incomplete",
-            "Application discovery is partial; select an exact running application id.",
+            "Application discovery is partial; running application identity is unresolved.",
             "application",
         )
     observed_keys = keys.intersection(key for item in running for key in item.get("matchKeys", []))
@@ -55,8 +54,7 @@ def _running_match(directory, installation):
     if len(running) != 1 or len(recipes) != 1:
         _refuse(
             "ambiguous_target",
-            "Declared window identity does not identify one running application and installation; "
-            "select an exact observed running application id.",
+            "Declared window identity has ambiguous running application and installation matches.",
             "application",
         )
     return dict(running[0])
@@ -87,7 +85,7 @@ def select_application(directory, selector):
     if directory["stopReasons"]:
         _refuse(
             "observation_incomplete",
-            "Application discovery is partial; use an exact observed application id.",
+            "Application discovery is partial; application identity is unresolved.",
             "application",
         )
     if len(matches) != 1:
@@ -96,8 +94,7 @@ def select_application(directory, selector):
                 "element_not_found",
                 "No observed running window matches "
                 + selector
-                + ". This driver does not discover or launch installed applications; "
-                "read the desktop or list_apps() and select a running application/window.",
+                + ". Discovery scope: running windows. Installed-application discovery and launch: unavailable.",
                 "application",
             )
         _refuse(
@@ -126,7 +123,8 @@ def select_surface(directory, window=None, *, follow_modal=True):
     else:
         if any(item["parentState"] == "unknown" for item in entries.values()):
             _refuse(
-                "observation_incomplete", "Some windows have unknown ownership; select an explicit observed window."
+                "observation_incomplete",
+                "Some windows have unknown ownership; implicit window selection is unresolved.",
             )
         for key in entries:
             seen, current = set(), key
@@ -134,18 +132,18 @@ def select_surface(directory, window=None, *, follow_modal=True):
                 if current not in entries or current in seen:
                     _refuse(
                         "observation_incomplete",
-                        "Window ownership is incomplete or cyclic; select an explicit observed window.",
+                        "Window ownership is incomplete or cyclic; implicit window selection is unresolved.",
                     )
                 seen.add(current)
                 current = entries[current]["parent"]
         candidates = [key for key, item in entries.items() if item["parent"] not in entries and item["kind"] != "menu"]
         if len(candidates) != 1:
             code = "ambiguous_target" if len(candidates) > 1 else "observation_incomplete"
-            _refuse(code, "Select one working window using a reference from Windows; the directory has no unique root.")
+            _refuse(code, "The window directory has no unique root.")
         if directory["stopReasons"]:
             _refuse(
                 "observation_incomplete",
-                "An incomplete directory cannot prove that the only observed root is the only window.",
+                "Window directory is incomplete; root uniqueness is unknown.",
             )
         root = candidates[0]
     view, visited = root, {root}
@@ -153,7 +151,7 @@ def select_surface(directory, window=None, *, follow_modal=True):
         while True:
             children = [key for key, item in entries.items() if item["parent"] == view and item["modal"] is True]
             if len(children) > 1:
-                _refuse("ambiguous_target", "Several confirmed modal children require an explicit view selection.")
+                _refuse("ambiguous_target", "Several confirmed modal children match the requested view.")
             if not children:
                 break
             view = children[0]

@@ -27,7 +27,6 @@ class FixedWindowInvalidated(ComputerUseError):
                 effect="none",
                 target="working window",
                 detail=detail,
-                next="discover a new App; this fixed window will not follow another document",
             )
         )
 
@@ -44,7 +43,6 @@ class FixedWindowUnconfirmed(ComputerUseError):
                 effect="none",
                 target="working window",
                 detail="The fixed working window is missing from the partial current directory.",
-                next="read this App/Window again to refresh its evidence",
             )
         )
 

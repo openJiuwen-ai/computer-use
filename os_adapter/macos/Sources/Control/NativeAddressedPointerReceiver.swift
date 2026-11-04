@@ -9,6 +9,9 @@ struct NativeAddressedPointerReceiver {
     enum Qualification: String {
         case unconfirmed, declaredInteraction, sameWindowPoint, originalWindowPoint
         case originalElementExactHit, originalElementNeedsExposure
+        case originalElementForegroundGeometry
+
+        var requiresForegroundGeometry: Bool { self == .originalElementForegroundGeometry }
 
         func requirement(captured: Bool) -> NativePointerReadiness.Requirement? {
             switch self {
@@ -16,6 +19,7 @@ struct NativeAddressedPointerReceiver {
             case .sameWindowPoint, .originalWindowPoint: return captured ? .foregroundWindowPoint : nil
             case .originalElementExactHit, .originalElementNeedsExposure:
                 return captured ? nil : .foregroundWindowPoint
+            case .originalElementForegroundGeometry: return captured ? nil : .contentReceiver
             case .unconfirmed: return nil
             }
         }
@@ -58,6 +62,24 @@ struct NativeAddressedPointerReceiver {
     /// requirement; this is not evidence that the hidden target is already hit.
     var exposureQualification: Qualification {
         supported ? .declaredInteraction : .originalElementNeedsExposure
+    }
+
+    /// A retained control can need window preparation before its provider
+    /// exposes a usable hit. Admission preserves that obligation; it does not
+    /// claim that the coarse window is already the requested receiver. Final
+    /// element geometry retains the same parent/frame proof as physical input.
+    func retainedElementQualification(
+        basis: NativeElementHitSelection.Basis, preparation: NativeElementHitSelection.Preparation,
+        exactOriginalHit: Bool, popup: Bool
+    ) -> Qualification? {
+        if basis == .exactHit, exactOriginalHit {
+            return supported ? .declaredInteraction : popup ? .unconfirmed : .originalElementExactHit
+        }
+        guard !popup else { return nil }
+        if basis == .coarseAncestorGeometry || preparation == .foreground {
+            return .originalElementForegroundGeometry
+        }
+        return nil
     }
 
     func qualification(concreteHit: Bool, sameWindow: Bool) -> Qualification {

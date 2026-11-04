@@ -19,6 +19,7 @@ import ApplicationServices
             "a valid window-root point can admit preparation but never dispatch")
         let confirmed = sample(.coarseAncestorWindow, foreground: true)
         precondition(confirmed.basis == .coarseAncestorGeometry && Hits.preparation(confirmed) == .geometryReady)
+        try retainedElementPreparation(initial: initial, confirmed: confirmed)
         precondition(sample(.target, foreground: true).basis == .exactHit)
         precondition(
             sample(.windowRoot, foreground: true).basis == .rejected,
@@ -74,6 +75,78 @@ import ApplicationServices
                      && scalarFocus["globalInput"] as? String == "no",
                      "text-point preparation declares its actual window-directed transport")
         keyboardWindowPreparation()
+    }
+
+    @MainActor static func retainedElementPreparation(
+        initial: NativeElementHitSelection.Selection<Int>, confirmed: NativeElementHitSelection.Selection<Int>
+    ) throws {
+        typealias Receiver = NativeAddressedPointerReceiver
+        typealias Hits = NativeElementHitSelection
+        for facts in [Receiver(role: kAXTextFieldRole, actions: [], focusWritable: true),
+                      Receiver(role: kAXButtonRole, actions: [])] {
+            let qualification = facts.retainedElementQualification(
+                basis: initial.basis, preparation: Hits.preparation(initial), exactOriginalHit: false, popup: false)!
+            precondition(qualification == .originalElementForegroundGeometry)
+            precondition(qualification.requirement(captured: true) == nil,
+                         "a retained element cannot qualify an unrelated captured coordinate")
+            let offer = NativeClickContract(
+                routeFamily: "macos.windowDirected.v1", delivery: .windowDirected, admission: .preparationRequired,
+                reason: nil, preparationOptions: ["foreground"],
+                pointerRequirement: qualification.requirement(captured: false)!,
+                requiresForegroundGeometry: qualification.requiresForegroundGeometry)
+            precondition(offer.permitsElementPointer(hasActuator: false))
+            precondition(!offer.permitsElementPointer(hasActuator: true))
+            var weakened = offer
+            weakened.requiresForegroundGeometry = false
+            precondition(offer != weakened, "native contract identity must preserve the unfinished geometry obligation")
+            precondition(SampleNativeClickPreparationPass.needed(offer, pointerReady: true, foreground: false),
+                         "a previous background pointer lease cannot skip original-window exposure")
+            precondition(!SampleNativeClickPreparationPass.needed(offer, pointerReady: true, foreground: true))
+            precondition(SampleNativeClickPreparationPass.needed(offer, pointerReady: false, foreground: true))
+            do {
+                try NativeClickPreparationPipeline.requireBackgroundPreparation(
+                    offer.pointerRequirement, requiresForegroundGeometry: offer.requiresForegroundGeometry)
+                preconditionFailure("the original geometry obligation cannot enter local-only preparation")
+            } catch is NativePreparationUnavailable { }
+            precondition(facts.retainedElementQualification(
+                basis: confirmed.basis, preparation: Hits.preparation(confirmed), exactOriginalHit: false,
+                popup: false) == qualification)
+            precondition(NativeElementPointerUnit.allowsDispatchBasis(
+                confirmed.basis, requirement: offer.pointerRequirement, exactOriginalHit: false, hasMember: false),
+                "post-preparation coarse ancestor/parent/frame proof must remain valid just as for physical input")
+            precondition(!NativeElementPointerUnit.allowsDispatchBasis(
+                .rejected, requirement: offer.pointerRequirement, exactOriginalHit: false, hasMember: false))
+            for popup in [false, true] {
+                precondition(facts.retainedElementQualification(
+                    basis: .rejected, preparation: .unavailable, exactOriginalHit: false, popup: popup) == nil,
+                    "a different control or unknown owner is not a window preparation route")
+            }
+            precondition(facts.retainedElementQualification(
+                basis: initial.basis, preparation: Hits.preparation(initial), exactOriginalHit: false,
+                popup: true) == nil, "popup choices retain their independent proof")
+
+            let element = AXUIElementCreateApplication(getpid())
+            let selected = NativeElementPointerUnit(application: .current, window: element, element: element)
+                .requiring(offer.pointerRequirement, foregroundGeometry: offer.requiresForegroundGeometry)
+            precondition(selected.pointerRequirement == .contentReceiver,
+                         "element dispatch must not impose the separate exact-hit-only contract")
+            for dx in [0.0, 20.0] {
+                let mapping = WindowGeometry.WindowMapping(
+                    id: 71, pid: getpid(), frame: CGRect(x: dx, y: 0, width: 100, height: 100),
+                    title: nil, width: 100, height: 100)
+                let pointer = selected.pointerUnit(mapping: mapping)
+                precondition(pointer.pointerRequirement == .foregroundWindowPoint,
+                             "fresh mappings must preserve foreground validation through final event delivery")
+                precondition(CFEqual(selected.element, element) && CFEqual(selected.window, element))
+                precondition(!NativePointerReadiness.ready(
+                    kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target,
+                    backgroundPrepared: true, backgroundReportedActive: true, requirement: pointer.pointerRequirement),
+                    "foreground loss after preparation cannot consume a stale background lease")
+                precondition(NativePointerReadiness.ready(
+                    kind: .click, foreground: true, windowKind: .keyRequiring, focus: .target,
+                    backgroundPrepared: true, requirement: pointer.pointerRequirement))
+            }
+        }
     }
 
     @MainActor static func keyboardWindowPreparation() {

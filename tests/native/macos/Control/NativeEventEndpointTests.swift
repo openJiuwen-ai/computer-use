@@ -2,9 +2,9 @@
 
 import AppKit
 
-@main enum NativeKeyboardEndpointTests {
+@main enum NativeEventEndpointTests {
     static func main() throws {
-        typealias Endpoint = NativeKeyboardEndpoint
+        typealias Endpoint = NativeEventEndpoint
         let pids: [Int: pid_t] = [1: 10, 2: 20, 3: 30, 4: 40]
         let parents = [1: 2, 2: 3, 3: 4]
         let kinds: [pid_t: RemoteApplicationKind] = [

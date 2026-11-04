@@ -240,8 +240,9 @@ class NativeReader:
     ) -> SemanticSnapshot:
         """Collect inside an existing node or window read operation.
 
-        A narrower query allowance limits the native request while the lease's
-        original deadline still bounds normalization and final publication checks.
+        A narrower query allowance limits the native request. Normalization
+        preserves facts already collected; later queries still use the lease's
+        original deadline.
         """
         request = FactReadRequest(
             read, node, fields, max_nodes, max_depth, children_page, relation_page, scope_kind, query_remaining

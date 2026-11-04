@@ -50,15 +50,12 @@ class CapturedDetailPages:
             length: Maximum Python characters, from 1 through 16384.
         """
         if element is not None and (type(element) is not int or element < 0):
-            raise local_failure(
-                "details element must be a nonnegative integer", "use an element number from this observation"
-            )
+            raise local_failure("details element must be a nonnegative integer")
         if type(length) is not int or not 1 <= length <= 16384:
-            raise local_failure("details length must be an integer from 1 to 16384", "use read_details(length=4096)")
+            raise local_failure("details length must be an integer from 1 to 16384")
         if cursor is not None and (not isinstance(cursor, str) or cursor not in self._positions):
             raise local_failure(
                 "details cursor does not belong to this observation",
-                "reuse the observation that returned this cursor, or omit cursor",
             )
         start = 0
         if cursor is not None:
@@ -66,14 +63,12 @@ class CapturedDetailPages:
             if element is not None and element != selected:
                 raise local_failure(
                     "details cursor belongs to another element scope",
-                    "continue without element, or restart with cursor=None",
                 )
             element = selected
         if element not in self._texts:
             if element is not None and self._element_details is None:
                 raise local_failure(
                     "this observation has no captured element details",
-                    "omit element to inspect its captured observation details",
                 )
             document = self.document if element is None else self._element_details(element)
             value = document.text

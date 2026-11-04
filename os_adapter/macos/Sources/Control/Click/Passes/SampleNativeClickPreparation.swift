@@ -5,6 +5,10 @@ import ApplicationServices
 
 /// QUERY: sample geometry and readiness of the selected pointer delivery only.
 @MainActor enum SampleNativeClickPreparationPass {
+    static func needed(_ offer: NativeClickContract, pointerReady: Bool, foreground: Bool) -> Bool {
+        !pointerReady || offer.requiresForegroundGeometry && !foreground
+    }
+
     static func run(_ plan: NativeClickPlan, boundary: NativeUnitBoundary, afterPreparation: Bool = false) throws
         -> NativeClickWindowPreparation?
     {
@@ -33,7 +37,9 @@ import ApplicationServices
         if plan.offer.delivery == .windowDirected {
             try BackgroundEvents.requirePointerRoute(window: pointer.window)
         }
-        let needed = !pointer.ready(at: point, delivery: plan.offer.delivery)
+        let needed = needed(
+            plan.offer, pointerReady: pointer.ready(at: point, delivery: plan.offer.delivery),
+            foreground: !plan.offer.requiresForegroundGeometry || pointer.foregroundWindow(at: point))
         try boundary.checkConditions()
         return NativeClickWindowPreparation(pointer: pointer, point: point, needed: needed)
     }

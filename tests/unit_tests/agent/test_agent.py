@@ -186,7 +186,7 @@ def test_connection_shutdown_error_preserves_cause_without_reconnect(monkeypatch
     async def run():
         connection = McpConnection(McpConfig(command="unused"))
         await connection.start()
-        with pytest.raises(RuntimeError, match="previous actions may have executed") as raised:
+        with pytest.raises(RuntimeError, match="Computer Use MCP connection ended") as raised:
             await connection.close()
         assert raised.value.__cause__ is failure
 

@@ -171,7 +171,6 @@ class CallLifecycle:
                     effect="none",
                     target="native call",
                     detail="The native session is retired." if self.retired else "Another native call owns this stage.",
-                    next="close the old driver and observe a new session" if self.retired else "wait for the active call to finish",
                 )
             )
         self._admission = None
@@ -233,8 +232,10 @@ class CallLifecycle:
             finally:
                 self._admission = None
             yield OperationLease(operation, target, remaining)
-            if intent is None:
-                remaining()
+            # The query already consumed the original deadline. Exiting a
+            # successful read must preserve returned evidence, including a
+            # provider's partial batch at its deadline. Any later query checks
+            # that same remaining budget before admission; cleanup still runs.
         except BaseException as error:
             primary_error = error
             raise

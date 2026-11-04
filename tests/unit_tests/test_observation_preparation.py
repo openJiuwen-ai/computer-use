@@ -99,7 +99,7 @@ def test_cleanup_failure_keeps_returned_preparation_receipt():
     with pytest.raises(RuntimeError) as failure:
         asyncio.run(ObservationPreparationPipeline(port).arun(TARGET))
     assert failure.value.observation_preparation["activation"] == "requested"
-    assert "Earlier observation preparation" in failure.value.__notes__[0]
+    assert "Observation preparation: activation=requested; raise=requested." in failure.value.__notes__[0]
 
 
 def test_explicit_preparation_without_selected_root_stays_observation_only(monkeypatch):

@@ -34,10 +34,7 @@ def create(*, services: NativeAppReader) -> Callable[[AcquiredObservation, Contr
                 ObservationGap(
                     "content",
                     "observation_incomplete",
-                    "No identifiable content controls or text were exposed in this bounded window observation. "
-                    "This does not establish that the window is empty or ready; "
-                    "content may be loading, suspended or inaccessible.",
-                    ("inspect the window screenshot; read again after an explicit user-visible operation if needed"),
+                    "Content controls and text: unavailable in this bounded window observation.",
                 ),
             )
         return replace(acquired, gaps=gaps)

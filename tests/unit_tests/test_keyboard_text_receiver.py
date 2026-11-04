@@ -1,0 +1,117 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
+"""A text receiver's read-only AX buffer is not a read-only keyboard stream."""
+
+import pytest
+from computer_use.errors import ComputerUseError
+from computer_use.interaction.write.engine import Engine
+from computer_use.native.contracts import Intent, Knowledge
+from computer_use.native.semantics import control_capabilities, keyboard_input_evidence
+from unit_tests.test_confirmed_text_receiver_evidence import SCOPE, TARGET, TextEvidencePort
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+class StreamPort(TextEvidencePort):
+    """The recorded Terminal AX facts, without any app name in qualification."""
+
+    def __init__(self, *, raw_role="AXTextArea", **changes):
+        super().__init__(editable=None)
+        self.native_role = raw_role
+        self.changes = changes
+
+    def raw_role(self):
+        return self.native_role
+
+    def editing_values(self):
+        # Terminal omitted AXEnabled/AXEditable, exposed writable AXFocused,
+        # and explicitly reported both buffer setters as not writable.
+        return {"focusWritable": True, "valueWritable": False, "textWritable": False, **self.changes}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["insert", "paste"])
+@pytest.mark.parametrize("forward_current", [False, True])
+@pytest.mark.parametrize("initial_state", ["ready", "preparable"])
+async def test_text_stream_input_does_not_require_ax_buffer_setters(kind, forward_current, initial_state):
+    port = StreamPort()
+    port.key_state = initial_state
+    result = await Engine(port).execute(
+        Intent(kind, {"text": "printf hello"}),
+        SCOPE if forward_current else TARGET,
+        forward_current=forward_current,
+    )
+    assert result["status"] == "dispatched"
+    assert port.contents == "originalprintf hello"
+    assert all(command.target == TARGET for command in port.commands)
+    assert sum(not command.prepare for command in port.commands) == 1
+    assert sum(command.prepare for command in port.commands) == (initial_state == "preparable")
+    assert all(not command.foreground for command in port.commands)
+    assert port.finished == ["operation"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("raw_role", ["AXGroup", "AXButton", "AXUnknown", "AXStaticText"])
+async def test_focus_writable_arbitrary_objects_do_not_become_text_streams(raw_role):
+    port = StreamPort(raw_role=raw_role)
+    with pytest.raises(ComputerUseError):
+        await Engine(port).execute(Intent("insert", {"text": "X"}), TARGET)
+    assert port.commands == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("changes", [{"editable": False}, {"enabled": False}])
+@pytest.mark.parametrize("forward_current", [False, True])
+async def test_explicit_disabled_or_noneditable_text_stream_is_still_refused(changes, forward_current):
+    port = StreamPort(**changes)
+    with pytest.raises(ComputerUseError):
+        await Engine(port).execute(
+            Intent("insert", {"text": "X"}),
+            SCOPE if forward_current else TARGET,
+            forward_current=forward_current,
+        )
+    assert port.commands == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("boundary", ["identity", "within_scope", "supported", "modal"])
+async def test_text_stream_semantics_do_not_override_native_target_or_route_rejection(boundary):
+    port = StreamPort()
+    if boundary == "modal":
+        port.blocked_by = ("modal",)
+    else:
+        setattr(port, boundary, Knowledge.NO)
+    with pytest.raises(ComputerUseError):
+        await Engine(port).execute(Intent("insert", {"text": "X"}), TARGET)
+    assert port.commands == []
+
+
+@pytest.mark.anyio
+async def test_keyboard_stream_capability_does_not_authorize_whole_buffer_replacement():
+    port = StreamPort()
+    with pytest.raises(ComputerUseError):
+        await Engine(port).execute(Intent("replace", {"text": "replacement"}), TARGET)
+    assert port.commands == [] and port.contents == "original"
+
+
+def test_observation_advertises_text_input_separately_from_replacement():
+    node = {
+        "values": {
+            "AXRole": "AXTextArea", "settable.AXFocused": True,
+            "settable.AXValue": False, "settable.AXSelectedText": False,
+        },
+        "fieldStatus": {"AXEditable": {"state": "unsupported"}, "AXEnabled": {"state": "unsupported"}},
+        "actions": {"state": "complete", "items": []},
+    }
+    capabilities = control_capabilities("macos", node, ("nativeTextInput", "nativeActuators"))
+    assert capabilities["typeText"] == "available"
+    assert capabilities["replaceText"] == "unknown"
+
+
+@pytest.mark.parametrize("declaration", ["readOnly", "textReadOnly"])
+def test_explicit_read_only_declarations_do_not_qualify_a_text_stream(declaration):
+    values = {"focusWritable": True, "valueWritable": False, "textWritable": False, declaration: True}
+    assert keyboard_input_evidence("textArea", values, platform="macos") is not True

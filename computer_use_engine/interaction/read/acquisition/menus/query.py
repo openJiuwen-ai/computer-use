@@ -39,11 +39,6 @@ def menu_failure(code: str, detail: str) -> ComputerUseError:
             effect="none",
             target="menu observation",
             detail=detail,
-            next=(
-                "read the parent menu or working window and use an exact observed title or "
-                "element reference; no menu was "
-                "opened"
-            ),
         )
     )
 

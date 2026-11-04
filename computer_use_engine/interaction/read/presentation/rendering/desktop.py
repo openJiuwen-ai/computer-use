@@ -76,11 +76,7 @@ def render_desktop(
         lines.append("  Unknown" if value.get("catalogError") else "  None reported")
     if value["omittedWindows"]:
         lines.append(
-            (
-                f"Window catalogue truncated: "
-                f"{number_string(value['omittedWindows'])}"
-                f" more windows; use the screenshot to inspect visible content."
-            )
+            (f"Window catalogue truncated: {number_string(value['omittedWindows'])} additional windows omitted.")
         )
     if value.get("catalogError"):
         lines.append("Catalogue: " + json_string(value["catalogError"]))

@@ -63,9 +63,7 @@ class AgentElementReadPipeline:
         target = snapshot["binding"]
         if cursor is not None:
             if not re.fullmatch(r"p[1-9][0-9]*", cursor):
-                raise local_failure(
-                    "this cursor is not a tree continuation", "use the cursor printed by Element.read()"
-                )
+                raise local_failure("this cursor is not a tree continuation")
             page = controller.pages.resolve(cursor, target)
             if "nativeRelationPages" in controller.transport.capabilities:
                 options: Record = dict(relation_page=page)
@@ -73,7 +71,6 @@ class AgentElementReadPipeline:
                 if page["property"] not in ("AXChildren", "Children", "children"):
                     raise local_failure(
                         "this provider cannot page that native relation",
-                        "read its explicit source subtree",
                         "unsupported_operation",
                     )
                 options: Record = dict(children_page={key: page[key] for key in ("cursor", "limit")})

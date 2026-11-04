@@ -19,8 +19,7 @@ if TYPE_CHECKING:
 def execute(value: ApplicationSelection, control: Control) -> NoReturn:
     raise failure(
         "observation_unavailable",
-        "No observable working window is available for this image request. "
-        "Read the desktop or observe the same App when its window appears.",
+        "No observable working window is available for this image request.",
     )
 
 

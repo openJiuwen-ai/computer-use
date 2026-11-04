@@ -19,7 +19,7 @@ def slice_statement(plan: TextSlicePlan) -> str:
     if plan.mode == "same":
         return "same text as " + anchor
     excerpts = " … ".join(quoted(fragment.text) for fragment in plan.fragments)
-    return f"excerpt {excerpts} [part of {anchor}; full: state.read_details(element={plan.source.ref})]"
+    return f"excerpt {excerpts} [part of {anchor}; captured details: element {plan.source.ref}]"
 
 
 def slice_destination(plan: TextSlicePlan) -> Record:

@@ -5,15 +5,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+import asyncio
+from contextlib import nullcontext
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
-from computer_use.diagnostics import local_failure
+from computer_use.diagnostics import diagnostic, local_failure
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor
-from computer_use.interaction.query.instances.scope import adopt, allowed, resolve
-from computer_use.interaction.read.acquisition.components.support import collect_component
+from computer_use.interaction.query.instances.scope import adopt, allowed, refresh, resolve
+from computer_use.interaction.read.acquisition.components.support import ObservationGap, collect_component
 from computer_use.interaction.read.acquisition.images.fixed import FixedWindowImagePipeline
+from computer_use.interaction.read.acquisition.loading import window_content_unexposed
 from computer_use.interaction.read.limits import DEFAULT_WINDOW_MAX_NODES
 from computer_use.interaction.read.model import (
     AppObservation,
@@ -27,18 +30,21 @@ from computer_use.interaction.read.presentation.model import SnapshotRenderReque
 from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
 from computer_use.native.contracts import Binding
 from computer_use.native.query.directory import select_surface
+from computer_use.session.events import observation_completed
 from computer_use.session.interfaces import WindowIdentity
+from computer_use.session.observation_data import observation_data, retain_observation_data
 
+from .collection import CollectionPlan, components
 from .menus import InterfaceMenuPipeline, remember_menu
 from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
 from .publication import capture_header, publish, tree_document
 from .related import RelatedRead
+from .settling import same_window_content
 
 if TYPE_CHECKING:
     from typing import Sequence
 
     from computer_use.interaction.controller import SessionController
-    from computer_use.interaction.read.acquisition.components.support import ObservationGap
     from computer_use.interaction.read.acquisition.images.capture import WindowImage
     from computer_use.interaction.read.acquisition.menus.query import MenuRead
     from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
@@ -74,15 +80,18 @@ def member_target(instance: InstanceState, item: SurfaceInfo) -> Binding:
 
 
 def _gap_line(gap: ObservationGap, *, concise: bool = False) -> DisplayText:
-    """Expose the directory's actual gap; the Skill supplies the normal reread syntax."""
-    if (
-        concise
-        and gap.component == "directory"
-        and gap.code == "observation_incomplete"
-        and gap.next == "inspect the directory again if the required window is missing"
-    ):
+    """Present the component and its observed collection gap."""
+    if concise and gap.component == "directory" and gap.code == "observation_incomplete":
         return template("Directory incomplete: {0}.", gap.detail)
-    return template("{0}: {1}: {2}; next: {3}", gap.component, gap.code, gap.detail, gap.next)
+    return template("{0}: {1}: {2}", gap.component, gap.code, gap.detail)
+
+
+def _collection_gap(component: str, error: Exception) -> ObservationGap:
+    return ObservationGap(
+        component,
+        error.code if isinstance(error, ComputerUseError) else "observation_incomplete",
+        error.detail if isinstance(error, ComputerUseError) else str(error) or type(error).__name__,
+    )
 
 
 def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> None:
@@ -111,6 +120,8 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     # native window; lookup still validates its node when it is used.
     if part.target.node is not None or not same_window:
         state.query_target = part.target
+    if part.tree is not None or not same_window:
+        state.query_snapshot = part.tree
     state.query_scope_kind = "window"
     # The interface branch reconciles membership itself; an old current-modal
     # observation must not retarget a fixed member during a semantic lookup.
@@ -173,9 +184,7 @@ class InterfaceReadPipeline:
             current = select_surface(directory, anchor)
             item = next((item for item in permitted.values() if item["surface"] == current.surface), None)
             if item is None:
-                raise local_failure(
-                    "the observation window is not confirmed in this instance", "read its window choices"
-                )
+                raise local_failure("the observation window is not confirmed in this instance")
             preparation = await ObservationPreparationPipeline(controller.port).arun(member_target(instance, item))
         try:
             if preparation is not None:
@@ -191,16 +200,11 @@ class InterfaceReadPipeline:
                     raise annotated from error
             raise
 
-    async def _collect(self, ui, view, full, menu_path, directory, first, preparation, related):
+    async def _collect(self, ui, view, full, menu_path, directory, first, preparation, related, on_observation=None):
         controller, instance = self.controller, ui._instance
         # Stage this observation's own lookup configuration, including a
         # catalogue-only result. Previous menu samples are not its content.
         ui._lookup_scopes, ui._menu_only = (), False
-        if related is not None and related.new_windows(directory) and view == "tree":
-            # A new peer may expose no useful AX content. Include its bounded
-            # visual view in this same response instead of requiring another
-            # model round trip solely to obtain executable observation.
-            view = "both"
         if related is not None and ui._anchor is None and instance.anchor is None:
             preferred = related.preferred(directory, related.original.root_window)
             if preferred in instance.members:
@@ -239,7 +243,7 @@ class InterfaceReadPipeline:
                 "Tree: not expanded; no unique observation window was selected.",
             ]
             if not choices:
-                lines.append("No observable working window. Installed/running does not imply an input context.")
+                lines.append("Observable working window: unavailable.")
             if isinstance(first, dict) and "detail" in first:
                 lines.append(template("Launch: {0}", first["detail"]))
             return publish(
@@ -251,54 +255,34 @@ class InterfaceReadPipeline:
                 directory=directory,
                 content_available=False,
                 partial=bool(directory["stopReasons"]),
+                on_observation=on_observation,
             )
         permitted = allowed(ui)
         # pylint: disable-next=protected-access
         anchor = ui._anchor or instance.anchor.root.root_window
         if related is not None:
             anchor = related.preferred(directory, anchor)
-        principal_error = None
-        try:
-            current = select_surface(directory, anchor)
-            principal = next(key for key, item in permitted.items() if item["surface"] == current.surface)
-        except (ComputerUseError, StopIteration) as error:
-            principal, principal_error = anchor, error
-        # Other independent application windows remain selectable in the header;
-        # only the principal and its confirmed attached scope get detailed reads.
-        ordered = [principal, *[key for key in permitted if key != principal and ancestor(directory, key, anchor)]]
-        if related is not None:
-            ordered.extend(key for key in related.new_windows(directory)[:2] if key not in ordered)
-        parts, notes = [], []
-        if related is not None:
-            new_refs = [ref for ref, key in instance.windows.items() if key in related.new_windows(directory)]
-            if new_refs:
-                notes.append(
-                    template(
-                        "Newly discovered windows after the action: {0}. This does not establish causation.",
-                        ", ".join(map(str, new_refs)),
-                    )
-                )
-        # pylint: disable-next=protected-access
-        ui._lookup_scopes = ()
-        # pylint: disable-next=protected-access
-        ui._menu_only = False
-        for index, key in enumerate(ordered[:6]):
-            if key not in permitted or any(part.target.surface == permitted[key]["surface"] for part in parts):
-                continue
+        plan = CollectionPlan(anchor, view, related)
+        plan.update(directory, permitted)
+        principal, principal_error = plan.principal, plan.selection_error
+        parts, notes, collection_gaps = [], [], []
+        ui._lookup_scopes, ui._menu_only = (), False
+        initial = True
+        while (work := plan.next()) is not None:
+            identity, member_view = work
+            key = identity.window
             item = permitted[key]
-            # pylint: disable-next=protected-access
-            if index == 0 and principal_error is None and ui._anchor is None:
-                # pylint: disable-next=protected-access
+            if initial and principal_error is None and ui._anchor is None:
+                initial = False
                 selected = controller.reader._selection(
                     instance.anchor.application, instance.anchor.name, directory, anchor
                 )
                 try:
                     observed = (
-                        first
-                        # pylint: disable-next=protected-access
-                        if isinstance(first, AppObservation) and ui._anchor is None
+                        first if isinstance(first, AppObservation)
                         else await controller.reader.read(
-                            selected, view=view, overview=False, source_directory=directory
+                            selected, view=member_view, overview=False, source_directory=directory,
+                            scope_managed=True, include_menus=related is None,
                         )
                     )
                 except WindowSelectionRequired as error:
@@ -314,56 +298,86 @@ class InterfaceReadPipeline:
                 if observed is not None:
                     adopt(controller, ui, observed.directory, instance.anchor)
                     directory, permitted = observed.directory, allowed(ui)
-                if observed is not None and any(
-                    member["surface"] == cast("AppObservation", observed).target.surface
-                    for member in permitted.values()
-                ):
-                    item = next(
-                        member
-                        for member in permitted.values()
-                        if member["surface"] == cast("AppObservation", observed).target.surface
-                    )
-                    part = WindowPart(
-                        member_target(instance, item),
-                        cast("AppObservation", observed).tree,
-                        cast("AppObservation", observed).image,
-                        cast("AppObservation", observed).menus,
-                        cast("AppObservation", observed).gaps,
-                        observed,
-                    )
-                    parts.append(part)
-                    remember(controller, ui, part)
-                    # pylint: disable-next=protected-access
-                    ui._context = item["window"] if cast("AppObservation", observed).scope_confirmed else None
-                    continue
+                plan.update(directory, permitted)
                 if observed is not None:
-                    # A dialog can disappear during the principal read. Its
-                    # captured surface must not be relabelled as a new member
-                    # or fed to remember() after membership was reconciled.
-                    principal_error = local_failure(
-                        "the observed window left the application catalogue during collection",
-                        "inspect the current member observations before input",
-                        "observation_incomplete",
+                    item = next(
+                        (member for member in permitted.values() if member["surface"] == observed.target.surface), None
                     )
+                    if item is not None:
+                        part = WindowPart(
+                            member_target(instance, item), observed.tree, observed.image,
+                            observed.menus, observed.gaps, observed,
+                        )
+                        parts.append(part)
+                        plan.captured(item, part)
+                        remember(controller, ui, part)
+                        ui._context = item["window"] if observed.scope_confirmed else None
+                    else:
+                        # Exact old objects never acquire a replacement's body.
+                        principal_error = local_failure(
+                            "the observed window left the application catalogue during collection",
+                            "observation_incomplete",
+                        )
                     continue
-            if key not in permitted:
+            initial = False
+            if key not in permitted or WindowIdentity.of(permitted[key]) != identity:
                 continue
             item = permitted[key]
-            part = await self.member(ui, item, view, max_nodes=DEFAULT_WINDOW_MAX_NODES if index == 0 else 200)
-            parts.append(part)
+            part = await self.member(
+                ui, item, member_view, max_nodes=DEFAULT_WINDOW_MAX_NODES if not parts else 200,
+                component_budget_ms=2000 if related is not None else None,
+            )
+            previous = next((old for old in parts if old.target.surface == part.target.surface), None)
+            if previous is not None:
+                # A late discovery may add image work to an already captured tree.
+                previous.tree = part.tree if part.tree is not None else previous.tree
+                previous.image = part.image if part.image is not None else previous.image
+                previous.gaps += part.gaps
+                part = previous
+            else:
+                parts.append(part)
+            plan.captured(item, part)
             remember(controller, ui, part)
+            if related is not None:
+                # Only the automatic related read follows member transitions.
+                # Failure of this optional recheck keeps every captured component.
+                try:
+                    directory = await refresh(controller, ui, accessibility=True)
+                    permitted = allowed(ui)
+                    plan.update(directory, permitted)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:  # noqa: BLE001 - optional observation work cannot erase captured content
+                    collection_gaps.append(_collection_gap("directory", error))
+        if related is not None:
+            new_refs = [ref for ref, key in instance.windows.items() if key in related.new_windows(directory)]
+            if new_refs:
+                notes.append(
+                    template(
+                        "Newly observed windows: {0}.",
+                        ", ".join(map(str, new_refs)),
+                    )
+                )
         captured = {part.target.surface for part in parts}
-        if related is not None and not any(part.tree is not None or part.image is not None for part in parts):
+        current_surfaces = {item["surface"] for item in permitted.values()}
+        if related is not None and not any(
+            part.target.surface in current_surfaces and (part.tree is not None or part.image is not None)
+            for part in parts
+        ):
             # Selection and acquisition can straddle a modal's closure. Use
             # the rechecked catalogue to recover the exact original target or
             # its still-live fixed owner within the same observation budget.
-            old = permitted.get(related.recovery_window(directory))
+            unavailable = frozenset(part.target.root_window for part in parts)
+            old = permitted.get(related.recovery_window(directory, unavailable))
             if old is not None and old["surface"] not in captured and len(parts) < 6:
-                fallback = await self.member(ui, old, view)
+                fallback_view = "both" if related.new_windows(directory) else view
+                fallback = await self.member(ui, old, fallback_view, component_budget_ms=2000)
+                identity = WindowIdentity.of(old)
+                plan.requested[identity] = components(fallback_view)
+                plan.attempted[identity] = components(fallback_view)
                 parts.append(fallback)
                 remember(controller, ui, fallback)
                 captured.add(old["surface"])
-                ordered.append(old["window"])
                 if fallback.tree is not None or fallback.image is not None:
                     ui._context = old["window"]
                     if ui._anchor is None:
@@ -375,9 +389,25 @@ class InterfaceReadPipeline:
                         "Preferred related-window detail was unavailable; the original window is shown."
                         if old["window"] == related.original.root_window
                         else "The previous detail could not be delivered; the surviving fixed Window is shown."
-                        if related.context_root is not None
+                        if related.context_root is not None and old["window"] == related.context_root.window
                         else "The previous detail could not be delivered; the App's current window is shown."
                     )
+        # Convenience context follows locally bound content. Ambiguity still
+        # leaves every explicitly bound window readable.
+        current_part = next((part for part in parts if part.target.root_window == plan.principal), None)
+        if current_part is not None and (current_part.tree is not None or current_part.image is not None):
+            principal, principal_error = plan.principal, plan.selection_error
+            if principal_error is None and (related is not None or ui._anchor is not None):
+                ui._context = principal
+        original_part = next(
+            (part for part in parts if related is not None and part.target.root_window == related.original.root_window),
+            None,
+        )
+        needs_refresh = (
+            related is not None and related.settle and not related.new_windows(directory)
+            and original_part is not None
+            and same_window_content(related.before_tree, original_part.tree)
+        )
         if principal_error is not None:
             # pylint: disable-next=protected-access
             ui._context = None
@@ -393,29 +423,52 @@ class InterfaceReadPipeline:
         displayed_parts: list[tuple[str, WindowPart]] = []
         shown: set[str] = set()
         for part in parts:
-            key = next(key for key, item in permitted.items() if item["surface"] == part.target.surface)
-            if key not in shown:
+            key = next((key for key, item in permitted.items() if item["surface"] == part.target.surface), None)
+            if key is not None and key not in shown:
                 shown.add(key)
                 displayed_parts.append((key, part))
+        displayed_parts.sort(key=lambda entry: entry[0] != plan.principal)
         delivered_gaps = tuple(
             (part.source.directory, part.gaps)
             for _, part in displayed_parts
             if view != "image" and part.tree is not None and part.source is not None
         )
-        header = capture_header(controller, ui, directory, parts=displayed_parts, delivered_gaps=delivered_gaps)
-        lines: list[str | DisplayText | DisplayDocument] = [DisplayText("interface_header", (header,))]
-        if isinstance(first, AppObservation) and first.launch:
-            lines.append(template("Launch: {0}", first.launch["detail"]))
-        screenshot = None
-        if view != "tree":
+        lines: list[str | DisplayText | DisplayDocument] = []
+        screenshot, included_images = None, ()
+        image_parts = [
+            part for _, part in displayed_parts
+            if part.image is not None or "image" in plan.requested.get(
+                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
+            )
+        ]
+        if image_parts:
             from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
 
-            image, image_notes = InterfaceImagePipeline(controller).run(ui, parts)
-            ui._image, screenshot = image, image.png if image is not None else None
-            lines += image_notes
+            try:
+                image, image_notes = InterfaceImagePipeline(controller).run(ui, image_parts)
+                ui._image, screenshot = image, image.png if image is not None else None
+                if image is not None:
+                    included_images = tuple(piece.window for piece in getattr(image, "pieces", ()))
+                    if not included_images:
+                        included_images = tuple(
+                            part.target.root_window for part in image_parts
+                            if part.image is not None and image.png is part.image.image
+                        )
+                lines += image_notes
+            except Exception as error:  # noqa: BLE001 - image composition must not discard independent text content
+                collection_gaps.append(_collection_gap("image", error))
+        header = capture_header(
+            controller, ui, directory, parts=displayed_parts, delivered_gaps=delivered_gaps,
+            image_windows=included_images,
+        )
+        lines.insert(0, DisplayText("interface_header", (header,)))
+        if isinstance(first, AppObservation) and first.launch:
+            lines.insert(1, template("Launch: {0}", first.launch["detail"]))
         trees = []
-        if view != "image":
+        if any(part.tree is not None for _, part in displayed_parts):
             lines.append("Tree: full")
+        elif any("tree" in requested for requested in plan.requested.values()):
+            lines.append("Tree: unavailable")
         else:
             lines.append("Tree: not requested")
         recovery_prefix = 0
@@ -427,6 +480,16 @@ class InterfaceReadPipeline:
                 )
             if part.source is not None:
                 lines.extend(part.source.context_notes)
+            requested = plan.requested.get(
+                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
+            )
+            ax_status = (
+                "collected" if part.tree is not None else "unavailable" if "tree" in requested else "not requested"
+            )
+            image_status = (
+                "collected" if key in included_images else "unavailable" if "image" in requested else "not requested"
+            )
+            lines.append(f"AX: {ax_status}; Image: {image_status}.")
             blockers = [
                 other
                 for other in permitted.values()
@@ -478,8 +541,6 @@ class InterfaceReadPipeline:
                     default=recovery_prefix,
                 )
                 lines.append(tree_document(controller, part.target, part.tree, prepared=prepared))
-            elif view != "image":
-                lines.append("Tree: unavailable for this window; use its image when available.")
             if part.menus is not None:
                 lines.append("Application menu:")
                 owners, menu_trees = remember_menu(controller, ui, part.menus, key)
@@ -496,10 +557,27 @@ class InterfaceReadPipeline:
                     template("Image note: {0}", note)
                     for note in capture_metadata(part.image.image).get("stopReasons", ())
                 ]
+        try:
+            coverage = plan.coverage(directory, parts, included_images)
+        except Exception as error:  # noqa: BLE001 - accounting cannot veto already acquired content or the action
+            coverage = ()
+            collection_gaps.append(_collection_gap("coverage", error))
+        for record in coverage:
+            if record["missing"]:
+                ref = next((ref for ref, key in instance.windows.items() if key == record["window"]), record["window"])
+                collection_gaps.append(
+                    ObservationGap(
+                        "window",
+                        "observation_incomplete",
+                        f"Window {ref}: {', '.join(record['missing'])} content was not included in this observation.",
+                    )
+                )
+        lines += [_gap_line(gap) for gap in collection_gaps]
         lines += notes
         # pylint: disable-next=protected-access
         scope = directory["application"] + (":app" if ui._anchor is None else ":window:" + ui._anchor) + ":" + view
-        return publish(
+        pending = []
+        result = publish(
             controller,
             ui,
             DisplayDocument.join(lines),
@@ -509,24 +587,70 @@ class InterfaceReadPipeline:
             scope=scope,
             directory=directory,
             preparation=preparation,
-            content_available=(
-                bool(trees)
-                if view == "tree"
-                else screenshot is not None
-                if view == "image"
-                else bool(trees) or screenshot is not None
-            ),
-            gaps=tuple(gap for part in parts for gap in part.gaps),
+            content_available=bool(trees) or screenshot is not None,
+            gaps=tuple(gap for part in parts for gap in part.gaps) + tuple(collection_gaps),
+            window_coverage=coverage,
             context_owner=related.context_owner if related is not None else None,
             partial=bool(
                 principal_error
                 or directory["stopReasons"]
                 or any(part.gaps for part in parts)
-                or len(displayed_parts) < len(set(ordered))
+                or collection_gaps
             ),
+            on_observation=pending.append if needs_refresh else on_observation,
         )
+        if not needs_refresh:
+            return result
+        try:
+            # A complete first observation is retained before optional work.
+            # The budget is still the original suffix budget, never restarted.
+            with controller.port.calls.claim(5000) as remaining:
+                can_refresh = remaining() >= 500
+                if can_refresh:
+                    diagnostic({
+                        "kind": "postwrite_observation_refresh", "reason": "unchanged_window_content",
+                        "window": original_part.target.root_window, "wait_ms": 200, "refresh_limit": 1,
+                    })
+                    await controller.reader.reader.wait_for_change(
+                        original_part.target, original_part.tree, remaining, delay_ms=200
+                    )
+            if can_refresh:
+                refreshed_directory, refreshed_first = await resolve(controller, ui, view)
+                refreshed_events = []
+                refreshed = await self._collect(
+                    ui, view, full, menu_path, refreshed_directory, refreshed_first, preparation,
+                    replace(related, settle=False, before_tree=None),
+                    on_observation=refreshed_events.append,
+                )
+                if not (observation_data(refreshed) or {}).get("content_available", True):
+                    raise local_failure(
+                        "the refreshed observation has no available content",
+                        "observation_incomplete",
+                    )
+                for event in refreshed_events:
+                    (on_observation or observation_completed)(event)
+                return refreshed
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - optional refresh failures must preserve the first captured observation
+            # A technical refresh cannot erase already captured content. Keep
+            # its exact directory/interval and report the failed newer sample.
+            metadata = observation_data(result)
+            gap = ObservationGap(
+                "refresh",
+                "observation_refresh_failed",
+                "The optional post-input refresh failed; the first captured observation is retained. "
+                + (error.detail if isinstance(error, ComputerUseError) else str(error) or type(error).__name__),
+            )
+            retain_observation_data(result, **{**metadata, "partial": True, "gaps": metadata["gaps"] + (gap,)})
+        for event in pending:
+            (on_observation or observation_completed)(event)
+        return result
 
-    async def member(self, ui: UIHandle, item: SurfaceInfo, view: str, *, max_nodes: int = 200) -> WindowPart:
+    async def member(
+        self, ui: UIHandle, item: SurfaceInfo, view: str, *, max_nodes: int = 200,
+        component_budget_ms: int | None = None,
+    ) -> WindowPart:
         """Collect one confirmed window member of the interface scope.
 
         Args:
@@ -540,19 +664,56 @@ class InterfaceReadPipeline:
         target = member_target(ui._instance, item)
         tree = image = None
         gaps = []
+        generation = controller.port.connection.session_identity
+
+        def failed(component, error):
+            if controller.port.calls.retired or controller.port.connection.session_identity != generation:
+                raise error
+            gaps.append(_collection_gap(component, error))
+
+        async def capture_image():
+            nonlocal image
+            try:
+                captured = await FixedWindowImagePipeline(controller.port, controller.reader.images).arun(target)
+                image = captured.image
+                if captured.gap is not None:
+                    gaps.append(captured.gap)
+            except Exception as error:  # noqa: BLE001 - preserve the independently acquired tree
+                failed("image", error)
+        image_first = component_budget_ms is not None and view == "both"
+        if image_first:
+            await capture_image()
         if view != "image":
-            tree, gap = await collect_component(
-                controller.port,
-                "tree",
-                lambda: controller.reader.reader.read(target, max_nodes=max_nodes, scope_kind="window"),
-            )
-            if gap:
-                gaps.append(gap)
-            if tree is not None:
-                (tree,) = controller.reader.number_snapshots((tree,))
-        if view != "tree":
-            captured = await FixedWindowImagePipeline(controller.port, controller.reader.images).arun(target)
-            image = captured.image
-            if captured.gap is not None:
-                gaps.append(captured.gap)
+            try:
+                # This exact-member component must leave room for pixels and
+                # directory reconciliation within the enclosing call deadline.
+                with (
+                    controller.port.calls.limit(component_budget_ms)
+                    if component_budget_ms is not None else nullcontext()
+                ):
+                    tree, gap = await collect_component(
+                        controller.port, "tree",
+                        lambda: controller.reader.reader.read(target, max_nodes=max_nodes, scope_kind="window"),
+                    )
+                if gap:
+                    gaps.append(gap)
+                if tree is not None:
+                    (tree,) = controller.reader.number_snapshots((tree,))
+            except Exception as error:  # noqa: BLE001 - independent optional component, preserving pixels and other windows
+                tree = None
+                failed("tree", error)
+            if tree is not None and component_budget_ms is not None:
+                try:
+                    if window_content_unexposed(tree):
+                        gaps.append(
+                            ObservationGap(
+                                "tree",
+                                "observation_incomplete",
+                                "AX content unavailable in this observation.",
+                            )
+                        )
+                except Exception as error:  # noqa: BLE001 - a completeness annotation cannot invalidate captured facts
+                    gaps.append(_collection_gap("coverage", error))
+        if view != "tree" and not image_first:
+            await capture_image()
         return WindowPart(target, tree, image, gaps=tuple(gaps))

@@ -91,14 +91,15 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
             context=context,
             identity=identity,
             stale=stale,
-            omitContext=context_already_shown and source.get("current", lambda: True)() is not False,
+            omitContext=context_already_shown,
+            coordinateTarget=source.get("coordinateTarget"),
         )
     if source is not None and known["metadata"] is not None:
         facts["stopReasons"] = known["metadata"].get("stopReasons", ())
-        # App.read already shows short state facts. If that context was shown,
-        # retain only the detailed repaint guidance in the image caption.
+        facts["capture"] = known["metadata"].get("id")
+        # The observation body already carries these sampled window facts.
         notes = window_state_notes(known["metadata"])
-        facts["stopReasons"] += notes[1:] if facts.get("omitContext") else notes
+        facts["stopReasons"] += () if facts.get("omitContext") else notes
         facts["visualText"] = known["metadata"].get("visualText")
         if coordinates is not None and facts["visualText"] is not None:
             visual = facts["visualText"]
@@ -107,9 +108,4 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
                 lines=[dict(line, rect=coordinates.delivered_rect(line["rect"])) for line in visual["lines"]],
             )
     caption = render_image_caption(size["width"], size["height"], facts)
-    actionable = (
-        facts["kind"] in ("desktop", "window") and not facts.get("stale") and facts.get("mappingAvailable", True)
-    )
-    return caption + (
-        "\nUse this displayed image's pixels for coordinates." if coordinates is not None and actionable else ""
-    )
+    return caption

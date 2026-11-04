@@ -38,7 +38,6 @@ def validate_current_receiver(frame: ResolutionFrame, _: object) -> ResolutionFr
                 effect="none",
                 target=facts.target_label,
                 detail="The current receiver changed after the container input target was resolved.",
-                next="read the container or specify the intended control; no requested input was sent",
             )
         )
     return frame

@@ -303,7 +303,7 @@ namespace ComputerUse.Windows
                 if (query == null || !new[] { "applications", "surfaces" }.Contains(Wire.Str(query, "kind")))
                     throw new Failure(
                         "stale_target",
-                        "UIA enrichment failed; finish this read lease before collecting more observations");
+                        "UIA enrichment failed during this read lease");
             }
 
             Start(request);

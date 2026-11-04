@@ -152,7 +152,7 @@ class InterfaceMenuPipeline:
         ui._lookup_scopes = owners
         # pylint: disable-next=protected-access
         ui._menu_only = True
-        lines.append("Tree: full; menu_path is read-only and does not open a menu.")
+        lines.append("Tree: full; scope=application menu.")
         for target, tree in trees:
             prepared = self.preparation.run(SnapshotRenderRequest(tree, compact=True, public_api=True))
             lines.append(tree_document(controller, target, tree, prepared=prepared))

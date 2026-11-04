@@ -121,7 +121,7 @@ import ApplicationServices
             receipt.detail =
                 alreadySatisfied
                 ? "The complete target text is already empty; no replacement input was sent."
-                : "\(intentKind) dispatched to the selected receiver; application effect unconfirmed."
+                : "\(intentKind) dispatched to the selected receiver."
             if alreadySatisfied { receipt.confirmation = "confirmed" }
             return alreadySatisfied
         }

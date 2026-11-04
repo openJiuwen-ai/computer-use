@@ -19,23 +19,21 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ObservationGap:
-    """A component collection failure and the next available observation step.
+    """A component collection failure.
 
     Attributes:
         component: Observation component that could not be fully collected.
         code: Structured collection error code.
         detail: Description of the collection failure or incomplete evidence.
-        next: Suggested next observation step.
     """
 
     component: str
     code: str
     detail: str
-    next: str
 
 
 def observation_gap(component: str, error: ComputerUseError) -> ObservationGap:
-    return ObservationGap(component, error.code, error.detail, error.next)
+    return ObservationGap(component, error.code, error.detail)
 
 
 async def collect_component(
@@ -50,6 +48,17 @@ async def collect_component(
     generation = port.connection.session_identity
     try:
         return await collect(), None
+    except TimeoutError as error:
+        # A missed observation component is local when its native generation
+        # and cleanup remain confirmed. Keep the other components; do not turn
+        # a suffix deadline into failure of already captured evidence.
+        if port.connection.session_identity != generation or port.calls.retired:
+            raise
+        return None, ObservationGap(
+            name,
+            "observation_incomplete",
+            f"Observation budget exhausted: {error}",
+        )
     except ComputerUseError as error:
         invalid_generation = (
             True

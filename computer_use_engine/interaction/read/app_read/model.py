@@ -52,6 +52,8 @@ class ReadRequest:
         overview: Whether to collect previews of related application windows.
         source_directory: Fresh directory resolved by the enclosing interface read;
             acquisition still rechecks scope after collection.
+        scope_managed: The enclosing interface owns member collection and final presentation.
+        include_menus: Whether this acquisition includes the optional application-menu summary.
     """
 
     selector: str | RunningApplication | WorkingWindow
@@ -67,6 +69,8 @@ class ReadRequest:
     view: str = "both"
     overview: bool = True
     source_directory: DirectoryFacts | None = None
+    scope_managed: bool = False
+    include_menus: bool = True
 
     @property
     def directory_profile(self) -> SurfaceReadProfile:

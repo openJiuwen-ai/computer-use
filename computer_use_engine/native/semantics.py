@@ -675,6 +675,29 @@ def direct_editor(role, values, *, platform=None):
     )
 
 
+def keyboard_input_evidence(role, values, *, platform=None):
+    """Text input semantics are independent of writable accessibility buffers.
+
+    A macOS text field/area can receive keyboard text while its exposed value
+    and selected text are read-only snapshots (for example a terminal stream).
+    Its declared text role and focus capability qualify receiver resolution;
+    the native keyboard contract still prepares and rechecks the exact target.
+    This does not authorize whole-buffer replacement or a generic focused view.
+    """
+    editing = editing_evidence(role, values, platform=platform)
+    if (
+        platform == "macos"
+        and role in ("textField", "textArea")
+        and values.get("focusWritable") is True
+        and values.get("enabled") is not False
+        and values.get("editable") is not False
+        and values.get("readOnly") is not True
+        and values.get("textReadOnly") is not True
+    ):
+        return True
+    return editing
+
+
 def preparable_editor(role, values, *, platform=None):
     """An identified text control may expose editing only after native focus.
 
@@ -899,7 +922,11 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
     if (
         "nativeTextInput" in driver_features
         and "nativeActuators" in driver_features
-        and direct_editor(role, values, platform=platform)
+        and (
+            direct_editor(role, values, platform=platform)
+            or role in ("textField", "textArea")
+            and keyboard_input_evidence(role, values, platform=platform) is True
+        )
     ):
         caps["typeText"] = "available"
     return caps

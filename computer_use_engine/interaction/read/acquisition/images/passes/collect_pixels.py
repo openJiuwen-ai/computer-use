@@ -38,7 +38,6 @@ def create(*, services: NativeAppReader) -> Callable[[ComponentLease, Control], 
                 "image",
                 "unsupported_operation",
                 "This driver does not declare window capture.",
-                "use a driver with nativeCapture support",
             )
             return replace(value, parts=replace(parts, gaps=parts.gaps + (gap,)))
         image, gap = await collect_component(

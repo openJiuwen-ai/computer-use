@@ -86,14 +86,11 @@ def _state_notes(metadata: Mapping[str, Any]) -> tuple[DisplayText, ...]:
 
     notes = [
         template(
-            "Window state (independent samples during capture): "
-            "onScreen={}; ownerForeground={}. These independent samples do not measure occlusion or repaint.",
+            "Window state (independent samples during capture): onScreen={}; ownerForeground={}.",
             label(state["onScreen"]),
             label(state["ownerForeground"]),
         )
     ]
-    if state["onScreen"] is False or state["ownerForeground"] is False:
-        notes.append(template("Off-screen window or background owner; pixels may lag accessibility."))
     return tuple(notes)
 
 
@@ -179,14 +176,11 @@ def compose_overview(
         lines.append(line)
         lines.extend(template("  Image note: {}", json_value(reason)) for reason in source.get("stopReasons", ()))
         lines.extend(template("  Image note: {}", json_value(reason)) for reason in _state_notes(source))
-    header = (
-        "Overview: window thumbnails; context only, not desktop layout or click coordinates. "
-        "Use app.window(ref).read() for a window image. Captures are separate observations."
-    )
+    header = "Overview: window thumbnails; coordinate mapping=unavailable; separately captured windows."
     if omitted:
         lines.append(
             template(
-                "Not pictured (overview budget): {}; select a window explicitly to read it.",
+                "Not pictured (overview budget): {}.",
                 join(omitted, separator=", "),
             )
         )
@@ -298,9 +292,7 @@ class NativeOverview:
                 if gap:
                     error = gap.detail
             previews.append(WindowPreview(aliases[entry["window"]], entry["window"], entry["title"], image, error))
-        remaining()
         overview = compose_overview(
             previews, [aliases[item["window"]] for item in entries[6:]], scope="catalogue:" + directory["application"]
         )
-        remaining()
         return overview

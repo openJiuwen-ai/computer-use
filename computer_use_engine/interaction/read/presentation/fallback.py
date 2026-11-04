@@ -14,6 +14,8 @@ import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.presentation.rendering.output import RenderedDocument, RenderedNode, RenderedSection
+
 if TYPE_CHECKING:
     from typing import Any, Iterable
 
@@ -108,19 +110,27 @@ class UncompressedFacts:
                 lines.append("\tRelation " + literal(relation["property"]) + ": " + literal(observed))
         return tuple(lines)
 
-    def render(self, members: Iterable[str], error: BaseException) -> RenderedTree:
+    def render(self, members: Iterable[str], error: BaseException, *, refresh: bool = False) -> RenderedTree:
         """Describe a real projection failure and retain its complete captured branch.
 
         Args:
             members: Source references belonging to this exact branch or declared control.
             error: Original failure, including its uncertainty and effect information.
         """
+        from computer_use.interaction.read.presentation.accounting.fields import RenderedResult
+
         members = tuple(members)
         issue = dict(root=members[0], error=type(error).__name__, detail=str(error))
-        lines = [
+        prefix = (
             f"Presentation fallback for {members[0]}: uncompressed collected facts "
             f"({issue['error']}: {literal(issue['detail'])}). "
-            "Relations below use element references; record order is not containment.",
-            *self.records(members),
-        ]
-        return dict(text="\n".join(lines), refs=list(members), presentation="uncompressed", issue=issue)
+            "Relations: element references."
+        )
+        nodes = tuple(
+            RenderedNode(ref, None, 0, "\n".join(self.records((ref,))), ref + " native element") for ref in members
+        )
+        text = "\n".join((prefix, *(node.text for node in nodes)))
+        return RenderedResult(
+            dict(text=text, refs=list(members), presentation="uncompressed", issue=issue),
+            document=RenderedDocument((RenderedSection(text, nodes, prefix=prefix, refresh=refresh),)),
+        )

@@ -46,7 +46,6 @@ def _expired(value: FixedImageAttempt, error: TimeoutError) -> FixedImageAttempt
             "image",
             "observation_incomplete",
             f"Image observation budget exhausted: {error}",
-            "read this same Window when another image is needed",
         ),
     )
 
@@ -102,7 +101,6 @@ class _CaptureFixedImage(Node[FixedImageAttempt, FixedImageAttempt]):
                     effect="none",
                     target="window image",
                     detail="The image observation's native session is retired or changed.",
-                    next="Observe the target in the current native session.",
                 )
             )
 
