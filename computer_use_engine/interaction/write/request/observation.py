@@ -101,11 +101,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
-            if error.code in TARGET_OBSERVATION_ERRORS and outcome.observation_status in ("available", "partial"):
-                error.next = (
-                    "Use the attached current observation to decide the next action; "
-                    "this command was not replayed and its original target was not rebound."
-                )
             if outcome.observation_error is not None:
                 from computer_use.session.events import action_observation_completed
 
@@ -153,12 +148,11 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             return replace(
                 outcome,
                 observation_error=FrozenRecord(
-                    {
-                        "code": "session_unavailable",
-                        "detail": "The original native session is retired or changed; no follow-up read was started.",
-                        "next": "The original action outcome is unchanged; do not replay it. Observe in a new session.",
-                        "session_usable": False,
-                    }
+                    dict(
+                        code="session_unavailable",
+                        detail="The original native session is retired or changed; no follow-up read was started.",
+                        session_usable=False,
+                    )
                 ),
             )
         try:
@@ -172,9 +166,15 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     visual = request.target.capture is not None or (
                         request.target.node is None and getattr(owner, "_image", None) is not None
                     )
-                    options = {"related": related} if related is not None else {}
+                    options = dict(related=related) if related is not None else {}
+                    # A pointer target explains how input was addressed, not
+                    # which observation capabilities the application has. Keep
+                    # visual feedback and acquire the independent semantic
+                    # component so the next intent can use AX references/diff.
+                    # Component gaps remain local: unavailable AX must not
+                    # discard pixels or make the completed write fail.
                     observed = await self.controller.interfaces.read(
-                        related_owner, "image" if visual else "tree", False, None, **options
+                        related_owner, "both" if visual else "tree", False, None, **options
                     )
             metadata = observation_data(observed) or {}
             partial = metadata.get("partial", False)
@@ -196,10 +196,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                             "code": gaps[0].code if gaps else "observation_incomplete",
                             "detail": "; ".join(gap.detail for gap in gaps)
                             or "The requested observation content is unavailable; only scope metadata was captured.",
-                            "next": (
-                                "The original action outcome is unchanged; do not replay it. "
-                                "Read the original scope again."
-                            ),
                             "session_usable": self.session_usable(request, session_identity),
                         }
                     ),
@@ -209,16 +205,21 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 observation=observed,
                 observation_status="partial" if partial else "available",
                 observation_error=(
-                    FrozenRecord({
-                        "code": refresh_gap.code, "detail": refresh_gap.detail, "next": refresh_gap.next,
-                        "session_usable": self.session_usable(request, session_identity),
-                    }) if refresh_gap is not None else None
+                    FrozenRecord(
+                        {
+                            "code": refresh_gap.code,
+                            "detail": refresh_gap.detail,
+                            "session_usable": self.session_usable(request, session_identity),
+                        }
+                    )
+                    if refresh_gap is not None
+                    else None
                 ),
                 window_lifecycle=lifecycle,
                 choices=choices,
             )
         except asyncio.CancelledError as error:
-            error.add_note(progress + "; do not replay it.")
+            error.add_note(progress)
             raise
         except Exception as error:  # noqa: BLE001 - preserve the already-published input on every read failure
             closed = isinstance(error, FixedWindowInvalidated)
@@ -245,17 +246,11 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             return replace(
                 outcome,
                 observation_error=FrozenRecord(
-                    {
-                        "code": code,
-                        "detail": detail,
-                        "next": "The original action outcome is unchanged; do not replay it. "
-                        + (
-                            "Select a current window with computer.window(id) for further work."
-                            if closed
-                            else "Read the original scope when another observation is needed."
-                        ),
-                        "session_usable": self.session_usable(request, session_identity),
-                    }
+                    dict(
+                        code=code,
+                        detail=detail,
+                        session_usable=self.session_usable(request, session_identity),
+                    )
                 ),
                 window_lifecycle=(
                     "closed"

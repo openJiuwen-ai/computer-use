@@ -133,7 +133,7 @@ class WorkerLifecycle:
         if self.exited is not None:
             await asyncio.wait({self.exited}, timeout=max(0, timeout))
 
-    def failure(self, detail=None, *, sent=False):
+    def failure(self, detail=None, *, sent=False, include_dispatch=True):
         status = self.child.returncode if self.child is not None else None
         phase = "startup failed" if not self.started else "execution interrupted" if sent else "stopped between calls"
         state = (
@@ -149,10 +149,12 @@ class WorkerLifecycle:
             reason += " Cause: " + summary + "."
         if detail:
             reason += " " + detail
+        if not include_dispatch:
+            return reason
         if not self.started:
-            reason += " This call's code was not sent. Check the worker installation and session log before continuing."
+            reason += " Code dispatch: not sent."
         elif sent:
-            reason += " Actions may already have executed; do not replay them automatically. Read again before acting."
+            reason += " Code dispatch: sent. Completion: unknown."
         else:
-            reason += " This call's code was not sent. Recreate variables and read again before acting."
+            reason += " Code dispatch: not sent."
         return reason

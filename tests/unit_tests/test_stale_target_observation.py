@@ -25,7 +25,10 @@ def scenario():
     controller, app, instance = setup(directory(original))
     target = Binding("session", original["instance"], original["window"], original["surface"], "button")
     snapshot = {
-        "binding": target, "container": False, "window_identity": WindowIdentity.of(original), "scope_kind": "window"
+        "binding": target,
+        "container": False,
+        "window_identity": WindowIdentity.of(original),
+        "scope_kind": "window",
     }
     instance.refs["7"] = snapshot
     controller.engine.execute = AsyncMock(return_value={"status": "dispatched", "target": "button", "detail": "Once"})
@@ -38,8 +41,10 @@ def scenario():
 def failure(code="stale_target", effect="none"):
     return ComputerUseError(
         {
-            "code": code, "effect": effect, "target": "original button",
-            "detail": "Original target ended", "next": "read again",
+            "code": code,
+            "effect": effect,
+            "target": "original button",
+            "detail": "Original target ended",
         },
         method="click",
         cause=ValueError("native evidence"),
@@ -51,7 +56,7 @@ def test_native_admission_failure_has_current_observation_without_replay(code):
     async def run():
         controller, app, _, snapshot, observation = scenario()
         error = failure(code)
-        context, impact = object(), object()
+        context, impact = object(), {"attempts": ()}
         error._failure_context, error.impact = context, impact
         controller.engine.execute.side_effect = error
         with pytest.raises(ComputerUseError) as caught:
@@ -62,9 +67,9 @@ def test_native_admission_failure_has_current_observation_without_replay(code):
         assert error._failure_context is context and error.impact is impact
         assert error.observation is observation and error.observation_status == "available"
         assert error.window_lifecycle == "observed"
-        assert "attached current observation" in error.next
+        assert "next" not in vars(error)
         assert "read again" not in str(error)
-        assert str(error).startswith("click [original button]:")
+        assert str(error).startswith("click [Window 0 / original button]:")
         controller.engine.execute.assert_awaited_once()
         controller.interfaces.read.assert_awaited_once()
         assert controller.interfaces.read.call_args.args == (app, "tree", False, None)
@@ -85,10 +90,13 @@ def test_preflight_window_loss_is_inside_observation_boundary():
             assert owner is app
             instance.reconcile(current, DirectoryMembership(True, (), (old,)))
 
-        with patch(
-            "computer_use.interaction.write.request.passes.validate_element_scope.refresh",
-            side_effect=close_during_refresh,
-        ) as refresh, pytest.raises(ComputerUseError) as caught:
+        with (
+            patch(
+                "computer_use.interaction.write.request.passes.validate_element_scope.refresh",
+                side_effect=close_during_refresh,
+            ) as refresh,
+            pytest.raises(ComputerUseError) as caught,
+        ):
             await controller.run(ActOnElement(app, snapshot, "click", {}))
         error = caught.value
         assert error.code == "stale_target" and error.effect == "none"
@@ -111,7 +119,11 @@ def test_retained_number_can_be_materialized_after_window_ends_then_action_retur
         owner = app
         if fixed:
             owner = UI(
-                _app=app, _instance=instance, _anchor=original.window, _context=original.window, _image=None,
+                _app=app,
+                _instance=instance,
+                _anchor=original.window,
+                _context=original.window,
+                _image=None,
                 _window_identity=Binding("session", original.instance, original.window, original.surface),
             )
             controller.register(owner, {"selector": "Fixture"})
@@ -153,11 +165,16 @@ def test_fixed_window_retained_descendant_number_fails_inside_observed_action(re
         current = directory(parent, child)
         instance.reconcile(
             current,
-            DirectoryMembership(True, tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES)
-                                             for item in current["surfaces"])),
+            DirectoryMembership(
+                True, tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in current["surfaces"])
+            ),
         )
         owner = UI(
-            _app=app, _instance=instance, _anchor="parent", _context="parent", _image=None,
+            _app=app,
+            _instance=instance,
+            _anchor="parent",
+            _context="parent",
+            _image=None,
             _window_identity=Binding("session", parent["instance"], "parent", parent["surface"]),
         )
         controller.register(owner, {"selector": "Fixture"})
@@ -167,16 +184,17 @@ def test_fixed_window_retained_descendant_number_fails_inside_observed_action(re
             instance.unconfirm(original)
         retained = await controller.run(ResolveElement(owner, 7, 0))
         assert retained["binding"] == snapshot["binding"]
-        with patch(
-            "computer_use.interaction.write.request.passes.validate_element_scope.refresh", new_callable=AsyncMock
-        ), pytest.raises(ComputerUseError) as caught:
+        with (
+            patch(
+                "computer_use.interaction.write.request.passes.validate_element_scope.refresh", new_callable=AsyncMock
+            ),
+            pytest.raises(ComputerUseError) as caught,
+        ):
             await controller.run(ActOnElement(owner, retained, "click", {}))
         assert caught.value.code == ("stale_target" if retired else "observation_incomplete")
         assert caught.value.observation is observation
         assert caught.value.effect == "none"
-        assert instance.evidence[original].lifetime is (
-            WindowLifetime.RETIRED if retired else WindowLifetime.RETAINED
-        )
+        assert instance.evidence[original].lifetime is (WindowLifetime.RETIRED if retired else WindowLifetime.RETAINED)
         controller.engine.execute.assert_not_awaited()
         controller.interfaces.read.assert_awaited_once()
         assert controller.interfaces.read.call_args.args[0] is app
@@ -194,11 +212,16 @@ def test_fixed_window_handle_construction_does_not_grant_outside_input(intent):
         current = directory(window("original"), other)
         instance.reconcile(
             current,
-            DirectoryMembership(True, tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES)
-                                             for item in current["surfaces"])),
+            DirectoryMembership(
+                True, tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in current["surfaces"])
+            ),
         )
         owner = UI(
-            _app=app, _instance=instance, _anchor="other", _context="other", _image=None,
+            _app=app,
+            _instance=instance,
+            _anchor="other",
+            _context="other",
+            _image=None,
             _window_identity=Binding("session", other["instance"], "other", other["surface"]),
         )
         controller.register(owner, {"selector": "Fixture"})
@@ -211,9 +234,10 @@ def test_fixed_window_handle_construction_does_not_grant_outside_input(intent):
         controller.engine.execute.assert_not_awaited()
         # Explicit reads use the same live scope guard; constructing a handle
         # cannot bypass that guard to read an unrelated Window either.
-        with patch("computer_use.interaction.read.element.agent.AgentElementReadPipeline.run") as read, patch(
-            "computer_use.interaction.read.text.agent.AgentTextReadPipeline.run"
-        ) as read_text:
+        with (
+            patch("computer_use.interaction.read.element.agent.AgentElementReadPipeline.run") as read,
+            patch("computer_use.interaction.read.text.agent.AgentTextReadPipeline.run") as read_text,
+        ):
             for request in (ObserveElement(owner, retained, None), ObserveText(owner, retained, None, 4096)):
                 with pytest.raises(ComputerUseError):
                     await controller.run(request)
@@ -312,25 +336,31 @@ def test_temporary_unknown_membership_recovers_in_one_action_without_new_referen
 
 
 @pytest.mark.parametrize("available", [True, False])
-def test_stale_recovery_guidance_distinguishes_partial_content_from_scope_metadata(available):
+def test_stale_recovery_status_distinguishes_partial_content_from_scope_metadata(available):
     async def run():
         controller, app, instance, snapshot, observation = scenario()
         error = failure()
         controller.engine.execute.side_effect = error
         retain_observation_data(
-            observation, (), (), directory=instance.directory, partial=True, content_available=available,
-            gaps=(ObservationGap("tree", "observation_incomplete", "Some controls unreadable", "read if needed"),),
+            observation,
+            (),
+            (),
+            directory=instance.directory,
+            partial=True,
+            content_available=available,
+            gaps=(ObservationGap("tree", "observation_incomplete", "Some controls unreadable"),),
         )
         with pytest.raises(ComputerUseError) as caught:
             await controller.run(ExecuteAction(app, Intent("click", {}), snapshot["binding"]))
         assert caught.value is error and error.observation is observation
         assert error.observation_status == ("partial" if available else "unavailable")
         if available:
-            assert "attached current observation" in error.next
+            assert "next" not in vars(error)
             assert error.observation_error is None
         else:
-            assert error.next == "read again"
+            assert "next" not in vars(error)
             assert error.observation_error["code"] == "observation_incomplete"
+            assert "Some controls unreadable" in error.observation_error["detail"]
         controller.engine.execute.assert_awaited_once()
         controller.interfaces.read.assert_awaited_once()
 
@@ -419,7 +449,8 @@ def test_failed_related_read_preserves_original_stale_reason_and_cause():
             await controller.run(ExecuteAction(app, Intent("click", {}), snapshot["binding"]))
         assert caught.value is error and error.code == "stale_target" and error.effect == "none"
         assert error.observation_error["code"] == "observation_timeout"
-        assert error.next == "read again"
+        assert error.observation is None
+        assert "next" not in vars(error)
         assert error.__cause__.args == ("native evidence",)
         controller.engine.execute.assert_awaited_once()
 
@@ -461,7 +492,8 @@ def test_mcp_delivers_related_content_in_the_same_failed_tool_call():
             text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
             assert "Current target choices: 344 Privacy" in text
             assert "Original target ended" in text
-            assert "attached current observation" in text
+            assert "Effect: none" in text
+            assert "Next:" not in text
             assert "Action [dispatched]" not in text
             controller.engine.execute.assert_awaited_once()
             controller.interfaces.read.assert_awaited_once()

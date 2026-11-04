@@ -108,7 +108,7 @@ def test_complete_and_partial_absence_keep_their_distinct_meanings(presenter):
     missing = next(ref for ref, native in before["refs"].items() if native == "other")
     deliver(presenter, before)
     partial = deliver(presenter, observations.read(omitted=True, partial=True))
-    assert f"Not observed in this read (not proof of removal): {missing}" in partial
+    assert f"Not observed in this read: {missing}" in partial
     assert "Removed element IDs" not in partial
     deliver(presenter, observations.read())
     removed = deliver(presenter, observations.read(omitted=True))
@@ -185,13 +185,14 @@ def test_terminal_failure_refreshes_only_its_root(presenter, monkeypatch):
     assert "Full tree" not in text and "Unchanged unrelated control" not in text
 
 
-def test_failed_output_does_not_advance_baseline(presenter):
+def test_draining_unpublished_capture_does_not_advance_baseline(presenter):
     observations = Observations()
     deliver(presenter, observations.read())
     output = ObservationOutput(presenter)
     output.observe(observations.read("Undelivered"))
-    with pytest.raises(RuntimeError, match="rejected"):
-        output.flush(lambda *_: (_ for _ in ()).throw(RuntimeError("rejected")))
+    retained = output.take()
+    assert len(retained) == 1
+    assert "Undelivered" in presenter.text(retained[0])
     assert "Tree: unchanged" in presenter.text(observations.read())
     assert "Undelivered" in presenter.text(observations.read("Undelivered"))
 

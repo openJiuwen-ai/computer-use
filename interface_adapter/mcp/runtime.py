@@ -83,11 +83,7 @@ class Runtime:
     def guard():
         run = _runs.get()
         if run is None or not run["active"] or run["phase"] != "code":
-            raise RuntimeError(
-                "Computer operation belongs to an ended tool execution. Effect: no command "
-                "sent. Next: execute operations within a current tool call; do not use "
-                "background timers for input."
-            )
+            raise RuntimeError("Tool execution ended. Command dispatch: not sent.")
         pending = asyncio.get_running_loop().create_future()
         run["pending"].add(pending)
 
@@ -121,22 +117,66 @@ class Runtime:
         run = _runs.get()
         if run is None or not run["active"]:
             return
-        run["output"].append(block, merge_text)
+        # Receipt/stdout progress remains available to the supervisor if the
+        # worker is interrupted. The final response is assembled from ordered
+        # slots so superseded automatic observations need not reach the model.
+        run["output"].append(dict(block), merge_text)
+        if not run["publishing"]:
+            run["outputEntries"].append({"kind": "block", "block": dict(block), "merge": merge_text})
         self.send(dict(output=block, mergeText=merge_text, executionId=run["id"]))
 
-    def flush_observations(self, run):
-        def emit(text, observation):
-            self.emit(dict(type="text", text=text))
-            if not observation.get("presentationGap"):
-                run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
-            if observation["state"].get("screenshot") is not None:
-                run["imageContexts"].set(observation["state"]["screenshot"], True)
+    def flush_observations(self, run, *, explicit=False):
+        """Retain chronological slots; render only the facts actually delivered.
 
-        def emit_image(png):
-            self.print_image(png)
+        The SDK's before-write boundary still records where earlier facts were
+        captured. A successful later capture may supersede the same view, while
+        a refused write leaves the preceding facts in their original position.
+        Explicit prints and full reads keep their requested historical view.
+        """
+        for observation in run["observations"].take():
+            incoming = {self.presenter.tree_key(observation, tree) for tree in self.presenter.trees(observation)}
+            for previous in run["observationEntries"]:
+                if not previous["pinned"] and not previous["superseded"] and run["observations"].superseded(
+                    previous["observation"], observation, incoming
+                ):
+                    previous["superseded"] = True
+            entry = {
+                "kind": "observation", "observation": observation,
+                "pinned": explicit or bool(observation.get("full")),
+                "superseded": False,
+            }
+            run["observationEntries"].append(entry)
+            run["outputEntries"].append(entry)
 
-        run["observations"].flush(emit, emit_image)
-        self.log_observations(run)
+    def publish_output(self, run):
+        """Commit baselines and image authority only for retained output slots."""
+        run["publishing"] = True
+        run["output"] = OutputBuffer()
+        failure = None
+        for entry in run["outputEntries"]:
+            try:
+                if entry["kind"] == "block":
+                    run["output"].append(dict(entry["block"]), entry["merge"])
+                elif entry["kind"] == "image":
+                    self.emit_image(entry["delivery"])
+                elif not entry["superseded"]:
+                    observation = entry["observation"]
+                    gap = observation.get("presentationGap")
+                    self.emit({"type": "text", "text": gap or self.presenter.text(observation)})
+                    if not gap:
+                        self.presenter.delivered(observation)
+                        run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
+                    png = observation["state"].get("screenshot")
+                    if png is not None:
+                        run["imageContexts"].set(png, True)
+                        self.emit_image(observation["imageDelivery"])
+            except Exception as error:  # noqa: BLE001 - retain later receipts, then rethrow the rendering failure
+                # Rendering an earlier capture must not erase receipts for
+                # later inputs which already completed in the script.
+                if failure is None:
+                    failure = error
+        if failure is not None:
+            raise failure
 
     def action(self, receipt):
         if not self.executor.is_owner:
@@ -165,6 +205,9 @@ class Runtime:
             self.presenter.invalidate(event["source"])
             if run is not None:
                 run["observations"].invalidate(event["source"])
+                for entry in run["outputEntries"]:
+                    if entry["kind"] == "observation" and entry["observation"]["source"] is event["source"]:
+                        entry["superseded"] = True
             return
         if run is None or not run["active"]:
             return
@@ -179,13 +222,10 @@ class Runtime:
             self.flush_observations(run)
             gap = data["observation_error"]
             target = result.target if failure else receipt["target"] if receipt is not None else "original target"
-            outcome = f"Action effect remains {result.effect}" if failure else f"Action remains {result['status']}"
-            message = (
-                f"Related observation [{data['observation_status']}] for {target}: "
-                f"{gap['detail']}\n{outcome}; do not replay it. {gap['next']}"
-            )
+            outcome = f"Effect: {result.effect}" if failure else f"Action: {result['status']}"
+            message = f"Related observation [{data['observation_status']}] for {target}: {gap['detail']}\n{outcome}"
             if data["window_lifecycle"] == "closed":
-                message += "\nThe original Window is closed; its retained targets have not been rebound."
+                message += "\nOriginal window: closed."
             if data["choices"]:
                 message += "\nCurrent windows:\n" + "\n".join(
                     f"computer.window({choice['id']}) {choice['title'] or '<untitled>'}" for choice in data["choices"]
@@ -193,6 +233,7 @@ class Runtime:
             self.emit(dict(type="text", text=message), True)
             return
         observation = event["observation"]
+        self.flush_observations(run)
         budget = current_operation_budget()
         failure = None
         try:
@@ -208,20 +249,24 @@ class Runtime:
             original = observation["state"]
             png = original.get("screenshot")
             cached = run["preparedImages"].get(id(png)) if png is not None else None
-            ready = png if cached is not None and cached[1].source is png and cached[0] == hashlib.sha256(png).digest() else None
+            ready = (
+                png if cached is not None and cached[1].source is png and cached[0] == hashlib.sha256(png).digest()
+                else None
+            )
             document = observation.get("document") or observation_document(original)
             presented = dict(
                 observation,
                 sourceState=original,
                 state=lazy_observation(document, ready),
                 presentationGap=(
-                    "Observation presentation incomplete [original operation deadline]: "
+                    "Observation presentation: partial [original operation deadline]. "
                     + str(error)
-                    + ". Captured source facts remain retained; the tree was not delivered or acknowledged. "
-                    + ("The already prepared image follows. " if ready is not None else "No prepared image is available. ")
-                    + "Earlier action effects remain unchanged; do not replay an input to repair this output gap."
+                    + ". Captured source facts remain retained. Tree delivery: not acknowledged. "
+                    + ("Prepared image: available." if ready is not None else "Prepared image: unavailable.")
                 ),
                 operationBudget=budget,
+                imageDelivery=cached[1] if ready is not None else None,
+                imageScope=cached[4] if ready is not None else None,
             )
         run["presentations"][id(observation["state"])] = presented
         run["observations"].observe(presented)
@@ -281,13 +326,21 @@ class Runtime:
         cached = run["preparedImages"].get(id(png))
         if cached is None or cached[0] != fingerprint or cached[1].source is not png:
             if run["phase"] == "draining":
-                raise RuntimeError("Image was not prepared within its originating operation; no late image encoding started")
+                raise RuntimeError(
+                    "Image was not prepared within its originating operation; no late image encoding started"
+                )
             budget = current_operation_budget()
             if budget is not None:
                 budget.checkpoint()
             delivery = prepare_image(png)
-            cached = fingerprint, delivery, base64.b64encode(delivery.png).decode("ascii")
+            cached = (
+                fingerprint, delivery, base64.b64encode(delivery.png).decode("ascii"),
+                image_metadata(png), image_output_scope(png),
+            )
             run["preparedImages"][id(png)] = cached
+            # Slots retain their original encoding even if the caller mutates
+            # this source object and prepares another delivery before finish.
+            run["preparedDeliveries"][id(delivery)] = cached
             if budget is not None:
                 budget.checkpoint()
         return cached[1]
@@ -301,12 +354,15 @@ class Runtime:
             return cached
         document = observation.get("document") or observation_document(original)
         png = original.get("screenshot")
-        if document is not None and png is not None:
-            projected = project_document(document, self.prepared_image(png).coordinates)
+        delivery = self.prepared_image(png) if png is not None else None
+        if document is not None and delivery is not None:
+            projected = project_document(document, delivery.coordinates)
             state = lazy_observation(projected, png)
             presented = dict(observation, state=state, document=projected, sourceState=original)
         else:
             presented = dict(observation, sourceState=original)
+        presented["imageDelivery"] = delivery
+        presented["imageScope"] = run["preparedDeliveries"][id(delivery)][4] if delivery is not None else None
         run["presentations"][id(original)] = presented
         return presented
 
@@ -360,11 +416,20 @@ class Runtime:
             # stays complete; no string matching can promote arbitrary output
             # into an observation or commit a partial slice as a full baseline.
             if run["observations"].contains(captured):
-                self.flush_observations(run)
+                self.flush_observations(run, explicit=True)
+            elif any(
+                entry["kind"] == "observation" and not entry["superseded"]
+                and entry["observation"].get("sourceState", entry["observation"]["state"]) is captured
+                for entry in run["outputEntries"]
+            ):
+                for entry in run["outputEntries"]:
+                    if entry["kind"] == "observation" and entry["observation"].get(
+                        "sourceState", entry["observation"]["state"]
+                    ) is captured:
+                        entry["pinned"] = True
             elif not any(state is captured for state in run["deliveredObservations"]):
                 self.emit(dict(type="text", text=(
-                    "This retained observation is already delivered or superseded; printing does not refresh it. "
-                    "Use read(full=True) for a fresh complete view."
+                    "Retained observation: previously delivered or superseded."
                 )), True)
         if not values:
             self.emit(dict(type="text", text="" if end in (None, "\n") else end), True)
@@ -375,24 +440,50 @@ class Runtime:
             return self.executor.call(self.print_image, png)
         if not isinstance(png, (bytes, bytearray, memoryview)):
             raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
-        delivery = self.prepared_image(png)
         run = _runs.get()
-        scope = image_output_scope(png)
+        delivery = self.prepared_image(png)
+        if run is not None and run["active"] and not run["publishing"]:
+            # Put the observation/caption before its explicit image, including
+            # related popup views captured before this parent-window read.
+            self.flush_observations(run, explicit=True)
+            run["outputEntries"].append({"kind": "image", "delivery": delivery})
+            return
+        self.emit_image(delivery)
+
+    def emit_image(self, delivery):
+        run = _runs.get()
+        png = delivery.source
+        prepared = run["preparedDeliveries"][id(delivery)] if run is not None else None
+        source_matches = prepared is None or prepared[0] == hashlib.sha256(png).digest()
+        scope = image_output_scope(png) if source_matches else None
         output_key = (scope if scope is not None else ("source", id(png)), hashlib.sha256(delivery.png).digest())
         if run is not None and run["active"] and output_key in run["imageOutputs"]:
-            # Keep every exact native mapping in the acknowledgement set, even
-            # when identical pixels in this same coordinate domain need only
-            # one model-facing image. Never authorize a pending image early.
+            # Output reuse does not merge the native sources. Every exact
+            # capture retains its own acknowledgement after actual delivery.
             self.record_image(run, delivery, coalesced=True)
             return
-        data = run["preparedImages"][id(png)][2] if run is not None else base64.b64encode(delivery.png).decode("ascii")
+        data = prepared[2] if prepared is not None else base64.b64encode(delivery.png).decode("ascii")
+        identifier = f"{run['id']}.{len(run['imageOutputs']) + 1}" if run is not None else "standalone"
+        context_shown = run is not None and run["imageContexts"].has(png)
+        # Mutated bytes cannot borrow their replacement's provenance or map.
+        # The immutable encoded output still depicts the originally printed image.
+        caption_source = png if source_matches else delivery.png
+        caption = image_label(caption_source, context_shown, delivery.coordinates)
+        label = caption if context_shown else image_label(caption_source, True, delivery.coordinates)
         self.emit(
             dict(
                 type="text",
-                text=image_label(png, run is not None and run["imageContexts"].has(png), delivery.coordinates),
+                text=f"Image {identifier}\n{caption}",
             )
         )
-        self.emit(dict(type="image", mimeType="image/png", data=data))
+        self.emit(
+            dict(
+                type="image",
+                mimeType="image/png",
+                data=data,
+                _meta={"computer-use": {"imageId": identifier, "caption": label}},
+            )
+        )
         if run is not None and run["active"]:
             run["imageOutputs"].add(output_key)
             self.record_image(run, delivery, coalesced=False)
@@ -401,8 +492,9 @@ class Runtime:
         if any(image.source is delivery.source and image.png == delivery.png for image in run["images"]):
             return
         run["images"].append(delivery)
+        captured = run["preparedDeliveries"][id(delivery)][3]
         self.send({
-            "diagnostic": {"kind": "image_output", "capture": image_metadata(delivery.source), "coalesced": coalesced},
+            "diagnostic": {"kind": "image_output", "capture": captured, "coalesced": coalesced},
             "executionId": run["id"],
         })
 
@@ -414,15 +506,12 @@ class Runtime:
         if run["pending"]:
             if error is None:
                 error: BaseException | None = RuntimeError(
-                    (
-                        "Computer operations outlived their script. Pending operations finished before "
-                        "this result; inspect their receipts and observations before "
-                        "continuing."
-                    )
+                    ("Computer operations outlived their script. Pending operations have finished.")
                 )
             await asyncio.gather(*list(run["pending"]), return_exceptions=True)
         try:
             self.flush_observations(run)
+            self.publish_output(run)
         except Exception as failure:
             if error is None:
                 error = failure
@@ -432,7 +521,8 @@ class Runtime:
             if error is None:
                 error = failure
         for delivery in run["images"]:
-            image_delivered(delivery.source, delivery.coordinates)
+            if run["preparedDeliveries"][id(delivery)][0] == hashlib.sha256(delivery.source).digest():
+                image_delivered(delivery.source, delivery.coordinates)
         for state in run["deliveredObservations"]:
             observation_delivered(state)
         run["active"] = False
@@ -441,20 +531,15 @@ class Runtime:
         message = None
         if error is not None:
             message = (type(error).__name__ + ": " + str(error))[:4096]
-            effect = (
-                ("This code did not execute; no statements from this call ran. Correct the syntax before continuing.")
-                if not run.get("evaluationStarted")
-                else "Earlier statements may have executed. Observe before retrying an action."
-            )
-            result["content"].append(dict(type="text", text=message + "\n" + effect))
+            if not run.get("evaluationStarted"):
+                message += "\nCode execution: not started."
+            result["content"].append(dict(type="text", text=message))
             result["isError"] = True
         elif not result["content"]:
             result["content"].append(
                 dict(
                     type="text",
-                    text=(
-                        "Completed (no output). Reads return observations automatically; use print() for other values."
-                    ),
+                    text=("Completed (no output)."),
                 )
             )
         self.send(result)
@@ -529,6 +614,9 @@ class Runtime:
             active=True,
             phase="code",
             output=OutputBuffer(),
+            outputEntries=[],
+            observationEntries=[],
+            publishing=False,
             observations=ObservationOutput(self.presenter),
             images=[],
             imageOutputs=set(),
@@ -538,6 +626,7 @@ class Runtime:
             textPages=WeakIdentityMap(),
             imageContexts=WeakIdentityMap(),
             preparedImages={},
+            preparedDeliveries={},
             presentations={},
             deliveredObservations=[],
             cancellation=ExecutionCancellation(),

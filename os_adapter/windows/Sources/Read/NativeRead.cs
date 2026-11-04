@@ -754,7 +754,7 @@ namespace ComputerUse.Windows
                         {
                             state = "partial";
                             detail =
-                                "Logical item enumeration limited to 4096 items; remaining count unknown. Read the visible subtree after an explicit scroll to explore further.";
+                                "Logical item enumeration limited to 4096 items; remaining count unknown.";
                             break;
                         }
 
@@ -1033,7 +1033,7 @@ namespace ComputerUse.Windows
                     {
                         row.Statuses[field] = Wire.Obj(
                             "state", "notProbed", "detail",
-                            "Default line hints probe the visible requested root, documents or focused objects only; read an observed Element to inspect another text object.");
+                            "Default line-hint scope: visible requested root, documents and focused objects.");
                         continue;
                     }
 

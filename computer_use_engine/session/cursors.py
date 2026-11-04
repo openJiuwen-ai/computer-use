@@ -27,7 +27,6 @@ class TextCursors:
         if len(value) > self.max_characters:
             raise local_failure(
                 "text exceeds the bounded public capture cache",
-                "read a smaller explicit text region",
                 "observation_incomplete",
             )
         key = "text_" + uuid4().hex
@@ -42,14 +41,10 @@ class TextCursors:
 
     def resolve(self, key, target):
         if not key.startswith("text_"):
-            raise local_failure("this cursor is not a text continuation", "use the cursor returned by read_text()")
+            raise local_failure("this cursor is not a text continuation")
         entry = self._entries.get(key)
         if entry is None:
-            raise local_failure(
-                "text continuation expired", "read_text() without a cursor to start a new snapshot", "snapshot_expired"
-            )
+            raise local_failure("text continuation expired", "snapshot_expired")
         if entry.target != target:
-            raise local_failure(
-                "text cursor belongs to a different element or window", "use the cursor on its original element"
-            )
+            raise local_failure("text cursor belongs to a different element or window")
         return entry

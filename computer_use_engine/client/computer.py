@@ -46,16 +46,14 @@ def _text(text, paste=False):
     try:
         (validate_paste_text if paste else validate_text)(text)
     except Exception as error:
-        raise local_failure(
-            str(error), "use paste for multiline text; send control keys separately with press_key"
-        ) from error
+        raise local_failure(str(error)) from error
 
 
 def _key(key):
     try:
         validate_key(key)
     except Exception as error:
-        raise local_failure(str(error), "use a documented key name or modifier chord") from error
+        raise local_failure(str(error)) from error
 
 
 class Computer:
@@ -107,14 +105,11 @@ class Computer:
             try:
                 nonempty(selector, "selector")
             except Exception as error:
-                raise local_failure(
-                    str(error), "use an app name or a published integer application reference"
-                ) from error
+                raise local_failure(str(error)) from error
             scope, key = dict(selector=selector), ("selector", selector)
         else:
             raise local_failure(
                 "app expects an integer reference or application selector string",
-                "use list_apps() to discover application instances",
             )
         app = self._apps.get(key)
         if app is None:
@@ -157,7 +152,7 @@ class Computer:
     def drag(self, start, end):
         start, end = parameters.point(start), parameters.point(end)
         if start == end:
-            raise local_failure("drag start and end must differ", "use click for a stationary gesture")
+            raise local_failure("drag start and end must differ")
         for x, y in (start, end):
             self._controller.desktop.check_coordinates(x, y)
         return self._controller.act(
@@ -181,7 +176,7 @@ class Computer:
 class UI:
     def __init__(self, controller=None, scope=None, *, _internal=False):
         if not _internal:
-            raise TypeError("Use Computer.app(), Computer.window(), or App.window(); UI is not directly constructible")
+            raise TypeError("UI requires an application or window binding")
         self._controller = controller
         self._executor = executor_for_controller(controller)
         self._lookup_scopes = ()
@@ -196,7 +191,7 @@ class UI:
     def element(self, target, *, timeout_ms=3000):
         # pylint: disable-next=unidiomatic-typecheck
         if type(timeout_ms) is not int or not 0 <= timeout_ms <= 10000:
-            raise local_failure("timeout_ms must be an integer in 0-10000", "omit it to use 3000 ms")
+            raise local_failure("timeout_ms must be an integer in 0-10000")
         # pylint: disable-next=unidiomatic-typecheck
         if type(target) is int:
             parameters.reference(target, "element reference")
@@ -211,7 +206,7 @@ class UI:
     def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False):
         parameters.view(view, full, menu_path)
         if type(allow_foreground) is not bool:
-            raise local_failure("allow_foreground must be a boolean", "omit it for observation without activation")
+            raise local_failure("allow_foreground must be a boolean")
         return operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground)))
 
     @synchronous
@@ -231,7 +226,7 @@ class UI:
     def drag(self, start, end):
         start, end = parameters.point(start), parameters.point(end)
         if start == end:
-            raise local_failure("drag start and end must differ", "use click for a stationary gesture")
+            raise local_failure("drag start and end must differ")
         return operation(lambda: self._controller.run(UIPointer(self, "drag", (start, end), {})))
 
     @synchronous
@@ -281,7 +276,7 @@ class Window(UI):
 class Element:
     def __init__(self, controller=None, owner=None, snapshot=None, *, _internal=False):
         if not _internal:
-            raise TypeError("Use app.element(target) or window.element(target)")
+            raise TypeError("Element requires an App or Window element binding")
         self._controller, self._owner, self._snapshot = controller, owner, snapshot
         self._executor = executor_for_controller(controller)
         handle_created(self, dict(kind="Element", controller=controller, owner=owner, snapshot=snapshot, query=None))
@@ -299,9 +294,7 @@ class Element:
         parameters.cursor(cursor)
         # pylint: disable-next=unidiomatic-typecheck
         if type(length) is not int or not 1 <= length <= 16384:
-            raise local_failure(
-                "length must be an integer in 1-16384 code points", "use read_text(length=4096) or a smaller page"
-            )
+            raise local_failure("length must be an integer in 1-16384 code points")
         return operation(lambda: self._controller.run(ObserveText(self._owner, self._snapshot, cursor, length)))
 
     @synchronous
@@ -318,7 +311,7 @@ class Element:
         _text(text)
         # pylint: disable-next=unidiomatic-typecheck
         if type(replace) is not bool:
-            raise local_failure("replace must be a bool", "use replace=True only for full control replacement")
+            raise local_failure("replace must be a bool")
         return self._act("replace" if replace else "insert", dict(text=text))
 
     @synchronous
@@ -344,7 +337,7 @@ class Element:
         try:
             nonempty(action, "action")
         except Exception as error:
-            raise local_failure(str(error), "copy a Secondary Actions name from this element") from error
+            raise local_failure(str(error)) from error
         return self._act("action", dict(action=action))
 
 

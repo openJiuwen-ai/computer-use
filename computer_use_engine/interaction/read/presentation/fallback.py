@@ -138,7 +138,7 @@ class UncompressedFacts:
         prefix = (
             f"Presentation fallback for {members[0]}: uncompressed collected facts "
             f"({issue['error']}: {literal(issue['detail'])}). "
-            "Relations below use element references; record order is not containment."
+            "Relations: element references."
         )
         nodes = tuple(
             RenderedNode(ref, None, 0, "\n".join(self.records((ref,))), ref + " native element") for ref in members

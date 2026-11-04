@@ -122,7 +122,10 @@ SDK 接口是同步的：每个操作返回结果或抛出异常后，再执行�
 通过 `computer.app(id)` 选择应用，用 `app.read(view="both")` 观察界面，再用 `app.element(name_or_path)` 定位控件。
 目标已经明确时可以直接链式操作，例如 `app.element("保存").click()`。
 
-MCP 中观察自动展示：首次给完整视图，后续默认显示变化（diff），包括写后观察及同一次调用中的连续操作。
+MCP 中观察自动展示：首次展示已采集的内容，后续默认显示变化（diff），包括写后观察及同一次调用中的连续操作。
+每个窗口分别标明 AX、图像采集情况和具体缺口；full/diff/unchanged 表示文字呈现模式。
+同次工具的连续写入保留每条回执，同范围自动观察合并为最终结果；独立弹层及显式打印/完整观察保留。
+窗口坐标操作的写后观察保留截图并采集独立的 AX 信息，缺少 AX 不会使已取得的截图不可用。
 需要重新获得完整上下文时调用 `app.read(full=True)` 或 `window.read(full=True)`；不需要客户端接入私有历史协议。
 SDK 返回的 `state.text` 始终是本次读取范围的完整文字，展示 diff 不改变元素绑定和截图坐标。
 MCP 中打印观察、观察的 `.text` 或直接文字切片，都复用自动展示，不额外输出全文；
@@ -132,11 +135,12 @@ SDK 内切片值及文件输出仍保持原意。需要限制读取范围时使�
 `app.read(view="both", allow_foreground=True)`，允许 SDK 在已确认的原窗口范围内准备观察；
 `Window.read()` 同样支持该选项。
 这可能改变焦点和窗口层次，但不注入全局鼠标或键盘、不自动切回其他应用。
-结果的 `preparation` 和文字说明保留实际请求；置前与截图成功都不证明应用已完成重绘。
+结果的 `preparation` 和文字说明保留实际请求，图像保留本次采样来源。
 观察目标尚未明确时仍返回窗口选择信息，不以此许可猜选目标。其他平台暂不支持该准备能力。
 
 写入在执行结果之外附带有界的相关观察，可读取 `result.observation`、`result.observation_status`
-和 `result.observation_error`；观察缺失不表示输入没有发送。目标失效、目标信息暂时无法确认、模态阻挡，
+和 `result.observation_error`。`result.target`、`result.intent` 和 `result.status` 保留操作目标、意图及派发／验证结果。
+目标失效、目标信息暂时无法确认、模态阻挡，
 以及 `effect="partial"` 或 `"possible"` 的 `ComputerUseError`，在原会话仍可观察时也附带这些字段。
 可直接使用错误附带的当前观察决定下一步；原错误与效果保持不变，SDK 不会重放不确定的输入。
 
@@ -186,11 +190,15 @@ SDK 返回原始截图及对应像素坐标。MCP 交付缩图时，自动输出
 桌面尺寸、显示器及窗口矩形同步使用交付图坐标，输入按实际编码尺寸逐轴映射回原图。
 任意 PIL 裁图不自动获得输入映射；自行拼接后的普通字符串也不会被当作观察对象重新转换。
 
-执行和观察分别交付结果。`status` 表示派发或已有验证，不代表应用的业务任务已经完成。
+执行和观察分别交付结果。`status` 表示派发或已有的局部验证；模型依据实际界面判断业务任务完成情况。
 `observation_status` 的值为 `available`、`partial`、`unavailable` 或 `not_requested`。
-`window_lifecycle` 的值为 `observed`、`closed`、`unknown` 或 `not_applicable`；没有截图本身不证明窗口关闭。
+`window_lifecycle` 的值为 `observed`、`closed`、`unknown` 或 `not_applicable`，来自窗口生命周期证据。
 原窗口结束时，相关观察仍可给出当前窗口选择，旧 Window 和 Element 不会改投这些候选。
-`observation_error.session_usable` 表示原会话是否仍可使用，不表示可以重放效果不明的输入。
+`observation_error.session_usable` 表示原会话是否仍可使用。
+
+MCP 与参考 Agent 共用静态工具说明。工具返回展示界面内容、对象归属、执行进度和具体缺口；
+每张图携带编号、来源、尺寸和坐标接收对象，DeepAgent 转换后仍保留对应说明。
+`ComputerUseError` 和 `ObservationError` 的返回字段已移除指导性的 `next`；`TextPage.next` 继续提供分页游标。
 
 `ActionResult.impact` 和 `ComputerUseError.impact` 提供只读的执行证据。
 `global_input_allowed` 记录会话授权；每个 `attempts` 项分别保留路线声明的 `declared_global_input`、
@@ -315,7 +323,7 @@ Windows/Linux 对应的临时前台归还与菜单连续性改进列为后续实
 - **DeepAgent 接入**：支持 openJiuwen 标准调用、流式输出和 Runner 接入，电脑操作工具可复用于已有 DeepAgent 应用。
 - **单工具代码执行**：模型写 Python，变量跨调用保留，一次调用完成多步工作流。
 - **无障碍树优先**：元素按十进制 ref 编号，支持 `element(path)` 路径查询、文本分页读取、菜单读取。
-- **可核验回执**：动作的 `dispatched` / `verified` 与 `observation_status`、`observation_error` 分别保留；输入失败结构化为 `code / effect / next`。`unsupported_operation` 表示所需能力／操作未实现，`permission_required` 表示该路线需要尚未授予的输入权限。
+- **可核验回执**：动作的 `target / intent / status` 与 `observation_status`、`observation_error` 分别保留；输入失败提供 `code / effect / target / detail / impact`。`unsupported_operation` 表示所需能力／操作未实现，`permission_required` 表示该路线需要尚未授予的输入权限。
 - **后台优先输入**：优先使用元素和应用定向操作，仅在操作确有需要时取得前台焦点或占用全局鼠标。
 - **跨平台原生驱动**：macOS、Windows、Linux 各一套，协议一致。
 - **可观测**：每次执行写入 `~/.computer-use/logs` 的 JSONL 日志，含代码、观测与回执。

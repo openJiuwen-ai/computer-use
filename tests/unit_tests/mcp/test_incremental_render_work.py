@@ -272,10 +272,14 @@ def test_coalescing_prepared_captures_uses_the_last_real_baseline():
         pending = ObservationOutput(presenter)
         pending.observe(presenter.prepare(observation(source, references, label="One")))
         pending.observe(presenter.prepare(observation(source, references, label="Zero")))
-        output = []
+        retained = pending.take()
+        assert len(retained) == 1
+        # Taking final slots is not a delivery acknowledgement. Render them
+        # against the actual baseline, then commit only the displayed result.
         with patch.object(RenderPreparedSnapshotPipeline, "run", side_effect=AssertionError("late renderer")):
-            pending.flush(lambda text, _: output.append(text))
-        assert len(output) == 1 and "Tree: unchanged" in output[0]
-        assert "One" not in output[0]
+            output = presenter.text(retained[0])
+            presenter.delivered(retained[0])
+        assert "Tree: unchanged" in output
+        assert "One" not in output
     finally:
         presenter.close()

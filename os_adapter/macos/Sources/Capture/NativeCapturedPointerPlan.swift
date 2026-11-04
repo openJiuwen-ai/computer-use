@@ -11,13 +11,13 @@ import AppKit
         original: WindowGeometry.WindowMapping, current: WindowGeometry.WindowMapping
     ) throws -> Self {
         guard current.id == original.id, current.pid == original.pid else {
-            throw ObservationChanged("window disappeared or owner changed; read the app again")
+            throw ObservationChanged("window disappeared or owner changed")
         }
         guard [current.frame.minX, current.frame.minY, current.frame.width, current.frame.height].allSatisfy(\.isFinite),
             current.frame.size == original.frame.size, current.frame.width > 0, current.frame.height > 0,
             original.width > 0, original.height > 0
         else {
-            throw ObservationChanged("window disappeared or geometry changed; read the app again")
+            throw ObservationChanged("window disappeared or geometry changed")
         }
         return Self(mapping: .init(
             id: original.id, pid: original.pid, frame: current.frame, title: original.title,

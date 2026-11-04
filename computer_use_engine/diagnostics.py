@@ -58,10 +58,8 @@ def pipeline_diagnostic(event):
     )
 
 
-# The error contract exposes a next field and accepts the matching keyword.
-# pylint: disable-next=redefined-builtin
-def local_failure(message, next, code="invalid_request", target="request"):
-    failure = dict(code=code, target=target, effect="none", detail=message, next=next)
+def local_failure(message, code="invalid_request", target="request"):
+    failure = dict(code=code, target=target, effect="none", detail=message)
     error = ComputerUseError(failure)
     diagnostic(dict(kind="local_error", stage="validation", error=str(error), failure=failure))
     return error

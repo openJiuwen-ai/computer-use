@@ -117,6 +117,23 @@ class DriverValueContracts(TestCase):
 
 
 class ImmutableObservationContracts(TestCase):
+    def test_external_sequence_subclasses_are_detached_like_builtin_containers(self):
+        class ExternalList(list):
+            pass
+
+        class ExternalTuple(tuple):
+            pass
+
+        nested = {"label": "original"}
+        source = ExternalList([ExternalTuple((nested,))])
+        value = Supplement("provider", source)
+        nested["label"] = "changed"
+        source.append("new")
+        self.assertIs(type(value.value), tuple)
+        self.assertIs(type(value.value[0]), tuple)
+        self.assertEqual(value.value, (({"label": "original"},),))
+        validate_query_observation(observation(NativeNode(supplements=(value,))))
+
     def test_nested_mutable_values_detach_even_through_external_mapping_proxy(self):
         source = {"items": [{"label": "original"}]}
         value = Supplement("provider", MappingProxyType(source))

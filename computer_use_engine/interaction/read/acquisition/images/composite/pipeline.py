@@ -79,10 +79,7 @@ class InterfaceImagePipeline:
                 images.append((key, part.image))
         if not images:
             return None, [
-                text(
-                    'Screenshot: unavailable; use member-window reads or '
-                    'Computer.read(view="image") for visual observation.'
-                ),
+                text("Screenshot: unavailable."),
                 DisplayText("image_header", (ImageHeader("unavailable", (), False, (), None),)),
             ]
         unique = dict(images)
@@ -194,8 +191,6 @@ class InterfaceImagePipeline:
                 on_gap(ObservationGap(
                     "image", "observation_incomplete",
                     f"Image composition budget exhausted; only Window {ref}'s original image was included. {error}",
-                    f"Use this displayed image with computer.window({ref}); inspect other windows if needed. "
-                    "Do not replay input.",
                 ))
         except (ValueError, OSError) as error:
             key, image = images[0]
@@ -204,17 +199,8 @@ class InterfaceImagePipeline:
             ref = next(ref for ref, window in ui._instance.windows.items() if window == key)
             displayed, kind = (key,), "partial"
             notes = [
-                template(
-                    "Screenshot: partial; shows only window {}, not the complete instance layout. {}", ref, str(error)
-                ),
-                template(
-                    (
-                        "Coordinates unavailable on this partial canvas; use "
-                        'app.window({}).read(view="image") or '
-                        'Computer.read(view="image").'
-                    ),
-                    ref,
-                ),
+                template("Screenshot: partial; window {}. {}", ref, str(error)),
+                "Coordinate mapping: unavailable.",
             ]
         summary = self.metadata(ui, canvas, collected, displayed, kind)
         target = canvas.pieces[0].image.target if canvas.pieces else images[0][1].target
@@ -325,16 +311,14 @@ class InterfaceImagePipeline:
 
         def valid() -> bool:
             image, native, state = value(), controller(), application()
-            if (
+            return not (
                 image is None
                 or native is None
                 or state is None
                 or image.expired
                 or native.transport.session != session
                 or hashlib.sha256(image.png).digest() != image.digest
-            ):
-                return False
-            return True
+            )
 
         def coordinate_windows() -> tuple[int, ...]:
             if not valid():
@@ -365,6 +349,19 @@ class InterfaceImagePipeline:
             image = value()
             return valid() and (image.unavailable_mapping or bool(coordinate_windows()))
 
+        fixed_ref = next((ref for ref, key in state.windows.items() if key == ui._anchor), None)
+        application_target = "computer.app(" + repr(str(state.selector)) + ")"
+
+        def coordinate_target() -> str | None:
+            # An older popup/composite can still be valid for one Window even
+            # after App coordinates advance to a newer delivered parent image.
+            image, state = value(), application()
+            if not valid() or image.unavailable_mapping:
+                return None
+            if fixed_window:
+                return f"computer.window({fixed_ref})" if fixed_ref in coordinate_windows() else None
+            return application_target if generation >= state.delivered_image_generation else None
+
         def delivered(coordinates: ImageCoordinates | None = None) -> None:
             if current():
                 image, state, native = value(), application(), controller()
@@ -384,6 +381,7 @@ class InterfaceImagePipeline:
                 mappingAvailable=not canvas.unavailable_mapping,
                 # pylint: disable-next=protected-access
                 selector=str(ui._instance.selector),
+                coordinateTarget=coordinate_target,
                 context=template(
                     "App {}; {}",
                     # pylint: disable-next=protected-access

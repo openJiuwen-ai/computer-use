@@ -25,7 +25,7 @@ def association(value: StartupLease, control: Control) -> StartupLease:
 
         raise failure(
             "observation_incomplete",
-            "Startup application discovery is partial; inspect the application directory before choosing an instance.",
+            "Startup application discovery is partial; running instance is unresolved.",
         )
     selected = select_application(value.applications, value.state.installation)
     if not selected["isRunning"]:

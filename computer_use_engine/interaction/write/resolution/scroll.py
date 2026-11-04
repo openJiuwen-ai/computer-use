@@ -165,7 +165,7 @@ class ScrollQuery(_ScrollRegionQuery):
             # Only this page-candidate stage is optional. Identity/modal/deadline
             # errors and failures finding the original nearest region propagate.
             raise PageRouteUnavailable(
-                dict(code=error.code, effect=error.effect, target=error.target, detail=error.detail, next=error.next),
+                {"code": error.code, "effect": error.effect, "target": error.target, "detail": error.detail},
                 cause=error,
             ) from error
 

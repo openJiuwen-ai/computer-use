@@ -40,7 +40,6 @@ class ImageCoordinates:
         if any(not math.isfinite(value) or not 0 <= value < bound for value, bound in zip(point, self.delivered_size)):
             raise local_failure(
                 "coordinates are outside the delivered image",
-                "choose a point inside the screenshot returned for this App/Window or desktop",
             )
         x, y = point
         return x * self.source_size[0] / self.delivered_size[0], y * self.source_size[1] / self.delivered_size[1]

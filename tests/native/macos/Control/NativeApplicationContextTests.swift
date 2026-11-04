@@ -52,13 +52,17 @@ import ApplicationServices
                 reported = true
             }, check: {}, onPreparation: { _ in }, onNativePreparation: { _ in }, wait: {})
         precondition(outcome == .activityObserved && posts == 1)
-        var turns = 0
-        let eventual = try await NativeApplicationContextUnit.prepare(
-            pid: 101, sample: { .init(foregroundPID: 999, reportedActive: turns == 2) }, alreadyPosted: { false },
-            make: { SyntheticFocusEvents.applicationActivation() }, post: { _ in }, check: {},
-            onPreparation: { _ in }, onNativePreparation: { _ in }, wait: { turns += 1 })
-        precondition(eventual == .activityObserved && turns == 2,
-                     "positive activity arriving on a short queue turn remains observable")
+        for settlesAfter in [2, 8] {
+            var turns = 0
+            let eventual = try await NativeApplicationContextUnit.prepare(
+                pid: 101, sample: { .init(foregroundPID: 999, reportedActive: turns == settlesAfter) },
+                alreadyPosted: { false }, make: { SyntheticFocusEvents.applicationActivation() },
+                post: { _ in }, check: {}, onPreparation: { _ in }, onNativePreparation: { _ in },
+                wait: { turns += 1 })
+            let expected: NativeApplicationContextUnit.Outcome = settlesAfter == 2 ? .activityObserved : .posted
+            precondition(eventual == expected && turns == 2,
+                         "a late optional ACK cannot extend the two-turn budget or become a readiness gate")
+        }
         let ordinary = NativeActionDocumentPolicy.preparation(
             action: "AXPress", exactStandardWindow: true, otherDocument: false)
         let other = NativeActionDocumentPolicy.preparation(

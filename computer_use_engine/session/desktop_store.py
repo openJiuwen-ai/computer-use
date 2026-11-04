@@ -54,7 +54,7 @@ class DesktopStore:
 
     def observed(self, ref):
         if self._view is None or self._view["desktopRef"] != ref:
-            raise local_failure("desktop observation changed", "read the desktop again", "stale_target", "Desktop")
+            raise local_failure("desktop observation changed", "stale_target", "Desktop")
         return self._view
 
     def delivered(self, png, coordinates=None):
@@ -71,7 +71,6 @@ class DesktopStore:
         if state is None:
             raise local_failure(
                 "desktop observation is missing or expired",
-                "call Computer.read before input",
                 "stale_target",
                 "Desktop",
             )
@@ -79,7 +78,6 @@ class DesktopStore:
             if state.get("screenshot") is None:
                 raise local_failure(
                     "desktop observation has no PNG",
-                    "read the desktop and inspect capture availability",
                     "input_unavailable",
                     "Desktop",
                 )
@@ -96,7 +94,6 @@ class DesktopStore:
             if invalid_state:
                 raise local_failure(
                     "current desktop image has not been returned to the model",
-                    "finish Computer.read() in this tool call, then choose desktop coordinates in the next call",
                     "input_unavailable",
                     "Desktop",
                 )
@@ -109,9 +106,7 @@ class DesktopStore:
             x, y = coordinates.source_point((x, y))
         invalid_x = True if not finite(x) or not finite(y) or x < 0 or y < 0 else False
         if invalid_x:
-            raise local_failure(
-                "coordinates must be finite, nonnegative numbers", "use pixels from Computer.read's desktop PNG"
-            )
+            raise local_failure("coordinates must be finite, nonnegative numbers")
 
         def _iter_d(_source_items: Iterator[Any]) -> Iterator[Any]:
             for d in _source_items:
@@ -125,5 +120,4 @@ class DesktopStore:
         if len(matches) != 1 or not matches[0]["captured"]:
             raise local_failure(
                 "coordinates are outside a captured display or in a display gap/overlap",
-                "choose a point on one captured display in the desktop PNG",
             )

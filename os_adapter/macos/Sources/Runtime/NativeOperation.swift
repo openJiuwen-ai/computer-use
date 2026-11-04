@@ -279,7 +279,7 @@ import Foundation
             }
             guard !clickPreparationRequiresObservation else {
                 throw DriverError(
-                    "preparation changed or may have changed the original click context; observe before continuing",
+                    "preparation changed or may have changed the original click context",
                     code: .executionUnknown, effect: .possible)
             }
         } catch {
@@ -328,7 +328,7 @@ import Foundation
             cleanup = "unknown"
             stop("invalid_native_result")
             throw DriverError(
-                "native result could not be retained; do not replay input", code: .executionUnknown, effect: .possible)
+                "native result could not be retained", code: .executionUnknown, effect: .possible)
         }
     }
 

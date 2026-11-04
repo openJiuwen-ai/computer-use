@@ -240,6 +240,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertNotIn("stale", text)
         self.assertIn(f"computer.window({ref(self.app, 'b')})", text)
+        self.assertNotIn("Coordinate target=computer.app(", text)
         self.assertIs(self.app._instance.delivered_image, parent)
         b = self.app.window(ref(self.app, "b"))
         await self.click(b)
@@ -266,6 +267,25 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.click(self.window, (140, 30))
         await self.execute(f"click(computer.window({ref(self.app, 'b')}), (140, 30))")
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
+
+    async def test_delayed_composite_retains_only_members_without_a_newer_delivered_image(self):
+        # Automatic observation sampled a parent and popup before a later
+        # explicit parent read. Emitting that composite later cannot roll the
+        # parent back, but the independent popup must remain actionable.
+        await self.execute("old = compose(app, ('a', 'b'))")
+        composite = self.app._image
+        await self.execute("new = observe(window, 'a')")
+        current_parent = self.window._image
+        result = await self.execute("print_image(old.screenshot)")
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        expected = f"Coordinate inputs for this displayed canvas: computer.window({ref(self.app, 'b')})."
+        self.assertIn(expected, text)
+        self.assertNotIn("Coordinate target=computer.app(", text)
+        self.assertIs(self.window._image, current_parent)
+        await self.click(self.window)
+        self.assertEqual(self.last_target(), current_parent.pieces[0].image.target)
+        await self.click(self.app.window(ref(self.app, "b")), (140, 30))
+        self.assertEqual(self.last_target(), composite.pieces[1].image.target)
 
     async def test_window_recreation_keeps_current_canvas_after_temporary_observer_dies(self):
         await self.execute("combined = compose(app, ('a', 'b'))")
@@ -346,6 +366,25 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.last_target().root_window, "a")
         await self.click(self.app.window(ref(self.app, "b")))
         self.assertEqual(self.last_target().root_window, "b")
+
+    async def test_image_labels_count_pictures_separately_from_exact_source_callbacks(self):
+        result = await self.execute(
+            "first = capture(app, 'a')\nprint_image(first.png)\n"
+            "second = capture(alias, 'a')\nprint_image(second.png)\n"
+            "third = capture(alias, 'b', (100, 80), 'white')\nprint_image(third.png)"
+        )
+        images = [block for block in result["content"] if block["type"] == "image"]
+        metadata = [block["_meta"]["computer-use"] for block in images]
+        self.assertEqual(len(images), 2)
+        self.assertEqual([item["imageId"].rsplit(".", 1)[1] for item in metadata], ["1", "2"])
+        for item, key in zip(metadata, ("a", "b")):
+            self.assertIn(f"computer.window({ref(self.app, key)})", item["caption"])
+        outputs = [
+            event["diagnostic"] for event in self.events
+            if event.get("diagnostic", {}).get("kind") == "image_output"
+        ]
+        self.assertEqual([event["coalesced"] for event in outputs], [False, True, False])
+        self.assertEqual(len({event["capture"]["id"] for event in outputs}), 3)
 
     async def test_budget_fallback_delivers_only_the_shown_window_mapping_and_coverage(self):
         clock = SimpleNamespace(now=0.0)

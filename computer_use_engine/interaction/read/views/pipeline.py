@@ -45,7 +45,7 @@ from computer_use.session.operations import OperationDeadlineExceeded, current_o
 from .collection import CollectionPlan, components
 from .menus import InterfaceMenuPipeline, remember_menu
 from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
-from .publication import capture_header, publish, tree_document
+from .publication import capture_header, publish, related_window_summary, tree_document
 from .related import RelatedRead
 
 if TYPE_CHECKING:
@@ -87,15 +87,10 @@ def member_target(instance: InstanceState, item: SurfaceInfo) -> Binding:
 
 
 def _gap_line(gap: ObservationGap, *, concise: bool = False) -> DisplayText:
-    """Expose the directory's actual gap; the Skill supplies the normal reread syntax."""
-    if (
-        concise
-        and gap.component == "directory"
-        and gap.code == "observation_incomplete"
-        and gap.next == "inspect the directory again if the required window is missing"
-    ):
+    """Present the component and its observed collection gap."""
+    if concise and gap.component == "directory" and gap.code == "observation_incomplete":
         return template("Directory incomplete: {0}.", gap.detail)
-    return template("{0}: {1}: {2}; next: {3}", gap.component, gap.code, gap.detail, gap.next)
+    return template("{0}: {1}: {2}", gap.component, gap.code, gap.detail)
 
 
 def _collection_gap(component: str, error: Exception) -> ObservationGap:
@@ -103,7 +98,6 @@ def _collection_gap(component: str, error: Exception) -> ObservationGap:
         component,
         error.code if isinstance(error, ComputerUseError) else "observation_incomplete",
         error.detail if isinstance(error, ComputerUseError) else str(error) or type(error).__name__,
-        "Use the retained observation; inspect the missing component if needed. Do not replay input.",
     )
 
 
@@ -197,9 +191,7 @@ class InterfaceReadPipeline:
             current = select_surface(directory, anchor)
             item = next((item for item in permitted.values() if item["surface"] == current.surface), None)
             if item is None:
-                raise local_failure(
-                    "the observation window is not confirmed in this instance", "read its window choices"
-                )
+                raise local_failure("the observation window is not confirmed in this instance")
             preparation = await ObservationPreparationPipeline(controller.port).arun(member_target(instance, item))
         try:
             if preparation is not None:
@@ -253,11 +245,12 @@ class InterfaceReadPipeline:
             choices = controller.interfaces.windows.choices(directory, state.name or str(instance.selector))
             lines = [
                 DisplayText("interface_header", (capture_header(controller, ui, directory, parts=()),)),
-                "Select a window with computer.window(id) or app.window(id).",
                 "Tree: not expanded; no unique observation window was selected.",
             ]
             if not choices:
-                lines.append("No observable working window. Installed/running does not imply an input context.")
+                lines.append("Observable working window: unavailable.")
+            if related is not None:
+                lines.append(related_window_summary(related, directory, instance.windows))
             if isinstance(first, dict) and "detail" in first:
                 lines.append(template("Launch: {0}", first["detail"]))
             return publish(
@@ -406,7 +399,7 @@ class InterfaceReadPipeline:
                         # Exact old objects never acquire a replacement's body.
                         principal_error = local_failure(
                             "the observed window left the application catalogue during collection",
-                            "inspect the current member observations before input", "observation_incomplete",
+                            "observation_incomplete",
                         )
                     continue
             initial = False
@@ -445,12 +438,10 @@ class InterfaceReadPipeline:
                 # Only automatic related reads follow member transitions.
                 recheck_pending = True
         if related is not None:
-            new_refs = [ref for ref, key in instance.windows.items() if key in related.new_windows(directory)]
-            if new_refs:
-                notes.append(template(
-                    "Newly discovered windows after the action: {0}. This does not establish causation.",
-                    ", ".join(map(str, new_refs)),
-                ))
+            notes.append(related_window_summary(
+                related, directory, instance.windows,
+                refresh_incomplete=any(gap.component == "directory" for gap in collection_gaps),
+            ))
         captured = {part.target.surface for part in parts}
         current_surfaces = {item["surface"] for item in permitted.values()}
         if related is not None and not any(
@@ -554,8 +545,10 @@ class InterfaceReadPipeline:
         included_tree_surfaces = set()
         presentation_exhausted = False
         tree_heading = len(lines)
-        if any("tree" in requested for requested in plan.requested.values()):
+        if any(part.tree is not None for _, part in displayed_parts):
             lines.append("Tree: full")
+        elif any("tree" in requested for requested in plan.requested.values()):
+            lines.append("Tree: unavailable")
         else:
             lines.append("Tree: not requested")
         recovery_prefix = 0
@@ -567,6 +560,16 @@ class InterfaceReadPipeline:
                 )
             if part.source is not None:
                 lines.extend(part.source.context_notes)
+            requested = plan.requested.get(
+                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
+            )
+            ax_status = (
+                "collected" if part.tree is not None else "unavailable" if "tree" in requested else "not requested"
+            )
+            image_status = (
+                "collected" if key in included_images else "unavailable" if "image" in requested else "not requested"
+            )
+            lines.append(f"AX: {ax_status}; Image: {image_status}.")
             blockers = [
                 other
                 for other in permitted.values()
@@ -616,7 +619,6 @@ class InterfaceReadPipeline:
                     collection_gaps.append(ObservationGap(
                         "presentation", "observation_incomplete",
                         f"Window {ref}: facts were captured but its tree presentation exceeded the original operation budget.",
-                        "Use the retained content and pixels; read this Window if its tree is needed. Do not replay input.",
                     ))
                 else:
                     trees.append((part.target, part.tree))
@@ -631,8 +633,6 @@ class InterfaceReadPipeline:
                         default=recovery_prefix,
                     )
                     lines.append(tree_document(controller, part.target, part.tree, prepared=prepared))
-            elif view != "image":
-                lines.append("Tree: unavailable for this window; use its image when available.")
             if part.menus is not None:
                 lines.append("Application menu:")
                 owners, menu_trees = remember_menu(controller, ui, part.menus, key)
@@ -653,7 +653,6 @@ class InterfaceReadPipeline:
                         collection_gaps.append(ObservationGap(
                             "presentation", "observation_incomplete",
                             f"Window {ref}: its captured menu tree was not prepared within the original budget.",
-                            "Use the retained content; read its menu if needed. Do not replay input.",
                         ))
             lines += [_gap_line(gap, concise=True) for gap in part.gaps]
             if part.image is not None:
@@ -671,11 +670,13 @@ class InterfaceReadPipeline:
         for record in coverage:
             if record["missing"]:
                 ref = next((ref for ref, key in instance.windows.items() if key == record["window"]), record["window"])
-                collection_gaps.append(ObservationGap(
-                    "window", "observation_incomplete",
-                    f"Window {ref}: {', '.join(record['missing'])} content was not included in this observation.",
-                    "Use the available content; inspect this window if needed. Do not replay input.",
-                ))
+                collection_gaps.append(
+                    ObservationGap(
+                        "window",
+                        "observation_incomplete",
+                        f"Window {ref}: {', '.join(record['missing'])} content was not included in this observation.",
+                    )
+                )
         lines += [_gap_line(gap) for gap in collection_gaps]
         lines += notes
         if presentation_exhausted:
@@ -776,11 +777,13 @@ class InterfaceReadPipeline:
             if tree is not None and component_budget_ms is not None:
                 try:
                     if window_content_unexposed(tree):
-                        gaps.append(ObservationGap(
-                            "tree", "observation_incomplete",
-                            "This window exposed no usable AX content; its identity does not establish an empty view.",
-                            "Use this window's image when available.",
-                        ))
+                        gaps.append(
+                            ObservationGap(
+                                "tree",
+                                "observation_incomplete",
+                                "AX content unavailable in this observation.",
+                            )
+                        )
                 except Exception as error:  # noqa: BLE001 - a completeness annotation cannot invalidate captured facts
                     gaps.append(_collection_gap("coverage", error))
         if view != "tree" and not image_first:

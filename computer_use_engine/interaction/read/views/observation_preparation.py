@@ -44,7 +44,7 @@ def annotate_preparation_failure(error, preparation):
         return error
     # Preserve cancellation semantics while retaining evidence for its owner.
     error.observation_preparation = frozen(preparation)
-    note = "Earlier observation preparation may have changed focus or window stacking; redraw is unconfirmed."
+    note = f"Observation preparation: activation={preparation['activation']}; raise={preparation['raiseStatus']}."
     if not isinstance(error, ComputerUseError):
         error.add_note(note)
         return error
@@ -53,7 +53,6 @@ def annotate_preparation_failure(error, preparation):
     if changed and error.effect == "none":
         error.effect = "possible"
     error.detail += " " + note
-    error.next += "; observe without activation before repeating preparation"
     error.args = (
         format_failure(
             {
@@ -61,7 +60,6 @@ def annotate_preparation_failure(error, preparation):
                 "effect": error.effect,
                 "target": error.target,
                 "detail": error.detail,
-                "next": error.next,
             }
         ),
     )

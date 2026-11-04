@@ -41,7 +41,7 @@ def test_tree_then_visual_postwrite_keeps_named_lookup_and_checks_attached_scope
         root = controller._query_root(request.owner)
         queried.append(root)
         if root.root_window == "child":
-            raise local_failure("no match here", "observe", "element_not_found")
+            raise local_failure("no match here", "element_not_found")
         return dict(binding=replace(root, node="button"))
 
     controller.interfaces.lookup = SimpleNamespace(arun=AsyncMock(side_effect=lookup))
@@ -94,7 +94,7 @@ def test_replaced_window_cannot_inherit_prior_query_binding():
 
 def test_live_lookup_failure_is_preserved_without_selecting_another_window():
     controller, _app, window = visual_after_accessibility()
-    failure = local_failure("observed native node is gone", "select a current element", "stale_target")
+    failure = local_failure("observed native node is gone", "stale_target")
     resolve = AsyncMock(side_effect=failure)
     controller.interfaces.lookup = SimpleNamespace(arun=resolve)
     with pytest.raises(ComputerUseError) as caught:

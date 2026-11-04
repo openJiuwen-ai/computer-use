@@ -125,11 +125,11 @@ namespace ComputerUse.Windows
                         {
                             if (incomplete.Length != 0 || (!foreignAncestor && depth != 0))
                                 return NativeObservationScope.Unknown(
-                                    "Raw View reached desktop but missing native identity/ownership facts cannot exclude the selected window." +
+                                    "Raw View reached desktop; native identity or ownership facts are missing." +
                                     incomplete);
                             return new NativeObservationScope(
                                 NativeOwnershipState.Outside,
-                                "Raw View ancestry reached the UIA desktop without the selected window; select the independent window before input or further traversal.");
+                                "Raw View ancestry reached the UIA desktop without the selected window.");
                         }
                     }
                     catch (Exception error)

@@ -113,7 +113,7 @@ class PostwriteSessionContinuityTests(IsolatedAsyncioTestCase):
         with self.assertRaises(ComputerUseError) as caught:
             await self.run_action()
         self.assertIs(caught.exception, failure)
-        self.assertEqual((failure.effect, failure.detail, failure.next), ("possible", "uncertain", "observe"))
+        self.assertEqual((failure.code, failure.effect, failure.detail), ("execution_unknown", "possible", "uncertain"))
         self.assertIs(failure.__cause__, cause)
         self.assertIs(failure._failure_context, context)
         self.assertIs(failure.impact, impact)

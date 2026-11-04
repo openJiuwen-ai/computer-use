@@ -119,7 +119,7 @@ namespace ComputerUse.Windows
         {
             string text;
             if (!texts.TryGetValue(reference, out text))
-                throw new Failure("snapshot_expired", "immutable text capture expired; read the original element again");
+                throw new Failure("snapshot_expired", "immutable text capture expired");
             if (offset < 0 || offset > text.Length || length < 2 || length > PreviewUnits || offset < text.Length && Char.IsLowSurrogate(text[(int)offset]))
                 throw new Failure("invalid_request", "text range is outside the capture or splits a UTF-16 surrogate pair");
             int start = (int)offset, end = Math.Min(text.Length, start + length);

@@ -156,7 +156,7 @@ def test_both_directions_preserve_source_addresses_and_common_capabilities(addre
     )
     result = render_tree(source)
     assert result["text"] == (
-        '0 table\n\tEmpty values [text field; Click: unknown, Input: unknown, Value: "", Selected text: ""]: '
+        '0 table\n\tEmpty values [text field; Value: "", Selected text: ""]: '
         + ", ".join(f"{i} {address}" for i, address in enumerate(addresses, 1))
     )
 

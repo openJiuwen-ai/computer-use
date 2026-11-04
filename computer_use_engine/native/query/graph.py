@@ -25,7 +25,6 @@ __all__ = ["UNKNOWN", "NativeGraph"]
 
 class NativeGraph:
     failure_target = "input receiver"
-    failure_next = "read the intended control or use its window observation; no input was sent by this lookup"
 
     def __init__(self, port, operation, root, remaining, *, fields, max_nodes=4096, max_depth=40, follow_relations=()):
         self.port, self.operation, self.root, self.remaining = port, operation, root, remaining
@@ -107,7 +106,6 @@ class NativeGraph:
                 effect="none",
                 target=self.failure_target,
                 detail=detail,
-                next=self.failure_next,
             )
         )
 

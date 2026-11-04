@@ -39,10 +39,7 @@ def select_submenu(value: MenuItemFacts, control: Control) -> tuple[str, tuple[s
             )
         level.request.query.fail(
             "ambiguous_target" if len(wrappers) > 1 else "observation_incomplete",
-            (
-                f"{json_string(level.title)} does not expose one unambiguous native submenu container; read "
-                f"this item first."
-            ),
+            f"{json_string(level.title)}: native submenu container is unresolved.",
         )
     return current, ancestors
 

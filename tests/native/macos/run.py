@@ -15,6 +15,7 @@ GROUPS = (
     "AgentPointerLifecycle",
     "NativeInputAuthorization",
     "NativeInputActivity",
+    "NativePhysicalInput",
     "NativeInspectQuery",
     "NativeQueryActionProfile",
     "NativeAppObserver",

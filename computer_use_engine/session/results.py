@@ -12,7 +12,9 @@ _text_handler = None
 
 
 def action_result(receipt, *, observation=None):
-    values = dict(status=receipt["status"], detail=receipt["detail"])
+    values = dict(
+        status=receipt["status"], detail=receipt["detail"], target=receipt["target"], intent=receipt.get("intent")
+    )
     values["impact"] = freeze_result(receipt.get("impact"))
     if observation is not None:
         values.update(

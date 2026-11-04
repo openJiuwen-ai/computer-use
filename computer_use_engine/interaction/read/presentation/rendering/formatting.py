@@ -496,7 +496,10 @@ def render_projection_lines(
                     "ranges": [(fragment.start, fragment.end) for fragment in excerpt.fragments],
                 }
                 parts = " … ".join(field(fragment.text) for fragment in excerpt.fragments)
-                return parts + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; read_details(element={node['ref']})]"
+                return (
+                    parts
+                    + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; captured details: element {node['ref']}]"
+                )
             if compact and (encoded := display_embedded(value, field, hint=detail_hint)) is not None:
                 # No full-value claim: accounting keeps the exact field under
                 # its source reference in details, including folded captions.
@@ -554,7 +557,7 @@ def render_projection_lines(
             fields.append(("Index: " if share_index_basis else "Index (0-based): ") + str(node["index"]))
             record(node, "index")
         if deferred_click:
-            fields.append("Click: unknown (rechecked on click)")
+            fields.append("Click: deferred")
         if node.get("editorOwnerRef"):
             fields.append("Editor for: " + node["editorOwnerRef"])
         if "disclosureLevel" in node and node["disclosureLevel"] != node.get("outlineDepth"):
@@ -574,13 +577,13 @@ def render_projection_lines(
             )
             record(node, "disclosing")
         if caps is not None and node.get("enabled") is not False and not node.get("blockedBy"):
-            if caps["click"] != "available" and (
+            if caps["click"] == "unavailable" and (
                 node["role"] in (STANDARD_CLICK if compact else CONVENTIONAL) or node.get("selectable")
             ):
                 fields.append("Click: " + caps["click"])
             if (
                 node["role"] in ("textField", "textArea", "comboBox")
-                and caps["typeText"] != "available"
+                and caps["typeText"] == "unavailable"
                 and caps["replaceText"] != "available"
             ):
                 fields.append("Input: " + caps["typeText"])
@@ -869,30 +872,19 @@ def render_projection_lines(
                     f"{number_string(node['childrenStart'])}"
                     f"{end}"
                     f"{complete}"
-                    f"; live native order, not a frozen list."
+                    f"; order=native."
                 )
             )
         for omission in node.get("childOmissions", []):
             hint(indent + "\tOmitted: " + omission)
         if "nextChildOffset" in node and not deferred_menu and not compact:
             hint(
-                f"{indent}\tContinue: use the returned cursor"
+                f"{indent}\tChildren coverage: partial"
                 if context.get("publicApi")
-                else (
-                    f"{indent}"
-                    f"\tContinue: element("
-                    f"{quoted(node['ref'])}"
-                    f').read({{"offset": '
-                    f"{number_string(node['nextChildOffset'])}"
-                    f"}})"
-                )
+                else (f"{indent}\tNext child offset: {number_string(node['nextChildOffset'])}")
             )
         elif partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
-            hint(
-                f"{indent}\tInspect subtree: app.element({node['ref']}).read()"
-                if context.get("publicApi")
-                else f"{indent}\tInspect subtree: element({quoted(node['ref'])}).read()"
-            )
+            hint(f"{indent}\tSubtree coverage: partial; element {node['ref']}")
         for omission in omissions:
             hint(indent + "\t" + omission)
 
@@ -912,11 +904,7 @@ def render_projection_lines(
 
         if block_value:
             continuation = (
-                (
-                    f"; use app.element({node['ref']}).read_text()"
-                    if context.get("publicApi")
-                    else f"; use element({quoted(node['ref'])}).read_text()"
-                )
+                (f"; text source: element {node['ref']}")
                 if "readableTextRefs" not in context or node["ref"] in context["readableTextRefs"]
                 else "; full captured value unavailable"
             )

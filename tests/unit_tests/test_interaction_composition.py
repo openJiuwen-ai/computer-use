@@ -126,7 +126,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
 
     async def test_failed_or_cancelled_write_is_not_replayed(self):
         for failure in (
-            local_failure("uncertain dispatch", "read first", "execution_unknown"),
+            local_failure("uncertain dispatch", "execution_unknown"),
             asyncio.CancelledError(),
         ):
             self.engine.reset_mock()
@@ -143,8 +143,9 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             raise ValueError("delivery failed")
 
         set_action_handler(fail)
-        with self.assertRaisesRegex(RuntimeError, "do not replay"):
+        with self.assertRaisesRegex(RuntimeError, "Action completed, but its receipt could not be displayed") as caught:
             await self.controller.run(ActOnElement(self.ui, self.snapshot, "click", {}))
+        self.assertIn("Effect: test element: sent once", str(caught.exception))
         self.engine.assert_awaited_once()
 
     async def test_pointer_maps_coordinates_and_dispatches_once(self):
@@ -177,7 +178,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.call_args.args[1], target)
 
     async def test_lookup_unique_missing_and_ambiguous(self):
-        missing = local_failure("not found", "read again", "element_not_found")
+        missing = local_failure("not found", "element_not_found")
         self.ui._lookup_scopes = (object(), object())
         self.ui._instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         second = {"binding": replace(self.target, node="other")}
@@ -196,11 +197,10 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                         await self.controller.run(ResolveElement(self.ui, "button", 0))
                     self.assertEqual(caught.exception.code, error)
                 else:
-                    self.assertIs(await self.controller.run(ResolveElement(self.ui, "button", 1000)), self.snapshot)
+                    self.assertIs(await self.controller.run(ResolveElement(self.ui, "button", 0)), self.snapshot)
                 requests = [call.args[0] for call in lookup.call_args_list]
                 self.assertEqual([request.owner for request in requests], list(self.ui._lookup_scopes))
-                self.assertTrue(all(request.timeout_ms == 0 for request in requests))
-                self.assertLessEqual(requests[1].timeout_ms, requests[0].timeout_ms)
+                self.assertEqual([request.timeout_ms for request in requests], [0, 0])
                 self.assertEqual(tuple(dict(segment) for segment in requests[0].path), ({"name": "button"},))
         self.engine.assert_not_awaited()
 
@@ -268,7 +268,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             self.assertIn("AgentInterface", query_control.path)
 
     async def test_write_boundary_limits_native_claims_and_releases_budget_after_failure(self):
-        failure = local_failure("not dispatched", "choose a supported operation", "unsupported_operation")
+        failure = local_failure("not dispatched", "unsupported_operation")
 
         async def execute(*_args, **_kwargs):
             with self.controller.port.calls.claim(120000) as remaining:

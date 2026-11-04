@@ -852,9 +852,7 @@ class Adapter:
             if not all(
                 node.values.get(key) is True and key not in node.row["fieldStatus"] for key in ("visible", "showing")
             ):
-                node.issue(
-                    ("structure",), "partial", "Cell coordinates were reported, but viewport visibility is unconfirmed."
-                )
+                node.issue(("structure",), "partial", "Cell viewport visibility: unknown.")
             return True
         if name == "UIA.Collection" and isinstance(value, dict):
             # pylint: disable-next=unidiomatic-typecheck
@@ -892,7 +890,7 @@ class Adapter:
                 node.issue(
                     ("structure", "collection_mode"),
                     "partial",
-                    value.get("detail") or "Exposed objects do not establish complete logical item coverage.",
+                    value.get("detail") or "Logical item coverage: partial.",
                 )
             elif value.get("detail") is not None:
                 node.supplement(name + ".detail", value["detail"], semantic_key="collection.detail")

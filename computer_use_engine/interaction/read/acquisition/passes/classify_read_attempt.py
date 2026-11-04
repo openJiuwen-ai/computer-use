@@ -55,7 +55,6 @@ def classify_read_attempt(attempt: RecheckedAttempt, control: Control) -> Classi
             "observation_incomplete",
             "The observed view changed or could not be confirmed after collection; "
             "the returned components retain their original view.",
-            "read again before acting on the current view",
         )
         return ClassifiedAttempt(replace(attempt, scope_confirmed=False, gaps=attempt.gaps + (gap,)), Refresh.KEEP)
     matches_attempt = can_refresh_image(

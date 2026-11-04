@@ -190,9 +190,6 @@ class CallLifecycle:
                     effect="none",
                     target="native call",
                     detail="The native session is retired." if self.retired else "Another native call owns this stage.",
-                    next="close the old driver and observe a new session"
-                    if self.retired
-                    else "wait for the active call to finish",
                 )
             )
         self._admission = None

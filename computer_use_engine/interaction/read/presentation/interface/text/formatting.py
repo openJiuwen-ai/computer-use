@@ -152,7 +152,7 @@ class InterfaceWriter:
                 raise ValueError("Prepared excerpt no longer matches its atomic source field")
             return (
                 " … ".join(field(fragment.text) for fragment in excerpt.fragments)
-                + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; read_details(element={ref})]"
+                + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; captured details: element {ref}]"
             )
         return slot_value(slot)
 
@@ -315,7 +315,7 @@ class InterfaceWriter:
             indent
             + "\t"
             + f"Omitted: {excerpt.total - excerpt.shown} of "
-            + f"{excerpt.total} characters from {attribute}; read_details(element={ref})"
+            + f"{excerpt.total} characters from {attribute}; captured details: element {ref}"
             for (owner, attribute), excerpt in excerpts.items()
             if owner == ref
         )
@@ -325,7 +325,7 @@ class InterfaceWriter:
                 + "\t"
                 + "Omitted: captured content for elements "
                 + reference_set(group.projected_refs)
-                + f"; state.read_details(); section {group.section_key}"
+                + f"; captured details: section {group.section_key}"
                 for group in self.request.groups.groups
                 if group.projected_refs[0] == ref
             )
@@ -443,7 +443,7 @@ class InterfaceWriter:
         heading = indent + ("Outline: " if table.layout == "outline" else "Records: ") + separator.join(headings)
         self.lines.append(heading)
         if deferred:
-            self.lines.append(indent + "Structure details (indices and cell extents): observation.read_details()")
+            self.lines.append(indent + "Captured structure details: indices and cell extents")
         row_context = (*context, ("table:" + table.ref, heading))
         for row in table.rows:
             if table.layout == "rows":

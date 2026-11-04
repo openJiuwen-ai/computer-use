@@ -7,7 +7,7 @@ import asyncio
 import logging
 from uuid import uuid4
 
-from computer_use_mcp.server import DESCRIPTION, RESET_DESCRIPTION
+from computer_use_mcp.instructions import CODE_DESCRIPTION, DESCRIPTION, RESET_DESCRIPTION, TITLE_DESCRIPTION
 from openjiuwen.core.foundation.tool import Tool, ToolCard
 from openjiuwen.core.foundation.tool.base import render_payload_text
 from openjiuwen.core.foundation.tool.mcp.base import extract_mcp_tool_result_content
@@ -64,8 +64,8 @@ class ComputerUseToolkit:
                 name="computer_use",
                 description=DESCRIPTION,
                 properties={
-                    "title": {"type": "string", "description": "Describe this call's intent in the user's language."},
-                    "code": {"type": "string", "description": "Synchronous Python code. SDK calls return results directly."},
+                    "title": {"type": "string", "description": TITLE_DESCRIPTION},
+                    "code": {"type": "string", "description": CODE_DESCRIPTION},
                 },
                 required=["code"],
             ),
@@ -98,6 +98,14 @@ class ComputerUseToolkit:
         self.emit("tool_result", {"name": name, "result": raw})
         converted = extract_mcp_tool_result_content(result, include_image_content=True, tool_name=name)
         data = converted.data if hasattr(converted, "data") else {"content": converted or ""}
+        images = [block for block in raw["content"] if block["type"] == "image"]
+        for index, (item, block) in enumerate(zip(data.get("multimodal", ()), images), start=1):
+            metadata = block.get("_meta", {}).get("computer-use", {})
+            identifier = metadata.get("imageId", str(index))
+            caption = metadata.get("caption", "")
+            # The framework renders source_path beside each image, including
+            # images forwarded in a separate multimodal message.
+            item["source_path"] = f"Image {identifier}" + (f"\n{caption}" if caption else "")
         data = {**data, "content": render_payload_text(data) or "Execution returned no text."}
         data = {**data, "mcp_result": raw}
         return ToolOutput(success=not result.isError, data=data, error=getattr(converted, "error", None))

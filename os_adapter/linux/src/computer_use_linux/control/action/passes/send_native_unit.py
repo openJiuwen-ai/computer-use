@@ -16,7 +16,7 @@ def send_native_unit(obj, index, target_service, click_ledger=None):
     if click_ledger is not None:
         click_ledger.action_returned(ok)
     if not ok:
-        raise Failure("Native action did not confirm acceptance; inspect before continuing.", "execution_unknown")
+        raise Failure("Native action acceptance was not confirmed.", "execution_unknown")
 
 
 CONTRACT = {

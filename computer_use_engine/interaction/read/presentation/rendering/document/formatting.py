@@ -25,12 +25,8 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.records import RenderedTree
 
 
-def _header(text: str, mode: str, public_api: bool) -> str:
-    title = (
-        f"Tree: {mode} (not full; read(full=True) for full text)"
-        if public_api
-        else f'Tree: {mode} (not full; read({{"full": True}}) for full text)'
-    )
+def _header(text: str, mode: str) -> str:
+    title = f"Tree: {mode}"
     if re.search(r"^Tree: ", text, re.MULTILINE):
         return re.sub(r"^Tree: .*$", lambda _: title, text, count=1, flags=re.MULTILINE)
     lines = text.split("\n") if text else []
@@ -45,7 +41,7 @@ def _section_delta(section: RenderedSection, delta: TreeDelta, missing: tuple[st
     if removed:
         lines.append("Removed element IDs: " + ", ".join(removed))
     if unobserved:
-        lines.append("Not observed in this read (not proof of removal): " + ", ".join(unobserved))
+        lines.append("Not observed in this read: " + ", ".join(unobserved))
     layout: tuple[tuple[str, str], ...] = ()
     for node in section.nodes:
         if section.refresh or node.ref in delta.changes or node.ref in delta.context:
@@ -167,5 +163,5 @@ def format_document(
     full_text = ("\n\n".join((*directories, *payloads)) + "\n\n" if directories else "") + "".join(full_parts) + footer
     if not incremental:
         return full_text
-    diff_text = _header("".join(diff_parts) + footer, "diff" if refreshed else plan.mode, public_api)
+    diff_text = _header("".join(diff_parts) + footer, "diff" if refreshed else plan.mode)
     return diff_text

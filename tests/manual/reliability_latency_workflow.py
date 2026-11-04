@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import time
@@ -114,6 +115,7 @@ async def verify(folder, python):
         entry["sdk_operations"] = entry["native_work"].get("sdk_operations", [])
         entry["final_delivery_tail_ns"] = entry["native_work"].get("final_delivery_tail_ns")
         entry["text_bytes"] = len(texts(result).encode())
+        entry["text_characters"] = len(texts(result))
         entry["image_count"] = len(screenshots(result))
         entry["full_tree_headers"] = texts(result).count("Tree: full")
         entry["diff_tree_headers"] = texts(result).count("Tree: diff")
@@ -147,7 +149,7 @@ async def verify(folder, python):
         )
         with (folder / "fixture-stderr.log").open("w") as errors:
             child = await asyncio.create_subprocess_exec(
-                str(python), str(FIXTURE), "--output", str(fixture), "--title", title,
+                str(python), "-X", "faulthandler", str(FIXTURE), "--output", str(fixture), "--title", title,
                 env={**os.environ, "QT_QPA_PLATFORM": "cocoa"},
                 stdin=asyncio.subprocess.DEVNULL, stdout=errors, stderr=errors,
             )
@@ -165,17 +167,28 @@ async def verify(folder, python):
             await invoke("launcher-read", f"app = computer.app({choices[0][0]}); app.read(view='both')")
             opened = await invoke("open-form", "app.element('Open schedule').click()")
             assert "Meeting title" in texts(opened), "New form AX must arrive in the original click result"
-            await effect("open-form", lambda s: s["opened"] == 1 and s["visible"], callback="opened")
+            opened_state = await effect("open-form", lambda s: s["opened"] == 1 and s["visible"], callback="opened")
             form_ref = window_with_content(texts(opened), "Meeting title")
             report["form_ref"] = form_ref
+            # Use the original delivered image and new fixed Window directly,
+            # before any preparatory SDK read of that Window.
+            delivered_point = image_point(opened, opened_state["form_frame"], opened_state["inline_point"])
+            report["first_delivered_window"] = {"ref": form_ref, "oracle": opened_state,
+                                                 "delivered_point": delivered_point}
+            clicked = await invoke(
+                "delivered-window-click", f"computer.window({form_ref}).click(at={delivered_point!r})"
+            )
+            await effect("delivered-window-click", lambda s: s["inline_clicks"] == 1, callback="inline")
+            assert "Tree:" in texts(clicked) and "Tree: not requested" not in texts(clicked), texts(clicked)
             form_image = await invoke("form-image", f"form = computer.window({form_ref}); form.read(view='image')")
             before_inline = await state(fixture, process=child)
             inline_point = image_point(form_image, before_inline["form_frame"], before_inline["inline_point"])
             report["inline_geometry"] = {"oracle": before_inline, "delivered_point": inline_point}
             await invoke("inline-coordinate", f"form.click(at={inline_point!r})")
-            await effect("inline-coordinate", lambda s: s["inline_clicks"] == 1, callback="inline")
+            await effect("inline-coordinate", lambda s: s["inline_clicks"] == 2, callback="inline")
             batched = await invoke(
                 "set-title-date-script",
+                "app.element('Meeting title').type_text('Intermediate title', replace=True)\n"
                 "app.element('Meeting title').type_text('Latency acceptance', replace=True)\n"
                 "app.element('Meeting date').click()\n"
                 "app.element('Meeting date').type_text('2026/11/9', replace=True)",
@@ -184,6 +197,9 @@ async def verify(folder, python):
                          lambda s: s["topic"] == "Latency acceptance" and s["date_model"] == "2026/11/9",
                          callback="date")
             assert "Tree: full" not in texts(batched), "Previously delivered form must use diffs in a combined call"
+            assert len(re.findall(r"Action \[(?:dispatched|verified)\]", texts(batched))) == 4, texts(batched)
+            assert texts(batched).count("Tree: diff") == 1, texts(batched)
+            assert "Intermediate title" not in texts(batched), texts(batched)
             await invoke("open-hour", "app.element('08:00').click()")
             await effect("open-hour", lambda s: s["popup"] is not None)
             await invoke("choose-hour", "app.element('10:00').click()")

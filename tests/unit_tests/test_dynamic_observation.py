@@ -10,6 +10,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from computer_use.client.host import (
+    set_action_handler,
+    set_diagnostic_handler,
+    set_execution_guard,
+    set_preview_handler,
+    set_text_page_handler,
+)
 from computer_use.interaction.query.instances.scope import adopt
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
@@ -24,12 +31,39 @@ from computer_use.native.scopes import WorkingWindow
 from computer_use.protocol.captures import decode_capture
 from computer_use.protocol.observation import NativeNode, NativeObservation, Relation
 from computer_use.session import images
-from computer_use.session.events import observation_delivered, set_observation_handler
+from computer_use.session.events import set_observation_handler
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
-from computer_use_mcp.output import ObservationOutput, ObservationPresenter, OutputBuffer
+from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from test_d34_read_contracts import directory, setup, window
+
+
+def deliver_through_runtime(observations, *, prefix_blocks=0):
+    """Use the actual final-response publisher and delivery acknowledgements."""
+    async def deliver():
+        previous_delivery = images._delivery_required
+        runtime = Runtime(lambda event: None, computer_factory=lambda: None)
+
+        def publish():
+            for _ in range(prefix_blocks):
+                runtime.emit({"type": "text", "text": "already emitted"})
+            for observation in observations:
+                runtime.observation({"kind": "observed", "observation": observation})
+
+        runtime.task_namespace["deliver"] = lambda: runtime.executor.call(publish)
+        try:
+            return await runtime.execute({"code": "deliver()", "executionId": 1})
+        finally:
+            await runtime.close()
+            for setter in (
+                set_action_handler, set_diagnostic_handler, set_execution_guard,
+                set_observation_handler, set_preview_handler, set_text_page_handler,
+            ):
+                setter(None)
+            images._delivery_required = previous_delivery
+
+    return asyncio.run(deliver())
 
 
 def tree(item, title):
@@ -103,7 +137,7 @@ def test_late_sheet_is_delivered_in_same_observation_with_partial_catalogue(monk
     controller.reader.read = AsyncMock(return_value=parent_result(state, a, before, after))
     pipeline = InterfaceReadPipeline(controller)
     related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),))
-    gap = ObservationGap("tree", "observation_incomplete", "AX not ready", "use image")
+    gap = ObservationGap("tree", "observation_incomplete", "AX not ready")
     calls = []
 
     async def member(owner, item, view, **kwargs):
@@ -150,22 +184,9 @@ def test_late_sheet_is_delivered_in_same_observation_with_partial_catalogue(monk
         assert "content was not included" in observed.text
     if failure == "directory":
         assert "optional recheck expired" in observed.text
-    presenter = ObservationPresenter()
-    output, received = ObservationOutput(presenter), []
-    output.observe(events[0]["observation"])
-
-    def emit(text, event):
-        received.append(text)
-        observation_delivered(event["state"])
-
-    def emit_image(png):
-        received.append(png)
-        images.image_delivered(png)
-
-    try:
-        output.flush(emit, emit_image)
-    finally:
-        presenter.close()
+    result = deliver_through_runtime([event["observation"] for event in events])
+    assert not result.get("isError"), result
+    received = [block["text"] for block in result["content"] if block["type"] == "text"]
     coverage = {record["window"]: record for record in observation_data(observed)["window_coverage"]}
     assert set(coverage["Sheet"]["delivered"]) == set(coverage["Sheet"]["included"])
     if failure not in ("tree", "both"):
@@ -190,7 +211,7 @@ def test_replacement_sheet_is_collected_without_rebinding_captured_old_identity(
     one = {**window("One", parent="A"), "modal": True}
     two = {**window("Two", parent="A"), "modal": True}
     before, first, last = directory(a), directory(a, one), directory(a, two)
-    last["endedWindows"] = [one]  # Native closure evidence is independent of visible membership.
+    last["endedWindows"] = [one]
     controller, app, state = setup(before)
     controller.reader.read = AsyncMock(return_value=parent_result(state, a, before, first))
     pipeline = InterfaceReadPipeline(controller)
@@ -428,32 +449,17 @@ def test_output_limit_acknowledges_only_observation_components_actually_emitted(
 
     assert set(coverage()["included"]) == {"tree", "image"}
     assert coverage()["delivered"] == ()
-    presenter = ObservationPresenter()
-    output = ObservationOutput(presenter)
-    output.observe(events[0]["observation"])
-    buffer = OutputBuffer()
     # Exercise the real per-response block limit, before either component or
     # between successful text and the image. A captured PNG is not delivery.
-    for _ in range(128 if failed_component == "tree" else 127):
-        buffer.append({"type": "text", "text": "already emitted"})
-
-    def emit(text, event):
-        buffer.append({"type": "text", "text": text})
-        observation_delivered(event["state"])
-
-    def emit_image(png):
-        buffer.append({"type": "image", "mimeType": "image/png", "data": base64.b64encode(png).decode()})
-        images.image_delivered(png)
-
-    try:
-        with pytest.raises(RuntimeError, match="Output limit reached"):
-            output.flush(emit, emit_image)
-        assert coverage()["delivered"] == (() if failed_component == "tree" else ("tree",))
-        assert not any(block["type"] == "image" for block in buffer.content)
-        assert ("Parent content" in buffer.content[-1]["text"]) == (failed_component == "image")
-    finally:
-        presenter.close()
-
+    result = deliver_through_runtime(
+        [event["observation"] for event in events],
+        prefix_blocks=128 if failed_component == "tree" else 127,
+    )
+    assert result["isError"]
+    assert "Output limit reached" in result["content"][-1]["text"]
+    assert coverage()["delivered"] == (() if failed_component == "tree" else ("tree",))
+    assert not any(block["type"] == "image" for block in result["content"])
+    assert ("Parent content" in result["content"][-2]["text"]) == (failed_component == "image")
 
 @pytest.mark.parametrize("root_available,tree_success", [(True, True), (False, False), (True, False)])
 def test_visual_first_window_uses_same_call_ax_upgrade_without_repeating_image(
@@ -468,7 +474,7 @@ def test_visual_first_window_uses_same_call_ax_upgrade_without_repeating_image(
     controller, app, state = setup(first_catalog)
     original = member_target(state, visual)
     image = pixels(state, visual)
-    unavailable = ObservationGap("tree", "observation_incomplete", "AX root is not available", "use image")
+    unavailable = ObservationGap("tree", "observation_incomplete", "AX root is not available")
     controller.reader.read = AsyncMock(return_value=AppObservation(
         selection=WorkingWindow("application", "Fixture", original), target=original,
         applications=None, source_directory=first_catalog, directory=upgraded, tree=None, image=image,
@@ -485,7 +491,7 @@ def test_visual_first_window_uses_same_call_ax_upgrade_without_repeating_image(
             return WindowPart(
                 member_target(state, item), tree=tree(form, "Meeting title") if tree_success else None,
                 gaps=() if tree_success else (
-                    ObservationGap("tree", "observation_incomplete", "tree budget exhausted", "use image"),
+                    ObservationGap("tree", "observation_incomplete", "tree budget exhausted"),
                 ),
             )
         return WindowPart(member_target(state, item), tree=tree(item, "Sharing button"))

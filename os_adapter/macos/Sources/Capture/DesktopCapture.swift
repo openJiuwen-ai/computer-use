@@ -32,17 +32,17 @@ import CoreGraphics
         func validate(_ current: Self?) throws {
             guard let current else {
                 throw DriverError(
-                    "desktop keyboard destination is unavailable; observe before input", code: .inputUnavailable)
+                    "desktop keyboard destination is unavailable", code: .inputUnavailable)
             }
             guard current.process == process, current.window == window,
                 focusedWindow == nil || current.focusedWindow == nil || focusedWindow == current.focusedWindow
             else {
                 throw DriverError(
-                    "desktop keyboard destination changed; read the desktop before input", code: .staleTarget)
+                    "desktop keyboard destination changed", code: .staleTarget)
             }
             if focusedWindow != nil && current.focusedWindow == nil {
                 throw DriverError(
-                    "the observed keyboard window cannot be confirmed; read the desktop before input",
+                    "observed keyboard window: unknown",
                     code: .inputUnavailable)
             }
         }
@@ -74,14 +74,14 @@ import CoreGraphics
     func mapping(_ ref: String) throws -> Mapping {
         let value = try observed(ref)
         guard try Self.geometry(maxDimension: value.geometry.maxDimension) == value.geometry else {
-            throw ObservationChanged("desktop display layout changed; read the desktop again")
+            throw ObservationChanged("desktop display layout changed")
         }
         return value
     }
 
     func observed(_ ref: String) throws -> Mapping {
         guard let value = mappings[ref] else {
-            throw DriverError("desktop observation expired; read the desktop again", code: .staleTarget)
+            throw DriverError("desktop observation expired", code: .staleTarget)
         }
         if let issue = value.inputIssue {
             throw DriverError(
@@ -123,7 +123,7 @@ import CoreGraphics
         _ = try observed(ref)
         guard let expected = keyboards[ref] else {
             throw DriverError(
-                "desktop keyboard destination changed or is unknown; read the desktop before input", code: .staleTarget)
+                "desktop keyboard destination: changed or unknown", code: .staleTarget)
         }
         try expected.validate(Self.destination())
         return expected
@@ -157,18 +157,18 @@ import CoreGraphics
                 as? [[String: Any]]
         else {
             throw DriverError(
-                "desktop window catalogue unavailable before pointer input; read the desktop again",
+                "desktop window catalogue unavailable before pointer input",
                 code: .inputUnavailable)
         }
         let expected = mapping.surfaces.first { $0.frame.contains(point) }
         let current = Self.surfaces(windows).first { $0.frame.contains(point) }
         guard expected == current else {
-            throw ObservationChanged("window at the desktop coordinates moved or changed; read the desktop again")
+            throw ObservationChanged("window at the desktop coordinates moved or changed")
         }
         if let expected, let process = mapping.processes.first(where: { $0.pid == expected.pid }),
             NativeProcessIdentity.read(process.pid) != process
         {
-            throw ObservationChanged("process at the desktop coordinates was replaced; read the desktop again")
+            throw ObservationChanged("process at the desktop coordinates was replaced")
         }
     }
 

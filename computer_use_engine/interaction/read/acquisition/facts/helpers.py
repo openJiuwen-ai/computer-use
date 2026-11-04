@@ -44,10 +44,7 @@ def validate_fact_scope(target: Binding, max_nodes: int, max_depth: int | None) 
                 code="observation_incomplete",
                 effect="none",
                 target="native observation",
-                detail=(
-                    "This surface has no accessible root; its window identity remains available for visual observation."
-                ),
-                next="use a supported window capture route; do not infer that the window has no content",
+                detail="AX root unavailable in this observation.",
             )
         )
     invalid_max_nodes = (

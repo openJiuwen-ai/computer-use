@@ -47,9 +47,7 @@ def format_group_overview(group: GroupOverview) -> tuple[str, ...]:
             )
         if group.uncertain_refs:
             lines.append(
-                "  Incomplete or unknown captured facts: elements "
-                + reference_set(group.uncertain_refs)
-                + "; inspect captured details or reread that element."
+                "  Incomplete or unknown captured facts: elements " + reference_set(group.uncertain_refs) + "."
             )
         if not group.directory_complete:
             lines.append("  Window directory incomplete; unknown window relationships remain unresolved.")
@@ -60,10 +58,7 @@ def format_group_overview(group: GroupOverview) -> tuple[str, ...]:
             "  Reported background state [elements " + reference_set(refs) + f"]: {key} = {value}"
             for (key, value), refs in states.items()
         )
-        lines.append(
-            f"  Full captured background: state.read_details(); section {group.section_key} "
-            "(global details; follow returned cursor)."
-        )
+        lines.append(f"  Captured background details: section {group.section_key}.")
         return tuple(lines)
     count = (
         f"{group.captured_records} captured records"
@@ -80,10 +75,7 @@ def format_group_overview(group: GroupOverview) -> tuple[str, ...]:
     for label, parts in (("First excerpt", group.head), ("Last excerpt", group.tail)):
         for part in parts:
             lines.append(f"  {label} [element {part.source.ref}]: {literal(part.text)}")
-    lines.append(
-        f"  Full captured content: state.read_details(); section {group.section_key} "
-        "(global details; follow returned cursor)."
-    )
+    lines.append(f"  Captured content details: section {group.section_key}.")
     return tuple(lines)
 
 

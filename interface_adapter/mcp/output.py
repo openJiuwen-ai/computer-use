@@ -40,18 +40,10 @@ class OutputBuffer:
         )
         size = len(utf8(dumps(block["text"] if append else block)))
         if self._bytes + size > 8 * 1024 * 1024 or not append and len(self.content) >= 128:
-            raise RuntimeError("Output limit reached (8 MiB / 128 blocks). Emit less text or fewer screenshots.")
+            raise RuntimeError("Output limit reached (8 MiB / 128 blocks); this block was omitted.")
         text_bytes = len(utf8(block["text"])) + (1 if append else 0) if block["type"] == "text" else 0
         if self._text_bytes + text_bytes > 256 * 1024:
-            raise RuntimeError(
-                (
-                    "Output limit reached (256 KiB UTF-8 text per call). This text block was not "
-                    "emitted; earlier output and effects remain. Inspect a smaller part of the "
-                    "value or evidence file; for UI use a relevant subtree, menu or read_text "
-                    "page. Do not repeat preceding actions just to print their "
-                    "result."
-                )
-            )
+            raise RuntimeError(("Output limit reached (256 KiB UTF-8 text per call); this text block was omitted."))
         self._bytes += size
         self._text_bytes += text_bytes
         if append:
@@ -139,7 +131,9 @@ class ObservationPresenter:
         ):
             # Explicit diagnostics must also be complete before delivery. Normal
             # full reads request the compact tree and keep raw details deferred.
-            format_document(prepared.request.document, prepared.snapshots, public_api=observation.get("publicApi", False))
+            format_document(
+                prepared.request.document, prepared.snapshots, public_api=observation.get("publicApi", False)
+            )
         checkpoint()
         baselines = []
         for value in self.baseline_inputs(observation):
@@ -232,31 +226,37 @@ class ObservationOutput:
             if self.superseded(previous, observation, incoming):
                 self._pending.pop(previous_key)
         key = self.presenter.key(observation)
-        if observation.get("full") and observation["view"] != "desktop":
+        if observation.get("full"):
             key = key, id(observation.get("sourceState", observation["state"]))
         previous = self._pending.get(key)
-        if previous is not None and self.presenter.trees(previous):
+        if previous is not None:
             # Same public scope is not proof that the new capture includes all
             # of its former native components (for example, a transient popup).
             old_key = key, id(previous.get("sourceState", previous["state"]))
             self._pending[old_key] = self._pending.pop(key)
         if key not in self._pending and len(self._pending) >= 32:
             raise RuntimeError(
-                "Too many observation scopes in one call; inspect the collected results before reading more."
+                "Too many observation scopes in one call (limit: 32)."
             )
+        # A replacement occupies its own acquisition position, after any
+        # independently retained popup or menu captured in between.
+        self._pending.pop(key, None)
         self._pending[key] = observation
 
     def superseded(self, previous, observation, incoming):
         trees = self.presenter.trees(previous)
         if (
-            not trees or previous.get("full") or previous["state"].get("preparation")
+            previous.get("full") or previous["state"].get("preparation")
             or previous.get("presentationGap") or observation.get("presentationGap")
         ):
             return False
         data = observation_data(previous.get("sourceState", previous["state"]))
         if data is not None and (data["partial"] or data["gaps"]):
             return False
-        if not all(self.presenter.tree_key(previous, tree) in incoming for tree in trees):
+        if trees:
+            if not all(self.presenter.tree_key(previous, tree) in incoming for tree in trees):
+                return False
+        elif self.presenter.key(previous) != self.presenter.key(observation) or previous["view"] != observation["view"]:
             return False
         png = previous["state"].get("screenshot")
         if png is None:
@@ -264,8 +264,15 @@ class ObservationOutput:
         replacement = observation["state"].get("screenshot")
         if replacement is png:
             return True
-        scope = image_output_scope(png)
-        return replacement is not None and scope is not None and image_output_scope(replacement) == scope
+        # These are the exact domains proved when each capture was prepared.
+        # Replacing a desktop sample may itself retire the preceding source;
+        # that must not prevent removing its unshown automatic output slot.
+        scope = previous["imageScope"] if "imageScope" in previous else image_output_scope(png)
+        replacement_scope = (
+            observation["imageScope"] if "imageScope" in observation
+            else image_output_scope(replacement) if replacement is not None else None
+        )
+        return replacement is not None and scope is not None and replacement_scope == scope
 
     def invalidate(self, source):
         self.presenter.invalidate(source)
@@ -283,17 +290,7 @@ class ObservationOutput:
             for value in self._pending.values()
         )
 
-    def flush(self, emit, emit_image=None):
-        for observation in self._pending.values():
-            if gap := observation.get("presentationGap"):
-                emit(gap, observation)
-            else:
-                emit(self.presenter.text(observation), observation)
-                self.presenter.delivered(observation)
-            if (
-                observation["view"] in ("window", "desktop")
-                and observation["state"].get("screenshot") is not None
-                and emit_image is not None
-            ):
-                emit_image(observation["state"]["screenshot"])
+    def take(self):
+        observations = tuple(self._pending.values())
         self._pending.clear()
+        return observations

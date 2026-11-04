@@ -189,7 +189,7 @@ def test_related_failed_new_detail_preserves_original_image_and_catalogue(monkey
         )
     )
     pipeline = InterfaceReadPipeline(controller)
-    gap = ObservationGap("image", "observation_incomplete", "child image unavailable", "read this window")
+    gap = ObservationGap("image", "observation_incomplete", "child image unavailable")
 
     async def member(owner, item, view, **kwargs):
         assert view == "both"  # new windows receive AX and visual fallback together
@@ -298,7 +298,8 @@ def test_sheet_dismissal_restores_original_window_context_only_on_related_delive
             state.reconcile(
                 after,
                 DirectoryMembership(
-                    True, tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in after["surfaces"])
+                    True, tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in after["surfaces"]),
+                    (WindowIdentity.of(sheet),)
                 ),
             )
             state.windows = {

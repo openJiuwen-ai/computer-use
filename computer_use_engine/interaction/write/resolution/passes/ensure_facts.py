@@ -39,7 +39,6 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
                     effect="none",
                     target=facts.target_label,
                     detail="Native inspection returned a different target.",
-                    next="read the intended window again",
                 )
             )
         validate_target(facts, native.policy)

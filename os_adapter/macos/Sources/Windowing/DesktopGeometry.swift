@@ -57,7 +57,7 @@ struct DesktopGeometry: Equatable {
 
     func point(x: Double, y: Double, captured: Set<CGDirectDisplayID>) throws -> CGPoint {
         guard x.isFinite, y.isFinite, x >= 0, y >= 0, x < Double(width), y < Double(height) else {
-            throw Invalid("coordinates are outside the desktop PNG; read the desktop and use its pixels")
+            throw Invalid("coordinates are outside the desktop PNG")
         }
         let point = CGPoint(
             x: bounds.minX + x * bounds.width / Double(width), y: bounds.minY + y * bounds.height / Double(height))

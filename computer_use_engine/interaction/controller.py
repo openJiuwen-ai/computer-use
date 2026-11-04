@@ -272,7 +272,7 @@ class SessionController:
         if owner is None:
             ref = self.desktop.target(coordinates=method in ("click", "scroll", "drag"))
             if params.get("desktopRef") != ref:
-                raise local_failure("desktop observation changed", "read the desktop again", "stale_target", "Desktop")
+                raise local_failure("desktop observation changed", "stale_target", "Desktop")
             observed = self.desktop.observed(ref)
             target = Binding(observed["binding"]["session"], None, None, None, capture=ref)
             parameter = "desktopRef"
@@ -339,12 +339,10 @@ class SessionController:
         """Return the handle's live, observed accessibility root for path lookup."""
         target = self.state(owner).query_target
         if target is None:
-            raise local_failure("this App has no observed query root", "call App.read first", "stale_target")
+            raise local_failure("this App has no observed query root", "stale_target")
         self.validate_element(target)
         if target.node is None:
-            raise local_failure(
-                "this window has no accessible query root", "use its observed window image", "observation_incomplete"
-            )
+            raise local_failure("this window has no accessible query root", "observation_incomplete")
         return target
 
     async def find(self, owner: object, path: LookupPath, timeout_ms: int, enabled: bool) -> ElementSnapshot:

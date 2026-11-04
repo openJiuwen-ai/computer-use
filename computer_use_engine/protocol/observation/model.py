@@ -37,7 +37,7 @@ def _freeze(value: Any, active: set[int] | None = None) -> Any:
     if kind is tuple and all(type(item) in _ATOMIC_TYPES or isinstance(item, _Immutable) for item in value):
         return value
     mapping = kind is dict or isinstance(value, Mapping)
-    if not mapping and kind not in (tuple, list):
+    if not mapping and not isinstance(value, (tuple, list)):
         return value
     active = set() if active is None else active
     if id(value) in active:

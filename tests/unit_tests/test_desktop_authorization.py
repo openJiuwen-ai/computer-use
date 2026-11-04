@@ -59,7 +59,7 @@ def test_required_global_pointer_reports_permission_without_selecting_a_wrong_se
     with pytest.raises(ComputerUseError) as caught:
         choose(facts(native, physical), CLICK, HostPolicy(False), Attempts())
     assert caught.value.code == "permission_required" and caught.value.effect == "none"
-    assert "allow_global_input" in caught.value.next
+    assert not hasattr(caught.value, "next")
     assert choose(facts(native, physical), CLICK, HostPolicy(True), Attempts()).primitive == physical
 
 

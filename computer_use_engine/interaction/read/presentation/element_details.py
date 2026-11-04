@@ -130,15 +130,12 @@ class CapturedElementDetails:
     def __call__(self, element: int) -> CapturedElementDocument:
         """Return this number's retained captures, or report an absent or conflicting alias."""
         if type(element) is not int or element < 0:
-            raise local_failure(
-                "details element must be a nonnegative integer", "use an element number from this observation"
-            )
+            raise local_failure("details element must be a nonnegative integer")
         reference = str(element)
         sources = self._references.get(reference, ())
         if not sources:
             raise local_failure(
                 f"element {element} was not recorded in this observation",
-                "use a number from this observation, or omit element for all captured details",
             )
         identities = {
             (source.snapshot.native.backend, source.snapshot.native.session, source.snapshot.refs[reference])
@@ -148,6 +145,5 @@ class CapturedElementDetails:
         if len(identities) != 1 or len(instances) > 1:
             raise local_failure(
                 f"element {element} has conflicting captured identities",
-                "omit element to inspect the separately scoped captured details",
             )
         return CapturedElementDocument(reference, sources)

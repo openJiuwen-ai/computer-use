@@ -25,7 +25,7 @@ class SessionBindings:
     def state(self, owner):
         state = self._states.get(owner)
         if state is None:
-            raise local_failure("unknown App", "obtain an App from this Computer", "stale_target")
+            raise local_failure("unknown App", "stale_target")
         return state
 
     def scope(self, owner):
@@ -40,7 +40,6 @@ class SessionBindings:
         if not isinstance(target, Binding) or target.session != session:
             raise local_failure(
                 "element belongs to an expired driver session",
-                "observe a new App and obtain a new element",
                 "stale_target",
             )
 

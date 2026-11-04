@@ -265,7 +265,7 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
                     columns.append(column)
         warning_options = dict(
             displayed_children=displayed_children,
-            hint="read the referenced element for native facts" if request.public_api else "see details",
+            hint="captured element details",
         )
         detailed_notes = observation_warnings(snapshot, **warning_options)
         compact_warning_options = dict(
@@ -366,7 +366,7 @@ def assemble_rendered_snapshot(value: SnapshotParts, control: Control) -> Render
             text=document.text,
             refs=dict(snapshot.refs),
             projections=projections,
-            fields=dict(snapshot.fields),
+            fields=thaw(snapshot.fields),
             textRefs=dict(snapshot.text_refs),
             relationSources=relation_sources,
             inlineChildRefs=[ref for part in projections for ref in part.get("inlineChildRefs", ())],

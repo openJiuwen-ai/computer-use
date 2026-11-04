@@ -181,7 +181,7 @@ class SessionExecutor:
         if self._closed:
             return
         if self.is_owner:
-            raise RuntimeError("Use aclose() from the session event loop")
+            raise RuntimeError("Synchronous close is unavailable on the session event loop")
         if self.loop is not None and not self.loop.is_closed():
             self.run(self.aclose)
             if not self._external:

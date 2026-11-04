@@ -62,7 +62,6 @@ class AgentTextReadPipeline:
             if captured is None:
                 raise local_failure(
                     "this element has no complete captured text source",
-                    "read the element or select its explicit text control",
                     "observation_incomplete",
                 )
             value, position = await self.complete(captured), 0
@@ -93,22 +92,17 @@ class AgentTextReadPipeline:
         while True:
             page = await collector.arun(CapturedTextRequest(source, offset=offset, length=16384))
             if total is not None and total != page["total"]:
-                raise local_failure(
-                    "captured text changed its declared range", "start a new read_text()", "snapshot_expired"
-                )
+                raise local_failure("captured text changed its declared range", "snapshot_expired")
             total = page["total"]
             chunks.append(page["text"])
             characters += len(page["text"])
             if characters > self.cursors.max_characters:
                 raise local_failure(
                     "text exceeds the bounded public capture cache",
-                    "read a smaller explicit text region",
                     "observation_incomplete",
                 )
             if page["next"] is None:
                 return "".join(chunks)
             if page["next"] <= offset:
-                raise local_failure(
-                    "native text continuation made no progress", "read this element again", "snapshot_expired"
-                )
+                raise local_failure("native text continuation made no progress", "snapshot_expired")
             offset = page["next"]

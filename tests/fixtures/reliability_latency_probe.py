@@ -44,8 +44,12 @@ class LatencyProbe(ContinuityProbe):
         layout.addWidget(filler)
         self.cloud = QtWidgets.QCheckBox("Cloud recording", contents)
         self.cloud.setAccessibleName("Cloud recording")
-        self.cloud.clicked.connect(self.cloud_events.append)
-        self.cloud.clicked.connect(lambda value: self.record("cloud", value))
+        # clicked also exposes a zero-argument overload. A built-in list.append
+        # slot is inferred without its bool parameter by PySide 6.8, poisoning
+        # later meta-calls after the resulting exception. Bind the bool signal
+        # explicitly and use a Python callable with a concrete argument.
+        self.cloud.clicked[bool].connect(lambda checked: self.cloud_events.append(checked))
+        self.cloud.clicked[bool].connect(lambda checked: self.record("cloud", checked))
         layout.addWidget(self.cloud)
         self.scroll.setWidget(contents)
         self.layout().addWidget(self.scroll)

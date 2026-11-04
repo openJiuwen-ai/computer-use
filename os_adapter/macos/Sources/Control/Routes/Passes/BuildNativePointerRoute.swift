@@ -56,7 +56,7 @@ import ApplicationServices
                     pointer, check: checkBoundary, onDispatch: markDispatch, onPosted: receipt.recordAccepted,
                     onCleanupUnknown: receipt.recordCleanupUnknown)
             }
-            receipt.detail = "\(intentKind) pointer sequence dispatched; application effect unconfirmed."
+            receipt.detail = "\(intentKind) pointer sequence dispatched."
             return false
         }
 

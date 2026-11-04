@@ -143,6 +143,6 @@ extension NativeElementControl {
             }
         } catch { /* Preserve dispatch; the application may have changed its UI. */  }
         return ActionResult(
-            verified: false, detail: "Target text-value replacement dispatched; resulting content is unconfirmed.")
+            verified: false, detail: "Target text-value replacement dispatched.")
     }
 }

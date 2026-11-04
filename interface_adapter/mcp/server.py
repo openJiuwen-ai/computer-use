@@ -19,48 +19,9 @@ from mcp.server.lowlevel import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
+from .instructions import CODE_DESCRIPTION, DESCRIPTION, RESET_DESCRIPTION, TITLE_DESCRIPTION
 from .session import ExecutionSession
 
-DESCRIPTION = (
-    "Execute synchronous Python in a persistent Computer Use session on "
-    "the MCP host. App selectors and file paths refer to that computer. "
-    "Preloaded: computer, print(*values), print_image(PNG bytes). Follow the "
-    "Computer → App/Window → Element SDK. SDK methods return results directly; "
-    "call them without await, including app.element(name).click(). Variables survive calls. "
-    "Prefer one computer_use call for multiple operations whose targets and steps are "
-    "already confirmed and require no intermediate observation. Each operation finishes or "
-    "raises before the next statement runs. Use the related observation returned after each action "
-    "to assess its effect; "
-    "read again when more or newer evidence is needed. "
-    "Stop and observe before continuing if an operation fails, the state needed for the "
-    "next operation is uncertain, or the next decision requires fresh UI evidence. "
-    "Completed actions emit dispatched/verified receipts followed by a bounded related observation. "
-    "The receipt remains valid if that observation fails; do not replay input to repair a read. "
-    "Reads default to tree for "
-    "App/Window and both for Computer; view='image' or 'both' requests images. "
-    "Reads automatically present text: first observations are complete, then changes "
-    "are shown by default within this session. state.text is always complete for its "
-    "bounded view. Use read(full=True) for full presentation, print() for other "
-    "values, and print_image() for images. Printing an observation, its text, or a direct text slice "
-    "reuses its automatic presentation instead of printing a second full view. "
-    "Use a subtree or read_text to bound observation content. print_image labels dimensions and "
-    "source without reading again. One tool call at a time; 45 s without native "
-    "command progress; command starts/completions renew the watchdog, printing "
-    "does not. Individual commands keep their own deadlines. "
-    "Timeout/cancellation clears variables and observations; never automatically "
-    "replay actions. Executes with the MCP server user's "
-    "permissions."
-)
-RESET_DESCRIPTION = (
-    "Reset this connection's Computer Use execution session and stop its window "
-    "capture streams. Clears all Python variables, imports, tasks, "
-    "App/Window/Element handles and observations. Works even if a script is "
-    "stuck. Does not close apps, undo actions or delete files or logs. "
-    "Call when finished using the computer, or to start a clean "
-    "environment; afterwards recreate variables and read before acting. "
-    "Idempotent; no "
-    "parameters."
-)
 _input = obj(dict(title=string(min=1, max=200).optional(), code=string(min=1, max=65536)))
 _empty = obj({})
 
@@ -105,17 +66,13 @@ class ComputerUseServer:
                                 type="string",
                                 minLength=1,
                                 maxLength=200,
-                                description=(
-                                    "A short sentence describing what this call will do, in the user's language. "
-                                    "Describe intent, not an unverified successful outcome. Used as the visible "
-                                    "call title."
-                                ),
+                                description=TITLE_DESCRIPTION,
                             ),
                             code=dict(
                                 type="string",
                                 minLength=1,
                                 maxLength=65536,
-                                description="Python code. Use print() / print_image() for output.",
+                                description=CODE_DESCRIPTION,
                             ),
                         ),
                         required=["code"],
@@ -146,11 +103,7 @@ class ComputerUseServer:
                         content=[
                             dict(
                                 type="text",
-                                text=(
-                                    "No active execution session or capture streams. The next computer_use call "
-                                    "starts a fresh "
-                                    "environment."
-                                ),
+                                text="Execution session: inactive. Capture streams: inactive.",
                             )
                         ]
                     )

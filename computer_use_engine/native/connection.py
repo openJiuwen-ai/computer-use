@@ -107,7 +107,6 @@ class Connection:
         if identity is None or previous is not None and previous != identity:
             raise local_failure(
                 "the original native session is unavailable for this observation",
-                "observe in a new session; the original action must not be replayed",
                 "stale_target",
                 "connection",
             )
@@ -124,7 +123,6 @@ class Connection:
             raise local_failure(
                 "the original native session ended during the related observation; "
                 "no replacement driver was started by this observation",
-                "observe in a new session; the original action must not be replayed",
                 "stale_target",
                 "connection",
             )
@@ -142,7 +140,6 @@ class Connection:
         if self.driver is None and sys.platform not in ("darwin", "linux", "win32"):
             raise local_failure(
                 f"platform {sys.platform} is not implemented",
-                "run the SDK on a supported system with its matching native backend",
                 "unsupported_operation",
                 "connection",
             )
@@ -151,7 +148,6 @@ class Connection:
         if self.driver is None and not Path(command).exists():
             raise local_failure(
                 f"{sys.platform} driver missing",
-                "run computer-use-build and computer-use-permissions on the target computer, then retry",
                 "execution_failed",
                 "connection",
             )
@@ -310,7 +306,7 @@ class Connection:
 
     async def request(self, method, params, options=None):
         if self._requesting:
-            raise local_failure("another system call is in progress", "wait for it to finish before starting the next")
+            raise local_failure("another system call is in progress")
         self._requesting = True
         try:
             return await self._request(method, params, options.get("timeoutMs") if options is not None else None)
@@ -349,44 +345,34 @@ class Connection:
 
     async def _request(self, method, params, budget):
         if method not in (None, "begin", "inspect", "execute", "finish", "capture", "prepareObservation"):
-            raise local_failure(
-                "unsupported native protocol-6 method", "use the native operation protocol", "invalid_request", method
-            )
+            raise local_failure("unsupported native protocol-6 method", "invalid_request", method)
         if self._pending is not None or self._waiting_for_exit:
-            raise local_failure("another system call is in progress", "wait for it to finish before starting the next")
+            raise local_failure("another system call is in progress")
         if method == "begin":
             try:
                 params = decode_begin(params)
             except (TypeError, ValueError) as error:
-                raise local_failure(
-                    str(error), "correct the native operation intent", "invalid_request", method
-                ) from error
+                raise local_failure(str(error), "invalid_request", method) from error
         if method == "inspect":
             try:
                 params = {**params, "query": decode_inspect_query(params.get("query"))}
             except (TypeError, ValueError) as error:
-                raise local_failure(
-                    str(error), "correct the native inspection request", "invalid_request", method
-                ) from error
+                raise local_failure(str(error), "invalid_request", method) from error
         if method == "capture":
             try:
                 params = decode_capture_request(params)
             except (TypeError, ValueError) as error:
-                raise local_failure(
-                    str(error), "correct the native capture scope or budget", "invalid_request", method
-                ) from error
+                raise local_failure(str(error), "invalid_request", method) from error
         if method == "prepareObservation":
             try:
                 params = decode_observation_preparation_request(params)
             except (TypeError, ValueError) as error:
-                raise local_failure(
-                    str(error), "select the original window before preparation", "invalid_request", method
-                ) from error
+                raise local_failure(str(error), "invalid_request", method) from error
         if method == "execute":
             try:
                 params = {**params, "command": decode_unit_command(params.get("command"))}
             except (TypeError, ValueError) as error:
-                raise local_failure(str(error), "correct the native unit command", "invalid_request", method) from error
+                raise local_failure(str(error), "invalid_request", method) from error
         deadline = _now() + max(
             1,
             min(
@@ -400,7 +386,6 @@ class Connection:
             if value < 1:
                 raise local_failure(
                     "request budget exhausted before dispatch; no system command was sent",
-                    "read the target again when ready",
                     "execution_failed",
                     "connection",
                 )
@@ -416,14 +401,12 @@ class Connection:
                 except TimeoutError:
                     raise local_failure(
                         "previous driver is still stopping",
-                        "wait for it to exit before reading the app again; no replacement driver was started",
                         "execution_failed",
                         "connection",
                     ) from None
                 if generation != self._generation:
                     raise local_failure(
                         "connection closed before the request started",
-                        "read the app again when ready",
                         "execution_failed",
                         "connection",
                     )
@@ -450,7 +433,6 @@ class Connection:
                         effect="none",
                         target=method or "connection",
                         detail=str(error),
-                        next="check the backend configuration and connect again; no system command was sent",
                     ),
                     cause=error,
                 )
@@ -463,9 +445,7 @@ class Connection:
             remaining()
             return dict(self._hello)
         if not safe_integer(self._next_id):
-            error = local_failure(
-                "request id space exhausted", "read the app in a new session", "execution_failed", method
-            )
+            error = local_failure("request id space exhausted", "execution_failed", method)
             self.close(error)
             raise error
         capability = (
@@ -488,7 +468,6 @@ class Connection:
         if capability is not None and capability not in self._hello["capabilities"]:
             raise local_failure(
                 f"backend does not provide {capability} in this desktop session",
-                ("use supported native elements, or connect a desktop with the required capture/input capabilities"),
                 "unsupported_operation",
                 method,
             )
@@ -499,14 +478,12 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide nativeFollowRelations",
-                "rebuild the driver before requesting additional relationship collection",
                 "unsupported_operation",
                 method,
             )
         if method == "capture" and "nativeCaptureKinds" not in self._hello["capabilities"]:
             raise local_failure(
                 "backend does not provide nativeCaptureKinds",
-                "rebuild the driver before using explicit native capture scopes",
                 "unsupported_operation",
                 method,
             )
@@ -519,7 +496,6 @@ class Connection:
         if missing_bound_contracts:
             raise local_failure(
                 "backend does not provide nativeBoundContracts",
-                "rebuild the native driver before using the contract-bound execution protocol",
                 "unsupported_operation",
                 method,
             )
@@ -537,7 +513,6 @@ class Connection:
         if missing_unit_readiness:
             raise local_failure(
                 "backend does not provide nativeUnitReadinessV2",
-                "rebuild the driver before using per-unit execution readiness",
                 "unsupported_operation",
                 method,
             )
@@ -557,7 +532,6 @@ class Connection:
         if missing_launch_support:
             raise local_failure(
                 "backend does not provide nativeLaunch",
-                "rebuild the native driver before launching through the execution pipeline",
                 "unsupported_operation",
                 method,
             )
@@ -574,7 +548,6 @@ class Connection:
         if missing_action_intents:
             raise local_failure(
                 "backend does not provide nativeActionIntents",
-                "update the native driver before using this execution route",
                 "unsupported_operation",
                 method,
             )
@@ -585,7 +558,6 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide nativeKeyboardIntents",
-                "update the native driver before preparing or sending keys",
                 "unsupported_operation",
                 method,
             )
@@ -596,7 +568,6 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide nativeTextInput",
-                "update the native driver before inserting or pasting text",
                 "unsupported_operation",
                 method,
             )
@@ -614,7 +585,6 @@ class Connection:
         if missing_window_scope:
             raise local_failure(
                 "backend does not provide nativeWindowScope",
-                "update the driver before resolving a target inside a native operation",
                 "unsupported_operation",
                 method,
             )
@@ -625,7 +595,6 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide nativeWindowScope",
-                "update the driver before binding logical target constraints",
                 "unsupported_operation",
                 method,
             )
@@ -642,7 +611,6 @@ class Connection:
         if missing_native_actuators:
             raise local_failure(
                 "backend does not provide nativeActuators",
-                "update the driver before selecting an internal editor",
                 "unsupported_operation",
                 method,
             )
@@ -653,7 +621,6 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide nativeScroll",
-                "update the driver before selecting native page scrolling",
                 "unsupported_operation",
                 method,
             )
@@ -664,7 +631,6 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide native scrolling",
-                "update the driver before executing native scrolling",
                 "unsupported_operation",
                 method,
             )
@@ -675,7 +641,6 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide nativeElementScroll",
-                "update the driver before selecting an element wheel route",
                 "unsupported_operation",
                 method,
             )
@@ -686,7 +651,6 @@ class Connection:
         ):
             raise local_failure(
                 "backend does not provide nativeScrollContentPath",
-                "update the driver before selecting moving scroll content",
                 "unsupported_operation",
                 method,
             )
@@ -695,7 +659,6 @@ class Connection:
             if capability not in self._hello["capabilities"]:
                 raise local_failure(
                     "backend does not provide " + capability,
-                    "update the driver before using this observed input scope",
                     "unsupported_operation",
                     method,
                 )
@@ -815,7 +778,6 @@ class Connection:
                     ):
                         raise local_failure(
                             "demoForeground is not supported by this native backend",
-                            "run computer-use-build on the target computer or disable demoForeground",
                             "unsupported_operation",
                             "connection",
                         )
@@ -939,7 +901,6 @@ class Connection:
                         target="hello",
                         effect="none",
                         detail=f"{error}; no system command was sent; hello did not complete",
-                        next="check the backend configuration before connecting again",
                     ),
                     cause=error,
                 )
@@ -958,7 +919,6 @@ class Connection:
                         f"{error}; {'read-only request failed' if pure else 'command may have partially executed'}"
                         f"; current observation invalidated"
                     ),
-                    next="reconnect by reading the target; inspect its state before retrying an action",
                 ),
                 cause=error,
                 method=pending_value["method"],
@@ -974,7 +934,7 @@ class Connection:
                     status="error",
                     stage="connection",
                     error=str(failure),
-                    failure={key: getattr(failure, key) for key in ("code", "effect", "target", "detail", "next")},
+                    failure={key: getattr(failure, key) for key in ("code", "effect", "target", "detail")},
                 )
             )
             pending_value["timer"].cancel()

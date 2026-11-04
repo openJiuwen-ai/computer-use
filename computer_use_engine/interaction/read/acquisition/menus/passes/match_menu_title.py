@@ -35,7 +35,7 @@ def match_menu_title(value: MenuLevelFacts, control: Control) -> MatchedMenuItem
         titles = [name for _, name in names if isinstance(name, str) and name]
         candidates = ", ".join(json_string(name) for name in titles[:30]) or "<none>"
         if len(titles) > 30:
-            candidates += f"; {len(titles) - 30} more (read the parent menu)"
+            candidates += f"; {len(titles) - 30} more"
         query.fail(
             "ambiguous_target" if matched else "element_not_found",
             f"Menu level {index + 1}, title {json_string(title)} has {len(matched)} matches. Candidates: {candidates}",

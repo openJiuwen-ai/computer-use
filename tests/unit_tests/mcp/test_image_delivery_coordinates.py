@@ -91,7 +91,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
             setter(None)
         images_state._delivery_required = self.previous_delivery
 
-    def capture(self, size=(4096, 1278), *, screenshot=True):
+    def capture(self, size=(4096, 1278), *, screenshot=True, full=False):
         facts, document = desktop_document(size, captured=screenshot)
         png = encoded_image(size) if screenshot else None
         state = lazy_observation(document, png)
@@ -107,7 +107,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
                     state=state,
                     document=document,
                     refs=[],
-                    full=True,
+                    full=full,
                 )
             )
             return state
@@ -229,7 +229,9 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.capture()
         result = await self.execute("obs = read()\nprint_image(obs.screenshot)\nprint(obs.text)")
         self.assert_delivery(result)
-        self.assertEqual([block["type"] for block in result["content"]], ["text", "image", "text"])
+        # Caption/observation now precede the image, rather than printing an
+        # explicit image first and an automatic copy after its text.
+        self.assertEqual([block["type"] for block in result["content"]], ["text", "text", "image"])
 
     async def test_only_the_latest_buffered_capture_commits_its_observation_context(self):
         _, _, first = self.capture()
@@ -247,6 +249,48 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.get("isError"), result)
         sizes = [png_size(base64.b64decode(block["data"])) for block in result["content"] if block["type"] == "image"]
         self.assertEqual(sizes, [dict(width=2048, height=639), dict(width=100, height=80)])
+
+    async def test_a_mutated_source_cannot_acknowledge_its_unprinted_replacement(self):
+        original, replacement = encoded_image((20, 20)), encoded_image((30, 30))
+        deliveries = []
+
+        def register_replacement():
+            register_image(original, dict(kind="window", selector="fixture", delivered=lambda: deliveries.append(True)))
+
+        register_image(original, dict(kind="window", selector="fixture"))
+        self.runtime.task_namespace.update(
+            png=original,
+            replacement=replacement,
+            register_replacement=lambda: self.runtime.executor.call(register_replacement),
+        )
+        result = await self.execute("print_image(png)\npng[:] = replacement\nregister_replacement()")
+        self.assertFalse(result.get("isError"), result)
+        images = [block for block in result["content"] if block["type"] == "image"]
+        self.assertEqual([png_size(base64.b64decode(block["data"])) for block in images], [dict(width=20, height=20)])
+        self.assertEqual(deliveries, [])
+        self.assertIn("source unknown", images[0]["_meta"]["computer-use"]["caption"])
+
+    async def test_explicit_desktop_full_keeps_its_captured_view_before_a_later_default_read(self):
+        _, _, first = self.capture(full=True)
+        self.runtime.task_namespace["first_read"] = self.runtime.task_namespace["read"]
+        _, _, second = self.capture((100, 80))
+        result = await self.execute("old = first_read()\nobs = read()\nassert_unseen()")
+        self.assertFalse(result.get("isError"), result)
+        images = [block for block in result["content"] if block["type"] == "image"]
+        self.assertEqual(
+            [png_size(base64.b64decode(block["data"])) for block in images],
+            [dict(width=2048, height=639), dict(width=100, height=80)],
+        )
+        self.assertEqual(self.deliveries, [first, second])
+
+    async def test_explicit_desktop_print_keeps_its_captured_view_before_a_later_default_read(self):
+        _, _, first = self.capture()
+        self.runtime.task_namespace["first_read"] = self.runtime.task_namespace["read"]
+        _, _, second = self.capture((100, 80))
+        result = await self.execute("old = first_read()\nprint(old)\nobs = read()\nassert_unseen()")
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 2)
+        self.assertEqual(self.deliveries, [first, second])
 
 
 class DeliveryProjectionTests(unittest.TestCase):

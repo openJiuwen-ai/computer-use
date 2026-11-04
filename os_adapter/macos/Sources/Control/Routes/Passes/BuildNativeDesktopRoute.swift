@@ -44,7 +44,7 @@ import ApplicationServices
                 ? """
                 Desktop wheel input dispatched; pages approximate the visible window length (display length \
                 if no window); content movement unconfirmed.
-                """ : "Desktop \(intentKind) dispatched; application effect unconfirmed."
+                """ : "Desktop \(intentKind) dispatched."
             receipt.context = ["after": unit.ref, "scope": context.access.desktop().scope, "window": NSNull()]
             return false
         }

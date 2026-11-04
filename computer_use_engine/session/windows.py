@@ -114,7 +114,6 @@ class WindowReferences:
         if entry is None or entry.session != session:
             raise local_failure(
                 "window reference is unknown or belongs to an expired session",
-                "read the desktop or App and choose a published Window reference",
                 "stale_target",
             )
         return entry

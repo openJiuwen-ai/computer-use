@@ -23,10 +23,7 @@ class WorkerInterpreterOutsideJob(RuntimeError):
     """Controlled launcher refusal; its public diagnosis contains no input."""
 
     code = "worker_interpreter_outside_job"
-    detail = (
-        "Worker interpreter escaped its lifetime Job. Use an ordinary CPython "
-        "installation (uv --managed-python), not a Microsoft Store execution alias."
-    )
+    detail = "Worker interpreter escaped its lifetime Job."
 
     def __init__(self):
         super().__init__(self.detail)

@@ -352,9 +352,7 @@ def plan_atom(
                 continue
             builder.add(attribute, label, format="number")
     if click_is_deferred(node):
-        builder.add(
-            "clickState", "Click", value="unknown (rechecked on click)", source_attributes=("enabled", "capabilities")
-        )
+        builder.add("clickState", "Click", value="deferred", source_attributes=("enabled", "capabilities"))
     if node.get("editorOwnerRef"):
         builder.add("editorOwnerRef", "Editor for", value=(node["editorOwnerRef"],), format="refs")
     if "disclosureLevel" in node and node["disclosureLevel"] != node.get("outlineDepth"):
@@ -373,13 +371,13 @@ def plan_atom(
         )
     caps = node.get("capabilities")
     if caps is not None and node.get("enabled") is not False and not node.get("blockedBy"):
-        if caps.get("click", "unknown") != "available" and (
+        if caps.get("click") == "unavailable" and (
             node["role"] in (STANDARD_CLICK if policy.compact else CONVENTIONAL) or node.get("selectable")
         ):
             builder.add("clickState", "Click", value=caps.get("click", "unknown"), source_attributes=("capabilities",))
         if (
             node["role"] in ("textField", "textArea", "comboBox")
-            and caps.get("typeText") != "available"
+            and caps.get("typeText") == "unavailable"
             and caps.get("replaceText") != "available"
         ):
             builder.add(

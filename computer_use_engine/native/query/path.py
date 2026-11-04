@@ -41,7 +41,6 @@ async def resolve_path(port, operation, root, remaining, path, *, timeout_ms=0):
 
 class TargetQuery(NativeGraph):
     failure_target = "element path"
-    failure_next = "read this working window and narrow the path or use an observed element"
 
     def __init__(self, port, operation, root, remaining, *, max_nodes=4096, max_depth=40):
         contents = followed_relations(port.platform, getattr(port, "capabilities", ()), content_only=True)

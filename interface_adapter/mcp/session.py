@@ -19,11 +19,7 @@ from .worker_transport import EncodedObservationDiagnostic, FRAMED_PROTOCOL, rea
 
 CLEANUP_TIMEOUT_SECONDS = 5
 
-RESET_NOTICE = (
-    "Execution session cleared. Recreate App variables and read again. Actions "
-    "may already have executed; do not replay them "
-    "automatically."
-)
+RESET_NOTICE = "Execution session cleared. Python variables and handles cleared."
 
 _LOG = logging.getLogger(__name__)
 
@@ -63,11 +59,9 @@ class ExecutionSession:
             result = await asyncio.shield(self._resetting)
             return result if result.get("isError") else await self.execute(code, signal, title, on_progress)
         if self._retiring is not None:
-            return execution_error(
-                ("Native cleanup is still pending. Call computer_use_reset before continuing; no code was executed.")
-            )
+            return execution_error(("Native cleanup: pending. Code execution: not started."))
         if self._pending is not None or self._starting:
-            return execution_error("Another call is running; wait for it to finish before starting the next.")
+            return execution_error("Another call is running. This call's code execution: not started.")
         if signal is not None and signal.is_set():
             return execution_error("Call cancelled before execution.")
         self._starting = True
@@ -133,7 +127,7 @@ class ExecutionSession:
             )
             return execution_error(
                 reason
-                + "No code was executed for this call; recreate variables before continuing."
+                + "Code execution: not started."
                 + ("\n" + reset["content"][0]["text"] if reset is not None and reset.get("isError") else "")
             )
         if signal is not None and signal.is_set():
@@ -405,7 +399,7 @@ class ExecutionSession:
         if self._child is not child:
             return
         detail = f"Worker communication failed ({type(error).__name__})." if error is not None else None
-        reason = worker.failure(detail, sent=sent)
+        reason = worker.failure(detail, sent=sent, include_dispatch=False)
         self._journal.record(
             dict(
                 kind="worker_failure",
@@ -455,6 +449,16 @@ class ExecutionSession:
     def reset(self, reason="Execution reset requested."):
         if self._resetting is not None:
             return self._resetting
+        # Once code was sent, resetting Python state cannot prove how far that
+        # code ran. Keep that execution fact alongside any streamed receipts.
+        pending = self._pending
+        dispatch = (
+            "Code dispatch: sent. Completion: unknown."
+            if pending is not None and pending["sent"]
+            else "Code dispatch: not sent."
+            if pending is not None
+            else None
+        )
         self._generation += 1
         worker, self._worker = self._worker, None
         if worker is not None:
@@ -514,11 +518,7 @@ class ExecutionSession:
                 if retired is not None:
                     await asyncio.wait_for(asyncio.shield(retired), CLEANUP_TIMEOUT_SECONDS)
             except TimeoutError:
-                failure = (
-                    "Native cleanup is still pending; capture stop is unconfirmed. Actions may "
-                    "already have executed; do not replay them. Retry computer_use_reset before "
-                    "continuing."
-                )
+                failure = "Native cleanup: pending. Capture stop: unknown."
             except Exception as error:
                 failure = str(error)
             if retired is None or retired.done():
@@ -531,7 +531,10 @@ class ExecutionSession:
                         self._retiring = None
 
                 retired.add_done_callback(clear)
-            result = execution_error(reason + "\n" + (failure if failure is not None else RESET_NOTICE))
+            result = execution_error("\n".join(
+                part for part in (reason, dispatch, failure if failure is not None else RESET_NOTICE)
+                if part is not None
+            ))
             result["content"] = (self._pending["output"].content.copy() if self._pending is not None else []) + result[
                 "content"
             ]
@@ -550,11 +553,9 @@ class ExecutionSession:
                         type="text",
                         text=(
                             "Execution session reset. Python variables, App/Element handles and "
-                            "observations cleared; session capture streams stopped and preview reset "
-                            "requested. Apps, documents, files and completed actions are unchanged. The "
-                            "next computer_use call starts a fresh "
-                            "environment."
-                        ),
+                            "observations cleared. Capture streams stopped."
+                        )
+                        + (" Preview reset requested." if self.on_preview is not None else ""),
                     )
                 ]
             )

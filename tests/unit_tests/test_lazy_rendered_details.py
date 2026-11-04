@@ -1,5 +1,6 @@
 """Normal delivery keeps expensive native diagnostics captured until requested."""
 
+from copy import deepcopy
 from unittest.mock import patch
 
 from computer_use.interaction.read.facts.normalize import normalize_facts
@@ -56,6 +57,14 @@ def test_serializing_a_complete_render_materializes_details_once():
         assert "provider detail 中文" in complete["details"]
         assert complete["capturedReadIssues"][0]["issue"]["path"] == ["nodes", "window", "help"]
         formatter.assert_called_once()
+
+
+def test_copy_keeps_deferred_source_details():
+    rendered = render_prepared_snapshot(captured_render())
+    copied = deepcopy(rendered)
+    assert "provider detail 中文" in copied["details"]
+    assert rendered["capturedReadIssues"] == copied["capturedReadIssues"]
+    assert copied["details"] == rendered["details"]
 
 
 def test_sdk_details_pages_keep_exact_capture_without_eager_normal_delivery():

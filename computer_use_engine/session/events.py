@@ -44,7 +44,6 @@ def action_completed(receipt):
                 f"{receipt['target']}"
                 f": "
                 f"{receipt['detail']}"
-                f"\nNext: read the app before continuing; do not replay the action"
             )
         ) from error
 

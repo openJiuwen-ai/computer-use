@@ -23,7 +23,7 @@ import Foundation
     var click: NativeClickEvidence?
 
     init(
-        target: [String: Any], detail: String = "Native action dispatched; application effect unconfirmed.",
+        target: [String: Any], detail: String = "Native action dispatched.",
         confirmation: String = "unavailable", onEffect: @escaping () -> Void
     ) {
         self.target = target

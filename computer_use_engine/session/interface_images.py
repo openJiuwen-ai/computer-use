@@ -123,7 +123,6 @@ class InterfaceImage:
         if self.unavailable_mapping:
             raise local_failure(
                 "the partial image has no confirmed overall window mapping",
-                'read a specific member with app.window(ref).read(view="image")',
                 "snapshot_expired",
             )
         if self.delivered_coordinates is not None:
@@ -137,12 +136,10 @@ class InterfaceImage:
                     if pixels.convert("RGBA").getpixel((math.floor(mapped[0]), math.floor(mapped[1])))[3] == 0:
                         raise local_failure(
                             "this point is outside confirmed visible window pixels",
-                            "choose a visible control or read a specific Window",
                         )
                 return piece, mapped
         raise local_failure(
             "the point is in a gap outside the captured windows",
-            "choose a visible window control; canvas gaps are not desktop targets",
         )
 
 

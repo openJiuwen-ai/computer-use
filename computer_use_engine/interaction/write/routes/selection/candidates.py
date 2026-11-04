@@ -70,7 +70,6 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
                 "input_unavailable",
                 facts,
                 f"No native action matches {name!r} on this element." + observed,
-                "read the element and use a complete action name or description from that observation",
             )
         # Matching an action name is distinct from admitting its current route.
         # Preserve unavailable declarations and their blockers for the refusal
