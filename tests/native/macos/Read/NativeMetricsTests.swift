@@ -35,17 +35,19 @@ import Foundation
                 } catch let caught as Original { precondition(caught === original) }
                 NativeMetrics.measureDiagnostic(.inputContractRegistration) { calls.append("register") }
                 NativeMetrics.measureDiagnostic(.inputContextEncoding) { calls.append("encode") }
+                NativeMetrics.measureDiagnostic(.clickViewportSampling) { calls.append("viewport") }
             }
-            precondition(calls == ["scope", "facts", "register", "encode"])
-            precondition(clockReads == (enabled ? 9 : 1), "disabled query timing must not read a clock")
+            precondition(calls == ["scope", "facts", "register", "encode", "viewport"])
+            precondition(clockReads == (enabled ? 11 : 1), "disabled query timing must not read a clock")
             let output = metrics.finish(method: "inspect", status: "error")!
-            precondition(clockReads == (enabled ? 10 : 2))
+            precondition(clockReads == (enabled ? 12 : 2))
             let phases = output["phases"] as! [String: [String: Any]]
             if enabled {
                 let spans = output["spans"] as! [[String: Any]]
-                precondition(spans.count == 4)
+                precondition(spans.count == 5)
                 precondition(spans.map { $0["phase"] as! String } == [
-                    "inputQueryResolution", "inputRouteSampling", "inputContractRegistration", "inputContextEncoding"
+                    "inputQueryResolution", "inputRouteSampling", "inputContractRegistration", "inputContextEncoding",
+                    "clickViewportSampling"
                 ])
                 precondition(spans[0]["startedUptime"] as? Double == 10)
                 precondition(abs((spans[0]["endedUptime"] as! Double) - 10.1) < 0.000001)

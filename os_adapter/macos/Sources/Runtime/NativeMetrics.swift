@@ -15,7 +15,7 @@ import Foundation
         case captureEnumeration, captureSharing, capturePixels, capturePNGEncoding, captureIdentityValidation
         case sharingStreamStart, sharingStreamStop
         case appObserverRegistration, appObserverWait
-        case clickPlan, clickPreparation, clickTargetValidation, clickDispatch, clickRelease
+        case clickPlan, clickPreparation, clickTargetValidation, clickViewportSampling, clickDispatch, clickRelease
         case readPublication
         case captureJoin
         case capturePermissionPreflight, captureStartupScope, captureTargetResolution, captureDocumentIdentity

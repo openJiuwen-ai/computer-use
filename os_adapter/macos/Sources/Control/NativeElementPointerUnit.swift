@@ -104,9 +104,11 @@ import ApplicationServices
     }
 
     func viewport() throws -> NativeElementViewport {
-        try validatePhysicalWindow()
-        let mapping = try NativeWindowUnit(application: application, window: window).mapping()
-        return try NativeElementViewport.sample(element: element, window: window, mapping: mapping)
+        try NativeMetrics.measureDiagnostic(.clickViewportSampling) {
+            try validatePhysicalWindow()
+            let mapping = try NativeWindowUnit(application: application, window: window).mapping()
+            return try NativeElementViewport.sample(element: element, window: window, mapping: mapping)
+        }
     }
 
     func exposure() throws -> NativeElementViewport.Exposure? { try viewport().exposure }
