@@ -15,7 +15,7 @@ struct NativeIntent {
         let value = try object(raw, keys: Set(["kind", "parameters"] + (hasGlobalInput ? ["globalInput"] : [])))
         kind = try string(value["kind"], label: "intent.kind")
         globalInput = hasGlobalInput ? try boolean(value["globalInput"], label: "intent.globalInput") : false
-        guard !globalInput || mode == "write" && ["click", "scroll", "drag", "insert", "replace", "paste", "key"].contains(kind)
+        guard !globalInput || mode == "write" && ["click", "scroll", "drag", "insert", "paste", "key"].contains(kind)
         else { throw DriverError("global input requires an explicit input intent", code: .invalidRequest) }
         guard let parameters = value["parameters"] as? [String: Any], JSONSerialization.isValidJSONObject(parameters),
             (mode == "read" && kind == "read")
@@ -47,13 +47,37 @@ struct NativeBeginRequest {
             clickContract == nil || (["v1", "v2"].contains(clickContract!) && mode == "write" && intent.kind == "click")
         else { throw DriverError("unsupported click contract for this operation", code: .invalidRequest) }
         _ = try nativeOperationTarget(value["target"], installation: intent.kind == "launch")
+        let globalScope = NativeGlobalTarget.isGlobal(value["target"])
+        guard !intent.globalInput || globalScope,
+            !globalScope || mode == "write" && intent.globalInput && clickContract == nil
+                && ["click", "scroll", "drag", "insert", "key", "paste"].contains(intent.kind)
+        else { throw DriverError("global input requires an explicit global scope and primitive intent", code: .invalidRequest) }
     }
 }
 
 func nativeOperationTarget(_ raw: Any?, installation: Bool) throws -> [String: Any] {
+    if NativeGlobalTarget.isGlobal(raw) { return try NativeGlobalTarget(raw).wire }
     guard installation else { return try NativeTarget(raw).wire }
     let target = try object(raw, keys: ["session", "application"])
     _ = try string(target["session"], label: "session")
     _ = try string(target["application"], label: "application")
     return target
+}
+
+/// Global input has no App, Window, Element or observation identity. The
+/// session scopes its operation lifetime; the OS chooses the input recipient.
+struct NativeGlobalTarget {
+    let session: String
+
+    static func isGlobal(_ raw: Any?) -> Bool { (raw as? [String: Any])?["global"] != nil }
+
+    init(_ raw: Any?) throws {
+        let value = try object(raw, keys: ["session", "global"])
+        session = try string(value["session"], label: "session")
+        guard try boolean(value["global"], label: "global") else {
+            throw DriverError("global scope must be explicit", code: .invalidRequest)
+        }
+    }
+
+    var wire: [String: Any] { ["session": session, "global": true] }
 }

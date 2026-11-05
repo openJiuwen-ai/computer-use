@@ -137,11 +137,11 @@ def test_no_wait_when_original_budget_cannot_reserve_useful_collection(monkeypat
     controller.port.app_changes.assert_not_awaited()
 
 
-def test_completion_allowance_does_not_extend_optional_notification_wait(monkeypatch):
+def test_unlimited_completion_does_not_extend_optional_notification_wait(monkeypatch):
     clock = [100.0]
     budget = OperationBudget(clock=lambda: clock[0])
     clock[0] += 1.1
-    assert budget.available_ms() > 0 and budget.target_available_ms() == 0
+    assert budget.available_ms() is None and budget.target_available_ms() == 0
     controller = SimpleNamespace(port=SimpleNamespace(app_changes=AsyncMock()))
     monkeypatch.setattr("computer_use.interaction.read.views.changes.current_operation_budget", lambda: budget)
     assert asyncio.run(PostwriteChanges(STAMP).wait(controller, {"appChange": STAMP}, collection_ms=50)) == ()

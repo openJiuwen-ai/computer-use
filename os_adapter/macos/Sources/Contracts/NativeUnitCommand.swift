@@ -18,13 +18,16 @@ struct NativeUnitCommand {
         guard
             [
                 "native_action", "native_selection", "native_text_edit", "native_value_replace", "key_sequence",
-                "clipboard_paste", "pointer_sequence", "native_scroll", "prepare_receiver", "launch_application"
+                "clipboard_paste", "pointer_sequence", "native_scroll", "prepare_receiver", "launch_application", "global_input"
             ].contains(kind)
         else { throw DriverError("unknown native unit", code: .invalidRequest) }
         primitiveID = try string(value["primitiveId"], label: "primitiveId")
         let launch = kind == "launch_application"
         target = try nativeOperationTarget(value["target"], installation: launch)
         foreground = try boolean(value["foreground"], label: "foreground")
+        guard (kind == "global_input") == NativeGlobalTarget.isGlobal(target),
+            kind != "global_input" || primitiveID == "global" && !foreground
+        else { throw DriverError("global input uses its direct primitive only", code: .invalidRequest) }
         guard !launch || !foreground else {
             throw DriverError(
                 "application launch requires only its observed installation contract", code: .invalidRequest)

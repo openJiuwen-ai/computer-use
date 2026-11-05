@@ -44,9 +44,15 @@ import ApplicationServices
     static func inputWindowHit(
         at point: CGPoint, retained: WindowGeometry.WindowMapping? = nil, nativeWindow: AXUIElement? = nil
     ) -> NativeInputWindowHit {
-        NativeInputWindowHit.resolve(windowServerHit(at: point)) {
-            NativeInputWindowQuery.accessibility(at: point, retained: retained, nativeWindow: nativeWindow)
+        var element: AXUIElement?
+        var result = NativeInputWindowHit.resolve(windowServerHit(at: point)) {
+            let sample = NativeInputWindowQuery.sampleAccessibility(
+                at: point, retained: retained, nativeWindow: nativeWindow)
+            element = sample.element
+            return sample.result
         }
+        result.accessibilityElement = element
+        return result
     }
 
     static func inputWindow(at point: CGPoint) -> CGWindowID? { inputWindowHit(at: point).windowID }

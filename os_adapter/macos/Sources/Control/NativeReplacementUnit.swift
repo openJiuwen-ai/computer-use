@@ -211,17 +211,10 @@ import ApplicationServices
             }
         }
         func validate() async throws {
-            if delivery.isScopedHID {
-                try validateImmediate()
-                try await validateReceiver()
-            } else {
-                try await validateReceiver()
-                try validateImmediate()
-            }
+            try await validateReceiver()
+            try validateImmediate()
         }
-        func beforeSelectionMutation() throws {
-            if delivery.isScopedHID { try RequestDiagnostics.checkCancellation() } else { try validateImmediate() }
-        }
+        func beforeSelectionMutation() throws { try validateImmediate() }
         try await validate()
         guard let before = snapshot(selection) else {
             throw DriverError("target text extent is unavailable; no replacement sent", code: .inputUnavailable)

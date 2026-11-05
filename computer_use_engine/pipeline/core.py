@@ -112,8 +112,8 @@ class Control:
     individual stages consult when needed.
 
     Attributes:
-        remaining: Callback returning milliseconds left on the call; may raise
-            on expiration.
+        remaining: Callback returning milliseconds left, or None when no total
+            deadline is set; may raise on expiration or cancellation.
         cancelled: Optional cancellation predicate supplied by the call owner.
         diagnostic: Optional event sink whose exceptions are isolated from execution.
         path: Diagnostic path through the declared flow nodes.
@@ -122,7 +122,7 @@ class Control:
         branch: Label of the selected branch.
     """
 
-    remaining: Callable[[], int] | None = None
+    remaining: Callable[[], int | None] | None = None
     cancelled: Callable[[], bool] | None = None
     diagnostic: Callable[[Event], None] | None = None
     path: tuple[str, ...] = ()

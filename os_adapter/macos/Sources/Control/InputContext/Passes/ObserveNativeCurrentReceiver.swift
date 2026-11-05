@@ -8,7 +8,7 @@ import ApplicationServices
 @MainActor enum ObserveNativeCurrentReceiverPass {
     static func run(_ plan: NativeInputContextPlan, access: NativeQueryAccess) throws -> [String: Any] {
         let binding = plan.query.binding
-        guard binding.node != nil, !plan.query.desktop, plan.actuator == nil, plan.receiver == nil, plan.basis.isEmpty,
+        guard binding.node != nil, plan.actuator == nil, plan.receiver == nil, plan.basis.isEmpty,
             ["focus", "insert", "paste", "key"].contains(plan.operation.intent)
         else {
             throw DriverError("current receiver discovery requires a container input intent", code: .invalidRequest)

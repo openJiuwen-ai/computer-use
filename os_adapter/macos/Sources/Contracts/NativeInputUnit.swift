@@ -16,7 +16,6 @@ enum NativeInputUnit: Equatable {
         NativeKeyboardIntent.Kind, NativeReplacementUnit.Selection? = nil,
         NativeKeyboardInterpreterEvidence.Policy = .existing)
     case pointer(NativePointerIntent.Kind)
-    case desktop(String)
     case scroll
     case launch(NativeInstallation)
 
@@ -49,30 +48,18 @@ enum NativeInputUnit: Equatable {
             wire["channel"] = "editor"
             wire["backgroundPreparation"] = "yes"
         case .scroll: wire["unit"] = "native_scroll"
-        case .pointerFocus(let target):
-            wire["globalInput"] = target == .scalarText || !NativeInputAuthorization.globalInputRequested ? "no" : "unknown"
+        case .pointerFocus:
             wire["unit"] = "prepare_receiver"
             wire["channel"] = "pointer"
             wire["backgroundPreparation"] = "yes"
-        case .keyboard(let kind, _, let policy):
-            // A retained local-Web qualification requires scoped HID. Other
-            // text receivers can change during preparation; native dispatch
-            // requalifies their transport rather than claiming no global use.
-            wire["globalInput"] = NativeInputAuthorization.globalInputRequested || policy == .localWebNoProcess ? "yes"
-                : [.insert, .replace].contains(kind) ? "unknown" : "no"
+        case .keyboard(let kind, _, _):
             wire["unit"] = kind.unit
             wire["channel"] = "keyboard"
             wire["backgroundPreparation"] = readiness.pending.contains("foreground") ? "no" : "yes"
         case .pointer:
-            wire["globalInput"] = NativeInputAuthorization.globalInputRequested ? "yes" : "no"
             wire["unit"] = "pointer_sequence"
             wire["channel"] = "pointer"
             wire["backgroundPreparation"] = "yes"
-        case .desktop(let intent):
-            wire["globalInput"] = "yes"
-            let pointer = NativePointerIntent.Kind(rawValue: intent) != nil
-            wire["unit"] = pointer ? "pointer_sequence" : "key_sequence"
-            wire["channel"] = pointer ? "pointer" : "keyboard"
         }
         if !readiness.preparationAllowed || readiness.pending.contains("foreground") {
             wire["backgroundPreparation"] = "no"
@@ -86,7 +73,7 @@ enum NativeInputUnit: Equatable {
     private var preparationImpact: [String: String] {
         var value = ["mouse": "no", "keyboard": "no", "activation": "no", "clipboard": "no"]
         switch self {
-        case .textValue, .selection, .scroll, .launch, .desktop: break
+        case .textValue, .selection, .scroll, .launch: break
         case .selectedText, .receiverContext:
             value["activation"] = "yes"
         case .action, .menuAction:

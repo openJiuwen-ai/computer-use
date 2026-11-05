@@ -420,7 +420,7 @@ class AgentInterfacePipeline:
                 available = budget.remaining()
             else:
                 return None
-            if available < 1:
+            if available is not None and available < 1:
                 raise OperationDeadlineExceeded("Element lookup exhausted its original operation budget")
             return available
 

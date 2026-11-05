@@ -8,7 +8,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.agent.pipeline import AgentDispatch, AgentInterfacePipeline
-from computer_use.interaction.passes.select_route import AGENT_ROUTES, QUERY, WRITE, stage as select_route
+from computer_use.interaction.global_input import GlobalInput
+from computer_use.interaction.operation import HostOperation
+from computer_use.interaction.passes.select_route import AGENT_ROUTES, GLOBAL, QUERY, WRITE
+from computer_use.interaction.passes.select_route import stage as select_route
 from computer_use.interaction.query.pipeline import QueryPipeline
 from computer_use.interaction.write.request.pipeline import ControllerWritePipeline
 from computer_use.pipeline import Pipeline, Select
@@ -38,6 +41,7 @@ class SessionPipeline(Pipeline["InteractionRequest", "InteractionResult"]):
         self.write = ControllerWritePipeline(controller)
         self.lookup = QueryPipeline(controller)
         self.interfaces = AgentInterfacePipeline(controller, self.write, self.lookup)
+        self.global_input = HostOperation(GlobalInput(controller))
         super().__init__(root=self.build())
 
     def build(self) -> Step[InteractionRequest, InteractionResult]:
@@ -49,6 +53,7 @@ class SessionPipeline(Pipeline["InteractionRequest", "InteractionResult"]):
                 **{route: agent for route in AGENT_ROUTES},
                 WRITE: self.write,
                 QUERY: self.lookup,
+                GLOBAL: self.global_input,
             },
         )
 

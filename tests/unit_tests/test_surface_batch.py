@@ -204,6 +204,7 @@ class BatchScopeTests(IsolatedAsyncioTestCase):
             connection = SimpleNamespace(
                 protocol_version=6,
                 platform="macos",
+                capabilities=("nativeDirectory",),
                 session_identity=(1, "session"),
                 request=AsyncMock(return_value=payload),
             )

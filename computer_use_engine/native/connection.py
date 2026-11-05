@@ -30,6 +30,7 @@ from computer_use.protocol.execution import (
     decode_execution_result,
     decode_inspect_query,
     decode_observation_preparation_request,
+    decode_point_location_request,
     decode_unit_command,
 )
 from computer_use.protocol.primitives import finite, record, safe_integer, trim
@@ -344,7 +345,7 @@ class Connection:
         await future
 
     async def _request(self, method, params, budget):
-        if method not in (None, "begin", "inspect", "execute", "finish", "capture", "prepareObservation"):
+        if method not in (None, "begin", "inspect", "execute", "finish", "capture", "prepareObservation", "locatePoint"):
             raise local_failure("unsupported native protocol-6 method", "invalid_request", method)
         if self._pending is not None or self._waiting_for_exit:
             raise local_failure("another system call is in progress")
@@ -366,6 +367,11 @@ class Connection:
         if method == "prepareObservation":
             try:
                 params = decode_observation_preparation_request(params)
+            except (TypeError, ValueError) as error:
+                raise local_failure(str(error), "invalid_request", method) from error
+        if method == "locatePoint":
+            try:
+                params = decode_point_location_request(params)
             except (TypeError, ValueError) as error:
                 raise local_failure(str(error), "invalid_request", method) from error
         if method == "execute":
@@ -449,7 +455,11 @@ class Connection:
             self.close(error)
             raise error
         capability = (
-            "nativeApplicationRoots"
+            "nativePointLocation"
+            if method == "locatePoint"
+            else "nativeGlobalInput"
+            if method == "begin" and params.get("target", {}).get("global") is True
+            else "nativeApplicationRoots"
             if method == "inspect" and params.get("query", {}).get("kind") == "roots"
             else "nativeRelationPages"
             if method == "inspect" and "relationPage" in params.get("query", {})
@@ -487,10 +497,15 @@ class Connection:
                 "unsupported_operation",
                 method,
             )
+        raw_global = (
+            params.get("target", {}).get("global") is True
+            or params.get("command", {}).get("kind") == "global_input"
+        )
         missing_bound_contracts = (
             True
             if (method == "begin" and params.get("mode") == "write" or method == "execute")
             and "nativeBoundContracts" not in self._hello["capabilities"]
+            and not raw_global
             else False
         )
         if missing_bound_contracts:
@@ -508,6 +523,7 @@ class Connection:
                 and params.get("query", {}).get("kind") in ("inputContext", "launch")
             )
             and "nativeUnitReadinessV2" not in self._hello["capabilities"]
+            and not raw_global
             else False
         )
         if missing_unit_readiness:
@@ -542,6 +558,7 @@ class Connection:
                 and params.get("intent", {}).get("kind") in ("click", "openMenu")
                 and params.get("target", {}).get("capture") is None
                 and "nativeActionIntents" not in self._hello["capabilities"]
+                and not raw_global
             )
             else False
         )
@@ -555,6 +572,7 @@ class Connection:
             method == "begin"
             and params.get("intent", {}).get("kind") in ("focus", "key")
             and "nativeKeyboardIntents" not in self._hello["capabilities"]
+            and not raw_global
         ):
             raise local_failure(
                 "backend does not provide nativeKeyboardIntents",
@@ -565,6 +583,7 @@ class Connection:
             method == "begin"
             and params.get("intent", {}).get("kind") in ("insert", "paste")
             and "nativeTextInput" not in self._hello["capabilities"]
+            and not raw_global
         ):
             raise local_failure(
                 "backend does not provide nativeTextInput",
@@ -684,7 +703,7 @@ class Connection:
         )
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        pure = method == "capture" or method == "inspect" and params.get("query", {}).get("kind") == "capturedText"
+        pure = method in ("capture", "locatePoint") or method == "inspect" and params.get("query", {}).get("kind") == "capturedText"
         pending = dict(
             id=id__value,
             method=method,

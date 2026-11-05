@@ -37,28 +37,11 @@ import ApplicationServices
                 input["geometryCurrent"] = "yes"
                 input["pointerRoute"] = proof == nil ? "no" : "yes"
                 declarations.declareClick(
-                    .pointer(.click), offer: NativePopupClickPolicy.pointerOffer(
-                        proof, delivery: op.request.globalInput ? .systemPointer : .windowDirected))
+                    .pointer(.click), offer: NativePopupClickPolicy.pointerOffer(proof))
                 return
             }
             foreground = pointer.foregroundWindow(at: point)
             input["geometryCurrent"] = "yes"
-            if op.request.globalInput {
-                let physical = pointer.physicalClickSample(at: point)
-                var offer = NativeClickContract(
-                    routeFamily: "macos.hid.v1", delivery: .systemPointer,
-                    admission: physical.ready && !exposure && !foregroundHitRequired ? .ready : .preparationRequired,
-                    reason: exposure ? "The original element needs to be scrolled into view."
-                        : foregroundHitRequired ? "The original element hit needs window preparation."
-                        : physical.ready ? nil : "The exact target window needs foreground preparation.",
-                    preparationOptions: foregroundHitRequired ? ["foreground"]
-                        : physical.ready ? (exposure ? ["background"] : []) : ["foreground"],
-                    backgroundFamily: "macos.hid.v1", backgroundUnavailable: !physical.ready)
-                offer.qtComboChoice = qtComboChoice
-                declarations.declareClick(.pointer(.click), offer: offer)
-                input["pointerRoute"] = physical.ready ? "yes" : "no"
-                return
-            }
             var transport = true
             do {
                 try BackgroundEvents.requirePointerRoute(window: pointer.window)
@@ -88,19 +71,7 @@ import ApplicationServices
             declarations.declareClick(.pointer(.click), offer: offer)
             input["pointerRoute"] = ready ? "yes" : "no"
         }
-        if plan.query.desktop {
-            let pointer = try NativePointerIntent(
-                unit: "pointer_sequence", kind: "click", parameters: op.request.parameters, foreground: false)
-            _ = try access.units.desktopUnit(binding.wire).pointer(pointer, requireAuthorization: false)
-            foreground = true
-            input["geometryCurrent"] = "yes"
-            input["pointerRoute"] = "yes"
-            declarations.declareClick(
-                .desktop("click"),
-                offer: NativeClickContract(
-                    routeFamily: "macos.hid.desktop.v1", delivery: .systemPointer, admission: .ready, reason: nil,
-                    preparationOptions: []))
-        } else if binding.wire["capture"] is String {
+        if binding.wire["capture"] is String {
             let captured = try access.captures.input(binding.wire)
             let pointer = NativePointerUnit(capture: captured)
             let request = try NativePointerIntent(
@@ -274,16 +245,11 @@ import ApplicationServices
                 {
                     // A pointer geometry failure cannot erase an independent
                     // action on the retained object.
-                    for (family, delivery) in [
-                        ("macos.windowDirected.v1", NativeClickDelivery.windowDirected),
-                        ("macos.hid.v1", .systemPointer)
-                    ] {
-                        declarations.declareClick(
-                            .pointer(.click),
-                            offer: .init(
-                                routeFamily: family, delivery: delivery, admission: .insufficientEvidence,
-                                reason: error.description, preparationOptions: []))
-                    }
+                    declarations.declareClick(
+                        .pointer(.click),
+                        offer: .init(
+                            routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
+                            admission: .insufficientEvidence, reason: error.description, preparationOptions: []))
                 }
             }
         } else {

@@ -52,6 +52,7 @@ import AppKit
         NSApplication.shared.setActivationPolicy(.prohibited)
         try await foregroundResponsibilitySurvivesCandidates()
         try await candidateDependencyExpiresWithoutDroppingDebt()
+        try await sameCandidateKeepsForegroundDependencyAcrossSteps()
         try await firstClaimUsesCurrentUserContext()
         try await localPreparationDoesNotDemandIdleUser()
         try await userTakeoverOnlyConstrainsRestoration()
@@ -75,6 +76,42 @@ import AppKit
             owner.report(to: activity)
             precondition(activity.finish(dispatch: "notDispatched", cleanup: "complete")["foregroundRestoration"]
                          as? String == "retained")
+            return ["dispatch": "notDispatched", "cleanup": "complete"]
+        }
+        _ = op.finish()
+    }
+
+    @MainActor static func sameCandidateKeepsForegroundDependencyAcrossSteps() async throws {
+        let scene = Scene(target: NativeProcessIdentity.read(getpid())!)
+        let owner = scene.owner(), op = try operation(owner)
+        let candidate = "keyboard-window-command"
+        _ = try await op.execute(step: 1, payload: Data([1]), candidateID: candidate) {
+            owner.requireForegroundForCandidate()
+            owner.recordPreparation(target: scene.target, foreground: true)
+            scene.foreground = scene.target.pid
+            return ["dispatch": "notDispatched", "cleanup": "complete"]
+        }
+        _ = try await op.execute(step: 2, payload: Data([2]), candidateID: candidate) {
+            precondition(owner.hasForegroundObligation && owner.retainsForegroundForInput,
+                         "receiver preparation and dispatch are steps of the same foreground-dependent candidate")
+            let activity = scene.recorder(step: 2)
+            await NativeInputActivity.$current.withValue(activity) {
+                try! await NativeForegroundRestorationScope.perform(
+                    target: BackgroundTarget(.current),
+                    onPreparation: { _ in preconditionFailure("a foreground-dependent input cannot return early") }
+                ) {}
+            }
+            precondition(owner.retainsForegroundForInput && scene.foreground == scene.target.pid,
+                         "first-keydown restitution must preserve a selected foreground input mechanism")
+            owner.report(to: activity)
+            precondition(activity.finish(dispatch: "notDispatched", cleanup: "complete")["foregroundRestoration"]
+                         as? String == "retained")
+            return ["dispatch": "notDispatched", "cleanup": "complete"]
+        }
+        _ = try await op.execute(step: 3, payload: Data([3]), candidateID: "another-native-mechanism") {
+            precondition(!owner.retainsForegroundForInput && owner.hasForegroundObligation,
+                         "another candidate releases the input dependency but preserves the operation's return debt")
+            precondition(owner.original == scene.original)
             return ["dispatch": "notDispatched", "cleanup": "complete"]
         }
         _ = op.finish()

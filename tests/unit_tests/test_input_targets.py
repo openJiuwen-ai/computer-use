@@ -13,6 +13,7 @@ from computer_use.client.computer import computer_for_controller
 from computer_use.client.targets import image_target, target_request
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.requests import ActOnElement
+from computer_use.interaction.requests import ComputerInput
 from computer_use.native.contracts import Binding
 from computer_use.session.image_coordinates import ImageCoordinates
 from computer_use.session.windows import WindowReferences
@@ -23,8 +24,10 @@ from unit_tests.test_sync_sdk import Controller
 def test_explicit_global_and_element_input_reuse_one_binding():
     class Recording(Controller):
         async def run(self, request):
-            if isinstance(request, ActOnElement):
+            if isinstance(request, (ActOnElement, ComputerInput)):
                 self.requests.append(request)
+            if isinstance(request, ComputerInput):
+                return {"status": "dispatched"}
             return await super().run(request)
 
     controller = Recording()
@@ -36,11 +39,21 @@ def test_explicit_global_and_element_input_reuse_one_binding():
         target = element.target
         controller.current = {"binding": Binding("session", "app", "window", "surface", "new")}
         computer.click(target=element)
-        computer.type_text("value", target=target, replace=True)
-        computer.press_key("Return", target=target)
+        computer.click(target=target)
+        computer.type_text("value")
+        computer.press_key("Return")
         element.click()
-        assert [request.global_input for request in controller.requests] == [True, True, True, False]
-        assert all(request.snapshot["binding"] == original for request in controller.requests)
+        global_requests = controller.requests[:-1]
+        assert all(isinstance(request, ComputerInput) for request in global_requests)
+        assert all(request.intent.global_input for request in global_requests)
+        assert all(request.points[0]._binding == original for request in global_requests[:2])
+        assert all(request.points == () for request in global_requests[2:])
+        assert controller.requests[-1].global_input is False
+        assert controller.requests[-1].snapshot["binding"] == original
+        with pytest.raises(TypeError):
+            computer.type_text("value", target=target, replace=True)
+        with pytest.raises(TypeError):
+            computer.press_key("Return", target=target)
         assert controller.resolutions == ["Field"]
         with pytest.raises(FrozenInstanceError):
             target._binding = controller.current["binding"]
@@ -55,7 +68,7 @@ def test_target_cannot_cross_sessions_or_silently_mix_coordinate_and_element_arg
             b.click(target=target)
         with pytest.raises(ComputerUseError, match="exactly one"):
             a.click(at=(1, 2), target=target)
-        with pytest.raises(ComputerUseError, match="two image point targets"):
+        with pytest.raises(ComputerUseError, match="start and end must differ"):
             a.drag(target, target)
         assert first.actions == second.actions == []
 
@@ -132,17 +145,43 @@ def test_desktop_target_retains_original_scaled_map_across_reads_and_releases_it
     assert windows.capture_references() == {"second"}
 
 
+def test_desktop_locator_uses_delivered_geometry_without_epoch_input_authority():
+    from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
+
+    epoch = [1]
+    desktop = DesktopStore(DesktopImageAccess(lambda *args: None, lambda: epoch[0], lambda: True))
+    controller = SimpleNamespace(desktop=desktop, interfaces=SimpleNamespace(windows=WindowReferences()))
+    state = {
+        "desktopRef": "image", "binding": {"session": "session"}, "screenshot": capture("image").image,
+        "observation": {"displays": [{"captured": True, "rect": {"x": 0, "y": 0, "width": 100, "height": 80}}]},
+    }
+    desktop.record(state)
+    desktop.delivered(state["screenshot"], ImageCoordinates((100, 80), (50, 40)))
+    epoch[0] += 1
+    target = image_target(controller, None, (10, 15))
+    assert target._point == (20, 30) and target._binding.capture == "image"
+    # Other platforms' existing captured input eligibility stays separate.
+    with pytest.raises(ComputerUseError, match="not been returned"):
+        desktop.check_coordinates(10, 15)
+
+
 @pytest.mark.parametrize("global_input", [False, True])
 def test_operation_scope_crosses_the_production_wire_schema(global_input):
-    from computer_use.native.contracts import HostPolicy, Intent
+    from computer_use.native.contracts import GlobalTarget, HostPolicy, Intent
     from computer_use.native.transport import ConnectionPort, encode_target
     from computer_use.protocol.execution import decode_begin
 
     port = ConnectionPort(SimpleNamespace(platform="macos", protocol_version=6, capabilities=()), HostPolicy())
     payload = port._intent_payload(Intent("click", {"button": "left", "count": 1}, global_input=global_input))
-    target = Binding("s", "a", "w", "surface", "node")
+    target = GlobalTarget("s") if global_input else Binding("s", "a", "w", "surface", "node")
     decoded = decode_begin({"mode": "write", "intent": payload, "target": encode_target(target)})
     assert decoded["intent"]["globalInput"] is global_input
+    if global_input:
+        with pytest.raises(ValueError, match="global session scope"):
+            decode_begin({
+                "mode": "write", "intent": payload,
+                "target": encode_target(Binding("s", "a", "w", "surface", "node")),
+            })
     for platform in ("windows", "linux"):
         port.connection.platform = platform
         assert "globalInput" not in port._intent_payload(Intent("click", {}, global_input=True))

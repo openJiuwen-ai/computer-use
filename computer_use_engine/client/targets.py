@@ -53,10 +53,10 @@ def window_target(window):
 
 def image_target(controller, owner, point):
     if owner is None:
-        controller.desktop.check_coordinates(*point)
-        ref = controller.desktop.target(True)
+        controller.desktop.check_coordinates(*point, current=False)
+        ref = controller.desktop.target(True, current=False)
         state = controller.desktop.observed(ref)
-        mapped = controller.desktop.map_parameters("click", {"x": point[0], "y": point[1]})
+        mapped = controller.desktop.map_parameters("click", {"x": point[0], "y": point[1]}, current=False)
         target = Target(
             controller,
             None,
@@ -66,8 +66,8 @@ def image_target(controller, owner, point):
         )
         controller.interfaces.windows.retain_target_capture(target, ref)
         return target
-    image = replace(input_image(controller, owner))
-    piece, _ = image.hit(point)
+    image = replace(input_image(controller, owner, current=False))
+    piece, _ = image.hit(point, scope_required=False)
     target = Target(controller, owner, piece.image.target, _point=point, _image=image, _internal=True)
     controller.interfaces.windows.retain_target_capture(target, piece.image.target.capture)
     return target

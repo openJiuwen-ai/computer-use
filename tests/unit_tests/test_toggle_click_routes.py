@@ -89,13 +89,9 @@ def test_toggle_global_click_is_explicit_and_respects_host_permission(role, auth
         choose(current, CLICK, HostPolicy(allow_global_input=authorized), Attempts())
     assert scoped.value.code == "input_unavailable"
     explicit = replace(CLICK, global_input=True)
-    if authorized:
-        command = choose(current, explicit, HostPolicy(allow_global_input=True), Attempts())
-        assert command.primitive == hid
-    else:
-        with pytest.raises(ComputerUseError) as failure:
-            choose(current, explicit, HostPolicy(allow_global_input=False), Attempts())
-        assert failure.value.code == "permission_required"
+    with pytest.raises(ComputerUseError) as failure:
+        choose(current, explicit, HostPolicy(allow_global_input=authorized), Attempts())
+    assert failure.value.code == "input_unavailable"
 
 
 @pytest.mark.anyio

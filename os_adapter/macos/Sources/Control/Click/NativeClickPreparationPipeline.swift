@@ -88,10 +88,6 @@ import ApplicationServices
                 } catch let error as DriverError where error.code == .inputUnavailable {
                     throw NativePreparationUnavailable(description: error.description)
                 }
-            case .systemPointer:
-                try AuthorizeNativeClickForegroundPass.run(plan)
-                try await PrepareNativeClickForegroundPass.run(
-                    preparation, boundary: boundary, receipt: receipt, evidence: evidence)
             case .objectAction, .objectSelection: break
             }
         }

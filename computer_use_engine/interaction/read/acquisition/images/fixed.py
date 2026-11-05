@@ -172,7 +172,8 @@ class FixedWindowImagePipeline(Node[Binding, FixedImageAttempt]):
             self.port.calls.validate_claim(control.remaining)
             return await self.loop.arun(value, control)
         try:
-            timeout = min(30000, control.remaining()) if control.remaining is not None else 30000
+            available = control.remaining() if control.remaining is not None else None
+            timeout = min(30000, available) if available is not None else 30000
         except TimeoutError as error:
             if self.port.calls.retired or self.port.connection.session_identity != value.generation:
                 raise

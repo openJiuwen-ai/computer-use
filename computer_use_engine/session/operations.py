@@ -20,7 +20,6 @@ _active = 0
 _budget = ContextVar("computer_use_operation_budget", default=None)
 _cancellation_source = ContextVar("computer_use_operation_cancellation", default=None)
 OPERATION_TARGET_MS = 1000
-OPERATION_BUDGET_MS = 2000
 
 
 class OperationDeadlineExceeded(TimeoutError):
@@ -28,21 +27,22 @@ class OperationDeadlineExceeded(TimeoutError):
 
 
 class OperationBudget:
-    """One absolute clock and original cancellation source for an SDK operation.
+    """Shared timing, cancellation and an optional explicit operation deadline.
 
-    Native claims may have shorter local limits, but never extend this clock.
+    Ordinary SDK operations have no total time cutoff. Native claims retain
+    their own timeouts; an explicitly supplied enclosing deadline narrows them.
     Completed receipts and mandatory cleanup remain publishable after expiry;
     a late completed result is recorded as an overrun rather than erased.
     """
 
-    def __init__(self, timeout_ms=OPERATION_BUDGET_MS, *, cancelled=None, clock=time.monotonic):
-        if type(timeout_ms) is not int or timeout_ms < 1:
+    def __init__(self, timeout_ms=None, *, cancelled=None, clock=time.monotonic):
+        if timeout_ms is not None and (type(timeout_ms) is not int or timeout_ms < 1):
             raise ValueError("Invalid SDK operation budget")
         self._clock = clock
         self.started = clock()
-        self.deadline = self.started + timeout_ms / 1000
+        self.deadline = self.started + timeout_ms / 1000 if timeout_ms is not None else None
         self.timeout_ms = timeout_ms
-        self.target_ms = min(OPERATION_TARGET_MS, timeout_ms)
+        self.target_ms = min(OPERATION_TARGET_MS, timeout_ms) if timeout_ms is not None else OPERATION_TARGET_MS
         self.target_deadline = self.started + self.target_ms / 1000
         self.operation_id = uuid4().hex
         self.cancelled = cancelled or (lambda: False)
@@ -53,7 +53,7 @@ class OperationBudget:
 
     @property
     def expired(self):
-        return self._clock() >= self.deadline
+        return self.deadline is not None and self._clock() >= self.deadline
 
     @property
     def target_exceeded(self):
@@ -65,15 +65,17 @@ class OperationBudget:
             raise asyncio.CancelledError("SDK operation cancelled")
         return max(0, int((self.target_deadline - self._clock()) * 1000))
 
-    def available_ms(self):
-        """Return optional-work time; an explicit host stop is never hidden."""
+    def available_ms(self) -> int | None:
+        """Return remaining explicit time, or None; always honor host cancellation."""
         if self.cancelled():
             raise asyncio.CancelledError("SDK operation cancelled")
+        if self.deadline is None:
+            return None
         return max(0, int((self.deadline - self._clock()) * 1000))
 
-    def remaining(self):
+    def remaining(self) -> int | None:
         value = self.available_ms()
-        if value < 1:
+        if value is not None and value < 1:
             raise OperationDeadlineExceeded(f"SDK operation exhausted its original {self.timeout_ms} ms budget")
         return value
 
@@ -98,8 +100,8 @@ def cancellation_scope(cancelled):
 
 
 @contextmanager
-def operation_budget():
-    """Nested controller operations inherit the same call and original clock."""
+def operation_budget(timeout_ms=None):
+    """Share one call context; impose a total deadline only when explicitly supplied."""
     existing = current_operation_budget()
     if existing is not None:
         yield existing
@@ -112,7 +114,7 @@ def operation_budget():
         active = task_ref()
         return bool(source is not None and source() or active is not None and active.cancelling())
 
-    token = _budget.set(OperationBudget(cancelled=cancelled))
+    token = _budget.set(OperationBudget(timeout_ms, cancelled=cancelled))
     try:
         yield current_operation_budget()
     finally:

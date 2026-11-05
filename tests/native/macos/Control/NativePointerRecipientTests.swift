@@ -17,6 +17,8 @@ import ApplicationServices
             title: "host", width: 400, height: 300)
         let point = CGPoint(x: 180, y: 140)
         var hit: AXUIElement?
+        var systemHit: AXUIElement?
+        var systemHitCount = 0
         var actual: pid_t? = 91413
         var membership = true
         var proxyWindow: CGWindowID? = 2999
@@ -48,6 +50,11 @@ import ApplicationServices
                 precondition(pid == self.host.pid && point == self.point)
                 return self.hit
             }
+            query.systemHit = { point in
+                precondition(point == self.point)
+                self.systemHitCount += 1
+                return self.systemHit
+            }
             query.actualPID = { node in
                 if CFEqual(node, self.nativeWindow) { return self.host.pid }
                 if CFEqual(node, self.element) { return self.actual }
@@ -55,8 +62,9 @@ import ApplicationServices
                 if CFEqual(node, self.other) { return self.endpointPID }
                 return self.host.pid
             }
-            query.belongs = { _, nativeWindow, mapping in
-                self.membership && nativeWindow.map { CFEqual($0, self.nativeWindow) } != false
+            query.belongs = { node, nativeWindow, mapping in
+                self.membership && !CFEqual(node, self.other)
+                    && nativeWindow.map { CFEqual($0, self.nativeWindow) } != false
                     && mapping.id == self.host.id && mapping.pid == self.host.pid
             }
             query.process = { self.processes[$0] }
@@ -83,9 +91,14 @@ import ApplicationServices
             return query
         }
 
-        func resolve(captured: Bool = false) throws -> NativePointerRecipient {
-            try NativePointerRecipient.resolve(
-                host, nativeWindow: nativeWindow, element: captured ? nil : element, at: point, using: queries())
+        func resolve(captured: Bool = false, foreground: Bool = false, preparedHit: AXUIElement? = nil) throws
+            -> NativePointerRecipient
+        {
+            let foregroundHit: NativeInputWindowHit? = foreground
+                ? .init(windowServer: .window(host.id), accessibility: nil, accessibilityElement: preparedHit) : nil
+            return try NativePointerRecipient.resolve(
+                host, nativeWindow: nativeWindow, element: captured ? nil : element, at: point,
+                foregroundHit: foregroundHit, using: queries())
         }
     }
 
@@ -98,7 +111,75 @@ import ApplicationServices
         } catch { preconditionFailure("unexpected failure: \(error)") }
     }
 
+    static func preparedLocalPointReadiness() {
+        // Actual inactive-window experiment: unchanged key window, prepared
+        // fixed local destination, app AXActive=false, no global foreground.
+        // Ordinary routes retain their existing preparation rule.
+        func ready(_ requirement: NativePointerReadiness.Requirement,
+                   focus: NativePointerReadiness.WindowFocus = .target,
+                   prepared: Bool = true) -> Bool {
+            NativePointerReadiness.ready(
+                kind: .click, foreground: false, windowKind: .keyRequiring, focus: focus,
+                backgroundPrepared: prepared, backgroundReportedActive: false, requirement: requirement)
+        }
+        precondition(!ready(.contentReceiver))
+        precondition(!ready(.foregroundWindowPoint))
+        precondition(ready(.preparedLocalPoint))
+        precondition(!ready(.preparedLocalPoint, prepared: false))
+        // The return's queued provider-deactivation callback can retire the
+        // shared transport cache after this point receipt was consumed. The
+        // fixed gesture keeps its own receipt; ordinary routes do not.
+        var cached = true
+        let requirement = NativePointerReadiness.Requirement.preparedLocalPoint
+        precondition(NativePointerReadiness.prepared(requirement: requirement, cached: cached))
+        cached = false
+        let pointReceipt = NativePointerReadiness.prepared(requirement: requirement, cached: cached)
+        precondition(pointReceipt && ready(requirement, prepared: pointReceipt))
+        precondition(!NativePointerReadiness.prepared(requirement: .contentReceiver, cached: cached))
+        precondition(!ready(requirement, focus: .otherWindow, prepared: pointReceipt),
+                     "a live point receipt does not hide a real key-window change")
+        for focus: NativePointerReadiness.WindowFocus in [.otherWindow, .absent, .unresolved, .failed, .notRequired] {
+            precondition(!ready(.preparedLocalPoint, focus: focus),
+                         "returned point never borrows another or unconfirmed window receiver")
+        }
+    }
+
+    @MainActor static func preparedPointLifetime() throws {
+        let local = Scene()
+        local.actual = local.host.pid
+        let recipient = try local.resolve(captured: true)
+        precondition(recipient.canPrepareBackgroundPoint)
+        func proof() -> NativePreparedPointerPoint {
+            NativePreparedPointerPoint(
+                window: local.host, point: local.point, recipient: recipient,
+                process: local.processes[local.host.pid]!)
+        }
+        let once = proof()
+        let consumed = try once.consume(window: local.host, point: local.point, currentProcess: { local.processes[$0] })
+        precondition(consumed.eventWindow.id == local.host.id)
+        expectError(.invalidRequest) {
+            _ = try once.consume(window: local.host, point: local.point, currentProcess: { local.processes[$0] })
+        }
+        expectError(.staleTarget) {
+            _ = try proof().consume(window: local.host, point: .zero, currentProcess: { local.processes[$0] })
+        }
+        expectError(.staleTarget) {
+            _ = try proof().consume(window: local.host, point: local.point, currentProcess: { local.identity($0, seconds: 2) })
+        }
+        let unknown = Scene()
+        unknown.hit = nil
+        let unknownRecipient = try unknown.resolve(captured: true)
+        precondition(!unknownRecipient.canPrepareBackgroundPoint,
+                     "unknown AX content retains the previous foreground recipe")
+        let service = Scene()
+        let serviceRecipient = try service.resolve(captured: true)
+        precondition(!serviceRecipient.canPrepareBackgroundPoint,
+                     "host local activity cannot qualify a remote event service")
+    }
+
     @MainActor static func main() throws {
+        preparedLocalPointReadiness()
+        try preparedPointLifetime()
         let retained = Scene()
         // A pointer target is not the keyboard focus or a separately queried hit.
         retained.hit = retained.other
@@ -122,8 +203,59 @@ import ApplicationServices
         precondition(pointRecipient.eventWindow.id == 2858,
                      "a selected gesture keeps its recipient instead of following later focus/point reads")
 
-        // Unknown remote evidence cannot disable an independent ordinary host
-        // pointer route or turn a visual-only surface into a public AX gate.
+        // Cold image clicks on NSOpenPanel return a host AXSheet from the app
+        // root even after activation. Exact foreground preparation makes the
+        // system-wide hit authoritative for the content point inside that sheet.
+        let coarse = Scene()
+        coarse.hit = coarse.nativeWindow
+        coarse.systemHit = coarse.element
+        let prepared = try coarse.resolve(captured: true, foreground: true)
+        precondition(prepared.isRemote && prepared.eventWindow.pid == coarse.endpointPID)
+        precondition(coarse.systemHitCount == 1)
+
+        // When the public window fallback already read the hit, dispatch uses
+        // that same object instead of repeating the system-wide AX query.
+        let shared = Scene()
+        shared.hit = shared.nativeWindow
+        let sharedRecipient = try shared.resolve(captured: true, foreground: true, preparedHit: shared.element)
+        precondition(sharedRecipient.isRemote && shared.systemHitCount == 0)
+
+        let covered = Scene()
+        covered.hit = covered.nativeWindow
+        covered.systemHit = covered.other
+        let background = try covered.resolve(captured: true)
+        precondition(!background.isRemote && covered.systemHitCount == 0,
+                     "a background point must not query a covering application's AX content")
+        let unrelated = try covered.resolve(captured: true, foreground: true)
+        precondition(!unrelated.isRemote && covered.systemHitCount == 1,
+                     "a system hit outside the real original parent chain cannot replace its receiver")
+
+        let missingSystem = Scene()
+        let knownRemote = try missingSystem.resolve(captured: true, foreground: true)
+        precondition(knownRemote.isRemote && missingSystem.systemHitCount == 0,
+                     "known remote content needs no additional system AX query")
+
+        let coarseSystem = Scene()
+        coarseSystem.systemHit = coarseSystem.nativeWindow
+        let preciseApp = try coarseSystem.resolve(captured: true, foreground: true)
+        precondition(preciseApp.isRemote && coarseSystem.systemHitCount == 0,
+                     "a coarse system hit must not replace precise app content with its host")
+
+        let coarsePrepared = Scene()
+        let preciseAfterPreparation = try coarsePrepared.resolve(
+            captured: true, foreground: true, preparedHit: coarsePrepared.nativeWindow)
+        precondition(preciseAfterPreparation.isRemote && coarsePrepared.systemHitCount == 0,
+                     "a cached coarse hit must not bypass the application's precise remote receiver")
+
+        let visualOnly = Scene()
+        visualOnly.hit = nil
+        let visualRecipient = try visualOnly.resolve(captured: true, foreground: true)
+        precondition(!visualRecipient.isRemote && visualOnly.systemHitCount == 1,
+                     "AX absence is not a new public prerequisite on admitted visual window transport")
+
+        // Missing AX is not a public gate. Once foreign content is positively
+        // known, however, unresolved event addressing must not silently send
+        // the gesture to the host and report an ordinary dispatch.
         for missing in 0..<12 {
             let scene = Scene()
             var captured = false
@@ -141,11 +273,18 @@ import ApplicationServices
             case 10: scene.processes[91413] = nil
             default: scene.processes[scene.host.pid] = nil
             }
-            let local = try scene.resolve(captured: captured)
-            precondition(
-                !local.isRemote && local.eventWindow.id == scene.host.id && local.eventWindow.pid == scene.host.pid,
-                "missing or ordinary endpoint evidence must retain host delivery")
+            if missing < 3 {
+                let local = try scene.resolve(captured: captured)
+                precondition(!local.isRemote && local.eventWindow.id == scene.host.id)
+            } else {
+                expectError(.inputUnavailable) { _ = try scene.resolve(captured: captured) }
+            }
         }
+
+        let hostAncestor = Scene()
+        hostAncestor.endpointPID = hostAncestor.host.pid
+        hostAncestor.category = .ordinaryApplication
+        expectError(.inputUnavailable) { _ = try hostAncestor.resolve() }
 
         let contradictory = Scene()
         contradictory.windows[2858] = .init(id: 2858, pid: 91415, frame: contradictory.host.frame)

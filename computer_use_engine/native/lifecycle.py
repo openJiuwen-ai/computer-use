@@ -51,7 +51,7 @@ class OperationLease(Generic[LeaseTarget]):
             raise ValueError("Invalid observation component budget")
         deadline = time.monotonic() + timeout_ms / 1000
         budget = current_operation_budget()
-        if budget is not None:
+        if budget is not None and budget.deadline is not None:
             deadline = min(deadline, budget.deadline)
 
         def remaining() -> int:
@@ -97,7 +97,7 @@ class CallLifecycle:
             raise RuntimeError("Another task owns the observation budget")
         deadline = time.monotonic() + timeout_ms / 1000
         budget = current_operation_budget()
-        if budget is not None:
+        if budget is not None and budget.deadline is not None:
             deadline = min(deadline, budget.deadline)
         if previous is not None:
             deadline = min(deadline, previous[1])
@@ -133,7 +133,7 @@ class CallLifecycle:
         self._owner = asyncio.current_task()
         deadline = time.monotonic() + timeout_ms / 1000
         budget = current_operation_budget()
-        if budget is not None:
+        if budget is not None and budget.deadline is not None:
             deadline = min(deadline, budget.deadline)
         if self._limit is not None:
             if self._limit[0] is not self._owner:

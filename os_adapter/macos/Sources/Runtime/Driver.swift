@@ -139,7 +139,7 @@ import CoreGraphics
                                 "nativeVisualSurfaceQuery", "nativeSurfaceBatch", "nativeVisualSurfaceBatch",
                                 "nativeApplicationListing", "nativeApplicationRoots", "nativeMenuActions",
                                 "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeCaptureRetention",
-                                "nativeDesktopInput",
+                                "nativeGlobalInput", "nativePointLocation",
                                 "nativeObservationPreparation",
                                 "nativeAppChangeEvents",
                                 "nativeQueryActionProfile",

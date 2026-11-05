@@ -26,7 +26,7 @@ import ApplicationServices
         precondition(proof() != nil && proof(currentFocus: .target) != nil)
         precondition(proof(initialForeground: false, initialPrepared: true) != nil)
         for value in [
-            proof(kind: .scroll), proof(kind: .drag), proof(delivery: .systemPointer),
+            proof(kind: .scroll), proof(kind: .drag), proof(delivery: .objectAction),
             proof(requirement: .foregroundWindowPoint), proof(remote: true), proof(initialReady: false),
             proof(initialFocus: .absent), proof(initialFocus: .otherWindow), proof(initialFocus: .failed),
             proof(initialForeground: false, initialPrepared: false), proof(currentReady: true),

@@ -41,7 +41,7 @@ import ApplicationServices
                 description: description)
             pointer = nil
         case .pointer(.click):
-            guard command.kind == "pointer_sequence", [.windowDirected, .systemPointer].contains(offer.delivery) else {
+            guard command.kind == "pointer_sequence", offer.delivery == .windowDirected else {
                 throw DriverError("click pointer contract mismatch", code: .invalidRequest)
             }
             let capture = command.target["capture"] is String
@@ -51,7 +51,7 @@ import ApplicationServices
             pointer = request
             if let qualification = offer.popupPointer {
                 guard !capture, contract.actuator == nil,
-                    offer.delivery == (op.request.globalInput ? .systemPointer : .windowDirected), !command.foreground,
+                    offer.delivery == .windowDirected, !command.foreground,
                     NativePopupClickPolicy.permitsIntent(op.request)
                 else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
                 target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))
@@ -79,13 +79,6 @@ import ApplicationServices
                 }
                 target = .element(unit)
             }
-        case .desktop("click"):
-            guard command.kind == "pointer_sequence", offer.delivery == .systemPointer, !command.foreground else {
-                throw DriverError("desktop click contract mismatch", code: .invalidRequest)
-            }
-            pointer = try NativePointerIntent(
-                unit: command.kind, kind: "click", parameters: op.request.parameters, foreground: false)
-            target = .desktop(try access.units.desktopUnit(command.target))
         default: throw DriverError("selected primitive does not implement click", code: .invalidRequest)
         }
         guard !command.foreground || offer.preparationOptions.contains("foreground") else {

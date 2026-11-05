@@ -9,7 +9,6 @@ import ApplicationServices
     func receiverRelation(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeReceiverRelation?
-    func desktopUnit(_ binding: [String: Any]) throws -> NativeDesktopUnit
     func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)?
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?

@@ -61,12 +61,12 @@ class DesktopStore:
         if self.current(png):
             self._delivered = dict(state=self._view, epoch=self.images.image_delivery_epoch(), coordinates=coordinates)
 
-    def map_parameters(self, operation, parameters):
-        self.target(True)
+    def map_parameters(self, operation, parameters, *, current=True):
+        self.target(True, current=current)
         coordinates = self._delivered.get("coordinates") if self._delivered is not None else None
         return coordinates.source_parameters(operation, parameters) if coordinates is not None else parameters
 
-    def target(self, coordinates=False):
+    def target(self, coordinates=False, *, current=True):
         state = self._view
         if state is None:
             raise local_failure(
@@ -87,7 +87,7 @@ class DesktopStore:
                 and (
                     self._delivered is None
                     or self._delivered["state"] is not state
-                    or self._delivered["epoch"] != self.images.image_delivery_epoch()
+                    or current and self._delivered["epoch"] != self.images.image_delivery_epoch()
                 )
                 else False
             )
@@ -99,8 +99,8 @@ class DesktopStore:
                 )
         return state["desktopRef"]
 
-    def check_coordinates(self, x, y):
-        self.target(True)
+    def check_coordinates(self, x, y, *, current=True):
+        self.target(True, current=current)
         coordinates = self._delivered.get("coordinates") if self._delivered is not None else None
         if coordinates is not None:
             x, y = coordinates.source_point((x, y))

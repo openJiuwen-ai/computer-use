@@ -98,7 +98,9 @@ def test_unavailable_addressed_route_requires_explicit_global_input(admission):
     directed, pointer = click_route("surface_pointer", admission), click_route("desktop_pointer")
     with pytest.raises(ComputerUseError, match="explicit Computer"):
         choose(facts(directed, pointer), CLICK, HostPolicy(), Attempts())
-    assert choose(facts(directed, pointer), replace(CLICK, global_input=True), HostPolicy(), Attempts()).primitive == pointer
+    # A legacy global flag cannot turn the object selector into raw input.
+    with pytest.raises(ComputerUseError, match="explicit Computer"):
+        choose(facts(directed, pointer), replace(CLICK, global_input=True), HostPolicy(), Attempts())
 
 
 def test_failed_addressed_route_keeps_macos_scope_and_preserves_other_platform_defaults():

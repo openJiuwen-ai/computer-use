@@ -2,6 +2,7 @@
 
 import Foundation
 import CoreGraphics
+import ApplicationServices
 
 /// Evidence for the window at a screen point. A public accessibility hit is
 /// kept distinct from WindowServer's input hit; neither proves a control effect.
@@ -14,6 +15,14 @@ struct NativeInputWindowHit: Equatable {
 
     let windowServer: WindowServer
     let accessibility: Accessibility?
+    /// Optional content hit obtained by the public window fallback. Keep the
+    /// object so a prepared pointer can resolve a hosted service without a
+    /// second system-wide query. It never changes the window-hit authority.
+    var accessibilityElement: AXUIElement? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.windowServer == rhs.windowServer && lhs.accessibility == rhs.accessibility
+    }
 
     var windowID: CGWindowID? {
         if case .window(let id) = windowServer { return id }

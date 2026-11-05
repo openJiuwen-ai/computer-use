@@ -7,6 +7,13 @@ import ApplicationServices
 @MainActor enum ResolveNativeResourceTargetPass {
     static func run(_ begin: NativeBeginRequest, access: NativeResourceAccess) throws -> NativeResourceTarget {
         let p = begin.value, mode = begin.mode, intent = begin.intent.kind
+        if NativeGlobalTarget.isGlobal(p["target"]) {
+            let scope = try NativeGlobalTarget(p["target"])
+            try access.scopes.requireSession(scope.session)
+            return NativeResourceTarget(
+                initial: scope.wire, releaseNode: {}, installation: false, discovery: false,
+                visual: false, windowScope: false, globalInput: true)
+        }
         let installation = intent == "launch" ? try access.directory.installation(p["target"]) : nil
         let discovery = installation == nil ? try access.scopes.directoryTarget(p["target"]) : nil
         let visualTarget = (p["target"] as? [String: Any]).flatMap { $0["capture"] is String ? $0 : nil }
@@ -25,13 +32,11 @@ import ApplicationServices
             }
             initial = discovery
             releaseNode = {}
-        } else if let visualTarget {
-            let desktop = access.scopes.isDesktop(visualTarget)
-            guard mode == "write",
-                NativePointerIntent.Kind(rawValue: intent) != nil || desktop && ["insert", "key"].contains(intent)
+        } else if visualTarget != nil {
+            guard mode == "write", NativePointerIntent.Kind(rawValue: intent) != nil
             else {
                 throw DriverError(
-                    "image input supports pointer intents; desktop input also supports insertion and keys",
+                    "window image input supports pointer intents",
                     code: .invalidRequest)
             }
             try access.sharing.checkAvailable()

@@ -7,6 +7,16 @@ import ApplicationServices
 /// the system-wide AX hit as z-order based. A window catalogue alone cannot
 /// establish an input hit through transparent or pass-through windows.
 @MainActor enum NativeInputWindowQuery {
+    struct PointHit {
+        let status: AXError
+        let element: AXUIElement?
+    }
+
+    struct AccessibilitySample {
+        let result: NativeInputWindowHit.Accessibility
+        let element: AXUIElement?
+    }
+
     struct PublicIdentity {
         let result: NativeInputWindowHit.Accessibility
         let window: NativeInputWindowHit.PublicWindow?
@@ -15,15 +25,42 @@ import ApplicationServices
     static func accessibility(
         at point: CGPoint, retained: WindowGeometry.WindowMapping? = nil, nativeWindow: AXUIElement? = nil
     ) -> NativeInputWindowHit.Accessibility {
+        sampleAccessibility(at: point, retained: retained, nativeWindow: nativeWindow).result
+    }
+
+    /// Point queries have one implementation; their caller owns whether the
+    /// result describes a window hit or supplies optional content routing.
+    static func pointHit(at point: CGPoint, application pid: pid_t? = nil) -> PointHit {
         guard point.x.isFinite, point.y.isFinite, abs(point.x) <= Double(Float.greatestFiniteMagnitude),
             abs(point.y) <= Double(Float.greatestFiniteMagnitude)
-        else { return .unresolvedWindow }
+        else { return .init(status: .illegalArgument, element: nil) }
         var hit: AXUIElement?
         let status = AXUIElementCopyElementAtPosition(
-            AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit)
-        if status == .noValue { return .noElement }
-        guard status == .success else { return .failed(status.rawValue) }
-        guard let hit else { return .noElement }
+            pid.map(AXUIElementCreateApplication) ?? AXUIElementCreateSystemWide(),
+            Float(point.x), Float(point.y), &hit)
+        return .init(status: status, element: status == .success ? hit : nil)
+    }
+
+    static func sampleAccessibility(
+        at point: CGPoint, retained: WindowGeometry.WindowMapping? = nil, nativeWindow: AXUIElement? = nil
+    ) -> AccessibilitySample {
+        let sample = pointHit(at: point)
+        let result: NativeInputWindowHit.Accessibility
+        if sample.status == .noValue {
+            result = .noElement
+        } else if sample.status != .success {
+            result = .failed(sample.status.rawValue)
+        } else if let hit = sample.element {
+            result = windowIdentity(of: hit, at: point, retained: retained, nativeWindow: nativeWindow)
+        } else {
+            result = .noElement
+        }
+        return .init(result: result, element: sample.element)
+    }
+
+    private static func windowIdentity(
+        of hit: AXUIElement, at point: CGPoint, retained: WindowGeometry.WindowMapping?, nativeWindow: AXUIElement?
+    ) -> NativeInputWindowHit.Accessibility {
         var pid: pid_t = 0
         guard AXUIElementGetPid(hit, &pid) == .success, pid > 0 else { return .unresolvedWindow }
         let owner: AXUIElement

@@ -10,7 +10,7 @@ enum NativeInputAuthorization {
     static func requireGlobalInput(_ route: String) throws {
         guard globalInputRequested else {
             throw DriverError(
-                "this macOS object operation cannot use \(route); use an explicit Computer input method with the same target",
+                "this macOS object operation cannot use \(route); use explicit Computer input for the current desktop recipient",
                 code: .inputUnavailable, effect: FailureEffect.none)
         }
         guard globalInputAllowed else {

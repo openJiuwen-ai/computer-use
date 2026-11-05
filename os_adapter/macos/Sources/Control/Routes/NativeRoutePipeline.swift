@@ -11,7 +11,6 @@ import ApplicationServices
         let context = NativeRouteContext(
             command: command, operation: op, resolved: resolved, boundary: boundary, receipt: receipt, access: access)
         switch resolved.contract.unit {
-        case .desktop(let expected): return try BuildNativeDesktopRoutePass.run(context, expected: expected)
         case .launch: throw DriverError("installation contract cannot send control input", code: .invalidRequest)
         case .selection:
             throw DriverError("native selection requires the negotiated click pipeline", code: .invalidRequest)

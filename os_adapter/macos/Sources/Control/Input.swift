@@ -52,11 +52,7 @@ import Carbon
     }
 
     static func source() throws -> CGEventSource {
-        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier != "com.apple.loginwindow" else {
-            throw DriverError(
-                "desktop is locked or unavailable; unlock the Mac before sending input", code: .desktopUnavailable)
-        }
-        guard CGPreflightPostEventAccess(), AXIsProcessTrusted() else {
+        guard CGPreflightPostEventAccess() else {
             throw DriverError(
                 """
                 accessibility permission denied; enable the driver or its launching terminal in System \
@@ -73,7 +69,6 @@ import Carbon
     static func requireDesktopInput() throws {
         try NativeInputAuthorization.requireGlobalInput("desktop")
         try RequestDiagnostics.checkCancellation()
-        try BackgroundTarget.validateDesktop(input: true)
     }
 
     private static func chord(_ key: String) throws -> (code: CGKeyCode, modifiers: [String]) {
@@ -95,6 +90,18 @@ import Carbon
         let source: CGEventSource
         let downs: [CGEvent]
         let ups: [CGEvent]
+    }
+
+    /// Consume before awaiting: failed handoff never replays a key prefix or
+    /// repeats the sequence's before-input preparation.
+    @MainActor final class FirstKeyDown {
+        private var pending = true
+
+        func run(_ body: (@MainActor () async throws -> Void)?) async throws {
+            guard pending else { return }
+            pending = false
+            try await body?()
+        }
     }
 
     /// Allocate the complete chord before any preparation or key-down. Both
@@ -129,13 +136,13 @@ import Carbon
     static func preparedKey(
         _ key: String, delivery: NativeKeyboardDelivery, validate: @escaping @MainActor () async throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
-        onCleanupUnknown: @escaping () -> Void
+        onCleanupUnknown: @escaping () -> Void,
+        beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil
     ) async throws {
         let events = try keyEvents(key)
-        for up in events.ups { delivery.cleanup(up) }
         try await withPreparedRoute(
             source: events.source, delivery: delivery, validate: validate, onDispatch: onDispatch, onPosted: onPosted,
-            onCleanupUnknown: onCleanupUnknown
+            onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: beforeFirstKeyDown
         ) { press, release in
             for index in events.downs.indices { try await press(events.downs[index], events.ups[index], nil) }
             try await Task.sleep(for: .milliseconds(15))
@@ -148,19 +155,19 @@ import Carbon
     static func preparedText(
         _ text: String, delivery: NativeKeyboardDelivery, applicationPID: pid_t?,
         validate: @escaping @MainActor () async throws -> Void, onDispatch: @escaping @MainActor () throws -> Void,
-        onPosted: @escaping @MainActor () -> Void, onCleanupUnknown: @escaping () -> Void
+        onPosted: @escaping @MainActor () -> Void, onCleanupUnknown: @escaping () -> Void,
+        beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil
     ) async throws {
         try validateText(text)
         let source = try source(), ascii = asciiKeys()
         try await withPreparedRoute(
             source: source, delivery: delivery, validate: validate, onDispatch: onDispatch, onPosted: onPosted,
-            onCleanupUnknown: onCleanupUnknown
+            onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: beforeFirstKeyDown
         ) { press, release in
             var notBefore: TimeInterval?
             for scalar in text.unicodeScalars {
                 let (down, up) = try unicodeEvents(
                     scalar, source: source, key: ascii[String(scalar)], foreground: delivery.isGlobal)
-                delivery.cleanup(up)
                 try await press(down, up, notBefore)
                 // Keep release behind a bounded provider round trip. This is
                 // delivery settling, not a post-input focus or value assertion.
@@ -243,7 +250,6 @@ import Carbon
         validate: @escaping @MainActor () async throws -> Void, onDispatch: @escaping @MainActor () throws -> Void,
         onPosted: @escaping @MainActor () -> Void, onCleanupUnknown: @escaping () -> Void
     ) async throws {
-        delivery.cleanup(events.up)
         try await withPreparedRoute(
             source: events.source, delivery: delivery, validate: validate, onDispatch: onDispatch, onPosted: onPosted,
             onCleanupUnknown: onCleanupUnknown
@@ -291,6 +297,7 @@ import Carbon
         source: CGEventSource, delivery: NativeKeyboardDelivery, validate: @escaping @MainActor () async throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
         onCleanupUnknown: @escaping () -> Void,
+        beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil,
         send:
             @MainActor (
                 _ press: @MainActor (CGEvent, CGEvent, TimeInterval?) async throws -> Void,
@@ -305,13 +312,15 @@ import Carbon
         }
         let pair = PairedInput<CGEvent>(
             source: source,
-            post: { event in delivery.post(event, isRelease: false, onCleanupUnknown: onCleanupUnknown) },
+            post: { event in delivery.post(event) },
             canRelease: { delivery.canRelease(expectedProcess: process) },
-            postRelease: { delivery.post($0, isRelease: true, onCleanupUnknown: onCleanupUnknown) },
+            postRelease: { delivery.post($0) },
             skipped: onCleanupUnknown)
+        let firstDown = FirstKeyDown()
         try await pair.run {
             try await send(
                 { down, up, notBefore in
+                    try await firstDown.run(beforeFirstKeyDown)
                     try await InputPacing.validate(notBefore: notBefore) {
                         try await validate()
                         guard recipient.map({ NativeProcessIdentity.read($0.pid) == process }) ?? true else {
@@ -320,7 +329,6 @@ import Carbon
                         try recipient?.validateFocus()
                     }
                     try onDispatch()
-                    if case .scopedForegroundHID(let scoped) = delivery { try scoped.requireCurrentBoundary() }
                     pair.press(down, release: up)
                     onPosted()
                 }, { pair.release() })

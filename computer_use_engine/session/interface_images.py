@@ -121,8 +121,9 @@ class InterfaceImage:
             return self
         return replace(self, pieces=pieces, membership=membership, source_canvas=self.source_canvas or self)
 
-    def hit(self, point: Point) -> tuple[ImagePiece, Point]:
-        if self.unavailable_mapping:
+    def hit(self, point: Point, *, scope_required: bool = True) -> tuple[ImagePiece, Point]:
+        """Map delivered pixels; global locators need geometry, not object eligibility."""
+        if scope_required and self.unavailable_mapping:
             raise local_failure(
                 "the partial image has no confirmed overall window mapping",
                 "snapshot_expired",
@@ -132,15 +133,14 @@ class InterfaceImage:
         for piece in reversed(self.pieces):
             x, y, width, height = piece.box
             if x <= point[0] < x + width and y <= point[1] < y + height:
-                if not piece.scope_confirmed:
+                if scope_required and not piece.scope_confirmed:
                     raise local_failure("the captured window's current scope is unconfirmed", "observation_incomplete")
                 metadata = capture_metadata(piece.image.image)
                 mapped = ((point[0] - x) * metadata["width"] / width, (point[1] - y) * metadata["height"] / height)
-                with Image.open(BytesIO(piece.image.image)) as pixels:
-                    if pixels.convert("RGBA").getpixel((math.floor(mapped[0]), math.floor(mapped[1])))[3] == 0:
-                        raise local_failure(
-                            "this point is outside confirmed visible window pixels",
-                        )
+                if scope_required:
+                    with Image.open(BytesIO(piece.image.image)) as pixels:
+                        if pixels.convert("RGBA").getpixel((math.floor(mapped[0]), math.floor(mapped[1])))[3] == 0:
+                            raise local_failure("this point is outside confirmed visible window pixels")
                 return piece, mapped
         raise local_failure(
             "the point is in a gap outside the captured windows",
