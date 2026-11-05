@@ -92,7 +92,10 @@ import ApplicationServices
         let token = (raw as? [String: Any])?["operation"] as? String
         let activity = token == current?.token ? pointerActivity : nil
         return try await NativeInputAuthorization.$globalInputAllowed.withValue(state.globalInputAllowed) {
-            try await AgentPointer.$current.withValue(activity) {
+            try await NativeInputAuthorization.$globalInputRequested.withValue(
+                token != nil && token == current?.token && current?.request.globalInput == true
+            ) {
+              try await AgentPointer.$current.withValue(activity) {
                 do {
                     return try await DriverPipeline.perform(
                         method, raw, timeoutMs: timeoutMs, operation: self.operation, resource: self.resourceAccess,
@@ -101,6 +104,7 @@ import ApplicationServices
                     activity?.recordOutcome(success: false)
                     throw error
                 }
+              }
             }
         }
     }

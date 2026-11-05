@@ -47,7 +47,7 @@ struct NativeUnitBoundary {
                 if let proof = contract.click?.popupPointer {
                     guard case .pointer(.click) = contract.unit, contract.actuator == nil, contract.receiver == nil,
                         binding.node != nil, !(binding.wire["capture"] is String), !command.foreground,
-                        contract.click?.delivery == .systemPointer,
+                        contract.click?.delivery == (op.request.globalInput ? .systemPointer : .windowDirected),
                         NativePopupClickPolicy.permitsIntent(op.request)
                     else { throw DriverError("popup point qualification used by another route", code: .invalidRequest) }
                     return try access.scopes.popupPointerBoundary(command.value["target"], qualification: proof)

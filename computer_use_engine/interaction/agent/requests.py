@@ -12,7 +12,9 @@ if TYPE_CHECKING:
     from typing import Sequence
 
     from computer_use.interaction.records import ElementSnapshot, UIHandle
+    from computer_use.native.contracts import Binding
     from computer_use.protocol.records import Record
+    from computer_use.session.interface_images import InterfaceImage
     from computer_use.types import ElementPath, Point
 
 
@@ -117,6 +119,7 @@ class ActOnElement:
     snapshot: ElementSnapshot
     intent: str
     parameters: Record
+    global_input: bool = False
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,8 @@ class UIKeyboard:
     owner: UIHandle
     method: str
     parameters: Record
+    global_input: bool = False
+    target: Binding | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +154,8 @@ class UIPointer:
     intent: str
     points: tuple[Point, ...]
     options: Record
+    global_input: bool = False
+    image: InterfaceImage | None = None
 
 
 READ_REQUESTS = (ObserveUI, ObserveDesktop, ObserveElement, ObserveText)

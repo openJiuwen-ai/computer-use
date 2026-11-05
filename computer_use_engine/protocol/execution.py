@@ -207,7 +207,7 @@ unit_contracts = {
     "launch_application": ({"object"}, {"launch"}),
 }
 
-_intent = obj(dict(kind=enum("read", *intent_kinds), parameters=unknown()))
+_intent = obj(dict(kind=enum("read", *intent_kinds), parameters=unknown(), globalInput=boolean().optional()))
 _begin = obj(
     dict(
         mode=enum("read", "write"),
@@ -245,6 +245,8 @@ def decode_begin(value):
     """Bind the original payload once, before observing or preparing a route."""
     result = _begin.parse(value)
     intent, mode = result["intent"], result["mode"]
+    if intent.get("globalInput") and intent["kind"] not in ("click", "scroll", "drag", "insert", "replace", "paste", "key"):
+        raise ValueError("protocol: explicit global input requires a direct input intent")
     if "clickContract" in result and (mode != "write" or intent["kind"] != "click"):
         raise ValueError("protocol: click contract requires a write click operation")
     if not isinstance(intent["parameters"], dict):

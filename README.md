@@ -112,7 +112,7 @@ The server uses stdio. For a client that accepts an `mcpServers` configuration, 
 }
 ```
 
-Replace the checkout path with its absolute path on the target computer. Global mouse and keyboard input is available by default; qualified element or application-directed routes remain preferred. Each action records the selected route's declared need for global input separately from its actual effects. To explicitly restrict a session to non-global input, pass `--no-allow-global-input`. System permissions must still be available on the target computer.
+Replace the checkout path with its absolute path on the target computer. On macOS, App/Window/Element operations never inject global mouse or keyboard input; agents explicitly select direct Computer input methods when needed. Windows/Linux retain their existing global-input capabilities. Each action records the selected route's declared need for global input separately from its actual effects. To explicitly restrict a session to non-global input, pass `--no-allow-global-input`. System permissions must still be available on the target computer.
 
 Inside the `computer_use` tool, `computer`, `print()` and `print_image()` are available. Start by discovering application references:
 
@@ -175,12 +175,43 @@ The public SDK uses ordinary synchronous calls, including `Observation.read_deta
 When embedding it in an asyncio or GUI application, run the blocking computer-operation code in a worker thread
 so the host remains responsive. Internal driver communication, progress and cleanup continue asynchronously.
 
-`allow_global_input` is a strict boolean session option, defaulting to `True`.
-It permits global mouse/keyboard routes without promoting them above qualified
-lower-impact routes, and does not grant macOS system permissions. An explicit
-`Computer(allow_global_input=False)` restricts global input; directed operations
-may still activate their original window and change keyboard focus. Under that
-explicit restriction, an operation with no permitted route reports `permission_required`.
+`allow_global_input` is a strict boolean session option, defaulting to `True`;
+it does not grant macOS system permissions. On macOS, App/Window/Element methods
+use AX or directed events throughout preparation, input and recovery. They may
+activate/focus their target, but never inject global mouse or keyboard input.
+Direct Computer input methods explicitly select global delivery for that call.
+Windows/Linux retain the existing ability to use global input for object operations;
+the same fixed boundary is future platform work.
+`Computer(allow_global_input=False)` rejects explicit global input with `permission_required`.
+A macOS object operation lacking a qualified non-global route reports `input_unavailable`.
+
+Reuse an existing destination without another desktop read or coordinate conversion:
+
+```python
+field = app.element("Input")
+field.type_text("scoped", replace=True)
+computer.type_text("global", target=field, replace=True)
+computer.click(target=field)
+computer.press_key("Return", target=field)
+computer.paste("multiple\nlines", target=field)
+
+p = app.point((120, 80))  # Pixels in the previously delivered App image; no read or input.
+app.click(at=p)          # Directed on macOS.
+computer.click(target=p) # Global input at the same destination.
+```
+
+`Target` is an immutable destination obtained from `Element.target`, `Window.target`,
+or `Computer/App/Window.point()`. Elements and Windows also work directly as `target=`.
+Window targets accept keyboard input; pointer input needs an element or image point.
+An element target retains its original object. A point retains the source image,
+its delivered scale and native mapping, independently of later reads. Translation
+uses the same window's current position; closure, resizing, display changes and
+receiver conflicts are still checked by the relevant mechanism. Targets belong to
+one Computer session. `computer.drag(start_target, end_target)` requires points
+from the same window/desktop image. Bare desktop coordinates still use the delivered
+desktop capture; targeted methods need no desktop observation. Global input records
+cursor movement and never automatically returns the cursor. See `result.impact` for
+actual delivery and preparation effects.
 
 `App` identifies an application scope; `list_apps()` lists applications. App and
 desktop observations publish window references. Use `computer.window(ref)` to
@@ -366,7 +397,7 @@ foreground changes, restoration outcomes and global input; they do not certify a
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.
 - **Verifiable receipts**: actions retain `target / intent / status` independently of `observation_status` and `observation_error`. Input failures expose `code / effect / target / detail / impact`. `unsupported_operation` means the required capability or operation is unavailable; `permission_required` identifies a missing input grant.
-- **Background-first input**: prefer element and application-directed operations; acquire foreground focus or the global pointer only when the operation requires it.
+- **Background-first input**: prefer element and application-directed operations; on macOS, use direct Computer input methods to explicitly select global mouse or keyboard input.
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.
 

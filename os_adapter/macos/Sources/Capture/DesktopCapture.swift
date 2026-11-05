@@ -176,7 +176,7 @@ import CoreGraphics
         ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
     }
 
-    func read(maxDimension: Int = 4096, retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]) async throws -> [String: Any] {
+    func read(maxDimension: Int = 4096, retainedCaptures: Set<String> = [], retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]) async throws -> [String: Any] {
         AgentPointer.beginDesktopCapture()
         defer { AgentPointer.endDesktopCapture() }
         try RequestDiagnostics.checkObservationBudget()
@@ -359,10 +359,11 @@ import CoreGraphics
         mappings[ref] = Mapping(
             geometry: geometry, captured: captured, surfaces: surfaces, processes: processes, inputIssue: inputIssue)
         order.append(ref)
-        while order.count > 64 {
-            let expired = order.removeFirst()
-            mappings.removeValue(forKey: expired)
-            keyboards.removeValue(forKey: expired)
+        let expired = NativeCapture.retirements(order, retaining: retainedCaptures)
+        order.removeAll { expired.contains($0) }
+        for ref in expired {
+            mappings.removeValue(forKey: ref)
+            keyboards.removeValue(forKey: ref)
         }
         let destination = Self.destination()
         keyboards[ref] = inputIssue == nil && destination?.process == recipient ? destination : nil

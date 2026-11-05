@@ -5,8 +5,14 @@
 /// The runtime installs this view; route preparation and dispatch only consume it.
 enum NativeInputAuthorization {
     @TaskLocal static var globalInputAllowed = false
+    @TaskLocal static var globalInputRequested = false
 
     static func requireGlobalInput(_ route: String) throws {
+        guard globalInputRequested else {
+            throw DriverError(
+                "this macOS object operation cannot use \(route); use an explicit Computer input method with the same target",
+                code: .inputUnavailable, effect: FailureEffect.none)
+        }
         guard globalInputAllowed else {
             throw DriverError(
                 "the selected \(route) route requires global input authorization; no global input was sent",

@@ -8,7 +8,9 @@ import ApplicationServices
 @main struct NativePopupChoiceBoundaryTests {
     @MainActor static func main() async throws {
         let denied = PopupChoiceProbe()
-        let deniedResult = try await denied.click()
+        let deniedResult = try await NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            try await denied.click()
+        }
         precondition(deniedResult["dispatch"] as? String == "notDispatched")
         precondition(deniedResult["errorCode"] as? String == "permission_required", "\(deniedResult)")
         precondition(denied.mode == "Auto" && denied.events.isEmpty && denied.presses == 0)
@@ -23,8 +25,13 @@ import ApplicationServices
             qualified: false, unit: .action("AXPress", nil), kind: "native_action")
         precondition(addressedResult["dispatch"] as? String == "dispatched")
         precondition(addressed.mode == "Manual" && addressed.presses == 1 && addressed.events.isEmpty)
-        try await NativeInputAuthorization.$globalInputAllowed.withValue(true) {
-            try await authorizedCases()
+        // Qualified visible popups now use directed input even when the host
+        // prohibits global input. The explicit route retains the same bounds.
+        try await authorizedCases()
+        try await NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            try await NativeInputAuthorization.$globalInputAllowed.withValue(true) {
+                try await authorizedCases()
+            }
         }
         precondition(!NativeInputAuthorization.globalInputAllowed)
     }
@@ -576,7 +583,7 @@ import ApplicationServices
         declarations.declareClick(
             .action("AXPress", nil),
             offer: NativePopupClickPolicy.actionOffer(original, requiresPointer: required && !legacy))
-        declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(noHit ? nil : proof))
+        declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(noHit ? nil : proof, delivery: NativeInputAuthorization.globalInputRequested ? .systemPointer : .windowDirected))
         return ["primitives": declarations.primitives]
     }
     func click(
@@ -590,7 +597,7 @@ import ApplicationServices
         let contracts = PopupChoiceContracts(state.applications)
         var offer =
             qualified
-            ? NativePopupClickPolicy.pointerOffer(proof)
+            ? NativePopupClickPolicy.pointerOffer(proof, delivery: NativeInputAuthorization.globalInputRequested ? .systemPointer : .windowDirected)
             : NativeClickContract(
                 routeFamily: "macos.axAction.AXPress", delivery: .objectAction, admission: .ready, reason: nil,
                 preparationOptions: [])
@@ -601,7 +608,7 @@ import ApplicationServices
         ]
         let op = NativeOperation(
             timeoutMs: 5000, writable: true,
-            intent: try NativeIntent(["kind": intent, "parameters": parameters], mode: "write"), target: binding,
+            intent: try NativeIntent(["kind": intent, "parameters": parameters, "globalInput": NativeInputAuthorization.globalInputRequested], mode: "write"), target: binding,
             clickContract: intent == "click" ? "v2" : nil, release: {}, cancelActive: {})
         defer { _ = op.finish() }
         let access = NativeControlAccess(

@@ -26,6 +26,7 @@ from computer_use.session.operations import operation
 from . import parameters
 from .execution import on_session, session_executor, synchronous
 from .handles import handle_created
+from .targets import Target, element_target, image_target, target_request, window_target
 
 
 def observation_state(state=None, *, document=None):
@@ -58,7 +59,7 @@ def _key(key):
 
 class Computer:
     def __init__(self, *, allow_global_input=True):
-        """Create a session with full input capability and low-interference route preference."""
+        """Create a session. On macOS only direct Computer input methods use global events."""
         from .factory import session_controller
 
         if type(allow_global_input) is not bool:
@@ -134,14 +135,24 @@ class Computer:
         return operation(lambda: self._controller.run(ObserveDesktop(view, full)))
 
     @synchronous
-    def click(self, options=None, *, at):
+    def click(self, options=None, *, at=None, target=None):
+        if (at is None) == (target is None):
+            raise local_failure("click expects exactly one of at or target")
+        if target is not None or isinstance(at, Target):
+            return self._target_action(target if target is not None else at, "click", parameters.click(options))
         click, (x, y) = parameters.click(options), parameters.point(at)
         self._controller.desktop.check_coordinates(x, y)
         return self._controller.act("click", dict(desktopRef=self._controller.desktop.target(True), x=x, y=y, **click))
 
     @synchronous
-    def scroll(self, direction, *, at, pages=1):
+    def scroll(self, direction, *, at=None, target=None, pages=1):
         parameters.scroll(direction, pages)
+        if (at is None) == (target is None):
+            raise local_failure("scroll expects exactly one of at or target")
+        if target is not None or isinstance(at, Target):
+            return self._target_action(
+                target if target is not None else at, "scroll", {"direction": direction, "pages": pages}
+            )
         x, y = parameters.point(at)
         self._controller.desktop.check_coordinates(x, y)
         return self._controller.act(
@@ -150,6 +161,8 @@ class Computer:
 
     @synchronous
     def drag(self, start, end):
+        if isinstance(start, Target) or isinstance(end, Target):
+            return self._target_action(start, "drag", {}, end=end)
         start, end = parameters.point(start), parameters.point(end)
         if start == end:
             raise local_failure("drag start and end must differ")
@@ -163,14 +176,38 @@ class Computer:
         )
 
     @synchronous
-    def type_text(self, text):
+    def type_text(self, text, *, target=None, replace=False):
         _text(text)
+        if type(replace) is not bool:
+            raise local_failure("replace must be a bool")
+        if target is not None:
+            return self._target_action(target, "replace" if replace else "insert", {"text": text})
+        if replace:
+            raise local_failure("replace=True requires an Element target")
         return self._controller.act("type_text", dict(desktopRef=self._controller.desktop.target(), text=text))
 
     @synchronous
-    def press_key(self, key):
+    def press_key(self, key, *, target=None):
         _key(key)
+        if target is not None:
+            return self._target_action(target, "key", {"key": key})
         return self._controller.act("press_key", dict(desktopRef=self._controller.desktop.target(), key=key))
+
+    @synchronous
+    def paste(self, text, *, target):
+        _text(text, paste=True)
+        return self._target_action(target, "paste", {"text": text})
+
+    @on_session
+    def point(self, at):
+        return image_target(self._controller, None, parameters.point(at))
+
+    def _target_action(self, target, intent, args, *, end=None):
+        return operation(
+            lambda: self._controller.run(
+                target_request(self._controller, target, intent, args, global_input=True, end=end)
+            )
+        )
 
 
 class UI:
@@ -211,12 +248,16 @@ class UI:
 
     @synchronous
     def click(self, options=None, *, at):
+        if isinstance(at, Target):
+            return self._point_action(at, "click", parameters.click(options))
         click, at = parameters.click(options), parameters.point(at)
         return operation(lambda: self._controller.run(UIPointer(self, "click", (at,), click)))
 
     @synchronous
     def scroll(self, direction, *, at, pages=1):
         parameters.scroll(direction, pages)
+        if isinstance(at, Target):
+            return self._point_action(at, "scroll", {"direction": direction, "pages": pages})
         at = parameters.point(at)
         return operation(
             lambda: self._controller.run(UIPointer(self, "scroll", (at,), dict(direction=direction, pages=pages)))
@@ -224,10 +265,21 @@ class UI:
 
     @synchronous
     def drag(self, start, end):
+        if isinstance(start, Target) or isinstance(end, Target):
+            return self._point_action(start, "drag", {}, end=end)
         start, end = parameters.point(start), parameters.point(end)
         if start == end:
             raise local_failure("drag start and end must differ")
         return operation(lambda: self._controller.run(UIPointer(self, "drag", (start, end), {})))
+
+    @on_session
+    def point(self, at):
+        return image_target(self._controller, self, parameters.point(at))
+
+    def _point_action(self, target, intent, args, *, end=None):
+        return operation(
+            lambda: self._controller.run(target_request(self._controller, target, intent, args, owner=self, end=end))
+        )
 
     @synchronous
     def type_text(self, text):
@@ -272,6 +324,11 @@ class Window(UI):
         self._window_identity = controller.state(self).selection.root
         handle_created(self, dict(kind="Window", controller=controller, owner=_app, selector=scope["selector"]))
 
+    @property
+    @on_session
+    def target(self):
+        return window_target(self)
+
 
 class Element:
     def __init__(self, controller=None, owner=None, snapshot=None, *, _internal=False):
@@ -283,6 +340,11 @@ class Element:
 
     def _act(self, intent, args=None):
         return operation(lambda: self._controller.run(ActOnElement(self._owner, self._snapshot, intent, args or {})))
+
+    @property
+    @on_session
+    def target(self):
+        return element_target(self)
 
     @synchronous
     def read(self, *, cursor=None):

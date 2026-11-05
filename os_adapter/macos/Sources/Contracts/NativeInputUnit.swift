@@ -50,7 +50,7 @@ enum NativeInputUnit: Equatable {
             wire["backgroundPreparation"] = "yes"
         case .scroll: wire["unit"] = "native_scroll"
         case .pointerFocus(let target):
-            wire["globalInput"] = target == .scalarText ? "no" : "unknown"
+            wire["globalInput"] = target == .scalarText || !NativeInputAuthorization.globalInputRequested ? "no" : "unknown"
             wire["unit"] = "prepare_receiver"
             wire["channel"] = "pointer"
             wire["backgroundPreparation"] = "yes"
@@ -58,13 +58,13 @@ enum NativeInputUnit: Equatable {
             // A retained local-Web qualification requires scoped HID. Other
             // text receivers can change during preparation; native dispatch
             // requalifies their transport rather than claiming no global use.
-            wire["globalInput"] = policy == .localWebNoProcess ? "yes"
+            wire["globalInput"] = NativeInputAuthorization.globalInputRequested || policy == .localWebNoProcess ? "yes"
                 : [.insert, .replace].contains(kind) ? "unknown" : "no"
             wire["unit"] = kind.unit
             wire["channel"] = "keyboard"
             wire["backgroundPreparation"] = readiness.pending.contains("foreground") ? "no" : "yes"
         case .pointer:
-            wire["globalInput"] = "unknown"
+            wire["globalInput"] = NativeInputAuthorization.globalInputRequested ? "yes" : "no"
             wire["unit"] = "pointer_sequence"
             wire["channel"] = "pointer"
             wire["backgroundPreparation"] = "yes"

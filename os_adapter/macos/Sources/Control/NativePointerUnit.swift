@@ -100,16 +100,11 @@ enum NativePointerReadiness {
     }
 }
 
-/// Delivery is explicit and independent of foreground permission or state.
-/// A missing addressed transport can select desktop input only before dispatch.
+/// The public input intent fixes delivery before preparation and dispatch.
 enum NativePointerDeliveryPolicy {
-    static func delivery(_ selected: NativeClickDelivery?, windowDirectedAvailable: Bool) -> NativeClickDelivery {
-        selected ?? (windowDirectedAvailable ? .windowDirected : .systemPointer)
+    static func delivery(_ selected: NativeClickDelivery?, globalInput: Bool) -> NativeClickDelivery {
+        selected ?? (globalInput ? .systemPointer : .windowDirected)
     }
-
-    static func implicitDelivery(kind: NativePointerIntent.Kind, windowDirectedAvailable: Bool, receiverSupported: Bool)
-        -> NativeClickDelivery
-    { delivery(nil, windowDirectedAvailable: windowDirectedAvailable && (kind != .click || receiverSupported)) }
 }
 
 /// One selected native window route. No target search, foreground fallback,
@@ -277,7 +272,7 @@ enum NativePointerDeliveryPolicy {
         at point: CGPoint? = nil, kind: NativePointerIntent.Kind, delivery: NativeClickDelivery? = nil
     ) -> Readiness {
         let selected = NativePointerDeliveryPolicy.delivery(
-            delivery, windowDirectedAvailable: BackgroundEvents.capabilities.windowDirectedTransport)
+            delivery, globalInput: NativeInputAuthorization.globalInputRequested)
         let foregroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let hit = foregroundPID == application.processIdentifier ? inputWindowHit(at: point) : nil
         let foreground = foregroundPID == application.processIdentifier && hit?.windowID == window.id
@@ -389,18 +384,8 @@ enum NativePointerDeliveryPolicy {
         return qualification
     }
 
-    func resolvedDelivery(_ selected: NativeClickDelivery?, at point: CGPoint, kind: NativePointerIntent.Kind) throws
-        -> NativeClickDelivery
-    {
-        if let selected { return selected }
-        // A selected foreground-point contract already fixed its transport.
-        // Capability loss is handled by the same route's final check; neither
-        // a new AX label nor missing transport may turn it into global input.
-        if pointerRequirement == .foregroundWindowPoint { return .windowDirected }
-        let transport = BackgroundEvents.capabilities.windowDirectedTransport
-        let receiver = try kind != .click || transport && addressedPointerReceiver(at: point) == .declaredInteraction
-        return NativePointerDeliveryPolicy.implicitDelivery(
-            kind: kind, windowDirectedAvailable: transport, receiverSupported: receiver)
+    func resolvedDelivery(_ selected: NativeClickDelivery?) -> NativeClickDelivery {
+        NativePointerDeliveryPolicy.delivery(selected, globalInput: NativeInputAuthorization.globalInputRequested)
     }
 
     private func reportedActive() -> Bool? {
@@ -443,7 +428,7 @@ enum NativePointerDeliveryPolicy {
         try check()
         try target.validate(input: true)
         try validateWindowIdentity()
-        let selected = try resolvedDelivery(delivery, at: point, kind: kind)
+        let selected = resolvedDelivery(delivery)
         if selected == .systemPointer { try NativeInputAuthorization.requireGlobalInput("system pointer") }
         try await NativePhysicalInput.wait(NativePhysicalInput.dependency(for: selected), check: check)
         let initial = sampleReadiness(at: point, kind: kind, delivery: selected)
@@ -482,7 +467,7 @@ enum NativePointerDeliveryPolicy {
     func requirePointReadiness(
         atNative point: CGPoint, kind: NativePointerIntent.Kind = .click, delivery: NativeClickDelivery? = nil
     ) throws {
-        let selected = try resolvedDelivery(delivery, at: point, kind: kind)
+        let selected = resolvedDelivery(delivery)
         let prepared = sampleReadiness(at: point, kind: kind, delivery: selected)
         diagnoseReadiness(prepared, at: point, phase: "afterPreparation")
         guard prepared.ready else {
@@ -496,7 +481,7 @@ enum NativePointerDeliveryPolicy {
         delivery: NativeClickDelivery? = nil, check: @escaping @MainActor () throws -> Void,
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
-        let selected = try resolvedDelivery(delivery, at: point, kind: kind)
+        let selected = resolvedDelivery(delivery)
         let outcome = try await prepareWindowContext(
             foreground: foreground, atNative: point, kind: kind, delivery: selected, check: check,
             onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
@@ -515,7 +500,7 @@ enum NativePointerDeliveryPolicy {
         let current = try resolvingCaptureTranslation()
         try current.validateParameters(request)
         let point = try current.point(request.start!)
-        let delivery = try current.resolvedDelivery(nil, at: point, kind: request.kind)
+        let delivery = current.resolvedDelivery(nil)
         let outcome = try await current.prepareWindowContext(
             foreground: foreground, atNative: point, kind: request.kind, delivery: delivery,
             check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
@@ -577,7 +562,7 @@ enum NativePointerDeliveryPolicy {
         try check()
         try target.validate(input: true)
         try validateWindowIdentity()
-        let selected = try resolvedDelivery(delivery, at: start, kind: request.kind)
+        let selected = resolvedDelivery(delivery)
         if selected == .systemPointer { try NativeInputAuthorization.requireGlobalInput("system pointer") }
         try await NativePhysicalInput.wait(NativePhysicalInput.dependency(for: selected), check: check)
         let initial = sampleReadiness(at: start, kind: request.kind, delivery: selected)
@@ -801,6 +786,10 @@ enum NativePointerDeliveryPolicy {
                     mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
             else { throw DriverError("cannot allocate pointer event", code: .inputUnavailable) }
             event.flags = []
+            // Down/up and the initial positioning event carry no relative
+            // motion. Do not inherit a previous event source's delta.
+            event.setIntegerValueField(.mouseEventDeltaX, value: 0)
+            event.setIntegerValueField(.mouseEventDeltaY, value: 0)
             event.setIntegerValueField(.mouseEventClickState, value: Int64(count))
             event.setIntegerValueField(.mouseEventNumber, value: group)
             event.setDoubleValueField(.mouseEventPressure, value: type == down || type == .leftMouseDragged ? 1 : 0)
@@ -835,6 +824,10 @@ enum NativePointerDeliveryPolicy {
             guard let to else { throw DriverError("drag endpoint missing", code: .invalidRequest) }
             result.append(
                 .init(event: try mouse(down, at: from), release: try mouse(up, at: from), point: from, delayMs: 15))
+            // Establish tracking at the press location before any displacement.
+            // A first moved sample can both initiate native window tracking and
+            // be consumed as movement, duplicating that first displacement.
+            result.append(.init(event: try mouse(.leftMouseDragged, at: from), release: nil, point: from, delayMs: 12))
             let count = max(8, Int(min(60, ceil(hypot(to.x - from.x, to.y - from.y) / 8))))
             var previous = from
             for step in 1...count {
@@ -842,7 +835,11 @@ enum NativePointerDeliveryPolicy {
                 let point = CGPoint(x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction)
                 // Check before converting to native integer deltas. Real window
                 // geometry is much smaller; malformed input must never trap.
-                let dx = (point.x - previous.x).rounded(), dy = (point.y - previous.y).rounded()
+                // Quantize cumulative displacement, then take the difference.
+                // Rounding each small segment independently accumulates drift
+                // in consumers that use deltas (including titlebar dragging).
+                let dx = (point.x - from.x).rounded() - (previous.x - from.x).rounded()
+                let dy = (point.y - from.y).rounded() - (previous.y - from.y).rounded()
                 guard dx.isFinite, dy.isFinite, abs(dx) < Double(Int64.max), abs(dy) < Double(Int64.max) else {
                     throw DriverError("drag delta exceeds native event range", code: .invalidRequest)
                 }

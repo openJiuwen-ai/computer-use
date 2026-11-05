@@ -8,10 +8,15 @@ import Foundation
 struct NativeIntent {
     let kind: String
     let parameters: [String: Any]
+    let globalInput: Bool
 
     init(_ raw: Any?, mode: String) throws {
-        let value = try object(raw, keys: ["kind", "parameters"])
+        let hasGlobalInput = (raw as? [String: Any])?["globalInput"] != nil
+        let value = try object(raw, keys: Set(["kind", "parameters"] + (hasGlobalInput ? ["globalInput"] : [])))
         kind = try string(value["kind"], label: "intent.kind")
+        globalInput = hasGlobalInput ? try boolean(value["globalInput"], label: "intent.globalInput") : false
+        guard !globalInput || mode == "write" && ["click", "scroll", "drag", "insert", "replace", "paste", "key"].contains(kind)
+        else { throw DriverError("global input requires an explicit input intent", code: .invalidRequest) }
         guard let parameters = value["parameters"] as? [String: Any], JSONSerialization.isValidJSONObject(parameters),
             (mode == "read" && kind == "read")
                 || (mode == "write"

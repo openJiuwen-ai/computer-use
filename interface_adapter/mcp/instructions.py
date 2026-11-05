@@ -20,13 +20,32 @@ Choose the interaction method for each operation using this preference:
    app.read(view='image') or window.read(view='image') when needed. Use that
    App/Window's coordinate or keyboard methods as appropriate, such as
    window.click(at=(x, y)) or window.press_key('Return').
-3. If App/Window operations still cannot advance the task, inspect the desktop
-   with computer.read(view='image') and use desktop-level mouse or keyboard
-   methods, such as computer.click(at=(x, y)) or computer.press_key('Return').
+3. When global input is needed, select a direct Computer input method. Reuse
+   an existing Element with computer.click(target=element),
+   computer.type_text(text, target=element, replace=True), or
+   computer.press_key('Return', target=element). No desktop read is needed.
+   For a displayed App/Window image, retain p = app.point((x, y)) and call
+   computer.click(target=p). computer.scroll('down', target=p) and
+   computer.drag(start_point, end_point) also reuse retained image targets.
+   Bare computer.click(at=(x, y)) uses the delivered desktop image, obtained
+   with computer.read(view='image'); bare Computer keyboard methods use its
+   captured input recipient.
 Apply this preference anew to every subsequent operation, including after
 desktop input. Reuse established behavior for the corresponding control and
 context; prefer usable elements for the next target. Choose another method
 directly when current evidence makes it more direct, reliable or efficient.
+On macOS, App/Window/Element operations never inject global mouse or keyboard
+input, including preparation and recovery. They may activate/focus their target.
+Computer direct input explicitly uses global events; it does not grant later
+object calls global authority. Windows/Linux currently retain their existing
+ability to use global input for object operations. A host restriction can still
+forbid global input. Use computer.paste(text, target=element_or_window) for an
+explicit global paste. Element.target and Window.target retain exact bindings;
+app.point((x, y)) and window.point((x, y)) retain one delivered image's mapping.
+Retained points also work in app.click(at=p) or window.click(at=p) for scoped input.
+They survive later reads and window translation; real identity, layout or display
+changes can still invalidate the corresponding target. A known input dispatch
+is not grounds to blindly repeat it through a global method.
 The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.

@@ -27,24 +27,10 @@ import ApplicationServices
         precondition(
             Readiness.ready(
                 kind: .click, foreground: true, windowKind: .keyRequiring, focus: .target, backgroundPrepared: false))
-        precondition(NativePointerDeliveryPolicy.delivery(nil, windowDirectedAvailable: true) == .windowDirected)
-        precondition(
-            NativePointerDeliveryPolicy.delivery(.windowDirected, windowDirectedAvailable: false) == .windowDirected)
-        precondition(
-            NativePointerDeliveryPolicy.delivery(.systemPointer, windowDirectedAvailable: true) == .systemPointer)
-        precondition(NativePointerDeliveryPolicy.delivery(nil, windowDirectedAvailable: false) == .systemPointer)
-        precondition(
-            NativePointerDeliveryPolicy.implicitDelivery(
-                kind: .click, windowDirectedAvailable: true, receiverSupported: false) == .systemPointer,
-            "pointer focus must not bypass the concrete-receiver contract used by explicit clicks")
-        precondition(
-            NativePointerDeliveryPolicy.implicitDelivery(
-                kind: .click, windowDirectedAvailable: true, receiverSupported: true) == .windowDirected)
-        for kind in [NativePointerIntent.Kind.scroll, .drag] {
-            precondition(
-                NativePointerDeliveryPolicy.implicitDelivery(
-                    kind: kind, windowDirectedAvailable: true, receiverSupported: false) == .windowDirected)
-        }
+        precondition(NativePointerDeliveryPolicy.delivery(nil, globalInput: false) == .windowDirected)
+        precondition(NativePointerDeliveryPolicy.delivery(nil, globalInput: true) == .systemPointer)
+        precondition(NativePointerDeliveryPolicy.delivery(.windowDirected, globalInput: true) == .windowDirected)
+        precondition(NativePointerDeliveryPolicy.delivery(.systemPointer, globalInput: true) == .systemPointer)
         for role in [kAXWindowRole, kAXGroupRole, kAXStaticTextRole, kAXImageRole, kAXUnknownRole] {
             precondition(
                 !NativeAddressedPointerReceiver(role: role, actions: [kAXRaiseAction, kAXShowMenuAction]).supported)
@@ -393,7 +379,7 @@ import ApplicationServices
                      "an absent AX window cannot erase the retained WindowServer route")
         // No real AX object is supplied: fixed delivery must not re-query a role
         // or fall through to HID after qualification was already retained.
-        let fixedDelivery = try unit.resolvedDelivery(nil, at: .zero, kind: .click)
+        let fixedDelivery = unit.resolvedDelivery(nil)
         precondition(fixedDelivery == .windowDirected)
         precondition(!unit.backgroundPreparationAvailable())
         let retained = try unit.resolvingCaptureTranslation()

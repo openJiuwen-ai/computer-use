@@ -212,6 +212,7 @@ class AgentInterfacePipeline:
         screenshot, lines = None, []
         if view != "tree":
             try:
+                self.controller.port.capture_references = self.windows.capture_references()
                 observed = await self.controller.desktop_reader.read()
                 self.controller.desktop.record(observed)
             except BaseException:
@@ -606,13 +607,15 @@ class AgentInterfacePipeline:
             )
         return Binding(instance.session, identity.instance, identity.window, identity.surface, None)
 
-    async def keyboard(self, ui: UIHandle, method: str, parameters: Record, control: Control) -> ActionResult:
+    async def keyboard(
+        self, ui: UIHandle, method: str, parameters: Record, control: Control, *, global_input=False, target=None
+    ) -> ActionResult:
         from computer_use.interaction.query.instances.scope import require_identity
 
         # Capture before a new query: neither focus changes nor hidden sampling
         # may turn this operation into input in another document.
         validate_session(self.controller, ui)
-        target = self.keyboard_context(ui)
+        target = target or self.keyboard_context(ui)
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
         await refresh(self.controller, ui)
         require_identity(ui, identity, current=True)
@@ -621,11 +624,12 @@ class AgentInterfacePipeline:
                 "the delivered receiver is no longer confirmed inside this fixed Window",
                 "observation_incomplete",
             )
-        intent = Intent(dict(type_text="insert", press_key="key").get(method, method), parameters)
+        intent = Intent(dict(type_text="insert", press_key="key").get(method, method), parameters, global_input)
         return await self.write.arun(ExecuteAction(ui, intent, target), control)
 
     async def act_element(
-        self, ui: UIHandle, snapshot: ElementSnapshot, intent: str, parameters: Record, control: Control
+        self, ui: UIHandle, snapshot: ElementSnapshot, intent: str, parameters: Record, control: Control,
+        *, global_input=False,
     ) -> ActionResult:
         """Validate an element and dispatch direct or current-container input.
 
@@ -650,15 +654,19 @@ class AgentInterfacePipeline:
         )
         return await self.write.arun(
             ExecuteAction(
-                ui, Intent(intent, parameters), snapshot["binding"], forward_current=bool(forward), snapshot=snapshot
+                ui, Intent(intent, parameters, global_input), snapshot["binding"],
+                forward_current=bool(forward), snapshot=snapshot
             ),
             control,
         )
 
     async def pointer(
-        self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record, control: Control
+        self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record, control: Control,
+        *, global_input=False, image=None,
     ) -> ActionResult:
-        return await InterfacePointerPipeline(self.controller, self.write).run(ui, intent, points, options, control)
+        return await InterfacePointerPipeline(self.controller, self.write).run(
+            ui, intent, points, options, control, global_input=global_input, image=image
+        )
 
     async def read_element(self, ui: UIHandle, snapshot: ElementSnapshot, cursor: str | None) -> Observation:
         from computer_use.interaction.read.element.agent import AgentElementReadPipeline
@@ -720,11 +728,20 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
         if isinstance(request, ResolveElement):
             return await api.element(request.owner, request.target, request.timeout_ms, control)
         if isinstance(request, ActOnElement):
-            return await api.act_element(request.owner, request.snapshot, request.intent, request.parameters, control)
+            return await api.act_element(
+                request.owner, request.snapshot, request.intent, request.parameters, control,
+                global_input=request.global_input,
+            )
         if isinstance(request, UIKeyboard):
-            return await api.keyboard(request.owner, request.method, request.parameters, control)
+            return await api.keyboard(
+                request.owner, request.method, request.parameters, control,
+                global_input=request.global_input, target=request.target,
+            )
         if isinstance(request, UIPointer):
-            return await api.pointer(request.owner, request.intent, request.points, request.options, control)
+            return await api.pointer(
+                request.owner, request.intent, request.points, request.options, control,
+                global_input=request.global_input, image=request.image,
+            )
         raise TypeError("Unknown agent interface request")
 
     def _run(self, value: InterfaceRequest, control: Control) -> AgentResult:

@@ -22,8 +22,22 @@ def requires_global_input(command: UnitCommand) -> bool:
     return offer is not None and offer.delivery == "desktop_pointer"
 
 
-def global_input_denied(command: UnitCommand, policy: HostPolicy | None) -> bool:
-    return requires_global_input(command) and not (policy is not None and policy.allow_global_input)
+def global_input_denied(command: UnitCommand, policy: HostPolicy | None, platform: str | None = None) -> bool:
+    scoped_macos = platform == "macos" and not command.intent.global_input
+    return requires_global_input(command) and (scoped_macos or not (policy is not None and policy.allow_global_input))
+
+
+def global_input_failure(policy: HostPolicy | None, platform: str, intent):
+    if platform == "macos" and not intent.global_input:
+        return (
+            "input_unavailable",
+            (
+                "This macOS object operation has no remaining non-global input route. "
+                "Use an explicit Computer input method with the same target if global input is intended. "
+                "Check recorded input progress before another action."
+            ),
+        )
+    return "permission_required", "The available route requires global input, which this session has not authorized."
 
 
 def input_impact_rank(command: UnitCommand) -> int:

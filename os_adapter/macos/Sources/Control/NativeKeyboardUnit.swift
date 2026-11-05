@@ -38,7 +38,7 @@ import ApplicationServices
                 try proof.association(context).map { owned in element.map { CFEqual($0, owned.editor) } == true }
                     == true
             } ?? true
-        let deliveryReady = try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
+        let deliveryReady = try NativeInputAuthorization.globalInputRequested || NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
             let mapping = try NativeWindowUnit(application: application, window: context.window ?? window).mapping()
             if let expected = dispatchExpectedNativeID, mapping.id != expected {
                 throw DriverError("original keyboard native window changed", code: .staleTarget)
@@ -62,6 +62,7 @@ import ApplicationServices
         kind: NativeKeyboardIntent.Kind, text: String?, state: State,
         textPolicy: NativeKeyboardInterpreterEvidence.Policy = .existing
     ) throws -> NativeKeyboardDeliveryProposal? {
+        guard !NativeInputAuthorization.globalInputRequested else { return nil }
         guard NativeKeyboardInterpreterEvidence.needsTextTransport(kind: kind.rawValue, text: text) else { return nil }
         let editor =
             element.flatMap { CFEqual($0, window) ? nil : $0 } ?? state.relatedEditor ?? state.focus ?? state.rawFocus
@@ -71,7 +72,7 @@ import ApplicationServices
     }
 
     /// A same-App but other-window focus is not an already-foreground scope.
-    private func requiresForegroundSelection(_ proposal: NativeKeyboardDeliveryProposal, state: State) -> Bool {
+    private func requiresForegroundSelection(state: State) -> Bool {
         var windowState = NativeKeyboardTransportPolicy.Window.unavailable
         let expected = state.window ?? window
         let expectedID = BackgroundEvents.nativeWindowID(expected)
@@ -88,21 +89,19 @@ import ApplicationServices
         {
             windowState = .hidden
         }
-        return NativeKeyboardTransportPolicy.select(
-            usesText: true, interpreter: proposal.interpreter.kind, applicationForeground: background.isForeground,
-            window: windowState) == .foregroundPreparation
+        return !background.isForeground || windowState == .other || windowState == .hidden
     }
 
     func textTransportSupported(
         kind: NativeKeyboardIntent.Kind, text: String?, state: State,
         textPolicy: NativeKeyboardInterpreterEvidence.Policy
     ) throws -> Bool {
+        if NativeInputAuthorization.globalInputRequested { return true }
         let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
-        if proposal?.unavailable == true { return false }
+        if proposal?.unavailable == true || proposal?.processTextUnavailable == true { return false }
         // Focus preparation can reveal a different editing capability or event
         // endpoint. Do not probe an unrelated current receiver before that work.
-        // Scoped HID owns its separate admission proof, independently of a PID.
-        if kind == .focus || state.receiver(element) != "yes" || proposal?.needsForeground == true { return true }
+        if kind == .focus || state.receiver(element) != "yes" { return true }
         return try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
             try BackgroundEvents.requireKeyboardRoute()
             _ = try BackgroundEvents.keyboardRecipient(
@@ -121,12 +120,8 @@ import ApplicationServices
         {
             return true
         }
-        let state = try sample()
-        guard
-            let proposal = try textProposal(
-                kind: request.kind, text: request.value, state: state, textPolicy: textPolicy)
-        else { return false }
-        return requiresForegroundSelection(proposal, state: state)
+        guard NativeInputAuthorization.globalInputRequested else { return false }
+        return requiresForegroundSelection(state: try sample())
     }
 
     func requiresCellEditorActivation() throws -> Bool {
@@ -166,6 +161,18 @@ import ApplicationServices
         onSelection: (NativeKeyboardBoundaryRouteFacts) -> Void
     ) throws -> NativeKeyboardDelivery {
         let state = try state ?? sample()
+        if NativeInputAuthorization.globalInputRequested {
+            try NativeInputAuthorization.requireGlobalInput("targeted global keyboard")
+            guard !requiresForegroundSelection(state: state),
+                let process = NativeProcessIdentity.read(application.processIdentifier)
+            else { throw NativePreparationUnavailable(description: "the original keyboard window needs foreground preparation") }
+            let keyboardWindow = state.window ?? window
+            let editor = element ?? state.relatedEditor ?? state.focus ?? state.rawFocus ?? keyboardWindow
+            return .scopedForegroundHID(.init(
+                application: application, window: keyboardWindow, surface: window,
+                mapping: try NativeWindowUnit(application: application, window: keyboardWindow).mapping(),
+                editor: editor, process: process))
+        }
         let proposal = try textProposal(kind: request.kind, text: request.value, state: state, textPolicy: textPolicy)
         if let proposal {
             if proposal.unavailable {
@@ -173,34 +180,12 @@ import ApplicationServices
                     "observed Web keyboard ownership is unavailable; no requested text was sent",
                     code: .inputUnavailable)
             }
-            if proposal.needsForeground {
-                try NativeInputAuthorization.requireGlobalInput("scoped foreground keyboard")
-                guard background.isForeground else {
-                    throw NativePreparationUnavailable(
-                        description:
-                            "local-Web process text isolation is unavailable in background; no requested input was sent"
-                    )
-                }
-                let keyboardWindow = state.window ?? window
-                let editor =
-                    element.flatMap { CFEqual($0, window) ? nil : $0 } ?? state.relatedEditor ?? state.focus
-                    ?? state.rawFocus
-                guard let editor, let area = proposal.interpreter.area,
-                    let process = NativeProcessIdentity.read(application.processIdentifier)
-                else { throw DriverError("scoped keyboard target identity is unavailable", code: .staleTarget) }
-                diagnose(
-                    [
-                        "kind": "keyboard_delivery_plan", "delivery": "scopedForegroundHID",
-                        "interpreter": proposal.interpreter.kind.rawValue, "presenterPID": process.pid,
-                        "window": BackgroundEvents.nativeWindowID(keyboardWindow) as Any? ?? NSNull()
-                    ] as [String: Any])
-                return .scopedForegroundHID(
-                    .init(
-                        application: application, window: keyboardWindow, surface: window,
-                        mapping: try NativeWindowUnit(application: application, window: keyboardWindow).mapping(),
-                        editor: editor, area: area, process: process))
+            if proposal.processTextUnavailable {
+                throw NativeRouteUnavailable(description:
+                    "local-Web process text isolation is unavailable; use an explicit Computer input method with the same target")
             }
         }
+
         let recipient = try BackgroundEvents.keyboardRecipient(
             NativeWindowUnit(application: application, window: state.window ?? window).mapping())
         let recipientRoute: String
@@ -256,11 +241,15 @@ import ApplicationServices
                 conditions.append(("foreground", "unknown"))
             }
         }
+        if includeDelivery, NativeInputAuthorization.globalInputRequested,
+            requiresForegroundSelection(state: state) {
+            conditions.append(("foreground", "unknown"))
+        }
         if includeDelivery,
             let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
         {
-            if proposal.unavailable || requiresForegroundSelection(proposal, state: state) {
-                conditions.append(("foreground", "unknown"))
+            if proposal.unavailable || proposal.processTextUnavailable {
+                conditions.append(("textTransport", "unknown"))
             }
         }
         return NativeReadiness(conditions)
@@ -323,19 +312,23 @@ import ApplicationServices
             throw NativePreparationUnavailable(
                 description: "observed Web keyboard ownership is unavailable; no requested input was sent")
         }
-        if proposal?.needsForeground == true {
+        if proposal?.processTextUnavailable == true {
+            throw NativeRouteUnavailable(description:
+                "local-Web process text isolation is unavailable; use an explicit Computer input method with the same target")
+        }
+        let usesGlobal = NativeInputAuthorization.globalInputRequested
+        if usesGlobal {
             try NativeInputAuthorization.requireGlobalInput("scoped foreground keyboard")
         }
-        if let proposal, requiresForegroundSelection(proposal, state: try initial ?? sample()), !foreground {
+        if usesGlobal, requiresForegroundSelection(state: try initial ?? sample()), !foreground {
             throw NativePreparationUnavailable(
                 description: """
-                    local-Web background text transport is unavailable by fresh mechanism evidence; no \
-                    requested input was sent
+                    the explicit global keyboard target needs foreground preparation; no requested input was sent
                     """)
         }
         if try readiness(
             kind: request.kind, key: request.key, text: request.value, replacement: replacement, textPolicy: textPolicy
-        ).ready, proposal?.needsForeground != true {
+        ).ready, !usesGlobal {
             return
         }
         let mapping = try NativeWindowUnit(application: application, window: keyboardWindow).mapping()
@@ -346,7 +339,7 @@ import ApplicationServices
             try await assist.prepare(
                 background, window: mapping.id, onAction: { onPreparation("foreground window activation") },
                 onCleanupUnknown: onCleanupUnknown)
-        } else if proposal?.needsForeground != true {
+        } else if !usesGlobal {
             do {
                 try await NativeFocusPipeline.prepare(
                     background, window: mapping, nativeWindow: keyboardWindow, onPreparation: onPreparation,
@@ -360,7 +353,7 @@ import ApplicationServices
             }
         }
         try check()
-        if proposal?.needsForeground == true {
+        if usesGlobal {
             let delivery = try selectedDelivery(request, textPolicy: textPolicy)
             try await confirmSelectedDelivery(delivery, check: check)
             if case .scopedForegroundHID(let scoped) = delivery {

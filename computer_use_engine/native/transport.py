@@ -227,9 +227,13 @@ class ConnectionPort:
         return result
 
     async def begin(self, intent, target, timeout_ms):
-        return await self._begin(
-            dict(kind=intent.kind, parameters=dict(intent.parameters)), "write", target, timeout_ms
-        )
+        return await self._begin(self._intent_payload(intent), "write", target, timeout_ms)
+
+    def _intent_payload(self, intent):
+        value = dict(kind=intent.kind, parameters=dict(intent.parameters))
+        if self.platform == "macos":
+            value["globalInput"] = intent.global_input
+        return value
 
     async def begin_read(self, target, timeout_ms):
         return await self._begin(dict(kind="read", parameters={}), "read", target, timeout_ms)
@@ -396,7 +400,8 @@ class ConnectionPort:
                 global_input=Knowledge(p.get("globalInput", "unknown")),
                 preparation_impact=(
                     PreparationImpact(**{key: Knowledge(item) for key, item in p["preparationImpact"].items()})
-                    if "preparationImpact" in p else None
+                    if "preparationImpact" in p
+                    else None
                 ),
             )
             for p in value["primitives"]
@@ -658,11 +663,13 @@ class ConnectionPort:
                 raise ValueError("Invalid application change token or event-wait limit")
             query = dict(kind="waitAppChange", application=application, after=after, timeoutMs=delay_ms)
         result = await self.connection.request(
-            "inspect", dict(operation=operation, target=encode_fields(target, _BINDING), query=query),
+            "inspect",
+            dict(operation=operation, target=encode_fields(target, _BINDING), query=query),
             dict(timeoutMs=timeout_ms),
         )
         if (
-            result["kind"] != query["kind"] or result["session"] != target.session
+            result["kind"] != query["kind"]
+            or result["session"] != target.session
             or result["application"] != application
         ):
             raise ValueError("Application change observation changed its session or application")
@@ -814,7 +821,7 @@ class ConnectionPort:
             and command.prepare
         ):
             raise ValueError("Click execution must use the negotiated integrated native contract")
-        if original != intent_key(dict(kind=command.intent.kind, parameters=dict(command.intent.parameters))):
+        if original != intent_key(self._intent_payload(command.intent)):
             raise local_failure(
                 "The operation intent is already bound; a step cannot change its parameters",
                 "invalid_request",

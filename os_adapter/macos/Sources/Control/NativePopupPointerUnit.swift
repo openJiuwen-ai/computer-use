@@ -26,6 +26,6 @@ import AppKit
         try await fixed.deliver(
             request, check: check, guardOperation: check, onDispatch: onDispatch, onPosted: onPosted,
             onCleanupUnknown: onCleanupUnknown,
-            delivery: .systemPointer)
+            delivery: NativeInputAuthorization.globalInputRequested ? .systemPointer : .windowDirected)
     }
 }

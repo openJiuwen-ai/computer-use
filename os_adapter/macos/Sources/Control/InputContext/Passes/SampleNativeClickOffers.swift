@@ -36,73 +36,57 @@ import ApplicationServices
                 foreground = physical.foreground
                 input["geometryCurrent"] = "yes"
                 input["pointerRoute"] = proof == nil ? "no" : "yes"
-                declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(proof))
                 declarations.declareClick(
-                    .pointer(.click),
-                    offer: .init(
-                        routeFamily: "macos.windowDirected.v1", delivery: .windowDirected, admission: .unavailable,
-                        reason: "This popup choice requires its confirmed foreground pointer point.",
-                        preparationOptions: []))
+                    .pointer(.click), offer: NativePopupClickPolicy.pointerOffer(
+                        proof, delivery: op.request.globalInput ? .systemPointer : .windowDirected))
                 return
             }
             foreground = pointer.foregroundWindow(at: point)
             input["geometryCurrent"] = "yes"
+            if op.request.globalInput {
+                let physical = pointer.physicalClickSample(at: point)
+                var offer = NativeClickContract(
+                    routeFamily: "macos.hid.v1", delivery: .systemPointer,
+                    admission: physical.ready && !exposure && !foregroundHitRequired ? .ready : .preparationRequired,
+                    reason: exposure ? "The original element needs to be scrolled into view."
+                        : foregroundHitRequired ? "The original element hit needs window preparation."
+                        : physical.ready ? nil : "The exact target window needs foreground preparation.",
+                    preparationOptions: foregroundHitRequired ? ["foreground"]
+                        : physical.ready ? (exposure ? ["background"] : []) : ["foreground"],
+                    backgroundFamily: "macos.hid.v1", backgroundUnavailable: !physical.ready)
+                offer.qtComboChoice = qtComboChoice
+                declarations.declareClick(.pointer(.click), offer: offer)
+                input["pointerRoute"] = physical.ready ? "yes" : "no"
+                return
+            }
             var transport = true
             do {
                 try BackgroundEvents.requirePointerRoute(window: pointer.window)
             } catch is NativePreparationUnavailable { transport = false }
-            let receiver: NativeAddressedPointerReceiver.Qualification
-            if let addressedReceiver {
-                receiver = addressedReceiver
-            } else {
-                receiver = try pointer.addressedPointerReceiver(at: point)
-            }
-            let requirement = receiver.requirement(captured: captured)
-            let directedPointer = pointer.requiring(requirement ?? .contentReceiver)
-            let directedAvailable = transport && requirement != nil
-            let foregroundGeometryRequired = receiver.requiresForegroundGeometry
-            let backgroundAvailable =
-                directedAvailable && !foregroundHitRequired && !foregroundGeometryRequired
-                && directedPointer.backgroundPreparationAvailable()
-            // The same existing HID readiness query retains its provenance;
-            // do not sample readiness again to manufacture a preference.
-            let physical = pointer.physicalClickSample(at: point)
-            let systemReady = physical.ready
-            let directedReady = directedAvailable && !exposure && !foregroundHitRequired
-                && (!foregroundGeometryRequired || foreground)
+            let receiver = try addressedReceiver ?? pointer.addressedPointerReceiver(at: point)
+            // A retained point/element already carries the geometry and target
+            // checks used by physical input. Missing AX action declarations
+            // require foreground preparation, not the user's physical cursor.
+            let declared = receiver.requirement(captured: captured)
+            let requirement = declared ?? (captured ? .foregroundWindowPoint : .contentReceiver)
+            let foregroundGeometry = receiver.requiresForegroundGeometry || (!captured && declared == nil)
+            let directedPointer = pointer.requiring(foregroundGeometry ? .foregroundWindowPoint : requirement)
+            let backgroundAvailable = transport && declared != nil && !foregroundHitRequired
+                && !foregroundGeometry && directedPointer.backgroundPreparationAvailable()
+            let ready = transport && !exposure && !foregroundHitRequired
+                && (!foregroundGeometry || foreground)
                 && directedPointer.ready(at: point, delivery: .windowDirected)
-            var directed = NativeClickContract(
+            var offer = NativeClickContract(
                 routeFamily: "macos.windowDirected.v1", delivery: .windowDirected,
-                admission: directedAvailable
-                    ? (directedReady ? .ready : .preparationRequired) : .unavailable,
-                reason: !transport
-                    ? "Window-directed mouse transport is unavailable."
-                    : requirement == nil
-                        ? "The point has no specific native receiver for addressed mouse input; the physical pointer route remains available."
-                        : !backgroundAvailable && !directedReady
-                            ? "The native window needs foreground preparation before addressed mouse input." : nil,
-                preparationOptions: directedAvailable
-                    ? (backgroundAvailable ? ["background", "foreground"] : ["foreground"]) : [],
+                admission: transport ? (ready ? .ready : .preparationRequired) : .unavailable,
+                reason: !transport ? "Window-directed mouse transport is unavailable."
+                    : ready ? nil : "The original window or element needs preparation for directed mouse input.",
+                preparationOptions: transport ? (backgroundAvailable ? ["background", "foreground"] : ["foreground"]) : [],
                 backgroundFamily: "macos.windowDirected.v1", backgroundUnavailable: !backgroundAvailable,
-                pointerRequirement: requirement ?? .contentReceiver,
-                requiresForegroundGeometry: foregroundGeometryRequired)
-            try RequestDiagnostics.checkCancellation()
-            var system = NativeClickContract(
-                routeFamily: "macos.hid.v1", delivery: .systemPointer,
-                admission: systemReady && !exposure && !foregroundHitRequired ? .ready : .preparationRequired,
-                reason: exposure
-                    ? "The original element needs to be scrolled into view."
-                    : foregroundHitRequired
-                        ? "The original element hit must be checked after window preparation."
-                        : systemReady ? nil : "The exact target window needs authorized foreground preparation.",
-                preparationOptions: foregroundHitRequired
-                    ? ["foreground"] : systemReady ? (exposure ? ["background"] : []) : ["foreground"],
-                backgroundFamily: "macos.windowDirected.v1",
-                backgroundUnavailable: !directedAvailable || !backgroundAvailable)
-            directed.qtComboChoice = qtComboChoice
-            system.qtComboChoice = qtComboChoice
-            for offer in [directed, system] { declarations.declareClick(.pointer(.click), offer: offer) }
-            input["pointerRoute"] = systemReady || directed.admission == .ready ? "yes" : "no"
+                pointerRequirement: requirement, requiresForegroundGeometry: foregroundGeometry)
+            offer.qtComboChoice = qtComboChoice
+            declarations.declareClick(.pointer(.click), offer: offer)
+            input["pointerRoute"] = ready ? "yes" : "no"
         }
         if plan.query.desktop {
             let pointer = try NativePointerIntent(

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.interaction.write.routes.policy import preparation_pair_available, refuse
 from computer_use.interaction.write.routes.selection.admission import stage_admission
-from computer_use.interaction.write.routes.selection.impact import global_input_denied
+from computer_use.interaction.write.routes.selection.impact import global_input_denied, global_input_failure
 from computer_use.interaction.write.routes.selection.model import RouteOptions
 from computer_use.native.contracts import Binding, Knowledge, UnitCommand
 from computer_use.pipeline import Contract, Pass
@@ -26,15 +26,14 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
     if any(
         stage_admission(primitive).available
         and global_input_denied(
-            UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver), request.policy
+            UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver),
+            request.policy,
+            facts.platform,
         )
         for primitive in candidates
     ):
-        refuse(
-            "permission_required",
-            facts,
-            "The available route requires global input, which this session has not authorized.",
-        )
+        code, detail = global_input_failure(request.policy, facts.platform, intent)
+        refuse(code, facts, detail)
     if any(
         stage_admission(primitive).preparation
         and not preparation_pair_available(

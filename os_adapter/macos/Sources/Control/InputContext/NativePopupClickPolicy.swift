@@ -13,9 +13,11 @@ enum NativePopupClickPolicy {
             reason: "The declared popup text action is not confirmed as a choice click.", preparationOptions: [])
     }
 
-    static func pointerOffer(_ proof: NativePopupPointerQualification?) -> NativeClickContract {
+    static func pointerOffer(
+        _ proof: NativePopupPointerQualification?, delivery: NativeClickDelivery = .windowDirected
+    ) -> NativeClickContract {
         var offer = NativeClickContract(
-            routeFamily: "macos.hid.v1", delivery: .systemPointer,
+            routeFamily: delivery == .systemPointer ? "macos.hid.v1" : "macos.windowDirected.v1", delivery: delivery,
             admission: proof == nil ? .insufficientEvidence : .ready,
             reason: proof == nil ? "The original popup choice point is not physically confirmed." : nil,
             preparationOptions: [])

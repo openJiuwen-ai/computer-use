@@ -286,7 +286,7 @@ class SessionController:
         intent = dict(type_text="insert", press_key="key").get(method, method)
         return await self._execute(
             owner,
-            Intent(intent, {k: v for k, v in params.items() if k != parameter}),
+            Intent(intent, {k: v for k, v in params.items() if k != parameter}, global_input=owner is None),
             target,
             app_keyboard=owner is not None and method in ("type_text", "paste", "press_key"),
         )

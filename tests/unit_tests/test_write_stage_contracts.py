@@ -295,7 +295,9 @@ async def test_every_click_delivery_keeps_preparation_atomic_and_stops_after_pos
         [StepResult(TARGET, dispatch, "possible input", click=click)],
         HostPolicy(allow_global_input=delivery == "desktop_pointer"),
     )
-    operation = Engine(port).execute(Intent("click", {"button": "left", "count": 1}), TARGET)
+    operation = Engine(port).execute(
+        Intent("click", {"button": "left", "count": 1}, global_input=delivery == "desktop_pointer"), TARGET
+    )
     if dispatch == Dispatch.DISPATCHED:
         assert (await operation)["status"] == "dispatched"
     else:

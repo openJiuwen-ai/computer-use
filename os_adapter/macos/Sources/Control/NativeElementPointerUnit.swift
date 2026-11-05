@@ -370,7 +370,7 @@ import ApplicationServices
         let sampled = try sample()
         guard sampled.preparation != .foreground else { return false }
         let pointer = pointerUnit(mapping: sampled.geometry.mapping)
-        let delivery = try pointer.resolvedDelivery(nil, at: sampled.geometry.point, kind: kind)
+        let delivery = pointer.resolvedDelivery(nil)
         return delivery == .systemPointer
             ? pointer.foregroundWindow(at: sampled.geometry.point) : pointer.backgroundPreparationAvailable(kind: kind)
     }
@@ -389,7 +389,7 @@ import ApplicationServices
                 [(preparable ? "foreground" : "receiver", "no")], preparationAllowed: preparable)
             return (readiness, pointer.foregroundWindow(at: sampled.geometry.point), true, false, sampled.hit)
         }
-        let delivery = try pointer.resolvedDelivery(nil, at: sampled.geometry.point, kind: kind)
+        let delivery = pointer.resolvedDelivery(nil)
         let foreground = pointer.foregroundWindow(at: sampled.geometry.point),
             route = pointer.ready(at: sampled.geometry.point, kind: kind, delivery: delivery)
         var required = [("receiver", route ? "yes" : "no")]
@@ -446,7 +446,7 @@ import ApplicationServices
         // Occlusion and ordinary preparation use the same exact-window
         // contract, including explicit key preparation for standard documents.
         let pointer = pointerUnit(mapping: selected.mapping)
-        let delivery = try pointer.resolvedDelivery(nil, at: selected.point, kind: kind)
+        let delivery = pointer.resolvedDelivery(nil)
         do {
             let outcome = try await pointer.prepareWindowContext(
                 foreground: foreground, atNative: selected.point, kind: kind, delivery: delivery, check: check,

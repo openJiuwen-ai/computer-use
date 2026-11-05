@@ -74,6 +74,7 @@ import CoreGraphics
                 event.location = point
                 let activity = NativeInputActivity.begin(
                     device: .mouse, transport: .globalHID, mechanism: "CGEvent.post.cghidEventTap", event: event)
+                NativeForegroundResponsibility.current?.willPostGlobalInput(event.type)
                 event.post(tap: .cghidEventTap)
                 activity?.returned()
             }, canRelease: { true }, skipped: onCleanupUnknown, onDispatch: onDispatch, onPosted: onPosted)

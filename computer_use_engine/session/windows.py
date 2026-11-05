@@ -4,6 +4,7 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass
+from weakref import WeakKeyDictionary
 
 from computer_use.diagnostics import local_failure
 from computer_use.identity import FrozenRecord
@@ -40,6 +41,7 @@ class WindowReferences:
         self._applications = {}
         self._physical = {}
         self._variants = {}
+        self._target_captures = WeakKeyDictionary()
 
     def application(self, session, application, name):
         key = (session, application)
@@ -174,14 +176,22 @@ class WindowReferences:
 
     def capture_references(self):
         """Live delivered/pending canvas maps, piggybacked on native captures."""
-        return frozenset(
-            piece.image.target.capture
+        images = [
+            image
             for state in self._applications.values()
             for image in (*state.window_images.values(), *state.sampled_window_images.values())
+        ]
+        return frozenset(
+            piece.image.target.capture
+            for image in images
             if not image.expired
             for piece in image.pieces
             if piece.scope_confirmed and piece.image.target.capture is not None
-        )
+        ) | frozenset(self._target_captures.values())
+
+    def retain_target_capture(self, target, capture):
+        """Keep native capture mappings while a public spatial target is live."""
+        self._target_captures[target] = capture
 
     def choices(self, directory, name=""):
         aliases = self.register_directory(directory, name)

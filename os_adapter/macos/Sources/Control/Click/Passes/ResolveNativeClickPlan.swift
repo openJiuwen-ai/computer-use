@@ -50,7 +50,8 @@ import ApplicationServices
                 element: !capture)
             pointer = request
             if let qualification = offer.popupPointer {
-                guard !capture, contract.actuator == nil, offer.delivery == .systemPointer, !command.foreground,
+                guard !capture, contract.actuator == nil,
+                    offer.delivery == (op.request.globalInput ? .systemPointer : .windowDirected), !command.foreground,
                     NativePopupClickPolicy.permitsIntent(op.request)
                 else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
                 target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))

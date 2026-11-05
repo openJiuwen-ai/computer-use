@@ -64,10 +64,13 @@ class Intent:
 
     kind: str
     parameters: Mapping[str, Any] = field(default_factory=dict)
+    global_input: bool = False
 
     def __post_init__(self):
         if self.kind not in INTENTS:
             raise ValueError(f"Unknown execution intent: {self.kind}")
+        if type(self.global_input) is not bool:
+            raise TypeError("global_input must be a boolean")
         object.__setattr__(self, "parameters", MappingProxyType(dict(self.parameters)))
 
 

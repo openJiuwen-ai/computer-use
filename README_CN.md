@@ -110,7 +110,7 @@ uv run --no-dev --extra mcp computer-use-mcp
 }
 ```
 
-将仓库路径替换为目标电脑上的绝对路径。默认可使用全局鼠标和键盘输入，仍优先选择符合语义且机制合格的元素或应用定向路线。每次动作分别记录所选路线声明的全局输入需求与实际影响。若需显式限制某个会话，使用 `--no-allow-global-input`；目标电脑自身的系统权限仍须具备。
+将仓库路径替换为目标电脑上的绝对路径。macOS 上 App／Window／Element 操作固定不注入全局鼠标或键盘；必要时由 Agent 自主选择 Computer 的直接输入方法。Windows／Linux 当前保持原有的全局输入能力。每次动作分别记录所选路线声明的全局输入需求与实际影响。若需显式限制某个会话，使用 `--no-allow-global-input`；目标电脑自身的系统权限仍须具备。
 
 `computer_use` 工具中已提供 `computer`、`print()` 和 `print_image()`。可以先查询应用引用：
 
@@ -162,10 +162,37 @@ with Computer() as computer:  # 仍优先选择机制合格的低干扰路线。
 嵌入已有 asyncio 或 GUI 应用时，在工作线程中运行阻塞的电脑操作代码，使宿主保持响应；
 内部驱动通信、进度和清理仍使用异步执行。
 
-`allow_global_input` 是严格的布尔型会话选项，默认 `True`，允许使用全局鼠标／键盘路线，
-但不会把它们排到合格的低干扰路线之前，也不授予 macOS 系统权限。
-显式设置 `Computer(allow_global_input=False)` 可限制全局输入；定向操作仍可能激活原窗口、改变键盘焦点。
-在这种显式限制下，没有可用允许路线的操作会报告 `permission_required`。
+`allow_global_input` 是严格的布尔型会话选项，默认 `True`，不授予 macOS 系统权限。
+macOS 上，App／Window／Element 的整次操作（含准备、恢复、清理）固定不注入全局鼠标或键盘，
+但允许必要的窗口激活和焦点准备。原来的全局鼠标后备路线改为定向投放。
+确需全局输入时，由 Agent 选择 Computer 的直接输入方法；该选择只作用于本次调用。
+Windows／Linux 当前保持原有行为，允许对象操作使用全局输入；相同边界的落地和验收后续实施。
+`Computer(allow_global_input=False)` 会限制显式全局输入并返回 `permission_required`。
+macOS 对象操作没有合格的非全局路线时返回 `input_unavailable`，不是要求重新授权对象方法。
+
+已有定位可直接复用，无需为切换输入渠道再读桌面、换算屏幕坐标或重新按名称找元素：
+
+```python
+field = app.element("输入框")
+field.type_text("普通输入", replace=True)       # macOS：AX／定向机制
+computer.type_text("全局输入", target=field, replace=True)
+computer.click(target=field)                  # 显式全局鼠标
+computer.press_key("Return", target=field)
+computer.paste("多行\n内容", target=field)    # 显式全局键盘；保留剪贴板事务
+
+# 从此前实际交付的 app 截图确定位置；point() 本身不读取或操作电脑。
+p = app.point((120, 80))
+app.click(at=p)                              # macOS：定向鼠标
+computer.click(target=p)                     # 相同定位，显式全局鼠标
+```
+
+`Target` 是不可变的定位值，由 `element.target`、`window.target` 或 `computer/app/window.point()` 取得。
+Element／Window 也可以直接作为 Computer 的 `target=`。窗口目标用于键盘输入，点击需要元素或图像点。
+元素目标保留原对象；图像点保留原图、实际交付尺寸和原生坐标映射。后续读取不会把旧目标改指新图；
+窗口平移使用原窗口的当前位置。窗口关闭、尺寸／显示布局改变或接收者冲突仍按具体机制处理。
+Target 限于同一个 Computer 会话。`computer.drag(start_target, end_target)` 的两端须来自同一窗口／桌面图像。
+裸 `computer.click(at=(x, y))` 等继续使用已交付桌面截图；带 Target 的调用不需要额外桌面观察。
+全局鼠标完成后记录实际位置变化，不自动移回原位置。实际通道与准备影响见 `result.impact`。
 
 `App` 表示应用范围，`list_apps()` 始终列出应用。App 和桌面观察发布窗口编号，
 通过 `computer.window(ref)` 直接选择具体窗口，或通过 `app.window(ref)` 选择同一个窗口并额外检查应用归属。

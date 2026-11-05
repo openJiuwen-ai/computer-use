@@ -7,7 +7,7 @@ import Carbon
 /// A call-local proposal. It is not an input permission or a text-client proof.
 @MainActor struct NativeKeyboardDeliveryProposal {
     let interpreter: NativeKeyboardInterpreterEvidence.Observation<AXUIElement>
-    var needsForeground: Bool { interpreter.kind == .localWeb }
+    var processTextUnavailable: Bool { interpreter.kind == .localWeb }
     var unavailable: Bool { interpreter.kind == .observedWebOwnershipUnknown }
 
     static func read(
@@ -112,8 +112,11 @@ import Carbon
                     "flags": event.flags.rawValue, "keycode": event.getIntegerValueField(.keyboardEventKeycode),
                     "unicodeUnits": count
                 ] as [String: Any])
+            NativeForegroundResponsibility.current?.willPostGlobalInput(event.type)
             event.post(tap: .cghidEventTap)
-        case .desktop: event.post(tap: .cghidEventTap)
+        case .desktop:
+            NativeForegroundResponsibility.current?.willPostGlobalInput(event.type)
+            event.post(tap: .cghidEventTap)
         }
         activity?.returned()
     }
@@ -142,20 +145,18 @@ import Carbon
     let surface: AXUIElement
     let mapping: WindowGeometry.WindowMapping
     let editor: AXUIElement
-    let area: AXUIElement
     let process: NativeProcessIdentity
     let readinessGate = NativeKeyboardReadinessGate()
 
     init(
         application: NSRunningApplication, window: AXUIElement, surface: AXUIElement,
-        mapping: WindowGeometry.WindowMapping, editor: AXUIElement, area: AXUIElement, process: NativeProcessIdentity
+        mapping: WindowGeometry.WindowMapping, editor: AXUIElement, process: NativeProcessIdentity
     ) {
         self.application = application
         self.window = window
         self.surface = surface
         self.mapping = mapping
         self.editor = editor
-        self.area = area
         self.process = process
     }
 
@@ -213,23 +214,7 @@ import Carbon
         guard (row[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true else {
             return .unavailable("original scoped keyboard window is not confirmed on screen")
         }
-        let observation = try NativeKeyboardDeliveryProposal.read(
-            element: editor, window: window, pid: process.pid, policy: .localWebNoProcess)
-        switch observation.interpreter.kind {
-        case .localWeb:
-            guard observation.interpreter.area.map({ CFEqual($0, area) }) == true else {
-                return .conflicting("original local-Web keyboard area changed")
-            }
-        case .remoteWeb: return .conflicting("original local-Web keyboard interpreter became remote")
-        case .noObservedWeb:
-            return observation.interpreter.complete
-                ? .conflicting("original local-Web containment changed")
-                : .unavailable("original local-Web parent query unavailable")
-        case .observedWebOwnershipUnknown:
-            return observation.interpreter.uncertainty == .identityConflict
-                ? .conflicting("original local-Web keyboard ownership conflicts")
-                : .unavailable("original local-Web keyboard ownership query unavailable")
-        }
+
         return .ready
     }
 
@@ -249,6 +234,8 @@ import Carbon
         if case .other = windowEvidence {
             return .conflicting("scoped keyboard native window changed during final receiver query")
         }
+        if CFEqual(editor, self.window), state.rawFocus == nil, state.focus == nil,
+            case .target = windowEvidence { return .ready }
         switch focus {
         case .value(let raw):
             guard CFGetTypeID(raw) == AXUIElementGetTypeID(), let expected = state.rawFocus ?? state.focus else {
