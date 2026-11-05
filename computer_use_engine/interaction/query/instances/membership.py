@@ -45,7 +45,7 @@ def ancestor(directory: DirectoryFacts, window: str, root: str) -> bool:
 
 
 def in_scope(ui: UIHandle, surface: str | None) -> bool:
-    """Check whether a native surface belongs to the App/Window view."""
+    """Check whether a native surface belongs to the App/window view."""
     # The pipeline shares retained bindings with their owning service.
     # pylint: disable-next=protected-access
     instance = ui._instance

@@ -204,7 +204,7 @@ class TargetQuery(NativeGraph):
                         # in this working window. It cannot prove uniqueness in
                         # another branch, or a complete negative lookup.
                         incomplete |= inline is None
-                        continue  # Select independent surfaces via App.window().
+                        continue  # Select independent surfaces via App methods' window= parameter.
                 matched = await self._matches(token, condition)
                 incomplete |= matched is None
                 if matched is True:

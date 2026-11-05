@@ -17,6 +17,7 @@ from computer_use.interaction.write.request.observation import WriteWithObservat
 from computer_use.interaction.write.request.passes.materialize_action_result import stage as materialize_action_result
 from computer_use.interaction.write.request.passes.prepare_write_scope import stage as prepare_write_scope
 from computer_use.interaction.write.request.passes.publish_action_event import stage as publish_action_event
+from computer_use.interaction.write.request.passes.resolve_window_close import stage as resolve_window_close
 from computer_use.interaction.write.request.passes.select_write_scope import stage as select_write_scope
 from computer_use.interaction.write.request.passes.validate_element_scope import stage as validate_element_scope
 from computer_use.interaction.write.request.passes.validate_write_binding import stage as validate_write_binding
@@ -58,16 +59,17 @@ class ExecuteNativeWrite(Node["ActionPlan", "Record"]):
         (engine, request) = (self.controller.engine, plan.request)
         self.children = (engine.pipeline,)
         label = _target_label(request, plan.target)
+        intent = plan.mechanism or request.intent
         try:
             options: Record = dict(path=request.path, query_timeout_ms=request.query_timeout_ms, _control=control)
             if request.forward_current:
                 options["forward_current"] = True
             if self.borrowed:
                 receipt = await engine.execute_in_call(
-                    request.intent, cast("OperationTarget", plan.target), cast("Remaining", plan.remaining), **options
+                    intent, cast("OperationTarget", plan.target), cast("Remaining", plan.remaining), **options
                 )
             else:
-                receipt = await engine.execute(request.intent, cast("OperationTarget", plan.target), **options)
+                receipt = await engine.execute(intent, cast("OperationTarget", plan.target), **options)
             receipt["intent"] = request.intent.kind
             if label:
                 receipt["target"] = label
@@ -207,6 +209,7 @@ class ControllerWritePipeline(HostOperation):
                                     steps=[
                                         validate_element_scope(controller=controller),
                                         prepare_write_scope(state_of=controller.state),
+                                        resolve_window_close(controller=controller),
                                         dispatch,
                                     ],
                                 ),

@@ -107,8 +107,8 @@ async def select_owned_window(app, filename, folder, report):
         if header is not None:
             selected = own_window(header["windows"], filename)
             if selected is not None:
-                window = app.window(selected["ref"])
-                observed = await asyncio.to_thread(window.read, view="tree", full=True)
+                window = selected["ref"]
+                observed = await asyncio.to_thread(app.read, view="tree", full=True, window=window)
                 selected_header = await captured_header(observed)
                 if selected_header is None or selected_header["scope"] != "window":
                     raise RuntimeError("Owned Window read did not retain captured scope metadata; no input sent")
@@ -211,13 +211,14 @@ async def run(options, folder):
         if selected is None:
             raise RuntimeError("No unique published application choice; inspect apps_after_open, no input sent")
         report["application_choice"] = selected
-        window, observation = await select_owned_window(computer.app(selected.id), filename, folder, report)
+        app = computer.app(selected.id)
+        window, observation = await select_owned_window(app, filename, folder, report)
         (folder / "owned-before.txt").write_text(observation.text)
         close_refs = [int(match[1]) for line in observation.text.splitlines() if (match := CLOSE.match(line))]
         if len(close_refs) != 1:
             raise RuntimeError("A unique close-button reference was not observed in the owned root; no input sent")
-        close_button = await asyncio.to_thread(window.element, close_refs[0])
-        field = await asyncio.to_thread(window.element, [{"role": "textArea"}])
+        close_button = await asyncio.to_thread(app.element, close_refs[0], window=window)
+        field = await asyncio.to_thread(app.element, [{"role": "textArea"}], window=window)
         initial = await asyncio.to_thread(field.read_text, length=4096)
         report["body_before"] = initial
         if initial.text != seed or initial.next is not None:
@@ -246,7 +247,7 @@ async def run(options, folder):
             if closed:
                 break
             try:
-                remaining = await asyncio.to_thread(window.read, view="tree")
+                remaining = await asyncio.to_thread(app.read, view="tree", window=window)
                 (folder / f"after-close-{attempt}.txt").write_text(remaining.text)
             except ComputerUseError as error:
                 report["after_close_read_error"] = failure(error)

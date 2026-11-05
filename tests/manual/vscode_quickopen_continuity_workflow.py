@@ -221,7 +221,7 @@ async def verify(folder, code, input_method="type"):
                     )
                 if len(matches) == 1:
                     ref, app = next(iter(matches.items()))
-                    window = app.window(ref)
+                    window = ref
                     report["owned_window_ref"] = ref
                     break
                 remaining = deadline - time.monotonic()
@@ -231,7 +231,7 @@ async def verify(folder, code, input_method="type"):
                 raise AssertionError(
                     "The uniquely named owned Code window was not discovered within the launch deadline; no input sent"
                 )
-            observed = await asyncio.to_thread(window.read, view="both", full=True)
+            observed = await asyncio.to_thread(app.read, view="both", full=True, window=window)
             save("initial", observed)
             assert marker in observed.text
             initially_visible = [path for path in documents if tokens[str(path)] in observed.text]
@@ -240,7 +240,7 @@ async def verify(folder, code, input_method="type"):
             report["round_trip"] = [str(path) for path in destinations]
             close_refs = re.findall(r"(?m)^\s*(\d+) (?:close button|关闭按钮)\b", observed.text)
             if len(close_refs) == 1:
-                close_button = await asyncio.to_thread(window.element, int(close_refs[0]))
+                close_button = await asyncio.to_thread(app.element, int(close_refs[0]), window=window)
             seed = {"before": await state(external_folder)}
             report["foreground_seed"] = seed
             started = time.monotonic()
@@ -281,11 +281,11 @@ async def verify(folder, code, input_method="type"):
 
             for index, path in enumerate(destinations):
                 prefix = f"transition-{index}"
-                await invoke(prefix + "-open", lambda: window.press_key("super+p"))
-                opened = await asyncio.to_thread(window.read, view="both", full=True)
+                await invoke(prefix + "-open", lambda: app.press_key("super+p", window=window))
+                opened = await asyncio.to_thread(app.read, view="both", full=True, window=window)
                 save(prefix + "-opened", opened)
                 opened_ref = quickopen_ref(opened.text)
-                field = await asyncio.to_thread(window.element, opened_ref)
+                field = await asyncio.to_thread(app.element, opened_ref, window=window)
                 if input_method == "paste":
                     before_value = observed_value(opened.text, opened_ref)
                     report[prefix + "-before-paste"] = {"reference": opened_ref, "value": before_value}
@@ -297,7 +297,7 @@ async def verify(folder, code, input_method="type"):
                     await invoke(
                         prefix + "-query-type", lambda field=field, path=path: field.type_text(str(path), replace=True)
                     )
-                filled = await asyncio.to_thread(window.read, view="both", full=True)
+                filled = await asyncio.to_thread(app.read, view="both", full=True, window=window)
                 save(prefix + "-filled", filled)
                 query_ref = quickopen_ref(filled.text)
                 query_value = observed_value(filled.text, query_ref)
@@ -315,14 +315,14 @@ async def verify(folder, code, input_method="type"):
                     external_folder, lambda value, before=before: value["clicks"] == before["clicks"] + 1
                 )
                 await asyncio.sleep(0.3)
-                retained = await asyncio.to_thread(window.read, view="both", full=True)
+                retained = await asyncio.to_thread(app.read, view="both", full=True, window=window)
                 save(prefix + "-after-external", retained)
                 quickopen_ref(retained.text)
                 await invoke(prefix + "-return", lambda field=field: field.press_key("Return"))
                 deadline = time.monotonic() + 5
                 current = None
                 while time.monotonic() < deadline:
-                    current = await asyncio.to_thread(window.read, view="both", full=True)
+                    current = await asyncio.to_thread(app.read, view="both", full=True, window=window)
                     if tokens[str(path)] in current.text:
                         break
                     await asyncio.sleep(0.15)
@@ -353,7 +353,9 @@ async def verify(folder, code, input_method="type"):
                     # Only the retained owned window is closed. Never quit Code
                     # or target whichever window is globally active at cleanup.
                     result = await asyncio.to_thread(
-                        close_button.click if close_button is not None else lambda: window.press_key("super+shift+w")
+                        close_button.click
+                        if close_button is not None
+                        else lambda: app.press_key("super+shift+w", window=window)
                     )
                     report["owned_window_close"] = result
                     if cli is not None:

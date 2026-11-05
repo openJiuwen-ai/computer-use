@@ -69,7 +69,7 @@ def render_desktop(
             + (json_string(window["title"]) if window["title"] else "<untitled>")
             + " "
             + box(window["rect"])
-            + (f" computer.window({reference})" if reference is not None else "")
+            + (f" window={reference}" if reference is not None else "")
             + application(window.get("selector"), "; application: ")
         )
     if not value["windows"]:

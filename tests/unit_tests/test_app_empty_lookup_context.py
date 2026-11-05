@@ -55,7 +55,11 @@ def test_historical_popup_with_no_current_lookup_context_uses_delivered_form_onl
     evidence = app._instance.evidence[WindowIdentity.of(popup)]
     assert evidence.lifetime is WindowLifetime.RETAINED
     assert evidence.membership.value == "unknown"
-    fixed._lookup_context = LookupContext(WindowIdentity.of(popup))
+    from computer_use.session.interfaces import DeliveredWindowContext
+
+    app._instance.window_contexts[fixed.identity] = DeliveredWindowContext(
+        WindowIdentity.of(popup), LookupContext(WindowIdentity.of(popup)), 1,
+    )
     with pytest.raises(ComputerUseError) as caught:
         asyncio.run(controller.interfaces.element(fixed, "10:00", 3000, None))
     assert caught.value.code == "observation_incomplete"

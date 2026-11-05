@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.scope import adopt, display_selection
 from computer_use.interaction.read.facts.normalize import normalize_facts
 from computer_use.interaction.read.numbering.references import DisplayReferences
@@ -44,7 +45,7 @@ def rendered_tree(target):
 
 def test_app_display_selects_new_ax_form_over_historical_native_only_launcher():
     controller, app = setup(surface("launcher"))
-    fixed = app.window(ref(app, "launcher"))
+    fixed = window_scope(controller, app, ref(app, "launcher"))
     original = fixed._window_identity
     updated = directory(surface("launcher", accessible=False), surface("form"), focus=None)
     adopt(controller, app, updated)
@@ -116,7 +117,7 @@ def test_app_lookup_after_native_only_popup_uses_only_actually_delivered_current
         )
         if delivered:
             observation_delivered(pending)
-        fixed = app.window(ref(app, "popup"))
+        fixed = window_scope(controller, app, ref(app, "popup"))
         original = fixed._window_identity
         fixed._context = "popup"
         visual = directory(
@@ -143,6 +144,7 @@ def test_app_lookup_after_native_only_popup_uses_only_actually_delivered_current
             assert caught.value.code == ("ambiguous_target" if duplicate else "observation_incomplete")
             assert queries == (["form", "child"] if duplicate else [])
         assert fixed._window_identity == original
+        controller.reader.directory._query = AsyncMock(return_value=visual)
         with pytest.raises(ComputerUseError) as caught:
             asyncio.run(controller.interfaces.element(fixed, "30 minutes", 0, None))
         assert caught.value.code == "observation_incomplete"
@@ -152,7 +154,7 @@ def test_app_lookup_after_native_only_popup_uses_only_actually_delivered_current
 
 def test_app_lookup_reselects_a_delivered_new_lifetime_in_the_same_window_slot_without_rebinding_old_window():
     controller, app = setup(surface("slot"))
-    fixed = app.window(ref(app, "slot"))
+    fixed = window_scope(controller, app, ref(app, "slot"))
     original = fixed._window_identity
     old_identity = WindowIdentity.of(surface("slot"))
     fresh = surface("slot", scope="new-lifetime")

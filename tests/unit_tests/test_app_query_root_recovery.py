@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.scope import adopt, display_selection
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.views.pipeline import WindowPart, member_target, remember
@@ -44,7 +45,7 @@ def popup_context():
         directory=current,
         trees=tuple((target, snapshot) for target, snapshot, _ in rendered),
     )
-    fixed = app.window(ref(app, "popup"))
+    fixed = window_scope(controller, app, ref(app, "popup"))
     return controller, app, fixed, form, popup, targets
 
 
@@ -100,7 +101,11 @@ def test_app_refreshes_once_after_failed_root_and_preserves_fixed_popup_identity
 @pytest.mark.parametrize("kind", ["fixed", "branch", "second_root_failure", "budget", "cancel", "foreign"])
 def test_fixed_window_other_incompleteness_and_exhaustion_do_not_authorize_unbounded_recovery(kind):
     controller, app, fixed, form, popup, _targets = popup_context()
-    fixed._lookup_context = app._instance.lookup_context
+    from computer_use.session.interfaces import DeliveredWindowContext
+
+    app._instance.window_contexts[fixed.identity] = DeliveredWindowContext(
+        app._instance.input_context, app._instance.lookup_context, 1,
+    )
     after = directory(form, {**popup, "node": None, "accessibility": False}, focus="form")
     controller.reader.directory._query = AsyncMock(return_value=after)
     if kind == "budget":

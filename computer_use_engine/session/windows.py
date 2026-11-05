@@ -113,13 +113,17 @@ class WindowReferences:
         """Return an existing exact alias without publishing scope or reviving a lifetime."""
         return self._aliases.get((session, application, identity))
 
-    def resolve(self, ref, session):
+    def resolve(self, ref, session, *, application=None):
         entry = self._entries.get(ref)
         if entry is None or entry.session != session:
             raise local_failure(
                 "window reference is unknown or belongs to an expired session",
                 "stale_target",
             )
+        if application is not None:
+            entry = self._variants[ref].get(application)
+            if entry is None:
+                raise local_failure("window does not belong to this App's confirmed application", "stale_target")
         return entry
 
     def retain_image(self, state, image, generation=0):
@@ -127,7 +131,7 @@ class WindowReferences:
 
         A member view uses the same canvas coordinates as the model saw. It
         cannot click a peer's pixels and does not become an unseen crop/local
-        image. Reconstructing a Window therefore never revives an older map.
+        image. Resolving a new request scope therefore never revives an older map.
         """
         if image.expired or image.unavailable_mapping or image.delivered is None:
             return
@@ -151,16 +155,6 @@ class WindowReferences:
                 continue
             state.window_images[identity] = retained
             state.window_image_generations[identity] = generation
-            view = state.views.get((identity.window, identity.surface, identity.instance))
-            if view is not None:
-                view._image = retained
-
-    def attach_image(self, state, identity, view):
-        """Bootstrap an unobserved Window from an exact actually delivered map."""
-        image = state.window_images.get(identity)
-        if image is not None and not image.expired:
-            view._image = image
-
     @staticmethod
     def delivered_image(state, view):
         """Pending sampling does not replace a fixed window's delivered view."""

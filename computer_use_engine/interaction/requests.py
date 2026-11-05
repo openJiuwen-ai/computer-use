@@ -39,7 +39,7 @@ class ExecuteAction:
     """Execute an intent against a binding or a semantic lookup result.
 
     Attributes:
-        owner: Registered App/Window owner, or None for desktop input.
+        owner: Registered App/window owner, or None for desktop input.
         intent: Operation and parameters, such as insertion, replacement, or a key.
         target: Binding or desktop image target to resolve before dispatch.
         path: Optional semantic path below the target's query root.

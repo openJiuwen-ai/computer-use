@@ -14,7 +14,7 @@ import ApplicationServices
             + tableArrays)
     private static let singleProperties = Set([
         "AXParent", "AXTitleUIElement", "AXWindow", "AXVerticalScrollBar", "AXHorizontalScrollBar", "AXHeader",
-        "AXDisclosedByRow"
+        "AXDisclosedByRow", "AXCloseButton"
     ])
     struct API {
         var count: (AXUIElement, String) -> (AXError, Int) = { element, property in

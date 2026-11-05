@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.reader import CapturedField, ChildContinuation
     from computer_use.native.contracts import Binding, Intent, OperationTarget
     from computer_use.session.interface_images import CapturedWindow, InterfaceImage
-    from computer_use.session.interfaces import InstanceState, LookupContext, WindowIdentity
+    from computer_use.session.interfaces import InstanceState, WindowIdentity
     from computer_use.types import ActionResult, AppInfo, Observation, TextPage
 
 Remaining: TypeAlias = Callable[[], int]
@@ -47,7 +47,7 @@ class ElementSnapshot(TypedDict):
 
 
 class UIHandle(Protocol):
-    """App/Window state needed to translate public UI operations.
+    """App/window state needed to translate public UI operations.
 
     Attributes:
         _instance: Shared instance membership, element references, and window views.
@@ -61,18 +61,9 @@ class UIHandle(Protocol):
     _instance: InstanceState
     _anchor: str | None
     _context: str | None
-    _lookup_context: LookupContext | None
     _lookup_scopes: tuple[object, ...]
     _menu_only: bool
     _image: InterfaceImage | None
-
-
-class WindowHandle(Protocol):
-    """Link from a fixed Window view to its containing App handle."""
-
-    @property
-    def _app(self) -> UIHandle:
-        pass
 
 
 class ObservedWindow(Protocol):

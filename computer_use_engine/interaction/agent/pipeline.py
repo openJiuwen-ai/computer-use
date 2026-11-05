@@ -37,7 +37,6 @@ from computer_use.session.cursors import TextCursors
 from computer_use.session.interfaces import (
     ApplicationEntry,
     ApplicationReferences,
-    WindowEvidence,
     WindowIdentity,
     WindowLifetime,
 )
@@ -46,6 +45,7 @@ from computer_use.session.windows import WindowReferences
 
 from .requests import (
     ActOnElement,
+    CloseWindow,
     DiscoverApps,
     ObserveDesktop,
     ObserveElement,
@@ -70,7 +70,7 @@ if TYPE_CHECKING:
 class AgentInterfacePipeline:
     """Translate public UI operations into scoped session execution.
 
-    App and Window handles supply instance membership; Element snapshots supply
+    Apps and request scopes supply instance membership; Element snapshots supply
     observed native bindings. This adapter resolves those scopes and retains
     the public references and cursors used by later calls.
 
@@ -79,7 +79,7 @@ class AgentInterfacePipeline:
         references: Registry mapping public application numbers to application identities.
         text_cursors: Registry linking text continuation tokens to captured sources.
         discovery: Flow publishing application choices.
-        read_pipeline: Flow observing App/Window views and publishing their results.
+        read_pipeline: Flow observing App/window views and publishing their results.
         write: Shared action flow, entered after public-scope validation.
         lookup: Shared lookup flow, entered once for each observed scope.
     """
@@ -120,60 +120,6 @@ class AgentInterfacePipeline:
 
     async def list_applications(self) -> list[AppInfo]:
         return await self.discovery.run()
-
-    def window(self, app: UIHandle | None, ref: int) -> UIHandle:
-        """Select the canonical fixed Window, optionally checking App ownership."""
-        from computer_use.interaction.query.instances.scope import adopt, require_identity
-        from computer_use.native.scopes import RunningApplication
-        from computer_use.session.state import AppState
-
-        entry = self.windows.resolve(ref, self.controller.transport.session)
-        instance = self.windows.application(entry.session, entry.application, entry.name)
-        if app is not None:
-            validate_session(self.controller, app)
-            running = self.controller.state(app).running
-            application = running.application if running is not None else app._instance.selector
-            if not self.windows.belongs(ref, application):
-                raise local_failure(
-                    "window does not belong to this App's confirmed application",
-                    "stale_target",
-                )
-        if app is None or app._instance.selector != entry.application:
-            state = AppState(
-                entry.application, running=RunningApplication(entry.application, entry.name, entry.session)
-            )
-            app = self.controller.adapters.create_app(
-                self.controller, dict(selector=entry.application, _nativeState=state)
-            )
-        app._instance = instance
-        # A desktop catalogue is sufficient to select a weak-AX Window. It is
-        # partial and cannot retire other windows; subsequent reads refresh it.
-        if instance.directory is None:
-            adopt(self.controller, app, entry.directory)
-        if entry.identity not in instance.evidence:
-            instance.evidence[entry.identity] = WindowEvidence(entry.identity, Knowledge.UNKNOWN)
-        require_identity(app, entry.identity)
-        identity = entry.identity
-        key = (identity.window, identity.surface, identity.instance)
-        value = instance.views.get(key)
-        if value is None:
-            selection = self.controller.reader._selection(
-                entry.application, entry.name, entry.directory, identity.window
-            )
-            state = AppState(
-                entry.application,
-                running=RunningApplication(entry.application, entry.name, entry.session),
-                selection=selection,
-                refs=instance.refs,
-                directory=instance.directory,
-                windows={str(k): v for k, v in instance.windows.items()},
-            )
-            value = self.controller.adapters.create_window(
-                self.controller, dict(selector=entry.application, _nativeState=state), app, identity.window
-            )
-            instance.views[key] = value
-        self.windows.attach_image(instance, identity, value)
-        return value
 
     async def read(
         self,
@@ -293,7 +239,7 @@ class AgentInterfacePipeline:
         """Check that a retained element still belongs to the handle's scope.
 
         Args:
-            ui: App/Window view constraining the element's allowed membership.
+            ui: App/window view constraining the element's allowed membership.
             snapshot: Element identity and the scope recorded when it was observed.
             allow_unknown: Permit reference retention before a fresh directory
                 query, never native observation or input authorization.
@@ -345,7 +291,7 @@ class AgentInterfacePipeline:
                 "observation_incomplete",
             )
         raise local_failure(
-            "this element is outside the allowed App/Window scope",
+            "this element is outside the allowed App/window scope",
             "stale_target",
         )
 
@@ -355,7 +301,7 @@ class AgentInterfacePipeline:
         """Resolve an observed number, exact name, or path within this UI view.
 
         Args:
-            ui: App/Window view constraining lookup and reference ownership.
+            ui: App/window view constraining lookup and reference ownership.
             target: Integer reference, exact accessible name, or semantic path.
             timeout_ms: Total wait allowed for path lookup, in milliseconds.
             control: Parent execution metadata passed to each lookup child.
@@ -392,7 +338,7 @@ class AgentInterfacePipeline:
         # pylint: disable-next=protected-access
         instance = ui._instance
         # Application aliases share the last actually delivered lookup scope.
-        # A fixed Window retains its own menu view and always bounds window
+        # A window scope uses its own menu view and always bounds window
         # lookup by its original root. Pending reads grant neither alias a new
         # name/path context while that scope is live. A retired popup is not
         # the App's lifetime: a fresh name query may use the App's already
@@ -404,6 +350,23 @@ class AgentInterfacePipeline:
                 "this App has no delivered lookup scope",
                 "stale_target",
             )
+        if ui._anchor is not None:
+            from .scope import lookup_window
+
+            # Acquire only the specified root's query facts inside this lookup.
+            # No publication or change to the App's delivered default context.
+            query_window = lookup_window(ui)
+            source_owner = instance.owners.get(query_window)
+            query = self.controller.state(source_owner).query_target if source_owner is not None else None
+            if query is None or query.node is None:
+                if instance.members.get(query_window, {}).get("node") is None:
+                    await refresh(self.controller, ui, accessibility=True)
+                for key, item in allowed(ui).items():
+                    if item.get("node") is not None:
+                        native = self.controller.state(instance.owners[key])
+                        native.query_target = member_target(instance, item)
+                        native.query_scope_kind = "window"
+                        native.selection, native.observation = None, None
         menu_only = lookup_context.menu_only if lookup_context is not None else False
 
         def lookup_remaining():
@@ -431,7 +394,10 @@ class AgentInterfacePipeline:
             ) == (instance.session, item["instance"], item["window"], item["surface"])
 
         def lookup_sources():
-            context = ui._anchor or (lookup_context.window.window if lookup_context.window is not None else None)
+            context = (
+                lookup_window(ui) if ui._anchor is not None
+                else lookup_context.window.window if lookup_context.window is not None else None
+            )
             owners = list(lookup_context.menus) if lookup_context is not None else []
 
             if ui._anchor is None and not menu_only:
@@ -612,7 +578,7 @@ class AgentInterfacePipeline:
         # Capture before a new query: neither focus changes nor hidden sampling
         # may turn this operation into input in another document.
         validate_session(self.controller, ui)
-        target = self.keyboard_context(ui)
+        target = self.keyboard_context(ui, require_observed=ui._anchor is None)
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
         await refresh(self.controller, ui)
         require_identity(ui, identity, current=True)
@@ -630,7 +596,7 @@ class AgentInterfacePipeline:
         """Validate an element and dispatch direct or current-container input.
 
         Args:
-            ui: App/Window view owning the element and its member-window scope.
+            ui: App/window view owning the element and its member-window scope.
             snapshot: Bound element and its container classification.
             intent: Requested operation, such as insert, replace, click, or key.
             parameters: Text, key, or other parameters for the operation.
@@ -705,9 +671,13 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
 
     async def _arun(self, request: InterfaceRequest, control: Control) -> AgentResult:
         api = self.interfaces
+        if isinstance(request, (ObserveUI, ResolveElement, CloseWindow, UIKeyboard, UIPointer)):
+            from .scope import request_scope
+
+            owner = await request_scope(api.controller, request.owner, request.window)
         if isinstance(request, ObserveUI):
             return await api.read(
-                request.owner, request.view, request.full, request.menu_path, request.allow_foreground
+                owner, request.view, request.full, request.menu_path, request.allow_foreground
             )
         if isinstance(request, ObserveDesktop):
             return await api.read_desktop(request.view, request.full)
@@ -718,13 +688,18 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
         if isinstance(request, DiscoverApps):
             return await api.list_applications()
         if isinstance(request, ResolveElement):
-            return await api.element(request.owner, request.target, request.timeout_ms, control)
+            snapshot = await api.element(owner, request.target, request.timeout_ms, control)
+            if request.window is not None and type(request.target) is int:
+                api.validate_snapshot(owner, snapshot, allow_unknown=True)
+            return snapshot
         if isinstance(request, ActOnElement):
             return await api.act_element(request.owner, request.snapshot, request.intent, request.parameters, control)
+        if isinstance(request, CloseWindow):
+            return await api.write.arun(ExecuteAction(owner, Intent("closeWindow"), owner._window_identity), control)
         if isinstance(request, UIKeyboard):
-            return await api.keyboard(request.owner, request.method, request.parameters, control)
+            return await api.keyboard(owner, request.method, request.parameters, control)
         if isinstance(request, UIPointer):
-            return await api.pointer(request.owner, request.intent, request.points, request.options, control)
+            return await api.pointer(owner, request.intent, request.points, request.options, control)
         raise TypeError("Unknown agent interface request")
 
     def _run(self, value: InterfaceRequest, control: Control) -> AgentResult:

@@ -6,7 +6,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from computer_use import UI, App, Computer, Element, Window
+from computer_use import App, Computer, Element
 from computer_use.client.computer import computer_for_controller
 from computer_use.client.execution import ExecutionCancellation, SessionExecutor, execution_scope
 from computer_use.errors import ComputerUseError
@@ -134,7 +134,7 @@ def test_operation_error_propagates_at_the_call_and_closed_handles_do_not_execut
 
 
 def test_all_model_methods_are_synchronous_including_retained_details():
-    for cls in (Computer, UI, App, Window, Element):
+    for cls in (Computer, App, Element):
         for name, method in inspect.getmembers(cls, inspect.isfunction):
             if not name.startswith("_"):
                 assert not inspect.iscoroutinefunction(method), (cls.__name__, name)

@@ -9,18 +9,27 @@ variables persist across calls. App selectors and paths refer to this host.
 Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
 list_apps() entries expose id, display_name, and is_running. app() selects a
 scope; the first app.read() starts a nonrunning installed app when needed.
-app.read() discovers numbered windows; app.window(ref) binds one observed window.
+app.read() discovers numbered windows. Use app.read(window=ref) to observe one.
+App methods accept optional window=ref to select the target for that call;
+no Window object is needed. Element numbers are shared across all reads of the
+same App. app.element(number) stays bound to its original control after reading
+another window. app.element(name, window=ref) searches the specified window;
+it does not require an extra read merely to switch contexts.
+On macOS, app.close_window(ref) requests normal close of that exact window,
+including when screen-sharing controls cover its title-bar buttons. Use the
+returned observation to handle any confirmation; the SDK does not choose save
+or discard. A dispatched close request may be declined by the application.
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
 2. When the target has no usable element, element interaction encounters
    problems, or the target, UI state or outcome is unclear, promptly inspect
-   the relevant App/Window screenshot.
+   the relevant App screenshot.
    Reuse an adequate current image; obtain an updated image with
-   app.read(view='image') or window.read(view='image') when needed. Use that
-   App/Window's coordinate or keyboard methods as appropriate, such as
-   window.click(at=(x, y)) or window.press_key('Return').
-3. If App/Window operations still cannot advance the task, inspect the desktop
+   app.read(view='image', window=ref) when needed. Use that
+   App's coordinate or keyboard methods as appropriate, such as
+   app.click(at=(x, y), window=ref) or app.press_key('Return', window=ref).
+3. If App operations still cannot advance the task, inspect the desktop
    with computer.read(view='image') and use desktop-level mouse or keyboard
    methods, such as computer.click(at=(x, y)) or computer.press_key('Return').
 Apply this preference anew to every subsequent operation, including after
@@ -31,14 +40,14 @@ The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.
 type_text() accepts one line. For multiline text or tabs, use element.paste(text)
-or window.paste(text); paste inserts at the target's current selection.
+or app.paste(text, window=ref); paste inserts at the target's current selection.
 For double-click: from computer_use import ClickOption;
 app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
 to its Element: app.element(ref).perform_action('raise'), including a window root.
 Use an action's attached observation first. A new form with only an image can
 benefit from one scoped tree/both read when several semantic fields are needed.
 
-App/Window.read() defaults to tree; view='image' and view='both' include images.
+App.read() defaults to tree; view='image' and view='both' include images.
 Reads and action observations automatically present text and images; action
 receipts also appear automatically. Combined calls keep each receipt and the
 latest automatic observation per scope; explicitly printed views are retained.
@@ -57,6 +66,8 @@ and omitted children identify partial coverage. Tree full/diff/unchanged is the
 presentation mode.
 
 Coordinates use the displayed image's pixels and its named coordinate target.
+After reading multiple windows, use window=ref to reuse the corresponding
+image without rereading it. Composite images keep whole-image coordinates.
 Choose coordinates from a newly returned image in the following tool call.
 Combine operations whose targets and steps are already known in one call.
 Return at a new menu, dialog or other state that requires a fresh decision.

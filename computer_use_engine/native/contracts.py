@@ -54,7 +54,7 @@ class Cleanup(str, Enum):
 
 
 INTENTS = frozenset(
-    ("click", "focus", "insert", "replace", "paste", "key", "openMenu", "action", "scroll", "drag", "launch")
+    ("click", "focus", "insert", "replace", "paste", "key", "openMenu", "action", "scroll", "drag", "launch", "closeWindow")
 )
 
 

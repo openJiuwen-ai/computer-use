@@ -50,7 +50,7 @@ class AgentElementReadPipeline:
         """Read the element request through the session controller and deliver its observation.
 
         Args:
-            ui: App or Window handle whose instance and observation bounds constrain the
+            ui: App or request scope whose instance and observation bounds constrain the
                 operation.
             snapshot: Facts captured for this observation; display edits do not mutate native
                 evidence.

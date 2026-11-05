@@ -29,23 +29,23 @@ async def main():
             raise RuntimeError(f"Expected one calculator instance, found {len(candidates)}")
         app = computer.app(candidates[0].id)
         await asyncio.to_thread(app.read, view="tree")
-        window = app.window(0)
-        initial = str(await asyncio.to_thread(window.read, view="tree"))
+        window = 0
+        initial = str(await asyncio.to_thread(app.read, view="tree", window=window))
         clear = next((name for name in ("全部清除", "清除", "All Clear", "Clear") if name in initial), None)
         if clear is None:
             raise RuntimeError("No observed clear control")
-        await asyncio.to_thread((await asyncio.to_thread(window.element, clear)).click)
-        before = str(await asyncio.to_thread(window.read, view="tree"))
+        await asyncio.to_thread((await asyncio.to_thread(app.element, clear, window=window)).click)
+        before = str(await asyncio.to_thread(app.read, view="tree", window=window))
         if not re.search(r"(?:文本|text) [\u200e\u200f]*0(?:\n|$)", before):
             raise AssertionError("Calculator did not clear to zero")
-        seven = await asyncio.to_thread(window.element, "7")
+        seven = await asyncio.to_thread(app.element, "7", window=window)
         result = await asyncio.to_thread(seven.click)
-        after = str(await asyncio.to_thread(window.read, view="tree"))
+        after = str(await asyncio.to_thread(app.read, view="tree", window=window))
         if not re.search(r"(?:文本|text) [\u200e\u200f]*7(?:\n|$)", after):
             raise AssertionError("Calculator did not display seven")
         clear = next(name for name in ("全部清除", "清除", "All Clear", "Clear") if name in after)
-        await asyncio.to_thread((await asyncio.to_thread(window.element, clear)).click)
-        final = str(await asyncio.to_thread(window.read, view="tree"))
+        await asyncio.to_thread((await asyncio.to_thread(app.element, clear, window=window)).click)
+        final = str(await asyncio.to_thread(app.read, view="tree", window=window))
         if not re.search(r"(?:文本|text) [\u200e\u200f]*0(?:\n|$)", final):
             raise AssertionError("Calculator did not return to zero")
         report = dict(

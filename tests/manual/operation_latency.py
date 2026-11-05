@@ -139,12 +139,12 @@ async def measure(args):
                             + "\ncatalogue = captured_interface_metadata(discovery)\n"
                             "targets = [item for item in catalogue['windows'] if item['title'] == 'Discovery document A']\n"
                             "assert len(targets) == 1, catalogue\n"
-                            "probe = base.window(targets[0]['ref'])\nprobe.read()\n"
-                            "field = probe.element('Document input')\nbutton = probe.element('Mark document')",
+                            "probe = targets[0]['ref']\nbase.read(window=probe)\n"
+                            "field = base.element('Document input', window=probe)\nbutton = base.element('Mark document', window=probe)",
                         )
                         for index in range(args.iterations):
-                            await invoke(session, "fixture_tree", "probe.read()")
-                            await invoke(session, "fixture_both", "probe.read(view='both')")
+                            await invoke(session, "fixture_tree", "base.read(window=probe)")
+                            await invoke(session, "fixture_both", "base.read(window=probe, view='both')")
                             await invoke(session, "element_click", "button.click()")
                             await state_at(output, lambda state: state["documents"]["A"]["clicks"] == index + 1)
                             value = f"latency {index} 测试"
@@ -166,11 +166,11 @@ async def measure(args):
                                 "catalogue = captured_interface_metadata(settings_discovery)\n"
                                 "target = catalogue['current']\n"
                                 "assert target is not None, catalogue\n"
-                                "settings = settings.window(target)",
+                                "settings.read(window=target)",
                             )
                             for _ in range(args.iterations):
-                                await invoke(session, "settings_tree", "settings.read()")
-                                await invoke(session, "settings_both", "settings.read(view='both')")
+                                await invoke(session, "settings_tree", "settings.read(window=target)")
+                                await invoke(session, "settings_both", "settings.read(window=target, view='both')")
                         report["passed"] = True
                     finally:
                         reset = await session.call_tool("computer_use_reset", arguments={})

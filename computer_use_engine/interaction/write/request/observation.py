@@ -60,6 +60,18 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         instance = getattr(request.owner, "_instance", None)
         prior = getattr(instance, "directory", None)
         fixed = getattr(request.owner, "_window_identity", None)
+        context_root = WindowIdentity(fixed.root_window, fixed.surface, fixed.instance) if fixed is not None else None
+        if context_root is None and prior is not None:
+            # An Element owns its App, not a persistent window view. Preserve
+            # the confirmed parent as read-recovery data when closing a sheet
+            # or popup; another document's focus must not erase that context.
+            identity = WindowIdentity(request.target.root_window, request.target.surface, request.target.instance)
+            original = next((item for item in prior["surfaces"] if WindowIdentity.of(item) == identity), None)
+            parent = next((
+                item for item in prior["surfaces"]
+                if original is not None and original["parentState"] == "known" and item["window"] == original["parent"]
+            ), None)
+            context_root = WindowIdentity.of(parent) if parent is not None else None
         source_owner = getattr(instance, "owners", {}).get(getattr(request.target, "root_window", None))
         before_tree = self.controller.state(source_owner).query_snapshot if source_owner is not None else None
         image_identity = WindowIdentity(
@@ -80,7 +92,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 request.target,
                 tuple(WindowIdentity.of(item) for item in prior["surfaces"]),
                 weakref.ref(request.owner) if fixed is not None else None,
-                WindowIdentity(fixed.root_window, fixed.surface, fixed.instance) if fixed is not None else None,
+                context_root,
                 changes=(
                     PostwriteChanges(None, before_tree, before_image)
                     if before_tree is not None or before_image is not None else None
@@ -92,7 +104,11 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         try:
             receipt = await self.body.arun(request, control)
         except ComputerUseError as error:
-            if error.effect not in ("partial", "possible") and error.code not in TARGET_OBSERVATION_ERRORS:
+            close_unavailable = request.intent.kind == "closeWindow" and error.code == "input_unavailable"
+            if (
+                error.effect not in ("partial", "possible")
+                and error.code not in TARGET_OBSERVATION_ERRORS and not close_unavailable
+            ):
                 raise
             # This is still the original exception, not a fabricated successful
             # receipt. Preparation/dispatch evidence and its original cause stay

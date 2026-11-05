@@ -138,14 +138,14 @@ async def verify(directory, include_panel, *, allow_global_input=False):
                 "The file panel was not discovered",
                 catalogue,
             )
-            panel = app.window(current)
-            observation = await asyncio.to_thread(panel.read)
-            field = await asyncio.to_thread(panel.element, search_ref(observation.text))
+            panel = current
+            observation = await asyncio.to_thread(app.read, window=panel)
+            field = await asyncio.to_thread(app.element, search_ref(observation.text), window=panel)
             await input_action("hosted panel insertion", lambda: field.type_text("WorkSwarm"))
             if "Value: WorkSwarm" not in (await asyncio.to_thread(field.read)).text:
                 raise AssertionError("The hosted search field did not receive the query")
             await input_action("hosted panel replacement", lambda: field.type_text("Terminal", replace=True))
-            await input_action("window receiver insertion", lambda: panel.type_text(" app"))
+            await input_action("window receiver insertion", lambda: app.type_text(" app", window=panel))
             if "Value: Terminal app" not in (await asyncio.to_thread(field.read)).text:
                 raise AssertionError("The hosted search field did not receive the replacement and suffix")
         driver = Path(native_driver()["command"])

@@ -102,14 +102,14 @@ async def verify(folder, until, duration_label):
             save_observation(folder, "initial", initial)
             ref = owned_window_ref(initial.text, "请输入会议主题")
             assert ref is not None, "The prepared booking form was not uniquely observed; no input sent"
-            draft = app.window(ref)
-            topic = await asyncio.to_thread(draft.element, "请输入会议主题")
+            draft = ref
+            topic = await asyncio.to_thread(app.element, "请输入会议主题", window=draft)
             topic_before = await asyncio.to_thread(topic.read)
             save_observation(folder, "topic-before", topic_before)
             assert "CUA 菜单测试" in topic_before.text, "The prepared draft title changed; no input sent"
-            date = await asyncio.to_thread(draft.element, "开始日期")
-            hour = await asyncio.to_thread(draft.element, "时间编辑框")
-            duration = await asyncio.to_thread(draft.element, "选择会议时长")
+            date = await asyncio.to_thread(app.element, "开始日期", window=draft)
+            hour = await asyncio.to_thread(app.element, "时间编辑框", window=draft)
+            duration = await asyncio.to_thread(app.element, "选择会议时长", window=draft)
             build_fixture(external_folder, bundle, "ForegroundContinuityProbe")
             external_pid = (await state(external_folder))["pid"]
             report["external_fixture"] = {"pid": external_pid, "bundle": bundle, "folder": str(external_folder)}
@@ -208,7 +208,7 @@ async def verify(folder, until, duration_label):
             report["duration_option"] = {"reference": option_ref, "label": duration_label}
             choice = await asyncio.to_thread(app.element, option_ref)
             await invoke("duration-select", choice.click)
-            selected = await asyncio.to_thread(draft.read, view="both", full=True)
+            selected = await asyncio.to_thread(app.read, view="both", full=True, window=draft)
             save_observation(folder, "duration-value-form", selected)
             value_ref = duration_value_ref(selected.text)
             value = observed_value(selected.text, value_ref)

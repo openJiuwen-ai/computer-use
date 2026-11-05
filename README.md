@@ -18,7 +18,7 @@ Computer Use is the desktop-operation component of the openJiuwen Agent System S
 
 Developers can adopt it in two ways:
 
-**Option 1: integrate the computer_use engine.** Connect an agent through MCP or call the Python SDK directly. The MCP tool `computer_use(title, code)` runs Python against the `Computer → App / Window → Element` interface, with variables retained across calls. Agents use accessibility trees and screenshots to locate controls and verify operation results.
+**Option 1: integrate the computer_use engine.** Connect an agent through MCP or call the Python SDK directly. The MCP tool `computer_use(title, code)` runs Python against the `Computer → App → Element` interface, with variables retained across calls. Agents use accessibility trees and screenshots to locate controls and verify operation results.
 
 **Option 2: integrate the Computer Use DeepAgent.** Use the agent assembled on openJiuwen DeepAgent through its standard `invoke()`, `stream()` and `Runner` interfaces. Applications pass natural-language tasks to the agent, which observes the desktop, performs operations and checks their results.
 
@@ -129,7 +129,7 @@ coalesced into the final state. Distinct popups and explicitly printed or full o
 Window coordinate actions retain visual feedback and collect available accessibility information independently.
 MCP automatically presents initially collected content and then changes (diffs) by default, including observations after
 writes and consecutive operations in one call. Each window reports AX/image acquisition and specific gaps separately;
-full/diff/unchanged identifies the text presentation mode. Use `app.read(full=True)` or `window.read(full=True)` to restore full
+full/diff/unchanged identifies the text presentation mode. Use `app.read(full=True)`, with optional `window=`, to restore full
 context; no private client history protocol is required. The SDK's `state.text` remains complete for the captured scope;
 diff presentation does not change element bindings or screenshot coordinates.
 In MCP, printing an observation, its `.text`, or a direct text slice reuses automatic presentation instead of adding
@@ -138,7 +138,7 @@ the observation scope.
 
 Reads do not activate or raise windows to refresh pixels by default. On macOS,
 `app.read(view="both", allow_foreground=True)` explicitly allows preparation of the confirmed original window;
-the same option is available on `Window.read()`.
+use `app.read(window=ref, allow_foreground=True)` to select a specific window.
 This may change focus and stacking, but sends no global mouse/keyboard input and does not switch back afterward.
 The observation's `preparation` record and text retain the requests made; images retain their capture provenance.
 An unresolved observation target still returns window choices instead of using this permission to guess a target.
@@ -183,30 +183,42 @@ may still activate their original window and change keyboard focus. Under that
 explicit restriction, an operation with no permitted route reports `permission_required`.
 
 `App` identifies an application scope; `list_apps()` lists applications. App and
-desktop observations publish window references. Use `computer.window(ref)` to
-select a specific window directly, or `app.window(ref)` to select the same window
-while also checking application ownership. Neither selection activates a window.
-Window references are shared across desktop, App and post-action observations;
-titles and positions are descriptions, not target identities.
+desktop observations publish window references. Use `app.read(window=ref)` for a
+specific window. `element`, `click`, `scroll`, `drag`, `type_text`, `paste`, and
+`press_key` accept the same optional `window=` parameter. Selecting a window and
+ordinary reads do not activate it. Titles and positions describe windows; native
+identity defines their lifetime.
 
-A `Window` remains bound to that window. Closing it invalidates its old handles
-and captures; the App can still discover other windows. Element operations keep
-their original control binding, and coordinates use the image actually delivered
-for the operation. App-level keyboard input uses the latest explicitly delivered
-input context, not whichever window happens to have focus when the call executes.
-Handles for the same App share the actually delivered lookup scope, keyboard
-context and image; undisclosed samples do not replace them. Fixed Windows retain
-their own observations and images, including a delivered, confirmed modal input context.
-The SDK handles target preparation; a genuinely ambiguous context returns window
-choices. Each `choices` entry is a `WindowInfo` with an `id` accepted by
-`computer.window(id)` and a descriptive `title`. Post-action observation may show
-a newly discovered window without rebinding existing Window, Element or screenshot targets.
+The public object model is `Computer → App → Element`; there is no public Window
+class or window factory. Element numbers are shared across read scopes, and
+`app.element(number)` keeps its original control after another window is read.
+A name lookup with `window=ref` prepares its query scope within the same call;
+it does not require a preceding public read to switch windows. Omitting `window=`
+uses the latest actually delivered, unambiguous lookup or input context rather
+than the current system focus.
+
+On macOS, `app.close_window(ref)` requests normal close of that exact window,
+including when screen-sharing controls cover its title-bar buttons. It resolves
+the window's declared close control and uses the existing input/observation flow.
+The application may decline the request or show a confirmation; the SDK does not
+choose save or discard. The receipt uses `intent="closeWindow"`; `dispatched`
+means the request was sent, while `window_lifecycle` and the attached observation
+report the available state. Windows/Linux support remains follow-up work.
+
+Each window retains its current delivered image independently. After reading A
+and B, `app.click(at=(x, y), window=a)` can reuse A's displayed image. Composite
+images retain whole-image coordinates and map the actual receiver internally.
+Undelivered samples do not replace these mappings. A closed window's old reference
+and captures expire without retiring the App. Each `choices` item is a `WindowInfo`
+with an `id` accepted by `window=` and a descriptive `title`. Related observations
+may reveal new windows without rebinding existing Elements or image targets.
+The shared API applies on all platforms; real multi-window acceptance is currently
+performed on macOS, with Windows/Linux validation remaining follow-up work.
 
 On macOS, live element references survive unrelated layout-wrapper changes, partial observations,
 and cache pressure from other references. The SDK refreshes necessary operation facts.
 A destroyed element, closed/reopened window, or actual document ownership change still rejects the
-old reference and includes the related observation when available. `app.element(ref)` and
-`window.element(ref)` can retrieve a reference already published by that application; constructing
+old reference and includes the related observation when available. `app.element(ref)` can retrieve a reference already published by that application; constructing
 the handle does not claim its target is alive or authorize access. Actual reads and writes check
 the original window scope and lifetime, so failed writes can return current observation in the same call.
 Action identities are independent
@@ -225,7 +237,7 @@ available verification, not completion of the application's business operation.
 `observation_status` is `available`, `partial`, `unavailable`, or `not_requested`.
 `window_lifecycle` is `observed`, `closed`, `unknown`, or `not_applicable`; absence
 of pixels alone does not prove closure. When the original window is gone, related
-observations can still provide current window choices. Existing Window and Element
+observations can still provide current window choices. Existing window references and Element
 handles do not switch to those alternatives. `observation_error.session_usable` tells the caller whether
 the original session remains usable; it is not permission to replay uncertain input.
 
@@ -350,7 +362,7 @@ flowchart TD
     OS --> Desktop["Desktop applications"]
 ```
 
-DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App / Window → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. A completed action returns its `dispatched` or `verified` receipt and a bounded related observation. Agents use that observation, and further reads when needed, to judge task results. Failure of the related read does not erase or replay the action.
+DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. A completed action returns its `dispatched` or `verified` receipt and a bounded related observation. Agents use that observation, and further reads when needed, to judge task results. Failure of the related read does not erase or replay the action.
 
 ## Features
 
@@ -396,7 +408,7 @@ computer-use/
 
 - [DeepAgent integration](computer_use_agent/agent.py): agent construction, standard invocation and conversation lifecycle.
 - [DeepAgent tools](computer_use_agent/toolkit.py): tools for existing openJiuwen applications.
-- [SDK API reference](computer_use_engine/__init__.pyi): public interfaces and parameter types for `Computer`, `App`, `Window` and `Element`.
+- [SDK API reference](computer_use_engine/__init__.pyi): public interfaces and parameter types for `Computer`, `App` and `Element`.
 - [MCP server](interface_adapter/mcp/server.py): tool schemas, execution instructions and global-input authorization.
 - [Native setup commands](scripts/native.py): platform builds, permission checks and Linux session setup.
 - [Direct conversation](computer_use_agent/cli/main.py): CLI options and interactive commands.

@@ -33,6 +33,7 @@ from artifact_json import encode_artifact
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
 from computer_use.errors import ComputerUseError
+from computer_use.native.contracts import Binding
 from computer_use.paths import native_driver
 from input_receiver_workflow import build_fixture, state
 from web_action_workflow import build, command, timestamp, wait_for
@@ -116,8 +117,8 @@ def window_ready(value, index):
     )
 
 
-async def snapshot(app, folder, name):
-    observation = await asyncio.to_thread(app.read, view="both", full=True)
+async def snapshot(app, folder, name, *, window=None):
+    observation = await asyncio.to_thread(app.read, view="both", full=True, window=window)
     (folder / (name + ".txt")).write_text(observation.text)
     if observation.screenshot is not None:
         (folder / (name + ".png")).write_bytes(observation.screenshot)
@@ -265,13 +266,16 @@ async def verify(folder, options):
         report["target_choices"] = candidates
         assert len(candidates) == 1, report["target_choices"]
         target_ref = candidates[0]["ref"]
-        target_window = app.window(target_ref)
-        root = target_window._window_identity
+        target_window = target_ref
+        identity = computer._controller.interfaces.windows.resolve(
+            target_window, computer._controller.transport.session
+        ).identity
+        root = Binding(computer._controller.transport.session, identity.instance, identity.window, identity.surface)
         report["fixed_window_binding"] = asdict(root)
         # A background launch cannot assume AppKit will honor self-activation.
         # Explicit observation preparation sets up only this known A window;
         # the measured action starts after B/sentinel replaces that context.
-        prepared = await asyncio.to_thread(target_window.read, view="tree", allow_foreground=True)
+        prepared = await asyncio.to_thread(app.read, view="tree", allow_foreground=True, window=target_window)
         report["setup_target_preparation"] = prepared.preparation
         await command(folder, "front-target")
         await wait_for(folder, lambda value: window_ready(value, 0))
@@ -281,23 +285,29 @@ async def verify(folder, options):
         # App reads describe an application; they do not bind it to whichever
         # window happens to be current. Retain the explicit A Window throughout
         # the B/sentinel switch, including element lookup and post-action read.
-        ui = target_window
+        ui = app
+        coordinate_window = target_window if options.coordinate_scope == "window" else None
         if options.operation == "coordinate":
             if options.coordinate_scope == "app":
                 ui = app
             else:
-                await snapshot(ui, folder, "a-window-observed")
+                await snapshot(ui, folder, "a-window-observed", window=coordinate_window)
             report["target_binding"] = asdict(root)
         else:
-            await snapshot(target_window, folder, "a-window-observed")
+            await snapshot(app, folder, "a-window-observed", window=target_window)
             target = await asyncio.to_thread(
-                target_window.element, [{"identifier": "document-" + options.receiver + "-A"}]
+                app.element, [{"identifier": "document-" + options.receiver + "-A"}], window=target_window
             )
-            assert target._owner is target_window
+            assert target._owner is app
             report["target_binding"] = asdict(target._snapshot["binding"])
         report["target_before_switch"] = await state(folder)
         if options.operation == "coordinate":
-            report["coordinate"] = coordinate_target(ui._image, root, report["target_before_switch"], options.receiver)
+            image = (
+                app._instance.window_images[identity]
+                if coordinate_window is not None
+                else app._instance.delivered_image
+            )
+            report["coordinate"] = coordinate_target(image, root, report["target_before_switch"], options.receiver)
         await command(folder, "front-other")
         report["other_window_selected"] = await wait_for(folder, lambda value: window_ready(value, 1))
         if options.state == "background":
@@ -339,7 +349,9 @@ async def verify(folder, options):
         report["requested_actions"] += 1
         try:
             if options.operation == "coordinate":
-                result = await asyncio.to_thread(ui.click, at=tuple(report["coordinate"]["point"]))
+                result = await asyncio.to_thread(
+                    ui.click, at=tuple(report["coordinate"]["point"]), window=coordinate_window
+                )
             elif options.operation == "click":
                 result = await asyncio.to_thread(target.click)
             else:
@@ -367,7 +379,7 @@ async def verify(folder, options):
                 break
             await asyncio.sleep(0.05)
         report["samples"] = samples
-        await snapshot(ui, folder, "a-after")
+        await snapshot(ui, folder, "a-after", window=coordinate_window)
         after = await state(folder)
         report["after"] = after
         report["system_foreground_changed"] = before["frontmostPID"] != after["frontmostPID"]
@@ -410,12 +422,12 @@ async def verify(folder, options):
             else []
         )
         report["target_binding_after"] = asdict(
-            target_window._window_identity if options.operation == "coordinate" else target._snapshot["binding"]
+            root if options.operation == "coordinate" else target._snapshot["binding"]
         )
-        report["fixed_window_binding_after"] = asdict(target_window._window_identity)
+        report["fixed_window_binding_after"] = asdict(root)
         assert report["fixed_window_binding_after"] == report["fixed_window_binding"]
         if options.operation != "coordinate":
-            assert target._owner is target_window
+            assert target._owner is app
         assert report["target_binding_after"] == report["target_binding"]
         assert report["unrelated_callback_delta"] == [0, 0], report["unrelated_callback_delta"]
         assert all(

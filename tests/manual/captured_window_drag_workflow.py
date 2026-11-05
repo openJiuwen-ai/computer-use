@@ -93,8 +93,10 @@ async def command(folder, kind):
     raise TimeoutError("Owned titlebar fixture did not consume its setup command")
 
 
-async def snapshot(ui, folder, name, *, allow_foreground=False):
+async def snapshot(ui, folder, name, *, allow_foreground=False, window=None):
     options = {"allow_foreground": True} if allow_foreground else {}
+    if window is not None:
+        options["window"] = window
     observation = await asyncio.to_thread(ui.read, view="both", **options)
     (folder / (name + ".txt")).write_text(observation.text)
     if observation.screenshot is not None:
@@ -175,10 +177,10 @@ async def verify(folder, options):
         result["setup_before"] = await command(folder, "reset")
         app = computer.app(bundle)
         await snapshot(app, folder, "app-setup")
-        window = app.window(0)
+        window = 0
         # Background self-activation is not a reliable fixture setup mechanism.
         # Explicitly prepare this already observed window before measuring drag.
-        prepared = await snapshot(window, folder, "window-setup", allow_foreground=True)
+        prepared = await snapshot(app, folder, "window-setup", allow_foreground=True, window=window)
         result["setup_target_preparation"] = prepared.preparation
         await command(folder, "foreground")
         for _ in range(100):
@@ -191,14 +193,16 @@ async def verify(folder, options):
         assert not before["buttonHeld"] and before["ordered"], before
         result["setup_after"] = before
         await snapshot(app, folder, "app-before")
-        await snapshot(window, folder, "window-before")
+        await snapshot(app, folder, "window-before", window=window)
         before = await state(folder)
         qx, qy, qw, qh = before["frameQuartz"]
         local_x, local_y = before["dragHandlePoint"]
         result["drag_handle_kind"] = before["dragHandleKind"]
         if options.route == "captured":
-            image = window._image
-            root = computer._controller.state(window).selection.root
+            image = app._instance.window_images[
+                computer._controller.interfaces.windows.resolve(window, computer._controller.transport.session).identity
+            ]
+            root = image.pieces[0].image.target
             result["observed_root"] = asdict(root)
             piece, start, end, local, pieces, attempts = captured_drag_points(image, root, before)
             local_x, local_y = local
@@ -210,7 +214,7 @@ async def verify(folder, options):
                 "piece_box": piece.box,
                 "digest": image.digest.hex(),
             }
-            ui = window
+            ui = app
         else:
             await snapshot(computer, folder, "desktop-before")
             catalogue = computer._controller.desktop._view["observation"]["windows"]
@@ -235,7 +239,8 @@ async def verify(folder, options):
         action_start = len(events)
         result["setup_diagnostic_count"] = action_start
         try:
-            result["receipt"] = dict(await asyncio.to_thread(ui.drag, start, end))
+            options_for_input = {"window": window} if options.route == "captured" else {}
+            result["receipt"] = dict(await asyncio.to_thread(ui.drag, start, end, **options_for_input))
         except ComputerUseError as error:
             result["error"] = {"code": error.code, "effect": error.effect, "detail": error.detail}
         result["returned_at"] = timestamp()
@@ -267,7 +272,7 @@ async def verify(folder, options):
         assert final["windowNumber"] == before["windowNumber"] and final["windowObjectID"] == before["windowObjectID"]
         assert final["frameQuartz"][2:] == before["frameQuartz"][2:], final
         assert not final["buttonHeld"] and final["otherClicks"] == 0 and final["contentDown"] == 0, final
-        await snapshot(window, folder, "window-after")
+        await snapshot(app, folder, "window-after", window=window)
         if options.expect == "complete":
             assert complete and "receipt" in result, result
         elif options.expect == "interrupted":

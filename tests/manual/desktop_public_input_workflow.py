@@ -86,7 +86,7 @@ def desktop_points(observation, current, names):
     ]
     pattern = re.compile(
         rf"^  ({QUOTED}) — ({QUOTED}|<untitled>) \(([^)]+)\)"
-        rf"(?: computer\.window\((\d+)\))?"
+        rf"(?: window=(\d+))?"
         rf"(?:; application: (?:computer\.app\(\d+\)|app={QUOTED}))?$"
     )
     windows, matches = [], []

@@ -267,7 +267,7 @@ class SessionController:
         Args:
             method: Requested pointer or keyboard operation.
             params: Operation parameters and the observed desktop/window reference.
-            owner: App/Window handle for scoped input, or None for desktop input.
+            owner: App/window handle for scoped input, or None for desktop input.
 
         Returns:
             Execution outcome from the write pipeline.

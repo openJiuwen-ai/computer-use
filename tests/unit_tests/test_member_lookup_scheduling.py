@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.agent.scope import window_scope
 from unit_tests.test_application_alias_lookup import observed_query_roots
 from unit_tests.test_application_window_lifetimes import ref, setup, surface
 
@@ -15,7 +16,7 @@ from unit_tests.test_application_window_lifetimes import ref, setup, surface
 def lookup_fixture():
     controller, app = setup(surface("toolbar", parent="a"), surface("a"))
     observed_query_roots(controller, app)
-    return controller, app.window(ref(app, "a"))
+    return controller, window_scope(controller, app, ref(app, "a"))
 
 
 def install_lookup(controller, find):

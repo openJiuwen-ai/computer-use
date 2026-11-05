@@ -149,7 +149,7 @@ def test_desktop_capture_without_mode_delivers_lazy_text_and_details(captured):
     details = observation.read_details(length=16384)
     assert details.next is None and details.text.endswith(observation.text)
     assert observation.text.startswith("Desktop: full view\n")
-    assert '"Owned document" (10, 20, 30, 40) computer.window(11); application: computer.app(7)' in observation.text
+    assert '"Owned document" (10, 20, 30, 40) window=11; application: computer.app(7)' in observation.text
     assert 'Foreground: "Document app"; computer.app(7)' in observation.text
     assert ("Screenshot: desktop 100x100 px" if captured else "Screenshot: unavailable") in observation.text
 

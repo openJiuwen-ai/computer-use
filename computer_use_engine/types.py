@@ -35,7 +35,7 @@ class Observation(Protocol):
         """Explicit foreground preparation evidence; None for an ordinary read."""
         pass
 
-    async def read_details(
+    def read_details(
         self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
     ) -> "TextPage": ...
     @property
@@ -64,7 +64,7 @@ class AppInfo(Protocol):
 
 
 class WindowInfo(Protocol):
-    """A specific observed window, selectable with computer.window(id)."""
+    """A specific observed window, selectable with App methods' window=id parameter."""
 
     id: int
     title: str

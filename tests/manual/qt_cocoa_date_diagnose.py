@@ -35,10 +35,11 @@ AX_PROBE_SOURCE = ROOT / "tests/fixtures/qt_cocoa_date_ax_probe.swift"
 DEFAULT_AX_PROBE = ROOT / ".artifacts/qt-cocoa-date-ax-probe"
 
 
-def delivered_text_point(window, native_point):
+def delivered_text_point(app, window, native_point):
     """Invert the retained capture transform, then apply its delivered scaling."""
-    image = window._image
-    surface = window._controller.state(window).selection.root.surface
+    identity = app._controller.interfaces.windows.resolve(window, app._controller.transport.session).identity
+    image = app._instance.window_images[identity]
+    surface = identity.surface
     piece = next(item for item in image.pieces if item.image.target.surface == surface)
     a, b, c, d, tx, ty = piece.image.coordinates["toNative"]
     determinant = a * d - b * c
@@ -196,8 +197,8 @@ async def diagnose(folder, python, mechanism, ax_probe):
                 candidates = [item for item in catalogue["windows"] if item["title"] == title]
                 assert len(candidates) == 1, catalogue
                 reference = candidates[0]["ref"]
-                window = app.window(reference)
-                image_observation = await asyncio.to_thread(window.read, view="image")
+                window = reference
+                image_observation = await asyncio.to_thread(app.read, view="image", window=window)
                 assert image_observation.screenshot, "Coordinate input requires delivered window pixels"
                 save_observation(folder, "text-point-window-before", image_observation)
                 oracle = (await state(folder, process=child))["text_geometry"]
@@ -211,11 +212,11 @@ async def diagnose(folder, python, mechanism, ax_probe):
                     origin, extent = position["value"], size["value"]
                     assert origin["x"] <= px < origin["x"] + extent["width"], oracle
                     assert origin["y"] <= py < origin["y"] + extent["height"], oracle
-                point, mapping = delivered_text_point(window, oracle["point"])
+                point, mapping = delivered_text_point(app, window, oracle["point"])
                 report["text_point_oracle"] = oracle
                 report["text_point_mapping"] = mapping
                 report["window_reference"] = reference
-                if not await step("text_point_click", lambda: window.click(at=point)):
+                if not await step("text_point_click", lambda: app.click(at=point, window=window)):
                     return
                 click = report["steps"][-1]
                 for name in ("value", "text", "model", "date_changes", "submissions", "guard"):

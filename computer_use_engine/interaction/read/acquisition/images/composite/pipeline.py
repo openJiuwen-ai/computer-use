@@ -62,7 +62,7 @@ class InterfaceImagePipeline:
         """Compose the requested interface image from confirmed member-window captures.
 
         Args:
-            ui: App or Window handle whose instance and observation bounds constrain the
+            ui: App or request scope whose instance and observation bounds constrain the
                 operation.
             parts: Ordered source parts whose provenance remains available after composition.
             on_gap: Receive incomplete-composition evidence without discarding already captured pixels.
@@ -333,7 +333,7 @@ class InterfaceImagePipeline:
         """Retain the composite image's source windows and coordinate mapping.
 
         Args:
-            ui: App or Window handle whose instance and observation bounds constrain the
+            ui: App or request scope whose instance and observation bounds constrain the
                 operation.
             target: A captured source identity whose native session owns this image.
             windows: Public references for the windows actually displayed in this PNG.
@@ -440,7 +440,7 @@ class InterfaceImagePipeline:
             if not current() or image.unavailable_mapping:
                 return None
             if fixed_window:
-                return f"computer.window({fixed_ref})" if fixed_ref in coordinate_windows() else None
+                return (application_target + f" (window={fixed_ref})") if fixed_ref in coordinate_windows() else None
             return application_target if generation >= state.delivered_image_generation else None
 
         def delivered(coordinates: ImageCoordinates | None = None) -> None:
@@ -469,7 +469,7 @@ class InterfaceImagePipeline:
                     # pylint: disable-next=protected-access
                     ui._instance.name or str(ui._instance.selector),
                     # pylint: disable-next=protected-access
-                    "observed windows" if ui._anchor is None else "fixed Window",
+                    "observed windows" if ui._anchor is None else "selected window",
                 ), *historical)),
                 current=current,
                 delivered=delivered,

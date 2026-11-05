@@ -32,6 +32,8 @@ import ApplicationServices
     var count = 0
     var submits = 0
     var closed = false
+    var closeMode = "normal"
+    var closeRequests = 0
     var changes = [String]()
     init(name: String, window: NSWindow) { self.name = name; self.window = window }
 }
@@ -84,6 +86,27 @@ import ApplicationServices
             let doc = documents.values.first(where: { $0.window === window }) else { return }
         doc.closed = true
         record()
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let doc = documents.values.first(where: { $0.window === sender }) else { return true }
+        doc.closeRequests += 1
+        record()
+        if doc.closeMode == "deny" { return false }
+        if doc.closeMode == "confirm" {
+            let alert = NSAlert()
+            alert.messageText = "Confirm close \(doc.name)"
+            alert.informativeText = "The SDK must leave this choice to its caller."
+            alert.addButton(withTitle: "Cancel close")
+            alert.addButton(withTitle: "Close document")
+            alert.beginSheetModal(for: sender) { response in
+                if response == .alertSecondButtonReturn { sender.close() }
+                self.record()
+            }
+            record()
+            return false
+        }
+        return true
     }
     func show(_ doc: D34Document) {
         NSApp.activate(ignoringOtherApps: true)
@@ -149,6 +172,7 @@ import ApplicationServices
                 "title": doc.window.title, "window": doc.window.windowNumber,
                 "object": String(describing: ObjectIdentifier(doc.window)),
                 "closed": doc.closed, "visible": doc.window.isVisible,
+                "closeMode": doc.closeMode, "closeRequests": doc.closeRequests,
                 "key": doc.window.isKeyWindow, "field": doc.field.stringValue,
                 "isSheet": doc.window.isSheet,
                 "sheetParent": doc.window.sheetParent?.windowNumber ?? -1,
@@ -203,6 +227,8 @@ import ApplicationServices
         case "focus":
             if let doc = documents[name], !doc.closed { show(doc) } else { commandError = "no live document" }
         case "close": documents[name]?.window.close()
+        case "deny-close": documents[name]?.closeMode = "deny"
+        case "confirm-close": documents[name]?.closeMode = "confirm"
         case "weak": show(create("Weak", title: "", offset: 110, weakAX: true))
         case "show-sheet":
             if let doc = documents[name], !doc.closed { openSheet(doc.countButton) }

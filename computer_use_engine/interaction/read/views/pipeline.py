@@ -112,7 +112,7 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     Args:
         controller: Session service owner; this dependency does not create another execution
             route.
-        ui: App or Window handle whose instance and observation bounds constrain the operation.
+        ui: App or request scope whose instance and observation bounds constrain the operation.
     """
     # The pipeline shares retained bindings with their owning service.
     # pylint: disable-next=protected-access
@@ -179,7 +179,7 @@ class InterfaceReadPipeline:
         """Read the handle's interface scope and publish its combined observation.
 
         Args:
-            ui: App or Window handle whose instance and observation bounds constrain the
+            ui: App or request scope whose instance and observation bounds constrain the
                 operation.
             view: Requested observation components: tree, image, or both.
             full: Whether delivery requests a complete tree instead of an eligible diff.
@@ -832,7 +832,7 @@ class InterfaceReadPipeline:
         """Collect one confirmed window member of the interface scope.
 
         Args:
-            ui: App or Window handle whose instance and observation bounds constrain the
+            ui: App or request scope whose instance and observation bounds constrain the
                 operation.
             view: Requested observation components: tree, image, or both.
             max_nodes: Maximum number of native objects this collection may read.

@@ -40,7 +40,7 @@ def remember_menu(
     Args:
         controller: Session service owner; this dependency does not create another execution
             route.
-        ui: App or Window handle whose instance and observation bounds constrain the operation.
+        ui: App or request scope whose instance and observation bounds constrain the operation.
     """
     owners, trees = [], []
     for part in menu.parts:
@@ -95,7 +95,7 @@ class InterfaceMenuPipeline:
         """Collect and publish menus within the handle's established interface scope.
 
         Args:
-            ui: App or Window handle whose instance and observation bounds constrain the
+            ui: App or request scope whose instance and observation bounds constrain the
                 operation.
             path: Ordered semantic lookup/menu components within the declared target scope.
             observed: Capture provenance or original observation used by the current stage.

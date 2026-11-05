@@ -19,6 +19,7 @@ import ApplicationServices
             try preservesSmallRelation(milliseconds)
         }
         try expiredRequestDoesNotCollect()
+        try closeButtonUsesSingleObjectGetter()
         try await cancelledRequestDoesNotCollect()
         print("PASS short observation budgets collect real root/relation facts and preserve expired/cancelled boundaries")
     }
@@ -33,6 +34,22 @@ import ApplicationServices
             element: element, scope: target.scope), evidence: .init(identity: identity, provider: nil, context: []),
             value: target)
         return (ref, element)
+    }
+
+    @MainActor private static func closeButtonUsesSingleObjectGetter() throws {
+        let element = AXUIElementCreateApplication(NSRunningApplication.current.processIdentifier)
+        var api = AXRelationReader.API()
+        api.count = { _, _ in preconditionFailure("AXCloseButton is not an array") }
+        api.range = { _, _, _ in preconditionFailure("AXCloseButton is not an array") }
+        api.single = { _, property in
+            precondition(property == "AXCloseButton")
+            return (.success, element)
+        }
+        let reader = AXRelationReader(api: api)
+        guard case .page(let page) = try reader.read(element, source: "window", property: "AXCloseButton", limit: 1)
+        else { preconditionFailure("the exact close button must be returned independently of AXChildren") }
+        precondition(page.total == 1 && page.targets.count == 1 && CFEqual(page.targets.first!, element))
+        precondition(page.nativeAPI == "AXUIElementCopyAttributeValue" && page.isArray == false)
     }
 
     @MainActor private static func preservesSmallRoot(_ milliseconds: Int) throws {

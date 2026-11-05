@@ -26,7 +26,31 @@ from computer_use.session.results import result_receipt
 
 
 class UI(SimpleNamespace):
-    pass
+    """Request-scope fixture; delivery state lives in the application session."""
+
+    def __init__(self, **fields):
+        from computer_use.session.interfaces import DeliveredWindowContext, LookupContext
+
+        receiver = fields.pop("_input_context", None)
+        lookup = fields.pop("_lookup_context", None)
+        generation = fields.pop("_delivered_generation", 0)
+        super().__init__(**fields)
+        fixed = fields.get("_window_identity")
+        if fixed is not None:
+            identity = WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)
+            self._instance.window_contexts[identity] = DeliveredWindowContext(
+                receiver, lookup or LookupContext(receiver), generation,
+            )
+
+    @property
+    def _input_context(self):
+        fixed = self._window_identity
+        return self._instance.window_contexts[WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)].input
+
+    @property
+    def _lookup_context(self):
+        fixed = self._window_identity
+        return self._instance.window_contexts[WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)].lookup
 
 
 def window(key, *, title="Same title", parent=None):
@@ -167,7 +191,7 @@ def test_application_header_preserves_all_windows_and_unknown_parent_selection()
     from computer_use.interaction.read.presentation.headers import interface_header
 
     text = interface_header(header)
-    assert "computer.window(0)" in text and "computer.window(1)" in text
+    assert "window=0" in text and "window=1" in text
     assert "parent unknown" in text and header.scope == "application"
     assert len(header.scoped) == 2
 
@@ -212,7 +236,7 @@ def test_related_failed_new_detail_preserves_original_image_and_catalogue(monkey
     )
     text, image, metadata = asyncio.run(pipeline._collect(app, "tree", False, None, current, None, None, related))
     assert image == b"old pixels" and metadata["content_available"]
-    assert "computer.window(0)" in text and "computer.window(1)" in text
+    assert "window=0" in text and "window=1" in text
     assert "original window is shown" in text and metadata["partial"]
     assert app._context == "A"
     assert related.original.root_window == "A"
@@ -227,7 +251,7 @@ def test_write_suffix_observes_owning_app_and_retains_original_lifecycle():
     target = member_target(state, a)
     receipt = dict(status="dispatched", target="A button", detail="Click delivered once")
     controller.engine.execute = AsyncMock(return_value=receipt)
-    observed = lazy_observation(CapturedTextDocument("Child input; computer.window(1)"))
+    observed = lazy_observation(CapturedTextDocument("Child input; window=1"))
     retain_observation_data(observed, (), (), directory=after)
 
     async def read(owner, view, full, menu_path, *, related):
@@ -265,7 +289,7 @@ def test_fixed_window_read_needs_no_application_display_primary(monkeypatch):
     text = asyncio.run(pipeline._collect(fixed, "image", False, None, current, None, None, None))
     assert pipeline.member.await_count == 1
     assert pipeline.member.call_args.args[1]["window"] == "A"
-    assert "computer.window(0)" in text and "computer.window(1)" in text
+    assert "window=0" in text and "window=1" in text
     assert "outside read scope" in text
     assert state.anchor is None and fixed._anchor == "A"
 
@@ -377,6 +401,8 @@ def test_application_lookup_context_captures_delivered_window_and_menu_configura
     internal = UI(_instance=state, _anchor=None, _context="B", _image=None)
     controller.register(internal, dict(selector="Fixture"))
     old_menu, new_menu = UI(), UI()
+    for menu in (old_menu, new_menu):
+        controller.register(menu, {"selector": "Fixture"})
     alias._context, alias._menu_only, alias._lookup_scopes = "A", True, (old_menu,)
     internal._menu_only, internal._lookup_scopes = False, (new_menu,)
     set_observation_handler(lambda _: None)
@@ -433,7 +459,7 @@ def test_catalogue_only_observation_does_not_republish_previous_menu_lookup():
     result = asyncio.run(
         InterfaceReadPipeline(controller)._collect(app, "image", False, None, current, None, None, None)
     )
-    assert "computer.window(0)" in result.text
+    assert "window=0" in result.text
     assert state.lookup_context.window is None
     assert not state.lookup_context.menu_only and state.lookup_context.menus == ()
 

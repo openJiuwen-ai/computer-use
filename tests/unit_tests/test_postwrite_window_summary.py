@@ -45,7 +45,7 @@ def test_reappeared_retained_popup_is_not_reported_as_a_created_window():
     # Popup's public ref already existed before hiding, but the immediately
     # pre-action catalogue contained only the parent. Its return is new evidence.
     text = summary(directory(parent), directory(parent, popup), {17: "A", 29: "Popup"})
-    assert "newly observed window entries: computer.window(29)" in text
+    assert "newly observed window entries: window=29" in text
     assert "created" not in text
     still_known = summary(directory(parent, popup), directory(parent, popup), {17: "A", 29: "Popup"})
     assert "no newly observed window entries" in still_known
@@ -54,14 +54,14 @@ def test_reappeared_retained_popup_is_not_reported_as_a_created_window():
 def test_menu_catalogue_entry_is_not_silently_omitted_and_failed_refresh_is_partial():
     parent, popup = window("A"), {**window("Menu"), "kind": "menu"}
     text = summary(directory(parent), directory(parent, popup), {17: "A", 29: "Menu"}, refresh_incomplete=True)
-    assert "computer.window(29)" in text and "catalogue partial" in text
+    assert "window=29" in text and "catalogue partial" in text
 
 
 def test_replacement_native_identity_is_a_new_observation_not_the_old_window():
     parent = window("A")
     replacement = {**parent, "instance": "replacement", "surface": "replacement-surface"}
     text = summary(directory(parent), directory(replacement), {29: "A"})
-    assert "newly observed window entries: computer.window(29)" in text
+    assert "newly observed window entries: window=29" in text
 
 
 def test_same_window_postwrite_summary_reaches_actual_mcp_text():

@@ -63,11 +63,11 @@ def main():
             app = computer.app(bundle)
             observation = app.read(view="both")
             (folder / "initial.txt").write_text(observation.text)
-            window = computer.window(window_with_content(observation.text, "Document A"))
-            field = window.element("A input")
+            window = window_with_content(observation.text, "Document A")
+            field = app.element("A input", window=window)
             field.type_text("Synchronous SDK", replace=True)
             field.press_key("Return")
-            window.element("Count").click()
+            app.element("Count", window=window).click()
             final = wait_state(
                 folder,
                 lambda value: (

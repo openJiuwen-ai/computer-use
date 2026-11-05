@@ -1,5 +1,6 @@
 """Image-only observation must not revoke retained exact AX lookup evidence."""
 
+from computer_use.interaction.agent.scope import window_scope
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
@@ -18,7 +19,7 @@ from unit_tests.test_application_window_lifetimes import directory, ref, setup, 
 def visual_after_accessibility(*, child_has_ax=True, primary_has_ax=True):
     main, child = surface("a", accessible=primary_has_ax), surface("child", parent="a", accessible=child_has_ax)
     controller, app = setup(main, surface("b"), child)
-    window = app.window(ref(app, "a"))
+    window = window_scope(controller, app, ref(app, "a"))
     for item in (main, child):
         target = Binding("session", item["instance"], item["window"], item["surface"], item["node"])
         remember(controller, window, WindowPart(target))
@@ -70,6 +71,7 @@ def test_visual_sampling_does_not_bypass_duplicate_name_ambiguity():
 
 def test_truly_missing_primary_ax_scope_cannot_claim_unique_match():
     controller, _app, window = visual_after_accessibility(primary_has_ax=False)
+    controller.reader.directory._query = AsyncMock(return_value=_app._instance.directory)
     resolve = AsyncMock(
         return_value=dict(binding=Binding("session", "owner:child", "child", "surface:child", "button"))
     )
@@ -105,7 +107,7 @@ def test_live_lookup_failure_is_preserved_without_selecting_another_window():
 
 def test_new_visual_only_child_does_not_invent_a_required_ax_lookup_scope():
     controller, app = setup(surface("a"), surface("b"))
-    fixed = app.window(ref(app, "a"))
+    fixed = window_scope(controller, app, ref(app, "a"))
     remember(controller, fixed, WindowPart(Binding("session", "owner:a", "a", "surface:a", "node:a")))
     # A coordinate action's image-only suffix can discover and display a new
     # attached native window without asking that child for AX content.

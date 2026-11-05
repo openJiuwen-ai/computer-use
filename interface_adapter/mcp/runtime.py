@@ -228,7 +228,7 @@ class Runtime:
                 message += "\nOriginal window: closed."
             if data["choices"]:
                 message += "\nCurrent windows:\n" + "\n".join(
-                    f"computer.window({choice['id']}) {choice['title'] or '<untitled>'}" for choice in data["choices"]
+                    f"window={choice['id']} {choice['title'] or '<untitled>'}" for choice in data["choices"]
                 )
             self.emit(dict(type="text", text=message), True)
             return

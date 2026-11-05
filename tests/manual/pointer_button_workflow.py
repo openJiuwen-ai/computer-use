@@ -33,8 +33,8 @@ LOG = logging.getLogger(__name__)
 CASES = {"left": ("left", 1), "right": ("right", 1), "middle": ("middle", 1), "double": ("left", 2)}
 
 
-async def snapshot(ui, folder, name):
-    observation = await asyncio.to_thread(ui.read, view="both")
+async def snapshot(ui, folder, name, *, window=None):
+    observation = await asyncio.to_thread(ui.read, view="both", window=window)
     (folder / f"{name}.txt").write_text(observation.text)
     assert observation.screenshot, "Coordinate input requires delivered pixels"
     (folder / f"{name}.png").write_bytes(observation.screenshot)
@@ -64,7 +64,9 @@ async def verify(folder, selected, driver_option, *, weak_ax=False):
         "sdk": computer_use.__file__,
         "driver": str(driver),
         "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
-        "head": (await asyncio.to_thread(subprocess.check_output, ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True)).strip(),
+        "head": (
+            await asyncio.to_thread(subprocess.check_output, ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True)
+        ).strip(),
         "cases": [],
     }
     sources = {
@@ -96,21 +98,22 @@ async def verify(folder, selected, driver_option, *, weak_ax=False):
         # and current global focus cannot choose the coordinate destination.
         directory = app._instance.directory
         originals = [
-            item for item in directory["surfaces"]
-            if item["nativeWindow"] and item["title"] == "Pointer button probe"
+            item for item in directory["surfaces"] if item["nativeWindow"] and item["title"] == "Pointer button probe"
         ]
         assert len(originals) == 1, directory
         original = originals[0]
         refs = [int(ref) for ref, key in app._instance.windows.items() if key == original["window"]]
         assert len(refs) == 1, (original, app._instance.windows)
-        window = app.window(refs[0])
+        window = refs[0]
         report["selected_window"] = {"ref": refs[0], "directory_entry": original}
         for case in selected:
-            await snapshot(window, folder, f"{case}-before")
+            await snapshot(app, folder, f"{case}-before", window=window)
             before = await state(folder)
             assert not any(before["heldButtons"].values()), before["heldButtons"]
-            image = window._image
-            root = computer._controller.state(window).selection.root
+            image = app._instance.window_images[
+                computer._controller.interfaces.windows.resolve(window, computer._controller.transport.session).identity
+            ]
+            root = image.pieces[0].image.target
             pieces = [p for p in image.pieces if p.image.target.surface == root.surface]
             assert len(pieces) == 1, "Expected one original root screenshot piece"
             piece = pieces[0]
@@ -126,7 +129,9 @@ async def verify(folder, selected, driver_option, *, weak_ax=False):
             start, started = len(events), time.monotonic()
             receipt, caught = None, None
             try:
-                receipt = await asyncio.to_thread(window.click, ClickOption(button=button, count=count), at=point)
+                receipt = await asyncio.to_thread(
+                    app.click, ClickOption(button=button, count=count), at=point, window=window
+                )
                 row["receipt"] = dict(receipt)
             except ComputerUseError as error:
                 caught = error
@@ -202,7 +207,7 @@ async def verify(folder, selected, driver_option, *, weak_ax=False):
             assert any(e.stage == "input" for e in mouse), impact
             assert all(attempt.cleanup == "complete" for attempt in impact.attempts), impact
             row["foreground_changed"] = after["frontmostPID"] != before["frontmostPID"]
-            await snapshot(window, folder, f"{case}-after")
+            await snapshot(app, folder, f"{case}-after", window=window)
             row["passed"] = True
         report["passed"] = True
     except BaseException as error:

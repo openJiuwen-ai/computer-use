@@ -193,11 +193,11 @@ async def verify(folder, python, *, capture_count=100):
         ref_a = window_with_content(texts(opened), "Meeting title")
         original_point = image_point(opened, a["form_frame"], a["inline_point"])
         report["first_delivered_window"] = {"ref": ref_a, "point": original_point, "oracle": a}
-        await invoke("first-delivered-window-click", f"computer.window({ref_a}).click(at={original_point!r})")
+        await invoke("first-delivered-window-click", f"app_a.click(at={original_point!r}, window={ref_a})")
         a = await click_effect("first-delivered-window-click", fixture_a, 1)
 
         # This is the sole retained A image for the cross-App stress interval.
-        retained = await invoke("retained-a-image", f"form_a = computer.window({ref_a}); form_a.read(view='image')",
+        retained = await invoke("retained-a-image", f"form_a = {ref_a}; app_a.read(window=form_a, view='image')",
                                 save_images=True)
         point_a = image_point(retained, a["form_frame"], a["inline_point"])
         assert len(captures(retained)) == 1, texts(retained)
@@ -213,8 +213,8 @@ async def verify(folder, python, *, capture_count=100):
         seen = set()
         for index in range(capture_count):
             label = f"b-image-{index + 1:03d}"
-            code = f"form_b = computer.window({ref_b}); form_b.read(view='image')" if index == 0 else \
-                "form_b.read(view='image')"
+            code = f"form_b = {ref_b}; app_b.read(window=form_b, view='image')" if index == 0 else \
+                "app_b.read(window=form_b, view='image')"
             result = await invoke(label, code, save_images=index in (0, capture_count - 1))
             tokens = captures(result)
             assert len(tokens) == 1 and tokens[0] not in seen, (label, "Expected a fresh public capture", tokens)
@@ -235,7 +235,7 @@ async def verify(folder, python, *, capture_count=100):
         # still identifies this button when its size/layout is unchanged.
         assert before_click["form_frame"][2:] == a["form_frame"][2:], "A's image-relevant size changed during stress"
         assert before_click["inline_point"] == a["inline_point"], "A's target layout changed during stress"
-        await invoke("retained-a-coordinate-click", f"form_a.click(at={point_a!r})", save_images=True)
+        await invoke("retained-a-coordinate-click", f"app_a.click(at={point_a!r}, window=form_a)", save_images=True)
         report["final_a"] = await click_effect("retained-a-coordinate-click", fixture_a, 2)
         report["final_b"] = await state(fixture_b, process=children["b"])
         assert report["final_b"]["opened"] == 0 and report["final_b"]["inline_clicks"] == 0, report["final_b"]

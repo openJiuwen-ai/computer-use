@@ -242,15 +242,15 @@ async def verify(folder, python, *, offscreen_first="cloud", offscreen_only=Fals
                 report["first_delivered_window"] = {"ref": form_ref, "oracle": opened_state,
                                                      "delivered_point": delivered_point}
                 clicked = await invoke(
-                    "delivered-window-click", f"computer.window({form_ref}).click(at={delivered_point!r})"
+                    "delivered-window-click", f"app.click(at={delivered_point!r}, window={form_ref})"
                 )
                 await effect("delivered-window-click", lambda s: s["inline_clicks"] == 1, callback="inline")
                 assert "Tree:" in texts(clicked) and "Tree: not requested" not in texts(clicked), texts(clicked)
-                form_image = await invoke("form-image", f"form = computer.window({form_ref}); form.read(view='image')")
+                form_image = await invoke("form-image", f"form = {form_ref}; app.read(window=form, view='image')")
                 before_inline = await state(fixture, process=child)
                 inline_point = image_point(form_image, before_inline["form_frame"], before_inline["inline_point"])
                 report["inline_geometry"] = {"oracle": before_inline, "delivered_point": inline_point}
-                await invoke("inline-coordinate", f"form.click(at={inline_point!r})")
+                await invoke("inline-coordinate", f"app.click(at={inline_point!r}, window=form)")
                 await effect("inline-coordinate", lambda s: s["inline_clicks"] == 2, callback="inline")
                 batched = await invoke(
                     "set-title-date-script",
@@ -277,7 +277,7 @@ async def verify(folder, python, *, offscreen_first="cloud", offscreen_only=Fals
                 assert len(popup_refs) == 1, ("Popup must expose one selectable window", popup_refs)
                 popup_ref = next(iter(popup_refs))
                 popup_image = await invoke(
-                    "popup-image", f"popup = computer.window({popup_ref}); popup.read(view='image')"
+                    "popup-image", f"popup = {popup_ref}; app.read(window=popup, view='image')"
                 )
                 geometry = popup_state["popup_geometry"]
                 choice = geometry["choices"].get("10:15")
@@ -302,7 +302,7 @@ async def verify(folder, python, *, offscreen_first="cloud", offscreen_only=Fals
                     "coordinate_trial_valid": trial_valid,
                 }
                 assert trial_valid, "Popup changed during observation; no click attempted using the earlier oracle"
-                await invoke("popup-coordinate", f"popup.click(at={popup_point!r})")
+                await invoke("popup-coordinate", f"app.click(at={popup_point!r}, window=popup)")
                 await effect("popup-coordinate", lambda s: s["hour_activations"] == ["10:00", "10:15"], callback="hour")
                 await invoke("open-duration", "app.element('30 minutes').click()")
                 await effect("open-duration", lambda s: s["popup"] is not None)

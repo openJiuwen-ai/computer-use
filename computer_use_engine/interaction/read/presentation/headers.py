@@ -50,7 +50,7 @@ class MemberHeading:
 
 @dataclass(frozen=True)
 class InterfaceHeader:
-    """Freeze one App/Window observation's scope and complete directory metadata.
+    """Freeze one App/window observation's scope and complete directory metadata.
 
     Window scope includes the fixed root and its confirmed descendants. Current
     and reported input retain their captured knowledge independently of bodies.
@@ -130,7 +130,7 @@ def member_heading(window: MemberHeading, *, name_in_body: bool = False) -> str:
         flags.append("not expanded")
     suffix = " (" + ", ".join(flags) + ")" if flags else ""
     title = "" if name_in_body else " " + _quoted(window.title)
-    return f"Window {window.ref}:" + title + suffix + f"; computer.window({window.ref})"
+    return f"Window {window.ref}:" + title + suffix + f"; window={window.ref}"
 
 
 def reported_input_label(ref: int | None, *, observed: bool = True) -> str:
@@ -157,7 +157,7 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
         suffix = " (window scope)" if header.scope == "window" else ""
         title = "" if name_in_body else ": " + _quoted(single.title)
         lines.append(
-            f"Window {single.ref}{title}, App: {_quoted(header.application)}{suffix}; computer.window({single.ref})."
+            f"Window {single.ref}{title}, App: {_quoted(header.application)}{suffix}; computer.app({header.directory['application']!r}).read(window={single.ref})."
         )
         relations = [flag for flag in _flags(single) if flag not in ("main", "current", "reports input")]
         if relations:
@@ -169,7 +169,7 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
     if header.current is None:
         lines.append("Current window: unknown")
     elif single is not None and header.current != single.ref:
-        lines.append(f"Detailed observation: Window {header.current}; computer.window({header.current})")
+        lines.append(f"Detailed observation: Window {header.current}; window={header.current}")
     if header.input_state != "member":
         lines.append(
             "Reported input window: "

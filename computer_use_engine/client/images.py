@@ -132,8 +132,8 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
         if refs:
             caption += (
                 "\nCoordinate inputs for this displayed canvas: "
-                + ", ".join(f"computer.window({ref})" for ref in refs)
-                + ". Use the whole displayed image's pixels; each Window accepts only its own region."
+                + ", ".join(f"computer.app({source['selector']!r}).click(at=(x, y), window={ref})" for ref in refs)
+                + ". Use the whole displayed image's pixels; window= selects that window and confirmed descendants."
             )
     return caption + (
         "\nUse this displayed image's pixels for coordinates." if coordinates is not None and actionable else ""

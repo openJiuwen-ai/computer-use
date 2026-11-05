@@ -139,7 +139,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertIn(f"Screenshot: desktop {size[0]}x{size[1]}", text)
         self.assertIn(f"Image: desktop {size[0]}x{size[1]}", text)
-        self.assertIn("computer.window(7); application: computer.app(2)", text)
+        self.assertIn("window=7; application: computer.app(2)", text)
         self.assertNotIn("4096x1278", text)
         self.assertEqual(text.count("Desktop: full view"), 1)
         return text

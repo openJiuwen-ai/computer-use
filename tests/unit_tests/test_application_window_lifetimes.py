@@ -5,9 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from computer_use.client.computer import App, computer_for_controller
+from computer_use.client.computer import App
 from computer_use.client.factory import session_controller
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.scope import adopt, display_selection, validate_session
 from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Binding, Knowledge
@@ -79,11 +80,10 @@ def ref(app, key):
 
 def test_global_and_application_window_use_same_fixed_handle_without_focus_query():
     controller, app = setup()
-    computer = computer_for_controller(controller)
-    a = app.window(ref(app, "a"))
-    b = computer.window(ref(app, "b"))
-    assert computer.window(ref(app, "a")) is a
-    assert app.window(ref(app, "b")) is b
+    a = window_scope(controller, app, ref(app, "a"))
+    b = window_scope(controller, app, ref(app, "b"))
+    assert window_scope(controller, app, ref(app, "a"))._window_identity == a._window_identity
+    assert window_scope(controller, app, ref(app, "b"))._window_identity == b._window_identity
     assert a._window_identity == Binding("session", "owner:a", "a", "surface:a", None)
     assert b._window_identity == Binding("session", "owner:b", "b", "surface:b", None)
     before = a._window_identity
@@ -98,7 +98,7 @@ def test_global_and_application_window_use_same_fixed_handle_without_focus_query
 
 def test_closing_display_primary_keeps_app_and_independent_window_alive():
     controller, app = setup()
-    a, b = app.window(ref(app, "a")), app.window(ref(app, "b"))
+    a, b = window_scope(controller, app, ref(app, "a")), window_scope(controller, app, ref(app, "b"))
     old_ref = ref(app, "a")
     identity = WindowIdentity.of(app._instance.members["a"])
     app._instance.input_context = identity
@@ -109,7 +109,7 @@ def test_closing_display_primary_keeps_app_and_independent_window_alive():
     validate_session(controller, b)
     for operation in (
         lambda: validate_session(controller, a),
-        lambda: app.window(old_ref),
+        lambda: window_scope(controller, app, old_ref),
         lambda: controller.interfaces.validate_snapshot(app, snapshot),
         lambda: controller.interfaces.keyboard_context(app),
     ):
@@ -133,7 +133,7 @@ def test_independent_element_binding_survives_app_display_primary_changes():
 def test_weak_ax_unknown_parent_window_is_selectable_and_has_own_native_binding():
     controller, app = setup(surface("a", accessible=False, parent_state="unknown"), surface("b"))
     app._instance.anchor = None
-    window = computer_for_controller(controller).window(ref(app, "a"))
+    window = window_scope(controller, app, ref(app, "a"))
     validate_session(controller, window)
     assert window._window_identity == Binding("session", "owner:a", "a", "surface:a", None)
     assert window._anchor == "a"
@@ -144,25 +144,25 @@ def test_app_window_rejects_other_application_even_same_name():
     other = directory(surface("c"), application="other")
     refs = controller.interfaces.windows.register_directory(other, "Editor")
     with pytest.raises(ComputerUseError, match="does not belong"):
-        app.window(int(next(iter(refs))))
+        window_scope(controller, app, int(next(iter(refs))))
 
 
 def test_helper_scope_alias_preserves_original_window_binding():
     controller, app = setup(surface("a"))
     number = ref(app, "a")
-    first = app.window(number)
+    first = window_scope(controller, app, number)
     helper = directory(surface("a", scope="helper"), application="helper")
     refs = controller.interfaces.windows.register_directory(helper, "Editor")
     assert int(next(iter(refs))) == number
     assert controller.interfaces.windows.resolve(number, "session").identity == WindowIdentity.of(surface("a"))
-    assert computer_for_controller(controller).window(number) is first
+    assert window_scope(controller, app, number)._window_identity == first._window_identity
     assert first._window_identity.instance == "owner:a"
 
 
 def test_retired_physical_alias_is_not_reused_for_new_owner_scope():
     controller, app = setup(surface("a"))
     number = ref(app, "a")
-    old = app.window(number)
+    old = window_scope(controller, app, number)
     adopt(controller, app, directory(focus=None, ended=(surface("a"),)))
     helper = directory(surface("a", scope="new-process"), application="helper")
     fresh = int(next(iter(controller.interfaces.windows.register_directory(helper))))
@@ -170,7 +170,7 @@ def test_retired_physical_alias_is_not_reused_for_new_owner_scope():
     with pytest.raises(ComputerUseError):
         validate_session(controller, old)
     with pytest.raises(ComputerUseError):
-        computer_for_controller(controller).window(number)
+        window_scope(controller, app, number)
 
 
 def test_new_lifetime_in_same_native_slot_has_new_reference():
@@ -211,14 +211,14 @@ def test_exact_alias_lookup_retains_unknown_or_retired_identity_without_reviving
 def test_complete_onscreen_absence_reappears_with_same_reference_and_fixed_binding():
     controller, app = setup()
     number = ref(app, "a")
-    fixed = app.window(number)
+    fixed = window_scope(controller, app, number)
     identity, binding = WindowIdentity.of(surface("a")), fixed._window_identity
     adopt(controller, app, directory(surface("b"), focus="b"))
     assert app._instance.evidence[identity].lifetime is WindowLifetime.RETAINED
     assert app._instance.evidence[identity].membership is Knowledge.UNKNOWN
     adopt(controller, app, directory(surface("a"), surface("b"), focus="a"))
     assert ref(app, "a") == number
-    assert app.window(number) is fixed
+    assert window_scope(controller, app, number)._window_identity == fixed._window_identity
     validate_session(controller, fixed)
     assert fixed._window_identity == binding
 
@@ -304,7 +304,7 @@ def test_only_actual_delivery_changes_shared_app_input_context():
 
 def test_window_read_delivery_updates_owning_application_context_without_rebinding():
     controller, app = setup()
-    window = app.window(ref(app, "b"))
+    window = window_scope(controller, app, ref(app, "b"))
     window._context = "b"
     publish(controller, window, "B", None, directory=app._instance.directory)
     assert app._instance.input_context.window == "b"
@@ -318,11 +318,11 @@ def test_exact_single_window_image_reuse_keeps_delivery_expiry_object():
     piece = ImagePiece("a", SimpleNamespace(target=target, image=b"png"), (0, 0, 100, 80))
     image = InterfaceImage(b"png", (piece,), signature(app._instance.members), delivered=7)
     controller.interfaces.windows.retain_image(app._instance, image)
-    window = computer_for_controller(controller).window(ref(app, "a"))
-    assert window._image is image
+    window = window_scope(controller, app, ref(app, "a"))
+    assert controller.interfaces.windows.delivered_image(app._instance, window) is image
     assert app._instance.window_images[identity] is image
     image.expired = True
-    assert window._image.expired
+    assert controller.interfaces.windows.delivered_image(app._instance, window).expired
 
 
 def test_composite_bootstrap_preserves_displayed_canvas_and_restricts_window_scope():
@@ -334,19 +334,19 @@ def test_composite_bootstrap_preserves_displayed_canvas_and_restricts_window_sco
     )
     image = InterfaceImage(b"whole-displayed-canvas", pieces, signature(app._instance.members), delivered=7)
     controller.interfaces.windows.retain_image(app._instance, image)
-    window = computer_for_controller(controller).window(ref(app, "b"))
-    assert window._image.png is image.png
-    assert window._image.pieces == (pieces[1],)
-    assert window._image.pieces[0].box == (100, 0, 100, 80)
+    window = window_scope(controller, app, ref(app, "b"))
+    assert controller.interfaces.windows.delivered_image(app._instance, window).png is image.png
+    assert controller.interfaces.windows.delivered_image(app._instance, window).pieces == (pieces[1],)
+    assert controller.interfaces.windows.delivered_image(app._instance, window).pieces[0].box == (100, 0, 100, 80)
     with pytest.raises(ComputerUseError, match="gap outside"):
-        window._image.hit((20, 30))
+        controller.interfaces.windows.delivered_image(app._instance, window).hit((20, 30))
 
 
 def test_fixed_window_keyboard_uses_delivered_modal_without_following_app_context():
     child = {**surface("sheet", parent="a"), "modal": True}
     controller, app = setup(surface("a"), surface("b"), child)
     app._instance.observed.update(("a", "b", "sheet"))
-    window = app.window(ref(app, "a"))
+    window = window_scope(controller, app, ref(app, "a"))
     original = window._window_identity
     window._context = "sheet"
     publish(controller, window, "attached sheet", None, directory=app._instance.directory)
@@ -365,7 +365,7 @@ def test_hidden_window_modal_observation_does_not_grant_receiver_and_ack_is_per_
     child = {**surface("sheet", parent="a"), "modal": True}
     controller, app = setup(surface("a"), surface("b"), child)
     app._instance.observed.update(("a", "b", "sheet"))
-    window = app.window(ref(app, "a"))
+    window = window_scope(controller, app, ref(app, "a"))
     events = []
     set_observation_handler(events.append)
     try:
@@ -386,7 +386,7 @@ def test_modal_receiver_relationship_is_rechecked_after_target_pin():
     child = {**surface("sheet", parent="a"), "modal": True}
     controller, app = setup(surface("a"), surface("b"), child)
     app._instance.observed.update(("a", "b", "sheet"))
-    window = app.window(ref(app, "a"))
+    window = window_scope(controller, app, ref(app, "a"))
     window._context = "sheet"
     publish(controller, window, "attached sheet", None, directory=app._instance.directory)
     moved = {**child, "parent": "b"}
@@ -408,14 +408,14 @@ def image_for(key, marker):
 
 def test_latest_delivered_canvas_replaces_older_window_image_but_pending_sample_does_not():
     controller, app = setup()
-    window = app.window(ref(app, "a"))
+    window = window_scope(controller, app, ref(app, "a"))
     shared, new = image_for("a", "shared"), image_for("a", "new")
     own = image_for("a", "own-window-read")
     controller.interfaces.windows.retain_image(app._instance, shared, 1)
-    assert window._image is shared
+    assert controller.interfaces.windows.delivered_image(app._instance, window) is shared
     window._image = own  # A newer pending sample has not been delivered.
     assert controller.interfaces.windows.delivered_image(app._instance, window) is shared
     controller.interfaces.windows.retain_image(app._instance, new, 2)
     controller.interfaces.windows.retain_image(app._instance, image_for("b", "other"), 3)
-    assert window._image is new
+    assert controller.interfaces.windows.delivered_image(app._instance, window) is new
     assert controller.interfaces.windows.delivered_image(app._instance, window) is new

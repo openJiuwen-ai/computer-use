@@ -1,7 +1,7 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Human intent: a desktop, an application, a window, or a control."""
+"""Human intent: a desktop, an application with optional window scope, or a control."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import weakref
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.agent.requests import (
     ActOnElement,
+    CloseWindow,
     DiscoverApps,
     ObserveDesktop,
     ObserveElement,
@@ -54,6 +55,11 @@ def _key(key):
         validate_key(key)
     except Exception as error:
         raise local_failure(str(error)) from error
+
+
+def _window(window):
+    if window is not None:
+        parameters.reference(window, "window reference")
 
 
 class Computer:
@@ -117,12 +123,6 @@ class Computer:
             self._apps[key] = app
         return app
 
-    @on_session
-    def window(self, ref):
-        """Select a published concrete Window without changing desktop focus."""
-        parameters.reference(ref, "window reference")
-        return self._controller.interfaces.window(None, ref)
-
     @synchronous
     def list_apps(self):
         """Return application choices with id, display_name, and is_running fields."""
@@ -173,81 +173,16 @@ class Computer:
         return self._controller.act("press_key", dict(desktopRef=self._controller.desktop.target(), key=key))
 
 
-class UI:
+class App:
     def __init__(self, controller=None, scope=None, *, _internal=False):
         if not _internal:
-            raise TypeError("UI requires an application or window binding")
+            raise TypeError("App requires an application binding")
         self._controller = controller
         self._executor = executor_for_controller(controller)
         self._lookup_scopes = ()
         self._menu_only = False
         self._context = None
-        self._input_context = None
-        self._lookup_context = None
-        self._delivered_generation = 0
         controller.register(self, scope)
-
-    @synchronous
-    def element(self, target, *, timeout_ms=3000):
-        # pylint: disable-next=unidiomatic-typecheck
-        if type(timeout_ms) is not int or not 0 <= timeout_ms <= 10000:
-            raise local_failure("timeout_ms must be an integer in 0-10000")
-        # pylint: disable-next=unidiomatic-typecheck
-        if type(target) is int:
-            parameters.reference(target, "element reference")
-
-        async def resolve():
-            snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms)))
-            return Element(self._controller, self, snapshot, _internal=True)
-
-        return resolve()
-
-    @synchronous
-    def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False):
-        parameters.view(view, full, menu_path)
-        if type(allow_foreground) is not bool:
-            raise local_failure("allow_foreground must be a boolean")
-        return operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground)))
-
-    @synchronous
-    def click(self, options=None, *, at):
-        click, at = parameters.click(options), parameters.point(at)
-        return operation(lambda: self._controller.run(UIPointer(self, "click", (at,), click)))
-
-    @synchronous
-    def scroll(self, direction, *, at, pages=1):
-        parameters.scroll(direction, pages)
-        at = parameters.point(at)
-        return operation(
-            lambda: self._controller.run(UIPointer(self, "scroll", (at,), dict(direction=direction, pages=pages)))
-        )
-
-    @synchronous
-    def drag(self, start, end):
-        start, end = parameters.point(start), parameters.point(end)
-        if start == end:
-            raise local_failure("drag start and end must differ")
-        return operation(lambda: self._controller.run(UIPointer(self, "drag", (start, end), {})))
-
-    @synchronous
-    def type_text(self, text):
-        _text(text)
-        return operation(lambda: self._controller.run(UIKeyboard(self, "type_text", dict(text=text))))
-
-    @synchronous
-    def paste(self, text):
-        _text(text, paste=True)
-        return operation(lambda: self._controller.run(UIKeyboard(self, "paste", dict(text=text))))
-
-    @synchronous
-    def press_key(self, key):
-        _key(key)
-        return operation(lambda: self._controller.run(UIKeyboard(self, "press_key", dict(key=key))))
-
-
-class App(UI):
-    def __init__(self, controller=None, scope=None, *, _internal=False):
-        super().__init__(controller, scope, _internal=_internal)
         from computer_use.session.interfaces import InstanceState
 
         running = controller.state(self).running
@@ -259,24 +194,84 @@ class App(UI):
         self._anchor, self._image = None, None
         handle_created(self, dict(kind="App", controller=controller, selector=scope["selector"]))
 
-    @on_session
-    def window(self, ref):
-        parameters.reference(ref, "window reference")
-        return self._controller.interfaces.window(self, ref)
+    @synchronous
+    def close_window(self, window):
+        """Request the selected window's normal close; return any confirmation UI."""
+        parameters.reference(window, "window reference")
+        return operation(lambda: self._controller.run(CloseWindow(self, window)))
+
+    @synchronous
+    def element(self, target, *, timeout_ms=3000, window=None):
+        _window(window)
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(timeout_ms) is not int or not 0 <= timeout_ms <= 10000:
+            raise local_failure("timeout_ms must be an integer in 0-10000")
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(target) is int:
+            parameters.reference(target, "element reference")
+
+        async def resolve():
+            snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms, window)))
+            return Element(self._controller, self, snapshot, _internal=True)
+
+        return resolve()
+
+    @synchronous
+    def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False, window=None):
+        _window(window)
+        parameters.view(view, full, menu_path)
+        if type(allow_foreground) is not bool:
+            raise local_failure("allow_foreground must be a boolean")
+        return operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground, window)))
+
+    @synchronous
+    def click(self, options=None, *, at, window=None):
+        _window(window)
+        click, at = parameters.click(options), parameters.point(at)
+        return operation(lambda: self._controller.run(UIPointer(self, "click", (at,), click, window)))
+
+    @synchronous
+    def scroll(self, direction, *, at, pages=1, window=None):
+        _window(window)
+        parameters.scroll(direction, pages)
+        at = parameters.point(at)
+        return operation(
+            lambda: self._controller.run(UIPointer(self, "scroll", (at,), dict(direction=direction, pages=pages), window))
+        )
+
+    @synchronous
+    def drag(self, start, end, *, window=None):
+        _window(window)
+        start, end = parameters.point(start), parameters.point(end)
+        if start == end:
+            raise local_failure("drag start and end must differ")
+        return operation(lambda: self._controller.run(UIPointer(self, "drag", (start, end), {}, window)))
+
+    @synchronous
+    def type_text(self, text, *, window=None):
+        _window(window)
+        _text(text)
+        return operation(lambda: self._controller.run(UIKeyboard(self, "type_text", dict(text=text), window)))
+
+    @synchronous
+    def paste(self, text, *, window=None):
+        _window(window)
+        _text(text, paste=True)
+        return operation(lambda: self._controller.run(UIKeyboard(self, "paste", dict(text=text), window)))
+
+    @synchronous
+    def press_key(self, key, *, window=None):
+        _window(window)
+        _key(key)
+        return operation(lambda: self._controller.run(UIKeyboard(self, "press_key", dict(key=key), window)))
 
 
-class Window(UI):
-    def __init__(self, controller=None, scope=None, *, _internal=False, _app=None, _anchor=None):
-        super().__init__(controller, scope, _internal=_internal)
-        self._app, self._instance, self._anchor, self._image = _app, _app._instance, _anchor, None
-        self._window_identity = controller.state(self).selection.root
-        handle_created(self, dict(kind="Window", controller=controller, owner=_app, selector=scope["selector"]))
 
 
 class Element:
     def __init__(self, controller=None, owner=None, snapshot=None, *, _internal=False):
         if not _internal:
-            raise TypeError("Element requires an App or Window element binding")
+            raise TypeError("Element requires an App element binding")
         self._controller, self._owner, self._snapshot = controller, owner, snapshot
         self._executor = executor_for_controller(controller)
         handle_created(self, dict(kind="Element", controller=controller, owner=owner, snapshot=snapshot, query=None))

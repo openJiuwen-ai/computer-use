@@ -58,7 +58,7 @@ def related_window_summary(
         item["window"] for item in directory["surfaces"]
         if WindowIdentity.of(item) not in related.known_windows
     }
-    refs = [f"computer.window({ref})" for ref, key in aliases.items() if key in newly_observed]
+    refs = [f"window={ref}" for ref, key in aliases.items() if key in newly_observed]
     discovered = directory.get("rootDiscoveryComplete")
     coverage = (
         "partial" if refresh_incomplete or directory["stopReasons"] or discovered is False
@@ -162,7 +162,7 @@ def publish(
 
     Args:
         controller: Session observation and interface services.
-        owner: App or Window handle that owns the observed interface, when applicable.
+        owner: App or request scope that owns the observed interface, when applicable.
         text: Formatted observation text delivered to the model.
         screenshot: Captured image delivered with this observation, when requested.
         trees: Native target/snapshot pairs retained for later element operations.
@@ -329,7 +329,7 @@ def publish(
     if owner is not None:
         # Publication proposes a context. Only actual delivery changes the
         # canonical application's convenience-input receiver, including when
-        # this observation was made through an explicit Window handle.
+        # this observation was made through an explicit window parameter.
         instance_state = owner._instance
         captured_lookup = lookup_context
         captured_query_windows = frozenset(
@@ -345,27 +345,36 @@ def publish(
         retained_state, retained_controller = weakref.ref(instance_state), weakref.ref(controller)
         fixed_owner = context_owner() if context_owner is not None else owner
         fixed = getattr(fixed_owner, "_window_identity", None)
-        root = instance_state.members.get(fixed.root_window) if fixed is not None else None
-        confirmed_fixed_context = (
-            captured is not None
-            and root is not None
-            and WindowIdentity.of(root) == WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)
-            and ancestor(directory or instance_state.directory, captured.window, fixed.root_window)
-        )
-        retained_fixed = weakref.ref(fixed_owner) if confirmed_fixed_context else None
-        fixed_lookup = None
-        if confirmed_fixed_context:
-            fixed_menus = []
+        candidates = set(captured_query_windows)
+        if captured is not None:
+            candidates.add(captured)
+            # An actually delivered sheet/menu also supplies context for its
+            # confirmed parents. This does not depend on retaining the scope
+            # object that originally opened it, or on reading the parent again.
+            candidates.update(
+                WindowIdentity.of(item) for item in instance_state.members.values()
+                if ancestor(directory or instance_state.directory, captured.window, item["window"])
+            )
+        if fixed is not None:
+            candidates.add(WindowIdentity(fixed.root_window, fixed.surface, fixed.instance))
+        contexts = {}
+        for root_identity in candidates:
+            root = instance_state.members.get(root_identity.window)
+            if (
+                captured is None or root is None or WindowIdentity.of(root) != root_identity
+                or not ancestor(directory or instance_state.directory, captured.window, root_identity.window)
+            ):
+                continue
+            menus = []
             for menu_owner in captured_lookup.menus:
                 menu_identity = controller.state(menu_owner).menu_window_identity
                 menu_window = instance_state.members.get(menu_identity.window) if menu_identity is not None else None
                 if (
-                    menu_window is not None
-                    and WindowIdentity.of(menu_window) == menu_identity
-                    and ancestor(directory or instance_state.directory, menu_identity.window, fixed.root_window)
+                    menu_window is not None and WindowIdentity.of(menu_window) == menu_identity
+                    and ancestor(directory or instance_state.directory, menu_identity.window, root_identity.window)
                 ):
-                    fixed_menus.append(menu_owner)
-            fixed_lookup = LookupContext(captured, captured_lookup.menu_only, tuple(fixed_menus))
+                    menus.append(menu_owner)
+            contexts[root_identity] = LookupContext(captured, captured_lookup.menu_only, tuple(menus))
 
         def delivered() -> None:
             observed = retained_result()
@@ -382,11 +391,16 @@ def publish(
                 state.input_context = captured
                 state.lookup_context = captured_lookup
                 state.delivered_observation_generation = generation
-            fixed_target = retained_fixed() if retained_fixed is not None else None
-            if fixed_target is not None and generation > fixed_target._delivered_generation:
-                fixed_target._input_context = captured
-                fixed_target._lookup_context = fixed_lookup
-                fixed_target._delivered_generation = generation
+            from computer_use.session.interfaces import DeliveredWindowContext
+
+            for identity, lookup in contexts.items():
+                evidence = state.evidence.get(identity)
+                previous = state.window_contexts.get(identity)
+                if (
+                    evidence is not None and evidence.lifetime is WindowLifetime.RETAINED
+                    and (previous is None or generation > previous.generation)
+                ):
+                    state.window_contexts[identity] = DeliveredWindowContext(captured, lookup, generation)
             if captured_image is not None and not runtime.adapters.image_delivery_required():
                 # Direct SDK return includes the PNG. MCP acknowledges image
                 # delivery separately, only after the image actually leaves the
@@ -517,7 +531,7 @@ def directory_text(
     Args:
         controller: Session service owner; this dependency does not create another execution
             route.
-        ui: App or Window handle whose instance and observation bounds constrain the operation.
+        ui: App or request scope whose instance and observation bounds constrain the operation.
         directory: Observed application/window catalogue, including incomplete relationships.
         delivered_gaps: Complete gap records from the window parts actually included below
             this header, paired with their original directory objects. Only identical source

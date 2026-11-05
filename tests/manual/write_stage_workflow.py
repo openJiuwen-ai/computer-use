@@ -161,18 +161,22 @@ async def operations(directory, recorder, *, allow_global_input=False):
         await recorder.action("element scroll", lambda: area.scroll("down", pages=0.5), mouse=True)
         current = await wait_state(directory, lambda v: v["scrollY"] > 10)
         old_offset = current["scrollY"]
-        window = app.window(0)
-        image = await asyncio.to_thread(window.read, view="image")
+        window = 0
+        image = await asyncio.to_thread(app.read, view="image", window=window)
         (directory / "scroll-before.png").write_bytes(image.screenshot)
         await recorder.action(
-            "coordinate wheel", lambda: window.scroll("down", at=tuple(current["scrollPoint"]), pages=0.5), mouse=True
+            "coordinate wheel",
+            lambda: app.scroll("down", at=tuple(current["scrollPoint"]), pages=0.5, window=window),
+            mouse=True,
         )
         await wait_state(directory, lambda v: v["scrollY"] > old_offset + 10)
-        image = await asyncio.to_thread(window.read, view="image")
+        image = await asyncio.to_thread(app.read, view="image", window=window)
         (directory / "drag-before.png").write_bytes(image.screenshot)
         current = await state(directory)
         await recorder.action(
-            "coordinate drag", lambda: window.drag(tuple(current["dragStart"]), tuple(current["dragEnd"])), mouse=True
+            "coordinate drag",
+            lambda: app.drag(tuple(current["dragStart"]), tuple(current["dragEnd"]), window=window),
+            mouse=True,
         )
         await wait_state(directory, lambda v: v["dragDowns"] == 1 and v["dragMoves"] > 0 and v["dragUps"] == 1)
         await recorder.action("open menu", lambda: popup.open_menu())

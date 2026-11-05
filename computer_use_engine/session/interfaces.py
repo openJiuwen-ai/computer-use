@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -130,6 +129,15 @@ class DirectoryMembership:
     ended: tuple[WindowIdentity, ...] = ()
 
 
+@dataclass(frozen=True)
+class DeliveredWindowContext:
+    """Actually delivered receiver and query scope for one exact window lifetime."""
+
+    input: WindowIdentity | None
+    lookup: LookupContext
+    generation: int
+
+
 @dataclass
 class InstanceState:
     """Retain an application catalogue, window lifetimes and delivered references.
@@ -144,7 +152,7 @@ class InstanceState:
         owners: Registered private scope handles owned by this session.
         refs: Retained element snapshots; their read-specific contents are opaque here.
         observed: Members already observed through this instance.
-        views: Weakly retained public window handles, opaque to this state owner.
+        window_contexts: Delivered per-window lookup/input context, independent of public handles.
         evidence: Retained window lifetimes and independently changing membership.
         owner_identities: Exact lifetimes of private scopes, preventing a reused
             window slot from retaining its previous owner's selection.
@@ -173,7 +181,7 @@ class InstanceState:
     owners: dict[str, object] = field(default_factory=dict)
     refs: OrderedDict[str, Record] = field(default_factory=OrderedDict)
     observed: set[str] = field(default_factory=set)
-    views: weakref.WeakValueDictionary[tuple[str, str, str], Any] = field(default_factory=weakref.WeakValueDictionary)
+    window_contexts: dict[WindowIdentity, DeliveredWindowContext] = field(default_factory=dict)
     evidence: dict[WindowIdentity, WindowEvidence] = field(default_factory=dict)
     # Index the retained generation in each native/public slot. Observation
     # work depends on the active catalogue, not every window ever discovered.
@@ -262,6 +270,7 @@ class InstanceState:
                 self.refs[ref] = dict(snapshot, text=None, children=None)
         for identity in identities:
             self.delivered_lookup_windows.discard(identity)
+            self.window_contexts.pop(identity, None)
             self.window_images.pop(identity, None)
             self.window_image_generations.pop(identity, None)
             self.sampled_window_images.pop(identity, None)

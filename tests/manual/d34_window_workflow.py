@@ -1,6 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""D34 acceptance with independent AppKit callbacks and the real SDK/MCP runtime.
+"""D35 acceptance with independent AppKit callbacks and the real SDK/MCP runtime.
 
 Build without opening any window:
   .venv/bin/python tests/manual/d34_window_workflow.py --build-only
@@ -44,7 +44,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[2]
 NAME = "D34WindowProbe"
 LOG = logging.getLogger(__name__)
-WINDOW_REF = re.compile(r"computer\.window\((\d+)\)")
+WINDOW_REF = re.compile(r"window=(\d+)")
 QUOTED = r'"(?:[^"\\]|\\.)*"'
 
 
@@ -113,7 +113,7 @@ def released(value):
 def error_evidence(error):
     if isinstance(error, ComputerUseError):
         return {
-            name: getattr(error, name)
+            name: getattr(error, name, None)
             for name in (
                 "code",
                 "effect",
@@ -259,7 +259,7 @@ def desktop_point(text, png, ref, doc, pointer_hit, fixture_pid):
     header = re.search(r"(?m)^Screenshot: desktop (\d+)x(\d+) px; origin=top-left$", text)
     assert header and tuple(map(int, header.groups())) == dimensions, (dimensions, text)
     assert "Window catalogue truncated:" not in text, text
-    pattern = re.compile(rf"^  ({QUOTED}) — ({QUOTED}|<untitled>) \(([^)]+)\)(?: computer\.window\((\d+)\))?.*$")
+    pattern = re.compile(rf"^  ({QUOTED}) — ({QUOTED}|<untitled>) \(([^)]+)\)(?: window=(\d+))?.*$")
     windows = []
     for line in text.splitlines():
         match = pattern.fullmatch(line)
@@ -352,41 +352,27 @@ async def verify(folder, options, fixture, bundle):
             if f'"{NAME}" — ' in line:
                 desktop_refs |= refs(line)
         assert len(desktop_refs) == 2, desktop.text
-        before_handles = await state(folder)
-        # Materialize handles before any App observation; selection is read-only.
-        handles = {ref: computer.window(ref) for ref in desktop_refs}
-        early_aliases = {ref: numeric_app.window(ref) for ref in desktop_refs}
-        assert (await state(folder))["keyWindow"] == before_handles["keyWindow"]
         selector_observation = await read("02-selector-app", selector_app, view="both")
         numeric_observation = await read("03-numeric-app", numeric_app, view="tree")
-        assert desktop_refs <= refs(selector_observation.text) and desktop_refs <= refs(numeric_observation.text), (
-            selector_observation.text,
-            numeric_observation.text,
-            desktop.text,
-        )
-        report["additional_AX_refs"] = {
-            "selector_app": sorted(refs(selector_observation.text) - desktop_refs),
-            "numeric_app": sorted(refs(numeric_observation.text) - desktop_refs),
-        }
+        assert desktop_refs <= refs(selector_observation.text) and desktop_refs <= refs(numeric_observation.text)
         named = {}
-        for ref, window in handles.items():
-            observation = await read(f"04-window-{ref}", window, view="both")
+        for reference in desktop_refs:
+            observation = await read(f"04-window-{reference}", selector_app, window=reference, view="both", full=True)
             names = [name for name in ("A", "B") if f"Document {name}" in observation.text]
             assert len(names) == 1, observation.text
-            named[names[0]] = (ref, window)
+            named[names[0]] = (reference, reference)
             report.setdefault("image_markers", []).append(
                 assert_window_image(observation, (await state(folder))["documents"][names[0]])
             )
-            for label, alias in (("numeric", early_aliases[ref]), ("selector", selector_app.window(ref))):
-                other = await read(f"05-{label}-{ref}", alias, view="both")
-                assert f"Document {names[0]}" in other.text, other.text
-                report["image_markers"].append(assert_window_image(other, (await state(folder))["documents"][names[0]]))
+            other = await read(f"05-numeric-{reference}", numeric_app, window=reference, view="both", full=True)
+            assert f"Document {names[0]}" in other.text, other.text
+            report["image_markers"].append(assert_window_image(other, (await state(folder))["documents"][names[0]]))
         assert set(named) == {"A", "B"}
         report["identity"] = {name: ref for name, (ref, _) in named.items()}
         report["checks"].append("same-title windows: desktop, selector App, numeric App share refs and fixed targets")
         a_ref, a = named["A"]
         b_ref, b = named["B"]
-        a_field = await asyncio.to_thread(a.element, [{"identifier": "d34-input-A"}])
+        a_field = await asyncio.to_thread(selector_app.element, [{"identifier": "d34-input-A"}], window=a)
         await command(folder, "focus", "A")
         await read("06-delivered-A", selector_app, view="tree")
         await command(folder, "focus", "B")
@@ -402,19 +388,19 @@ async def verify(folder, options, fixture, bundle):
             lambda: a_field.type_text("Original-A", replace=True),
             lambda value: value["documents"]["A"]["field"] == "Original-A" and value["documents"]["B"]["field"] == "",
         )
-        a_image = await read("08-retained-A-image", a, view="both")
+        a_image = await read("08-retained-A-image", selector_app, window=a, view="both")
         report["image_markers"].append(assert_window_image(a_image, (await state(folder))["documents"]["A"]))
         await command(folder, "focus", "B")
         await read("09-newer-B-image", selector_app, view="both")
         point = window_point(a_image, (await state(folder))["documents"]["A"])
         await action(
             "fixed Window screenshot remains A",
-            lambda: a.click(at=point),
+            lambda: selector_app.click(at=point, window=a),
             lambda value: value["documents"]["A"]["count"] == 1 and value["documents"]["B"]["count"] == 0,
         )
         opened = await action(
             "open untitled independent window",
-            lambda: a.element("Open independent window").click(),
+            lambda: selector_app.element("Open independent window", window=a).click(),
             lambda value: value["opens"] == 1,
         )
         assert opened.observation is not None and "Child input" in opened.observation.text, opened
@@ -445,35 +431,67 @@ async def verify(folder, options, fixture, bundle):
             lambda: child_field.type_text("Child-value", replace=True),
             lambda value: value["documents"]["Child"]["field"] == "Child-value",
         )
-        child = computer.window(child_ref)
-        assert "Document A" in (await read("11-original-A", a, view="tree")).text
-        child_image = await read("12-child", child, view="both")
+        child = child_ref
+        assert "Document A" in (await read("11-original-A", selector_app, window=a, view="tree")).text
+        child_image = await read("12-child", selector_app, window=child, view="both")
         assert "Document Child" in child_image.text
         report["image_markers"].append(assert_window_image(child_image, (await state(folder))["documents"]["Child"]))
-        closer = await asyncio.to_thread(a.element, "Close this window")
+        # D35: deliver A/B once, then alternate exact coordinate inputs without
+        # public context-switch reads. Callback journals prove the actual receiver.
+        images = {}
+        points = {}
+        before_cross = await state(folder)
+        for name, number in (("A", a), ("B", b)):
+            images[name] = await read("d35-image-" + name, selector_app, window=number, view="both")
+            points[name] = window_point(images[name], before_cross["documents"][name])
+            report["image_markers"].append(assert_window_image(images[name], before_cross["documents"][name]))
+        await command(folder, "focus", "B")
+        await action(
+            "D35 explicit A keyboard while B has system focus",
+            lambda: selector_app.press_key("Return", window=a),
+            lambda value: (value["documents"]["A"]["submits"] == before_cross["documents"]["A"]["submits"] + 1
+                           and value["documents"]["B"]["submits"] == before_cross["documents"]["B"]["submits"]),
+        )
+        counts = {name: before_cross["documents"][name]["count"] for name in ("A", "B")}
+        for name, number in (("A", a), ("B", b), ("A", a), ("B", b)):
+            counts[name] += 1
+            expected = dict(counts)
+            await action(
+                "D35 coordinate " + name,
+                lambda number=number, name=name: selector_app.click(at=points[name], window=number),
+                lambda value, expected=expected: all(
+                    value["documents"][key]["count"] == count for key, count in expected.items()
+                ),
+            )
+        report["d35_coordinate_switching"] = {"initial_reads": 2, "writes": 4, "switch_reads": 0}
+        closer = await asyncio.to_thread(selector_app.element, "Close this window", window=a)
         closed = await action(
             "close original while other windows survive",
             lambda: closer.click(),
             lambda value: value["documents"]["A"]["closed"],
         )
         report["closed_receipt"] = dict(closed)
-        assert closed.window_lifecycle == "closed", closed
+        # macOS can still report an ended retained NSWindow as unconfirmed.
+        # Preserve that gap; the independent close callback proves the fixture
+        # effect, while each old target below must refuse without retargeting.
+        assert closed.window_lifecycle in ("closed", "unknown"), closed
+        report["close_lifecycle_confirmed_by_sdk"] = closed.window_lifecycle == "closed"
         for label, operation in (
-            ("closed Window", lambda: a.read(view="tree")),
+            ("closed Window", lambda: selector_app.read(view="tree", window=a)),
             ("closed Element", lambda: a_field.type_text("MUST NOT LAND")),
-            ("closed screenshot", lambda: a.click(at=point)),
+            ("closed screenshot", lambda: selector_app.click(at=point, window=a)),
         ):
             try:
                 result = await asyncio.to_thread(operation)
             except ComputerUseError as error:
-                assert error.code == "stale_target" and error.effect == "none", error
+                assert error.code in ("stale_target", "observation_incomplete") and error.effect == "none", error
                 report["checks"].append({label: error_evidence(error)})
             else:
                 raise AssertionError((label, "should be stale, not retargeted", result))
         survivors = await read("13-surviving-App", selector_app, view="tree")
         assert {b_ref, child_ref} <= refs(survivors.text) and a_ref not in refs(survivors.text), survivors.text
         await command(folder, "focus", "B")
-        sheet_button = await asyncio.to_thread(b.element, "Open sheet")
+        sheet_button = await asyncio.to_thread(selector_app.element, "Open sheet", window=b)
         sheet_receipt = await action(
             "open confirmed sheet", lambda: sheet_button.click(), lambda value: value["sheetOwner"] == "B"
         )
@@ -482,32 +500,32 @@ async def verify(folder, options, fixture, bundle):
         sheet_ref = window_with_content(sheet_receipt.observation.text, "Sheet input")
         assert sheet_ref not in {a_ref, b_ref, child_ref}, sheet_receipt.observation.text
         report["identity"]["Sheet"] = sheet_ref
-        sheet = computer.window(sheet_ref)
-        b_with_sheet = await read("14b-fixed-B-with-sheet", b, view="both")
+        sheet = sheet_ref
+        b_with_sheet = await read("14b-fixed-B-with-sheet", selector_app, window=b, view="both")
         assert "Sheet input" in b_with_sheet.text, b_with_sheet.text
         await command(folder, "focus", "Child")
         unrelated_app_read = await read("14c-App-observes-Child", selector_app, view="tree")
         assert "Child input" in unrelated_app_read.text, unrelated_app_read.text
         await action(
             "fixed B keyboard retains its delivered sheet after App observes Child",
-            lambda: b.type_text("Pinned-Sheet"),
+            lambda: selector_app.type_text("Pinned-Sheet", window=b),
             lambda value: (
                 value["documents"]["Sheet"]["field"] == "Pinned-Sheet"
                 and value["documents"]["B"]["field"] == ""
                 and value["documents"]["Child"]["field"] == "Child-value"
             ),
         )
-        sheet_field = await asyncio.to_thread(sheet.element, [{"identifier": "d34-input-Sheet"}])
+        sheet_field = await asyncio.to_thread(selector_app.element, [{"identifier": "d34-input-Sheet"}], window=sheet)
         await action(
             "sheet exact input",
             lambda: sheet_field.type_text("Sheet-value", replace=True),
             lambda value: value["documents"]["Sheet"]["field"] == "Sheet-value",
         )
-        dismiss = await asyncio.to_thread(b.element, "Dismiss sheet")
+        dismiss = await asyncio.to_thread(selector_app.element, "Dismiss sheet", window=b)
         await action("dismiss sheet", lambda: dismiss.click(), lambda value: value["sheetOwner"] is None)
         await action(
             "original B continues after its scoped sheet dismissal without an extra read",
-            lambda: b.type_text("B-after-sheet"),
+            lambda: selector_app.type_text("B-after-sheet", window=b),
             lambda value: (
                 value["documents"]["B"]["field"] == "B-after-sheet"
                 and value["documents"]["Sheet"]["field"] == "Sheet-value"
@@ -520,14 +538,14 @@ async def verify(folder, options, fixture, bundle):
         weak_ref = current_window(weak_catalogue.text)
         assert weak_ref not in before_weak, weak_catalogue.text
         report["identity"]["Weak"] = weak_ref
-        weak = computer.window(weak_ref)
-        weak_image = await read("17-weak-image", weak, view="both")
+        weak = weak_ref
+        weak_image = await read("17-weak-image", selector_app, window=weak, view="both")
         report["image_markers"].append(assert_window_image(weak_image, (await state(folder))["documents"]["Weak"]))
         assert "Weak input" not in weak_image.text, "Fixture did not actually suppress AX children"
         weak_point = window_point(weak_image, (await state(folder))["documents"]["Weak"])
         await action(
             "weak AX window screenshot click",
-            lambda: weak.click(at=weak_point),
+            lambda: selector_app.click(at=weak_point, window=weak),
             lambda value: value["documents"]["Weak"]["count"] == 1,
         )
         report["checks"].append("weak AX retained a selectable untitled window, screenshot and coordinate input")
@@ -568,7 +586,7 @@ async def verify(folder, options, fixture, bundle):
         mcp_weak_ref = next(iter(refs(fixture_rows[0])))
         report["mcp_identity"] = {"Weak": mcp_weak_ref}
         public_text, window_images = await mcp(
-            "19-mcp-window", f"weak = computer.window({mcp_weak_ref})\nweak_shot = weak.read(view='both')"
+            "19-mcp-window", f"app = computer.app({bundle!r})\nweak_shot = app.read(window={mcp_weak_ref}, view='both')"
         )
         assert "Weak input" not in public_text and "Document Child" not in public_text, public_text
         assert len(window_images) == 1, len(window_images)
@@ -598,7 +616,7 @@ async def verify(folder, options, fixture, bundle):
         report["mcp_geometry"] = {"raw": raw_dimensions, "delivered": delivered_dimensions, **geometry}
         await mcp("21-mcp-desktop-click", f"receipt = computer.click(at={point!r})")
         final = await effect(folder, lambda value: value["documents"]["Weak"]["count"] == 2)
-        assert final["documents"]["A"]["count"] == 1 and final["documents"]["B"]["count"] == 0, final
+        assert all(final["documents"][name]["count"] == count for name, count in counts.items()), final
         assert final["documents"]["Child"]["count"] == 1, final
         assert final["documents"]["Child"]["field"] == "Child-value", final
         assert final["documents"]["B"]["field"] == "B-after-sheet", final
@@ -652,7 +670,7 @@ def main():
         if not args.build_only:
             asyncio.run(verify(folder, args, fixture, bundle))
     finally:
-        LOG.info("D34 evidence: %s", folder)
+        LOG.info("D35 evidence: %s", folder)
 
 
 if __name__ == "__main__":

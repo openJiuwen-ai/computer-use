@@ -5,6 +5,7 @@
 from copy import deepcopy
 from unittest import TestCase
 
+from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.membership import ancestry
 from computer_use.interaction.query.instances.scope import adopt, display_selection
 from computer_use.native.contracts import Knowledge
@@ -36,7 +37,7 @@ class RootCoverageTests(TestCase):
         payload.update(rootDiscoveryComplete=False, application="editor")
         controller, app = setup()
         adopt(controller, app, decode_directory(payload))
-        selected = app.window(next(ref for ref, key in app._instance.windows.items() if key == "root"))
+        selected = window_scope(controller, app, next(ref for ref, key in app._instance.windows.items() if key == "root"))
         self.assertEqual(selected._window_identity.root_window, "root")
         self.assertFalse(app._instance.directory["rootDiscoveryComplete"])
 
@@ -47,7 +48,7 @@ class RootCoverageTests(TestCase):
         adopt(controller, app, decode_directory(payload))
         self.assertEqual(set(app._instance.members), {"root", "other"})
         self.assertEqual(ancestry(payload, "other", "root"), Knowledge.UNKNOWN)
-        chosen = app.window(next(ref for ref, key in app._instance.windows.items() if key == "other"))
+        chosen = window_scope(controller, app, next(ref for ref, key in app._instance.windows.items() if key == "other"))
         self.assertEqual(chosen._window_identity.root_window, "other")
 
     def test_independent_root_coverage_wire_fact_is_required_and_strict(self):

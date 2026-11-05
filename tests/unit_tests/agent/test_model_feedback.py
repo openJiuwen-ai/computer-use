@@ -134,7 +134,7 @@ def labelled_images_then_failure():
                 "windows": (window,),
                 "selector": "Fixture",
                 "observed": {"id": f"observation-{window}"},
-                "coordinateTarget": f"computer.window({window})",
+                "coordinateTarget": f"computer.app('Fixture') (window={window})",
             },
         )
         print_image(png)  # noqa: F821 - injected by the MCP worker
@@ -173,7 +173,7 @@ def test_model_keeps_each_image_label_and_partial_output_on_failure(model_server
         assert f"Image 1.{index}" in caption
         assert f"Window reference: {window}" in caption
         assert f"observation-{window}" in caption
-        assert f"computer.window({window})" in caption
+        assert f"computer.app('Fixture') (window={window})" in caption
         with Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1]))) as image:
             assert image.size == (12, 8)
             assert image.getpixel((6, 4))[:3] == color

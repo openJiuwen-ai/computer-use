@@ -23,6 +23,7 @@ from computer_use.client.host import (
     set_text_page_handler,
 )
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.scope import adopt
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
@@ -41,6 +42,7 @@ from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
 from computer_use.session.operations import OperationBudget
 from computer_use.session.state import AppState
+from computer_use.session.windows import WindowReferences
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
@@ -53,8 +55,9 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = Runtime(self.events.append)
         with execution_scope(self.runtime.executor):
             self.controller, self.app = setup()
-            self.window = computer_for_controller(self.controller).window(ref(self.app, "a"))
-        self.alias = self.window._app
+            self.window = window_scope(self.controller, self.app, ref(self.app, "a"))
+        self.alias = App(self.controller, {"selector": "editor"}, _internal=True)
+        adopt(self.controller, self.alias, self.app._instance.directory)
         self.assertIsNot(self.alias, self.app)
         self.assertIs(self.alias._instance, self.app._instance)
         self.captures = []
@@ -66,6 +69,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             compose=lambda *args: self.runtime.executor.call(self.compose, *args),
             alias=self.alias,
             window=self.window,
+            scope=lambda ref: self.runtime.executor.call(window_scope, self.controller, self.app, ref),
             observe=lambda *args: self.runtime.executor.call(self.observe, *args),
             capture=lambda *args: self.runtime.executor.call(self.capture, *args),
             click=lambda ui, point=(20, 30): self.runtime.executor.run(lambda: self.click(ui, point)),
@@ -186,9 +190,9 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.last_target(), second.pieces[0].image.target)
         self.assertEqual(self.last_target().root_window, "b")
         # Selection from the delivered single-window observation can reuse exactly its PNG.
-        b = self.app.window(ref(self.app, "b"))
-        self.assertIs(b._image.png, second.png)
-        self.assertEqual(b._image.pieces, second.pieces)
+        b = window_scope(self.controller, self.app, ref(self.app, "b"))
+        self.assertIs(WindowReferences.delivered_image(self.app._instance, b).png, second.png)
+        self.assertEqual(WindowReferences.delivered_image(self.app._instance, b).pieces, second.pieces)
 
     async def test_old_alias_png_cannot_renew_or_replace_the_newer_delivery(self):
         await self.execute("old = observe(app, 'a')")
@@ -241,9 +245,9 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fixed_window_image_survives_other_app_alias_deliveries(self):
         await self.execute("fixed = observe(window, 'a')")
-        fixed = self.window._image
+        fixed = WindowReferences.delivered_image(self.app._instance, self.window)
         await self.execute("new = observe(alias, 'b')")
-        self.assertIs(self.window._image, fixed)
+        self.assertIs(WindowReferences.delivered_image(self.app._instance, self.window), fixed)
         await self.click(self.window)
         self.assertEqual(self.last_target(), fixed.pieces[0].image.target)
         second = self.alias._image
@@ -259,10 +263,10 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         result = await self.execute("print_image(popup.png)", reset_images=True)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertNotIn("stale", text)
-        self.assertIn(f"computer.window({ref(self.app, 'b')})", text)
+        self.assertIn(f"computer.app('editor').click(at=(x, y), window={ref(self.app, 'b')})", text)
         self.assertNotIn("Coordinate target=computer.app(", text)
         self.assertIs(self.app._instance.delivered_image, parent)
-        b = self.app.window(ref(self.app, "b"))
+        b = window_scope(self.controller, self.app, ref(self.app, "b"))
         await self.click(b)
         self.assertEqual(self.last_target(), popup.pieces[0].image.target)
         # Re-delivering B must not authorize unseen A in the reset model epoch.
@@ -271,13 +275,13 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_composite_delivery_bootstraps_inline_window_with_whole_canvas_pixels(self):
         await self.execute("old = observe(window, 'a')")
-        old = self.window._image
+        old = WindowReferences.delivered_image(self.app._instance, self.window)
         await self.execute("combined = compose(app, ('a', 'b'))")
         canvas = self.app._image
-        self.assertIsNot(self.window._image, old)
-        self.assertIs(self.window._image.png, canvas.png)
-        b = self.app.window(ref(self.app, "b"))
-        self.assertIs(b._image.png, canvas.png)
+        self.assertIsNot(WindowReferences.delivered_image(self.app._instance, self.window), old)
+        self.assertIs(WindowReferences.delivered_image(self.app._instance, self.window).png, canvas.png)
+        b = window_scope(self.controller, self.app, ref(self.app, "b"))
+        self.assertIs(WindowReferences.delivered_image(self.app._instance, b).png, canvas.png)
         await self.click(b, (140, 30))
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
         self.assertEqual(self.write.arun.call_args.args[0].intent.parameters["x"], 20)
@@ -285,7 +289,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.click(b, (20, 30))
         with self.assertRaisesRegex(ComputerUseError, "gap outside"):
             await self.click(self.window, (140, 30))
-        await self.execute(f"click(computer.window({ref(self.app, 'b')}), (140, 30))")
+        await self.execute(f"click(scope({ref(self.app, 'b')}), (140, 30))")
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
 
     async def test_delayed_composite_retains_only_members_without_a_newer_delivered_image(self):
@@ -295,23 +299,23 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.execute("old = compose(app, ('a', 'b'))")
         composite = self.app._image
         await self.execute("new = observe(window, 'a')")
-        current_parent = self.window._image
+        current_parent = WindowReferences.delivered_image(self.app._instance, self.window)
         result = await self.execute("print_image(old.screenshot)")
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
-        expected = f"Coordinate inputs for this displayed canvas: computer.window({ref(self.app, 'b')})."
+        expected = f"Coordinate inputs for this displayed canvas: computer.app('editor').click(at=(x, y), window={ref(self.app, 'b')})."
         self.assertIn(expected, text)
         self.assertNotIn("Coordinate target=computer.app(", text)
-        self.assertIs(self.window._image, current_parent)
+        self.assertIs(WindowReferences.delivered_image(self.app._instance, self.window), current_parent)
         await self.click(self.window)
         self.assertEqual(self.last_target(), current_parent.pieces[0].image.target)
-        await self.click(self.app.window(ref(self.app, "b")), (140, 30))
+        await self.click(window_scope(self.controller, self.app, ref(self.app, "b")), (140, 30))
         self.assertEqual(self.last_target(), composite.pieces[1].image.target)
 
     async def test_window_recreation_keeps_current_canvas_after_temporary_observer_dies(self):
         await self.execute("combined = compose(app, ('a', 'b'))")
         canvas = self.app._image
         source = weakref.ref(canvas)
-        b = self.app.window(ref(self.app, "b"))
+        b = window_scope(self.controller, self.app, ref(self.app, "b"))
         handle = weakref.ref(b)
         del b
         gc.collect()
@@ -323,25 +327,25 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         gc.collect()
         self.assertIsNotNone(source())
         canvas = source()
-        b = self.app.window(ref(self.app, "b"))
-        self.assertIs(b._image.png, canvas.png)
+        b = window_scope(self.controller, self.app, ref(self.app, "b"))
+        self.assertIs(WindowReferences.delivered_image(self.app._instance, b).png, canvas.png)
         await self.click(b, (140, 30))
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
 
     async def test_pending_fixed_window_sample_does_not_change_delivered_pointer_mapping(self):
         await self.execute("old = observe(window, 'a')")
-        old = self.window._image
+        old = WindowReferences.delivered_image(self.app._instance, self.window)
         await self.execute("pending = capture(window, 'a', (200, 160))\nclick(window)")
         self.assertEqual(self.last_target(), old.pieces[0].image.target)
         await self.execute("print_image(pending.png)\nclick(window)")
         self.assertEqual(self.last_target(), old.pieces[0].image.target)
         await self.click(self.window)
-        self.assertEqual(self.last_target(), self.window._image.pieces[0].image.target)
+        self.assertEqual(self.last_target(), WindowReferences.delivered_image(self.app._instance, self.window).pieces[0].image.target)
         self.assertNotEqual(self.last_target(), old.pieces[0].image.target)
 
     async def test_native_retention_tracks_delivered_and_latest_pending_exact_captures(self):
         await self.execute("old = observe(window, 'a')")
-        delivered = self.window._image.pieces[0].image.target.capture
+        delivered = WindowReferences.delivered_image(self.app._instance, self.window).pieces[0].image.target.capture
         await self.execute("pending = capture(window, 'a', (200, 160))")
         pending = self.window._image.pieces[0].image.target.capture
         self.assertEqual(self.controller.port.capture_references, frozenset((delivered, pending)))
@@ -412,7 +416,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
         self.assertEqual(sum("Coordinate inputs" in block.get("text", "") for block in result["content"]), 1)
         await self.click(self.window)
-        self.assertEqual(self.last_target(), self.window._image.pieces[0].image.target)
+        self.assertEqual(self.last_target(), WindowReferences.delivered_image(self.app._instance, self.window).pieces[0].image.target)
 
     async def test_identical_same_window_pixels_acknowledge_new_native_capture_once_each(self):
         result = await self.execute(
@@ -440,7 +444,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.captures[-2].png, self.captures[-1].png)
         await self.click(self.window)
         self.assertEqual(self.last_target().root_window, "a")
-        await self.click(self.app.window(ref(self.app, "b")))
+        await self.click(window_scope(self.controller, self.app, ref(self.app, "b")))
         self.assertEqual(self.last_target().root_window, "b")
 
     async def test_image_labels_count_pictures_separately_from_exact_source_callbacks(self):
@@ -454,7 +458,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(images), 2)
         self.assertEqual([item["imageId"].rsplit(".", 1)[1] for item in metadata], ["1", "2"])
         for item, key in zip(metadata, ("a", "b")):
-            self.assertIn(f"computer.window({ref(self.app, key)})", item["caption"])
+            self.assertIn(f"computer.app('editor').click(at=(x, y), window={ref(self.app, key)})", item["caption"])
         outputs = [
             event["diagnostic"] for event in self.events
             if event.get("diagnostic", {}).get("kind") == "image_output"
@@ -529,8 +533,8 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.task_namespace["states"] = canvas
         result = await self.execute("print_image(states.png)")
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
-        self.assertIn(f"Coordinate inputs for this displayed canvas: computer.window({current_number}).", text)
-        self.assertNotIn(f"Coordinate inputs for this displayed canvas: computer.window({old_number})", text)
+        self.assertIn(f"Coordinate inputs for this displayed canvas: computer.app('editor').click(at=(x, y), window={current_number}).", text)
+        self.assertNotIn(f"Coordinate inputs for this displayed canvas: computer.app('editor').click(at=(x, y), window={old_number})", text)
         image = next(block for block in result["content"] if block["type"] == "image")
         self.assertIn("arrangement is not a live window layout", image["_meta"]["computer-use"]["caption"])
         self.assertIn("separate", gaps[0].detail)
@@ -569,7 +573,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.click(self.window)
         self.assertEqual(self.last_target(), canvas.pieces[0].image.target)
         self.assertEqual(self.write.arun.call_args.args[0].intent.parameters, {"x": 20.0, "y": 30.0})
-        b = self.app.window(ref(self.app, "b"))
+        b = window_scope(self.controller, self.app, ref(self.app, "b"))
         with self.assertRaisesRegex(ComputerUseError, "no current image mapping"):
             await self.click(b)
 
@@ -591,7 +595,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current.pieces[0].window, "b")
         self.assertEqual(current.pieces[0].box, (0, 0, 100, 80))
         self.assertIsNot(current.png, original.png)
-        b = self.app.window(ref(self.app, "b"))
+        b = window_scope(self.controller, self.app, ref(self.app, "b"))
         await self.click(b, (20, 30))
         self.assertEqual(self.last_target(), current.pieces[0].image.target)
         self.assertNotEqual(self.last_target(), old_target)

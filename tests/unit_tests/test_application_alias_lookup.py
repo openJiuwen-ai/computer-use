@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from computer_use.client.computer import computer_for_controller
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.scope import adopt, display_selection
 from computer_use.interaction.read.views.pipeline import WindowPart, remember
 from computer_use.interaction.read.views.publication import publish
@@ -45,8 +46,9 @@ def finder(controller):
 
 def test_generated_owning_app_postwrite_lookup_updates_original_alias_without_read():
     controller, selector_app = setup()
-    fixed_a = computer_for_controller(controller).window(ref(selector_app, "a"))
-    generated_app = fixed_a._app
+    fixed_a = window_scope(controller, selector_app, ref(selector_app, "a"))
+    generated_app = computer_for_controller(controller).app("editor")
+    adopt(controller, generated_app, selector_app._instance.directory)
     assert generated_app is not selector_app
     observed_query_roots(controller, selector_app)
     selector_app._context = "b"
@@ -72,7 +74,8 @@ def test_generated_owning_app_postwrite_lookup_updates_original_alias_without_re
 
 def test_pending_read_on_other_alias_does_not_change_delivered_lookup():
     controller, app = setup()
-    generated = computer_for_controller(controller).window(ref(app, "a"))._app
+    generated = computer_for_controller(controller).app("editor")
+    adopt(controller, generated, app._instance.directory)
     observed_query_roots(controller, app)
     app._context = "b"
     publish(controller, app, "delivered B", directory=app._instance.directory)
@@ -99,7 +102,7 @@ def test_app_name_lookup_after_popup_closure_uses_only_observed_current_primary(
 
     candidates = (surface("next"),) if current else (surface("next"), surface("peer"))
     controller, app = setup(surface("a"), *candidates)
-    fixed = app.window(ref(app, "a"))
+    fixed = window_scope(controller, app, ref(app, "a"))
     original = fixed._window_identity
     observed_query_roots(controller, app)
     app._context = "a"
@@ -148,7 +151,7 @@ def menu_owner(controller, app, key):
 def test_fixed_window_hidden_menu_sampling_keeps_delivered_window_lookup():
     controller, app = setup()
     observed_query_roots(controller, app)
-    fixed = app.window(ref(app, "a"))
+    fixed = window_scope(controller, app, ref(app, "a"))
     fixed._context = "a"
     publish(controller, fixed, "A contents", directory=app._instance.directory)
     source = menu_owner(controller, app, "a")
@@ -168,7 +171,7 @@ def test_fixed_window_hidden_menu_sampling_keeps_delivered_window_lookup():
 
 def test_old_menu_element_keeps_its_frozen_window_after_another_menu_observation():
     controller, app = setup()
-    fixed_a = app.window(ref(app, "a"))
+    fixed_a = window_scope(controller, app, ref(app, "a"))
     original = WindowIdentity.of(app._instance.members["a"])
     snapshot = dict(
         binding=Binding("session", original.instance, "a", "shared-menu-surface", "item"),
@@ -237,7 +240,7 @@ def test_explicit_child_element_read_updates_app_alias_from_its_snapshot():
 
 def test_explicit_element_read_keeps_fixed_window_and_original_menu_context():
     controller, app = setup()
-    fixed = app.window(ref(app, "a"))
+    fixed = window_scope(controller, app, ref(app, "a"))
     root = fixed._window_identity
     identity = WindowIdentity.of(app._instance.members["a"])
     app._context = "b"

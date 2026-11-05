@@ -18,7 +18,7 @@ Computer Use 是 openJiuwen 智能体系统服务层（Agent System Service）�
 
 开发者有两种形式可以接入使用：
 
-**方法 1：接入 computer_use 引擎。** 通过 MCP 连接智能体，或直接调用 Python SDK。MCP 工具 `computer_use(title, code)` 提供 `Computer → App / Window → Element` 接口，模型编写 Python 完成操作，变量跨调用保留。智能体结合无障碍树和截图定位控件，并读取界面验证操作结果。
+**方法 1：接入 computer_use 引擎。** 通过 MCP 连接智能体，或直接调用 Python SDK。MCP 工具 `computer_use(title, code)` 提供 `Computer → App → Element` 接口，模型编写 Python 完成操作，变量跨调用保留。智能体结合无障碍树和截图定位控件，并读取界面验证操作结果。
 
 **方法 2：接入 Computer Use DeepAgent。** 使用基于 openJiuwen DeepAgent 组装的电脑操作智能体，通过标准 `invoke()`、`stream()` 和 `Runner` 接口集成到应用中。应用向智能体传入自然语言任务，由智能体观察桌面、执行操作并核对结果。
 
@@ -126,14 +126,14 @@ MCP 中观察自动展示：首次展示已采集的内容，后续默认显示�
 每个窗口分别标明 AX、图像采集情况和具体缺口；full/diff/unchanged 表示文字呈现模式。
 同次工具的连续写入保留每条回执，同范围自动观察合并为最终结果；独立弹层及显式打印/完整观察保留。
 窗口坐标操作的写后观察保留截图并采集独立的 AX 信息，缺少 AX 不会使已取得的截图不可用。
-需要重新获得完整上下文时调用 `app.read(full=True)` 或 `window.read(full=True)`；不需要客户端接入私有历史协议。
+需要重新获得完整上下文时调用 `app.read(full=True)`，需要指定窗口时增加 `window=`；不需要客户端接入私有历史协议。
 SDK 返回的 `state.text` 始终是本次读取范围的完整文字，展示 diff 不改变元素绑定和截图坐标。
 MCP 中打印观察、观察的 `.text` 或直接文字切片，都复用自动展示，不额外输出全文；
 SDK 内切片值及文件输出仍保持原意。需要限制读取范围时使用子树或 `read_text`。
 
 读取默认不为刷新画面而激活或提升窗口。在 macOS 上，调用方可显式使用
 `app.read(view="both", allow_foreground=True)`，允许 SDK 在已确认的原窗口范围内准备观察；
-`Window.read()` 同样支持该选项。
+指定窗口时使用 `app.read(window=ref, allow_foreground=True)`。
 这可能改变焦点和窗口层次，但不注入全局鼠标或键盘、不自动切回其他应用。
 结果的 `preparation` 和文字说明保留实际请求，图像保留本次采样来源。
 观察目标尚未明确时仍返回窗口选择信息，不以此许可猜选目标。其他平台暂不支持该准备能力。
@@ -167,21 +167,41 @@ with Computer() as computer:  # 仍优先选择机制合格的低干扰路线。
 显式设置 `Computer(allow_global_input=False)` 可限制全局输入；定向操作仍可能激活原窗口、改变键盘焦点。
 在这种显式限制下，没有可用允许路线的操作会报告 `permission_required`。
 
-`App` 表示应用范围，`list_apps()` 始终列出应用。App 和桌面观察发布窗口编号，
-通过 `computer.window(ref)` 直接选择具体窗口，或通过 `app.window(ref)` 选择同一个窗口并额外检查应用归属。
-选择不会激活窗口；桌面、App 和写后观察共用窗口引用，标题和位置只作描述，不作为绑定依据。
+`App` 表示应用范围，`list_apps()` 始终列出应用。App 和桌面观察发布窗口编号。
+通过 `app.read(window=ref)` 观察指定窗口；`element`、`click`、`scroll`、`drag`、
+`type_text`、`paste` 和 `press_key` 同样接受可选 `window=`。窗口选择和普通读取不激活窗口。
+窗口编号在桌面、App 和写后观察间共用；标题和位置只作描述，不作为绑定依据。
 
-`Window` 固定指向该窗口，关闭后旧窗口对象和截图失效，App 仍可发现其他窗口。
-元素操作保留原控件绑定，坐标操作使用实际交付的对应图像。App 级键盘输入使用最近一次明确交付的输入上下文，
-不会因为执行时焦点变化而改选窗口。目标准备由 SDK 完成，确有歧义时返回窗口选择。
-同一应用的不同 App 入口共用实际交付的名称查询范围、键盘上下文和截图；未展示的采样不会覆盖它们。
-固定 Window 保留自己的观察和图像绑定；已确认的模态弹窗可作为该 Window 已交付的输入上下文。
-`choices` 中的每项是 `WindowInfo`，包含可交给 `computer.window(id)` 的 `id` 和描述性 `title`。
-写后观察可以展示新发现的窗口，不改绑已有 Window、Element 或截图目标。
+```python
+app = computer.app("com.apple.TextEdit")
+view = app.read(view="both")
+# a、b 使用观察中提供的两个窗口编号。
+app.read(window=a, view="both")
+app.read(window=b, view="both")
+app.click(at=(200, 150), window=a)  # 复用 A 实际交付的图像，无须重读来切换范围。
+app.element("保存", window=b).click()
+app.press_key("Return", window=a)
+```
+
+公开对象只有 `Computer`、`App`、`Element`，没有公开 `Window` 或窗口工厂。
+macOS 可通过 `app.close_window(ref)` 正常请求关闭指定窗口，即使共享标识遮住标题栏按钮。
+它根据窗口声明定位关闭控件，复用已有输入和写后观察；不自动保存、丢弃或关闭其他窗口。
+应用可拒绝关闭或弹出确认框；回执的 `intent` 为 `closeWindow`，`dispatched` 表示已派发请求，
+`window_lifecycle` 与附带观察说明已取得的窗口状态。Windows／Linux 的该能力后续实现。
+同一应用的元素编号跨读取范围保持一致；`app.element(ref)` 保持原控件绑定，读取其他窗口不改绑它。
+数字元素引用附带 `window=` 时检查其范围是否相符。指定窗口的名称查询在本次调用内准备定位事实，
+不要求先公开读取该窗口。省略 `window=` 的名称查询和键盘输入使用最近实际交付的明确上下文，
+不会因为执行时系统焦点变化而改选目标。
+
+每个窗口独立保留当前已交付图像；组合图仍使用整张已展示图片的坐标，由 SDK 映射实际接收窗口。
+未交付采样不替换已交付映射。窗口关闭后旧窗口编号和图像失效，应用仍可发现其他窗口。
+`choices` 中的每项是 `WindowInfo`，包含可传给 `window=` 的 `id` 和描述性 `title`。
+写后观察可以展示新发现的窗口，不改绑已有 Element 或图像目标。窗口操作由 SDK 准备接收链，
+确有歧义时返回具体候选。macOS 已纳入真实验收；其他平台沿用共同接口，真实多窗口验收为后续工作。
 
 macOS 的存续元素引用不因无关布局包装变化、局部观察或其他引用的缓存压力而失效；必要的操作条件由 SDK 更新。
 元素真正结束、窗口关闭后重开或真实文档归属改变时，旧引用仍会拒绝输入，并附带可取得的相关观察。
-`app.element(ref)`／`window.element(ref)` 可取回本应用已经发布的引用；构造句柄不声明目标仍存续或已获操作资格。
+`app.element(ref)` 可取回本应用已经发布的引用；构造句柄不声明目标仍存续或已获操作资格。
 实际读取和写入均检查原窗口范围与生命周期，失败写入可在同一次调用中返回当前观察。
 操作身份与历史文字缓存独立：大内容缓存可以回收，最小引用元数据保留至明确退休或会话结束。
 本轮原生引用稳定性改进及真实 SDK／MCP 验收限于 macOS；Windows／Linux 的对应原生实现与验收列为后续工作。
@@ -193,7 +213,7 @@ SDK 返回原始截图及对应像素坐标。MCP 交付缩图时，自动输出
 执行和观察分别交付结果。`status` 表示派发或已有的局部验证；模型依据实际界面判断业务任务完成情况。
 `observation_status` 的值为 `available`、`partial`、`unavailable` 或 `not_requested`。
 `window_lifecycle` 的值为 `observed`、`closed`、`unknown` 或 `not_applicable`，来自窗口生命周期证据。
-原窗口结束时，相关观察仍可给出当前窗口选择，旧 Window 和 Element 不会改投这些候选。
+原窗口结束时，相关观察仍可给出当前窗口选择，旧窗口编号和 Element 不会改投这些候选。
 `observation_error.session_usable` 表示原会话是否仍可使用。
 
 MCP 与参考 Agent 共用静态工具说明。工具返回展示界面内容、对象归属、执行进度和具体缺口；
@@ -311,7 +331,7 @@ flowchart TD
     OS --> Desktop["桌面应用"]
 ```
 
-DeepAgent 负责模型调用、对话上下文与工具循环；引擎维护 `Computer → App / Window → Element` 接口、目标身份、观察结果及操作选路；操作系统适配器负责解析原生对象、准备输入接收者并派发操作。已完成的动作返回 `dispatched` 或 `verified` 回执及一次有界的相关观察。智能体据此判断任务效果，需要更多或更新证据时再读取；附带读取失败不抹掉动作回执，也不重放输入。
+DeepAgent 负责模型调用、对话上下文与工具循环；引擎维护 `Computer → App → Element` 接口、目标身份、观察结果及操作选路；操作系统适配器负责解析原生对象、准备输入接收者并派发操作。已完成的动作返回 `dispatched` 或 `verified` 回执及一次有界的相关观察。智能体据此判断任务效果，需要更多或更新证据时再读取；附带读取失败不抹掉动作回执，也不重放输入。
 
 ## 功能特性
 
@@ -355,7 +375,7 @@ computer-use/
 
 - [DeepAgent 接入](computer_use_agent/agent.py)：Agent 构建、标准调用与会话生命周期。
 - [DeepAgent 工具](computer_use_agent/toolkit.py)：已有 openJiuwen 应用的工具接入。
-- [SDK 接口参考](computer_use_engine/__init__.pyi)：`Computer`、`App`、`Window`、`Element` 的公开接口与参数类型。
+- [SDK 接口参考](computer_use_engine/__init__.pyi)：`Computer`、`App`、`Element` 的公开接口与参数类型。
 - [MCP 服务入口](interface_adapter/mcp/server.py)：工具定义、执行说明与全局输入授权参数。
 - [原生环境准备命令](scripts/native.py)：各平台构建、权限检查与 Linux 会话配置。
 - [直接对话](computer_use_agent/cli/main.py)：命令行选项与交互命令。

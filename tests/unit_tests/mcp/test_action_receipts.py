@@ -111,7 +111,7 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("do not replay", text)
         self.assertNotIn("Choose a current instance", text)
         self.assertIn("Original window: closed", text)
-        self.assertIn("computer.window(7) Another document", text)
+        self.assertIn("window=7 Another document", text)
 
     async def test_suffix_delivery_failure_does_not_replace_returned_receipt(self):
         receipt = dict(target="Original document", status="dispatched", detail="Input sent once.")

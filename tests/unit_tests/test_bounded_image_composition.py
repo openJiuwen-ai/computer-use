@@ -128,7 +128,7 @@ def test_fixed_window_composite_needs_no_prior_app_primary_or_anchor():
     piece, point = canvas.hit((140, 30))
     assert piece.window == "child" and point == (20, 30)
     caption = image_label(canvas.png)
-    assert "fixed Window" in caption
+    assert "selected window" in caption
     assert "Window references: 0, 7" in caption
     assert "unknown" not in caption
     assert controller.transport.session == "session"
