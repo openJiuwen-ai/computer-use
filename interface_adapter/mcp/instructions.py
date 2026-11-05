@@ -29,13 +29,41 @@ Choose the interaction method for each operation using this preference:
    app.read(view='image', window=ref) when needed. Use that
    App's coordinate or keyboard methods as appropriate, such as
    app.click(at=(x, y), window=ref) or app.press_key('Return', window=ref).
-3. If App operations still cannot advance the task, inspect the desktop
-   with computer.read(view='image') and use desktop-level mouse or keyboard
-   methods, such as computer.click(at=(x, y)) or computer.press_key('Return').
+3. When global input is needed on macOS, select a direct Computer input method.
+   computer.click(at=(screen_x, screen_y)) uses native screen points (negative
+   points are valid on secondary displays), without a preceding read. For image
+   pixels, explicitly retain p = app.point((x, y), window=ref) or
+   computer.point((x, y)) from the corresponding displayed image, then call
+   computer.click(target=p). computer.click(target=element) locates its center.
+   These locators only find a screen point; they do not activate, raise, focus,
+   or require that the object currently receives input. The global click hits
+   whatever is actually at that screen location.
+   computer.scroll('down', at=(screen_x, screen_y)) and computer.drag(start, end)
+   also accept retained point/element targets; drag endpoints are independent.
+   computer.type_text(text), computer.press_key('Return'), and computer.paste(text)
+   go directly to the OS's current receiver. They have no target or replace
+   option: use explicit clicks/keys when a global operation needs preparation.
+   Global inputs return dispatch/effect receipts, without forced observations;
+   request an App/Computer read when the next decision needs observation.
 Apply this preference anew to every subsequent operation, including after
 desktop input. Reuse established behavior for the corresponding control and
 context; prefer usable elements for the next target. Choose another method
 directly when current evidence makes it more direct, reliable or efficient.
+On macOS, App/Element operations never inject global mouse or keyboard
+input, including preparation and recovery. They may activate/focus their target.
+Computer direct input explicitly uses global events; it does not grant later
+object calls global authority. Windows/Linux currently retain their existing
+ability to use global input for object operations. A host restriction can still
+forbid global input. Windows/Linux Computer inputs currently retain their
+captured-desktop adapters; the raw screen-point contract above is macOS-only.
+Computer.paste(text) is currently macOS-only; App/Element.paste remain available
+on Windows/Linux.
+Element.target retains the exact element binding.
+app.point((x, y), window=ref) retains that window's delivered image mapping.
+Retained points also work in app.click(at=p, window=ref) for scoped input.
+They survive later reads and window translation; real identity, layout or display
+changes can still invalidate the corresponding target. A known input dispatch
+is not grounds to blindly repeat it through a global method.
 The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.
@@ -64,8 +92,12 @@ continuation cursor for further pages. A tree continuation's cursor is accepted
 by element.read(cursor=...). AX collected reports acquired content; scope gaps
 and omitted children identify partial coverage. Tree full/diff/unchanged is the
 presentation mode.
+Explicit native detail geometry retains its declared screen/AX coordinate space;
+do not treat it as screenshot pixels.
 
-Coordinates use the displayed image's pixels and its named coordinate target.
+App coordinates and point() helpers use the displayed image's pixels
+and its named coordinate target. Bare macOS Computer coordinates use native
+screen points; never pass image pixels as raw screen points.
 After reading multiple windows, use window=ref to reuse the corresponding
 image without rereading it. Composite images keep whole-image coordinates.
 Choose coordinates from a newly returned image in the following tool call.

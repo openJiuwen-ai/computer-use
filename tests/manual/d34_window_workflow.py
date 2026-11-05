@@ -181,6 +181,10 @@ async def effect(folder, predicate):
 
 async def command(folder, action, name="A"):
     current = await state(folder)
+    if action in {"focus", "weak"}:
+        # This is fixture setup, outside measured SDK actions. LaunchServices
+        # grants activation that a background app's self-activate may not get.
+        await asyncio.to_thread(subprocess.run, ["open", "-a", str(folder / (NAME + ".app"))], check=True)
     sequence = current["sequence"] + 1
     temporary = folder / "command.tmp"
     temporary.write_text(json.dumps({"sequence": sequence, "action": action, "name": name}))
@@ -390,12 +394,13 @@ async def verify(folder, options, fixture, bundle):
         )
         a_image = await read("08-retained-A-image", selector_app, window=a, view="both")
         report["image_markers"].append(assert_window_image(a_image, (await state(folder))["documents"]["A"]))
+        point = window_point(a_image, (await state(folder))["documents"]["A"])
+        retained_a = selector_app.point(point, window=a)
         await command(folder, "focus", "B")
         await read("09-newer-B-image", selector_app, view="both")
-        point = window_point(a_image, (await state(folder))["documents"]["A"])
         await action(
-            "fixed Window screenshot remains A",
-            lambda: selector_app.click(at=point, window=a),
+            "retained App point stays in A after B image delivery",
+            lambda: selector_app.click(at=retained_a, window=a),
             lambda value: value["documents"]["A"]["count"] == 1 and value["documents"]["B"]["count"] == 0,
         )
         opened = await action(
@@ -440,10 +445,12 @@ async def verify(folder, options, fixture, bundle):
         # public context-switch reads. Callback journals prove the actual receiver.
         images = {}
         points = {}
+        targets = {}
         before_cross = await state(folder)
         for name, number in (("A", a), ("B", b)):
             images[name] = await read("d35-image-" + name, selector_app, window=number, view="both")
             points[name] = window_point(images[name], before_cross["documents"][name])
+            targets[name] = selector_app.point(points[name], window=number)
             report["image_markers"].append(assert_window_image(images[name], before_cross["documents"][name]))
         await command(folder, "focus", "B")
         await action(
@@ -453,12 +460,13 @@ async def verify(folder, options, fixture, bundle):
                            and value["documents"]["B"]["submits"] == before_cross["documents"]["B"]["submits"]),
         )
         counts = {name: before_cross["documents"][name]["count"] for name in ("A", "B")}
-        for name, number in (("A", a), ("B", b), ("A", a), ("B", b)):
+        for index, (name, number) in enumerate((("A", a), ("B", b), ("A", a), ("B", b))):
             counts[name] += 1
             expected = dict(counts)
+            at = targets[name] if index < 2 else points[name]
             await action(
                 "D35 coordinate " + name,
-                lambda number=number, name=name: selector_app.click(at=points[name], window=number),
+                lambda number=number, at=at: selector_app.click(at=at, window=number),
                 lambda value, expected=expected: all(
                     value["documents"][key]["count"] == count for key, count in expected.items()
                 ),
@@ -602,8 +610,14 @@ async def verify(folder, options, fixture, bundle):
             "shot = computer.read(view='both')\nprint(shot.text)\nprint_image(shot.screenshot)",
         )
         assert len(images) == 1, len(images)
-        raw_dimensions = png_size(runtime.task_namespace["shot"].screenshot)
+        from computer_use.session.observation import observation_screenshot
+
+        # MCP now publishes a paired image/text view on the public observation.
+        # Only the retained acquisition record supplies unprojected dimensions.
+        public_dimensions = png_size(runtime.task_namespace["shot"].screenshot)
+        raw_dimensions = png_size(observation_screenshot(runtime.task_namespace["shot"]))
         delivered_dimensions = png_size(images[0])
+        assert public_dimensions == delivered_dimensions
         assert max(delivered_dimensions) <= 2048 and delivered_dimensions != raw_dimensions, (
             "Resized-image acceptance requires a desktop larger than the MCP cap",
             raw_dimensions,
@@ -614,7 +628,7 @@ async def verify(folder, options, fixture, bundle):
             desktop_text, images[0], mcp_weak_ref, current["documents"]["Weak"], current["pointerHit"], current["pid"]
         )
         report["mcp_geometry"] = {"raw": raw_dimensions, "delivered": delivered_dimensions, **geometry}
-        await mcp("21-mcp-desktop-click", f"receipt = computer.click(at={point!r})")
+        await mcp("21-mcp-desktop-click", f"receipt = computer.click(target=computer.point({point!r}))")
         final = await effect(folder, lambda value: value["documents"]["Weak"]["count"] == 2)
         assert all(final["documents"][name]["count"] == count for name, count in counts.items()), final
         assert final["documents"]["Child"]["count"] == 1, final

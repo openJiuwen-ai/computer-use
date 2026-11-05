@@ -22,6 +22,13 @@ def point(value):
     return value
 
 
+def screen_point(value):
+    """Global screen points may be negative on displays left/above the primary."""
+    if not isinstance(value, tuple) or len(value) != 2 or any(not finite(v) for v in value):
+        raise local_failure("a screen point must be a tuple of two finite numbers")
+    return value
+
+
 def click(options):
     if options is None:
         options = ClickOption()

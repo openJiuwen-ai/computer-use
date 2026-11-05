@@ -8,21 +8,12 @@ import Foundation
         typealias Physical = NativePhysicalInput
         let held = Physical.State(modifiers: [.maskCommand], buttons: [.left])
         let released = Physical.State(modifiers: [], buttons: [])
-        for delivery in [NativeClickDelivery.objectAction, .objectSelection, .windowDirected] {
-            let dependency = Physical.dependency(for: delivery)
-            precondition(dependency == nil)
-            var samples = 0
-            try Physical.validate(dependency, sample: { samples += 1; return held })
-            try await Physical.wait(dependency, check: {}, sample: { samples += 1; return held })
-            precondition(samples == 0, "addressed mechanisms cannot require an idle physical keyboard/mouse")
-        }
         var idleChecks = 0
-        try await Physical.wait(.globalHID, check: { idleChecks += 1 }, sample: { released }, pause: { _ in
+        try await Physical.wait(.menuTracking, check: { idleChecks += 1 }, sample: { released }, pause: { _ in
             preconditionFailure("an already released physical device cannot add a fixed wait")
         })
         precondition(idleChecks == 0, "an idle physical device cannot trigger extra scope discovery")
-        precondition(Physical.dependency(for: .systemPointer) == .globalHID)
-        for dependency in [Physical.Dependency.globalHID, .menuTracking] {
+        for dependency in [Physical.Dependency.menuTracking] {
             do {
                 try Physical.validate(dependency, sample: { held })
                 preconditionFailure("shared input conflict was ignored")
@@ -47,17 +38,17 @@ import Foundation
                 precondition(error.code == .inputUnavailable && time <= 10.081)
             }
         }
-        // Our paired mouse up must not conflict with our own down; unrelated
-        // buttons and modifiers remain real conflicts for global injection.
-        try Physical.validate(.globalHID, allowing: .left,
+        // Tracking preparation owns its local dependency; these checks must
+        // never become admission for explicit global event injection.
+        try Physical.validate(.menuTracking, allowing: .left,
                               sample: { .init(modifiers: [], buttons: [.left]) })
         do {
-            try Physical.validate(.globalHID, allowing: .left, sample: { held })
+            try Physical.validate(.menuTracking, allowing: .left, sample: { held })
             preconditionFailure("allowing our button suppressed a different held modifier")
         } catch is DriverError {}
         var pauses = 0
         do {
-            try await Physical.wait(.globalHID, check: { throw CancellationError() },
+            try await Physical.wait(.menuTracking, check: { throw CancellationError() },
                                     sample: { held }, pause: { _ in pauses += 1 })
             preconditionFailure("cancelled input waited")
         } catch is CancellationError {}

@@ -148,7 +148,7 @@ import ApplicationServices
             readiness: ready ? NativeReadiness() : NativeReadiness([(condition, "unknown")]))
         wire["backgroundPreparation"] = offer.preparationOptions.contains("background") ? "yes" : "no"
         wire["click"] = offer.wire
-        wire["globalInput"] = offer.delivery == .systemPointer ? "yes" : "no"
+        wire["globalInput"] = "no"
         primitives.append(wire)
     }
 

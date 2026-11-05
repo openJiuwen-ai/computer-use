@@ -73,7 +73,8 @@ def fixture():
             raise RuntimeError("DESKTOP CAPTURE FAILED")
 
         source.desktop_reader = SimpleNamespace(read=read)
-        interface = SimpleNamespace(controller=source)
+        source.port = SimpleNamespace()
+        interface = SimpleNamespace(controller=source, windows=SimpleNamespace(capture_references=lambda: frozenset()))
         executor.run(lambda: AgentInterfacePipeline.read_desktop(interface, "image", False))
 
     globals().update(

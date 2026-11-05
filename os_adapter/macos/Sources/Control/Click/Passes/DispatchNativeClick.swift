@@ -8,7 +8,8 @@ import ApplicationServices
     static func run(
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
         evidence: NativeClickEvidence, objects: any NativeControlObjectAccess,
-        resolveWindow: () throws -> NativeFixedInputWindow? = { nil }
+        resolveWindow: () throws -> NativeFixedInputWindow? = { nil },
+        preparedPoint: NativePreparedPointerPoint? = nil
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickDispatch)
         defer { metric?.end() }
@@ -34,9 +35,6 @@ import ApplicationServices
             evidence.markCall("nativeAction")
         }
         func pointerBoundary() throws {
-            if plan.offer.delivery == .systemPointer {
-                try NativeInputAuthorization.requireGlobalInput("system pointer click")
-            }
             try boundary.markDispatchInFlight()
             evidence.markCall("posted")
         }
@@ -70,7 +68,8 @@ import ApplicationServices
                 plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
                 onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery,
-                onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record)
+                onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record,
+                preparedPoint: preparedPoint)
         case .element(let unit):
             // This samples the original element after preparation. Only this
             // ensuing gesture freezes geometry; no new screenshot RPC is needed.
@@ -80,10 +79,6 @@ import ApplicationServices
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery,
                 onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record)
         case .popupPointer(let unit):
-            try await unit.deliver(
-                plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
-                onCleanupUnknown: receipt.recordCleanupUnknown)
-        case .desktop(let unit):
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown)

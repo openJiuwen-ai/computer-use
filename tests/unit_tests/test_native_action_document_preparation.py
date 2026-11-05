@@ -107,7 +107,7 @@ async def test_action_document_preparation_keeps_one_original_dispatch(
     assert sum(command["kind"] == "native_action" for command in commands) == 1
     calls = connection.request.await_args_list
     assert calls[0].args[0] == "begin"
-    assert calls[0].args[1]["intent"] == {"kind": "action", "parameters": {"action": "AXPress"}}
+    assert calls[0].args[1]["intent"] == {"kind": "action", "parameters": {"action": "AXPress"}, "globalInput": False}
     assert "clickContract" not in calls[0].args[1], "explicit actions must use the ordinary write pipeline"
     assert all(call.args[1]["operation"] == "operation" for call in calls if call.args[0] == "execute")
     assert facts.inspections == len(commands)
@@ -215,6 +215,7 @@ async def test_final_action_precondition_change_refreshes_into_background_prepar
     assert connection.request.await_args_list[0].args[1]["intent"] == {
         "kind": "action",
         "parameters": {"action": "AXPress"},
+        "globalInput": False,
     }
     # Two action envelopes reach the driver. The first stops at its final
     # precondition guard; only the final receipt reports requested AXPress input.

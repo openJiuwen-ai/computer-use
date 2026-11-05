@@ -240,7 +240,7 @@ def test_click_uses_same_admission_contract_and_requires_an_explicit_preparation
         ("foreground",),
         Knowledge.NO,
         click=ClickOffer(
-            "native.pointer", "pointer", "desktop_pointer", "preparationRequired", preparation_options=("foreground",)
+            "native.pointer", "pointer", "surface_pointer", "preparationRequired", preparation_options=("foreground",)
         ),
     )
     admission = stage_admission(base)
@@ -256,12 +256,11 @@ def test_click_uses_same_admission_contract_and_requires_an_explicit_preparation
         ("native_action", "object_action", Channel.OBJECT),
         ("native_selection", "object_selection", Channel.OBJECT),
         ("pointer_sequence", "surface_pointer", Channel.POINTER),
-        ("pointer_sequence", "desktop_pointer", Channel.POINTER),
     ],
 )
 @pytest.mark.parametrize("admission", ["ready", "preparationRequired"])
 @pytest.mark.parametrize("dispatch", [Dispatch.DISPATCHED, Dispatch.PARTIAL, Dispatch.UNKNOWN])
-async def test_every_click_delivery_keeps_preparation_atomic_and_stops_after_possible_input(
+async def test_every_object_click_delivery_keeps_preparation_atomic_and_stops_after_possible_input(
     unit,
     delivery,
     channel,
@@ -293,7 +292,7 @@ async def test_every_click_delivery_keeps_preparation_atomic_and_stops_after_pos
     port = RecordingPort(
         [facts(CASES[0], declared)],
         [StepResult(TARGET, dispatch, "possible input", click=click)],
-        HostPolicy(allow_global_input=delivery == "desktop_pointer"),
+        HostPolicy(allow_global_input=False),
     )
     operation = Engine(port).execute(Intent("click", {"button": "left", "count": 1}), TARGET)
     if dispatch == Dispatch.DISPATCHED:

@@ -26,6 +26,24 @@ if TYPE_CHECKING:
 from .membership import compatible_membership
 
 
+def input_image(controller, ui, image=None, *, current=True):
+    """Resolve and validate one delivered canvas without reading the desktop."""
+    if current:
+        validate_session(controller, ui)
+    if image is None:
+        image = (
+            WindowReferences.delivered_image(ui._instance, ui)
+            if ui._anchor is not None
+            else ui._instance.delivered_image
+        )
+    if image is None or current and (image.expired or hashlib.sha256(image.png).digest() != image.digest):
+        raise local_failure("this UI has no current image mapping", "snapshot_expired")
+    adapters = controller.adapters
+    if current and adapters.image_delivery_required() and image.delivered != adapters.image_delivery_epoch():
+        raise local_failure("this image has not been delivered to the model", "input_unavailable")
+    return image
+
+
 class InterfacePointerPipeline:
     """Execute a gesture in an App or Window screenshot's coordinate space.
 
@@ -43,7 +61,15 @@ class InterfacePointerPipeline:
         self.write = write
 
     async def run(
-        self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record, control: Control
+        self,
+        ui: UIHandle,
+        intent: str,
+        points: tuple[Point, ...],
+        options: Record,
+        control: Control,
+        *,
+        global_input=False,
+        image=None,
     ) -> ActionResult:
         """Validate the delivered image mapping and execute the gesture on its native window.
 
@@ -57,25 +83,7 @@ class InterfacePointerPipeline:
         Returns:
             The action receipt for the mapped member window.
         """
-        validate_session(self.controller, ui)
-        # The pipeline shares retained bindings with their owning service.
-        # pylint: disable-next=protected-access
-        image = (
-            WindowReferences.delivered_image(ui._instance, ui)
-            if ui._anchor is not None
-            else ui._instance.delivered_image
-        )
-        if image is None or image.expired or hashlib.sha256(image.png).digest() != image.digest:
-            raise local_failure(
-                "this UI has no current image mapping",
-                "snapshot_expired",
-            )
-        adapters = self.controller.adapters
-        if adapters.image_delivery_required() and image.delivered != adapters.image_delivery_epoch():
-            raise local_failure(
-                "this image has not been delivered to the model",
-                "input_unavailable",
-            )
+        image = input_image(self.controller, ui, image)
         mapped = tuple(image.hit(point) for point in points)
         piece = mapped[0][0]
         if any(other.window != piece.window for other, point in mapped):
@@ -89,11 +97,13 @@ class InterfacePointerPipeline:
         await refresh(self.controller, ui, accessibility=False)
         if not compatible_membership(image.membership, signature(allowed(ui)), piece.window):
             image.expired = True
-            raise local_failure("the window membership or modal layout changed", "snapshot_expired")
+            raise local_failure("the original window binding changed", "snapshot_expired")
         if intent == "drag":
             start, end = mapped[0][1], mapped[1][1]
             parameters = dict(fromX=start[0], fromY=start[1], toX=end[0], toY=end[1])
         else:
             x, y = mapped[0][1]
             parameters = dict(x=x, y=y, **options)
-        return await self.write.arun(ExecuteAction(ui, Intent(intent, parameters), piece.image.target), control)
+        return await self.write.arun(
+            ExecuteAction(ui, Intent(intent, parameters, global_input), piece.image.target), control
+        )

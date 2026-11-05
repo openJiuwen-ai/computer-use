@@ -120,7 +120,7 @@ def test_unaddressed_member_lifetime_does_not_expire_the_original_root_capture(m
 )
 def test_addressed_member_or_its_original_ancestor_cannot_be_replaced(monkeypatch, members):
     pipeline, ui, write, queried, _ = setup_pipeline(monkeypatch, members=members)
-    with pytest.raises(ComputerUseError, match="membership or modal layout changed"):
+    with pytest.raises(ComputerUseError, match="original window binding changed"):
         asyncio.run(pipeline.run(ui, "click", ((120, 30),), {}, None))
     write.arun.assert_not_awaited()
     assert not queried and ui._image.expired
@@ -146,10 +146,35 @@ def test_drag_cannot_cross_original_member_mappings(monkeypatch):
 
 
 @pytest.mark.parametrize("modal", [True, None])
-def test_new_modal_or_unconfirmed_member_stops_before_input(monkeypatch, modal):
+@pytest.mark.parametrize(
+    "intent,points", [("click", ((20, 30),)), ("scroll", ((20, 30),)), ("drag", ((20, 30), (40, 50)))]
+)
+def test_current_modality_reaches_native_without_expiring_original_capture(monkeypatch, modal, intent, points):
     extra = ("new", "new-surface", "root", "known", modal)
-    pipeline, ui, write, queried, _ = setup_pipeline(monkeypatch, members=(ROOT, CHILD, extra))
-    with pytest.raises(ComputerUseError, match="modal layout changed"):
-        asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None))
-    write.arun.assert_not_awaited()
-    assert queried == []
+    pipeline, ui, write, queried, target = setup_pipeline(monkeypatch, members=(ROOT, CHILD, extra))
+    # The current native boundary, not a prior Python catalogue, decides if a
+    # transient modal actually blocks this original target. Its rejection is
+    # preserved without destroying the image's unchanged coordinate binding.
+    blocked = ComputerUseError(
+        {"code": "blocked_by_modal", "target": "root", "effect": "none", "detail": "target blocked by modal new"}
+    )
+    write.arun.side_effect = [blocked, "dispatched"]
+    with pytest.raises(ComputerUseError) as failure:
+        asyncio.run(pipeline.run(ui, intent, points, {}, None))
+    assert failure.value is blocked
+    assert write.arun.call_args.args[0].target == target
+    assert not queried and not ui._image.expired
+    # Native readiness may change while the retained capture remains valid;
+    # the second call need not acquire another screenshot to use that image.
+    assert asyncio.run(pipeline.run(ui, intent, points, {}, None)) == "dispatched"
+    assert write.arun.await_count == 2
+    assert all(call.args[0].target == target for call in write.arun.call_args_list)
+    assert not queried and not ui._image.expired
+
+
+def test_unrelated_unknown_peer_does_not_become_an_input_precondition(monkeypatch):
+    peer = ("unrelated", "peer-surface", None, "unknown", None)
+    pipeline, ui, write, queried, target = setup_pipeline(monkeypatch, members=(ROOT, CHILD, peer))
+    assert asyncio.run(pipeline.run(ui, "click", ((20, 30),), {}, None)) == "dispatched"
+    assert write.arun.call_args.args[0].target == target
+    assert not queried and not ui._image.expired

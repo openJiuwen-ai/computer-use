@@ -110,7 +110,7 @@ uv run --no-dev --extra mcp computer-use-mcp
 }
 ```
 
-将仓库路径替换为目标电脑上的绝对路径。默认可使用全局鼠标和键盘输入，仍优先选择符合语义且机制合格的元素或应用定向路线。每次动作分别记录所选路线声明的全局输入需求与实际影响。若需显式限制某个会话，使用 `--no-allow-global-input`；目标电脑自身的系统权限仍须具备。
+将仓库路径替换为目标电脑上的绝对路径。macOS 上 App／Element 操作固定不注入全局鼠标或键盘；必要时由 Agent 自主选择 Computer 的直接输入方法。Windows／Linux 当前保持原有的全局输入能力。每次动作分别记录所选路线声明的全局输入需求与实际影响。若需显式限制某个会话，使用 `--no-allow-global-input`；目标电脑自身的系统权限仍须具备。
 
 `computer_use` 工具中已提供 `computer`、`print()` 和 `print_image()`。可以先查询应用引用：
 
@@ -162,13 +162,51 @@ with Computer() as computer:  # 仍优先选择机制合格的低干扰路线。
 嵌入已有 asyncio 或 GUI 应用时，在工作线程中运行阻塞的电脑操作代码，使宿主保持响应；
 内部驱动通信、进度和清理仍使用异步执行。
 
-`allow_global_input` 是严格的布尔型会话选项，默认 `True`，允许使用全局鼠标／键盘路线，
-但不会把它们排到合格的低干扰路线之前，也不授予 macOS 系统权限。
-显式设置 `Computer(allow_global_input=False)` 可限制全局输入；定向操作仍可能激活原窗口、改变键盘焦点。
-在这种显式限制下，没有可用允许路线的操作会报告 `permission_required`。
+`allow_global_input` 是严格的布尔型会话选项，默认 `True`，不授予 macOS 系统权限。
+macOS 上，App／Element 的整次操作（含准备、恢复、清理）固定不注入全局鼠标或键盘，
+但允许必要的窗口激活和焦点准备。原来的全局鼠标后备路线改为定向投放。
+确需全局输入时，由 Agent 选择 Computer 的直接输入方法；该选择只作用于本次调用。
+Windows／Linux 当前保持原有行为，允许对象操作使用全局输入；相同边界的落地和验收后续实施。
+`Computer(allow_global_input=False)` 会限制显式全局输入并返回 `permission_required`。
+macOS 对象操作没有合格的非全局路线时返回 `input_unavailable`，不是要求重新授权对象方法。
+
+macOS 的 Computer 直接输入使用系统全局事件，由当前桌面和键盘焦点决定接收者。
+裸坐标是全局屏幕 point，可包含副屏的负坐标；不依赖此前截图，不自动激活或归还应用。
+例如已知屏幕坐标时，可以不先读取：
+
+```python
+computer.click(at=(640, 360))
+computer.type_text("全局输入")
+computer.press_key("Return")
+```
+
+图片坐标用明确的定位值转换；已有元素也可作为鼠标定位来源：
+
+```python
+field = app.element("输入框")
+field.type_text("普通输入", replace=True)       # macOS：AX／定向机制
+computer.click(target=field)                  # 只定位到屏幕点，再全局点击
+computer.press_key("super+a")                # 当前系统接收者中的显式全选
+computer.type_text("全局输入")               # 不隐式聚焦或替换特定编辑器
+computer.paste("多行\n内容")                 # 当前焦点中的全局粘贴
+
+# 从此前实际交付的 app 截图确定位置；point() 本身不读取或操作电脑。
+p = app.point((120, 80), window=ref)
+app.click(at=p)                              # macOS：定向鼠标
+computer.click(target=p)                     # 换算到屏幕点，再由系统路由
+```
+
+`Target` 保留元素或图像点的定位来源，后续读取不会把旧点改指新图。
+用于 Computer 鼠标输入时只解析一次屏幕位置，不自动处理遮挡、滚入可见或焦点；定位后不再锁定原对象。
+全局拖拽两端可分别定位，不要求来自同一窗口或图片。对象方法使用 Target 时仍保持原对象及图像绑定。
+全局键盘方法不接受 `target=` 或隐式 `replace=True`；需要时先显式点击、选择，再输入。
+全局输入返回派发回执；需要界面结果时显式读取，读取失败不影响下一次全局输入。
+鼠标位置和系统焦点保留操作产生的结果，不自动归还。实际输入影响见 `result.impact`。
+这些原始全局与定位语义先在 macOS 实现；Windows／Linux 桌面输入仍使用既有截图上下文，后续迁移。
+`Computer.paste(text)` 当前仅在 macOS 实现；Windows／Linux 继续使用既有对象粘贴方法，原始全局粘贴列为后续实现。
 
 `App` 表示应用范围，`list_apps()` 始终列出应用。App 和桌面观察发布窗口编号。
-通过 `app.read(window=ref)` 观察指定窗口；`element`、`click`、`scroll`、`drag`、
+通过 `app.read(window=ref)` 观察指定窗口；`element`、`point`、`click`、`scroll`、`drag`、
 `type_text`、`paste` 和 `press_key` 同样接受可选 `window=`。窗口选择和普通读取不激活窗口。
 窗口编号在桌面、App 和写后观察间共用；标题和位置只作描述，不作为绑定依据。
 
@@ -206,9 +244,9 @@ macOS 的存续元素引用不因无关布局包装变化、局部观察或其�
 操作身份与历史文字缓存独立：大内容缓存可以回收，最小引用元数据保留至明确退休或会话结束。
 本轮原生引用稳定性改进及真实 SDK／MCP 验收限于 macOS；Windows／Linux 的对应原生实现与验收列为后续工作。
 
-SDK 返回原始截图及对应像素坐标。MCP 交付缩图时，自动输出、`print(obs)` 和 `print(obs.text)` 中的
-桌面尺寸、显示器及窗口矩形同步使用交付图坐标，输入按实际编码尺寸逐轴映射回原图。
-任意 PIL 裁图不自动获得输入映射；自行拼接后的普通字符串也不会被当作观察对象重新转换。
+普通 SDK 返回原始截图及对应像素坐标。MCP 交付缩图时，公开观察的文字与 PNG 成对使用交付图坐标，
+文字切行或拼接仍保持相同尺度；图像定位值按实际编码尺寸逐轴映射回原图。
+任意 PIL 裁图不自动获得输入映射。macOS 的 Computer 裸坐标始终是屏幕 point，图片点请用 `point()` 明确转换。
 
 执行和观察分别交付结果。`status` 表示派发或已有的局部验证；模型依据实际界面判断业务任务完成情况。
 `observation_status` 的值为 `available`、`partial`、`unavailable` 或 `not_requested`。
@@ -228,8 +266,8 @@ MCP 与参考 Agent 共用静态工具说明。工具返回展示界面内容、
 `impact`／`actual` 缺失或 `actual.coverage` 不完整表示证据不足，不表示没有影响。
 即使 coverage 完整，其范围也仅为该次原生执行步骤，不包含独立读取、稍后的会话清理或应用自身的异步后果。
 
-单次 SDK 操作以约 1000ms 为性能目标，保留 2000ms 总完成预算；嵌套定位、准备、原生请求、写后观察和交付准备共用原时钟。
-可选的通知等待仍受 1000ms 目标约束，后备时间用于完成必要采集与交付，不会扩大等待或为重试重新计时。
+单次 SDK 操作以约 1000ms 为性能目标，默认不设置总完成截止。原生请求保留自身超时，
+显式提供的操作截止由嵌套定位、准备、原生请求与观察共用，不为恢复重新计时。
 已返回的原生执行事实先保存，再处理后续观察或清理。日志中的 `sdk_operation_end` 记录实际耗时、
 `targetExceeded`、超过总预算的 `overrun`、观察完整性和具体缺口；MCP 元数据另记录整次工具调用时间，包含启动、多个 SDK 操作及最终交付。
 一次工具脚本可连续调用多个 SDK 方法，逐操作时间与工具总时间分别核对。

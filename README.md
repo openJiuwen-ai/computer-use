@@ -112,7 +112,7 @@ The server uses stdio. For a client that accepts an `mcpServers` configuration, 
 }
 ```
 
-Replace the checkout path with its absolute path on the target computer. Global mouse and keyboard input is available by default; qualified element or application-directed routes remain preferred. Each action records the selected route's declared need for global input separately from its actual effects. To explicitly restrict a session to non-global input, pass `--no-allow-global-input`. System permissions must still be available on the target computer.
+Replace the checkout path with its absolute path on the target computer. On macOS, App/Element operations never inject global mouse or keyboard input; agents explicitly select direct Computer input methods when needed. Windows/Linux retain their existing global-input capabilities. Each action records the selected route's declared need for global input separately from its actual effects. To explicitly restrict a session to non-global input, pass `--no-allow-global-input`. System permissions must still be available on the target computer.
 
 Inside the `computer_use` tool, `computer`, `print()` and `print_image()` are available. Start by discovering application references:
 
@@ -175,16 +175,59 @@ The public SDK uses ordinary synchronous calls, including `Observation.read_deta
 When embedding it in an asyncio or GUI application, run the blocking computer-operation code in a worker thread
 so the host remains responsive. Internal driver communication, progress and cleanup continue asynchronously.
 
-`allow_global_input` is a strict boolean session option, defaulting to `True`.
-It permits global mouse/keyboard routes without promoting them above qualified
-lower-impact routes, and does not grant macOS system permissions. An explicit
-`Computer(allow_global_input=False)` restricts global input; directed operations
-may still activate their original window and change keyboard focus. Under that
-explicit restriction, an operation with no permitted route reports `permission_required`.
+`allow_global_input` is a strict boolean session option, defaulting to `True`;
+it does not grant macOS system permissions. On macOS, App/Element methods
+use AX or directed events throughout preparation, input and recovery. They may
+activate/focus their target, but never inject global mouse or keyboard input.
+Direct Computer input methods explicitly select global delivery for that call.
+Windows/Linux retain the existing ability to use global input for object operations;
+the same fixed boundary is future platform work.
+`Computer(allow_global_input=False)` rejects explicit global input with `permission_required`.
+A macOS object operation lacking a qualified non-global route reports `input_unavailable`.
+
+On macOS, direct Computer input sends system-wide events. The current desktop and
+keyboard focus determine the recipient. Bare coordinates are global screen points,
+including negative secondary-display coordinates; no prior observation is required.
+Computer input does not activate an application or restore the previous foreground.
+
+```python
+computer.click(at=(640, 360))
+computer.type_text("global input")
+computer.press_key("Return")
+```
+
+Use an explicit image point or an existing element to resolve a pointer location:
+
+```python
+field = app.element("Input")
+field.type_text("scoped", replace=True)
+computer.click(target=field)  # Resolve a screen point, then send a global click.
+computer.press_key("super+a") # Explicit selection in the current system recipient.
+computer.type_text("global")
+computer.paste("multiple\nlines")
+
+p = app.point((120, 80), window=ref)  # Pixels in the previously delivered App image; no read or input.
+app.click(at=p)          # Directed on macOS.
+computer.click(target=p) # Global input at the same destination.
+```
+
+`Target` retains its element or image-point source independently of later reads.
+For Computer pointer input it resolves a screen point once, without handling occlusion,
+scrolling into view, or focus. Dispatch does not subsequently lock the original object.
+Global drag endpoints may come from different windows or images. Object methods keep
+their original target and image-binding semantics.
+Global keyboard methods do not accept `target=` or an implicit `replace=True`;
+click and select explicitly before typing when needed. Global input returns its dispatch
+receipt; read explicitly for observation. A failed read does not block subsequent global
+input. Cursor position and foreground remain as the operation leaves them. See `result.impact`.
+These direct global and locator semantics are implemented first on macOS; Windows/Linux
+desktop input retains its existing screenshot context pending platform migration.
+`Computer.paste(text)` is currently implemented on macOS; use the existing object
+paste methods on Windows/Linux until their global paste primitive is implemented.
 
 `App` identifies an application scope; `list_apps()` lists applications. App and
 desktop observations publish window references. Use `app.read(window=ref)` for a
-specific window. `element`, `click`, `scroll`, `drag`, `type_text`, `paste`, and
+specific window. `element`, `point`, `click`, `scroll`, `drag`, `type_text`, `paste`, and
 `press_key` accept the same optional `window=` parameter. Selecting a window and
 ordinary reads do not activate it. Titles and positions describe windows; native
 identity defines their lifetime.
@@ -226,11 +269,12 @@ of bounded historical text caches; minimal reference metadata remains until conf
 session end. This native stability improvement and its real SDK/MCP validation cover macOS;
 the corresponding Windows/Linux native changes and validation are follow-up work.
 
-The SDK returns source screenshots and their original pixel coordinates. When MCP
-resizes an image, automatic output, `print(obs)` and `print(obs.text)` project desktop,
-display and window geometry into the delivered image; input maps back using each
-axis's actual encoded size. Arbitrary PIL crops do not acquire an input mapping,
-and manually assembled strings are not reinterpreted as observation objects.
+The standalone SDK returns source screenshots and their original pixel coordinates.
+When MCP resizes an image, public observation text and PNG share the delivered coordinate
+space, including text split into lines or assembled into strings. Image point locators map
+back using each axis's actual encoded size. Arbitrary PIL crops do not acquire an input
+mapping. On macOS, bare Computer coordinates always mean screen points; use `point()`
+to explicitly convert image coordinates.
 
 Execution and observation have separate results. `status` reports dispatch or
 available verification, not completion of the application's business operation.
@@ -253,10 +297,9 @@ or incomplete, not that nothing happened. Even complete coverage describes only
 that native execution step; it excludes separate reads, later session cleanup,
 and the application's asynchronous consequences.
 
-Each SDK operation targets roughly 1000ms, with one 2000ms completion budget. Nested lookup,
-preparation, native requests, post-action observation and delivery preparation share
-that clock. Optional notification waits still use only the 1000ms target window;
-the remaining time finishes necessary collection and delivery without renewing retries.
+Each SDK operation targets roughly 1000ms without a default total deadline. Native requests
+retain their own timeouts. An explicitly supplied operation deadline is shared across nested
+lookup, preparation, requests and observation; recovery does not renew it.
 Returned native outcomes are retained before subsequent observation or
 cleanup. `sdk_operation_end` diagnostics record elapsed time, target overruns, deadline overruns, observation
 completeness and gaps. MCP metadata separately records the whole tool call, including
@@ -378,7 +421,7 @@ foreground changes, restoration outcomes and global input; they do not certify a
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.
 - **Verifiable receipts**: actions retain `target / intent / status` independently of `observation_status` and `observation_error`. Input failures expose `code / effect / target / detail / impact`. `unsupported_operation` means the required capability or operation is unavailable; `permission_required` identifies a missing input grant.
-- **Background-first input**: prefer element and application-directed operations; acquire foreground focus or the global pointer only when the operation requires it.
+- **Background-first input**: prefer element and application-directed operations; on macOS, use direct Computer input methods to explicitly select global mouse or keyboard input.
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.
 

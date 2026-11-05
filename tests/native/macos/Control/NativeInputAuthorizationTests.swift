@@ -4,37 +4,36 @@ import Foundation
 
 @main struct NativeInputAuthorizationTests {
     @MainActor static func main() async throws {
-        // A legacy environment variable cannot grant global input.
-        setenv("COMPUTER_USE_DESKTOP", "exclusive", 1)
-        precondition(!NativeInputAuthorization.globalInputAllowed)
-        for route in ["desktop keyboard", "system pointer", "scoped foreground keyboard"] {
-            do {
-                try NativeInputAuthorization.requireGlobalInput(route)
-                preconditionFailure("unauthorized \(route)")
-            } catch let error as DriverError {
-                precondition(error.code == .permissionRequired && error.effect == FailureEffect.none)
-                precondition(error.description.contains(route))
-            }
-        }
-        // Desktop dispatch checks authority before OS/foreground checks.
-        do {
-            try NativeKeyboardDelivery.desktop.requireAdmission()
-            preconditionFailure("desktop input admitted without permission")
-        } catch let error as DriverError {
-            precondition(error.code == .permissionRequired && error.effect == FailureEffect.none)
-        }
-        try await NativeInputAuthorization.$globalInputAllowed.withValue(true) {
-            try NativeInputAuthorization.requireGlobalInput("system pointer")
-            try await Task { try NativeInputAuthorization.requireGlobalInput("scoped foreground keyboard") }.value
-            try NativeInputAuthorization.$globalInputAllowed.withValue(false) {
+        precondition(!NativeInputAuthorization.globalInputRequested)
+        for allowed in [false, true] {
+            try NativeInputAuthorization.$globalInputAllowed.withValue(allowed) {
                 do {
-                    try NativeInputAuthorization.requireGlobalInput("desktop keyboard")
-                    preconditionFailure("nested denied scope inherited permission")
-                } catch let error as DriverError { precondition(error.code == .permissionRequired) }
+                    try NativeInputAuthorization.requireGlobalInput("system pointer")
+                    preconditionFailure("object input acquired global authority")
+                } catch let error as DriverError {
+                    precondition(error.code == .inputUnavailable && error.effect == FailureEffect.none)
+                }
             }
-            precondition(NativeInputAuthorization.globalInputAllowed)
         }
-        precondition(!NativeInputAuthorization.globalInputAllowed)
+        try await NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            do {
+                try NativeKeyboardDelivery.desktop.requireAdmission()
+                preconditionFailure("desktop input admitted without host permission")
+            } catch let error as DriverError {
+                precondition(error.code == .permissionRequired)
+            }
+            try await NativeInputAuthorization.$globalInputAllowed.withValue(true) {
+                try NativeInputAuthorization.requireGlobalInput("system pointer")
+                try await Task { try NativeInputAuthorization.requireGlobalInput("keyboard") }.value
+                try NativeInputAuthorization.$globalInputRequested.withValue(false) {
+                    do {
+                        try NativeInputAuthorization.requireGlobalInput("keyboard")
+                        preconditionFailure("object input inherited explicit global input")
+                    } catch let error as DriverError { precondition(error.code == .inputUnavailable) }
+                }
+            }
+        }
+        precondition(!NativeInputAuthorization.globalInputAllowed && !NativeInputAuthorization.globalInputRequested)
         // Hello parsing accepts booleans only: 1 and "true" are not grants.
         let granted = try boolean(true, label: "globalInputAllowed")
         let denied = try boolean(false, label: "globalInputAllowed")

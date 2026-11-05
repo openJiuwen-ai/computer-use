@@ -4,17 +4,16 @@ import AppKit
 import ApplicationServices
 
 /// One gesture's event destination, separate from its displayed/semantic host.
-/// Missing remote evidence preserves host delivery. Once a service is selected,
-/// new events validate that same endpoint; a release never searches or retargets.
+/// Optional AX point evidence improves an already admitted window transport.
+/// A known remote content boundary must resolve before dispatch. Once a service
+/// is selected, new events validate it; a release never searches or retargets.
 @MainActor struct NativePointerRecipient {
     typealias Endpoint = NativeEventEndpoint.Candidate<AXUIElement>
     @MainActor struct Queries {
         var hit: @MainActor (pid_t, CGPoint) -> AXUIElement? = { pid, point in
-            var hit: AXUIElement?
-            let status = AXUIElementCopyElementAtPosition(
-                AXUIElementCreateApplication(pid), Float(point.x), Float(point.y), &hit)
-            return status == .success ? hit : nil
+            NativeInputWindowQuery.pointHit(at: point, application: pid).element
         }
+        var systemHit: @MainActor (CGPoint) -> AXUIElement? = { NativeInputWindowQuery.pointHit(at: $0).element }
         var actualPID: @MainActor (AXUIElement) -> pid_t? = BackgroundEvents.accessibilityProcessID
         var belongs: @MainActor (AXUIElement, AXUIElement?, WindowGeometry.WindowMapping) -> Bool = {
             NativePointerRecipient.belongs($0, to: $1, host: $2)
@@ -42,6 +41,10 @@ import ApplicationServices
     let eventWindow: WindowGeometry.WindowMapping
     private let remote: Remote?
     var isRemote: Bool { remote != nil }
+    private var localContentProcessConfirmed = false
+    /// Address evidence only. The caller separately establishes actual local
+    /// activity/key-window state after returning the user's foreground.
+    var canPrepareBackgroundPoint: Bool { localContentProcessConfirmed }
 
     /// AX proxy public PIDs can differ along an authentic remote view chain.
     /// Prove the retained host through its real parents, not PID equality or
@@ -65,24 +68,70 @@ import ApplicationServices
     }
 
     static func resolve(
-        _ host: WindowGeometry.WindowMapping, nativeWindow: AXUIElement?, element: AXUIElement?, at point: CGPoint
+        _ host: WindowGeometry.WindowMapping, nativeWindow: AXUIElement?, element: AXUIElement?, at point: CGPoint,
+        foregroundHit: NativeInputWindowHit? = nil
     ) throws -> Self {
         try RequestDiagnostics.checkCancellation()
-        let result = try resolve(host, nativeWindow: nativeWindow, element: element, at: point, using: Queries())
+        let result = try resolve(
+            host, nativeWindow: nativeWindow, element: element, at: point, foregroundHit: foregroundHit, using: Queries())
         try RequestDiagnostics.checkCancellation()
         return result
     }
 
     static func resolve(
         _ host: WindowGeometry.WindowMapping, nativeWindow: AXUIElement?, element: AXUIElement?, at point: CGPoint,
-        using query: Queries
+        foregroundHit: NativeInputWindowHit? = nil, using query: Queries
     ) throws -> Self {
         let local = Self(presenter: host.pid, eventWindow: host, remote: nil)
         // A retained element is the receiver evidence even when the provider's
-        // point query is coarse. Capture-only routes need their own fresh hit.
-        guard let target = element ?? query.hit(host.pid, point), let actual = query.actualPID(target),
-            actual != host.pid
-        else { return local }
+        // point query is coarse. A coordinate gets a new content hit after the
+        // original window has been prepared, not another coarse host-only hit.
+        var target = element
+        var source = element == nil ? "applicationPoint" : "retainedElement"
+        if target == nil {
+            let preparedHit = foregroundHit.flatMap { sampled -> AXUIElement? in
+                guard sampled.windowID == host.id, let hit = sampled.accessibilityElement,
+                    query.belongs(hit, nativeWindow, host) else { return nil }
+                return hit
+            }
+            func hasForeignProcess(_ hit: AXUIElement?) -> Bool {
+                hit.flatMap(query.actualPID).map { $0 != host.pid } ?? false
+            }
+            if hasForeignProcess(preparedHit) {
+                target = preparedHit
+                source = "preparedSystemWidePoint"
+            } else {
+                target = query.hit(host.pid, point)
+                // A coarse host hit must not erase a more precise remote
+                // receiver already found through the application. System AX
+                // only fills a content-addressing gap in this exact foreground
+                // window; it never searches another application's descendants.
+                if !hasForeignProcess(target), let preparedHit {
+                    target = preparedHit
+                    source = "preparedSystemWidePoint"
+                } else if !hasForeignProcess(target), let foregroundHit,
+                    foregroundHit.windowID == host.id, foregroundHit.accessibilityElement == nil,
+                    let hit = query.systemHit(point), query.belongs(hit, nativeWindow, host)
+                {
+                    target = hit
+                    source = "systemWidePoint"
+                }
+            }
+        }
+        func hostRoute(_ reason: String) -> Self {
+            diagnose([
+                "kind": "pointer_recipient_resolution", "presenterPID": host.pid, "hostWindow": host.id,
+                "recipientPID": host.pid, "eventWindow": host.id, "source": source, "resolution": reason
+            ])
+            var result = local
+            result.localContentProcessConfirmed = reason == "hostPointProcess"
+            return result
+        }
+        // No content AX is an unknown source, not a new gate on visual-only
+        // window transport. This does not claim that the host has consumed it.
+        guard let target else { return hostRoute("windowTransportWithoutContentHit") }
+        guard let actual = query.actualPID(target) else { return hostRoute("windowTransportWithUnknownContentProcess") }
+        guard actual != host.pid else { return hostRoute("hostPointProcess") }
         // A WebContent process may also be prohibited, while its host owns and
         // forwards NSEvents. Reuse the existing proven hosted-view boundary;
         // process activation policy alone cannot distinguish these routes.
@@ -90,13 +139,21 @@ import ApplicationServices
             KeyboardEventRoute.resolve(
                 hostWindow: host.id, focusWindow: query.windowID(target),
                 webAreaWindow: query.windowID(area), hasHostedWebArea: true) == .host
-        { return local }
-        guard let endpoint = try query.endpoint(target), endpoint.kind == .prohibitedApplication,
-            endpoint.pid != host.pid, query.belongs(target, nativeWindow, host),
+        { return hostRoute("hostedWebForwarding") }
+        // A positive foreign content PID is not the same as absent AX. Silently
+        // using the host here loses clicks in system-hosted panels. Failure is
+        // local to this directed mechanism and happens before any pointer event.
+        guard query.belongs(target, nativeWindow, host), let endpoint = try query.endpoint(target) else {
+            throw DriverError("the remote pointer content has no resolved event receiver in its original window",
+                              code: .inputUnavailable)
+        }
+        guard endpoint.kind == .prohibitedApplication, endpoint.pid != host.pid,
             let id = query.windowID(endpoint.element), let mapping = query.mapping(id),
             let hostProcess = query.process(host.pid), let elementProcess = query.process(actual),
             let process = query.process(endpoint.pid)
-        else { return local }
+        else {
+            throw DriverError("the remote pointer event receiver is not currently available", code: .inputUnavailable)
+        }
         guard mapping.id == id, mapping.pid == endpoint.pid else {
             throw DriverError("the remote pointer endpoint's window has a different owner", code: .inputUnavailable)
         }
@@ -111,6 +168,7 @@ import ApplicationServices
             "kind": "pointer_recipient_resolution", "presenterPID": host.pid, "hostWindow": host.id,
             "accessibilityPID": actual, "endpointPID": endpoint.pid,
             "recipientPID": eventWindow.pid, "eventWindow": eventWindow.id,
+            "source": source, "resolution": "remoteEndpoint",
             "hostFrame": [host.frame.minX, host.frame.minY, host.frame.width, host.frame.height],
             "eventFrame": [eventWindow.frame.minX, eventWindow.frame.minY, eventWindow.frame.width, eventWindow.frame.height]
         ])

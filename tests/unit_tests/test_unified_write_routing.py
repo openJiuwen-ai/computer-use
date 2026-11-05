@@ -94,19 +94,26 @@ def test_available_background_route_precedes_activation_of_another_route():
 
 
 @pytest.mark.parametrize("admission", ["unavailable", "insufficientEvidence"])
-def test_unavailable_addressed_route_does_not_block_global_mouse(admission):
+def test_unavailable_addressed_route_requires_explicit_global_input(admission):
     directed, pointer = click_route("surface_pointer", admission), click_route("desktop_pointer")
-    assert choose(facts(directed, pointer), CLICK, HostPolicy(allow_global_input=True), Attempts()).primitive == pointer
+    with pytest.raises(ComputerUseError, match="explicit Computer"):
+        choose(facts(directed, pointer), CLICK, HostPolicy(), Attempts())
+    # A legacy global flag cannot turn the object selector into raw input.
+    with pytest.raises(ComputerUseError, match="explicit Computer"):
+        choose(facts(directed, pointer), replace(CLICK, global_input=True), HostPolicy(), Attempts())
 
 
-def test_failed_addressed_route_allows_global_mouse_only_before_dispatch():
+def test_failed_addressed_route_keeps_macos_scope_and_preserves_other_platform_defaults():
     directed, pointer = (
         click_route("surface_pointer", "preparationRequired", ("background",)),
         click_route("desktop_pointer"),
     )
     attempts = Attempts()
     attempts.unavailable.add(route_key(UnitCommand(directed, TARGET, CLICK)))
-    assert choose(facts(directed, pointer), CLICK, HostPolicy(allow_global_input=True), attempts).primitive == pointer
+    with pytest.raises(ComputerUseError, match="explicit Computer"):
+        choose(facts(directed, pointer), CLICK, HostPolicy(), attempts)
+    for platform in ("windows", "linux"):
+        assert choose(facts(directed, pointer, platform=platform), CLICK, HostPolicy(), attempts).primitive == pointer
 
 
 @pytest.mark.parametrize(
@@ -130,7 +137,7 @@ def test_frontmost_global_pointer_does_not_override_semantic_action(platform, ro
 
 
 def test_native_mechanism_can_require_pointer_before_any_action_is_dispatched():
-    native, pointer = click_route("object_action"), click_route("desktop_pointer", profile="physicalRequired")
+    native, pointer = click_route("object_action"), click_route("surface_pointer", profile="physicalRequired")
     assert choose(facts(native, pointer), CLICK, HostPolicy(allow_global_input=True), Attempts()).primitive == pointer
     explicit = Intent("action", {"action": "AXPress"})
     assert choose(facts(native, pointer), explicit, HostPolicy(), Attempts()).primitive == native
@@ -141,7 +148,7 @@ def test_native_mechanism_can_require_pointer_before_any_action_is_dispatched():
     [{"button": "right", "count": 1}, {"button": "left", "count": 2}, {"x": 12, "y": 20, "button": "left", "count": 1}],
 )
 def test_mouse_specific_requests_retain_pointer_semantics(parameters):
-    native, pointer = click_route("object_action"), click_route("desktop_pointer")
+    native, pointer = click_route("object_action"), click_route("surface_pointer")
     selected = choose(
         facts(native, pointer), Intent("click", parameters), HostPolicy(allow_global_input=True), Attempts()
     )

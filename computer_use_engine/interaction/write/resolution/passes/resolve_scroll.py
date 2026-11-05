@@ -31,7 +31,7 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         intent, target, operation, remaining = parts(frame)
         capabilities = getattr(native, "capabilities", ())
         selected = None
-        if "nativeScroll" in capabilities and (
+        if not intent.global_input and "nativeScroll" in capabilities and (
             not any((route.unit == "native_scroll" for route in frame.request.history.unavailable))
         ):
             query: ScrollQuery | ScrollPointerQuery = ScrollQuery(native, operation, target, remaining)

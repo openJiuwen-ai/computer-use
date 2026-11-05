@@ -15,18 +15,22 @@ import ApplicationServices
         do {
             let plan = try ResolveNativeClickPlanPass.run(
                 command, resolved: resolved, op: operation, step: step, access: access)
-            if plan.offer.delivery == .systemPointer {
-                try NativeInputAuthorization.requireGlobalInput("system pointer click")
-            }
             func execute() async throws {
+                var preparedPoint: NativePreparedPointerPoint?
                 try await NativeInputActivity.$stage.withValue(.preparation) {
                     try await NativeClickPreparationPipeline.run(
                         plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
+                    if command.foreground, plan.offer.qtComboChoice == nil, case .captured(let unit) = plan.target {
+                        preparedPoint = try await unit.prepareBackgroundPoint(
+                            plan.pointer!, check: boundary.checkConditions,
+                            onPreparation: receipt.recordPreparation, onCleanupUnknown: receipt.recordCleanupUnknown,
+                            onNativePreparation: evidence.record)
+                    }
                 }
                 NativeForegroundRestorationScope.current?.willDispatchInput()
                 try await DispatchNativeClickPass.run(
                     plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects,
-                    resolveWindow: { try access.scopes.fixedInputWindow(command.target) })
+                    resolveWindow: { try access.scopes.fixedInputWindow(command.target) }, preparedPoint: preparedPoint)
             }
             let application: NSRunningApplication?
             switch plan.target {

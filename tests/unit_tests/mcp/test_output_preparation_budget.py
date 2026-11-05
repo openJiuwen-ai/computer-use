@@ -51,16 +51,20 @@ class OutputPreparationBudgetTests(unittest.IsolatedAsyncioTestCase):
         }
         self.budget = None
 
-        def capture(expired=False):
-            with operation_budget() as budget:
+        def capture(expired=False, timeout_ms=1000, elapsed=0):
+            with operation_budget(timeout_ms) as budget:
                 self.budget = budget
+                if elapsed:
+                    budget._clock = lambda: budget.started + elapsed
                 if expired:
                     budget._clock = lambda: budget.deadline + 1
                 observation_completed(self.captured)
             return self.state
 
         self.runtime.task_namespace.update(
-            capture=lambda expired=False: self.runtime.executor.call(capture, expired),
+            capture=lambda expired=False, timeout_ms=1000, elapsed=0: self.runtime.executor.call(
+                capture, expired, timeout_ms, elapsed
+            ),
             expire=lambda: setattr(self.budget, "_clock", lambda: self.budget.deadline + 1),
             action=lambda: self.runtime.executor.call(
                 self.runtime.action, {"target": "button", "status": "dispatched", "detail": "Sent once."}
@@ -78,6 +82,17 @@ class OutputPreparationBudgetTests(unittest.IsolatedAsyncioTestCase):
 
     async def execute(self, code):
         return await self.runtime.execute({"executionId": 1, "code": code})
+
+    async def test_default_operation_publishes_tree_and_image_after_two_seconds(self):
+        result = await self.execute("state = capture(timeout_ms=None, elapsed=3.1)")
+        self.assertFalse(result.get("isError"), result)
+        self.assertIsNone(self.budget.timeout_ms)
+        self.assertFalse(self.budget.expired)
+        self.assertTrue(self.budget.target_exceeded)
+        self.assertEqual(self.tree_acks, [self.state])
+        self.assertEqual(self.image_acks, [self.png])
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
+        self.assertIn("Form", "\n".join(block["text"] for block in result["content"] if block["type"] == "text"))
 
     async def test_image_encoding_happens_in_original_budget_and_completed_draft_survives_later_expiry(self):
         budgets = []
@@ -199,7 +214,7 @@ class PresentationBudgetBoundaryTests(unittest.IsolatedAsyncioTestCase):
             control.remaining()
             return value
 
-        with patch.object(flow.presentation, "run", side_effect=inspect), operation_budget() as budget:
+        with patch.object(flow.presentation, "run", side_effect=inspect), operation_budget(1000) as budget:
             self.assertIs(flow.run(marker, original), marker)
             budget._clock = lambda: budget.deadline + 1
             retained = flow.run(marker, original)

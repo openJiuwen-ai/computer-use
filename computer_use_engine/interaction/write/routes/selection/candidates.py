@@ -115,6 +115,11 @@ def apply_platform_preferences(value: CandidateSet) -> CandidateSet:
     # interaction preferences. Keep that branch independent.
     if intent.kind == "action":
         return value
+    if intent.global_input and request.facts.platform != "macos":
+        if intent.kind in ("click", "scroll", "drag"):
+            candidates = [p for p in candidates if p.channel == Channel.POINTER]
+        elif intent.kind in ("insert", "replace", "paste", "key"):
+            candidates = [p for p in candidates if p.unit in ("key_sequence", "clipboard_paste", "prepare_receiver")]
     if _element_intent(request, "click"):
         pointers = [
             p

@@ -78,7 +78,8 @@ import ApplicationServices
         let motion = scene.posts.filter { $0.event.type == .leftMouseDragged }
         precondition(!motion.isEmpty && motion.last?.point == end,
                      "the held drag must reach its original screen endpoint even when it moves or resizes its window")
-        precondition(motion.allSatisfy {
+        precondition(motion.first?.point == start, "drag tracking starts without displacing its press anchor")
+        precondition(motion.dropFirst().allSatisfy {
             $0.point.x > start.x && $0.point.x <= end.x && $0.point.y > start.y && $0.point.y <= end.y
         }, "a changed origin or extent must not translate or rescale the already resolved screen path")
         precondition(scene.posts.count == motion.count + 3)
@@ -140,8 +141,8 @@ import ApplicationServices
             precondition([.windowGone, .modalBlocked, .processGone].contains(change))
         }
         let expected: [CGEventType] = change == .processGone
-            ? [.mouseMoved, .leftMouseDown, .leftMouseDragged]
-            : [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp]
+            ? [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseDragged]
+            : [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseDragged, .leftMouseUp]
         precondition(scene.types == expected, "interruption may release only its own press; it must never replay")
         let lastDelivered = scene.posts.last { $0.event.type == .leftMouseDragged }!.point
         precondition(lastDelivered != CGPoint(x: 700, y: 490))
@@ -153,11 +154,12 @@ import ApplicationServices
             precondition(scene.skippedReleases == 0)
         }
         precondition(scene.checkedHeld.last == true && scene.releaseChecks == 1)
-        precondition(scene.dispatches == 3 && scene.accepted == 3 && scene.deliveries == 1)
+        precondition(scene.dispatches == 4 && scene.accepted == 4 && scene.deliveries == 1)
         requireOriginalRoute(scene)
     }
 
     @MainActor static func main() async throws {
+        try dragDisplacementDoesNotAccumulateRounding()
         try await translatedClick(count: 1)
         try await translatedClick(count: 2)
         try await translatedScroll()
@@ -170,6 +172,25 @@ import ApplicationServices
             .windowChanged, .ownerChanged, .windowGone, .modalBlocked, .processGone, .invalidFrame
         ] { try await interruptedDrag(change) }
         print("Captured pointer event sequence regressions passed")
+    }
+
+    @MainActor private static func dragDisplacementDoesNotAccumulateRounding() throws {
+        let from = CGPoint(x: 370.25, y: 1053.5)
+        for delta in [CGPoint(x: 60, y: 0), CGPoint(x: -61, y: 33), CGPoint(x: 3.5, y: -2.5)] {
+            let to = CGPoint(x: from.x + delta.x, y: from.y + delta.y)
+            let sequence = try NativePointerEvents(
+                request: request("drag"), from: from, to: to, viewport: CGSize(width: 480, height: 242),
+                source: CGEventSource(stateID: .privateState)!)
+            let events = sequence.items.flatMap { [$0.event, $0.release].compactMap { $0 } }
+            let sumX = events.reduce(Int64(0)) { $0 + $1.getIntegerValueField(.mouseEventDeltaX) }
+            let sumY = events.reduce(Int64(0)) { $0 + $1.getIntegerValueField(.mouseEventDeltaY) }
+            precondition(sumX == Int64(delta.x.rounded()) && sumY == Int64(delta.y.rounded()),
+                         "relative input must agree with the requested complete path")
+            for event in events where event.type != .leftMouseDragged {
+                precondition(event.getIntegerValueField(.mouseEventDeltaX) == 0)
+                precondition(event.getIntegerValueField(.mouseEventDeltaY) == 0)
+            }
+        }
     }
 }
 
@@ -225,7 +246,7 @@ import ApplicationServices
         let afterDown = [.afterDown, .resizeAfterDown].contains(change) && event.type == .leftMouseDown
         let afterMove = change == .afterMove && event.type == .mouseMoved
         let afterDrag = ![.none, .afterMove, .afterDown, .resizeAfterDown].contains(change)
-            && event.type == .leftMouseDragged
+            && event.type == .leftMouseDragged && event.location != firstScreenPoint
         guard !changed && (afterDown || afterMove || afterDrag) else { return }
         changed = true
         let old = currentFrame

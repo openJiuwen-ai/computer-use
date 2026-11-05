@@ -48,7 +48,14 @@ binding = obj(
     )
 )
 application_binding = obj(dict(session=identity, application=identity))
-operation_target = union(binding, application_binding)
+global_target = obj({"session": identity, "global": boolean()})
+operation_target = union(binding, application_binding, global_target)
+screen_point = obj({"x": number(), "y": number()})
+
+
+def decode_point_location_request(value):
+    """Location is a read-only conversion, not input or target preparation."""
+    return obj({"target": binding, "point": screen_point.nullable()}).parse(value)
 
 
 def decode_observation_preparation_request(value):
@@ -207,7 +214,7 @@ unit_contracts = {
     "launch_application": ({"object"}, {"launch"}),
 }
 
-_intent = obj(dict(kind=enum("read", *intent_kinds), parameters=unknown()))
+_intent = obj(dict(kind=enum("read", *intent_kinds), parameters=unknown(), globalInput=boolean().optional()))
 _begin = obj(
     dict(
         mode=enum("read", "write"),
@@ -217,7 +224,7 @@ _begin = obj(
     )
 )
 _unit_command = obj(
-    dict(kind=enum(*unit_contracts), primitiveId=identity, target=operation_target, foreground=boolean())
+    dict(kind=enum(*unit_contracts, "global_input"), primitiveId=identity, target=operation_target, foreground=boolean())
 )
 _capture_request = obj(
     dict(
@@ -245,6 +252,16 @@ def decode_begin(value):
     """Bind the original payload once, before observing or preparing a route."""
     result = _begin.parse(value)
     intent, mode = result["intent"], result["mode"]
+    if "global" in result["target"] and (
+        result["target"]["global"] is not True
+        or mode != "write"
+        or intent.get("globalInput") is not True
+        or intent["kind"] not in ("click", "scroll", "drag", "insert", "paste", "key")
+        or "clickContract" in result
+    ):
+        raise ValueError("protocol: global scope requires an explicit primitive input")
+    if intent.get("globalInput") and result["target"].get("global") is not True:
+        raise ValueError("protocol: explicit global input requires the global session scope")
     if "clickContract" in result and (mode != "write" or intent["kind"] != "click"):
         raise ValueError("protocol: click contract requires a write click operation")
     if not isinstance(intent["parameters"], dict):
@@ -269,6 +286,15 @@ def decode_unit_command(value):
     Parameters are validated by the chosen native unit before preparation.
     """
     result = _unit_command.parse(value)
+    if "global" in result["target"] or result["kind"] == "global_input":
+        if (
+            result["target"].get("global") is not True
+            or result["kind"] != "global_input"
+            or result["primitiveId"] != "global"
+            or result["foreground"]
+        ):
+            raise ValueError("protocol: global input has no object selection or foreground preparation")
+        return result
     installation = "application" in result["target"]
     if installation != (result["kind"] == "launch_application"):
         raise ValueError("protocol: an installation target permits only application launch")
@@ -521,6 +547,7 @@ def validate_click_receipt(value, target, dispatch, cleanup_result):
 
 
 _schemas = {
+    "locatePoint": obj({"point": screen_point}),
     "begin": obj(
         dict(
             operation=identity,
@@ -713,11 +740,14 @@ def decode_execution_result(method, value, *, retain_observation=False):
         return value
     result = _schemas[method].parse(value)
     bound = result.get("target") or result.get("binding")
+    if bound is not None and "global" in bound and bound["global"] is not True:
+        raise ValueError("protocol: invalid global input scope")
     invalid_bound = (
         True
         if (
             bound is not None
             and "application" not in bound
+            and "global" not in bound
             and bound["surface"] is None
             and any(bound[key] is not None for key in ("instance", "rootWindow", "node"))
         )

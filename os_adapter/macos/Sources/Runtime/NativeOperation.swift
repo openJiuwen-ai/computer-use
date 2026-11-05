@@ -252,7 +252,9 @@ import Foundation
 
     /// The result contains the unit's effect journal even on native failure.
     /// Protocol validation happens before admission; unit failures are values.
-    func execute(step: Int64, payload: Data, body: () async -> [String: Any]) async throws -> [String: Any] {
+    func execute(
+        step: Int64, payload: Data, candidateID: String? = nil, body: () async -> [String: Any]
+    ) async throws -> [String: Any] {
         // A duplicate completed step can be retrieved after finish/expiry. It
         // must never re-enter a native API, including after result eviction.
         switch steps.begin(id: step, request: payload) {
@@ -304,14 +306,14 @@ import Foundation
             busy = false
             if state == .stopping { close() }
         }
-        if foregroundResponsibility == nil {
+        if !request.globalInput, foregroundResponsibility == nil {
             foregroundResponsibility = NativeForegroundResponsibility(check: { [weak self] in
                 guard let self else { throw CancellationError() }
                 try self.check(write: true)
                 try RequestDiagnostics.checkCancellation()
             })
         }
-        foregroundResponsibility?.beginCandidate()
+        foregroundResponsibility?.beginCandidate(candidateID)
         let result = await NativeForegroundResponsibility.$current.withValue(foregroundResponsibility) {
             await body()
         }

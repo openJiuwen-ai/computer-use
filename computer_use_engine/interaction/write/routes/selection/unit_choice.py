@@ -33,7 +33,7 @@ def eligible_unit_routes(value: CandidateSet) -> EligibleRoutes:
         ):
             continue
         command = UnitCommand(primitive, facts.binding, intent, facts.actuator, receiver=facts.receiver)
-        if global_input_denied(command, request.policy):
+        if global_input_denied(command, request.policy, request.facts.platform):
             continue
         if route_key(command) in attempts.unavailable:
             continue

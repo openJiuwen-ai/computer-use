@@ -20,6 +20,8 @@ from computer_use.interaction.agent.requests import (
     UIKeyboard,
     UIPointer,
 )
+from computer_use.interaction.requests import ComputerInput
+from computer_use.native.contracts import Intent
 from computer_use.protocol.primitives import nonempty
 from computer_use.protocol.validation import validate_key, validate_paste_text, validate_text
 from computer_use.session.operations import operation
@@ -27,6 +29,7 @@ from computer_use.session.operations import operation
 from . import parameters
 from .execution import on_session, session_executor, synchronous
 from .handles import handle_created
+from .targets import Target, as_target, element_target, image_target, target_request
 
 
 def observation_state(state=None, *, document=None):
@@ -64,7 +67,7 @@ def _window(window):
 
 class Computer:
     def __init__(self, *, allow_global_input=True):
-        """Create a session with full input capability and low-interference route preference."""
+        """Create a session. On macOS only direct Computer input methods use global events."""
         from .factory import session_controller
 
         if type(allow_global_input) is not bool:
@@ -134,43 +137,54 @@ class Computer:
         return operation(lambda: self._controller.run(ObserveDesktop(view, full)))
 
     @synchronous
-    def click(self, options=None, *, at):
-        click, (x, y) = parameters.click(options), parameters.point(at)
-        self._controller.desktop.check_coordinates(x, y)
-        return self._controller.act("click", dict(desktopRef=self._controller.desktop.target(True), x=x, y=y, **click))
+    def click(self, options=None, *, at=None, target=None):
+        """On macOS, click a native screen point or a geometrically located Target."""
+        if (at is None) == (target is None):
+            raise local_failure("click expects exactly one of at or target")
+        point = self._input_point(target if target is not None else at)
+        return self._global_input("click", parameters.click(options), (point,))
 
     @synchronous
-    def scroll(self, direction, *, at, pages=1):
+    def scroll(self, direction, *, at=None, target=None, pages=1):
         parameters.scroll(direction, pages)
-        x, y = parameters.point(at)
-        self._controller.desktop.check_coordinates(x, y)
-        return self._controller.act(
-            "scroll", dict(desktopRef=self._controller.desktop.target(True), x=x, y=y, direction=direction, pages=pages)
-        )
+        if (at is None) == (target is None):
+            raise local_failure("scroll expects exactly one of at or target")
+        point = self._input_point(target if target is not None else at)
+        return self._global_input("scroll", {"direction": direction, "pages": pages}, (point,))
 
     @synchronous
     def drag(self, start, end):
-        start, end = parameters.point(start), parameters.point(end)
-        if start == end:
+        points = self._input_point(start), self._input_point(end)
+        if points[0] == points[1]:
             raise local_failure("drag start and end must differ")
-        for x, y in (start, end):
-            self._controller.desktop.check_coordinates(x, y)
-        return self._controller.act(
-            "drag",
-            dict(
-                desktopRef=self._controller.desktop.target(True), fromX=start[0], fromY=start[1], toX=end[0], toY=end[1]
-            ),
-        )
+        return self._global_input("drag", {}, points)
 
     @synchronous
     def type_text(self, text):
+        """Type into the OS's current receiver, without selecting or focusing one."""
         _text(text)
-        return self._controller.act("type_text", dict(desktopRef=self._controller.desktop.target(), text=text))
+        return self._global_input("insert", {"text": text})
 
     @synchronous
     def press_key(self, key):
         _key(key)
-        return self._controller.act("press_key", dict(desktopRef=self._controller.desktop.target(), key=key))
+        return self._global_input("key", {"key": key})
+
+    @synchronous
+    def paste(self, text):
+        _text(text, paste=True)
+        return self._global_input("paste", {"text": text})
+
+    @on_session
+    def point(self, at):
+        """Retain a point in the last delivered desktop image, including its scale."""
+        return image_target(self._controller, None, parameters.point(at))
+
+    def _input_point(self, value):
+        return parameters.screen_point(value) if isinstance(value, tuple) else as_target(self._controller, value)
+
+    def _global_input(self, intent, args, points=()):
+        return operation(lambda: self._controller.run(ComputerInput(Intent(intent, args, global_input=True), points)))
 
 
 class App:
@@ -227,6 +241,8 @@ class App:
     @synchronous
     def click(self, options=None, *, at, window=None):
         _window(window)
+        if isinstance(at, Target):
+            return self._point_action(at, "click", parameters.click(options), window=window)
         click, at = parameters.click(options), parameters.point(at)
         return operation(lambda: self._controller.run(UIPointer(self, "click", (at,), click, window)))
 
@@ -234,6 +250,8 @@ class App:
     def scroll(self, direction, *, at, pages=1, window=None):
         _window(window)
         parameters.scroll(direction, pages)
+        if isinstance(at, Target):
+            return self._point_action(at, "scroll", {"direction": direction, "pages": pages}, window=window)
         at = parameters.point(at)
         return operation(
             lambda: self._controller.run(UIPointer(self, "scroll", (at,), dict(direction=direction, pages=pages), window))
@@ -242,6 +260,8 @@ class App:
     @synchronous
     def drag(self, start, end, *, window=None):
         _window(window)
+        if isinstance(start, Target) or isinstance(end, Target):
+            return self._point_action(start, "drag", {}, window=window, end=end)
         start, end = parameters.point(start), parameters.point(end)
         if start == end:
             raise local_failure("drag start and end must differ")
@@ -265,7 +285,29 @@ class App:
         _key(key)
         return operation(lambda: self._controller.run(UIKeyboard(self, "press_key", dict(key=key), window)))
 
+    @synchronous
+    def point(self, at, *, window=None):
+        """Retain a point in this App's or the selected window's delivered image."""
+        from computer_use.interaction.agent.scope import request_scope
 
+        _window(window)
+        at = parameters.point(at)
+
+        async def retain():
+            owner = await request_scope(self._controller, self, window)
+            return image_target(self._controller, owner, at)
+
+        return operation(retain)
+
+    def _point_action(self, target, intent, args, *, window=None, end=None):
+        from computer_use.interaction.agent.scope import request_scope
+
+        async def execute():
+            owner = await request_scope(self._controller, self, window)
+            request = target_request(self._controller, target, intent, args, owner=owner, end=end)
+            return await self._controller.run(request)
+
+        return operation(execute)
 
 
 class Element:
@@ -278,6 +320,11 @@ class Element:
 
     def _act(self, intent, args=None):
         return operation(lambda: self._controller.run(ActOnElement(self._owner, self._snapshot, intent, args or {})))
+
+    @property
+    @on_session
+    def target(self):
+        return element_target(self)
 
     @synchronous
     def read(self, *, cursor=None):

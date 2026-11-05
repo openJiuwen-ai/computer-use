@@ -20,7 +20,7 @@ import ApplicationServices
         let id = decoded.primitiveID
         let payload = try JSONSerialization.data(
             withJSONObject: decoded.value, options: [.sortedKeys, .withoutEscapingSlashes])
-        return try await op.execute(step: request.step, payload: payload) {
+        return try await op.execute(step: request.step, payload: payload, candidateID: id) {
             let receipt = NativeExecutionReceipt(target: decoded.target, onEffect: access.recordEffect)
             let activity = NativeInputActivity(
                 operation: op.token, step: request.step, command: kind, intent: op.request.kind, target: decoded.target,
@@ -33,6 +33,13 @@ import ApplicationServices
                         let offer = access.contracts.primitiveContracts(op.token).first { $0.id == id }?.click
                         receipt.click = NativeClickEvidence(
                             target: decoded.target, family: offer?.routeFamily ?? "macos.unresolved")
+                    }
+                    if kind == "global_input" {
+                        do { try await NativeGlobalInputUnit.run(op, receipt: receipt, onEffect: access.recordEffect) }
+                        catch { receipt.recordFailure(error) }
+                        AgentPointer.current?.recordOutcome(success: receipt.succeeded)
+                        receipt.impact = activity.finish(dispatch: receipt.dispatch, cleanup: receipt.cleanup)
+                        return receipt.wire
                     }
                     do {
                         let resolved = try ResolveNativeTargetPass.run(decoded, op: op, access: access)

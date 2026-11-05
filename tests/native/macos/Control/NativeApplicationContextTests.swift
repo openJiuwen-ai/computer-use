@@ -204,8 +204,7 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
         let receipt = NativeExecutionReceipt(target: binding, onEffect: {})
         let evidence = NativeClickEvidence(target: binding, family: "macos.axAction.AXPress")
         let boundary = NativeUnitBoundary(
-            checkConditions: boundaryCheck, checkSelection: {}, markDispatchInFlight: {}, checkKeyboardSelection: {},
-            markPreparedKeyboardDispatchInFlight: {},
+            checkConditions: boundaryCheck, checkSelection: {}, markDispatchInFlight: {},
             beforeDispatch: {
                 try self.boundaryCheck()
                 op.recordInputDispatch()
@@ -301,7 +300,6 @@ private final class ContextProbe: NativeControlObjectAccess, NativeInputUnitAcce
     func receiverRelation(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeReceiverRelation? { nil }
-    func desktopUnit(_ binding: [String: Any]) throws -> NativeDesktopUnit { preconditionFailure("unselected") }
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeKeyboardUnit { preconditionFailure("unselected") }

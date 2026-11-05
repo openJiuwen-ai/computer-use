@@ -10,7 +10,6 @@ import ApplicationServices
     case captured(NativePointerUnit)
     case element(NativeElementPointerUnit)
     case popupPointer(any NativePopupPointerInput)
-    case desktop(NativeDesktopUnit)
 }
 
 @MainActor struct NativeClickPlan {

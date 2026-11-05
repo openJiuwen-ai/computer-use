@@ -42,7 +42,7 @@ import ApplicationServices
         default: actuator = nil
         }
         let query = NativeInputQueryScope(
-            binding: (binding, [], requested), desktop: false,
+            binding: (binding, [], requested),
             selection: NativeSelectionBasis(access: state.applications), scope: "window")
         let plan = NativeInputContextPlan(
             query: query, operation: op, within: [], actuator: actuator, receiver: nil, basis: [])

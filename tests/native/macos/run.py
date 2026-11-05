@@ -14,6 +14,7 @@ LOG = logging.getLogger(__name__)
 GROUPS = (
     "AgentPointerLifecycle",
     "NativeInputAuthorization",
+    "NativeGlobalInput",
     "NativeInputActivity",
     "NativePhysicalInput",
     "NativeInspectQuery",
@@ -38,6 +39,7 @@ GROUPS = (
     "NativeCapturedPointerPlan",
     "NativeCapturedPointerSequence",
     "NativePointerActivityRecovery",
+    "NativePointerHandoff",
     "NativeExplicitActionSelection",
     "NativeApplicationContext",
     "NativeFocusComposition",
@@ -56,6 +58,7 @@ GROUPS = (
     "NativePointerRecipient",
     "NativePointerEventValidation",
     "NativeKeyboardRecipient",
+    "NativeKeyboardReceiverReadiness",
     "NativeWriteStage",
     "NativeElementIdentity",
     "NativeReferenceLifetime",

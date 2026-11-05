@@ -15,7 +15,7 @@ from computer_use.interaction.read.acquisition.images.desktop.service import Nat
 from computer_use.interaction.read.acquisition.reader import captured_children, captured_field
 from computer_use.interaction.read.app import NativeAppReader
 from computer_use.interaction.read.pages import ContentPages
-from computer_use.interaction.requests import ExecuteAction, FindElement
+from computer_use.interaction.requests import ComputerInput, ExecuteAction, FindElement
 from computer_use.interaction.write.engine import Engine
 from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
@@ -133,7 +133,7 @@ class SessionController:
         pass
 
     @overload
-    async def run(self, request: ExecuteAction | ActOnElement | UIKeyboard | UIPointer) -> ActionResult:
+    async def run(self, request: ComputerInput | ExecuteAction | ActOnElement | UIKeyboard | UIPointer) -> ActionResult:
         pass
 
     async def run(self, request: InteractionRequest) -> InteractionResult:
@@ -286,7 +286,7 @@ class SessionController:
         intent = dict(type_text="insert", press_key="key").get(method, method)
         return await self._execute(
             owner,
-            Intent(intent, {k: v for k, v in params.items() if k != parameter}),
+            Intent(intent, {k: v for k, v in params.items() if k != parameter}, global_input=owner is None),
             target,
             app_keyboard=owner is not None and method in ("type_text", "paste", "press_key"),
         )

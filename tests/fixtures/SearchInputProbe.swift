@@ -11,9 +11,26 @@ import AppKit
     let result = NSTextField(labelWithString: "No search event")
     var changes = 0, actions = 0
     var panel: NSOpenPanel?
+    var pointerEvents = [[String: Any]]()
+
+    func recordPointer(_ event: NSEvent) {
+        let cg = event.cgEvent
+        pointerEvents.append([
+            "type": event.type.rawValue, "x": event.locationInWindow.x, "y": event.locationInWindow.y,
+            "dx": event.deltaX, "dy": event.deltaY,
+            "cgX": cg?.location.x as Any? ?? NSNull(), "cgY": cg?.location.y as Any? ?? NSNull(),
+            "cgDX": cg?.getIntegerValueField(.mouseEventDeltaX) as Any? ?? NSNull(),
+            "cgDY": cg?.getIntegerValueField(.mouseEventDeltaY) as Any? ?? NSNull(),
+            "windowX": window.frame.minX, "windowY": window.frame.minY,
+        ])
+        try! JSONSerialization.data(withJSONObject: pointerEvents).write(
+            to: directory.appendingPathComponent("pointer-events.json"), options: .atomic)
+    }
 
     func record() {
         let value: [String: Any] = [
+            "foregroundPID": NSWorkspace.shared.frontmostApplication?.processIdentifier as Any? ?? NSNull(),
+            "windowX": window.frame.minX, "windowY": window.frame.minY,
             "pid": getpid(), "value": search.stringValue, "changes": changes, "actions": actions,
             "result": result.stringValue, "other": other.stringValue,
             "mouseX": NSEvent.mouseLocation.x, "mouseY": NSEvent.mouseLocation.y,
@@ -47,11 +64,20 @@ import AppKit
         window.makeMain()
         window.makeFirstResponder(other)
         let menu = NSMenu()
+        let appMenu = NSMenuItem(title: "SearchInputProbe", action: nil, keyEquivalent: "")
+        appMenu.submenu = NSMenu()
+        appMenu.submenu!.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(appMenu)
         let edit = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         edit.submenu = NSMenu()
         edit.submenu!.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.submenu!.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(edit)
         NSApp.mainMenu = menu
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { event in
+            self.recordPointer(event)
+            return event
+        }
         record()
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in MainActor.assumeIsolated { self.record() } }
     }

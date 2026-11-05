@@ -33,7 +33,6 @@ import ApplicationServices
     func legacyKeyboardBoundary(_ anchor: NativeKeyboardBoundaryAnchor) throws -> [String]
     func checkContainment(_ binding: [String: Any], within: [String], op: NativeOperation) throws
     func checkActuator(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, op: NativeOperation) throws
-    func isDesktop(_ binding: [String: Any]) -> Bool
     func directoryTarget(_ raw: Any?) throws -> [String: Any]?
     func observationTarget(_ raw: Any?) throws -> (wire: [String: Any], node: String)
     func observePointer(_ binding: [String: Any])

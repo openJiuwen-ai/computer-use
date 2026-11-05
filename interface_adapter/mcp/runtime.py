@@ -42,13 +42,17 @@ from computer_use.session.events import observation_delivered
 from computer_use.session.observation import (
     CapturedObservationText,
     LazyObservation,
+    bind_observation_presentation,
     lazy_observation,
     observation_document,
+    observation_presentation,
+    observation_screenshot,
     peek_observation_text,
 )
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 
 from .image_delivery import prepare_image, project_document
+from .image_presentation import PresentationImages
 from .output import ObservationOutput, ObservationPresenter, OutputBuffer
 from .worker_lifecycle import READY_ENV
 from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
@@ -61,6 +65,7 @@ class Runtime:
         self.send, self.computer_factory = send, computer_factory
         self.executor = SessionExecutor(loop=asyncio.get_running_loop())
         self.presenter = ObservationPresenter()
+        self.presentation_images = PresentationImages()
         self.command_runs = {}
         self.executions = set()
         self.closed = False
@@ -166,10 +171,10 @@ class Runtime:
                     if not gap:
                         self.presenter.delivered(observation)
                         run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
-                    png = observation["state"].get("screenshot")
-                    if png is not None:
-                        run["imageContexts"].set(png, True)
-                        self.emit_image(observation["imageDelivery"])
+                    delivery = observation.get("imageDelivery")
+                    if delivery is not None:
+                        run["imageContexts"].set(delivery.source, True)
+                        self.emit_image(delivery)
             except Exception as error:  # noqa: BLE001 - retain later receipts, then rethrow the rendering failure
                 # Rendering an earlier capture must not erase receipts for
                 # later inputs which already completed in the script.
@@ -247,7 +252,7 @@ class Runtime:
             # another deadline to render it during finish().
             failure = error
             original = observation["state"]
-            png = original.get("screenshot")
+            png = observation_screenshot(original)
             cached = run["preparedImages"].get(id(png)) if png is not None else None
             ready = (
                 png if cached is not None and cached[1].source is png and cached[0] == hashlib.sha256(png).digest()
@@ -289,8 +294,8 @@ class Runtime:
     def log_observations(self, run, *, materializedOnly=False):
         """Record captured evidence in acquisition order at the text output boundary.
 
-        The retained observation supplies the original immutable snapshot. Logging does
-        not reacquire the interface or change the delivery baseline. During an explicit
+        The retained document supplies the original snapshot; materialized text follows
+        its paired public view. Logging does not reacquire or change the baseline. During an explicit
         print, stop at the first unrendered capture so unrelated views remain structured.
         """
         while run["observationLogs"]:
@@ -322,6 +327,12 @@ class Runtime:
         run = _runs.get()
         if run is None:
             return prepare_image(png)
+        presented = self.presentation_images.prepared(png)
+        if presented is not None:
+            # Reprinting this exact public view retains its original source and
+            # inverse. It cannot adopt the last image's dimensions or binding.
+            run["preparedDeliveries"][id(presented[1])] = presented
+            return presented[1]
         fingerprint = hashlib.sha256(png).digest()
         cached = run["preparedImages"].get(id(png))
         if cached is None or cached[0] != fingerprint or cached[1].source is not png:
@@ -353,11 +364,19 @@ class Runtime:
         if cached is not None and cached["sourceState"] is original:
             return cached
         document = observation.get("document") or observation_document(original)
-        png = original.get("screenshot")
+        view = observation_presentation(original)
+        png = view.screenshot if view is not None else observation_screenshot(original)
         delivery = self.prepared_image(png) if png is not None else None
-        if document is not None and delivery is not None:
+        if view is not None:
+            presented = dict(observation, state=original, document=view.document, sourceState=original)
+        elif document is not None and delivery is not None:
             projected = project_document(document, delivery.coordinates)
-            state = lazy_observation(projected, png)
+            screenshot = self.presentation_images.create(run["preparedDeliveries"][id(delivery)])
+            if isinstance(original, LazyObservation):
+                bind_observation_presentation(original, projected, screenshot)
+                state = original
+            else:
+                state = lazy_observation(projected, screenshot)
             presented = dict(observation, state=state, document=projected, sourceState=original)
         else:
             presented = dict(observation, sourceState=original)
@@ -667,6 +686,7 @@ class Runtime:
             await self.executor.aclose()
         finally:
             self.presenter.close()
+            self.presentation_images.clear()
 
 
 _original_print = builtins.print

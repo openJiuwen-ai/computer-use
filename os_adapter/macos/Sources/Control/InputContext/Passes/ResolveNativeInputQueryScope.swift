@@ -11,10 +11,6 @@ import ApplicationServices
     ) throws -> NativeInputQueryScope {
         try access.sharing.checkAvailable()
         let binding = try access.scopes.inputBinding(p["target"])
-        let desktop = access.scopes.isDesktop(binding.wire)
-        guard !desktop || (within.isEmpty && actuator == nil && receiver == nil && basis.isEmpty) else {
-            throw DriverError("desktop input cannot carry element selection dependencies", code: .invalidRequest)
-        }
         guard !within.contains(binding.node ?? "") else {
             throw DriverError("within must contain proper ancestors", code: .invalidRequest)
         }
@@ -42,9 +38,9 @@ import ApplicationServices
         }
         if let receiver { _ = try access.units.receiverRelation(binding.wire, actuator: actuator, receiver: receiver) }
         let selection = access.contracts.selectionBasis(op.token)
-        let scope = desktop ? access.desktop().scope : try string(binding.wire["surface"], label: "surface")
+        let scope = try string(binding.wire["surface"], label: "surface")
         try selection.validate(basis, scope: scope)
-        return NativeInputQueryScope(binding: binding, desktop: desktop, selection: selection, scope: scope)
+        return NativeInputQueryScope(binding: binding, selection: selection, scope: scope)
 
     }
 }

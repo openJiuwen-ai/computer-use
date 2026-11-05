@@ -33,6 +33,16 @@ import ApplicationServices
     /// pointer's separate queue, never by adding AX work to the input path.
     func visualElement(_ ref: String) -> AXUIElement? { registry.target(ref)?.element }
 
+    /// A locator borrows the exact registered object, not an input-ready editor.
+    /// Geometry availability is checked by the caller; action, focus, role and
+    /// ancestor readiness cannot prevent resolving a point for human input.
+    func pointElement(_ ref: String, scope: String?) throws -> AXUIElement {
+        guard let target = registry.target(ref), target.scope == scope,
+            !target.application.isTerminated, target.application.launchDate == target.launched
+        else { throw DriverError("original point target expired", code: .staleTarget) }
+        return target.element
+    }
+
     func observationScope(_ app: NSRunningApplication, window: AXUIElement?, reference: String? = nil) -> String {
         return registry.observationScope(app, window: window, reference: reference)
     }

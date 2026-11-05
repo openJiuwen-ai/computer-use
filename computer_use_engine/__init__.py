@@ -4,6 +4,7 @@
 """Computer Use SDK: public Python API and cross-platform desktop semantics."""
 
 from .client.computer import App, Computer, Element
+from .client.targets import Target
 from .errors import ComputerUseError
 from .types import (
     ActionResult,
@@ -48,6 +49,7 @@ __all__ = [
     "Observation",
     "ObservationError",
     "Point",
+    "Target",
     "TextPage",
     "View",
     "WindowInfo",

@@ -2,6 +2,7 @@
 
 import asyncio
 import gc
+import hashlib
 import inspect
 from dataclasses import replace
 from types import SimpleNamespace
@@ -18,7 +19,8 @@ from computer_use.interaction.read.views.publication import publish
 from computer_use.native.contracts import Binding
 from computer_use.session.events import observation_delivered, set_observation_handler
 from computer_use.session.interfaces import WindowIdentity
-from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
+from unit_tests.test_application_window_lifetimes import directory, image_for, ref, setup, surface
+from unit_tests.test_image_gesture_scope import capture
 
 
 def test_public_api_has_only_app_and_element_scopes():
@@ -29,7 +31,7 @@ def test_public_api_has_only_app_and_element_scopes():
     assert not hasattr(computer_for_controller(controller), "window")
     assert not hasattr(controller.adapters, "create_window")
     assert not hasattr(app._instance, "views")
-    for method in ("read", "element", "click", "scroll", "drag", "type_text", "paste", "press_key"):
+    for method in ("read", "element", "click", "scroll", "drag", "type_text", "paste", "press_key", "point"):
         parameter = inspect.signature(getattr(App, method)).parameters["window"]
         assert parameter.default is None and parameter.kind is inspect.Parameter.KEYWORD_ONLY
 
@@ -43,6 +45,7 @@ def test_window_parameters_reject_invalid_scalars_before_native_calls(value):
         lambda: app.click(at=(1, 2), window=value), lambda: app.scroll("up", at=(1, 2), window=value),
         lambda: app.drag((1, 2), (3, 4), window=value), lambda: app.type_text("a", window=value),
         lambda: app.paste("a", window=value), lambda: app.press_key("Return", window=value),
+        lambda: app.point((1, 2), window=value),
     )
     for call in calls:
         with pytest.raises(ComputerUseError):
@@ -123,6 +126,40 @@ def test_explicit_unobserved_keyboard_pins_window_before_refresh():
     assert result == "dispatched"
     assert writes.call_args.args[0].target.root_window == "a"
     assert app._instance.input_context is None
+
+
+@pytest.mark.parametrize("method", ["click", "scroll", "drag"])
+def test_retained_point_reuses_selected_window_after_another_window_is_delivered(method):
+    controller, app = setup()
+    a, b = ref(app, "a"), ref(app, "b")
+    image = image_for("a", "original-a")
+    captured = replace(capture("a"), target=image.pieces[0].image.target)
+    image.png = captured.image
+    image.pieces = (replace(image.pieces[0], image=captured),)
+    image.digest = hashlib.sha256(image.png).digest()
+    controller.interfaces.windows.retain_image(app._instance, image, 1)
+    start, end = app.point((10, 20), window=a), app.point((30, 40), window=a)
+    other = image_for("b", "new-b")
+    controller.interfaces.windows.retain_image(app._instance, other, 2)
+    app._instance.delivered_image = other
+    controller.reader.directory._query = AsyncMock(return_value=directory(surface("a"), surface("b"), focus="b"))
+    writes = AsyncMock(return_value="dispatched")
+    controller.interfaces.write = SimpleNamespace(arun=writes)
+    if method == "click":
+        result = app.click(at=start, window=a)
+    elif method == "scroll":
+        result = app.scroll("down", at=start, window=a)
+    else:
+        result = app.drag(start, end, window=a)
+    assert result == "dispatched"
+    executed = writes.call_args.args[0]
+    assert executed.target == image.pieces[0].image.target
+    assert executed.target.root_window == "a" and executed.target.capture == "original-a"
+    assert executed.intent.global_input is False
+    writes.reset_mock()
+    with pytest.raises(ComputerUseError, match="original window binding changed"):
+        app.click(at=start, window=b)
+    writes.assert_not_awaited()
 
 
 def test_other_application_window_is_not_an_app_switch():

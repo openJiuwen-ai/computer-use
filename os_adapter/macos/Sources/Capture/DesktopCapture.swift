@@ -5,16 +5,13 @@ import CoreGraphics
 @preconcurrency import ScreenCaptureKit
 
 /// Desktop observation does not traverse AX, select an application or change
-/// focus. Input retains optional focused-window evidence separately.
+/// focus. Retained mappings only translate image pixels to screen points.
 @MainActor final class DesktopCapture {
     private let applications: ApplicationDiscovery
     init(applications: ApplicationDiscovery) { self.applications = applications }
     struct Mapping {
         let geometry: DesktopGeometry
         let captured: Set<CGDirectDisplayID>
-        let surfaces: [Surface]
-        let processes: Set<NativeProcessIdentity>
-        let inputIssue: String?
     }
     struct Surface: Equatable {
         let id: CGWindowID
@@ -24,30 +21,6 @@ import CoreGraphics
     let scope = UUID().uuidString
     private var mappings = [String: Mapping]()
     private var order = [String]()
-    struct KeyboardDestination: Equatable {
-        let process: NativeProcessIdentity
-        let window: CGWindowID?
-        let focusedWindow: CGWindowID?
-
-        func validate(_ current: Self?) throws {
-            guard let current else {
-                throw DriverError(
-                    "desktop keyboard destination is unavailable", code: .inputUnavailable)
-            }
-            guard current.process == process, current.window == window,
-                focusedWindow == nil || current.focusedWindow == nil || focusedWindow == current.focusedWindow
-            else {
-                throw DriverError(
-                    "desktop keyboard destination changed", code: .staleTarget)
-            }
-            if focusedWindow != nil && current.focusedWindow == nil {
-                throw DriverError(
-                    "observed keyboard window: unknown",
-                    code: .inputUnavailable)
-            }
-        }
-    }
-    private var keyboards = [String: KeyboardDestination]()
     private static let background = CGColor(gray: 0.18, alpha: 1)
 
     static func geometry(maxDimension: Int = 4096) throws -> DesktopGeometry {
@@ -71,72 +44,16 @@ import CoreGraphics
         return try DesktopGeometry(displays, maxDimension: maxDimension)
     }
 
-    func mapping(_ ref: String) throws -> Mapping {
-        let value = try observed(ref)
-        guard try Self.geometry(maxDimension: value.geometry.maxDimension) == value.geometry else {
-            throw ObservationChanged("desktop display layout changed")
-        }
-        return value
-    }
-
     func observed(_ ref: String) throws -> Mapping {
         guard let value = mappings[ref] else {
             throw DriverError("desktop observation expired", code: .staleTarget)
         }
-        if let issue = value.inputIssue {
-            throw DriverError(
-                issue, code: .staleTarget,
-                next: "read the desktop again before desktop input, or use an independently observed App target")
-        }
         return value
     }
 
-    static func recipient() -> NativeProcessIdentity? {
+    private static func recipient() -> NativeProcessIdentity? {
         NSWorkspace.shared.frontmostApplication.flatMap { NativeProcessIdentity.read($0.processIdentifier) }
     }
-
-    /// Z-order alone is not keyboard focus. Use a bounded, optional focused-
-    /// window attribute as additional evidence; never require an AX tree.
-    static func destination() -> KeyboardDestination? {
-        guard let process = recipient(),
-            let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-                as? [[String: Any]]
-        else { return nil }
-        let windows = raw.filter { ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 }
-        let window = surfaces(windows).first { $0.pid == process.pid }?.id
-        var focusedWindow: CGWindowID?
-        if AXIsProcessTrusted() {
-            let app = AXUIElementCreateApplication(process.pid)
-            AXUIElementSetMessagingTimeout(app, 0.05)
-            var focused: CFTypeRef?
-            if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focused) == .success,
-                let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
-            {
-                focusedWindow = BackgroundEvents.nativeWindowID(unsafeDowncast(focused, to: AXUIElement.self))
-            }
-        }
-        guard recipient() == process else { return nil }
-        return KeyboardDestination(process: process, window: window, focusedWindow: focusedWindow)
-    }
-
-    func keyboardDestination(_ ref: String) throws -> KeyboardDestination {
-        _ = try observed(ref)
-        guard let expected = keyboards[ref] else {
-            throw DriverError(
-                "desktop keyboard destination: changed or unknown", code: .staleTarget)
-        }
-        try expected.validate(Self.destination())
-        return expected
-    }
-
-    /// A normal desktop interaction can focus another already observed application.
-    /// A newly launched process must first appear in a new observation.
-    func inputFinished(_ ref: String) {
-        let current = Self.destination()
-        keyboards[ref] = current.flatMap { mappings[ref]?.processes.contains($0.process) == true ? $0 : nil }
-    }
-
-    func inputFailed() { keyboards.removeAll() }
 
     static func surfaces(_ raw: [[String: Any]]) -> [Surface] {
         raw.compactMap { item in
@@ -150,33 +67,11 @@ import CoreGraphics
         }
     }
 
-    func validateHit(_ ref: String, point: CGPoint) throws {
-        let mapping = try mapping(ref)
-        guard
-            let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-                as? [[String: Any]]
-        else {
-            throw DriverError(
-                "desktop window catalogue unavailable before pointer input",
-                code: .inputUnavailable)
-        }
-        let expected = mapping.surfaces.first { $0.frame.contains(point) }
-        let current = Self.surfaces(windows).first { $0.frame.contains(point) }
-        guard expected == current else {
-            throw ObservationChanged("window at the desktop coordinates moved or changed")
-        }
-        if let expected, let process = mapping.processes.first(where: { $0.pid == expected.pid }),
-            NativeProcessIdentity.read(process.pid) != process
-        {
-            throw ObservationChanged("process at the desktop coordinates was replaced")
-        }
-    }
-
     private func rectangle(_ rect: CGRect) -> [String: Double] {
         ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
     }
 
-    func read(maxDimension: Int = 4096, retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]) async throws -> [String: Any] {
+    func read(maxDimension: Int = 4096, retainedCaptures: Set<String> = [], retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]) async throws -> [String: Any] {
         AgentPointer.beginDesktopCapture()
         defer { AgentPointer.endDesktopCapture() }
         try RequestDiagnostics.checkObservationBudget()
@@ -281,13 +176,13 @@ import CoreGraphics
             changes.append("window catalogue unavailable")
         }
         // Seeing a changing desktop is useful, especially for understanding a
-        // covering popup. It does not prove a stable input target. Retain the
-        // pixels and uncertainty, but never authorize input from this capture.
+        // covering popup. Retain pixels and describe the uncertainty; a
+        // screenshot does not grant or withhold permission for later input.
         let inputIssue =
             changes.isEmpty
             ? nil
             : """
-            Desktop screenshot is observation-only: \(changes.joined(separator: "; ")) during capture. \
+            Desktop changed: \(changes.joined(separator: "; ")) during capture. \
             Window catalogue describes the end of capture and may differ from the image.
             """
         let visibleWindows = (rawWindows ?? []).filter { raw in
@@ -352,20 +247,14 @@ import CoreGraphics
         // Pixels and their retained mapping have one opaque identity. A
         // catalogue-only observation still has a reference but no image.
         let ref = screenshot?.id ?? UUID().uuidString
-        let surfaces = Self.surfaces(rawWindows ?? [])
-        var processes = Set(Set(surfaces.map(\.pid)).compactMap(NativeProcessIdentity.read))
-        if let recipient { processes.insert(recipient) }
         try RequestDiagnostics.checkCancellation()
-        mappings[ref] = Mapping(
-            geometry: geometry, captured: captured, surfaces: surfaces, processes: processes, inputIssue: inputIssue)
+        mappings[ref] = Mapping(geometry: geometry, captured: captured)
         order.append(ref)
-        while order.count > 64 {
-            let expired = order.removeFirst()
-            mappings.removeValue(forKey: expired)
-            keyboards.removeValue(forKey: expired)
+        let expired = NativeCapture.retirements(order, retaining: retainedCaptures)
+        order.removeAll { expired.contains($0) }
+        for ref in expired {
+            mappings.removeValue(forKey: ref)
         }
-        let destination = Self.destination()
-        keyboards[ref] = inputIssue == nil && destination?.process == recipient ? destination : nil
         return [
             "desktopRef": ref, "scope": scope, "observation": observation,
             "screenshot": screenshot?.protocolValue(kind: .desktop, scope: scope) as Any? ?? NSNull()

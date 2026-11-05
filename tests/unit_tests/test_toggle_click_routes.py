@@ -80,18 +80,18 @@ async def test_unavailable_mouse_does_not_fall_back_to_unconfirmed_toggle_press(
 
 @pytest.mark.parametrize("role", ["AXCheckBox", "AXRadioButton"])
 @pytest.mark.parametrize("authorized", [False, True])
-def test_toggle_hid_fallback_still_requires_global_input_permission(role, authorized):
+def test_toggle_global_click_is_explicit_and_respects_host_permission(role, authorized):
     unconfirmed = click_route("object_action", "insufficientEvidence")
     directed = click_route("surface_pointer", "unavailable")
     hid = click_route("desktop_pointer")
     current = facts(unconfirmed, directed, hid, native_role=role)
-    if authorized:
-        command = choose(current, CLICK, HostPolicy(allow_global_input=True), Attempts())
-        assert command.primitive == hid
-    else:
-        with pytest.raises(ComputerUseError) as failure:
-            choose(current, CLICK, HostPolicy(allow_global_input=False), Attempts())
-        assert failure.value.code == "permission_required"
+    with pytest.raises(ComputerUseError) as scoped:
+        choose(current, CLICK, HostPolicy(allow_global_input=authorized), Attempts())
+    assert scoped.value.code == "input_unavailable"
+    explicit = replace(CLICK, global_input=True)
+    with pytest.raises(ComputerUseError) as failure:
+        choose(current, explicit, HostPolicy(allow_global_input=authorized), Attempts())
+    assert failure.value.code == "input_unavailable"
 
 
 @pytest.mark.anyio

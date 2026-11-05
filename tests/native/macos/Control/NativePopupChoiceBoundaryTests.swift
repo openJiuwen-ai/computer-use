@@ -7,14 +7,15 @@ import ApplicationServices
 /// facts and the OS input adapter substituted. No desktop input is posted.
 @main struct NativePopupChoiceBoundaryTests {
     @MainActor static func main() async throws {
-        let denied = PopupChoiceProbe()
-        let deniedResult = try await denied.click()
-        precondition(deniedResult["dispatch"] as? String == "notDispatched")
-        precondition(deniedResult["errorCode"] as? String == "permission_required", "\(deniedResult)")
-        precondition(denied.mode == "Auto" && denied.events.isEmpty && denied.presses == 0)
-        precondition(deniedResult["retryReason"] is NSNull)
-        // The same denied global authority must leave an independent semantic
-        // action available. Its fake provider records ordinary AX consumption.
+        // An ambient global authorization cannot change an object route.
+        // This popup uses addressed input even while global input is denied.
+        let directed = PopupChoiceProbe()
+        let directedResult = try await NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            try await directed.click()
+        }
+        precondition(directedResult["dispatch"] as? String == "dispatched")
+        precondition(directed.mode == "Manual" && directed.presses == 0)
+        // Independent semantic actions also remain available without global authority.
         let addressed = PopupChoiceProbe()
         addressed.scopes.currentOwner = addressed.nodes["P"]!
         addressed.scopes.ids["E"] = 284
@@ -23,8 +24,13 @@ import ApplicationServices
             qualified: false, unit: .action("AXPress", nil), kind: "native_action")
         precondition(addressedResult["dispatch"] as? String == "dispatched")
         precondition(addressed.mode == "Manual" && addressed.presses == 1 && addressed.events.isEmpty)
-        try await NativeInputAuthorization.$globalInputAllowed.withValue(true) {
-            try await authorizedCases()
+        // Qualified visible popups now use directed input even when the host
+        // prohibits global input. The explicit route retains the same bounds.
+        try await authorizedCases()
+        try await NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            try await NativeInputAuthorization.$globalInputAllowed.withValue(true) {
+                try await authorizedCases()
+            }
         }
         precondition(!NativeInputAuthorization.globalInputAllowed)
     }
@@ -453,7 +459,6 @@ import ApplicationServices
     func receiverRelation(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeReceiverRelation? { preconditionFailure("unselected unit") }
-    func desktopUnit(_ binding: [String: Any]) throws -> NativeDesktopUnit { preconditionFailure("unselected unit") }
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeKeyboardUnit { preconditionFailure("unselected unit") }
@@ -471,7 +476,7 @@ import ApplicationServices
     }
     func deliver(
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
-        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void
+        onPosted: () -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
         if probe.failInFlight {
             try check()
@@ -556,7 +561,7 @@ import ApplicationServices
         return (
             op,
             .init(
-                binding: (binding, [], "E"), desktop: false,
+                binding: (binding, [], "E"),
                 selection: NativeSelectionBasis(access: state.applications), scope: "s")
         )
     }

@@ -27,23 +27,11 @@ import ApplicationServices
         precondition(
             Readiness.ready(
                 kind: .click, foreground: true, windowKind: .keyRequiring, focus: .target, backgroundPrepared: false))
-        precondition(NativePointerDeliveryPolicy.delivery(nil, windowDirectedAvailable: true) == .windowDirected)
-        precondition(
-            NativePointerDeliveryPolicy.delivery(.windowDirected, windowDirectedAvailable: false) == .windowDirected)
-        precondition(
-            NativePointerDeliveryPolicy.delivery(.systemPointer, windowDirectedAvailable: true) == .systemPointer)
-        precondition(NativePointerDeliveryPolicy.delivery(nil, windowDirectedAvailable: false) == .systemPointer)
-        precondition(
-            NativePointerDeliveryPolicy.implicitDelivery(
-                kind: .click, windowDirectedAvailable: true, receiverSupported: false) == .systemPointer,
-            "pointer focus must not bypass the concrete-receiver contract used by explicit clicks")
-        precondition(
-            NativePointerDeliveryPolicy.implicitDelivery(
-                kind: .click, windowDirectedAvailable: true, receiverSupported: true) == .windowDirected)
-        for kind in [NativePointerIntent.Kind.scroll, .drag] {
-            precondition(
-                NativePointerDeliveryPolicy.implicitDelivery(
-                    kind: kind, windowDirectedAvailable: true, receiverSupported: false) == .windowDirected)
+        precondition(NativePointerDeliveryPolicy.delivery(nil) == .windowDirected)
+        precondition(NativePointerDeliveryPolicy.delivery(.windowDirected) == .windowDirected)
+        NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            precondition(NativePointerDeliveryPolicy.delivery(nil) == .windowDirected,
+                         "object pointer delivery cannot inherit a surrounding global request")
         }
         for role in [kAXWindowRole, kAXGroupRole, kAXStaticTextRole, kAXImageRole, kAXUnknownRole] {
             precondition(
@@ -73,33 +61,18 @@ import ApplicationServices
         typealias Physical = NativePhysicalInput
         let held = Physical.State(modifiers: [.maskCommand, .maskShift], buttons: [.left, .right])
         precondition(held.conflicts() == ["modifier.command", "modifier.shift", "mouse.button.0", "mouse.button.1"])
-        for delivery: NativeClickDelivery in [.objectAction, .objectSelection, .windowDirected] {
-            // A user dragging/typing elsewhere must not enter a session-state
-            // probe before this addressed action/selection or window event.
-            try Physical.validate(Physical.dependency(for: delivery), sample: {
-                preconditionFailure("addressed input cannot inherit a global held-state prerequisite")
-            })
-            try await Physical.wait(Physical.dependency(for: delivery), check: {
-                preconditionFailure("an unrelated physical wait cannot veto addressed input")
-            }, sample: { held })
+        do {
+            try Physical.validate(.menuTracking, sample: { held })
+            preconditionFailure("menu tracking must retain its actual shared-state dependency")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable)
         }
-        precondition(Physical.dependency(for: .systemPointer) == .globalHID)
-        for dependency: Physical.Dependency in [.globalHID, .menuTracking] {
-            do {
-                try Physical.validate(dependency, sample: { held })
-                preconditionFailure("global input/tracking must retain the actual conflict barrier")
-            } catch let error as DriverError {
-                precondition(error.code == .inputUnavailable)
-                precondition(error.description.contains("modifier.command"))
-                precondition(error.description.contains("mouse.button.0"))
-            }
-        }
-        // An already-held synthetic drag can continue on its own button, but
-        // a second physical button or modifier is still a real HID conflict.
-        try Physical.validate(.globalHID, allowing: .left, sample: { .init(modifiers: [], buttons: [.left]) })
+        // Only menu-tracking preparation consumes this shared session state.
+        // Raw global input has no dependency here.
+        try Physical.validate(.menuTracking, allowing: .left, sample: { .init(modifiers: [], buttons: [.left]) })
         precondition(held.conflicts(allowing: .left) == ["modifier.command", "modifier.shift", "mouse.button.1"])
         var now: TimeInterval = 0, pauses = 0, checks = 0
-        try await Physical.wait(.globalHID, check: { checks += 1 }, sample: {
+        try await Physical.wait(.menuTracking, check: { checks += 1 }, sample: {
             pauses == 0 ? held : .init(modifiers: [], buttons: [])
         }, clock: { now }, pause: { duration in
             pauses += 1
@@ -108,7 +81,7 @@ import ApplicationServices
         precondition(pauses == 1 && checks >= 2 && now <= 0.08,
                      "one call must absorb a short user gesture instead of requiring model retries")
         pauses = 0
-        try await Physical.wait(.globalHID, check: {}, sample: { .init(modifiers: [], buttons: []) }, pause: { _ in
+        try await Physical.wait(.menuTracking, check: {}, sample: { .init(modifiers: [], buttons: []) }, pause: { _ in
             preconditionFailure("no conflict must mean no physical-input delay")
         })
         now = 0
@@ -393,7 +366,7 @@ import ApplicationServices
                      "an absent AX window cannot erase the retained WindowServer route")
         // No real AX object is supplied: fixed delivery must not re-query a role
         // or fall through to HID after qualification was already retained.
-        let fixedDelivery = try unit.resolvedDelivery(nil, at: .zero, kind: .click)
+        let fixedDelivery = unit.resolvedDelivery(nil)
         precondition(fixedDelivery == .windowDirected)
         precondition(!unit.backgroundPreparationAvailable())
         let retained = try unit.resolvingCaptureTranslation()
@@ -408,11 +381,8 @@ import ApplicationServices
                      "a retained window-directed requirement may enter the original-element unit")
         precondition(!offer.permitsElementPointer(hasActuator: true),
                      "the new exact-original-element requirement cannot adopt a member")
-        let global = NativeClickContract(
-            routeFamily: "macos.hid.v1", delivery: .systemPointer, admission: .preparationRequired,
-            reason: nil, preparationOptions: ["foreground"], pointerRequirement: pinned)
-        precondition(!global.permitsElementPointer(hasActuator: false),
-                     "the new requirement cannot change its selected delivery to global input")
+        precondition(NativeClickDelivery(rawValue: "desktop_pointer") == nil,
+                     "object contracts cannot carry the retired global delivery")
         precondition(other.permitsElementPointer(hasActuator: true),
                      "existing declared-content member routes retain their own admission contract")
     }

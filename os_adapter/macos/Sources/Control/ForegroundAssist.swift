@@ -71,12 +71,14 @@ import ApplicationServices
 
     private static func activate(
         _ target: BackgroundTarget, window: CGWindowID, pointerAt: CGPoint? = nil,
-        onWait: (NativePreparationWait) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
+        onWait: (NativePreparationWait) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void,
+        beforeAction: @escaping @MainActor () throws -> Void
     ) async throws {
         let app = target.application
         let pid = app.processIdentifier
         let native = try nativeWindow(pid, window)
         func checkPreparation() throws {
+            try beforeAction()
             try RequestDiagnostics.checkCancellation()
             try target.validate(input: true)
             guard let info = WindowServerInfo.window(window),
@@ -182,7 +184,8 @@ import ApplicationServices
 
     func prepare(
         _ target: BackgroundTarget, window: CGWindowID, pointerAt: CGPoint? = nil, onAction: () -> Void,
-        onWait: (NativePreparationWait) -> Void = { _ in }, onCleanupUnknown: @escaping @MainActor () -> Void = {}
+        onWait: (NativePreparationWait) -> Void = { _ in }, onCleanupUnknown: @escaping @MainActor () -> Void = {},
+        beforeAction: @escaping @MainActor () throws -> Void = {}
     ) async throws {
         try target.validate(input: true)
         NativeForegroundResponsibility.current?.requireForegroundForCandidate()
@@ -208,10 +211,12 @@ import ApplicationServices
             throw NativePreparationUnavailable(
                 description: "the user selected a new foreground during this operation; no repeated activation sent")
         }
+        try beforeAction()
         NativeForegroundResponsibility.current?.recordPreparation(target: target.capturedProcessIdentity, foreground: true)
         onAction()
         try await Self.activate(
-            target, window: window, pointerAt: pointerAt, onWait: onWait, onCleanupUnknown: onCleanupUnknown)
+            target, window: window, pointerAt: pointerAt, onWait: onWait, onCleanupUnknown: onCleanupUnknown,
+            beforeAction: beforeAction)
         try target.validate(input: true)
         diagnose("foreground assist: prepared pid=\(target.application.processIdentifier), window=\(window)")
     }

@@ -9,6 +9,7 @@ import ApplicationServices
         Any]
     {
         let initial = resolved.initial
+        if resolved.globalInput { return initial }
         return resolved.installation
             ? try access.directory.installation(initial).wire
             : resolved.discovery
