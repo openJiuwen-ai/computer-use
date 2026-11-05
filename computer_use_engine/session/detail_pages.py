@@ -41,6 +41,10 @@ class CapturedDetailPages:
         self._positions: dict[str, tuple[int | None, int]] = {}
         self._cursors: dict[tuple[int | None, int], str] = {}
 
+    def with_document(self, document: ObservationDocument) -> CapturedDetailPages:
+        """Start pages for a host presentation without changing native element details."""
+        return CapturedDetailPages(document, element_details=self._element_details)
+
     def read(self, *, element: int | None = None, cursor: str | None = None, length: int = 4096) -> TextPage:
         """Return a bounded page from this capture, rendering it once on first access.
 

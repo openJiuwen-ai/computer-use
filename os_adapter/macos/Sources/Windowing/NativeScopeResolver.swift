@@ -29,6 +29,67 @@ import ApplicationServices
         self.pointer = pointer
     }
 
+    func requireSession(_ value: String) throws {
+        guard value == session else { throw DriverError("request belongs to another session", code: .staleTarget) }
+    }
+
+    /// Resolve once, independently of input admission. The subsequent global
+    /// event uses this screen point without following or checking the object.
+    func locatePoint(_ raw: Any?) throws -> [String: Any] {
+        let request = try object(raw, keys: ["target", "point"])
+        let target = try NativeTarget(request["target"])
+        try target.requireSession(session)
+        try RequestDiagnostics.checkCancellation()
+        let result: CGPoint
+        if let capture = target.capture {
+            guard target.node == nil else {
+                throw DriverError("a point locator cannot mix image and element references", code: .invalidRequest)
+            }
+            let pixel = try object(request["point"], keys: ["x", "y"])
+            let point = CGPoint(x: try number(pixel["x"], label: "point.x"), y: try number(pixel["y"], label: "point.y"))
+            if target.isDesktopImage {
+                guard target.instance == nil, target.rootWindow == nil else {
+                    throw DriverError("desktop point locator has an application identity", code: .invalidRequest)
+                }
+                let mapping = try desktop().observed(capture)
+                result = try mapping.geometry.point(x: point.x, y: point.y, captured: mapping.captured)
+            } else {
+                let entry = try captures.retained(capture)
+                guard NSDictionary(dictionary: entry.binding).isEqual(to: target.wire),
+                    !entry.surface.owner.isTerminated
+                else {
+                    throw DriverError("image point belongs to another binding", code: .staleTarget)
+                }
+                let original = entry.mapping
+                guard let row = WindowServerInfo.window(original.id),
+                    let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                    let bounds = row[kCGWindowBounds as String] as? [String: Any],
+                    let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+                else { throw ObservationChanged("point target window is unavailable") }
+                let current = WindowGeometry.WindowMapping(
+                    id: original.id, pid: pid, frame: frame, title: original.title,
+                    width: original.width, height: original.height)
+                result = try NativeCapturedPointerPlan.resolve(original: original, current: current).point(point)
+            }
+        } else {
+            guard request["point"] is NSNull, let node = target.node else {
+                throw DriverError("element point locator requires an element and no image point", code: .invalidRequest)
+            }
+            let element = try applications.pointElement(node, scope: target.surface)
+            var position = CGPoint.zero, size = CGSize.zero
+            guard let origin = AXAccess.read(element, kAXPositionAttribute).value,
+                let dimensions = AXAccess.read(element, kAXSizeAttribute).value,
+                CFGetTypeID(origin) == AXValueGetTypeID(), CFGetTypeID(dimensions) == AXValueGetTypeID(),
+                AXValueGetValue(unsafeDowncast(origin, to: AXValue.self), .cgPoint, &position),
+                AXValueGetValue(unsafeDowncast(dimensions, to: AXValue.self), .cgSize, &size),
+                [position.x, position.y, size.width, size.height].allSatisfy(\.isFinite), size.width > 0, size.height > 0
+            else { throw DriverError("original element has no usable frame", code: .observationIncomplete) }
+            result = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+        }
+        try RequestDiagnostics.checkCancellation()
+        return ["point": ["x": result.x, "y": result.y]]
+    }
+
     func observationSurface(_ binding: [String: Any]) throws -> NativeDirectory.Surface {
         try sharing.checkAvailable()
         return try directory.windowScope(
@@ -486,12 +547,7 @@ import ApplicationServices
                     "visual input requires this session's exact window image binding", code: .invalidRequest)
             }
             if target.isDesktopImage {
-                guard target.instance == nil, target.rootWindow == nil else {
-                    throw DriverError(
-                        "desktop input cannot contain application/window identities", code: .invalidRequest)
-                }
-                try desktopUnit(value).check()
-                return (value, [], nil)
+                throw DriverError("desktop images locate points; use explicit Computer input", code: .invalidRequest)
             }
             let visual = try captures.inputScope(value)
             return (value, visual.blocked, nil)
@@ -619,12 +675,6 @@ import ApplicationServices
             application: read.application, window: proof.context.popup, element: read.element,
             logicalWindow: observed)
         return NativePopupPointerUnit(element: unit, qualification: proof)
-    }
-
-    func isDesktop(_ binding: [String: Any]) -> Bool { binding["surface"] is NSNull && binding["capture"] is String }
-
-    func desktopUnit(_ binding: [String: Any]) throws -> NativeDesktopUnit {
-        NativeDesktopUnit(desktop: desktop(), ref: try string(binding["capture"], label: "capture"))
     }
 
     func receiverRelation(

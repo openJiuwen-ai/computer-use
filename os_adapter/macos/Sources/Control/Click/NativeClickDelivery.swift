@@ -8,5 +8,4 @@ enum NativeClickDelivery: String {
     case objectAction = "object_action"
     case objectSelection = "object_selection"
     case windowDirected = "surface_pointer"
-    case systemPointer = "desktop_pointer"
 }

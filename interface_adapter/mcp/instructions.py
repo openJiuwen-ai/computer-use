@@ -20,16 +20,22 @@ Choose the interaction method for each operation using this preference:
    app.read(view='image') or window.read(view='image') when needed. Use that
    App/Window's coordinate or keyboard methods as appropriate, such as
    window.click(at=(x, y)) or window.press_key('Return').
-3. When global input is needed, select a direct Computer input method. Reuse
-   an existing Element with computer.click(target=element),
-   computer.type_text(text, target=element, replace=True), or
-   computer.press_key('Return', target=element). No desktop read is needed.
-   For a displayed App/Window image, retain p = app.point((x, y)) and call
-   computer.click(target=p). computer.scroll('down', target=p) and
-   computer.drag(start_point, end_point) also reuse retained image targets.
-   Bare computer.click(at=(x, y)) uses the delivered desktop image, obtained
-   with computer.read(view='image'); bare Computer keyboard methods use its
-   captured input recipient.
+3. When global input is needed on macOS, select a direct Computer input method.
+   computer.click(at=(screen_x, screen_y)) uses native screen points (negative
+   points are valid on secondary displays), without a preceding read. For image
+   pixels, explicitly retain p = app.point((x, y)), window.point((x, y)), or
+   computer.point((x, y)) from the corresponding displayed image, then call
+   computer.click(target=p). computer.click(target=element) locates its center.
+   These locators only find a screen point; they do not activate, raise, focus,
+   or require that the object currently receives input. The global click hits
+   whatever is actually at that screen location.
+   computer.scroll('down', at=(screen_x, screen_y)) and computer.drag(start, end)
+   also accept retained point/element targets; drag endpoints are independent.
+   computer.type_text(text), computer.press_key('Return'), and computer.paste(text)
+   go directly to the OS's current receiver. They have no target or replace
+   option: use explicit clicks/keys when a global operation needs preparation.
+   Global inputs return dispatch/effect receipts, without forced observations;
+   request an App/Window/Computer read when the next decision needs observation.
 Apply this preference anew to every subsequent operation, including after
 desktop input. Reuse established behavior for the corresponding control and
 context; prefer usable elements for the next target. Choose another method
@@ -39,8 +45,11 @@ input, including preparation and recovery. They may activate/focus their target.
 Computer direct input explicitly uses global events; it does not grant later
 object calls global authority. Windows/Linux currently retain their existing
 ability to use global input for object operations. A host restriction can still
-forbid global input. Use computer.paste(text, target=element_or_window) for an
-explicit global paste. Element.target and Window.target retain exact bindings;
+forbid global input. Windows/Linux Computer inputs currently retain their
+captured-desktop adapters; the raw screen-point contract above is macOS-only.
+Computer.paste(text) is currently macOS-only; App/Element.paste remain available
+on Windows/Linux.
+Element.target and Window.target retain exact bindings;
 app.point((x, y)) and window.point((x, y)) retain one delivered image's mapping.
 Retained points also work in app.click(at=p) or window.click(at=p) for scoped input.
 They survive later reads and window translation; real identity, layout or display
@@ -74,8 +83,12 @@ continuation cursor for further pages. A tree continuation's cursor is accepted
 by element.read(cursor=...). AX collected reports acquired content; scope gaps
 and omitted children identify partial coverage. Tree full/diff/unchanged is the
 presentation mode.
+Explicit native detail geometry retains its declared screen/AX coordinate space;
+do not treat it as screenshot pixels.
 
-Coordinates use the displayed image's pixels and its named coordinate target.
+App/Window coordinates and point() helpers use the displayed image's pixels
+and its named coordinate target. Bare macOS Computer coordinates use native
+screen points; never pass image pixels as raw screen points.
 Choose coordinates from a newly returned image in the following tool call.
 Combine operations whose targets and steps are already known in one call.
 Return at a new menu, dialog or other state that requires a fresh decision.

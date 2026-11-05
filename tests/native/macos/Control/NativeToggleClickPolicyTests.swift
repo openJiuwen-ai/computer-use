@@ -31,7 +31,7 @@ import Foundation
             // An unrelated declared action keeps its own semantics. The policy
             // is only applied to automatic click offers, never explicit AXPress.
             precondition(NativeToggleClickPolicy.actionOffer(action, action: "CustomAction", role: role) == action)
-            for delivery in [NativeClickDelivery.windowDirected, .systemPointer, .objectSelection] {
+            for delivery in [NativeClickDelivery.windowDirected, .objectSelection] {
                 let original = NativeClickContract(
                     routeFamily: "independent", delivery: delivery, admission: .ready, reason: nil,
                     preparationOptions: [])

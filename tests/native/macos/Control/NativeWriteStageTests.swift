@@ -110,8 +110,26 @@ import ApplicationServices
         precondition(scalarFocus["supported"] as? String == "yes"
                      && scalarFocus["globalInput"] as? String == "no",
                      "text-point preparation declares its actual window-directed transport")
+        objectDeclarationsNeverAuthorizeGlobalInput()
         keyboardWindowPreparation()
         viewportPreparationContinuation()
+    }
+
+    @MainActor static func objectDeclarationsNeverAuthorizeGlobalInput() {
+        NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            let units: [NativeInputUnit] = [
+                .pointer(.click), .pointer(.scroll), .pointer(.drag), .pointerFocus(.editor),
+                .keyboard(.insert), .keyboard(.key), .keyboard(.paste),
+                .keyboard(.insert, nil, .localWebNoProcess)
+            ]
+            for unit in units {
+                let wire = unit.declaration(id: "object", supported: true, readiness: NativeReadiness())
+                precondition(wire["globalInput"] as? String == "no",
+                    "an object declaration cannot inherit ambient global authorization")
+            }
+            let popup = NativePopupClickPolicy.pointerOffer(nil)
+            precondition(popup.delivery == .windowDirected && popup.routeFamily == "macos.windowDirected.v1")
+        }
     }
 
     @MainActor static func viewportPreparationContinuation() {

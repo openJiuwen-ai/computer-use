@@ -23,6 +23,9 @@ import ApplicationServices
     var rawFocus: AXUIElement? = nil
     var rawFocusOwner: AXUIElement? = nil
     var rawLocalFocus: Bool? = nil
+    /// A fresh concrete local receiver, independent of any synthetic receipt.
+    /// This does not satisfy the separate window-command preparation contract.
+    var localReceiverConfirmed = false
 
     func receives(_ element: AXUIElement?) -> Bool { receiver(element) == "yes" }
 

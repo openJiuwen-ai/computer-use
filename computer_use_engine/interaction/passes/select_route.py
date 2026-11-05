@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.agent.requests import QUERY_REQUESTS, READ_REQUESTS, WRITE_REQUESTS
-from computer_use.interaction.requests import ExecuteAction, FindElement
+from computer_use.interaction.requests import ComputerInput, ExecuteAction, FindElement
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from computer_use.pipeline.core import Control
 
 AGENT_READ, AGENT_WRITE, AGENT_QUERY = "agent:read", "agent:write", "agent:query"
-WRITE, QUERY = "write", "query"
+WRITE, QUERY, GLOBAL = "write", "query", "global"
 AGENT_ROUTES = (AGENT_READ, AGENT_WRITE, AGENT_QUERY)
 
 _ROUTES: tuple[tuple[tuple[type, ...], str], ...] = (
@@ -33,6 +33,7 @@ _ROUTES: tuple[tuple[tuple[type, ...], str], ...] = (
     (QUERY_REQUESTS, AGENT_QUERY),
     ((ExecuteAction,), WRITE),
     ((FindElement,), QUERY),
+    ((ComputerInput,), GLOBAL),
 )
 
 

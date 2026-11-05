@@ -4,10 +4,10 @@ import AppKit
 import ApplicationServices
 
 /// Shared session state matters only to mechanisms that consume it. Addressed
-/// AX actions/attributes and window events carry their own target/event flags;
-/// they do not inherit the physical-input admission of global HID or tracking.
+/// AX actions/attributes, window events and explicit global input do not wait
+/// for a physically idle desktop. Only menu-tracking preparation uses this gate.
 @MainActor enum NativePhysicalInput {
-    enum Dependency: String { case globalHID, menuTracking }
+    enum Dependency: String { case menuTracking }
     struct State {
         let modifiers: CGEventFlags
         let buttons: [CGMouseButton]
@@ -19,10 +19,6 @@ import ApplicationServices
             let modifiers = names.compactMap { self.modifiers.contains($0.0) ? "modifier.\($0.1)" : nil }
             return modifiers + buttons.filter { $0 != button }.map { "mouse.button.\($0.rawValue)" }
         }
-    }
-
-    static func dependency(for delivery: NativeClickDelivery) -> Dependency? {
-        delivery == .systemPointer ? .globalHID : nil
     }
 
     static func sample() -> State {

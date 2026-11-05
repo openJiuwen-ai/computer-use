@@ -40,6 +40,7 @@ import ApplicationServices
     ) async throws -> [String: Any] {
         switch method {
         case "begin": return try await NativeResourceScope.begin(raw, timeoutMs: timeoutMs, access: resource)
+        case "locatePoint": return try resource.scopes.locatePoint(raw)
         case "capture": return try await CapturePipeline.collect(raw, operation: operation, scopes: resource.scopes)
         case "prepareObservation":
             return try await ObservationPreparationPipeline.run(raw, operation: operation, scopes: resource.scopes)

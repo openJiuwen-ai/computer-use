@@ -10,7 +10,7 @@ import ApplicationServices
         _ plan: NativeInputContextPlan, declarations: NativePrimitiveDeclarations, access: NativeQueryAccess
     ) throws -> NativeSampledInput {
         let queryScope = plan.query, op = plan.operation
-        let binding = queryScope.binding, desktop = queryScope.desktop
+        let binding = queryScope.binding
         let actuator = plan.actuator, receiver = plan.receiver
         func declare(
             _ unit: NativeInputUnit, supported: Bool,
@@ -57,29 +57,7 @@ import ApplicationServices
                     try access.scopes.fixedInputWindow(binding.wire)?.window
                 })
             } : nil
-        if desktop {
-            let unit = try access.units.desktopUnit(binding.wire)
-            enabled = nil
-            foreground = true
-            if NativePointerIntent.Kind(rawValue: op.intent) != nil {
-                let pointer = try NativePointerIntent(
-                    unit: "pointer_sequence", kind: op.intent, parameters: op.request.parameters, foreground: false)
-                _ = try unit.pointer(pointer, requireAuthorization: false)
-                input["geometryCurrent"] = "yes"
-                input["pointerRoute"] = "yes"
-            } else {
-                // Empty insertion is resolved by Python after this
-                // scope observation, without selecting an input unit.
-                if op.intent == "insert", op.request.parameters["text"] as? String == "" {
-                    _ = try object(op.request.parameters, keys: ["text"])
-                } else {
-                    _ = try NativeKeyboardIntent(
-                        unit: "key_sequence", kind: op.intent, parameters: op.request.parameters, foreground: false)
-                }
-                _ = try access.desktop().keyboardDestination(unit.ref)
-            }
-            try declare(.desktop(op.intent), supported: true)
-        } else if let actuator, actuator.relation == "scrollPage" {
+        if let actuator, actuator.relation == "scrollPage" {
             let facts = try access.objects.nativeActionFacts(binding.node!)
             enabled = facts.enabled
             foreground = facts.foreground

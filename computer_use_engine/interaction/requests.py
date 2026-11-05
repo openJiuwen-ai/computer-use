@@ -59,11 +59,19 @@ class ExecuteAction:
     snapshot: ElementSnapshot | None = None
 
 
-REQUEST_TYPES = INTERFACE_REQUESTS + (FindElement, ExecuteAction)
+@dataclass(frozen=True)
+class ComputerInput:
+    """Explicit global input, with optional points that need only geometric location."""
+
+    intent: Intent
+    points: tuple[object, ...] = ()
+
+
+REQUEST_TYPES = INTERFACE_REQUESTS + (FindElement, ExecuteAction, ComputerInput)
 
 if TYPE_CHECKING:
     from typing import TypeAlias
 
     from .agent.requests import InterfaceRequest
 
-    InteractionRequest: TypeAlias = InterfaceRequest | FindElement | ExecuteAction
+    InteractionRequest: TypeAlias = InterfaceRequest | FindElement | ExecuteAction | ComputerInput

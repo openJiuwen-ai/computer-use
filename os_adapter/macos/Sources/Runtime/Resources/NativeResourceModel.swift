@@ -10,6 +10,7 @@ struct NativeResourceTarget {
     let discovery: Bool
     let visual: Bool
     let windowScope: Bool
+    var globalInput = false
 }
 
 @MainActor struct NativeResourceAccess {

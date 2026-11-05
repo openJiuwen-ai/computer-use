@@ -7,7 +7,7 @@ import AppKit
 @MainActor protocol NativePopupPointerInput {
     func deliver(
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
-        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void) async throws
+        onPosted: () -> Void, onCleanupUnknown: @escaping @MainActor () -> Void) async throws
 }
 
 @MainActor struct NativePopupPointerUnit: NativePopupPointerInput {
@@ -16,7 +16,7 @@ import AppKit
 
     func deliver(
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
-        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void
+        onPosted: () -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
         guard request.kind == .click, request.button == "left", request.count == 1 else {
             throw DriverError("popup point qualification belongs to one primary click", code: .invalidRequest)
@@ -26,6 +26,6 @@ import AppKit
         try await fixed.deliver(
             request, check: check, guardOperation: check, onDispatch: onDispatch, onPosted: onPosted,
             onCleanupUnknown: onCleanupUnknown,
-            delivery: NativeInputAuthorization.globalInputRequested ? .systemPointer : .windowDirected)
+            delivery: .windowDirected)
     }
 }

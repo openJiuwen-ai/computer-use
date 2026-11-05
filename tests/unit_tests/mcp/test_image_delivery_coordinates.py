@@ -6,6 +6,7 @@
 import base64
 import unittest
 from io import BytesIO, StringIO
+from unittest.mock import patch
 
 from computer_use.client.host import (
     set_action_handler,
@@ -25,7 +26,12 @@ from computer_use.protocol.png import PNG, png_size
 from computer_use.session import images as images_state
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
 from computer_use.session.events import observation_completed, register_observation_delivery
-from computer_use.session.observation import lazy_observation
+from computer_use.session.observation import (
+    CapturedTextDocument,
+    lazy_observation,
+    observation_document,
+    observation_screenshot,
+)
 from computer_use_mcp.image_delivery import prepare_image, project_document
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
@@ -91,10 +97,10 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
             setter(None)
         images_state._delivery_required = self.previous_delivery
 
-    def capture(self, size=(4096, 1278), *, screenshot=True, full=False):
+    def capture(self, size=(4096, 1278), *, screenshot=True, full=False, details_document=None):
         facts, document = desktop_document(size, captured=screenshot)
         png = encoded_image(size) if screenshot else None
-        state = lazy_observation(document, png)
+        state = lazy_observation(document, png, details_document=details_document)
 
         def publish():
             self.store.record(dict(desktopRef="desktop:fixture", observation=facts, screenshot=png))
@@ -144,9 +150,10 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text.count("Desktop: full view"), 1)
         return text
 
-    async def test_automatic_delivery_geometry_maps_next_input_and_preserves_sdk_capture(self):
+    async def test_automatic_delivery_binds_a_text_image_pair_and_preserves_source_capture(self):
         facts, document, state = self.capture()
-        original_png = memoryview(state.screenshot).tobytes()
+        source = state.screenshot
+        original_png = memoryview(source).tobytes()
         result = await self.execute("obs = read()\nassert_unseen()")
         text = self.assert_delivery(result)
         self.assertIn('"Display" (0, 0, 2048, 639)', text)
@@ -156,10 +163,54 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         # rather than the failing log's doubled (2060, 500).
         self.assertEqual(self.store.map_parameters("click", dict(x=515, y=125)), dict(x=1030, y=250))
         self.store.check_coordinates(515, 125)
-        self.assertIn("Screenshot: desktop 4096x1278", state.text)
-        self.assertEqual(state.text, document.text)
+        self.assertIn("Screenshot: desktop 2048x639", state.text)
+        self.assertEqual(png_size(state.screenshot), {"width": 2048, "height": 639})
+        self.assertIs(observation_document(state), document)
+        self.assertIs(observation_screenshot(state), source)
+        self.assertIn("Screenshot: desktop 4096x1278", document.text)
         self.assertEqual(facts["windows"][0]["rect"]["x"], 814)
-        self.assertEqual(memoryview(state.screenshot).tobytes(), original_png)
+        self.assertEqual(memoryview(source).tobytes(), original_png)
+
+    async def test_ordinary_string_operations_keep_the_actual_delivered_pixel_space(self):
+        for expression in (
+            "obs.text.splitlines()",
+            "'\\n'.join(obs.text.splitlines())",
+            "f'{obs.text}'",
+            "str(obs.text)",
+        ):
+            with self.subTest(expression=expression):
+                self.deliveries.clear()
+                self.capture()
+                result = await self.execute(f"obs = read()\nprint({expression})")
+                self.assertFalse(result.get("isError"), result)
+                images = [base64.b64decode(block["data"]) for block in result["content"] if block["type"] == "image"]
+                self.assertEqual([png_size(png) for png in images], [{"width": 2048, "height": 639}])
+                text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+                self.assertIn("(407, 75, 400, 300)", text)
+                self.assertNotIn("(814, 150, 800, 600)", text)
+                self.assertNotIn("4096x1278", text)
+                self.assertEqual(self.store.map_parameters("click", {"x": 515, "y": 125}), {"x": 1030, "y": 250})
+
+    async def test_default_desktop_details_share_the_public_image_pixel_space(self):
+        _, document, state = self.capture()
+        result = await self.execute("obs = read()\nprint(obs.read_details().text)")
+        self.assertFalse(result.get("isError"), result)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn("Captured details (same observation)", text)
+        self.assertIn("2048x639", text)
+        self.assertNotIn("4096x1278", text)
+        self.assertIn("(407, 75, 400, 300)", state.read_details().text)
+        self.assertIn("4096x1278", document.text)
+
+    async def test_explicit_native_details_keep_their_screen_space(self):
+        details = CapturedTextDocument("AX bounds in screen points: (814, 150, 800, 600)")
+        _, _, state = self.capture(details_document=details)
+        result = await self.execute("obs = read()\nprint(obs.read_details().text)")
+        self.assertFalse(result.get("isError"), result)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn(details.text, text)
+        self.assertIn("2048x639", state.text)
+        self.assertIn(details.text, state.read_details().text)
 
     async def test_explicit_observation_and_full_text_prints_use_delivery_geometry(self):
         for print_code in ("print(obs)", "print(obs.text)", "print(obs.text[:20])", "print(obs.text[-20:])"):
@@ -174,7 +225,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         _, document, state = self.capture((2301, 933))
         result = await self.execute("obs = read()")
         self.assert_delivery(result, (2048, 830))
-        delivery = prepare_image(state.screenshot)
+        delivery = prepare_image(observation_screenshot(state))
         projected = project_document(document, delivery.coordinates)
         rect = projected.parts[0].values[0]["windows"][0]["rect"]
         self.assertAlmostEqual(rect["x"], 814 * 2048 / 2301)
@@ -215,15 +266,69 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not been returned", result["content"][-1]["text"])
         self.assertEqual(self.store.map_parameters("click", dict(x=515, y=125)), dict(x=1030, y=250))
 
-    async def test_source_file_output_remains_raw_while_model_output_is_projected(self):
-        _, _, state = self.capture()
-        # A text file sink is not a model delivery boundary.
+    async def test_saved_public_text_and_png_describe_the_same_presentation(self):
+        _, document, state = self.capture()
         file = StringIO()
-        self.runtime.task_namespace["file"] = file
-        result = await self.execute("obs = read()\nprint(obs.text, file=file)")
+        png_file = BytesIO()
+        self.runtime.task_namespace.update(file=file, png_file=png_file)
+        result = await self.execute("obs = read()\nprint(obs.text, file=file)\npng_file.write(obs.screenshot)")
         self.assert_delivery(result)
-        self.assertIn("4096x1278", file.getvalue())
-        self.assertIn("4096x1278", state.text)
+        self.assertIn("2048x639", file.getvalue())
+        self.assertIn("2048x639", state.text)
+        self.assertEqual(png_size(png_file.getvalue()), {"width": 2048, "height": 639})
+        self.assertIn("4096x1278", document.text)
+        self.assertEqual(png_size(observation_screenshot(state)), {"width": 4096, "height": 1278})
+
+    async def test_retained_presentation_keeps_its_own_source_after_a_different_resize(self):
+        _, _, first = self.capture()
+        first_source = observation_screenshot(first)
+        await self.execute("old = read()")
+        first_png, first_text = first.screenshot, str(first.text)
+        first_delivery = self.runtime.presentation_images.prepared(first_png)[1]
+        _, _, second = self.capture()
+        with patch("computer_use_mcp.runtime.prepare_image", side_effect=lambda png: prepare_image(png, max_dimension=1024)):
+            await self.execute("new = read()")
+        self.assertEqual(png_size(second.screenshot), {"width": 1024, "height": 319})
+        self.assertIsNot(first_source, observation_screenshot(second))
+        self.assertIs(first.screenshot, first_png)
+        self.assertEqual(str(first.text), first_text)
+        # Both exact public PNG and its explicit bytes conversion re-emit the
+        # original pair; neither aliases the later observation or resizes again.
+        with patch("computer_use_mcp.runtime.prepare_image", side_effect=AssertionError("unexpected re-encoding")):
+            result = await self.execute("print(f'{old.text}')\nprint_image(bytes(old.screenshot))\nprint_image(old.screenshot)")
+        text = self.assert_delivery(result)
+        self.assertNotIn("1024x319", text)
+        self.assertIs(self.runtime.presentation_images.prepared(bytes(first_png))[1], first_delivery)
+        self.assertIs(first_delivery.source, first_source)
+
+    async def test_equal_pixels_from_an_unrelated_buffer_do_not_inherit_presentation_authority(self):
+        _, _, state = self.capture()
+        await self.execute("obs = read()")
+        for copy in (PNG(memoryview(state.screenshot).tobytes()), memoryview(state.screenshot).tobytes()):
+            self.runtime.task_namespace["copy"] = copy
+            result = await self.execute("print_image(copy)", reset_images=True)
+            self.assertFalse(result.get("isError"), result)
+            text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+            self.assertIn("source unknown", text)
+            with self.assertRaisesRegex(ComputerUseError, "not been returned"):
+                self.store.map_parameters("click", {"x": 515, "y": 125})
+        await self.execute("print_image(bytes(obs.screenshot))")
+        self.assertEqual(self.store.map_parameters("click", {"x": 515, "y": 125}), {"x": 1030, "y": 250})
+
+    async def test_mutated_presentation_cannot_reuse_original_capture_authority(self):
+        self.capture()
+        self.runtime.task_namespace["replacement"] = encoded_image((100, 80))
+        await self.execute("obs = read()\nsaved = bytes(obs.screenshot)")
+        result = await self.execute("obs.screenshot[:] = replacement\nprint_image(obs.screenshot)", reset_images=True)
+        self.assertFalse(result.get("isError"), result)
+        images = [block for block in result["content"] if block["type"] == "image"]
+        self.assertEqual([png_size(base64.b64decode(block["data"])) for block in images], [{"width": 100, "height": 80}])
+        self.assertIn("source unknown", images[0]["_meta"]["computer-use"]["caption"])
+        with self.assertRaisesRegex(ComputerUseError, "not been returned"):
+            self.store.map_parameters("click", {"x": 515, "y": 125})
+        # The earlier immutable bytes still denote the exact original view.
+        await self.execute("print_image(saved)")
+        self.assertEqual(self.store.map_parameters("click", {"x": 515, "y": 125}), {"x": 1030, "y": 250})
 
     async def test_explicit_image_before_text_keeps_one_matching_delivery(self):
         self.capture()

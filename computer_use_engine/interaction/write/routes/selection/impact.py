@@ -23,17 +23,19 @@ def requires_global_input(command: UnitCommand) -> bool:
 
 
 def global_input_denied(command: UnitCommand, policy: HostPolicy | None, platform: str | None = None) -> bool:
-    scoped_macos = platform == "macos" and not command.intent.global_input
+    # This selector belongs only to object execution. Explicit Computer input
+    # has a separate primitive branch, never a privilege on an object candidate.
+    scoped_macos = platform == "macos"
     return requires_global_input(command) and (scoped_macos or not (policy is not None and policy.allow_global_input))
 
 
-def global_input_failure(policy: HostPolicy | None, platform: str, intent):
-    if platform == "macos" and not intent.global_input:
+def global_input_failure(policy: HostPolicy | None, platform: str):
+    if platform == "macos":
         return (
             "input_unavailable",
             (
                 "This macOS object operation has no remaining non-global input route. "
-                "Use an explicit Computer input method with the same target if global input is intended. "
+                "Use an explicit Computer input method if global input is intended. "
                 "Check recorded input progress before another action."
             ),
         )

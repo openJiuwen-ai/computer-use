@@ -22,7 +22,7 @@ import ApplicationServices
             let binding = try CheckNativeResourceBoundaryPass.run(resolved, mode: mode, access: access)
             // Arm before any preparation/input. The returned read suffix can
             // consume events from the write-to-observation gap without an RPC.
-            let appChange = mode == "write" ? try access.directory.appChangeBaseline(binding) : nil
+            let appChange = mode == "write" && !resolved.globalInput ? try access.directory.appChangeBaseline(binding) : nil
             let remaining = timeoutMs - Int((ProcessInfo.processInfo.systemUptime - budgetStart) * 1000)
             guard remaining > 0 else { throw RequestDeadlineExceeded() }
             let selection = NativeSelectionBasis(access: access.objects)

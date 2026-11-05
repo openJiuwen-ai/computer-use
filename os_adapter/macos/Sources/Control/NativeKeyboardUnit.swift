@@ -38,12 +38,26 @@ import ApplicationServices
                 try proof.association(context).map { owned in element.map { CFEqual($0, owned.editor) } == true }
                     == true
             } ?? true
-        let deliveryReady = try NativeInputAuthorization.globalInputRequested || NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
+        var localReceiverConfirmed = false
+        let deliveryReady = try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
             let mapping = try NativeWindowUnit(application: application, window: context.window ?? window).mapping()
             if let expected = dispatchExpectedNativeID, mapping.id != expected {
                 throw DriverError("original keyboard native window changed", code: .staleTarget)
             }
-            return BackgroundEvents.keyboardPreparationIsCurrent(background, window: mapping)
+            let keyboardWindow = context.window ?? window
+            let focusedWindow = context.focusedWindowRead?.value.flatMap { value -> AXUIElement? in
+                guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+                return unsafeDowncast(value, to: AXUIElement.self)
+            }
+            localReceiverConfirmed = NativeKeyboardReceiverReadiness.confirmedLocal(.init(
+                windowRoute: context.windowRoute, scopeRoute: context.scopeRoute,
+                concreteFocus: context.focus.map { !CFEqual($0, keyboardWindow) } == true,
+                focusedWindowMatches: focusedWindow.map { CFEqual($0, keyboardWindow) } == true,
+                focusOwnerMatches: context.rawFocusOwner.map { CFEqual($0, keyboardWindow) } == true,
+                locallyFocused: context.rawLocalFocus,
+                actualPID: context.focus.flatMap(BackgroundEvents.accessibilityProcessID),
+                presenterPID: application.processIdentifier, nativeWindowKnown: mapping.id != 0))
+            return localReceiverConfirmed || BackgroundEvents.keyboardPreparationIsCurrent(background, window: mapping)
         }
         return State(
             windowRoute: context.windowRoute == "yes" && !deliveryReady ? "no" : context.windowRoute,
@@ -55,14 +69,14 @@ import ApplicationServices
             window: context.window, surface: context.surface, scopeRoute: context.scopeRoute,
             reportedFocus: context.reportedFocus, focusReportAbsent: ownedEditor && context.focusReportAbsent,
             focusedWindowRead: context.focusedWindowRead, focusedWindowStatus: context.focusedWindowStatus,
-            rawFocus: context.rawFocus, rawFocusOwner: context.rawFocusOwner, rawLocalFocus: context.rawLocalFocus)
+            rawFocus: context.rawFocus, rawFocusOwner: context.rawFocusOwner, rawLocalFocus: context.rawLocalFocus,
+            localReceiverConfirmed: localReceiverConfirmed)
     }
 
     func textProposal(
         kind: NativeKeyboardIntent.Kind, text: String?, state: State,
         textPolicy: NativeKeyboardInterpreterEvidence.Policy = .existing
     ) throws -> NativeKeyboardDeliveryProposal? {
-        guard !NativeInputAuthorization.globalInputRequested else { return nil }
         guard NativeKeyboardInterpreterEvidence.needsTextTransport(kind: kind.rawValue, text: text) else { return nil }
         let editor =
             element.flatMap { CFEqual($0, window) ? nil : $0 } ?? state.relatedEditor ?? state.focus ?? state.rawFocus
@@ -71,32 +85,10 @@ import ApplicationServices
         return .init(interpreter: NativeKeyboardInterpreterEvidence.applying(textPolicy, to: observation.interpreter))
     }
 
-    /// A same-App but other-window focus is not an already-foreground scope.
-    private func requiresForegroundSelection(state: State) -> Bool {
-        var windowState = NativeKeyboardTransportPolicy.Window.unavailable
-        let expected = state.window ?? window
-        let expectedID = BackgroundEvents.nativeWindowID(expected)
-        if let read = state.focusedWindowRead, case .value(let raw) = read, CFGetTypeID(raw) == AXUIElementGetTypeID() {
-            let focused = unsafeDowncast(raw, to: AXUIElement.self)
-            if CFEqual(focused, expected) {
-                windowState = .target
-            } else if let original = expectedID, let actual = BackgroundEvents.nativeWindowID(focused) {
-                windowState = original == actual ? .target : .other
-            }
-        }
-        if windowState == .target, let id = expectedID, let row = WindowServerInfo.window(id),
-            (row[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == false
-        {
-            windowState = .hidden
-        }
-        return !background.isForeground || windowState == .other || windowState == .hidden
-    }
-
     func textTransportSupported(
         kind: NativeKeyboardIntent.Kind, text: String?, state: State,
         textPolicy: NativeKeyboardInterpreterEvidence.Policy
     ) throws -> Bool {
-        if NativeInputAuthorization.globalInputRequested { return true }
         let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
         if proposal?.unavailable == true || proposal?.processTextUnavailable == true { return false }
         // Focus preparation can reveal a different editing capability or event
@@ -120,34 +112,13 @@ import ApplicationServices
         {
             return true
         }
-        guard NativeInputAuthorization.globalInputRequested else { return false }
-        return requiresForegroundSelection(state: try sample())
+        return false
     }
 
     func requiresCellEditorActivation() throws -> Bool {
         guard cellEditorState != nil, cellEditor == nil, let element else { return false }
         return try NativeCellEditorHandoff.requiresActivation(
             element: element, window: window, pid: application.processIdentifier)
-    }
-
-    /// Bounded queries shared by this captured plan within one native execute.
-    /// A later public prepare/dispatch RPC recaptures under the original operation deadline.
-    func confirmSelectedDelivery(_ delivery: NativeKeyboardDelivery, check: () throws -> Void) async throws {
-        guard case .scopedForegroundHID(let scoped) = delivery else { return }
-        do {
-            try await scoped.readinessGate.confirm(
-                check: RequestDiagnostics.checkCancellation,
-                sample: {
-                    try check()
-                    return try NativeKeyboardReadinessGate.queryThenReceiver(
-                        mechanism: scoped.mechanismEvidence, receiver: { scoped.receiverState(try self.sample()) }
-                    ) { scoped.windowEvidence(state: $0) }
-                })
-        } catch NativeKeyboardReadinessGate.Failure.unavailable(let reason) {
-            throw DriverError("scoped keyboard window confirmation unavailable: " + reason, code: .inputUnavailable)
-        } catch NativeKeyboardReadinessGate.Failure.conflicting(let reason) {
-            throw DriverError(reason, code: .staleTarget)
-        }
     }
 
     func selectedDelivery(
@@ -161,18 +132,6 @@ import ApplicationServices
         onSelection: (NativeKeyboardBoundaryRouteFacts) -> Void
     ) throws -> NativeKeyboardDelivery {
         let state = try state ?? sample()
-        if NativeInputAuthorization.globalInputRequested {
-            try NativeInputAuthorization.requireGlobalInput("targeted global keyboard")
-            guard !requiresForegroundSelection(state: state),
-                let process = NativeProcessIdentity.read(application.processIdentifier)
-            else { throw NativePreparationUnavailable(description: "the original keyboard window needs foreground preparation") }
-            let keyboardWindow = state.window ?? window
-            let editor = element ?? state.relatedEditor ?? state.focus ?? state.rawFocus ?? keyboardWindow
-            return .scopedForegroundHID(.init(
-                application: application, window: keyboardWindow, surface: window,
-                mapping: try NativeWindowUnit(application: application, window: keyboardWindow).mapping(),
-                editor: editor, process: process))
-        }
         let proposal = try textProposal(kind: request.kind, text: request.value, state: state, textPolicy: textPolicy)
         if let proposal {
             if proposal.unavailable {
@@ -182,7 +141,7 @@ import ApplicationServices
             }
             if proposal.processTextUnavailable {
                 throw NativeRouteUnavailable(description:
-                    "local-Web process text isolation is unavailable; use an explicit Computer input method with the same target")
+                    "local-Web process text isolation is unavailable; use explicit Computer input for the current desktop recipient")
             }
         }
 
@@ -240,10 +199,6 @@ import ApplicationServices
             {
                 conditions.append(("foreground", "unknown"))
             }
-        }
-        if includeDelivery, NativeInputAuthorization.globalInputRequested,
-            requiresForegroundSelection(state: state) {
-            conditions.append(("foreground", "unknown"))
         }
         if includeDelivery,
             let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
@@ -314,21 +269,11 @@ import ApplicationServices
         }
         if proposal?.processTextUnavailable == true {
             throw NativeRouteUnavailable(description:
-                "local-Web process text isolation is unavailable; use an explicit Computer input method with the same target")
-        }
-        let usesGlobal = NativeInputAuthorization.globalInputRequested
-        if usesGlobal {
-            try NativeInputAuthorization.requireGlobalInput("scoped foreground keyboard")
-        }
-        if usesGlobal, requiresForegroundSelection(state: try initial ?? sample()), !foreground {
-            throw NativePreparationUnavailable(
-                description: """
-                    the explicit global keyboard target needs foreground preparation; no requested input was sent
-                    """)
+                "local-Web process text isolation is unavailable; use explicit Computer input for the current desktop recipient")
         }
         if try readiness(
             kind: request.kind, key: request.key, text: request.value, replacement: replacement, textPolicy: textPolicy
-        ).ready, !usesGlobal {
+        ).ready {
             return
         }
         let mapping = try NativeWindowUnit(application: application, window: keyboardWindow).mapping()
@@ -339,7 +284,7 @@ import ApplicationServices
             try await assist.prepare(
                 background, window: mapping.id, onAction: { onPreparation("foreground window activation") },
                 onCleanupUnknown: onCleanupUnknown)
-        } else if !usesGlobal {
+        } else {
             do {
                 try await NativeFocusPipeline.prepare(
                     background, window: mapping, nativeWindow: keyboardWindow, onPreparation: onPreparation,
@@ -353,13 +298,6 @@ import ApplicationServices
             }
         }
         try check()
-        if usesGlobal {
-            let delivery = try selectedDelivery(request, textPolicy: textPolicy)
-            try await confirmSelectedDelivery(delivery, check: check)
-            if case .scopedForegroundHID(let scoped) = delivery {
-                try NativeScopedKeyboardPreparation.prepare(scoped, check: check, onPreparation: onPreparation)
-            }
-        }
         let receiver = NativeReceiverPreparation(
             application: application, window: window, element: element, receiverRelation: receiverRelation,
             cellEditor: cellEditor)
@@ -390,17 +328,16 @@ import ApplicationServices
     func deliver(
         _ request: NativeKeyboardIntent, delivery: NativeKeyboardDelivery,
         replacement: NativeReplacementUnit.Selection? = nil, prepared: Bool = false,
-        check: @escaping @MainActor () throws -> Void, prepareDispatch: @escaping @MainActor () throws -> Void = {},
+        check: @escaping @MainActor () throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
-        onPreparation: (String) -> Void, onClipboardRestore: (PasteboardTransaction.RestoreResult) -> Void,
-        onCleanupUnknown: @escaping () -> Void
+        onPreparation: @escaping @MainActor (String) -> Void,
+        onClipboardRestore: (PasteboardTransaction.RestoreResult) -> Void,
+        onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws -> Bool {
         try check()
         try checkEnabled()
         try delivery.requireAdmission()
-        try await NativePhysicalInput.wait(delivery.isGlobal ? .globalHID : nil, check: check)
-        var initial = try sample()
-        if case .scopedForegroundHID(let scoped) = delivery { initial = scoped.receiverState(initial) }
+        let initial = try sample()
         guard
             try readiness(
                 kind: request.kind, key: request.key, text: request.value, replacement: replacement, prepared: prepared,
@@ -417,12 +354,9 @@ import ApplicationServices
         // proved that exact element was the original focused cell.
         let continuity = NativeReceiverContinuity(
             element: cellEditor == nil ? element : nil, window: window, state: initial)
-        let readinessGate: NativeKeyboardReadinessGate
-        if case .scopedForegroundHID(let scoped) = delivery {
-            readinessGate = scoped.readinessGate
-        } else {
-            readinessGate = NativeKeyboardReadinessGate(waits: 0)
-        }
+        let target = background
+        let process = target.capturedProcessIdentity
+        let recipient = delivery.processRecipient
         func validateState(_ current: inout State) throws {
             guard current.window.map({ CFEqual($0, keyboardWindow) }) == true else {
                 throw DriverError(
@@ -434,59 +368,85 @@ import ApplicationServices
             // proof, not an observation hint, authorizes the retained owner.
             if let ownedEditor { current.relatedEditor = ownedEditor.owner }
             try continuity?.validate(current, ownedEditor: ownedEditor)
-            guard
-                try self.receiverReadiness(request, replacement: replacement, prepared: prepared, state: current).ready
+            guard try self.receiverReadiness(
+                request, replacement: replacement, prepared: prepared, state: current).ready
             else {
                 throw DriverError(
                     "keyboard unit readiness changed; remaining key events were not sent", code: .inputUnavailable)
             }
         }
         func validateReceiver() async throws {
-            if case .scopedForegroundHID(let scoped) = delivery {
-                do {
-                    try await readinessGate.confirm(
-                        check: RequestDiagnostics.checkCancellation,
-                        sample: {
-                            try check()
-                            try self.checkEnabled()
-                            try prepareDispatch()
-                            return try NativeKeyboardReadinessGate.queryThenReceiver(
-                                mechanism: scoped.mechanismEvidence,
-                                receiver: { scoped.receiverState(try self.sample()) }
-                            ) { current in
-                                let evidence = scoped.windowEvidence(state: current)
-                                if case .ready = evidence {
-                                    try validateState(&current)
-                                    return try scoped.finalReceiverEvidence(current)
-                                }
-                                return evidence
-                            }
-                        })
-                } catch NativeKeyboardReadinessGate.Failure.unavailable(let reason) {
-                    throw DriverError(
-                        "scoped keyboard window confirmation unavailable: " + reason + "; remaining input was not sent",
-                        code: .inputUnavailable)
-                } catch NativeKeyboardReadinessGate.Failure.conflicting(let reason) {
-                    throw DriverError(reason + "; remaining input was not sent", code: .staleTarget)
-                }
-            } else {
+            try check()
+            try self.checkEnabled()
+            var current = try self.sample()
+            try validateState(&current)
+        }
+        func handoffBeforeFirstKeyDown() async throws {
+            // Preparation can activate an application after its native step
+            // returned. The operation still owns that excursion. Return before
+            // the first requested down, with the already fixed local receiver;
+            // neither a new field nor a replacement selection is chosen here.
+            guard initial.localReceiverConfirmed, let originalFocus = initial.focus,
+                let recipient, recipient.pid == application.processIdentifier,
+                recipient.presenter == application.processIdentifier, recipient.remoteElement == nil,
+                recipient.remoteRoute == nil, let process,
+                let responsibility = NativeForegroundResponsibility.current,
+                let original = responsibility.original, original.pid != process.pid
+            else { return }
+            let ownership = responsibility.state(target: process)
+            guard responsibility.hasForegroundObligation, !responsibility.retainsForegroundForInput,
+                !ownership.externalActivation,
+                ownership.foregroundPID == process.pid, responsibility.permitsForegroundPreparation()
+            else { return }
+            func checkOriginal() throws {
                 try check()
                 try self.checkEnabled()
-                var current = try self.sample()
-                try validateState(&current)
+                guard NativeProcessIdentity.read(application.processIdentifier) == process else {
+                    throw DriverError("keyboard process changed before foreground return", code: .staleTarget)
+                }
+                var fresh = try self.sample()
+                try validateState(&fresh)
+                let mapping = try NativeWindowUnit(application: application, window: keyboardWindow).mapping()
+                guard fresh.localReceiverConfirmed,
+                    fresh.focus.map({ CFEqual($0, originalFocus) }) == true,
+                    mapping.pid == recipient.pid, mapping.id == recipient.window
+                else {
+                    throw DriverError("keyboard receiver changed before foreground return", code: .staleTarget)
+                }
+                try recipient.validateFocus()
             }
+            try checkOriginal()
+            diagnose(["kind": "keyboard_foreground_handoff", "phase": "beforeFirstKeyDown",
+                      "presenterPID": application.processIdentifier, "recipientPID": recipient.pid,
+                      "window": recipient.window as Any? ?? NSNull(), "requestedKeyDownAttempted": false])
+            try await NativeInputActivity.$stage.withValue(.preparation) {
+                try await NativeForegroundRestorationScope.perform(
+                    target: target, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown
+                ) { try checkOriginal() }
+            }
+            // Fresh first-responder facts survive expected AX deactivation.
+            // Do not send another activity notification or renew a cache lease:
+            // either would undo the return and can erase a previous selection.
+            try checkOriginal()
+            let after = responsibility.state(target: process)
+            diagnose(["kind": "keyboard_foreground_handoff", "phase": "afterReturn",
+                      "recipientPID": recipient.pid, "window": recipient.window as Any? ?? NSNull(),
+                      "foregroundPID": after.foregroundPID as Any? ?? NSNull(),
+                      "externalActivation": after.externalActivation, "requestedKeyDownAttempted": false,
+                      "replayedKeyEvents": 0])
         }
         switch request.kind {
         case .focus: throw DriverError("focus is preparation, not keyboard delivery", code: .invalidRequest)
         case .key:
             try await Input.preparedKey(
                 request.value!, delivery: delivery, validate: validateReceiver, onDispatch: onDispatch,
-                onPosted: onPosted, onCleanupUnknown: onCleanupUnknown)
+                onPosted: onPosted, onCleanupUnknown: onCleanupUnknown,
+                beforeFirstKeyDown: handoffBeforeFirstKeyDown)
         case .insert:
             try await Input.preparedText(
                 request.value!, delivery: delivery, applicationPID: application.processIdentifier,
                 validate: validateReceiver, onDispatch: onDispatch, onPosted: onPosted,
-                onCleanupUnknown: onCleanupUnknown)
+                onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: handoffBeforeFirstKeyDown)
         case .replace:
             guard let element, let replacement else {
                 throw DriverError("replacement requires an addressed editing/selection contract", code: .invalidRequest)
@@ -517,7 +477,7 @@ import ApplicationServices
                     onPosted: {
                         sent = true
                         onPosted()
-                    }, onCleanupUnknown: onCleanupUnknown)
+                    }, onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: handoffBeforeFirstKeyDown)
             } catch {
                 onClipboardRestore(await transaction.finish(afterInput: sent))
                 throw error

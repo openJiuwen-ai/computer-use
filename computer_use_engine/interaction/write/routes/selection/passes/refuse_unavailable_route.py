@@ -32,7 +32,7 @@ def refuse_unavailable_route(options: RouteOptions) -> NoReturn:
         )
         for primitive in candidates
     ):
-        code, detail = global_input_failure(request.policy, facts.platform, intent)
+        code, detail = global_input_failure(request.policy, facts.platform)
         refuse(code, facts, detail)
     if any(
         stage_admission(primitive).preparation

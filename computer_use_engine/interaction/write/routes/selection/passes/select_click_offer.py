@@ -59,7 +59,7 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
         if reason is None and global_input_denied(command, request.policy, request.facts.platform):
             reason = (
                 "explicitGlobalInputRequired"
-                if facts.platform == "macos" and not intent.global_input
+                if facts.platform == "macos"
                 else "globalInputPermissionRequired"
             )
         if reason is not None:
@@ -106,7 +106,7 @@ def execute(value: CandidateSet, control: Control) -> UnitCommand:
     if not choices:
         record_click_selection(control, request, tuple(exclusions), None)
         if any(item.reason in ("globalInputPermissionRequired", "explicitGlobalInputRequired") for item in exclusions):
-            code, detail = global_input_failure(request.policy, facts.platform, intent)
+            code, detail = global_input_failure(request.policy, facts.platform)
             refuse(code, facts, detail)
         detail = (
             facts.unavailable_reason or "No click delivery can satisfy the original target and requested semantics."

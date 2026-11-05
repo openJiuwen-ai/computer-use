@@ -25,7 +25,7 @@ import ApplicationServices
             timeoutMs: 5000, writable: true, intent: intent, target: binding, release: {}, cancelActive: {})
         defer { _ = op.finish() }
         let query = NativeInputQueryScope(
-            binding: (binding, [], "field"), desktop: false,
+            binding: (binding, [], "field"),
             selection: NativeSelectionBasis(access: state.applications), scope: "window")
         let declarations = NativePrimitiveDeclarations(
             previous: [], op: op, query: query, within: [], actuator: nil, receiver: nil, basis: [])

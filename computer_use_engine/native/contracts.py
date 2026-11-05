@@ -135,7 +135,22 @@ class ApplicationBinding:
         return value
 
 
-OperationTarget = Binding | ApplicationBinding
+@dataclass(frozen=True)
+class GlobalTarget:
+    """A connection's global input sink, independent of observed UI objects."""
+
+    session: str
+
+    def same_target(self, other: object) -> bool:
+        return self == other
+
+    def canonical(self, value):
+        if value != self:
+            raise ValueError("Native begin changed the global input session")
+        return value
+
+
+OperationTarget = Binding | ApplicationBinding | GlobalTarget
 
 
 @dataclass(frozen=True)

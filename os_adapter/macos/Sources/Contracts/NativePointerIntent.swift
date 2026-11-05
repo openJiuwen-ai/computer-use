@@ -16,7 +16,7 @@ struct NativePointerIntent {
     let direction: String?
     let pages: Double?
 
-    init(unit: String, kind: String, parameters: Any?, foreground: Bool, element: Bool = false) throws {
+    init(unit: String, kind: String, parameters: Any?, foreground: Bool, element: Bool = false, screen: Bool = false) throws {
         guard let kind = Kind(rawValue: kind), ["prepare_receiver", "pointer_sequence"].contains(unit),
             !foreground || unit == "prepare_receiver"
         else { throw DriverError("invalid pointer unit", code: .invalidRequest) }
@@ -69,7 +69,7 @@ struct NativePointerIntent {
         }
         func point(_ x: String, _ y: String) throws -> CGPoint {
             let x = try number(p[x], label: x), y = try number(p[y], label: y)
-            guard x >= 0, y >= 0 else {
+            guard screen || x >= 0 && y >= 0 else {
                 throw DriverError("pointer coordinates must be nonnegative", code: .invalidRequest)
             }
             return CGPoint(x: x, y: y)

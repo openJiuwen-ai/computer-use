@@ -11,6 +11,7 @@ from .contracts import (
     Binding,
     Cleanup,
     Facts,
+    GlobalTarget,
     HostPolicy,
     Intent,
     OpenedOperation,
@@ -151,6 +152,16 @@ class NativePort(Protocol):
 
     async def execute(self, operation: str, step: int, command: UnitCommand, timeout_ms: int) -> StepResult:
         pass
+
+    async def locate_point(
+        self, target: Binding, point: tuple[float, float] | None, timeout_ms: int
+    ) -> tuple[float, float]:
+        """Resolve original object/image geometry without preparing input."""
+
+    async def execute_global(
+        self, operation: str, target: GlobalTarget, intent: Intent, timeout_ms: int
+    ) -> StepResult:
+        """Dispatch the session's explicit global primitive without object selection."""
 
     async def finish(self, operation: str) -> Cleanup:
         pass

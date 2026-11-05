@@ -56,11 +56,17 @@ def test_denied_global_permission_preserves_addressed_route_and_activation(prepa
 def test_required_global_pointer_reports_permission_without_selecting_a_wrong_semantic_route():
     native = click_route("object_action")
     physical = click_route("desktop_pointer", profile="physicalRequired")
-    with pytest.raises(ComputerUseError) as caught:
-        choose(facts(native, physical), replace(CLICK, global_input=True), HostPolicy(False), Attempts())
-    assert caught.value.code == "permission_required" and caught.value.effect == "none"
-    assert not hasattr(caught.value, "next")
-    assert choose(facts(native, physical), replace(CLICK, global_input=True), HostPolicy(True), Attempts()).primitive == physical
+    for platform in ("windows", "linux"):
+        current = facts(native, physical, platform=platform)
+        with pytest.raises(ComputerUseError) as caught:
+            choose(current, replace(CLICK, global_input=True), HostPolicy(False), Attempts())
+        assert caught.value.code == "permission_required" and caught.value.effect == "none"
+        assert not hasattr(caught.value, "next")
+        assert choose(current, replace(CLICK, global_input=True), HostPolicy(True), Attempts()).primitive == physical
+    for allowed in (False, True):
+        with pytest.raises(ComputerUseError) as caught:
+            choose(facts(native, physical), replace(CLICK, global_input=True), HostPolicy(allowed), Attempts())
+        assert caught.value.code == "input_unavailable"
 
 
 def test_known_global_keyboard_does_not_hide_independent_object_edit():
@@ -78,10 +84,8 @@ def test_known_global_keyboard_does_not_hide_independent_object_edit():
         choose(facts(keyboard), request, HostPolicy(False), Attempts())
     assert caught.value.code == "input_unavailable"
     explicit = replace(request, global_input=True)
-    assert choose(current, explicit, HostPolicy(), Attempts()).primitive == keyboard
-    with pytest.raises(ComputerUseError) as denied:
-        choose(current, explicit, HostPolicy(False), Attempts())
-    assert denied.value.code == "permission_required"
+    assert choose(current, explicit, HostPolicy(), Attempts()).primitive == value
+    assert choose(current, explicit, HostPolicy(False), Attempts()).primitive == value
     directed = replace(keyboard, global_input=Knowledge.NO)
     assert choose(facts(directed), request, HostPolicy(), Attempts()).primitive == directed
 

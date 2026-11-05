@@ -5,7 +5,6 @@ import ApplicationServices
 
 struct NativeInputQueryScope {
     let binding: (wire: [String: Any], blocked: [String], node: String?)
-    let desktop: Bool
     let selection: NativeSelectionBasis
     let scope: String
 }

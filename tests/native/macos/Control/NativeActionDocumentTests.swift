@@ -241,7 +241,7 @@ import ApplicationServices
             timeoutMs: 5000, writable: true, intent: intent, target: probe.binding, release: {}, cancelActive: {})
         defer { _ = op.finish() }
         let query = NativeInputQueryScope(
-            binding: (probe.binding, [], "original"), desktop: false,
+            binding: (probe.binding, [], "original"),
             selection: NativeSelectionBasis(access: probe.state.applications), scope: "window")
         func declarations(_ previous: [NativePrimitiveContract], within: [String] = []) -> NativePrimitiveDeclarations {
             NativePrimitiveDeclarations(
@@ -468,8 +468,7 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
             }
         }
         let boundary = NativeUnitBoundary(
-            checkConditions: boundaryCheck, checkSelection: {}, markDispatchInFlight: {}, checkKeyboardSelection: {},
-            markPreparedKeyboardDispatchInFlight: {},
+            checkConditions: boundaryCheck, checkSelection: {}, markDispatchInFlight: {},
             beforeDispatch: {
                 try self.boundaryCheck()
                 op.recordInputDispatch()
@@ -626,7 +625,6 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
     func receiverRelation(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeReceiverRelation? { nil }
-    func desktopUnit(_ binding: [String: Any]) throws -> NativeDesktopUnit { preconditionFailure("unselected") }
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeKeyboardUnit { preconditionFailure("unselected") }
@@ -696,7 +694,7 @@ extension DocumentProbe: NativeQueryObjectAccess, NativeContractAccess {
             release: {}, cancelActive: {})
         defer { _ = op.finish() }
         let query = NativeInputQueryScope(
-            binding: (binding, [], "original"), desktop: false,
+            binding: (binding, [], "original"),
             selection: NativeSelectionBasis(access: state.applications), scope: "window")
         let plan = NativeInputContextPlan(
             query: query, operation: op, within: [], actuator: nil, receiver: nil, basis: [])

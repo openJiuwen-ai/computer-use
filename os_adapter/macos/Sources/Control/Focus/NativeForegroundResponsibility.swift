@@ -32,6 +32,7 @@ import ApplicationServices
     private var ownershipLost = false
     private var restored = false
     private var lastRestoration: NativeForegroundRestorationScope.Outcome?
+    private var candidateIdentity: String?
     private(set) var retainsForegroundForInput = false
 
     init(
@@ -110,8 +111,19 @@ import ApplicationServices
 
     /// A candidate's dependency ends with that candidate; its outstanding
     /// foreground responsibility remains owned by the whole operation.
-    func beginCandidate() { retainsForegroundForInput = false }
+    func beginCandidate(_ identity: String? = nil) {
+        // Receiver preparation and requested dispatch are separate RPCs for
+        // the same primitive. Its declared dependency survives that boundary.
+        // An unaddressed step or a different candidate starts a new dependency.
+        if identity == nil || identity != candidateIdentity {
+            retainsForegroundForInput = false
+            candidateIdentity = identity
+        }
+    }
     func requireForegroundForCandidate() { retainsForegroundForInput = true }
+    /// Only addressed input with a fixed recipient may discharge
+    /// its preparation-only foreground dependency before requested input.
+    func releaseForegroundForAddressedInput() { retainsForegroundForInput = false }
 
     func recordActivation(_ identity: NativeProcessIdentity) {
         guard foregroundObligation, identity != original, !targets.contains(identity) else { return }

@@ -29,6 +29,7 @@ from computer_use.native.contracts import (
     CurrentReceiverEvidence,
     Dispatch,
     Facts,
+    GlobalTarget,
     HostPolicy,
     InputEffect,
     InputContext,
@@ -79,12 +80,16 @@ def encode_fields(value, mapping):
 
 
 def decode_binding(value):
+    if value.get("global") is True:
+        return GlobalTarget(value["session"])
     if "application" in value:
         return ApplicationBinding(value["session"], value["application"])
     return Binding(**{name: value[wire] for name, wire in _BINDING.items()})
 
 
 def encode_target(target):
+    if isinstance(target, GlobalTarget):
+        return {"session": target.session, "global": True}
     return (
         dict(session=target.session, application=target.application)
         if isinstance(target, ApplicationBinding)
@@ -165,6 +170,16 @@ def decode_native_impact(value):
     )
 
 
+def decode_step_result(value):
+    return StepResult(
+        decode_binding(value["target"]), Dispatch(value["dispatch"]), value["detail"],
+        tuple(value["preparation"]), Confirmation(value["confirmation"]), Cleanup(value["cleanup"]),
+        value["errorCode"], value["retryReason"], value["context"], value.get("application"),
+        decode_click_receipt(value.get("click")), decode_native_impact(value.get("impact")),
+        value.get("appChangeInputBaseline"),
+    )
+
+
 class ConnectionPort:
     def __init__(self, connection, policy: HostPolicy):
         if connection.protocol_version != 6:
@@ -195,11 +210,11 @@ class ConnectionPort:
 
     async def connect(self, timeout_ms):
         hello = await self.connection.connect(timeout_ms)
-        if "nativeDirectory" not in hello["capabilities"]:
-            raise RuntimeError("This driver does not provide the native discovery contract")
         return Binding(hello["session"], None, None, None)
 
     async def directory(self, operation, target, query, timeout_ms):
+        if "nativeDirectory" not in self.capabilities:
+            raise RuntimeError("This driver does not provide the native discovery contract")
         self._check(operation)
         result = await self.connection.request(
             "inspect",
@@ -242,7 +257,7 @@ class ConnectionPort:
         self.calls.check_begin(intent["kind"], mode, target)
         original = intent_key(intent)
         version = None
-        if mode == "write" and intent["kind"] == "click":
+        if mode == "write" and intent["kind"] == "click" and not isinstance(target, GlobalTarget):
             version = next(
                 (
                     v
@@ -264,6 +279,37 @@ class ConnectionPort:
         return OpenedOperation(
             value["operation"], decode_binding(value["target"]), version, value.get("appChangeBaseline")
         )
+
+    async def locate_point(self, target, point, timeout_ms):
+        value = await self.connection.request(
+            "locatePoint",
+            {
+                "target": encode_fields(target, _BINDING),
+                "point": None if point is None else {"x": point[0], "y": point[1]},
+            },
+            {"timeoutMs": timeout_ms},
+        )
+        return value["point"]["x"], value["point"]["y"]
+
+    async def execute_global(self, operation, target, intent, timeout_ms):
+        if self._check(operation) != intent_key(self._intent_payload(intent)):
+            raise local_failure("The global input intent is already bound", "invalid_request", "execute")
+        value = await self.connection.request(
+            "execute",
+            {
+                "operation": operation,
+                "step": 1,
+                "command": {
+                    "kind": "global_input", "primitiveId": "global",
+                    "target": encode_target(target), "foreground": False,
+                },
+            },
+            {"timeoutMs": timeout_ms},
+        )
+        if decode_binding(value["target"]) != target or "click" in value:
+            self.calls.retired = True
+            raise ValueError("Native global input changed its session or added an object click contract")
+        return decode_step_result(value)
 
     async def inspect(
         self,
@@ -918,21 +964,7 @@ class ConnectionPort:
             if matches_transport:
                 self.calls.retired = True
                 raise ValueError("Native selection receipt changed its negotiated transport")
-        return StepResult(
-            decode_binding(value["target"]),
-            Dispatch(value["dispatch"]),
-            value["detail"],
-            tuple(value["preparation"]),
-            Confirmation(value["confirmation"]),
-            Cleanup(value["cleanup"]),
-            value["errorCode"],
-            value["retryReason"],
-            value["context"],
-            value.get("application"),
-            decode_click_receipt(value.get("click")),
-            decode_native_impact(value.get("impact")),
-            value.get("appChangeInputBaseline"),
-        )
+        return decode_step_result(value)
 
     async def finish(self, operation):
         self._check(operation)

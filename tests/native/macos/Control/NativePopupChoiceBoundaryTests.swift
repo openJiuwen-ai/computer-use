@@ -7,16 +7,15 @@ import ApplicationServices
 /// facts and the OS input adapter substituted. No desktop input is posted.
 @main struct NativePopupChoiceBoundaryTests {
     @MainActor static func main() async throws {
-        let denied = PopupChoiceProbe()
-        let deniedResult = try await NativeInputAuthorization.$globalInputRequested.withValue(true) {
-            try await denied.click()
+        // An ambient global authorization cannot change an object route.
+        // This popup uses addressed input even while global input is denied.
+        let directed = PopupChoiceProbe()
+        let directedResult = try await NativeInputAuthorization.$globalInputRequested.withValue(true) {
+            try await directed.click()
         }
-        precondition(deniedResult["dispatch"] as? String == "notDispatched")
-        precondition(deniedResult["errorCode"] as? String == "permission_required", "\(deniedResult)")
-        precondition(denied.mode == "Auto" && denied.events.isEmpty && denied.presses == 0)
-        precondition(deniedResult["retryReason"] is NSNull)
-        // The same denied global authority must leave an independent semantic
-        // action available. Its fake provider records ordinary AX consumption.
+        precondition(directedResult["dispatch"] as? String == "dispatched")
+        precondition(directed.mode == "Manual" && directed.presses == 0)
+        // Independent semantic actions also remain available without global authority.
         let addressed = PopupChoiceProbe()
         addressed.scopes.currentOwner = addressed.nodes["P"]!
         addressed.scopes.ids["E"] = 284
@@ -460,7 +459,6 @@ import ApplicationServices
     func receiverRelation(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeReceiverRelation? { preconditionFailure("unselected unit") }
-    func desktopUnit(_ binding: [String: Any]) throws -> NativeDesktopUnit { preconditionFailure("unselected unit") }
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeKeyboardUnit { preconditionFailure("unselected unit") }
@@ -478,7 +476,7 @@ import ApplicationServices
     }
     func deliver(
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
-        onPosted: () -> Void, onCleanupUnknown: @escaping () -> Void
+        onPosted: () -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
         if probe.failInFlight {
             try check()
@@ -563,7 +561,7 @@ import ApplicationServices
         return (
             op,
             .init(
-                binding: (binding, [], "E"), desktop: false,
+                binding: (binding, [], "E"),
                 selection: NativeSelectionBasis(access: state.applications), scope: "s")
         )
     }
@@ -583,7 +581,7 @@ import ApplicationServices
         declarations.declareClick(
             .action("AXPress", nil),
             offer: NativePopupClickPolicy.actionOffer(original, requiresPointer: required && !legacy))
-        declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(noHit ? nil : proof, delivery: NativeInputAuthorization.globalInputRequested ? .systemPointer : .windowDirected))
+        declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(noHit ? nil : proof))
         return ["primitives": declarations.primitives]
     }
     func click(
@@ -597,7 +595,7 @@ import ApplicationServices
         let contracts = PopupChoiceContracts(state.applications)
         var offer =
             qualified
-            ? NativePopupClickPolicy.pointerOffer(proof, delivery: NativeInputAuthorization.globalInputRequested ? .systemPointer : .windowDirected)
+            ? NativePopupClickPolicy.pointerOffer(proof)
             : NativeClickContract(
                 routeFamily: "macos.axAction.AXPress", delivery: .objectAction, admission: .ready, reason: nil,
                 preparationOptions: [])
@@ -608,7 +606,7 @@ import ApplicationServices
         ]
         let op = NativeOperation(
             timeoutMs: 5000, writable: true,
-            intent: try NativeIntent(["kind": intent, "parameters": parameters, "globalInput": NativeInputAuthorization.globalInputRequested], mode: "write"), target: binding,
+            intent: try NativeIntent(["kind": intent, "parameters": parameters], mode: "write"), target: binding,
             clickContract: intent == "click" ? "v2" : nil, release: {}, cancelActive: {})
         defer { _ = op.finish() }
         let access = NativeControlAccess(

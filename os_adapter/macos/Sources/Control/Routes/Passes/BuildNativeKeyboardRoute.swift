@@ -99,24 +99,10 @@ import ApplicationServices
                     try checkBoundary()
                 }
             }
-            if case .scopedForegroundHID(let scoped) = delivery {
-                try await unit.confirmSelectedDelivery(delivery, check: checkBoundary)
-                try NativeInputActivity.$stage.withValue(.preparation) {
-                    try NativeScopedKeyboardPreparation.prepare(
-                        scoped, check: checkBoundary, onPreparation: receipt.recordPreparation)
-                }
-            }
             let alreadySatisfied = try await dispatchUnit.deliver(
                 keyboard, delivery: delivery, replacement: replacement, prepared: op.preparationConfirmed(id),
                 check: dispatchCheck,
-                prepareDispatch: { if delivery.isScopedHID { try context.boundary.checkKeyboardSelection() } },
-                onDispatch: {
-                    if delivery.isScopedHID {
-                        try context.boundary.markPreparedKeyboardDispatchInFlight()
-                    } else {
-                        try markDispatch()
-                    }
-                }, onPosted: receipt.recordAccepted, onPreparation: receipt.recordPreparation,
+                onDispatch: markDispatch, onPosted: receipt.recordAccepted, onPreparation: receipt.recordPreparation,
                 onClipboardRestore: receipt.recordClipboardRestore, onCleanupUnknown: receipt.recordCleanupUnknown)
             receipt.detail =
                 alreadySatisfied
