@@ -98,7 +98,13 @@ def _target_label(request: ExecuteAction, target: OperationTarget | None) -> str
         # Native root slots may be reused. A current public label cannot be
         # borrowed for an older binding merely because its root string agrees.
         return None
-    window = next((ref for ref, key in getattr(instance, "windows", {}).items() if key == target.root_window), None)
+    root = target.root_window
+    displayed = request.display_window
+    if displayed is not None:
+        host = getattr(instance, "members", {}).get(displayed.window)
+        if host is not None and (host.get("surface"), host.get("instance")) == (displayed.surface, displayed.instance):
+            root = displayed.window
+    window = next((ref for ref, key in getattr(instance, "windows", {}).items() if key == root), None)
     if window is None:
         return None
     parts = [f"Window {window}"]

@@ -9,7 +9,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING, cast
 
 from computer_use.diagnostics import diagnostic
-from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.query.instances.membership import interaction_contains
 from computer_use.interaction.query.instances.scope import allowed
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.delivery.coverage import document_coverage, tree_collection_issues
@@ -25,6 +25,7 @@ from computer_use.session.events import observation_completed, register_observat
 from computer_use.session.interfaces import ApplicationEntry, LookupContext, WindowIdentity, WindowLifetime
 from computer_use.session.observation import lazy_observation
 from computer_use.session.observation_data import component_delivered, retain_observation_data
+from computer_use.session.surface_content import content_host, content_kind, transient_content
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -58,18 +59,31 @@ def related_window_summary(
         item["window"] for item in directory["surfaces"]
         if WindowIdentity.of(item) not in related.known_windows
     }
-    refs = [f"window={ref}" for ref, key in aliases.items() if key in newly_observed]
+    members = {item["window"]: item for item in directory["surfaces"]}
+    attached = {key for key in newly_observed if transient_content(members[key]) and content_host(members[key]) in members}
+    hosts = {content_host(members[key]) for key in attached}
+    menus = [f"window={ref}" for ref, key in aliases.items() if key in hosts]
+    sections = []
+    for kinds, label in (
+        ({"window"}, "newly observed window entries"),
+        ({"menu"}, "newly observed menu sources"),
+        ({"popup"}, "newly observed popup sources"),
+        ({"unknown", "application"}, "newly observed interface sources"),
+    ):
+        refs = [f"window={ref}" for ref, key in aliases.items()
+                if key in newly_observed - attached and content_kind(members[key]) in kinds]
+        if refs:
+            sections.append(label + ": " + ", ".join(refs))
+    if menus:
+        sections.append("newly observed attached content for " + ", ".join(menus))
     discovered = directory.get("rootDiscoveryComplete")
     coverage = (
         "partial" if refresh_incomplete or directory["stopReasons"] or discovered is False
         else "complete" if discovered is True
         else "unconfirmed"
     )
-    membership = (
-        "newly observed window entries: " + ", ".join(refs)
-        if refs
-        else "newly observed window entries have no published references"
-        if newly_observed
+    membership = "; ".join(sections) if sections else (
+        "newly observed interface sources have no published references" if newly_observed
         else "no newly observed window entries"
     )
     return template(
@@ -157,6 +171,7 @@ def publish(
     lookup_context: LookupContext | None = None,
     on_observation=None,
     window_coverage=(),
+    presentations=(),
 ) -> Observation:
     """Publish the combined interface observation and retain its source data.
 
@@ -313,6 +328,7 @@ def publish(
         directory=directory,
         window_coverage=window_coverage,
         captured_trees=captured_trees,
+        presentations=presentations,
     )
     if window_coverage:
         diagnostic({"kind": "observation_member_coverage", "windows": window_coverage})
@@ -353,7 +369,7 @@ def publish(
             # object that originally opened it, or on reading the parent again.
             candidates.update(
                 WindowIdentity.of(item) for item in instance_state.members.values()
-                if ancestor(directory or instance_state.directory, captured.window, item["window"])
+                if interaction_contains(directory or instance_state.directory, captured.window, item["window"])
             )
         if fixed is not None:
             candidates.add(WindowIdentity(fixed.root_window, fixed.surface, fixed.instance))
@@ -362,7 +378,7 @@ def publish(
             root = instance_state.members.get(root_identity.window)
             if (
                 captured is None or root is None or WindowIdentity.of(root) != root_identity
-                or not ancestor(directory or instance_state.directory, captured.window, root_identity.window)
+                or not interaction_contains(directory or instance_state.directory, captured.window, root_identity.window)
             ):
                 continue
             menus = []
@@ -371,7 +387,7 @@ def publish(
                 menu_window = instance_state.members.get(menu_identity.window) if menu_identity is not None else None
                 if (
                     menu_window is not None and WindowIdentity.of(menu_window) == menu_identity
-                    and ancestor(directory or instance_state.directory, menu_identity.window, root_identity.window)
+                    and interaction_contains(directory or instance_state.directory, menu_identity.window, root_identity.window)
                 ):
                     menus.append(menu_owner)
             contexts[root_identity] = LookupContext(captured, captured_lookup.menu_only, tuple(menus))
@@ -425,6 +441,15 @@ def publish(
             **({"observed": directory["observed"]} if directory else {}),
         )
     )
+    if owner is not None:
+        # The host accepted this result for its running script. Make only its
+        # semantic query scope available locally; actual delivery below/after
+        # host buffering remains the sole diff/image/input commitment.
+        from computer_use.session.lookup_continuation import retain_lookup_continuation
+
+        retain_lookup_continuation(
+            instance_state, captured_lookup, captured_query_windows, generation, native_session,
+        )
     return cast("Observation", result)
 
 
@@ -497,6 +522,8 @@ def capture_header(
                 source.source_directory if source is not None else None,
                 source.directory if source is not None else None,
                 source.scope_confirmed if source is not None else None,
+                content_kind(item),
+                aliases.get(content_host(item)),
             )
         )
     covered_reasons = {

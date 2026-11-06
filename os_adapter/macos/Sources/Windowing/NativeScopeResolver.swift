@@ -124,6 +124,15 @@ import ApplicationServices
         return try inputScope(value, canonicalize: canonicalize, observed: observed)
     }
 
+    /// Optional restitution borrows retained ownership, never a fresh input
+    /// boundary query on a target that the action may just have closed.
+    func retainedForegroundSource(_ binding: [String: Any]) -> (application: NSRunningApplication, element: AXUIElement?)? {
+        guard let scope = binding["surface"] as? String else { return nil }
+        guard let application = directory.surface(scope)?.owner ?? directory.applicationRoot(scope)?.owner else { return nil }
+        return (application, (binding["node"] as? String).flatMap { applications.visualElement($0) }
+                ?? directory.surface(scope)?.element)
+    }
+
     func fixedInputWindow(_ binding: [String: Any]) throws -> NativeFixedInputWindow? {
         let requested = try NativeTarget(binding)
         try requested.requireSession(session)

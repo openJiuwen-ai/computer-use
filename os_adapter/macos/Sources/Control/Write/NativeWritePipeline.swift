@@ -57,7 +57,23 @@ import ApplicationServices
                             switch route {
                             case .prepare(let body):
                                 try await NativePreparePipeline.run(body, boundary: boundary, op: op, id: id)
-                            case .dispatch(let body): try await NativeDispatchPipeline.run(body, receipt: receipt)
+                            case .dispatch(let body):
+                                if NativeForegroundResponsibility.current?.hasForegroundObligation == true,
+                                    let source = access.scopes.retainedForegroundSource(decoded.target) {
+                                    try await NativeForegroundRestorationScope.perform(
+                                        target: BackgroundTarget(source.application), onPreparation: receipt.recordPreparation,
+                                        onCleanupUnknown: receipt.recordCleanupUnknown, afterInput: true,
+                                        inputState: {
+                                            receipt.dispatch == "notDispatched" ? .notDispatched
+                                                : receipt.dispatch == "dispatched" ? .completed : .uncertain
+                                        }, presentation: {
+                                            try NativeForegroundResult.presentation(
+                                                source.element, pid: source.application.processIdentifier)
+                                        }) {
+                                            NativeForegroundRestorationScope.current?.willDispatchInput()
+                                            try await NativeDispatchPipeline.run(body, receipt: receipt)
+                                        }
+                                } else { try await NativeDispatchPipeline.run(body, receipt: receipt) }
                             }
                         }
                     } catch {

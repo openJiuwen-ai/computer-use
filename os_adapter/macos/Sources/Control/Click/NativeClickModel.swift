@@ -8,6 +8,7 @@ import ApplicationServices
     case selection(node: String, contract: NativeRowSelection.Contract)
     case menu(NativeMenuUnit, node: String, name: String, description: String?)
     case captured(NativePointerUnit)
+    case coordinateMenuPress(NativeCoordinateMenuPress)
     case element(NativeElementPointerUnit)
     case popupPointer(any NativePopupPointerInput)
 }

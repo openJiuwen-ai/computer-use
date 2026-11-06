@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import local_failure
-from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.query.instances.membership import ancestor, interaction_contains
 from computer_use.interaction.read.model import WindowSelectionRequired
 from computer_use.native.contracts import Knowledge
 from computer_use.native.query.directory import SurfaceReadProfile, select_application, surfaces_query
@@ -24,6 +24,7 @@ from computer_use.session.interfaces import (
     WindowLifetime,
 )
 from computer_use.session.state import AppState
+from computer_use.session.surface_content import content_host, content_kind, display_host, transient_content
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
@@ -85,8 +86,19 @@ def retain_fixed_failure(instance: InstanceState, selection: WorkingWindow, erro
 
 def display_selection(controller, instance, directory):
     """Choose an observation primary without granting a keyboard input target."""
-    entries = {item["window"]: item for item in directory["surfaces"] if item["kind"] != "menu"}
-    focused = directory.get("focusedWindow")
+    sources = {item["window"]: item for item in directory["surfaces"]}
+    entries = {key: item for key, item in sources.items()
+               if not transient_content(item) and content_host(item) not in sources}
+    if not entries:
+        # A menu-only/status-item application still has observable content.
+        # Its heading remains a menu; choosing it does not promote a document.
+        entries = {key: item for key, item in sources.items() if content_host(item) not in sources}
+    if working := {key: item for key, item in entries.items() if content_kind(item) != "application"}:
+        entries = working
+    classified = {key: item for key, item in entries.items() if content_kind(item) == "window"}
+    if classified:
+        entries = classified
+    focused = display_host(sources, directory.get("focusedWindow"))
     if focused in entries:
         key = focused
     elif len(entries) == 1:
@@ -243,5 +255,5 @@ def allowed(ui):
     return {
         key: item
         for key, item in instance.members.items()
-        if ui._anchor is None or ancestor(instance.directory, key, ui._anchor)
+        if ui._anchor is None or interaction_contains(instance.directory, key, ui._anchor)
     }

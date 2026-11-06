@@ -187,6 +187,9 @@ class InstanceState:
     # work depends on the active catalogue, not every window ever discovered.
     _window_lifetimes: dict[str, WindowIdentity] = field(default_factory=dict, repr=False)
     owner_identities: dict[str, WindowIdentity] = field(default_factory=dict)
+    # Acquired menu presentation facts, independent of native lifetimes and
+    # actual model-delivery baselines. They never authorize or reject input.
+    content_presentations: dict[tuple, dict] = field(default_factory=dict)
 
     def reconcile(self, directory: NativeDirectory, facts: DirectoryMembership) -> None:
         """Replace current authorization facts while retaining unknown lifetimes.

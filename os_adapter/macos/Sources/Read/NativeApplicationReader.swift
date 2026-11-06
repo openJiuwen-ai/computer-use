@@ -87,6 +87,10 @@ import ApplicationServices
         var nativeID: CGWindowID? = nil
         var modal: Bool? = nil
         var document: String? = nil
+        var contentKind: String = "unknown"
+        var contentHost: String? = nil
+        var contentEvidence: String = "unclassified"
+        var contentElement: AXUIElement? = nil
     }
 
     /// Coverage belongs to the failing discovery step, not to diagnostic text.
@@ -306,6 +310,8 @@ import ApplicationServices
         // through actual child edges; never infer ownership from screen overlap.
         let surfaceDeadline = ProcessInfo.processInfo.systemUptime + 0.4
         var scanned = [AXUIElement]()
+        var contentEdges = [(node: AXUIElement, children: [AXUIElement])] ()
+        var contentRoles = [(node: AXUIElement, role: String)] ()
         let surfaceRelations = AXRelationReader(api: timing?.relationAPI(query.relations) ?? query.relations)
         var surfaceIssues = Set<String>()
         func surfaceIssue(_ detail: String) {
@@ -357,6 +363,8 @@ import ApplicationServices
                     if page.prefix.count < page.total || page.issue != nil {
                         stop("relation_incomplete")
                         surfaceIssue("attached surface discovery incomplete: child/node budget or changing relation")
+                    } else {
+                        contentEdges.append((node, Array(page.targets)))
                     }
                     for child in page.targets {
                         if ProcessInfo.processInfo.systemUptime >= surfaceDeadline {
@@ -365,6 +373,7 @@ import ApplicationServices
                             break
                         }
                         let role = attribute(child, kAXRoleAttribute, stage: "getter.surface.role", root: parent) as? String ?? ""
+                        contentRoles.append((child, role))
                         if returnedRoles != nil { returnedRoles![role, default: 0] += 1 }
                         if surfaceRoles.contains(role) {
                             found.append(child)
@@ -606,6 +615,7 @@ import ApplicationServices
             // confirmed surface edges. A failed optional role must not erase a
             // positive AXModal or AXSheets fact on that exact candidate.
             let role = reportedRole ?? ""
+            contentRoles.append((element, role))
             guard (projection == .inputBoundary || projection == .visualCatalogue || (reportedRole != nil &&
                 ([kAXWindowRole, kAXSheetRole, "AXPopover"].contains(role)
                     || declaredRoots.contains { CFEqual($0, element) }))),
@@ -661,7 +671,11 @@ import ApplicationServices
                             for: Identity(
                                 pid: pid, launched: app.launchDate, element: element, incarnation: incarnation)),
                         title: presentation ? attribute(element, kAXTitleAttribute) as? String ?? "" : "", element: element,
-                        kind: kind, modal: attribute(element, kAXModalAttribute) as? Bool))
+                        kind: kind, modal: attribute(element, kAXModalAttribute) as? Bool,
+                        contentKind: role == kAXApplicationRole ? "application" : role == kAXMenuRole ? "menu"
+                            : role == kAXSheetRole || subrole == kAXStandardWindowSubrole ? "window" : "unknown",
+                        contentEvidence: role == kAXApplicationRole || role == kAXMenuRole || role == kAXSheetRole || subrole == kAXStandardWindowSubrole
+                            ? "AXRole" : "unclassified"))
             }
             if let timing, let item = result.last { timing.root(item.element, ref: item.ref) }
             if projection == .inputBoundary || projection == .visualCatalogue {
@@ -862,10 +876,12 @@ import ApplicationServices
             return .inputBoundary(.init(windows: result, issue: boundaryIssue, expandedRequiredSurface: discoverRequired,
                                         unresolvedModalHints: unresolvedModalHints(in: result), parentEvidence: relations))
         }
-        // Merge only one-to-one native matches. Same-title/overlapping windows
-        // must not collapse, nor may a sheet borrow its parent's identity.
+        // One-to-one native matches may share identity. Multiple exact AX
+        // sources keep their own objects and share only physical capture facts.
+        // Same-title/overlapping windows and parent/sheet identities do not merge.
         var remapped = [String: String]()
         var exactNativeIDs = [String: CGWindowID]()
+        var sharedNativeHosts = [String: String]()
         // Read each AX hint once, not once per pair of AX/native windows.
         let hints = try result.map { item in
             try RequestDiagnostics.checkCancellation()
@@ -895,6 +911,19 @@ import ApplicationServices
                 if hints[index]?.id == native.mapping.id, let ref = remapped[item.ref] {
                     exactNativeIDs[ref] = native.mapping.id
                 }
+            } else if matches.count == 1, let native = matches.first, hints[index]?.id == native.mapping.id {
+                // Distinct AX roots can expose different contents of the same
+                // exact physical window. Keep each AX identity. A unique
+                // standard root may own the visual row; otherwise the native
+                // row is the host and no AX source is promoted by position.
+                let peers = result.indices.filter { hints[$0]?.id == native.mapping.id }
+                let standards = peers.filter { result[$0].contentKind == "window" }
+                let host = standards.count == 1
+                    ? registry.windowReference(native, element: result[standards[0]].element)
+                    : registry.windowReference(native)
+                if standards.count == 1 && standards[0] == index { remapped[item.ref] = host }
+                else { sharedNativeHosts[item.ref] = host }
+                exactNativeIDs[remapped[item.ref] ?? item.ref] = native.mapping.id
             } else if matches.isEmpty, let id = hints[index]?.id, let process,
                 hints.filter({ $0?.id == id }).count == 1
             {
@@ -915,7 +944,10 @@ import ApplicationServices
                 ref: remapped[item.ref] ?? item.ref, title: item.title, element: item.element, kind: item.kind,
                 parent: item.parent.map { remapped[$0] ?? $0 },
                 parentUnknown: item.parentUnknown, applicationParent: item.applicationParent,
-                nativeID: exactNativeIDs[remapped[item.ref] ?? item.ref], modal: item.modal)
+                nativeID: exactNativeIDs[remapped[item.ref] ?? item.ref], modal: item.modal,
+                contentKind: sharedNativeHosts[item.ref] == nil ? item.contentKind : "unknown",
+                contentHost: sharedNativeHosts[item.ref],
+                contentEvidence: sharedNativeHosts[item.ref] == nil ? item.contentEvidence : "nativeWindowID")
         }
         // A native child (including system sharing controls) may report the
         // application as AXParent. Keep it visible, but do not invent another
@@ -927,6 +959,46 @@ import ApplicationServices
                 || (projection == .visualCatalogue && mapped[index].parentUnknown)
         }
         if !relations.unresolved.isEmpty { issue("some native window parent relationships could not be confirmed") }
+        // Reuse child edges already collected for discovery. A separate AX
+        // dialog sharing the opener's exact list is content of that control,
+        // even when its reverse parent is AXApplication or AXWindow is absent.
+        // No additional tree traversal is added to visual/input projections.
+        if projection == .catalogue {
+            func sampledRole(_ node: AXUIElement) -> String? {
+                contentRoles.last(where: { CFEqual($0.node, node) })?.role
+            }
+            func sampledChildren(_ node: AXUIElement) -> [AXUIElement]? {
+                contentEdges.last(where: { CFEqual($0.node, node) })?.children
+            }
+            for index in mapped.indices {
+                let item = mapped[index]
+                if item.modal == true {
+                    mapped[index].contentKind = "window"
+                    if item.contentHost == nil { mapped[index].contentEvidence = "AXModal" }
+                    continue
+                }
+                let content: AXUIElement?
+                if [kAXMenuRole, "AXList"].contains(sampledRole(item.element) ?? "") {
+                    content = item.element
+                } else if item.kind == "dialog", let children = sampledChildren(item.element), children.count == 1,
+                    [kAXMenuRole, "AXList"].contains(sampledRole(children[0]) ?? "") {
+                    content = children[0]
+                } else { content = nil }
+                if let content, let host = NativeContentRelations.host(
+                    content: content, excluding: item.element, roots: mapped.map(\.element),
+                    same: { CFEqual($0, $1) }, role: sampledRole, children: sampledChildren
+                ), let owner = mapped.first(where: { CFEqual($0.element, host) }) {
+                    mapped[index].contentKind = "menu"
+                    mapped[index].contentHost = owner.ref
+                    mapped[index].contentEvidence = "AXChildren"
+                    mapped[index].contentElement = content
+                } else if item.kind == "popover", let parent = item.parent {
+                    mapped[index].contentKind = "popup"
+                    mapped[index].contentHost = parent
+                    mapped[index].contentEvidence = "attachedSurface"
+                }
+            }
+        }
         if projection == .visualCatalogue, !unresolvedModalHints(in: result).isEmpty {
             issue("previously observed modal identity could not be revalidated; input still requires a fresh boundary check")
         }

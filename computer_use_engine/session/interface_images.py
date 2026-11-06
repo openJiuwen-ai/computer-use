@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from computer_use.native.contracts import Binding
     from computer_use.protocol.png import PNG
+    from computer_use.session.interfaces import WindowIdentity
     from computer_use.types import Point
 
 ImageBox: TypeAlias = tuple[float, float, float, float]
@@ -77,6 +78,7 @@ class InterfaceImage:
         delivered_coordinates: Actual model-image pixels mapped to this retained canvas.
         generation: Acquisition order within the owning application.
         source_canvas: Shared original canvas kept alive by its fixed-window views.
+        identities: Captured generations for host/source aliases, never rebound at delivery.
     """
 
     png: PNG
@@ -91,6 +93,9 @@ class InterfaceImage:
     delivered_coordinates: ImageCoordinates | None = None
     generation: int = 0
     source_canvas: InterfaceImage | None = field(default=None, repr=False)
+    content_hosts: tuple[tuple[str, str], ...] = ()
+    shared_pixels: tuple[tuple[str, str], ...] = ()
+    identities: tuple[WindowIdentity, ...] = ()
 
     def for_window(self, window: str) -> InterfaceImage | None:
         """Keep this displayed canvas, restricted to one fixed window's scope.
@@ -100,23 +105,29 @@ class InterfaceImage:
         acquire input authority merely because they occur in that same PNG.
         """
         members = {item[0]: item for item in self.membership}
+        hosts = dict(self.content_hosts)
+        scope = dict(self.shared_pixels).get(window, window)
 
         def within(key: str) -> bool:
-            seen = set()
-            while key not in seen:
-                if key == window:
+            pending, seen = [key], set()
+            while pending:
+                key = pending.pop()
+                if key == scope:
                     return True
+                if key in seen:
+                    continue
                 seen.add(key)
                 item = members.get(key)
-                if item is None or item[3] != "known" or item[2] is None:
-                    return False
-                key = item[2]
+                if item is not None and item[3] == "known" and item[2] is not None:
+                    pending.append(item[2])
+                if key in hosts and hosts[key] in members:
+                    pending.append(hosts[key])
             return False
 
         pieces = tuple(piece for piece in self.pieces if within(piece.window))
-        if not pieces or not any(piece.window == window and piece.scope_confirmed for piece in pieces):
+        if window not in members or not pieces or not any(piece.scope_confirmed for piece in pieces):
             return None
-        membership = tuple(item for item in self.membership if within(item[0]))
+        membership = tuple(item for item in self.membership if item[0] == window or within(item[0]))
         if pieces == self.pieces and membership == self.membership:
             return self
         return replace(self, pieces=pieces, membership=membership, source_canvas=self.source_canvas or self)
@@ -154,6 +165,20 @@ def signature(members: Mapping[str, Mapping[str, Any]]) -> Membership:
             for item in members.values()
         )
     )
+
+
+def content_signature(members: Mapping[str, Mapping[str, Any]]) -> tuple[tuple[str, str], ...]:
+    """Freeze logical host evidence with the exact captured canvas."""
+    return tuple(sorted(
+        (key, item["content"]["host"])
+        for key, item in members.items()
+        if item.get("content", {}).get("host") in members
+    ))
+
+
+def shared_pixel_signature(members):
+    return tuple((key, host) for key, host in content_signature(members)
+                 if members[key]["content"]["evidence"] == "nativeWindowID")
 
 
 def frame(image: CapturedWindow) -> ImageBox:

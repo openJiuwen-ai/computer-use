@@ -72,6 +72,9 @@ Retained points also work in app.click(at=p, window=ref) for scoped input.
 They survive later reads and window translation; real identity, layout or display
 changes can still invalidate the corresponding target. A known input dispatch
 is not grounds to blindly repeat it through a global method.
+On macOS, an ordinary App coordinate click on an open menu item may use its
+Press action. Use app.click(at=p, force_pointer=True) when the mouse-event
+sequence itself is required. This option never grants global input.
 The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.

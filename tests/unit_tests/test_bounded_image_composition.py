@@ -10,7 +10,6 @@ from types import SimpleNamespace
 
 import pytest
 from computer_use.client.images import image_delivery_epoch, image_label, register_image
-from computer_use.errors import ComputerUseError
 from computer_use.identity import Record
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
@@ -80,6 +79,30 @@ def fixture(*, fixed=False):
     return ui, controller, InterfaceImagePipeline(controller)
 
 
+def test_attached_popup_pixels_use_host_scope_but_keep_exact_receiver():
+    ui, _, pipeline = fixture(fixed=True)
+    child = ui._instance.members["child"]
+    child.update(parent=None, parentState="none", content={"kind": "menu", "host": "root", "evidence": "AXChildren"})
+    root, popup = captured_part("root"), captured_part("child", x=110)
+    canvas, _ = pipeline.run(ui, [root, popup])
+    scoped = canvas.for_window("root")
+    assert scoped is not None and {piece.window for piece in scoped.pieces} == {"root", "child"}
+    piece, point = scoped.hit((120, 10))
+    assert piece.image.target == popup.target and point == (10, 10)
+    assert child["parent"] is None
+
+
+def test_host_scope_keeps_available_menu_image_when_host_capture_fails():
+    ui, _, pipeline = fixture(fixed=True)
+    child = ui._instance.members["child"]
+    child.update(parent=None, parentState="none", content={"kind": "menu", "host": "root", "evidence": "AXChildren"})
+    popup = captured_part("child")
+    canvas, _ = pipeline.run(ui, [WindowPart(captured_part("root").target), popup])
+    scoped = canvas.for_window("root")
+    assert scoped is not None
+    assert scoped.hit((10, 10))[0].image.target == popup.target
+
+
 def test_principal_image_remains_executable_with_unexpanded_independent_catalogue_windows():
     ui, controller, pipeline = fixture()
     part = captured_part("root")
@@ -98,23 +121,44 @@ def test_principal_image_remains_executable_with_unexpanded_independent_catalogu
     assert controller.transport.session == "session"
 
 
-def test_missing_a_selected_capture_still_returns_an_explicit_unclickable_partial_image():
+def test_missing_a_selected_capture_keeps_other_pixels_and_their_mapping():
     ui, controller, pipeline = fixture()
     root, child = captured_part("root"), captured_part("child", x=120)
     child.image = None
-    canvas, notes = pipeline.run(ui, [root, child])
+    gaps = []
+    canvas, notes = pipeline.run(ui, [root, child], on_gap=gaps.append)
     ui._image = canvas
-    assert canvas.unavailable_mapping
+    assert not canvas.unavailable_mapping
     assert notes[-1].values[0].kind == "partial"
     assert canvas.membership == signature(ui._instance.members)
-    with pytest.raises(ComputerUseError, match="partial image"):
-        canvas.hit((20, 30))
+    assert canvas.hit((20, 30)) == (canvas.pieces[0], (20, 30))
+    assert canvas.pieces[0].image is root.image
+    assert len(gaps) == 1 and "child" in gaps[0].detail
     caption = image_label(canvas.png, coordinates=ImageCoordinates((100, 80), (100, 80)))
-    assert "Coordinate mapping: unavailable." in caption
-    assert "Image point" not in caption
+    assert "Coordinate mapping: unavailable." not in caption
     assert "Window reference: 0" in caption
     assert "Window references" not in caption
     assert controller.transport.session == "session"
+
+
+@pytest.mark.parametrize("different_space", [False, True])
+def test_unproved_layout_keeps_every_capture_in_separate_mapped_regions(different_space):
+    ui, _, pipeline = fixture()
+    first, second = captured_part("root"), captured_part("other")
+    if different_space:
+        second.image.coordinates["nativeSpace"] = "another-coordinate-space"
+    canvas, notes = pipeline.run(ui, [first, second])
+    assert not canvas.unavailable_mapping
+    assert {piece.window for piece in canvas.pieces} == {"root", "other"}
+    assert "separate" in str(notes[0]).lower()
+    for piece in canvas.pieces:
+        x, y, w, h = piece.box
+        assert canvas.hit((x + w * .25, y + h * .5)) == (piece, (25, 40))
+    first_box, second_box = [piece.box for piece in canvas.pieces]
+    assert first_box[0] + first_box[2] <= second_box[0]
+    header = notes[-1].values[0]
+    assert header.mapping_available and header.windows == (0, 2)
+    assert all(item["displayed"] for item in header.captures)
 
 
 def test_fixed_window_composite_needs_no_prior_app_primary_or_anchor():
@@ -223,3 +267,18 @@ def test_explicit_cancellation_is_not_downgraded_to_an_image_gap(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         pipeline.run(ui, [root, child], on_gap=gaps.append)
     assert not gaps
+
+
+def test_shared_physical_source_uses_host_pixels_without_fabricating_a_gap():
+    ui, _, pipeline = fixture()
+    ui._instance.members["child"]["content"] = {
+        "kind": "unknown", "host": "root", "evidence": "nativeWindowID",
+    }
+    root, child = captured_part("root"), captured_part("child")
+    child.image = None
+    gaps = []
+    canvas, _ = pipeline.run(ui, [root, child], on_gap=gaps.append)
+    assert not gaps
+    assert len(canvas.pieces) == 1
+    view = canvas.for_window("child")
+    assert view is not None and view.hit((20, 30))[0].image is root.image

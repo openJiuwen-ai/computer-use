@@ -27,6 +27,16 @@ import ApplicationServices
             target = .selection(node: node, contract: selection)
             pointer = nil
         case .action(let name, let description):
+            if let press = offer.coordinateMenuPress {
+                guard command.kind == "native_action", offer.delivery == .objectAction,
+                    offer.routeFamily == NativeCoordinateMenuPress.family, name == kAXPressAction,
+                    command.target["capture"] as? String == press.capture, !command.foreground,
+                    NativeCoordinateMenuPress.permits(op.request)
+                else { throw DriverError("coordinate menu Press contract mismatch", code: .invalidRequest) }
+                target = .coordinateMenuPress(press)
+                pointer = nil
+                break
+            }
             guard command.kind == "native_action", offer.delivery == .objectAction, let node = resolved.binding.node
             else { throw DriverError("click action contract mismatch", code: .invalidRequest) }
             _ = try NativeObjectIntent(unit: command.kind, kind: "click", parameters: op.request.parameters)

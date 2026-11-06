@@ -30,6 +30,13 @@ enum NativePointerReadiness {
         requirement == .preparedLocalPoint || cached()
     }
 
+    /// A captured menu is rendered by its proven popup, even when the AX
+    /// owning-window bridge names the document containing its opener.
+    static func nativeWindowMatches(reported: CGWindowID?, expected: CGWindowID, presentedMenu: Bool) -> Bool? {
+        if presentedMenu { return true }
+        return reported.map { $0 == expected }
+    }
+
     private enum Field: Equatable {
         case declared(String), absent, failed
         init(_ read: AXRead<CFTypeRef>) {
@@ -74,11 +81,16 @@ enum NativePointerReadiness {
     static func ready(
         kind: NativePointerIntent.Kind, foreground: Bool, windowKind: WindowKind, focus: WindowFocus,
         initialFocus: WindowFocus? = nil, backgroundPrepared: Bool,
-        backgroundReportedActive: Bool? = nil, requirement: Requirement = .contentReceiver
+        backgroundReportedActive: Bool? = nil, requirement: Requirement = .contentReceiver,
+        presentedMenuReceiver: Bool = false
     ) -> Bool {
         // Foreground here already includes the exact original window hit.
         // A prior synthetic focus receipt cannot discharge this requirement.
         guard requirement != .foregroundWindowPoint || foreground else { return false }
+        // An already presented, exactly associated menu owns its tracking
+        // receiver. Activating its document would instead cancel that receiver.
+        if presentedMenuReceiver, kind == .click, requirement == .contentReceiver,
+            windowKind == .otherDeclared { return true }
         if foreground {
             if kind == .scroll { return true }
             switch windowKind {
@@ -196,7 +208,9 @@ enum NativePointerDeliveryPolicy {
         let subrole = AXAccess.read(nativeWindow, kAXSubroleAttribute)
         return NativePointerReadiness.windowKind(
             role: role, subrole: subrole,
-            nativeWindowMatches: BackgroundEvents.nativeWindowID(nativeWindow).map { $0 == window.id },
+            nativeWindowMatches: NativePointerReadiness.nativeWindowMatches(
+                reported: BackgroundEvents.nativeWindowID(nativeWindow), expected: window.id,
+                presentedMenu: capturedMenuMappingIsCurrent),
             observed: observedWindowAttributes)
     }
 
@@ -205,7 +219,9 @@ enum NativePointerDeliveryPolicy {
         var pid: pid_t = 0
         let owner = AXUIElementGetPid(nativeWindow, &pid)
         if (owner == .success && pid != window.pid)
-            || BackgroundEvents.nativeWindowID(nativeWindow).map({ $0 != window.id }) == true
+            || NativePointerReadiness.nativeWindowMatches(
+                reported: BackgroundEvents.nativeWindowID(nativeWindow), expected: window.id,
+                presentedMenu: capturedMenuMappingIsCurrent) == false
         {
             throw DriverError(
                 "the retained accessibility window no longer matches the pointer destination", code: .staleTarget)
@@ -262,7 +278,7 @@ enum NativePointerDeliveryPolicy {
     private func contentReadiness(
         foreground: Bool, kind: NativePointerIntent.Kind, declaredWindow: NativePointerReadiness.WindowKind? = nil,
         initialFocus: NativePointerReadiness.WindowFocus? = nil,
-        requirement: NativePointerReadiness.Requirement? = nil
+        requirement: NativePointerReadiness.Requirement? = nil, at point: CGPoint? = nil
     ) -> Readiness {
         // The declaration class is gesture-local. Rechecking labels for every
         // down/up would add slow provider RPCs to the event cadence. The real
@@ -275,11 +291,13 @@ enum NativePointerDeliveryPolicy {
             requirement: effectiveRequirement,
             cached: BackgroundEvents.pointerPreparationIsCurrent(target, window: window, needsKeyWindow: kind != .scroll))
         let active = !foreground && declared == .keyRequiring ? reportedActive() : nil
+        let menuReceiver = kind == .click && effectiveRequirement == .contentReceiver && presentedMenu(at: point)
         return Readiness(
             ready: NativePointerReadiness.ready(
                 kind: kind, foreground: foreground, windowKind: declared, focus: focus, initialFocus: initialFocus,
                 backgroundPrepared: prepared,
-                backgroundReportedActive: active, requirement: effectiveRequirement),
+                backgroundReportedActive: active, requirement: effectiveRequirement,
+                presentedMenuReceiver: menuReceiver),
             foreground: foreground, focus: focus, windowKind: declared,
             backgroundPrepared: foreground ? nil : prepared, backgroundReportedActive: active)
     }
@@ -296,7 +314,7 @@ enum NativePointerDeliveryPolicy {
         if selected != .windowDirected {
             result = Readiness(ready: false, foreground: foreground, focus: .notRequired, windowKind: .visualOnly)
         } else {
-            result = contentReadiness(foreground: foreground, kind: kind, requirement: requirement)
+            result = contentReadiness(foreground: foreground, kind: kind, requirement: requirement, at: point)
         }
         result.foregroundPID = foregroundPID
         result.hit = hit
@@ -352,6 +370,20 @@ enum NativePointerDeliveryPolicy {
         ])
     }
 
+    /// This capture is already the exact live menu surface. Its tracker
+    /// receives coordinates directly; it must not be re-prepared as a document.
+    private var capturedMenuMappingIsCurrent: Bool {
+        guard let capturedImage, let nativeWindow,
+            capturedImage.surface.native?.menu != nil
+                || observedWindowAttributes?[kAXRoleAttribute]?.value as? String == kAXMenuRole else { return false }
+        return NativeMenuSurfaces.matches(nativeWindow, window: window)
+    }
+
+    private func presentedMenu(at point: CGPoint?) -> Bool {
+        guard let point, window.frame.contains(point) else { return false }
+        return capturedMenuMappingIsCurrent
+    }
+
     func addressedPointerReceiver(
         at point: CGPoint,
         mechanismQualification: ((AXUIElement, String?) throws -> NativeAddressedPointerReceiver.Qualification?)? = nil
@@ -362,6 +394,7 @@ enum NativePointerDeliveryPolicy {
         // preparation. It gains no semantic/background or element authority.
         guard let nativeWindow else { return .originalWindowPoint }
         try RequestDiagnostics.checkCancellation()
+        if presentedMenu(at: point) { return .declaredInteraction }
         let sampled = NativeInputWindowQuery.pointHit(at: point, application: window.pid)
         let status = sampled.status
         try RequestDiagnostics.checkCancellation()
@@ -741,7 +774,7 @@ enum NativePointerDeliveryPolicy {
                 queryRecipient: { try queryRecipient(continuingDrag: continuingDrag) }, queryReadiness: {
                     let current = contentReadiness(
                         foreground: foregroundWindow(at: point), kind: request.kind,
-                        declaredWindow: initial.windowKind, initialFocus: initial.focus, requirement: requirement)
+                        declaredWindow: initial.windowKind, initialFocus: initial.focus, requirement: requirement, at: point)
                     readiness = current
                     return current.ready
                 }, checkPhysicalInput: {}, unavailable: {

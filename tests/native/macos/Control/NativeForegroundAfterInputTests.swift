@@ -61,7 +61,7 @@ import AppKit
         ] {
             precondition(Result.decide(before: [1], after: [1, 2], windows: [value], knownTransient: false) == .unknownResult)
         }
-        precondition(Result.decide(before: [1], after: [1], windows: [], knownTransient: false) == .noProvenPersistentResult)
+        precondition(Result.decide(before: [1], after: [1], windows: [], knownTransient: false) == .noTransientResult)
         precondition(Result.decide(before: [1], after: [1], windows: [], knownTransient: true) == .transientResult)
         precondition(Result.decide(before: nil, after: [1, 2], windows: [standard], knownTransient: false) == .unknownResult)
         precondition(Result.decide(before: [1], after: [1, 2, 3], windows: [standard], knownTransient: false) == .unknownResult)
@@ -70,10 +70,56 @@ import AppKit
 
     @MainActor static func main() async throws {
         decisions()
+        let animated = Scene(); animated.begin()
+        animated.owner.retainPresentation { .present }
+        var animatedInspections = 0, animatedReturns = 0
+        let animatedCompleted = await NativeForegroundResponsibility.$current.withValue(animated.owner) {
+            await NativeForegroundRestorationScope.finishPhase(
+                input: .completed, activity: .settled,
+                inspect: {
+                    animatedInspections += 1
+                    return animatedInspections == 1 ? .transientResult : .noTransientResult
+                }, restore: { animatedReturns += 1; return true }, retain: { animated.reasons.append($0) })
+        }
+        precondition(animatedCompleted && animatedInspections == 2 && animatedReturns == 1,
+                     "a retained menu's delayed close must settle before ending its foreground responsibility")
+        let newlyOpened = Scene(); newlyOpened.begin()
+        var openingInspections = 0
+        let openingCompleted = await NativeForegroundResponsibility.$current.withValue(newlyOpened.owner) {
+            await NativeForegroundRestorationScope.finishPhase(
+                input: .completed, activity: .settled,
+                inspect: {
+                    openingInspections += 1
+                    newlyOpened.owner.retainPresentation { .present }
+                    return .transientResult
+                }, restore: { preconditionFailure("an explicitly opened menu must remain open") },
+                retain: { newlyOpened.reasons.append($0) })
+        }
+        precondition(!openingCompleted && openingInspections == 1,
+                     "opening a new menu must not wait for that requested result to close")
+        let completedInlineChoice = Scene(); completedInlineChoice.begin()
+        expect(await completedInlineChoice.finish(result: .noTransientResult))
+        precondition(completedInlineChoice.activations == 1,
+                     "completed selection must return foreground without requiring a new persistent window")
+        var sameApp = NativeForegroundRestorationScope.State(
+            foregroundPID: 101, originalCurrent: true, targetCurrent: true, activity: [0],
+            externalActivation: false, originalWindowCurrent: false)
+        var windowReturns = 0
+        let returnedWindow = await NativeForegroundRestorationScope.restore(
+            originalPID: 101, targetPID: 101, touched: true, initialActivity: [0], sample: { sameApp }, check: {},
+            activate: { windowReturns += 1; sameApp.originalWindowCurrent = true; return true }, wait: {})
+        precondition(returnedWindow == .restored && windowReturns == 1,
+                     "the same foreground PID must not hide a changed document window")
+        sameApp.originalWindowCurrent = false
+        sameApp.externalActivation = true
+        let takeover = await NativeForegroundRestorationScope.restore(
+            originalPID: 101, targetPID: 101, touched: true, initialActivity: [0], sample: { sameApp }, check: {},
+            activate: { windowReturns += 1; return true }, wait: {})
+        precondition(takeover == .ownershipLost && windowReturns == 1)
         let ordinary = Scene(); ordinary.begin()
         expect(await ordinary.finish())
         precondition(ordinary.activations == 1 && ordinary.foreground == ordinary.original.pid)
-        for reason in [NativeForegroundResult.Decision.noProvenPersistentResult, .transientResult, .unknownResult] {
+        for reason in [NativeForegroundResult.Decision.transientResult, .unknownResult] {
             let scene = Scene(); scene.begin()
             expect(await !scene.finish(result: reason))
             precondition(scene.activations == 0 && scene.reasons == [reason.rawValue])

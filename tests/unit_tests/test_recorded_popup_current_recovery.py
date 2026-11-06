@@ -137,7 +137,9 @@ def test_original_popup_already_absent_does_not_force_a_new_old_popup_capture(mo
     assert "Parent content" in result.text and app._context == "2"
     assert controller.reader.read.call_args.args[0].root.root_window == "2"
     assert controller.reader.read.call_args.kwargs["view"] == "tree"
-    assert pipeline.member.await_count == 1  # Existing attached helper; never old popup4 or a forced PNG.
+    # Recovered form already supplies current content. The unchanged sharing
+    # helper stays in the catalogue without another body read.
+    pipeline.member.assert_not_awaited()
 
 
 def test_historical_capture_is_kept_when_current_scope_is_ambiguous(monkeypatch):

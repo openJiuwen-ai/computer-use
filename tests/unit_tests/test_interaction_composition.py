@@ -45,6 +45,8 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                 )
             },
             anchor=None,
+            delivered_lookup_windows=set(),
+            delivered_observation_generation=0,
             refs={"1": self.snapshot},
             owners={},
             members={"window": {"surface": "surface", "window": "window", "instance": "app"}},
@@ -160,6 +162,8 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             expired=False,
             membership=signature(members),
             pieces=(piece,),
+            identities=(),
+            content_hosts=(),
             hit=lambda point: (piece, (point[0] - 10, point[1] - 20)),
         )
         self.ui._instance.delivered_image = self.ui._image

@@ -10,6 +10,7 @@ from weakref import ReferenceType
 
 from computer_use.native.contracts import Binding
 from computer_use.session.interfaces import WindowIdentity
+from computer_use.session.surface_content import content_kind
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import UIHandle
@@ -49,7 +50,7 @@ class RelatedRead:
                 return identity.window
         windows = [
             item["window"] for item in directory["surfaces"]
-            if item["kind"] != "menu" and item["window"] not in unavailable
+            if content_kind(item) == "window" and item["window"] not in unavailable
         ]
         focused = directory.get("focusedWindow")
         if focused in windows:
@@ -62,7 +63,14 @@ class RelatedRead:
         return tuple(
             item["window"]
             for item in directory["surfaces"]
-            if item["kind"] != "menu" and WindowIdentity.of(item) not in self.known_windows
+            if content_kind(item) == "window" and WindowIdentity.of(item) not in self.known_windows
+        )
+
+    def new_surfaces(self, directory) -> tuple[str, ...]:
+        """New content includes menus without promoting them to working windows."""
+        return tuple(
+            item["window"] for item in directory["surfaces"]
+            if WindowIdentity.of(item) not in self.known_windows
         )
 
     def preferred(self, directory, fallback: str) -> str:
@@ -82,6 +90,8 @@ class RelatedRead:
             WindowIdentity.of(item) == self.context_root for item in directory["surfaces"]
         ):
             return self.context_root.window
+        if not any(item["window"] == fallback for item in directory["surfaces"]):
+            return self.recovery_window(directory) or fallback
         return fallback
 
 

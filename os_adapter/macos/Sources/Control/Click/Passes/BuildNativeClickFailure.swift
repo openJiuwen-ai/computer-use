@@ -15,7 +15,17 @@ import Foundation
             evidence.fail(dispatch: receipt.dispatch, cleanup: receipt.cleanup, retryReason: nil)
             return
         }
-        if error is NativeSelectionBasis.Changed {
+        var refreshWithinScope = false
+        if let press = offer?.coordinateMenuPress,
+            (error as? ClassifiedFailure)?.code == .inputUnavailable
+        {
+            // Only this optional plan is retired, only within this operation.
+            // Re-enter the unchanged coordinate branch before any input; the
+            // normal Gate still owns the single bounded refresh allowance.
+            press.attempt.rejectedBeforeDispatch = true
+            receipt.retryReason = "preconditionChanged"
+            refreshWithinScope = true
+        } else if error is NativeSelectionBasis.Changed {
             receipt.retryReason = "preconditionChanged"
         } else if error is NativePreparationUnavailable {
             receipt.retryReason = "preparationUnavailable"
@@ -30,6 +40,7 @@ import Foundation
                 offer.map { [.objectAction, .objectSelection].contains($0.delivery) } == true
                 ? "routeUnavailable" : "preconditionChanged"
         }
-        evidence.fail(dispatch: receipt.dispatch, cleanup: receipt.cleanup, retryReason: receipt.retryReason)
+        evidence.fail(dispatch: receipt.dispatch, cleanup: receipt.cleanup, retryReason: receipt.retryReason,
+                      refreshWithinScope: refreshWithinScope)
     }
 }

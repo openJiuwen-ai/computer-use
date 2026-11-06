@@ -54,6 +54,12 @@ import ApplicationServices
             try BackgroundTarget(application).validate(input: true)
             let detail = "native document context " + attribute
             onPreparation(detail)
+            if NativeForegroundRestorationScope.current == nil {
+                // Explicit-action preparation may precede dispatch in another
+                // RPC. Its operation owner still retains this first context.
+                NativeForegroundResponsibility.current?.recordPreparation(
+                    target: BackgroundTarget(application).capturedProcessIdentity)
+            }
             onNativePreparation(
                 .init(
                     kind: .windowSelection, phase: .willSend, detail: detail,

@@ -22,12 +22,15 @@ from computer_use.protocol.captures import capture_metadata, decode_capture
 from computer_use.session.interface_images import (
     ImagePiece,
     InterfaceImage,
+    content_signature,
     frame,
     overlaps,
+    shared_pixel_signature,
     signature,
 )
-from computer_use.session.interfaces import WindowIdentity
+from computer_use.session.interfaces import WindowIdentity, WindowLifetime
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
+from computer_use.session.surface_content import display_host
 from PIL import Image
 
 if TYPE_CHECKING:
@@ -99,7 +102,7 @@ class InterfaceImagePipeline:
                         members.setdefault(key, original)
                         source_directories.append(directory)
             aliases[identity] = (
-                next((ref for ref, window in ui._instance.windows.items() if window == key), None)
+                next((ref for ref, window in ui._instance.windows.items() if window == display_host(members, key)), None)
                 if confirmed[identity] else self.controller.interfaces.windows.reference(
                     part.target.session, ui._instance.selector, identity
                 )
@@ -117,6 +120,16 @@ class InterfaceImagePipeline:
         collected = tuple(images)
         budget = current_operation_budget()
         layout_notes = ()
+        missing = requested - unique.keys()
+        shared = dict(shared_pixel_signature(members))
+        captured_windows = {identity.window for identity in unique if confirmed[identity]}
+        missing = {identity for identity in missing if shared.get(identity.window) not in captured_windows}
+        capture_notes = []
+        if missing:
+            detail = "Image unavailable for: " + ", ".join(sorted(key.window for key in missing)) + "."
+            capture_notes.append(text(detail))
+            if on_gap is not None:
+                on_gap(ObservationGap("image", "observation_incomplete", detail))
 
         def related(child: WindowIdentity, parent: WindowIdentity) -> bool:
             targets = {key: image.target for key, image in collected}
@@ -136,35 +149,39 @@ class InterfaceImagePipeline:
         try:
             if len(images) > 1 or len(images) != len(requested):
                 checkpoint()
-            if len(images) != len(requested):
-                raise ValueError("Some windows selected for this observation could not be captured.")
-            if len({image.coordinates["nativeSpace"] for _, image in images}) != 1:
-                raise ValueError("The window captures use different native coordinate spaces.")
-            frames = {key: frame(image) for key, image in images} if len(images) > 1 else {}
             separate_states = len({key.window for key, _ in images}) != len(images)
-            if separate_states:
-                # Distinct retained lifetimes of the same native slot describe
-                # different captured states, not an overlapping live layout.
+            separate_views = separate_states or len({image.coordinates["nativeSpace"] for _, image in images}) != 1
+            frames = {}
+            if len(images) > 1 and not separate_views:
+                try:
+                    frames = {key: frame(image) for key, image in images}
+                except ValueError:
+                    # Native layout is optional: each capture still has its own
+                    # pixel-to-native transform, including nonrectangular maps.
+                    separate_views = True
+                if not separate_views:
+                    separate_views = any(
+                        overlaps(frames[key], frames[other])
+                        and not (related(key, other) or related(other, key))
+                        for index, (key, _) in enumerate(images) for other, _ in images[index + 1:]
+                    )
+            if separate_views:
+                # Unknown stacking is not missing input authority. Arrange
+                # original captures in distinct pixel regions; each region
+                # retains its own native recipient and inverse mapping.
                 left = 0
-                for key, _image in images:
-                    _, _, width, height = frames[key]
+                for key, image in images:
+                    metadata = capture_metadata(image.image)
+                    width, height = metadata["width"], metadata["height"]
                     frames[key] = left, 0, width, height
                     left += width + 16
-            else:
-                for index, (key, image) in enumerate(images):
-                    for other, _ in images[slice(index + 1, None)]:
-                        if overlaps(frames[key], frames[other]) and not (
-                            related(key, other) or related(other, key)
-                        ):
-                            raise ValueError(
-                                "Overlapping sibling windows have no confirmed stacking order in this driver protocol."
-                            )
 
             def depth(key: WindowIdentity) -> int:
                 # pylint: disable-next=protected-access
                 return sum(related(key, other) for other, _ in collected if key != other)
 
-            images.sort(key=lambda item: depth(item[0]))
+            if not separate_views:
+                images.sort(key=lambda item: depth(item[0]))
             if len(images) == 1:
                 key, image = images[0]
                 canvas = self.single(key, image, members, scope_confirmed=confirmed[key])
@@ -172,7 +189,8 @@ class InterfaceImagePipeline:
                 left, top = min(v[0] for v in frames.values()), min(v[1] for v in frames.values())
                 width = max(v[0] + v[2] for v in frames.values()) - left
                 height = max(v[1] + v[3] for v in frames.values()) - top
-                scale = min(4096 / max(width, height), max(1 / image.coordinates["toNative"][0] for _, image in images))
+                density = 1.0 if separate_views else max(1 / image.coordinates["toNative"][0] for _, image in images)
+                scale = min(4096 / max(width, height), density)
                 size = math.ceil(width * scale), math.ceil(height * scale)
                 checkpoint()
                 with Image.new("RGBA", size, (0, 0, 0, 0)) as pixels:
@@ -210,16 +228,23 @@ class InterfaceImagePipeline:
                     "window",
                     scope,
                 )
-                canvas = InterfaceImage(png, tuple(pieces), signature(members), (left, top), scale)
+                canvas = InterfaceImage(
+                    png, tuple(pieces), signature(members), (left, top), scale,
+                    content_hosts=content_signature(members),
+                    shared_pixels=shared_pixel_signature(members),
+                    identities=tuple(WindowIdentity.of(members[key]) for key in sorted(members)),
+                )
             displayed = tuple(key for key, _ in images)
-            kind = "single" if len(images) == 1 else "composite"
-            notes = []
-            if separate_states:
+            kind = "partial" if missing else "single" if len(images) == 1 else "composite"
+            notes = list(capture_notes)
+            if separate_views:
                 layout_notes = (text(
                     "Screenshot: separate captured window states; arrangement is not a live window layout."
+                    if separate_states else
+                    "Screenshot: separate captured views; panel positions do not represent desktop positions."
                 ),)
                 notes.extend(layout_notes)
-                if on_gap is not None:
+                if separate_states and on_gap is not None:
                     on_gap(ObservationGap(
                         "image", "observation_incomplete",
                         "The displayed canvas includes historical and current window lifetimes "
@@ -252,15 +277,19 @@ class InterfaceImagePipeline:
                     f"Image composition budget exhausted; only Window {ref}'s original image was included. {error}",
                 ))
         except (ValueError, OSError) as error:
-            key, image = images[0]
-            canvas = InterfaceImage(image.image, (), signature(members), unavailable_mapping=True)
+            key, image = collected[0]
+            canvas = self.single(key, image, members, scope_confirmed=confirmed[key])
             # pylint: disable-next=protected-access
             ref = aliases[key] if aliases[key] is not None else key.window
             displayed, kind = (key,), "partial"
-            notes = [
+            notes = [*capture_notes,
                 template("Screenshot: partial; window {}. {}", ref, str(error)),
-                "Coordinate mapping: unavailable.",
             ]
+            if on_gap is not None:
+                on_gap(ObservationGap(
+                    "image", "observation_incomplete",
+                    f"Image composition failed; Window {ref}'s original image is retained. {error}",
+                ))
         historical = tuple(template(
             "Window {} image: historical capture ({}–{} native ns); current scope unconfirmed; "
             "coordinate mapping unavailable for this window.",
@@ -285,6 +314,9 @@ class InterfaceImagePipeline:
             image.image,
             (ImagePiece(key.window, image, (0, 0, metadata["width"], metadata["height"]), scope_confirmed),),
             signature(members),
+            content_hosts=content_signature(members),
+            shared_pixels=shared_pixel_signature(members),
+            identities=tuple(WindowIdentity.of(members[key]) for key in sorted(members)),
         )
 
     @staticmethod
@@ -316,7 +348,7 @@ class InterfaceImagePipeline:
         )
         return ImageHeader(
             kind,
-            tuple(aliases[key] for key in displayed if aliases[key] is not None),
+            tuple(dict.fromkeys(aliases[key] for key in displayed if aliases[key] is not None)),
             not canvas.unavailable_mapping and any(confirmed[key] for key in displayed),
             captures,
             capture_metadata(canvas.png),
@@ -373,6 +405,9 @@ class InterfaceImagePipeline:
                 and previous.delivered == adapters.image_delivery_epoch()
                 and previous.digest == canvas.digest
                 and previous.membership == canvas.membership
+                and previous.content_hosts == canvas.content_hosts
+                and previous.shared_pixels == canvas.shared_pixels
+                and previous.identities == canvas.identities
                 and sources(previous) == sources(canvas)
             )
             else False
@@ -406,9 +441,19 @@ class InterfaceImagePipeline:
                 piece.window: (piece.image.target.surface, piece.image.target.instance) for piece in image.pieces
                 if piece.scope_confirmed
             }
+            captured = {identity.window: identity for identity in image.identities}
+            hosts = dict(image.content_hosts)
+            captured_hosts = {key: {"content": {"host": hosts.get(key)}} for key in captured}
+            for key in tuple(identities):
+                host = display_host(captured_hosts, key)
+                original = captured.get(host)
+                member = state.members.get(host)
+                if host != key and original is not None and member is not None and (
+                    WindowIdentity.of(member) == original and image.for_window(host) is not None
+                ):
+                    identities[host] = (original.surface, original.instance)
+                    identities.pop(key)
             available = []
-            from computer_use.session.interfaces import WindowIdentity, WindowLifetime
-
             for ref, window in state.windows.items():
                 if window not in identities:
                     continue

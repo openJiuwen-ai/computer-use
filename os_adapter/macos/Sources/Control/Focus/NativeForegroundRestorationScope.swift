@@ -16,6 +16,7 @@ import ApplicationServices
         var targetCurrent: Bool
         var activity: [UInt32]
         var externalActivation: Bool
+        var originalWindowCurrent: Bool = true
     }
 
     let target: NativeProcessIdentity?
@@ -29,7 +30,7 @@ import ApplicationServices
     private var activationUnsettled = false
     private let afterInput: Bool
     private let inputState: @MainActor () -> InputState
-    private let knownTransient: @MainActor () throws -> Bool
+    private let presentation: @MainActor () throws -> NativeForegroundResult.Presentation
     private var beforeInputWindows: Set<CGWindowID>?
     private let onPreparation: @MainActor (String) -> Void
     private let onCleanupUnknown: @MainActor () -> Void
@@ -39,12 +40,12 @@ import ApplicationServices
         onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void,
         afterInput: Bool, inputState: @escaping @MainActor () -> InputState,
-        knownTransient: @escaping @MainActor () throws -> Bool
+        presentation: @escaping @MainActor () throws -> NativeForegroundResult.Presentation
     ) {
         self.target = target.capturedProcessIdentity
         self.afterInput = afterInput
         self.inputState = inputState
-        self.knownTransient = knownTransient
+        self.presentation = presentation
         let owner = NativeForegroundResponsibility.current
         responsibility = owner ?? NativeForegroundResponsibility()
         localResponsibility = owner == nil
@@ -66,7 +67,12 @@ import ApplicationServices
     }
 
     func willDispatchInput() {
-        guard afterInput, !finished, responsibility.hasForegroundObligation, let target else { return }
+        guard afterInput, !finished, touched || responsibility.hasForegroundObligation, let target else { return }
+        // AXMain/AXFocused can change the concrete foreground window without
+        // an application activation. Sample after preparation, before choosing
+        // result inspection; the pre-preparation obligation may still be false.
+        _ = responsibility.state(target: target)
+        guard responsibility.hasForegroundObligation else { return }
         beforeInputWindows = Self.visibleWindows(target.pid)
     }
 
@@ -81,10 +87,23 @@ import ApplicationServices
     private func resultDecision(_ pid: pid_t) -> NativeForegroundResult.Decision {
         do {
             try responsibility.checkRestoration()
-            if try knownTransient() { return .transientResult }
+            if let retained = responsibility.retainedPresentation {
+                switch try retained() {
+                case .present: return .transientResult
+                case .unknown: return .unknownResult
+                case .absent: break
+                }
+            }
+            switch try presentation() {
+            case .present:
+                responsibility.retainPresentation(presentation)
+                return .transientResult
+            case .unknown: return .unknownResult
+            case .absent: break
+            }
             guard let beforeInputWindows, let after = Self.visibleWindows(pid) else { return .unknownResult }
             let added = after.subtracting(beforeInputWindows)
-            guard !added.isEmpty else { return .noProvenPersistentResult }
+            guard !added.isEmpty else { return .noTransientResult }
             let root = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(root, 0.1)
             guard let windows = AXAccess.read(root, kAXWindowsAttribute).value as? [AXUIElement] else { return .unknownResult }
@@ -104,7 +123,7 @@ import ApplicationServices
     }
 
     /// The actual phase composition is exercised without desktop input. Only
-    /// positive persistent-result evidence permits optional after-input return.
+    /// presented content stays intact; completion need not create a new window.
     static func finishPhase(
         input: InputState, activity: NativeForegroundResponsibility.ActivityState,
         inspect: () -> NativeForegroundResult.Decision,
@@ -114,8 +133,30 @@ import ApplicationServices
         if activity == .userActivity { retain("userTakeover"); return false }
         if activity == .ownInputPending { retain("ownHIDCounterPending"); return false }
         if input == .completed {
-            let decision = inspect()
-            guard decision == .persistentResult else { retain(decision.rawValue); return false }
+            // A native menu action can return while its closing animation is
+            // still presented. Only an interaction retained before this input
+            // has that settling obligation. Opening a fresh menu returns at
+            // once and keeps the requested menu; this never sends more input.
+            let continuation = NativeForegroundResponsibility.current.flatMap {
+                $0.retainedPresentation != nil ? $0 : nil
+            }
+            var decision = inspect()
+            if decision == .transientResult, let continuation {
+                do {
+                    let settled = try await NativeMenuPresentationSettlement.wait(
+                        initiallyPresented: true, deadline: RequestDiagnostics.deadline ?? .infinity,
+                        check: continuation.checkRestoration,
+                        presented: { decision = inspect(); return decision == .transientResult })
+                    diagnose(["kind": "foreground_result_settle", "samples": settled.samples,
+                              "durationMs": settled.elapsed * 1000, "result": decision.rawValue])
+                } catch {
+                    retain("presentationSettleUnconfirmed")
+                    return false
+                }
+            }
+            guard decision == .persistentResult || decision == .noTransientResult else {
+                retain(decision.rawValue); return false
+            }
         }
         return try await restore()
     }
@@ -138,8 +179,8 @@ import ApplicationServices
         // A foreground menu/pointer candidate can prepare another local
         // receiver inside this scope. It still needs foreground through input;
         // sharing the original owner must not turn that into early restitution.
-        if !afterInput && responsibility.retainsForegroundForInput {
-            recordOutcome(original == target ? .notNeeded : .retained)
+        if !afterInput && (responsibility.retainsForegroundForInput || responsibility.retainedPresentation != nil) {
+            recordOutcome(.retained)
             return false
         }
         guard let original, let target else {
@@ -157,7 +198,7 @@ import ApplicationServices
                 diagnose(["kind": "foreground_return", "reason": "userTakeover", "targetPID": target.pid])
                 return false
             }
-            if current.foregroundPID == original.pid {
+            if current.foregroundPID == original.pid && current.originalWindowCurrent {
                 recordOutcome(.notNeeded)
                 return false
             }
@@ -188,21 +229,34 @@ import ApplicationServices
                 let background = BackgroundTarget(application)
                 guard background.capturedProcessIdentity == original else { return false }
                 let detail = afterInput ? "return original foreground after pointer input" : "return original foreground before background input"
-                let receipt = try await ForegroundActivation.request(
-                    background,
-                    check: {
+                let check: @MainActor () throws -> Void = {
                         try self.responsibility.checkRestoration()
                         let current = self.state()
                         guard current.originalCurrent, current.targetCurrent,
                             [original.pid, target.pid].contains(current.foregroundPID ?? 0),
                             !current.externalActivation, current.activity == self.initialActivity
                         else { throw DriverError("foreground preparation ownership ended", code: .inputUnavailable) }
-                    }, onCleanupUnknown: onCleanupUnknown)
+                    }
+                let receipt = self.state().foregroundPID != original.pid ? try await ForegroundActivation.request(
+                    background, check: check, onCleanupUnknown: onCleanupUnknown) : nil
                 // The activation adapter owns actual invoked/unknown evidence.
                 // A scope-level willSend before its ownership checks would
                 // leave a false pending click effect when the user takes over.
-                if receipt.invoked { onPreparation(detail) }
-                return receipt.invoked
+                if receipt?.invoked == true { onPreparation(detail) }
+                if receipt?.invoked == true, responsibility.originalWindow != nil {
+                    for _ in 0..<24 {
+                        try check()
+                        if self.state().foregroundPID == original.pid && application.isActive { break }
+                        try await Task.sleep(for: .milliseconds(25))
+                    }
+                    guard self.state().foregroundPID == original.pid else {
+                        throw DriverError("original foreground activation is still pending", code: .executionUnknown,
+                                          effect: .possible)
+                    }
+                }
+                let windowInvoked = try responsibility.originalWindow?.restore(
+                    application, check: check, onPreparation: onPreparation) ?? false
+                return receipt?.invoked == true || windowInvoked
             }, wait: { try await Task.sleep(for: .milliseconds(25)) },
             onUnsettled: { self.activationUnsettled = true })
         recordOutcome(outcome)
@@ -246,17 +300,18 @@ import ApplicationServices
         sample: () -> State, check: () throws -> Void, activate: () async throws -> Bool,
         wait: () async throws -> Void, onUnsettled: () -> Void = {}
     ) async -> Outcome {
-        guard touched, originalPID != targetPID else { return .notNeeded }
+        guard touched else { return .notNeeded }
         let initial = sample()
         NativeInputActivity.current?.recordForegroundObservation(initial.foregroundPID)
         guard initial.originalCurrent, initial.targetCurrent else { return .unavailable }
         guard !initial.externalActivation, initial.activity == initialActivity else { return .ownershipLost }
-        if initial.foregroundPID == originalPID { return .notNeeded }
+        if initial.foregroundPID == originalPID && initial.originalWindowCurrent { return .notNeeded }
         guard initial.foregroundPID != nil else { return .unknown }
         guard ownsForeground(initial, targetPID: targetPID, initialActivity: initialActivity) else { return .ownershipLost }
         var activationMayBePending = false
         func finish(_ outcome: Outcome, current: State) -> Outcome {
-            if activationMayBePending && !(current.originalCurrent && current.foregroundPID == originalPID) {
+            if activationMayBePending && !(current.originalCurrent && current.foregroundPID == originalPID
+                                          && current.originalWindowCurrent) {
                 onUnsettled()
             }
             return outcome
@@ -292,8 +347,10 @@ import ApplicationServices
                 guard !current.externalActivation, current.activity == initialActivity else {
                     return finish(.ownershipLost, current: current)
                 }
-                if current.foregroundPID == originalPID { return .restored }
-                guard current.foregroundPID == targetPID else { return finish(.ownershipLost, current: current) }
+                if current.foregroundPID == originalPID && current.originalWindowCurrent { return .restored }
+                guard current.foregroundPID == targetPID || current.foregroundPID == originalPID else {
+                    return finish(.ownershipLost, current: current)
+                }
                 if attempt < 39 { try await wait() }
             }
             return finish(.unknown, current: sample())
@@ -313,7 +370,8 @@ import ApplicationServices
         onPreparation: @escaping @MainActor (String) -> Void,
         onCleanupUnknown: @escaping @MainActor () -> Void = {},
         afterInput: Bool = false, inputState: @escaping @MainActor () -> InputState = { .notDispatched },
-        knownTransient: @escaping @MainActor () throws -> Bool = { false }, body: () async throws -> T
+        presentation: @escaping @MainActor () throws -> NativeForegroundResult.Presentation = { .absent },
+        body: () async throws -> T
     ) async throws -> T {
         // A completed restitution cannot own a later local-activity request.
         // Give that request its own scope so any actual activation is still
@@ -323,7 +381,7 @@ import ApplicationServices
         }
         let scope = NativeForegroundRestorationScope(
             target: target, onPreparation: onPreparation,
-            onCleanupUnknown: onCleanupUnknown, afterInput: afterInput, inputState: inputState, knownTransient: knownTransient)
+            onCleanupUnknown: onCleanupUnknown, afterInput: afterInput, inputState: inputState, presentation: presentation)
         func run() async throws -> T { try await $current.withValue(scope) {
             do {
                 let result = try await body()

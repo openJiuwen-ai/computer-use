@@ -17,6 +17,7 @@ struct NativeClickContract: Equatable {
     var backgroundUnavailable = false
     var popupPointer: NativePopupPointerQualification? = nil
     var qtComboChoice: NativeQtComboChoice? = nil
+    var coordinateMenuPress: NativeCoordinateMenuPress? = nil
     var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
     /// Original-element geometry must be confirmed in the exposed foreground
     /// window, even when addressed transport already has a background lease.
@@ -43,7 +44,13 @@ struct NativeClickContract: Equatable {
         case (let a?, let b?): comboMatches = a.matches(b)
         default: comboMatches = false
         }
-        return comboMatches && popupMatches && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
+        let coordinateMatches: Bool
+        switch (lhs.coordinateMenuPress, rhs.coordinateMenuPress) {
+        case (nil, nil): coordinateMatches = true
+        case (let a?, let b?): coordinateMatches = a.matches(b)
+        default: coordinateMatches = false
+        }
+        return coordinateMatches && comboMatches && popupMatches && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
             && lhs.admission == rhs.admission && lhs.reason == rhs.reason
             && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
             && lhs.backgroundUnavailable == rhs.backgroundUnavailable

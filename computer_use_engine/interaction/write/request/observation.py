@@ -21,6 +21,7 @@ from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
+from computer_use.session.surface_content import content_host
 
 POSTWRITE_OBSERVATION_MS = 5000
 WRITE_WITH_OBSERVATION_MS = 30000
@@ -69,7 +70,9 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             original = next((item for item in prior["surfaces"] if WindowIdentity.of(item) == identity), None)
             parent = next((
                 item for item in prior["surfaces"]
-                if original is not None and original["parentState"] == "known" and item["window"] == original["parent"]
+                if original is not None and item["window"] == (
+                    content_host(original) or (original["parent"] if original["parentState"] == "known" else None)
+                )
             ), None)
             context_root = WindowIdentity.of(parent) if parent is not None else None
         source_owner = getattr(instance, "owners", {}).get(getattr(request.target, "root_window", None))
@@ -108,6 +111,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             if (
                 error.effect not in ("partial", "possible")
                 and error.code not in TARGET_OBSERVATION_ERRORS and not close_unavailable
+                and error._observation_reason is None
             ):
                 raise
             # This is still the original exception, not a fabricated successful
@@ -119,6 +123,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 f"Action effect remains {error.effect}: {error.detail}",
                 session_identity,
                 related,
+                prefer_image=error._observation_reason is not None,
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
@@ -148,6 +153,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         progress: str,
         session_identity: tuple[int, str] | None,
         related: RelatedRead | None = None,
+        *,
+        prefer_image: bool = False,
     ) -> ObservedAction:
         """Publish a bounded related read for a completed or uncertain write.
 
@@ -187,7 +194,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     prior_tree = (
                         related.changes.before_tree if related is not None and related.changes is not None else None
                     )
-                    visual = request.target.capture is not None or (
+                    visual = prefer_image or request.target.capture is not None or (
                         request.target.node is None and getattr(owner, "_image", None) is not None
                         and (prior_tree is None or window_content_unexposed(prior_tree))
                     )

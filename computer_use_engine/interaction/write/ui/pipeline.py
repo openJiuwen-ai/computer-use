@@ -13,6 +13,7 @@ from computer_use.interaction.query.instances.scope import allowed, refresh, val
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.native.contracts import Intent
 from computer_use.session.interface_images import signature
+from computer_use.session.surface_content import display_host
 from computer_use.session.windows import WindowReferences
 
 if TYPE_CHECKING:
@@ -104,6 +105,14 @@ class InterfacePointerPipeline:
         else:
             x, y = mapped[0][1]
             parameters = dict(x=x, y=y, **options)
+        # The model may have received the popup pixels under its document's
+        # public alias. Carry that captured display identity to the receipt,
+        # independently of the physical popup binding used for every input.
+        captured = {identity.window: identity for identity in image.identities}
+        hosts = dict(image.content_hosts)
+        host = display_host({key: {"content": {"host": hosts.get(key)}} for key in captured}, piece.window)
+        display_window = captured.get(host) if host != piece.window else None
         return await self.write.arun(
-            ExecuteAction(ui, Intent(intent, parameters, global_input), piece.image.target), control
+            ExecuteAction(ui, Intent(intent, parameters, global_input), piece.image.target,
+                          display_window=display_window), control
         )

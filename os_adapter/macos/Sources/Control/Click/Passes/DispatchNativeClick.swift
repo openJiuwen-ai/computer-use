@@ -9,7 +9,8 @@ import ApplicationServices
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
         evidence: NativeClickEvidence, objects: any NativeControlObjectAccess,
         resolveWindow: () throws -> NativeFixedInputWindow? = { nil },
-        preparedPoint: NativePreparedPointerPoint? = nil
+        preparedPoint: NativePreparedPointerPoint? = nil,
+        resolveCapture: (() throws -> NativeCapture.Input)? = nil
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickDispatch)
         defer { metric?.end() }
@@ -51,6 +52,24 @@ import ApplicationServices
                     try boundary.beforeDispatch()
                     evidence.markCall("nativeSelection")
                 }, onReturned: evidence.markReturned)
+        case .coordinateMenuPress(let press):
+            guard let resolveCapture else {
+                throw DriverError("coordinate menu Press lacks its original image", code: .invalidRequest)
+            }
+            try guardOperation()
+            try press.requireCurrent(resolveCapture())
+            try actionBoundary()
+            // Reuse the same terminal AX dispatch as Element Press. A proven
+            // already-open menu does not inherit menu-bar/document preparation.
+            let status = AXMessaging.performAction(press.element, kAXPressAction as CFString)
+            evidence.markReturned()
+            guard status == .success else {
+                throw DriverError("coordinate menu Press returned AX error \(status.rawValue); effect unknown, not retried",
+                                  code: .executionUnknown, effect: .possible)
+            }
+            try await CompleteNativeCoordinateMenuPressPass.run(
+                windowID: press.windowID, pid: press.application.processIdentifier,
+                receipt: receipt, evidence: evidence, deadline: plan.operation.deadline, check: guardOperation)
         case .action(let node, let name, let description):
             try objects.executeNativeAction(
                 node, action: name, description: description, onDispatch: actionBoundary,

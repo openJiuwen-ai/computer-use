@@ -78,6 +78,14 @@ import ApplicationServices
                 unit: "pointer_sequence", kind: "click", parameters: op.request.parameters, foreground: false)
             try pointer.validateParameters(request)
             let point = try pointer.point(request.start!)
+            if let press = try NativeCoordinateMenuPress.match(
+                intent: op.request, captured: captured, point: point, attempt: op.coordinateMenuPressAttempt)
+            {
+                declarations.declareClick(.action(kAXPressAction, nil), offer: press.offer)
+                return NativeSampledInput(
+                    plan: plan, declarations: declarations, enabled: nil, foreground: false,
+                    input: input, nativeRole: nil, actionsComplete: false, applicationMenu: false)
+            }
             var choice: NativeQtComboChoice?
             let receiver = try pointer.addressedPointerReceiver(at: point) { hit, role in
                 choice = try NativeQtComboChoice.captured(captured, pixels: request.start!, hit: hit, role: role)

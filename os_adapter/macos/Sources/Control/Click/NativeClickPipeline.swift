@@ -15,6 +15,7 @@ import ApplicationServices
         do {
             let plan = try ResolveNativeClickPlanPass.run(
                 command, resolved: resolved, op: operation, step: step, access: access)
+            var presentationElement: AXUIElement?
             func execute() async throws {
                 var preparedPoint: NativePreparedPointerPoint?
                 try await NativeInputActivity.$stage.withValue(.preparation) {
@@ -28,44 +29,44 @@ import ApplicationServices
                     }
                 }
                 NativeForegroundRestorationScope.current?.willDispatchInput()
+                if NativeForegroundResponsibility.current?.hasForegroundObligation == true {
+                    switch plan.target {
+                    case .action, .selection, .popupPointer:
+                        presentationElement = access.scopes.retainedForegroundSource(command.target)?.element
+                    case .coordinateMenuPress(let press): presentationElement = press.element
+                    case .menu(let unit, _, _, _): presentationElement = unit.element
+                    case .element(let unit): presentationElement = unit.member ?? unit.element
+                    case .captured(let unit):
+                        if let start = plan.pointer?.start, let point = try? unit.point(start) {
+                            presentationElement = NativeInputWindowQuery.pointHit(
+                                at: point, application: unit.application.processIdentifier).element
+                        }
+                    }
+                }
                 try await DispatchNativeClickPass.run(
                     plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects,
-                    resolveWindow: { try access.scopes.fixedInputWindow(command.target) }, preparedPoint: preparedPoint)
+                    resolveWindow: { try access.scopes.fixedInputWindow(command.target) }, preparedPoint: preparedPoint,
+                    resolveCapture: { try access.captures.input(command.target) })
             }
             let application: NSRunningApplication?
             switch plan.target {
             case .element(let unit): application = unit.application
             case .captured(let unit): application = unit.application
             case .menu(let unit, _, _, _): application = unit.application
-            default: application = nil
+            case .coordinateMenuPress(let press): application = press.application
+            case .action, .selection, .popupPointer:
+                application = access.scopes.retainedForegroundSource(command.target)?.application
             }
-            func knownTransientResult() throws -> Bool {
-                if plan.qtPopupOpener != nil { return true }
-                let element: AXUIElement?
-                switch plan.target {
-                case .action(_, let name, _): return name == kAXShowMenuAction
-                case .menu(_, let node, let name, _):
-                    if name == kAXShowMenuAction { return true }
-                    let facts = try? access.objects.nativeActionFacts(node)
-                    return facts?.role == kAXMenuBarItemRole
-                case .element(let unit): element = unit.member ?? unit.element
-                default: element = nil
-                }
-                guard let element else { return false }
-                let role = AXAccess.read(element, kAXRoleAttribute).value as? String
-                if [kAXMenuRole, kAXMenuButtonRole, kAXPopUpButtonRole, kAXComboBoxRole, "AXPopover"].contains(role ?? "") {
-                    return true
-                }
-                return AXAccess.read(element, kAXExpandedAttribute).value as? Bool == true
-            }
-            if command.foreground, let application {
+            if let application {
                 try await NativeForegroundRestorationScope.perform(
                     target: BackgroundTarget(application), onPreparation: receipt.recordPreparation,
                     onCleanupUnknown: receipt.recordCleanupUnknown, afterInput: true,
                     inputState: {
                         receipt.dispatch == "notDispatched" ? .notDispatched
                             : receipt.dispatch == "dispatched" ? .completed : .uncertain
-                    }, knownTransient: knownTransientResult, body: execute)
+                    }, presentation: {
+                        try NativeForegroundResult.presentation(presentationElement, pid: application.processIdentifier)
+                    }, body: execute)
             } else {
                 try await execute()
             }

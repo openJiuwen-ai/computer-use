@@ -19,6 +19,7 @@ from contextvars import ContextVar
 from computer_use import Computer
 from computer_use.client.execution import ExecutionCancellation, SessionExecutor, execution_scope
 from computer_use.client.host import (
+    lookup_continuation_scope,
     set_action_handler,
     set_diagnostic_handler,
     set_execution_guard,
@@ -591,7 +592,7 @@ class Runtime:
             return trace
 
         previous = sys.gettrace()
-        with execution_scope(self.executor, cancellation):
+        with execution_scope(self.executor, cancellation), lookup_continuation_scope():
             sys.settrace(trace)
             try:
                 run["evaluationStarted"] = True

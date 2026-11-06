@@ -276,6 +276,24 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.read.assert_not_awaited()
         self.execute.assert_awaited_once()
 
+    async def test_unavailable_current_scope_returns_scene_without_replaying_input(self):
+        from computer_use.interaction.write.routes.policy import refuse
+        from computer_use.native.contracts import Facts, Knowledge
+
+        facts = Facts(self.target, "now", "original", Knowledge.YES, Knowledge.UNKNOWN, Knowledge.YES, (), ())
+        try:
+            refuse("input_unavailable", facts, "Current receiver scope changed")
+        except ComputerUseError as failure:
+            self.execute.side_effect = failure
+            with self.assertRaises(ComputerUseError) as raised:
+                await self.run_action()
+            self.assertIs(raised.exception, failure)
+            self.assertIs(failure.observation, self.observation)
+            self.assertEqual(failure.effect, "none")
+            self.execute.assert_awaited_once()
+            self.read.assert_awaited_once()
+            self.assertEqual(self.read.call_args.args[1], "both")
+
     async def test_uncertain_write_retains_same_error_effect_context_and_cause_after_read(self):
         for effect in ("partial", "possible"):
             with self.subTest(effect=effect):

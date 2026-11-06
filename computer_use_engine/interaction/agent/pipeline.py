@@ -338,14 +338,25 @@ class AgentInterfacePipeline:
         validate_session(self.controller, ui)
         # pylint: disable-next=protected-access
         instance = ui._instance
-        # Application aliases share the last actually delivered lookup scope.
+        # Application aliases share the delivered lookup scope, or a semantic
+        # result already returned within this host execution. This continuation
+        # never advances model-delivery, image or default keyboard-input state.
         # A window scope uses its own menu view and always bounds window
-        # lookup by its original root. Pending reads grant neither alias a new
-        # name/path context while that scope is live. A retired popup is not
+        # lookup by its original root. Unreturned/background reads grant no
+        # new name/path context. A retired popup is not
         # the App's lifetime: a fresh name query may use the App's already
         # actually delivered current primary. Fixed handles and numbered references do
         # not acquire this recovery, and no input/image delivery is advanced.
-        lookup_context = instance.lookup_context if ui._anchor is None else ui._lookup_context
+        from computer_use.session.lookup_continuation import current_lookup_continuation
+
+        continuation = current_lookup_continuation(instance) if ui._anchor is None else None
+        lookup_context = (
+            continuation.context if continuation is not None
+            else instance.lookup_context if ui._anchor is None else ui._lookup_context
+        )
+        lookup_windows = instance.delivered_lookup_windows | (
+            continuation.windows if continuation is not None else frozenset()
+        )
         if ui._anchor is None and lookup_context is None:
             raise local_failure(
                 "this App has no delivered lookup scope",
@@ -415,7 +426,7 @@ class AgentInterfacePipeline:
                     replacement = instance.members.get(current.root.root_window) if current is not None else None
                     if (
                         replacement is not None
-                        and WindowIdentity.of(replacement) in instance.delivered_lookup_windows
+                        and WindowIdentity.of(replacement) in lookup_windows
                         and observed_query(replacement)
                     ):
                         context = replacement["window"]
@@ -499,7 +510,7 @@ class AgentInterfacePipeline:
                     and current["node"] != error.binding.node
                     and (current["instance"], current["surface"])
                     == (error.binding.instance, error.binding.surface)
-                    and WindowIdentity.of(current) in instance.delivered_lookup_windows
+                    and WindowIdentity.of(current) in lookup_windows
                 ):
                     self.controller.state(owner).query_target = member_target(instance, current)
                 owners, incomplete = lookup_sources()
@@ -630,6 +641,10 @@ class AgentInterfacePipeline:
         self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record, control: Control,
         *, global_input=False, image=None,
     ) -> ActionResult:
+        if intent == "click" and "pointerOnly" in options and self.controller.transport.platform != "macos":
+            # Other adapters already use pointer delivery for coordinates. Keep
+            # their existing strict wire schemas unchanged by this macOS option.
+            options = {key: value for key, value in options.items() if key != "pointerOnly"}
         return await InterfacePointerPipeline(self.controller, self.write).run(
             ui, intent, points, options, control, global_input=global_input, image=image
         )

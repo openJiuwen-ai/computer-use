@@ -47,6 +47,9 @@ class ComputerUseError(Exception):
         self.target = failure["target"]
         self.detail = failure["detail"]
         self._failure_context = None
+        # A concrete state conflict can request a read suffix without changing
+        # the public error category or replaying any input.
+        self._observation_reason = None
         # A read-only suffix may enrich a write failure without changing its
         # identity, effect, recovery category, cause, or native failure context.
         self.observation = None

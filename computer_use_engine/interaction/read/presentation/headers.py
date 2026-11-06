@@ -42,6 +42,8 @@ class MemberHeading:
     source_directory: Mapping[str, object] | None = None
     rechecked_directory: Mapping[str, object] | None = None
     scope_confirmed: bool | None = None
+    content_kind: str = "window"
+    content_host: int | None = None
 
     def __post_init__(self) -> None:
         for name in ("target", "source_target", "source_applications", "source_directory", "rechecked_directory"):
@@ -125,11 +127,20 @@ def member_heading(window: MemberHeading, *, name_in_body: bool = False) -> str:
     """Name a window and its relationships, reusing a proved full-body Name when present."""
     flags = _flags(window)
     if not window.in_scope:
-        flags.append("outside read scope")
+        flags.append("App-level supplement" if window.expanded else "outside read scope")
     elif not window.expanded:
         flags.append("not expanded")
     suffix = " (" + ", ".join(flags) + ")" if flags else ""
     title = "" if name_in_body else " " + _quoted(window.title)
+    if window.content_host is not None:
+        label = "Menu" if window.content_kind == "menu" else "Popup" if window.content_kind == "popup" else "Content"
+        return f"{label} for window={window.content_host}:" + title + suffix
+    if window.content_kind in ("menu", "popup"):
+        return f"{window.content_kind.title()} source {window.ref}:" + title + suffix + f"; window={window.ref}"
+    if window.content_kind == "application":
+        return f"Application content source {window.ref}:" + title + suffix
+    if window.content_kind == "unknown":
+        return f"Interface source {window.ref}:" + title + suffix + f"; window={window.ref} (unclassified)"
     return f"Window {window.ref}:" + title + suffix + f"; window={window.ref}"
 
 
@@ -152,7 +163,7 @@ def reported_input_label(ref: int | None, *, observed: bool = True) -> str:
 def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> str:
     """Render actual scope and uncertainty, optionally reusing a proved single-window Name."""
     lines: list[str] = []
-    single = header.scoped[0] if len(header.scoped) == 1 else None
+    single = header.scoped[0] if len(header.scoped) == 1 and header.scoped[0].content_kind == "window" else None
     if single is not None:
         suffix = " (window scope)" if header.scope == "window" else ""
         title = "" if name_in_body else ": " + _quoted(single.title)

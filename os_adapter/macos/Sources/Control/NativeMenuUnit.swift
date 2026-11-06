@@ -156,10 +156,17 @@ import ApplicationServices
     func prepare(
         foreground: Bool, check: @escaping @MainActor () throws -> Void,
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void,
-        onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in },
+        onNativePreparation deliveredPreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in },
         onFocusOutcome: @escaping @MainActor (NativeFocusOutcome) -> Void = { _ in },
         onPreparationWait: @escaping @MainActor (NativePreparationWait) -> Void = { _ in }, observeOutcome: Bool = false
     ) async throws {
+        func onNativePreparation(_ event: NativePreparationEffect) {
+            if let scope = NativeForegroundRestorationScope.current { scope.record(event) }
+            else if event.phase == .willSend {
+                NativeForegroundResponsibility.current?.recordPreparation(target: background.capturedProcessIdentity)
+            }
+            deliveredPreparation(event)
+        }
         try check()
         let branches = try branches()
         guard let window else { return }

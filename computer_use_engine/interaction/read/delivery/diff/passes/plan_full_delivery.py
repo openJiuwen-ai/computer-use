@@ -21,7 +21,7 @@ def execute(value: DeliverySelection, control: Control) -> PlannedDelivery:
     reason = (
         "explicit-full"
         if observation["full"]
-        else ("non-window-view" if observation["view"] != "window" else "initial-observation")
+        else ("non-tree-view" if observation["view"] not in ("window", "menu") else "initial-observation")
     )
     return PlannedDelivery(observation, DeltaPlan(reason=reason))
 

@@ -58,7 +58,61 @@ import AppKit
         try await userTakeoverOnlyConstrainsRestoration()
         try await endedTargetWindowDoesNotOwnRestoration()
         try await untouchedAndUnknownAreDistinct()
+        try await menuResponsibilityContinuesOnlyAcrossRelatedObjectCalls()
         print("PASS operation foreground responsibility survives candidates without blind restoration or common input gates")
+    }
+
+    @MainActor static func menuResponsibilityContinuesOnlyAcrossRelatedObjectCalls() async throws {
+        for interruption in ["none", "user", "global", "unrelated"] {
+            let scene = Scene(), owner = scene.owner()
+            let state = NativeDesktopState()
+            let execution = NativeExecution(state: state, session: "menu-session", cancelActive: {})
+            let binding: [String: Any] = ["session": "menu-session", "surface": "parent", "instance": "owner"]
+            func make(_ target: [String: Any], global: Bool = false,
+                      foreground: NativeForegroundResponsibility? = nil, mode: String = "write") throws -> NativeOperation {
+                var raw: [String: Any] = ["kind": mode == "read" ? "read" : "click", "parameters": [:]]
+                if global { raw["globalInput"] = true }
+                let op = NativeOperation(timeoutMs: 3000, writable: mode == "write",
+                    intent: try NativeIntent(raw, mode: mode), target: target,
+                    foregroundResponsibility: foreground, release: {}, cancelActive: {})
+                execution.registerNativeResourceScope(op, selection: NativeSelectionBasis(access: state.applications),
+                                                      mode: mode, intent: mode == "read" ? "read" : "click")
+                return op
+            }
+            let first = try make(binding, foreground: owner)
+            _ = try await first.execute(step: 1, payload: Data([1])) {
+                owner.recordPreparation(target: scene.target, foreground: true)
+                scene.foreground = scene.target.pid
+                owner.retainPresentation { .present }
+                owner.recordRestoration(.retained)
+                first.recordInputDispatch()
+                return ["dispatch": "dispatched", "cleanup": "complete"]
+            }
+            _ = first.finish()
+            precondition(scene.activations == 0, "closing an operation cannot operate the idle desktop")
+            let read = try make(binding, mode: "read")
+            _ = read.finish() // Pure observation does not discard or discharge the menu's owner.
+            if interruption == "user" { scene.activity[0] += 1 }
+            var next = binding
+            if interruption == "unrelated" { next["surface"] = "another-document" }
+            if interruption == "global" { next = ["session": "menu-session", "global": true] }
+            let second = try make(next, global: interruption == "global")
+            _ = try await second.execute(step: 1, payload: Data([2])) {
+                let current = NativeForegroundResponsibility.current
+                if interruption == "none" {
+                    precondition(current === owner && current?.original == scene.original,
+                                 "the second call recaptured the SDK's foreground as the user's original")
+                    owner.recordRestoration(.restored)
+                } else {
+                    precondition(current !== owner, "interrupted responsibility survived into unrelated input")
+                    if interruption == "global" { precondition(current == nil, "global input acquired object restoration") }
+                }
+                second.recordInputDispatch()
+                return ["dispatch": "dispatched", "cleanup": "complete"]
+            }
+            _ = second.finish()
+            execution.shutdown()
+        }
     }
 
     @MainActor static func candidateDependencyExpiresWithoutDroppingDebt() async throws {

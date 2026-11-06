@@ -43,7 +43,7 @@ from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 
 from .capture_companions import CapturedSharingControl, companion_capture
-from .collection import CollectionPlan, components
+from .collection import CollectionPlan, components, observation_members
 from .menus import InterfaceMenuPipeline, remember_menu
 from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
 from .publication import capture_header, publish, related_window_summary, tree_document
@@ -236,6 +236,7 @@ class InterfaceReadPipeline:
                 menu_path,
                 observed=first if isinstance(first, MenuAppObservation) else None,
                 preparation=preparation,
+                full=full,
             )
         if instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
@@ -247,7 +248,7 @@ class InterfaceReadPipeline:
             )
             if matches_view:
                 return await InterfaceMenuPipeline(controller).run(
-                    ui, menu_path or (), observed=first if isinstance(first, MenuAppObservation) else None
+                    ui, menu_path or (), observed=first if isinstance(first, MenuAppObservation) else None, full=full
                 )
             ui._context = None
             choices = controller.interfaces.windows.choices(directory, state.name or str(instance.selector))
@@ -272,7 +273,7 @@ class InterfaceReadPipeline:
                 partial=bool(directory["stopReasons"]),
                 on_observation=on_observation,
             )
-        permitted = allowed(ui)
+        permitted = observation_members(ui, related)
         # pylint: disable-next=protected-access
         anchor = ui._anchor or instance.anchor.root.root_window
         if related is not None:
@@ -290,6 +291,7 @@ class InterfaceReadPipeline:
         # can see an event whose tree/pixels we have not acquired yet.
         change_directory = directory
         while True:
+            plan.reuse_attached_content(parts, permitted)
             work = plan.next()
             if work is None:
                 if (
@@ -311,7 +313,7 @@ class InterfaceReadPipeline:
                             )
                             if changed:
                                 directory = await refresh(controller, ui, accessibility=True)
-                                permitted = allowed(ui)
+                                permitted = observation_members(ui, related)
                                 plan.update(directory, permitted)
                                 if not related.new_windows(directory) and original is not None:
                                     identity = WindowIdentity(
@@ -331,7 +333,7 @@ class InterfaceReadPipeline:
                 recheck_pending = False
                 try:
                     directory = await refresh(controller, ui, accessibility=True)
-                    permitted = allowed(ui)
+                    permitted = observation_members(ui, related)
                     plan.update(directory, permitted)
                 except asyncio.CancelledError:
                     raise
@@ -376,7 +378,7 @@ class InterfaceReadPipeline:
                     if changed_directory is not None:
                         directory = changed_directory
                         adopt(controller, ui, directory)
-                        permitted = allowed(ui)
+                        permitted = observation_members(ui, related)
                     if related is None and app_reselection:
                         # This fixed selector was an internal acquisition for
                         # an App read, not the public handle's identity. Reuse
@@ -389,7 +391,7 @@ class InterfaceReadPipeline:
                             ui._context = anchor
                 if observed is not None:
                     adopt(controller, ui, observed.directory, instance.anchor)
-                    directory, permitted = observed.directory, allowed(ui)
+                    directory, permitted = observed.directory, observation_members(ui, related)
                 plan.update(directory, permitted)
                 if observed is not None:
                     item = next(
@@ -486,6 +488,38 @@ class InterfaceReadPipeline:
             if related is not None:
                 # Only automatic related reads follow member transitions.
                 recheck_pending = True
+        if (
+            related is not None and ui._anchor is None
+            and directory.get("rootDiscoveryComplete") is True
+            and not directory["surfaces"] and not directory["stopReasons"]
+            and not collection_gaps
+            and not any(part.tree is not None or part.image is not None for part in parts)
+        ):
+            # A closing window can lose AX before its WindowServer animation
+            # ends. The final complete catalogue is now empty: failed attempts
+            # contain no historical body to retain as a phantom current card.
+            # This is a presentation fact, never proof of native destruction.
+            ui._context, ui._image, instance.anchor = None, None, None
+            lifetime = original_lifecycle(related.original, directory, related.original_window)
+            lines = [
+                DisplayText("interface_header", (capture_header(controller, ui, directory, parts=()),)),
+                "Current catalogue: no observable windows.",
+                "Original window lifetime: closed." if lifetime == "closed"
+                else "Original window lifetime: unconfirmed.",
+            ]
+            previous_failures = tuple(dict.fromkeys(
+                f"{gap.component} [{gap.code}]: {gap.detail}" for part in parts for gap in part.gaps
+            ))
+            if previous_failures:
+                lines.append("Earlier window reads during the transition: " + "; ".join(previous_failures))
+            lines.append(related_window_summary(related, directory, instance.windows))
+            return publish(
+                controller, ui, DisplayDocument.join(lines), full=full,
+                scope=directory["application"] + ":app:" + view, directory=directory,
+                preparation=preparation, content_available=True,
+                window_coverage=plan.coverage(directory, parts),
+                context_owner=related.context_owner, on_observation=on_observation,
+            )
         if related is not None:
             notes.append(related_window_summary(
                 related, directory, instance.windows,
@@ -540,6 +574,10 @@ class InterfaceReadPipeline:
             principal, principal_error = plan.principal, plan.selection_error
             if principal_error is None and (related is not None or ui._anchor is not None):
                 ui._context = principal
+                if related is not None and ui._anchor is None:
+                    instance.anchor = controller.reader._selection(
+                        directory["application"], instance.name, directory, principal
+                    )
         if principal_error is not None:
             # pylint: disable-next=protected-access
             ui._context = None
@@ -631,6 +669,7 @@ class InterfaceReadPipeline:
         else:
             lines.append("Tree: not requested")
         recovery_prefix = 0
+        capture_statuses = []
         for key, part in displayed_parts:
             ref = controller.interfaces.windows.reference(
                 part.target.session, directory["application"],
@@ -656,16 +695,8 @@ class InterfaceReadPipeline:
                     ref, parent_ref, aliases[proof.root], aliases[proof.button],
                     proof.context.capture, proof.context.before, proof.context.after,
                 ),)))
-            requested = plan.requested.get(
-                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
-            )
-            ax_status = (
-                "collected" if part.tree is not None else "unavailable" if "tree" in requested else "not requested"
-            )
-            image_status = (
-                "collected" if key in included_images else "unavailable" if "image" in requested else "not requested"
-            )
-            lines.append(f"AX: {ax_status}; Image: {image_status}.")
+            capture_statuses.append((len(lines), key, part))
+            lines.append("")
             blockers = [
                 other
                 for other in permitted.values()
@@ -764,6 +795,24 @@ class InterfaceReadPipeline:
                     template("Image note: {0}", note)
                     for note in capture_metadata(part.image.image).get("stopReasons", ())
                 ]
+        # Reused content is available through its host, not a failed capture.
+        # Decide after presentation so an exhausted host render cannot claim
+        # that the model received the reused menu's tree.
+        for index, key, part in capture_statuses:
+            identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+            requested = plan.requested.get(identity, ())
+            reused_tree, reused_image = plan.reused_content.get(identity), plan.reused_images.get(identity)
+            ax_status = (
+                "collected" if part.tree is not None else "included in host tree"
+                if reused_tree is not None and reused_tree["surface"] in included_tree_surfaces
+                else "unavailable" if "tree" in requested else "not requested"
+            )
+            image_status = (
+                "collected" if key in included_images else "included in host image"
+                if reused_image is not None and reused_image["window"] in included_images
+                else "unavailable" if "image" in requested else "not requested"
+            )
+            lines[index] = f"AX: {ax_status}; Image: {image_status}."
         try:
             coverage = plan.coverage(directory, parts, included_images, included_trees=included_tree_surfaces)
         except Exception as error:  # noqa: BLE001 - accounting cannot veto already acquired content or the action
@@ -781,6 +830,11 @@ class InterfaceReadPipeline:
                 )
         lines += [_gap_line(gap) for gap in collection_gaps]
         lines += notes
+        from .presentations import collect_presentations, presentation_notices
+
+        presentations = collect_presentations(instance.content_presentations, directory, parts)
+        instance.content_presentations = {item["id"]: item for item in presentations}
+        lines.extend(presentation_notices(presentations, instance.windows))
         if presentation_exhausted:
             lines[tree_heading] = (
                 "Tree: partial (presentation budget exhausted; unprepared captured facts not expanded)"
@@ -814,6 +868,7 @@ class InterfaceReadPipeline:
             content_available=bool(trees) or screenshot is not None,
             gaps=tuple(gap for part in parts for gap in part.gaps) + tuple(collection_gaps),
             window_coverage=coverage,
+            presentations=presentations,
             context_owner=related.context_owner if related is not None else None,
             partial=bool(
                 principal_error
