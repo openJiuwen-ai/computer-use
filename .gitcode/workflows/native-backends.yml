@@ -1,0 +1,116 @@
+name: native-backends
+
+on:
+  schedule:
+    # UTC 19:00 = next day 03:00 Asia/Shanghai. Refresh retained artifacts daily.
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'os_adapter/**'
+      - 'scripts/native.py'
+      - 'scripts/pointer.py'
+      - 'scripts/backend_artifacts.py'
+      - 'scripts/distribution.py'
+      - 'scripts/remote_backend.py'
+      - 'computer_use_engine/protocol/session.py'
+      - 'computer_use_engine/json.py'
+      - 'computer_use_engine/interaction/read/presentation/formatting.py'
+      - '.gitcode/workflows/native-backends.yml'
+
+jobs:
+  linux:
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - uses: checkout
+      - uses: setup-python
+        with:
+          python-version: '3.12'
+      - name: Install build tooling
+        run: python -m pip install uv
+      - name: Package Linux backend
+        run: |
+          uv run --no-dev --group build python scripts/distribution.py backend --target linux-x86_64 --output dist/backends
+          echo "name=$(python scripts/distribution.py name --target linux-x86_64)" >> "$ATOMGIT_OUTPUT"
+        id: backend
+      - uses: upload-artifact
+        with:
+          name: ${{ steps.backend.outputs.name }}
+          path: dist/backends/*.zip
+          retention-days: 30
+
+  macos:
+    # GitCode hosted runners are Linux. This job sends the exact checkout to a
+    # native macOS builder, then archives its result here using upload-artifact.
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - uses: checkout
+      - uses: setup-python
+        with:
+          python-version: '3.12'
+      - name: Build on macOS
+        id: backend
+        env:
+          BUILDER_HOST: ${{ secrets.MACOS_BUILDER_HOST }}
+          BUILDER_SSH_KEY: ${{ secrets.MACOS_BUILDER_SSH_KEY }}
+          BUILDER_KNOWN_HOSTS: ${{ secrets.MACOS_BUILDER_KNOWN_HOSTS }}
+          BUILDER_PORT: ${{ vars.MACOS_BUILDER_PORT }}
+          BUILDER_PYTHON: ${{ vars.MACOS_BUILDER_PYTHON }}
+          BUILDER_UV: ${{ vars.MACOS_BUILDER_UV }}
+        run: |
+          python scripts/remote_backend.py --target macos-arm64 --output dist/backends
+          echo "name=$(python scripts/distribution.py name --target macos-arm64)" >> "$ATOMGIT_OUTPUT"
+      - uses: upload-artifact
+        with:
+          name: ${{ steps.backend.outputs.name }}
+          path: dist/backends/*.zip
+          retention-days: 30
+
+  windows:
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - uses: checkout
+      - uses: setup-python
+        with:
+          python-version: '3.12'
+      - name: Build on Windows
+        id: backend
+        env:
+          BUILDER_HOST: ${{ secrets.WINDOWS_BUILDER_HOST }}
+          BUILDER_SSH_KEY: ${{ secrets.WINDOWS_BUILDER_SSH_KEY }}
+          BUILDER_KNOWN_HOSTS: ${{ secrets.WINDOWS_BUILDER_KNOWN_HOSTS }}
+          BUILDER_PORT: ${{ vars.WINDOWS_BUILDER_PORT }}
+          BUILDER_PYTHON: ${{ vars.WINDOWS_BUILDER_PYTHON }}
+          BUILDER_UV: ${{ vars.WINDOWS_BUILDER_UV }}
+        run: |
+          python scripts/remote_backend.py --target windows-x86_64 --output dist/backends
+          echo "name=$(python scripts/distribution.py name --target windows-x86_64)" >> "$ATOMGIT_OUTPUT"
+      - uses: upload-artifact
+        with:
+          name: ${{ steps.backend.outputs.name }}
+          path: dist/backends/*.zip
+          retention-days: 30
+
+  wheels:
+    needs: [linux, macos, windows]
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - uses: checkout
+      - uses: setup-python
+        with:
+          python-version: '3.12'
+      - uses: download-artifact
+        with:
+          path: .artifacts/downloads
+      - name: Assemble SDK wheels from this run
+        run: |
+          python -m pip install uv
+          mkdir -p .artifacts/backends
+          find .artifacts/downloads -name 'backend-*.zip' -exec cp {} .artifacts/backends/ \;
+          uv run --no-dev --group build python scripts/distribution.py wheels --backend-dir .artifacts/backends
+      - uses: upload-artifact
+        with:
+          name: sdk-wheels
+          path: dist/*.whl
+          retention-days: 30

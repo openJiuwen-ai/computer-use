@@ -65,8 +65,9 @@ class Computer:
     def app(self, selector: int | str) -> App: ...
     def read(self, *, view: View = "both", full: bool = False) -> Observation: ...
 
-    # macOS：裸 Point 为系统屏幕 point（可为负数），不要求先读取。
-    # 图像像素须显式使用 point()；target 只定位元素/图像点，再执行同一全局原语。
+    # 所有截图取点均使用显示图片像素，左上角为原点，无需换算：
+    # p = computer.point((x, y)); computer.click(target=p)。App 图用 app.point()。
+    # macOS 裸 at 元组为设备级系统屏幕点，不是截图输入；该入口不要求先读取。
     def point(self, at: Point) -> Target: ...
     def click(
         self,
@@ -97,6 +98,7 @@ class Target:
     ...
 
 class App:
+    # (x, y) 是图上看到的像素；SDK 负责缩放和窗口偏移，随后 app.click(at=p)。
     def point(self, at: Point, *, window: int | None = None) -> Target: ...
     # 正常请求关闭指定窗口，不自动确认保存、丢弃或关闭其他窗口。
     def close_window(self, window: int) -> ActionResult: ...

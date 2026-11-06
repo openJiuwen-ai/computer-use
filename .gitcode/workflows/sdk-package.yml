@@ -1,0 +1,25 @@
+name: sdk-package
+
+# SDK-only updates reuse matching backend artifacts from earlier daily builds.
+on:
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - uses: checkout
+      - uses: setup-python
+        with:
+          python-version: '3.12'
+      - name: Assemble wheels using retained backend artifacts
+        env:
+          GITCODE_TOKEN: ${{ secrets.BACKEND_ARTIFACT_TOKEN }}
+        run: |
+          python -m pip install uv
+          uv run --no-dev --group build python scripts/distribution.py wheels
+      - uses: upload-artifact
+        with:
+          name: sdk-wheels
+          path: dist/*.whl
+          retention-days: 30

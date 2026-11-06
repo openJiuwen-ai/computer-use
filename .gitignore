@@ -13,7 +13,6 @@ __pycache__/
 os_adapter/linux/.venv/
 
 /uv.lock
-/docs/
 /AGENTS.md
 /logs/
 /outputs/

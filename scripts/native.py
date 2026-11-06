@@ -116,7 +116,10 @@ def build_linux(root=None, *, protocol_version=NATIVE_PROTOCOL_VERSION):
     if not stamp.exists() or stamp.read_text(encoding="utf-8") != requirements:
         run(executable, ["-m", "pip", "install", "-r", "requirements.lock"], native)
         stamp.write_text(requirements, encoding="utf-8")
-    run(executable, ["-m", "pip", "install", "--no-deps", "--editable", "."], native)
+    bundled = (native.parents[1] / "backend.json").is_file()
+    wheels = sorted((native / ".build").glob("computer_use_linux-*.whl")) if bundled else []
+    package = [str(wheels[0])] if wheels else ["--editable", "."]
+    run(executable, ["-m", "pip", "install", "--no-deps", *package], native)
     run(
         executable,
         [
@@ -138,6 +141,18 @@ def build_linux(root=None, *, protocol_version=NATIVE_PROTOCOL_VERSION):
 
 def build_native(root=None, *, protocol_version=NATIVE_PROTOCOL_VERSION):
     _protocol_version(protocol_version)
+    root = Path(root) if root else repository_root()
+    backend = root / "backend.json"
+    if backend.is_file():
+        from .backend_artifacts import host_target
+
+        metadata = jsonLoads(backend.read_text(encoding="utf-8"))
+        if metadata["target"] != host_target() or metadata["protocol"] != protocol_version:
+            raise RuntimeError("Install a backend wheel matching this platform and native protocol.")
+        if sys.platform != "linux":
+            executable = Path(native_driver(root=root)["command"])
+            report(executable)
+            return executable
     if sys.platform == "darwin":
         return build_mac_os(root)
     if sys.platform == "linux":

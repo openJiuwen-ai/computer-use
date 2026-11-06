@@ -7,6 +7,7 @@ import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.delivery.image_caption import IMAGE_COORDINATE_SPACE
 from computer_use.interaction.read.presentation.formatting import json_string, number_string
 
 if TYPE_CHECKING:
@@ -58,6 +59,7 @@ def render_desktop(
             + ("captured" if d["captured"] else "unavailable: " + json_string(d["error"]))
         )
     if captured:
+        lines.append(IMAGE_COORDINATE_SPACE)
         lines.append("Display gaps and uncaptured regions are blank canvas, not interactive desktop.")
     lines.append("On-screen windows (rectangles may overlap; not element references):")
     for index, window in enumerate(value["windows"]):
@@ -80,12 +82,10 @@ def render_desktop(
         )
     if value.get("catalogError"):
         lines.append("Catalogue: " + json_string(value["catalogError"]))
-    lines.append(
-        (
-            "Desktop pixels are not App.click coordinates. Window catalogue "
-            "and display "
-            "images were collected sequentially; re-observe if they "
+    if captured:
+        lines.append(
+            "Use the point constructor shown beside this image for its whole canvas. "
+            "Window catalogue and display images were collected sequentially; re-observe if they "
             "disagree."
         )
-    )
     return "\n".join(lines)

@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.formatting import json_string, number_string
 
+IMAGE_COORDINATE_SPACE = (
+    "Coordinate space: displayed image pixels. Origin: top-left; x increases right; y increases down."
+)
+IMAGE_POINT_GUIDANCE = "Use (x, y) as shown. The SDK handles resizing and screen/window offsets."
+
 if TYPE_CHECKING:
     from typing import Any, Mapping
 
@@ -71,24 +76,32 @@ def _base_caption(width: int, height: int, facts: Mapping[str, Any]) -> str:
     size = number_string(width) + "x" + number_string(height)
     kind = facts["kind"]
     if kind == "unknown":
-        return f"Image: {size} px; source unknown; coordinate mapping=unavailable."
+        return f"Image: {size} px; source unknown; coordinate mapping=unavailable.\n" + IMAGE_COORDINATE_SPACE
     if kind == "desktop":
-        return f"Image: desktop {size} px; origin=top-left; coordinate target=Computer." + (
-            " Mapping: stale." if facts.get("stale") else ""
+        return (
+            f"Image: desktop {size} px; origin=top-left\n"
+            + IMAGE_COORDINATE_SPACE
+            + ("\nCoordinate mapping: stale." if facts.get("stale") else "")
         )
     if kind == "overview":
-        return (f"Image: app overview {size} px; coordinate mapping=unavailable.\n") + (facts.get("context") or "")
+        return (
+            f"Image: app overview {size} px; coordinate mapping=unavailable.\n"
+            + IMAGE_COORDINATE_SPACE
+            + "\n"
+            + (facts.get("context") or "")
+        )
     validity = (
-        "Coordinate mapping: stale."
+        "\nCoordinate mapping: stale."
         if facts.get("stale")
-        else "Coordinate mapping: unavailable."
+        else "\nCoordinate mapping: unavailable."
         if not facts.get("mappingAvailable", True)
-        else "Coordinate space: displayed image pixels."
+        else ""
     )
     return (
         f"Image: window {size} px; origin=top-left\n{facts['identity']}"
         + ("" if facts.get("omitContext") else "\n" + facts["context"])
         + "\n"
+        + IMAGE_COORDINATE_SPACE
         + validity
         + (" Coordinate target=" + facts["coordinateTarget"] + "." if facts.get("coordinateTarget") else "")
     )

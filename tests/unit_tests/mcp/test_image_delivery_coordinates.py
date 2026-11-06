@@ -8,6 +8,9 @@ import unittest
 from io import BytesIO, StringIO
 from unittest.mock import patch
 
+from computer_use.client.computer import computer_for_controller
+from computer_use.client.execution import execution_scope
+from computer_use.client.factory import session_controller
 from computer_use.client.host import (
     set_action_handler,
     set_diagnostic_handler,
@@ -22,6 +25,8 @@ from computer_use.identity import Record
 from computer_use.interaction.read.presentation.content import DisplayText
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.native.contracts import HostPolicy
+from computer_use.native.transport import ConnectionPort
 from computer_use.protocol.png import PNG, png_size
 from computer_use.session import images as images_state
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
@@ -35,6 +40,7 @@ from computer_use.session.observation import (
 from computer_use_mcp.image_delivery import prepare_image, project_document
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
+from unit_tests.test_global_input_foundation import PrimitiveConnection
 
 
 def encoded_image(size):
@@ -103,7 +109,14 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         state = lazy_observation(document, png, details_document=details_document)
 
         def publish():
-            self.store.record(dict(desktopRef="desktop:fixture", observation=facts, screenshot=png))
+            self.store.record(
+                dict(
+                    desktopRef="desktop:fixture",
+                    binding={"session": "session"},
+                    observation=facts,
+                    screenshot=png,
+                )
+            )
             register_observation_delivery(state, lambda: self.deliveries.append(state))
             observation_completed(
                 dict(
@@ -170,6 +183,46 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Screenshot: desktop 4096x1278", document.text)
         self.assertEqual(facts["windows"][0]["rect"]["x"], 814)
         self.assertEqual(memoryview(source).tobytes(), original_png)
+
+    async def test_desktop_caption_example_reaches_global_input_with_image_scaling(self):
+        connection = PrimitiveConnection()
+        with execution_scope(self.runtime.executor):
+            controller = session_controller(ConnectionPort(connection, HostPolicy()))
+            computer = computer_for_controller(controller)
+        self.store = controller.desktop
+        self.runtime.task_namespace["computer"] = computer
+        self.capture()
+        result = await self.execute("obs = read()")
+        image = next(block for block in result["content"] if block["type"] == "image")
+        caption = image["_meta"]["computer-use"]["caption"]
+        self.assertIn("Coordinate space: displayed image pixels.", caption)
+        self.assertIn("Image point: p = computer.point((x, y))", caption)
+        self.assertIn("Global click: computer.click(target=p)", caption)
+        self.assertNotIn("coordinate target=Computer", caption)
+        # Follow the code actually delivered beside the PNG. The native stub
+        # maps capture pixels to a display with origin (-300, 40).
+        point_example = next(
+            line.removeprefix("Image point: ") for line in caption.splitlines() if line.startswith("Image point: ")
+        )
+        click_example = next(
+            line.removeprefix("Global click: ") for line in caption.splitlines() if line.startswith("Global click: ")
+        )
+        for point in ((1137, 323), (100, 50)):
+            connection.requests.clear()
+            result = await self.execute(point_example.replace("(x, y)", repr(point)) + "\n" + click_example)
+            self.assertFalse(result.get("isError"), result)
+            self.assertEqual(
+                [method for method, _ in connection.requests], ["locatePoint", "begin", "execute", "finish"]
+            )
+            self.assertEqual(connection.requests[0][1]["point"], {"x": point[0] * 2, "y": point[1] * 2})
+            parameters = connection.requests[1][1]["intent"]["parameters"]
+            self.assertEqual((parameters["x"], parameters["y"]), (point[0] * 2 - 300, point[1] * 2 + 40))
+        # Device-level input stays independent of this earlier image.
+        connection.requests.clear()
+        result = await self.execute("computer.click(at=(-200, -80))")
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual([method for method, _ in connection.requests], ["begin", "execute", "finish"])
+        self.assertEqual(connection.requests[0][1]["intent"]["parameters"]["x"], -200)
 
     async def test_ordinary_string_operations_keep_the_actual_delivered_pixel_space(self):
         for expression in (
@@ -257,7 +310,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         result = await self.execute("print_image(crop)", reset_images=True)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertIn("source unknown", text)
-        self.assertNotIn("Use this displayed image's pixels", text)
+        self.assertNotIn("Image point", text)
         with self.assertRaises(ComputerUseError):
             self.store.map_parameters("click", dict(x=515, y=125))
         # Printing the known source also does not grant authority inside that call.

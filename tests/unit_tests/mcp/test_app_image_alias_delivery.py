@@ -46,6 +46,7 @@ from computer_use.session.windows import WindowReferences
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
+from unit_tests.test_global_input_foundation import PrimitiveConnection
 
 
 class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
@@ -201,13 +202,43 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         result = await self.execute("print_image(old.screenshot)", reset_images=True)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertIn("stale", text)
-        self.assertNotIn("Use this displayed image's pixels", text)
+        self.assertNotIn("Image point", text)
         self.assertIs(self.app._instance.delivered_image, second)
         with self.assertRaisesRegex(ComputerUseError, "not been delivered"):
             await self.click(self.app)
         await self.execute("print_image(new.screenshot)")
         await self.click(self.app)
         self.assertEqual(self.last_target(), second.pieces[0].image.target)
+
+    async def test_scaled_window_caption_point_is_reusable_for_explicit_global_click(self):
+        connection = PrimitiveConnection()
+        self.controller.port = ConnectionPort(connection, HostPolicy())
+        self.runtime.task_namespace["computer"]._apps[("selector", "editor")] = self.app
+        result = await self.execute("picture = capture(window, 'a', (2301, 933))\nprint_image(picture.png)")
+        image = next(block for block in result["content"] if block["type"] == "image")
+        caption = image["_meta"]["computer-use"]["caption"]
+        self.assertIn("Coordinate space: displayed image pixels.", caption)
+        self.assertIn("App click: computer.app('editor').click(at=p)", caption)
+        self.assertIn("Global click (explicit): computer.click(target=p)", caption)
+        point_example = next(
+            line.split(": ", 1)[1]
+            for line in caption.splitlines()
+            if line.startswith(f"Image point for window={ref(self.app, 'a')}:")
+        )
+        result = await self.execute(point_example.replace("(x, y)", "(100, 50)"))
+        self.assertFalse(result.get("isError"), result)
+        # Subsequent unrelated observations cannot relabel the retained point.
+        await self.execute("observe(alias, 'b')")
+        result = await self.execute("computer.click(target=p)")
+        self.assertFalse(result.get("isError"), result)
+        point = connection.requests[0][1]["point"]
+        self.assertAlmostEqual(point["x"], 100 * 2301 / 2048)
+        self.assertAlmostEqual(point["y"], 50 * 933 / 830)
+        self.assertEqual(connection.requests[0][1]["target"]["capture"], "capture-0")
+        parameters = connection.requests[1][1]["intent"]["parameters"]
+        self.assertAlmostEqual(parameters["x"], point["x"] - 300)
+        self.assertAlmostEqual(parameters["y"], point["y"] + 40)
+        self.assertEqual([method for method, _ in connection.requests], ["locatePoint", "begin", "execute", "finish"])
 
     async def test_pending_sample_does_not_revoke_delivered_image_or_grant_new_coordinates(self):
         await self.execute("old = observe(app, 'a')")
@@ -263,7 +294,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         result = await self.execute("print_image(popup.png)", reset_images=True)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertNotIn("stale", text)
-        self.assertIn(f"computer.app('editor').click(at=(x, y), window={ref(self.app, 'b')})", text)
+        self.assertIn(f"computer.app('editor').point((x, y), window={ref(self.app, 'b')})", text)
         self.assertNotIn("Coordinate target=computer.app(", text)
         self.assertIs(self.app._instance.delivered_image, parent)
         b = window_scope(self.controller, self.app, ref(self.app, "b"))
@@ -302,7 +333,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         current_parent = WindowReferences.delivered_image(self.app._instance, self.window)
         result = await self.execute("print_image(old.screenshot)")
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
-        expected = f"Coordinate inputs for this displayed canvas: computer.app('editor').click(at=(x, y), window={ref(self.app, 'b')})."
+        expected = f"Image point for window={ref(self.app, 'b')}: p = computer.app('editor').point((x, y), window={ref(self.app, 'b')})"
         self.assertIn(expected, text)
         self.assertNotIn("Coordinate target=computer.app(", text)
         self.assertIs(WindowReferences.delivered_image(self.app._instance, self.window), current_parent)
@@ -410,13 +441,14 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_repeated_explicit_and_automatic_image_outputs_share_one_exact_picture(self):
         result = await self.execute(
-            "state = observe(window, 'a')\nprint_image(state.screenshot)\n"
-            "print_image(state.screenshot)\nprint(state)"
+            "state = observe(window, 'a')\nprint_image(state.screenshot)\nprint_image(state.screenshot)\nprint(state)"
         )
         self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
-        self.assertEqual(sum("Coordinate inputs" in block.get("text", "") for block in result["content"]), 1)
+        self.assertEqual(sum("Image point" in block.get("text", "") for block in result["content"]), 1)
         await self.click(self.window)
-        self.assertEqual(self.last_target(), WindowReferences.delivered_image(self.app._instance, self.window).pieces[0].image.target)
+        self.assertEqual(
+            self.last_target(), WindowReferences.delivered_image(self.app._instance, self.window).pieces[0].image.target
+        )
 
     async def test_identical_same_window_pixels_acknowledge_new_native_capture_once_each(self):
         result = await self.execute(
@@ -458,10 +490,9 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(images), 2)
         self.assertEqual([item["imageId"].rsplit(".", 1)[1] for item in metadata], ["1", "2"])
         for item, key in zip(metadata, ("a", "b")):
-            self.assertIn(f"computer.app('editor').click(at=(x, y), window={ref(self.app, key)})", item["caption"])
+            self.assertIn(f"computer.app('editor').point((x, y), window={ref(self.app, key)})", item["caption"])
         outputs = [
-            event["diagnostic"] for event in self.events
-            if event.get("diagnostic", {}).get("kind") == "image_output"
+            event["diagnostic"] for event in self.events if event.get("diagnostic", {}).get("kind") == "image_output"
         ]
         self.assertEqual([event["coalesced"] for event in outputs], [False, True, False])
         self.assertEqual(len({event["capture"]["id"] for event in outputs}), 3)
@@ -521,7 +552,9 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         current = self.source_part("a", "current", "blue")
         gaps = []
         canvas, notes = InterfaceImagePipeline(self.controller).run(
-            self.app, [historical, current], on_gap=gaps.append,
+            self.app,
+            [historical, current],
+            on_gap=gaps.append,
         )
         self.assertEqual(len(canvas.pieces), 2)
         self.assertEqual([piece.scope_confirmed for piece in canvas.pieces], [False, True])
@@ -533,8 +566,11 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.task_namespace["states"] = canvas
         result = await self.execute("print_image(states.png)")
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
-        self.assertIn(f"Coordinate inputs for this displayed canvas: computer.app('editor').click(at=(x, y), window={current_number}).", text)
-        self.assertNotIn(f"Coordinate inputs for this displayed canvas: computer.app('editor').click(at=(x, y), window={old_number})", text)
+        self.assertIn(
+            f"Image point for window={current_number}: p = computer.app('editor').point((x, y), window={current_number})",
+            text,
+        )
+        self.assertNotIn(f"Image point for window={old_number}:", text)
         image = next(block for block in result["content"] if block["type"] == "image")
         self.assertIn("arrangement is not a live window layout", image["_meta"]["computer-use"]["caption"])
         self.assertIn("separate", gaps[0].detail)

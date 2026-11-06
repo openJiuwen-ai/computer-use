@@ -6,6 +6,13 @@ DESCRIPTION = """Execute synchronous Python on the MCP host in a persistent sess
 Preloaded: computer, print, print_image. SDK methods return results directly;
 variables persist across calls. App selectors and paths refer to this host.
 
+All screenshot coordinates use the displayed image's pixels, with (0, 0) at
+its top-left, x increasing right and y increasing down. Use the point constructor
+printed beside that image with (x, y) unchanged. The SDK handles resizing,
+display placement and window offsets; never calculate those conversions.
+Retain the point to reuse the same location after later reads or to change the
+input method. A composite image uses its whole canvas, including popup placement.
+
 Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
 list_apps() entries expose id, display_name, and is_running. app() selects a
 scope; the first app.read() starts a nonrunning installed app when needed.
@@ -27,19 +34,20 @@ Choose the interaction method for each operation using this preference:
    the relevant App screenshot.
    Reuse an adequate current image; obtain an updated image with
    app.read(view='image', window=ref) when needed. Use that
-   App's coordinate or keyboard methods as appropriate, such as
-   app.click(at=(x, y), window=ref) or app.press_key('Return', window=ref).
+   image's point constructor: p = app.point((x, y), window=ref).
+   Use app.click(at=p) or the appropriate keyboard method, such as
+   app.press_key('Return', window=ref).
 3. When global input is needed on macOS, select a direct Computer input method.
-   computer.click(at=(screen_x, screen_y)) uses native screen points (negative
-   points are valid on secondary displays), without a preceding read. For image
-   pixels, explicitly retain p = app.point((x, y), window=ref) or
-   computer.point((x, y)) from the corresponding displayed image, then call
-   computer.click(target=p). computer.click(target=element) locates its center.
+   Reuse p from the App image, or use p = computer.point((x, y)) for a desktop
+   image, then call computer.click(target=p). The image coordinates stay the
+   same when choosing App or Computer input. Do not pass screenshot pixel tuples
+   directly to Computer.click/scroll/drag; use their retained image points.
+   computer.click(target=element) locates its center.
    These locators only find a screen point; they do not activate, raise, focus,
    or require that the object currently receives input. The global click hits
    whatever is actually at that screen location.
-   computer.scroll('down', at=(screen_x, screen_y)) and computer.drag(start, end)
-   also accept retained point/element targets; drag endpoints are independent.
+   computer.scroll('down', target=p) and computer.drag(start_point, end_point)
+   use the same retained points; drag endpoints may come from different images.
    computer.type_text(text), computer.press_key('Return'), and computer.paste(text)
    go directly to the OS's current receiver. They have no target or replace
    option: use explicit clicks/keys when a global operation needs preparation.
@@ -55,7 +63,7 @@ Computer direct input explicitly uses global events; it does not grant later
 object calls global authority. Windows/Linux currently retain their existing
 ability to use global input for object operations. A host restriction can still
 forbid global input. Windows/Linux Computer inputs currently retain their
-captured-desktop adapters; the raw screen-point contract above is macOS-only.
+captured-desktop adapters; direct device-level input is implemented on macOS.
 Computer.paste(text) is currently macOS-only; App/Element.paste remain available
 on Windows/Linux.
 Element.target retains the exact element binding.
@@ -95,9 +103,6 @@ presentation mode.
 Explicit native detail geometry retains its declared screen/AX coordinate space;
 do not treat it as screenshot pixels.
 
-App coordinates and point() helpers use the displayed image's pixels
-and its named coordinate target. Bare macOS Computer coordinates use native
-screen points; never pass image pixels as raw screen points.
 After reading multiple windows, use window=ref to reuse the corresponding
 image without rereading it. Composite images keep whole-image coordinates.
 Choose coordinates from a newly returned image in the following tool call.

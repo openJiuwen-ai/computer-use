@@ -2,6 +2,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -20,8 +21,8 @@ def repository_root():
     root = checkout_root()
     if root is not None:
         return root
-    # Wheels carry build inputs. Materialize an atomic, versioned user-owned
-    # working tree so native builds never write into system site-packages.
+    # Wheels carry build inputs and optionally a matching prebuilt backend.
+    # Materialize them into a versioned user-owned runtime directory.
     assets = Path(__file__).parent / "_resources"
     manifest = (assets / "manifest.json").read_bytes()
     key = hashlib.sha256(manifest).hexdigest()[:20]
@@ -33,6 +34,11 @@ def repository_root():
     temporary = Path(tempfile.mkdtemp(prefix=".prepare-", dir=directory))
     try:
         shutil.copytree(assets, temporary, dirs_exist_ok=True)
+        backend = temporary / "backend.json"
+        if backend.is_file():
+            # Wheel installers need not preserve archive executable bits.
+            for name, details in json.loads(backend.read_text(encoding="utf-8"))["files"].items():
+                (temporary / name).chmod(details["mode"])
         try:
             os.rename(temporary, target)
         except OSError:

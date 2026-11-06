@@ -111,7 +111,7 @@ def test_missing_a_selected_capture_still_returns_an_explicit_unclickable_partia
         canvas.hit((20, 30))
     caption = image_label(canvas.png, coordinates=ImageCoordinates((100, 80), (100, 80)))
     assert "Coordinate mapping: unavailable." in caption
-    assert "Use this displayed image's pixels" not in caption
+    assert "Image point" not in caption
     assert "Window reference: 0" in caption
     assert "Window references" not in caption
     assert controller.transport.session == "session"

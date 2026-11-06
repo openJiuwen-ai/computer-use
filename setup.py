@@ -5,6 +5,8 @@
 
 import hashlib
 import json
+import os
+import runpy
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -12,8 +14,11 @@ from typing import Any
 
 from setuptools import find_packages, setup
 from setuptools.command.build_py import build_py
+from wheel.bdist_wheel import bdist_wheel
 
 ROOT = Path(__file__).resolve().parent
+BACKENDS = runpy.run_path(str(ROOT / "scripts/backend_artifacts.py"))
+BACKEND_ARCHIVE = os.environ.get("COMPUTER_USE_BACKEND_ARCHIVE")
 
 # Public imports retain stable, unambiguous package names while the checkout
 # groups code by responsibility. Never scan the repository or native sources as
@@ -107,9 +112,25 @@ class BuildWithResources(build_py):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
             manifest[relative.as_posix()] = hashlib.sha256(source.read_bytes()).hexdigest()
+        if BACKEND_ARCHIVE:
+            backend = BACKENDS["unpack_archive"](BACKEND_ARCHIVE, output, root=ROOT)
+            for name in ["backend.json", *backend["files"]]:
+                manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
         (output / "manifest.json").write_text(
             json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8"
         )
 
 
-setup(packages=discover_packages(), package_dir=PACKAGE_ROOTS, cmdclass={"build_py": BuildWithResources})
+class BackendWheel(bdist_wheel):
+    def get_tag(self):
+        if BACKEND_ARCHIVE:
+            backend = BACKENDS["inspect_archive"](BACKEND_ARCHIVE, root=ROOT)
+            return "py3", "none", BACKENDS["TARGETS"][backend["target"]][2]
+        return super().get_tag()
+
+
+setup(
+    packages=discover_packages(),
+    package_dir=PACKAGE_ROOTS,
+    cmdclass={"build_py": BuildWithResources, "bdist_wheel": BackendWheel},
+)

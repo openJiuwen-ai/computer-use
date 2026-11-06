@@ -18,7 +18,7 @@ Computer Use 是 openJiuwen 智能体系统服务层（Agent System Service）�
 
 开发者有两种形式可以接入使用：
 
-**方法 1：接入 computer_use 引擎。** 通过 MCP 连接智能体，或直接调用 Python SDK。MCP 工具 `computer_use(title, code)` 提供 `Computer → App → Element` 接口，模型编写 Python 完成操作，变量跨调用保留。智能体结合无障碍树和截图定位控件，并读取界面验证操作结果。
+**方法 1：接入 computer_use 引擎。** 通过 MCP 连接智能体，或直接调用 Python SDK。MCP 工具 `computer_use(title, code)` 提供 `Computer → App / Window → Element` 接口，模型编写 Python 完成操作，变量跨调用保留。智能体结合无障碍树和截图定位控件，并读取界面验证操作结果。
 
 **方法 2：接入 Computer Use DeepAgent。** 使用基于 openJiuwen DeepAgent 组装的电脑操作智能体，通过标准 `invoke()`、`stream()` 和 `Runner` 接口集成到应用中。应用向智能体传入自然语言任务，由智能体观察桌面、执行操作并核对结果。
 
@@ -31,327 +31,14 @@ Computer Use 是 openJiuwen 智能体系统服务层（Agent System Service）�
 **接入 DeepAgent：**
 
 ```text
-请阅读 https://gitcode.com/openJiuwen/computer-use 的 README，将 Computer Use DeepAgent 接入当前项目，按文档安装 Agent 依赖并准备本机后端，复用项目的模型配置，通过 create_agent 和标准 invoke/stream 接口调用（已有 openJiuwen DeepAgent 则接入 ComputerUseToolkit），最后用“列出正在运行的应用”验证接入。
+请阅读 https://gitcode.com/openJiuwen/computer-use/blob/main/docs/deepagent.md，按文档从源码构建安装 Computer Use，将 Computer Use DeepAgent 接入当前项目并验证接入。
 ```
 
 **通过 MCP 接入：**
 
 ```text
-请阅读 https://gitcode.com/openJiuwen/computer-use 的 README，在本机安装并构建 Computer Use，按文档将 computer-use-mcp 接入你当前的 MCP 工具配置，检查桌面访问权限，并调用 computer_use 列出正在运行的应用以验证接入。
+请阅读 https://gitcode.com/openJiuwen/computer-use/blob/main/docs/mcp.md，按文档从源码构建安装 Computer Use，通过 MCP 接入我正在使用的 Agent 并验证接入。
 ```
-
-### 安装与准备宿主
-
-安装 Python 3.12 或更高版本及 `uv`，然后克隆仓库并安装依赖：
-
-```bash
-git clone https://gitcode.com/openJiuwen/computer-use.git
-cd computer-use
-uv sync --no-dev
-```
-
-这会安装独立 SDK，不安装 MCP 或模型依赖。MCP 与参考 Agent 分别通过 `mcp`
-和 `agent` extra 安装；Agent extra 包含其实际需要的 MCP 连接依赖。开发时可使用
-普通 `uv sync` 安装测试、检查与构建工具，其中包含接入测试需要的 MCP。
-
-已有 wheel 时，可在另一虚拟环境运行
-`uv pip install /absolute/path/to/computer_use_toolkit-0.0.1-py3-none-any.whl`。
-wheel 包含原生构建源码；使用 SDK 前，在目标电脑的该环境中运行
-`computer-use-build` 和 `computer-use-permissions`。安装后的原生构建使用用户可写的版本化 runtime 目录。
-
-在需要操作桌面的目标电脑上准备原生依赖：
-
-| 平台 | 环境要求 |
-| --- | --- |
-| macOS | macOS 14 或更高版本、包含 Swift 6 的 Xcode 工具链，以及辅助功能和屏幕录制权限。 |
-| Windows | Windows x64、.NET Framework 4.8 及其 C# 编译器；窗口截图需要 Windows 10 1903 或更高版本。 |
-| Linux | 包含 AT-SPI 和 PyGObject 的图形桌面会话；截图和鼠标输入使用 X11。 |
-
-Debian 或 Ubuntu 需要先安装 Linux 系统依赖：
-
-```bash
-sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
-```
-
-构建或准备原生后端，并检查桌面访问条件：
-
-```bash
-uv run --no-dev computer-use-build
-uv run --no-dev computer-use-permissions
-```
-
-macOS 可运行 `uv run --no-dev computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
-
-### 方法 1：接入引擎
-
-#### MCP
-
-```bash
-uv run --no-dev --extra mcp computer-use-mcp
-```
-
-通过 wheel 安装时，为同一个 wheel 选择 `mcp` extra，例如
-`uv pip install '/absolute/path/to/computer_use_toolkit-0.0.1-py3-none-any.whl[mcp]'`，
-然后在该环境运行 `computer-use-mcp`。
-
-服务使用 stdio 通信。对于采用 `mcpServers` 配置的客户端，可使用：
-
-```json
-{
-  "mcpServers": {
-    "computer-use": {
-      "command": "uv",
-      "args": [
-        "--directory", "/absolute/path/to/computer-use",
-        "run", "--no-dev", "--extra", "mcp", "computer-use-mcp"
-      ]
-    }
-  }
-}
-```
-
-将仓库路径替换为目标电脑上的绝对路径。macOS 上 App／Element 操作固定不注入全局鼠标或键盘；必要时由 Agent 自主选择 Computer 的直接输入方法。Windows／Linux 当前保持原有的全局输入能力。每次动作分别记录所选路线声明的全局输入需求与实际影响。若需显式限制某个会话，使用 `--no-allow-global-input`；目标电脑自身的系统权限仍须具备。
-
-`computer_use` 工具中已提供 `computer`、`print()` 和 `print_image()`。可以先查询应用引用：
-
-```python
-print(computer.list_apps())
-```
-
-SDK 接口是同步的：每个操作返回结果或抛出异常后，再执行下一条语句。
-通过 `computer.app(id)` 选择应用，用 `app.read(view="both")` 观察界面，再用 `app.element(name_or_path)` 定位控件。
-目标已经明确时可以直接链式操作，例如 `app.element("保存").click()`。
-
-MCP 中观察自动展示：首次展示已采集的内容，后续默认显示变化（diff），包括写后观察及同一次调用中的连续操作。
-每个窗口分别标明 AX、图像采集情况和具体缺口；full/diff/unchanged 表示文字呈现模式。
-同次工具的连续写入保留每条回执，同范围自动观察合并为最终结果；独立弹层及显式打印/完整观察保留。
-窗口坐标操作的写后观察保留截图并采集独立的 AX 信息，缺少 AX 不会使已取得的截图不可用。
-需要重新获得完整上下文时调用 `app.read(full=True)`，需要指定窗口时增加 `window=`；不需要客户端接入私有历史协议。
-SDK 返回的 `state.text` 始终是本次读取范围的完整文字，展示 diff 不改变元素绑定和截图坐标。
-MCP 中打印观察、观察的 `.text` 或直接文字切片，都复用自动展示，不额外输出全文；
-SDK 内切片值及文件输出仍保持原意。需要限制读取范围时使用子树或 `read_text`。
-
-读取默认不为刷新画面而激活或提升窗口。在 macOS 上，调用方可显式使用
-`app.read(view="both", allow_foreground=True)`，允许 SDK 在已确认的原窗口范围内准备观察；
-指定窗口时使用 `app.read(window=ref, allow_foreground=True)`。
-这可能改变焦点和窗口层次，但不注入全局鼠标或键盘、不自动切回其他应用。
-结果的 `preparation` 和文字说明保留实际请求，图像保留本次采样来源。
-观察目标尚未明确时仍返回窗口选择信息，不以此许可猜选目标。其他平台暂不支持该准备能力。
-
-写入在执行结果之外附带有界的相关观察，可读取 `result.observation`、`result.observation_status`
-和 `result.observation_error`。`result.target`、`result.intent` 和 `result.status` 保留操作目标、意图及派发／验证结果。
-目标失效、目标信息暂时无法确认、模态阻挡，
-以及 `effect="partial"` 或 `"possible"` 的 `ComputerUseError`，在原会话仍可观察时也附带这些字段。
-可直接使用错误附带的当前观察决定下一步；原错误与效果保持不变，SDK 不会重放不确定的输入。
-
-#### Python SDK
-
-将以下示例保存为 `list_apps.py`，通过 `uv run --no-dev python list_apps.py` 运行：
-
-```python
-from computer_use import Computer
-
-
-with Computer() as computer:  # 仍优先选择机制合格的低干扰路线。
-    for app in computer.list_apps():
-        print(app.id, app.display_name, app.is_running)
-```
-
-`Computer.close()` 释放会话持有的驱动资源，上下文管理器在退出时自动调用它。
-公开 SDK 方法均直接同步调用，包括 `Observation.read_details()`。
-嵌入已有 asyncio 或 GUI 应用时，在工作线程中运行阻塞的电脑操作代码，使宿主保持响应；
-内部驱动通信、进度和清理仍使用异步执行。
-
-`allow_global_input` 是严格的布尔型会话选项，默认 `True`，不授予 macOS 系统权限。
-macOS 上，App／Element 的整次操作（含准备、恢复、清理）固定不注入全局鼠标或键盘，
-但允许必要的窗口激活和焦点准备。原来的全局鼠标后备路线改为定向投放。
-确需全局输入时，由 Agent 选择 Computer 的直接输入方法；该选择只作用于本次调用。
-Windows／Linux 当前保持原有行为，允许对象操作使用全局输入；相同边界的落地和验收后续实施。
-`Computer(allow_global_input=False)` 会限制显式全局输入并返回 `permission_required`。
-macOS 对象操作没有合格的非全局路线时返回 `input_unavailable`，不是要求重新授权对象方法。
-
-macOS 的 Computer 直接输入使用系统全局事件，由当前桌面和键盘焦点决定接收者。
-裸坐标是全局屏幕 point，可包含副屏的负坐标；不依赖此前截图，不自动激活或归还应用。
-例如已知屏幕坐标时，可以不先读取：
-
-```python
-computer.click(at=(640, 360))
-computer.type_text("全局输入")
-computer.press_key("Return")
-```
-
-图片坐标用明确的定位值转换；已有元素也可作为鼠标定位来源：
-
-```python
-field = app.element("输入框")
-field.type_text("普通输入", replace=True)       # macOS：AX／定向机制
-computer.click(target=field)                  # 只定位到屏幕点，再全局点击
-computer.press_key("super+a")                # 当前系统接收者中的显式全选
-computer.type_text("全局输入")               # 不隐式聚焦或替换特定编辑器
-computer.paste("多行\n内容")                 # 当前焦点中的全局粘贴
-
-# 从此前实际交付的 app 截图确定位置；point() 本身不读取或操作电脑。
-p = app.point((120, 80), window=ref)
-app.click(at=p)                              # macOS：定向鼠标
-computer.click(target=p)                     # 换算到屏幕点，再由系统路由
-```
-
-`Target` 保留元素或图像点的定位来源，后续读取不会把旧点改指新图。
-用于 Computer 鼠标输入时只解析一次屏幕位置，不自动处理遮挡、滚入可见或焦点；定位后不再锁定原对象。
-全局拖拽两端可分别定位，不要求来自同一窗口或图片。对象方法使用 Target 时仍保持原对象及图像绑定。
-全局键盘方法不接受 `target=` 或隐式 `replace=True`；需要时先显式点击、选择，再输入。
-全局输入返回派发回执；需要界面结果时显式读取，读取失败不影响下一次全局输入。
-鼠标位置和系统焦点保留操作产生的结果，不自动归还。实际输入影响见 `result.impact`。
-这些原始全局与定位语义先在 macOS 实现；Windows／Linux 桌面输入仍使用既有截图上下文，后续迁移。
-`Computer.paste(text)` 当前仅在 macOS 实现；Windows／Linux 继续使用既有对象粘贴方法，原始全局粘贴列为后续实现。
-
-`App` 表示应用范围，`list_apps()` 始终列出应用。App 和桌面观察发布窗口编号。
-通过 `app.read(window=ref)` 观察指定窗口；`element`、`point`、`click`、`scroll`、`drag`、
-`type_text`、`paste` 和 `press_key` 同样接受可选 `window=`。窗口选择和普通读取不激活窗口。
-窗口编号在桌面、App 和写后观察间共用；标题和位置只作描述，不作为绑定依据。
-
-```python
-app = computer.app("com.apple.TextEdit")
-view = app.read(view="both")
-# a、b 使用观察中提供的两个窗口编号。
-app.read(window=a, view="both")
-app.read(window=b, view="both")
-app.click(at=(200, 150), window=a)  # 复用 A 实际交付的图像，无须重读来切换范围。
-app.element("保存", window=b).click()
-app.press_key("Return", window=a)
-```
-
-公开对象只有 `Computer`、`App`、`Element`，没有公开 `Window` 或窗口工厂。
-macOS 可通过 `app.close_window(ref)` 正常请求关闭指定窗口，即使共享标识遮住标题栏按钮。
-它根据窗口声明定位关闭控件，复用已有输入和写后观察；不自动保存、丢弃或关闭其他窗口。
-应用可拒绝关闭或弹出确认框；回执的 `intent` 为 `closeWindow`，`dispatched` 表示已派发请求，
-`window_lifecycle` 与附带观察说明已取得的窗口状态。Windows／Linux 的该能力后续实现。
-同一应用的元素编号跨读取范围保持一致；`app.element(ref)` 保持原控件绑定，读取其他窗口不改绑它。
-数字元素引用附带 `window=` 时检查其范围是否相符。指定窗口的名称查询在本次调用内准备定位事实，
-不要求先公开读取该窗口。省略 `window=` 的名称查询和键盘输入使用最近实际交付的明确上下文，
-不会因为执行时系统焦点变化而改选目标。
-
-每个窗口独立保留当前已交付图像；组合图仍使用整张已展示图片的坐标，由 SDK 映射实际接收窗口。
-未交付采样不替换已交付映射。窗口关闭后旧窗口编号和图像失效，应用仍可发现其他窗口。
-`choices` 中的每项是 `WindowInfo`，包含可传给 `window=` 的 `id` 和描述性 `title`。
-写后观察可以展示新发现的窗口，不改绑已有 Element 或图像目标。窗口操作由 SDK 准备接收链，
-确有歧义时返回具体候选。macOS 已纳入真实验收；其他平台沿用共同接口，真实多窗口验收为后续工作。
-
-macOS 的存续元素引用不因无关布局包装变化、局部观察或其他引用的缓存压力而失效；必要的操作条件由 SDK 更新。
-元素真正结束、窗口关闭后重开或真实文档归属改变时，旧引用仍会拒绝输入，并附带可取得的相关观察。
-`app.element(ref)` 可取回本应用已经发布的引用；构造句柄不声明目标仍存续或已获操作资格。
-实际读取和写入均检查原窗口范围与生命周期，失败写入可在同一次调用中返回当前观察。
-操作身份与历史文字缓存独立：大内容缓存可以回收，最小引用元数据保留至明确退休或会话结束。
-本轮原生引用稳定性改进及真实 SDK／MCP 验收限于 macOS；Windows／Linux 的对应原生实现与验收列为后续工作。
-
-普通 SDK 返回原始截图及对应像素坐标。MCP 交付缩图时，公开观察的文字与 PNG 成对使用交付图坐标，
-文字切行或拼接仍保持相同尺度；图像定位值按实际编码尺寸逐轴映射回原图。
-任意 PIL 裁图不自动获得输入映射。macOS 的 Computer 裸坐标始终是屏幕 point，图片点请用 `point()` 明确转换。
-
-执行和观察分别交付结果。`status` 表示派发或已有的局部验证；模型依据实际界面判断业务任务完成情况。
-`observation_status` 的值为 `available`、`partial`、`unavailable` 或 `not_requested`。
-`window_lifecycle` 的值为 `observed`、`closed`、`unknown` 或 `not_applicable`，来自窗口生命周期证据。
-原窗口结束时，相关观察仍可给出当前窗口选择，旧窗口编号和 Element 不会改投这些候选。
-`observation_error.session_usable` 表示原会话是否仍可使用。
-
-MCP 与参考 Agent 共用静态工具说明。工具返回展示界面内容、对象归属、执行进度和具体缺口；
-每张图携带编号、来源、尺寸和坐标接收对象，DeepAgent 转换后仍保留对应说明。
-`ComputerUseError` 和 `ObservationError` 的返回字段已移除指导性的 `next`；`TextPage.next` 继续提供分页游标。
-
-`ActionResult.impact` 和 `ComputerUseError.impact` 提供只读的执行证据。
-`global_input_allowed` 记录会话授权；每个 `attempts` 项分别保留路线声明的 `declared_global_input`、
-`preparation_potential`，以及派发、清理和 `actual` 原生证据。
-`actual.effects` 按阶段、设备、传输、机制和调用状态分组，不是逐按键日志，也不证明应用已消费输入。
-`foreground_changed` 和 `clipboard_restoration` 保留已知或未知的实际结果。
-`impact`／`actual` 缺失或 `actual.coverage` 不完整表示证据不足，不表示没有影响。
-即使 coverage 完整，其范围也仅为该次原生执行步骤，不包含独立读取、稍后的会话清理或应用自身的异步后果。
-
-单次 SDK 操作以约 1000ms 为性能目标，默认不设置总完成截止。原生请求保留自身超时，
-显式提供的操作截止由嵌套定位、准备、原生请求与观察共用，不为恢复重新计时。
-已返回的原生执行事实先保存，再处理后续观察或清理。日志中的 `sdk_operation_end` 记录实际耗时、
-`targetExceeded`、超过总预算的 `overrun`、观察完整性和具体缺口；MCP 元数据另记录整次工具调用时间，包含启动、多个 SDK 操作及最终交付。
-一次工具脚本可连续调用多个 SDK 方法，逐操作时间与工具总时间分别核对。
-
-macOS 的写后观察会利用已建立的应用变更通知，在原预算内补采新窗口或欠缺组件；纯截图观察不会因此初始化 AX。
-固定窗口独立保留实际交付截图的坐标映射，隐藏／重显与真正销毁分别处理。
-这些通知恢复及本轮原生输入、截图性能改进先实现 macOS；Windows／Linux 的对应能力及实机验收列为后续工作。
-
-### 方法 2：接入 DeepAgent
-
-使用 Python 3.12 或 3.13 安装 Agent 依赖：
-
-```bash
-uv sync --no-dev --extra agent
-```
-
-通过 wheel 安装时选择 `agent` extra；其中已经包含 MCP。
-
-通过 openJiuwen 的 `ModelClientConfig`、`ModelRequestConfig` 配置支持工具调用和图片输入的模型。以下示例从 `MODEL_PROVIDER`、`API_BASE`、`API_KEY`、`MODEL_NAME` 环境变量读取服务提供方、地址、密钥和模型名称。
-
-`ComputerUseAgent` 继承 DeepAgent 的标准 `invoke()`、`stream()` 接口，也可交给 `Runner` 执行。模型使用 openJiuwen 原生配置构建，后续消息复用 `conversation_id`：
-
-```python
-import asyncio
-import os
-
-from openjiuwen.core.foundation.llm import Model, ModelClientConfig, ModelRequestConfig
-
-from computer_use_agent import create_agent
-
-
-async def main():
-    model = Model(
-        model_client_config=ModelClientConfig(
-            client_provider=os.getenv("MODEL_PROVIDER", "OpenAI"),
-            api_base=os.environ["API_BASE"],
-            api_key=os.environ["API_KEY"],
-        ),
-        model_config=ModelRequestConfig(model=os.environ["MODEL_NAME"]),
-    )
-    async with create_agent(model) as agent:
-        conversation_id = "desktop-conversation"
-        print(await agent.invoke({"query": "列出正在运行的应用", "conversation_id": conversation_id}))
-        async for chunk in agent.stream({"query": "查看计算器窗口", "conversation_id": conversation_id}):
-            print(chunk)
-
-
-asyncio.run(main())
-```
-
-Agent 使用统一的低干扰优先执行管线。`AgentConfig.allow_global_input` 默认 `True`，本地 MCP 会话可使用全局鼠标和键盘输入；显式设置 `False` 会将该限制传递到会话。通过 `AgentConfig.mcp` 配置 `McpConfig` 可连接其他 MCP 宿主。异步上下文在对话结束时清理电脑操作会话。
-
-已有 openJiuwen DeepAgent 应用也可以通过 `ComputerUseToolkit` 接入标准工具集合：
-
-```python
-from openjiuwen.harness import create_deep_agent
-
-from computer_use_agent import ComputerUseToolkit
-
-
-async def run(model):
-    async with ComputerUseToolkit() as desktop:
-        agent = create_deep_agent(
-            model,
-            tools=desktop.tools,
-            system_prompt=desktop.system_prompt,
-            parallel_tool_calls=False,
-            enable_tool_resilience_rail=False,
-            enable_sys_operation=False,
-            enable_read_image_multimodal=True,
-        )
-        return await agent.invoke({"query": "列出正在运行的应用"})
-```
-
-#### 直接使用 CLI
-
-同一个 Agent 也可以通过 CLI 直接运行。首次执行 `uv run --extra agent computer-use-agent --init-config`，在生成的 `~/.computer-use/agent/config.json` 中填写 `model`、`provider`、`api_base`、`api_key`，随后进入对话或执行单次任务：
-
-```bash
-uv run --extra agent computer-use-agent
-uv run --extra agent computer-use-agent "打开预定会议表单，停在提交前"
-```
-
-命令行选项可通过 `uv run --extra agent computer-use-agent --help` 查看。
 
 ## 架构简介
 
@@ -369,11 +56,11 @@ flowchart TD
     OS --> Desktop["桌面应用"]
 ```
 
-DeepAgent 负责模型调用、对话上下文与工具循环；引擎维护 `Computer → App → Element` 接口、目标身份、观察结果及操作选路；操作系统适配器负责解析原生对象、准备输入接收者并派发操作。已完成的动作返回 `dispatched` 或 `verified` 回执及一次有界的相关观察。智能体据此判断任务效果，需要更多或更新证据时再读取；附带读取失败不抹掉动作回执，也不重放输入。
+DeepAgent 负责模型调用、对话上下文与工具循环；引擎维护 `Computer → App / Window → Element` 接口、目标身份、观察结果及操作选路；操作系统适配器负责解析原生对象、准备输入接收者并派发操作。已完成的对象动作返回 `dispatched` 或 `verified` 回执及一次有界的相关观察。macOS 的 Computer 全局输入只返回派发回执，需要观察时显式读取。智能体据此判断任务效果，需要更多或更新证据时再读取；附带读取失败不抹掉动作回执，也不重放输入。
 
 ## 功能特性
 
-macOS 的后台输入准备会在条件允许时归还由 SDK 临时改变的前台，并保留目标内部接收状态。
+macOS 的对象输入准备会在条件允许时归还由 SDK 临时改变的前台，并保留目标内部接收状态。
 它不在每次操作后统一切回旧应用，不撤销显式置前，也不覆盖用户后续切换。
 工作区切换和会话结束不会通过额外失活通知撤销已打开的菜单；配对输入与监听器仍正常释放。
 Windows/Linux 对应的临时前台归还与菜单连续性改进列为后续实现，不能据 macOS 验证推定已支持。
@@ -383,7 +70,7 @@ Windows/Linux 对应的临时前台归还与菜单连续性改进列为后续实
 - **单工具代码执行**：模型写 Python，变量跨调用保留，一次调用完成多步工作流。
 - **无障碍树优先**：元素按十进制 ref 编号，支持 `element(path)` 路径查询、文本分页读取、菜单读取。
 - **可核验回执**：动作的 `target / intent / status` 与 `observation_status`、`observation_error` 分别保留；输入失败提供 `code / effect / target / detail / impact`。`unsupported_operation` 表示所需能力／操作未实现，`permission_required` 表示该路线需要尚未授予的输入权限。
-- **后台优先输入**：优先使用元素和应用定向操作，仅在操作确有需要时取得前台焦点或占用全局鼠标。
+- **后台优先输入**：优先使用元素和应用定向操作；macOS 对象操作固定非全局，需要全局鼠标或键盘时显式调用 Computer 的直接输入方法。
 - **跨平台原生驱动**：macOS、Windows、Linux 各一套，协议一致。
 - **可观测**：每次执行写入 `~/.computer-use/logs` 的 JSONL 日志，含代码、观测与回执。
 
@@ -402,6 +89,7 @@ computer-use/
 │   ├── macos/
 │   ├── windows/
 │   └── linux/
+├── docs/                    # 构建、安装与接入指南
 ├── scripts/                 # 原生构建、权限检查与资源生成
 ├── tests/                   # 单元测试
 ├── pyproject.toml           # 包元数据、依赖与命令行入口
@@ -411,6 +99,9 @@ computer-use/
 
 ## 完整文档
 
+- [MCP 构建、安装与接入](docs/mcp.md)
+- [DeepAgent 构建、安装与接入](docs/deepagent.md)
+- [开发打包说明](PACKAGING.md)
 - [DeepAgent 接入](computer_use_agent/agent.py)：Agent 构建、标准调用与会话生命周期。
 - [DeepAgent 工具](computer_use_agent/toolkit.py)：已有 openJiuwen 应用的工具接入。
 - [SDK 接口参考](computer_use_engine/__init__.pyi)：`Computer`、`App`、`Element` 的公开接口与参数类型。

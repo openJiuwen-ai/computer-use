@@ -91,12 +91,18 @@ def test_model_receives_scoped_popup_content_and_factual_gap(model_server, tmp_p
     assert "Image 2.1" in caption
     assert "Window reference: 1" in caption
     assert "20x10 px" in caption and "coordinate target=" in caption.lower()
+    assert "Coordinate space: displayed image pixels." in caption
+    assert ".point((x, y), window=1)" in caption
+    assert "App click:" in caption and ".click(at=p)" in caption
+    assert "Global click (explicit): computer.click(target=p)" in caption
     assert "Capture:" in caption
     with Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1]))) as image:
         assert image.size == (20, 10)
         assert image.getpixel((10, 5))[:3] == (34, 187, 68)
     schema = next(tool["function"] for tool in request["tools"] if tool["function"]["name"] == "computer_use")
     assert schema["description"] == DESCRIPTION
+    assert "All screenshot coordinates use the displayed image's pixels" in schema["description"]
+    assert "screen_x" not in schema["description"]
     assert "replace=True" in schema["description"]
     assert "Each window/page has its own accessibility coverage" in schema["description"]
 

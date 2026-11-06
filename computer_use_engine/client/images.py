@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.delivery.image_caption import png_summary, render_image_caption, window_state_notes
+from computer_use.interaction.read.delivery.image_caption import (
+    IMAGE_POINT_GUIDANCE,
+    png_summary,
+    render_image_caption,
+    window_state_notes,
+)
 from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.protocol.png import png_size
 from computer_use.session.images import (
@@ -126,15 +131,33 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
     actionable = (
         facts["kind"] in ("desktop", "window") and not facts.get("stale") and facts.get("mappingAvailable", True)
     )
-    coordinate_windows = source.get("coordinate_windows") if source is not None else None
-    if callable(coordinate_windows) and actionable:
-        refs = coordinate_windows()
-        if refs:
-            caption += (
-                "\nCoordinate inputs for this displayed canvas: "
-                + ", ".join(f"computer.app({source['selector']!r}).click(at=(x, y), window={ref})" for ref in refs)
-                + ". Use the whole displayed image's pixels; window= selects that window and confirmed descendants."
-            )
-    return caption + (
-        "\nUse this displayed image's pixels for coordinates." if coordinates is not None and actionable else ""
+    if not actionable:
+        return caption
+    if facts["kind"] == "desktop":
+        return (
+            caption
+            + "\n"
+            + IMAGE_POINT_GUIDANCE
+            + ("\nImage point: p = computer.point((x, y))\nGlobal click: computer.click(target=p)")
+        )
+    coordinate_windows = source.get("coordinate_windows")
+    refs = coordinate_windows() if callable(coordinate_windows) else ()
+    # Delayed/composite pictures may still describe old members. Only advertise
+    # locators whose window currently retains this exact delivered canvas.
+    if callable(coordinate_windows) and not refs:
+        return caption
+    application = f"computer.app({source['selector']!r})"
+    points = (
+        [f"Image point for window={ref}: p = {application}.point((x, y), window={ref})" for ref in refs]
+        if refs
+        else [f"Image point: p = {application}.point((x, y))"]
+    )
+    return "\n".join(
+        [
+            caption,
+            IMAGE_POINT_GUIDANCE,
+            *points,
+            f"App click: {application}.click(at=p)",
+            "Global click (explicit): computer.click(target=p)",
+        ]
     )
