@@ -35,6 +35,7 @@ import Foundation
     private var unavailableBackgroundPreparation = Set<String>()
     private var confirmedPreparation = Set<String>()
     private(set) var keyboardInsertionSelection: NativeTextSelection?
+    private(set) var geckoTextProvider: NativeGeckoTextProvider.Proof?
     /// The operation owns original document evidence independently of the
     /// currently declared AX capability list.
     let actionDocuments = NativeActionDocumentContexts()
@@ -112,6 +113,12 @@ import Foundation
     /// insertion. Later preparation or inspection may confirm it, never move it.
     func retainKeyboardInsertionSelection(_ selection: NativeTextSelection) {
         if keyboardInsertionSelection == nil { keyboardInsertionSelection = selection }
+    }
+
+    /// A live provider sample can qualify a route. Temporary loss of that
+    /// sample must not revive a setter already excluded for this original edit.
+    func retainGeckoTextProvider(_ proof: NativeGeckoTextProvider.Proof) {
+        if geckoTextProvider == nil { geckoTextProvider = proof }
     }
 
     func confirmPreparation(_ primitive: String) throws {

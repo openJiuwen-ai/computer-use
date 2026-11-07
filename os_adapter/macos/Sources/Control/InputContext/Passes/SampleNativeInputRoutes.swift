@@ -12,6 +12,9 @@ import ApplicationServices
         let queryScope = plan.query, op = plan.operation
         let binding = queryScope.binding
         let actuator = plan.actuator, receiver = plan.receiver
+        let originalAddressedElement = actuator == nil && receiver == nil && binding.node != nil
+            && binding.node == op.target["node"] as? String && !(binding.wire["capture"] is String)
+        let requestedText = op.request.parameters["text"] as? String ?? ""
         func declare(
             _ unit: NativeInputUnit, supported: Bool,
             readiness: (Bool) throws -> NativeReadiness = { _ in NativeReadiness() }
@@ -53,10 +56,17 @@ import ApplicationServices
         let textFacts =
             try op.intent == "replace" && actuator == nil
             ? binding.node.map {
-                try access.objects.nativeTextValueFacts($0, originalWindow: {
-                    try access.scopes.fixedInputWindow(binding.wire)?.window
-                })
+                try access.objects.nativeTextValueFacts(
+                    $0, replacementText: originalAddressedElement ? requestedText : "",
+                    originalWindow: { try access.scopes.fixedInputWindow(binding.wire)?.window })
             } : nil
+        if let proof = textFacts?.geckoProvider { op.retainGeckoTextProvider(proof) }
+        let valueContract = textFacts?.contract.flatMap { contract -> NativeElementControl.TextValueContract? in
+            if case .geckoAtomicFullReplacement(let proof) = contract.semantics, proof != op.geckoTextProvider {
+                return nil
+            }
+            return contract
+        }
         if let actuator, actuator.relation == "scrollPage" {
             let facts = try access.objects.nativeActionFacts(binding.node!)
             enabled = facts.enabled
@@ -93,7 +103,7 @@ import ApplicationServices
             input["pointerRoute"] = ready ? "yes" : "no"
             let pending = [("receiver", ready ? "yes" : "no")]
             declare(.pointer(kind), supported: true, readiness: { _ in NativeReadiness(pending) })
-        } else if let facts = textFacts, let contract = facts.contract, contract.independent {
+        } else if let facts = textFacts, let contract = valueContract, contract.independent {
             enabled = facts.enabled
             foreground = facts.foreground
             try declare(.textValue(contract), supported: true)
@@ -109,15 +119,14 @@ import ApplicationServices
             }
         } else if let kind = NativeKeyboardIntent.Kind(rawValue: op.intent) {
             var unit = try access.units.keyboardUnit(binding.wire, actuator: actuator, receiver: receiver)
-            unit.originalAddressedElement = actuator == nil && receiver == nil && binding.node != nil
-                && binding.node == op.target["node"] as? String && !(binding.wire["capture"] is String)
+            unit.originalAddressedElement = originalAddressedElement
             let facts = try unit.sample(includeAncestors: true)
             let cellActivation = try kind == .replace && unit.requiresCellEditorActivation()
             let enabledRead = unit.element.map { AXAccess.read($0, kAXEnabledAttribute) }
             enabled = enabledRead?.value as? Bool
             foreground = facts.foreground
             nativeRole = unit.element.flatMap { AXAccess.read($0, kAXRoleAttribute).value as? String }
-            if let contract = textFacts?.contract { try declare(.textValue(contract), supported: true) }
+            if let contract = valueContract { try declare(.textValue(contract), supported: true) }
             input["windowRoute"] = facts.windowRoute
             if facts.windowRoute == "yes", facts.scopeRoute == "yes" {
                 input["keyboardSurface"] = binding.wire["surface"]
@@ -179,11 +188,26 @@ import ApplicationServices
                     NativeReadiness([("receiver", "unknown")])
                 }
             }
+            let geckoTextProvider: NativeGeckoTextProvider.Proof?
+            if originalAddressedElement, !cellActivation, !requestedText.isEmpty,
+                kind == .insert, let element = unit.element
+            {
+                let observed = try NativeGeckoTextProvider.prove(
+                    element: element, presenterPID: unit.application.processIdentifier, originalWindow: { unit.window })
+                if let observed { op.retainGeckoTextProvider(observed) }
+                geckoTextProvider = observed == op.geckoTextProvider ? observed : nil
+            } else {
+                geckoTextProvider = textFacts?.geckoProvider == op.geckoTextProvider ? textFacts?.geckoProvider : nil
+            }
             if !cellActivation, [.insert, .replace, .paste].contains(kind), let element = unit.element {
                 let edit = NativeSelectedTextUnit(
                     application: unit.application, window: unit.window, element: element,
                     receiverRelation: unit.receiverRelation, cellEditor: unit.cellEditor)
-                if kind != .paste, let contract = try edit.contract(replace: kind == .replace) {
+                let providerAvailable = !originalAddressedElement || op.geckoTextProvider == nil || geckoTextProvider != nil
+                if kind != .paste, providerAvailable, let contract = try edit.contract(
+                    replace: kind == .replace, text: requestedText, geckoProvider: geckoTextProvider,
+                    pinnedInsertionSelection: op.keyboardInsertionSelection)
+                {
                     try declare(.selectedText(contract), supported: true) { _ in try edit.readiness(contract) }
                 } else {
                     let receiver = NativeReceiverPreparation(
@@ -231,23 +255,29 @@ import ApplicationServices
                     }
                 }
             } else {
-                if kind == .insert, let element = unit.element, let entry = keyboardEntry(),
-                    op.keyboardInsertionSelection != nil
+                if kind == .insert, let element = unit.element, let entry = keyboardEntry() {
+                    let provider = entry.isPlainTextControl ? geckoTextProvider : nil
+                    let providerSelection = provider == nil ? nil : entry.selection(element)
+                    let useQualifiedInsertion = provider != nil && NativeKeyboardUnit.needsGeckoInsertion(
+                        selection: providerSelection, retained: op.keyboardInsertionSelection)
+                    if useQualifiedInsertion || op.keyboardInsertionSelection != nil
                         || (AXAccess.read(element, "AXEditable").value as? Bool != true
                             && !(entry.isPlainTextControl
                                 && AXAccess.writable(element, kAXFocusedAttribute).value == true))
-                {
-                    let selection = entry.selection(element)
-                    // A composite without its own text protocol can still
-                    // expose a separate editor through receiver resolution.
-                    if selection != nil || entry.isPlainTextControl || op.keyboardInsertionSelection != nil {
-                        // Preparation may establish the editor's actual caret.
-                        // Pin a selection only on an already confirmed receiver.
-                        if let selection, unit.exactTextEntryReceiver(facts) == "yes" {
-                            op.retainKeyboardInsertionSelection(selection)
+                    {
+                        let selection = provider == nil ? entry.selection(element) : providerSelection
+                        // A composite without its own text protocol can still
+                        // expose a separate editor through receiver resolution.
+                        if selection != nil || entry.isPlainTextControl || op.keyboardInsertionSelection != nil {
+                            // Preparation may establish the editor's actual caret.
+                            // Pin a selection only on an already confirmed receiver.
+                            if let selection, unit.exactTextEntryReceiver(facts) == "yes" {
+                                op.retainKeyboardInsertionSelection(selection)
+                            }
+                            unit.keyboardInsertion = entry
+                            unit.insertionSelection = op.keyboardInsertionSelection
+                            if useQualifiedInsertion { unit.geckoInsertion = provider }
                         }
-                        unit.keyboardInsertion = entry
-                        unit.insertionSelection = op.keyboardInsertionSelection
                     }
                 }
                 let textPolicy = declarations.keyboardPolicy(kind: kind, selection: nil, observed: observedInterpreter)
@@ -257,7 +287,7 @@ import ApplicationServices
                     .keyboard(kind, nil, textPolicy),
                     supported: keyboardSupported
                         && (op.keyboardInsertionSelection == nil || unit.keyboardInsertion != nil),
-                    enabled: enabled, keyboardInsertion: unit.keyboardInsertion
+                    enabled: enabled, keyboardInsertion: unit.keyboardInsertion, geckoKeyboardInsertion: unit.geckoInsertion
                 ) { prepared in
                     try unit.readiness(
                         kind: kind, key: op.request.parameters["key"] as? String,

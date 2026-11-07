@@ -7,7 +7,8 @@ import Carbon
 /// A call-local proposal. It is not an input permission or a text-client proof.
 @MainActor struct NativeKeyboardDeliveryProposal {
     let interpreter: NativeKeyboardInterpreterEvidence.Observation<AXUIElement>
-    var processTextUnavailable: Bool { interpreter.kind == .localWeb }
+    var permitsQualifiedLocalInsertion = false
+    var processTextUnavailable: Bool { interpreter.kind == .localWeb && !permitsQualifiedLocalInsertion }
     var unavailable: Bool { interpreter.kind == .observedWebOwnershipUnknown }
 
     static func read(

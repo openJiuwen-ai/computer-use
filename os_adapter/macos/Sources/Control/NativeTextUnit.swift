@@ -10,6 +10,7 @@ extension NativeElementControl {
         enum Semantics: Equatable {
             case propertyReplacement(independent: Bool)
             case providerAtomicFullReplacement(NativeProviderTextValueEvidence.Proof)
+            case geckoAtomicFullReplacement(NativeGeckoTextProvider.Proof)
         }
         let role: String
         let subrole: String?
@@ -25,10 +26,15 @@ extension NativeElementControl {
             self.subrole = subrole
             semantics = .providerAtomicFullReplacement(provider)
         }
+        init(role: String, subrole: String?, gecko: NativeGeckoTextProvider.Proof) {
+            self.role = role
+            self.subrole = subrole
+            semantics = .geckoAtomicFullReplacement(gecko)
+        }
         var independent: Bool {
             switch semantics {
             case .propertyReplacement(let independent): return independent
-            case .providerAtomicFullReplacement: return true
+            case .providerAtomicFullReplacement, .geckoAtomicFullReplacement: return true
             }
         }
 
@@ -39,10 +45,11 @@ extension NativeElementControl {
         let contract: TextValueContract?
         let enabled: Bool?
         let foreground: Bool
+        let geckoProvider: NativeGeckoTextProvider.Proof?
     }
 
     func nativeTextValueFacts(
-        _ ref: String, originalWindow: () throws -> AXUIElement?
+        _ ref: String, replacementText: String, originalWindow: () throws -> AXUIElement?
     ) throws -> TextValueFacts {
         guard let target = registry.target(ref) else {
             throw DriverError("element reference expired", code: .staleTarget)
@@ -89,6 +96,13 @@ extension NativeElementControl {
                 || focus.value == true && AXAccess.read(target.element, "AXEditable").value as? Bool != false)
             && explicitlyUnavailable(AXAccess.writable(target.element, kAXSelectedTextAttribute))
         var contract = replacement ? TextValueContract(role: role!, subrole: subrole, independent: independent) : nil
+        let enabled = (inspection.attribute(target.element, kAXEnabledAttribute) as? NSNumber)?.boolValue
+        let geckoProvider =
+            try !replacementText.isEmpty && role == kAXTextFieldRole && subrole == kAXSearchFieldSubrole
+            ? NativeGeckoTextProvider.prove(
+                element: target.element, presenterPID: target.application.processIdentifier,
+                originalWindow: { try target.observedInteractionSurface ?? originalWindow() })
+            : nil
         // Keep the old independent property primitive unchanged. A separate
         // provider editing proof can strengthen only whole replacement of the
         // same addressed object; SampleNativeInputRoutes already excludes a
@@ -96,7 +110,19 @@ extension NativeElementControl {
         if contract?.independent != true {
             let providerSubrole: NativeProviderTextValueEvidence.OptionalAttribute<String> =
                 subroleKnown ? subrole.map { .value($0) } ?? .absent : .unknown
-            if let provider = try NativeProviderTextValueQuery.proof(
+            if let proof = geckoProvider, let role,
+                enabled == true, settable == .success, writable.boolValue,
+                AXAccess.read(target.element, "AXEditable").value as? Bool != false,
+                AXAccess.read(target.element, "AXReadOnly").value as? Bool != true,
+                NativeGeckoTextProvider.needsAtomicReplacement(
+                    text: replacementText, value: AXAccess.read(target.element, kAXValueAttribute).value as? String),
+                NativeGeckoTextProvider.focused(proof)
+            {
+                // Gecko AXValue performs one editor replacement. It can
+                // establish a selection and focus, so only an already
+                // confirmed receiver gets this independent offer.
+                contract = TextValueContract(role: role, subrole: subrole, gecko: proof)
+            } else if let provider = try NativeProviderTextValueQuery.proof(
                 element: target.element,
                 originalWindow: { try target.observedInteractionSurface ?? originalWindow() },
                 presenterPID: target.application.processIdentifier, role: role, subrole: providerSubrole,
@@ -106,9 +132,7 @@ extension NativeElementControl {
             }
         }
         return TextValueFacts(
-            contract: contract,
-            enabled: (inspection.attribute(target.element, kAXEnabledAttribute) as? NSNumber)?.boolValue,
-            foreground: background.isForeground)
+            contract: contract, enabled: enabled, foreground: background.isForeground, geckoProvider: geckoProvider)
     }
 
     func executeNativeTextValue(
@@ -117,7 +141,11 @@ extension NativeElementControl {
     ) throws -> ActionResult {
         try validateText(text)
         let target = try inputTarget(ref)
-        guard try nativeTextValueFacts(ref, originalWindow: originalWindow).contract == contract else {
+        let refreshed = try nativeTextValueFacts(ref, replacementText: text, originalWindow: originalWindow).contract
+        guard refreshed == contract else {
+            if case .geckoAtomicFullReplacement = contract.semantics {
+                throw NativeRouteUnavailable(description: "the original atomic text replacement is unavailable")
+            }
             throw DriverError(
                 "the selected text-value replacement contract is no longer available", code: .inputUnavailable)
         }

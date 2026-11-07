@@ -17,4 +17,5 @@ struct NativePrimitiveContract {
     var actionDocument: NativeActionDocumentContract? = nil
     /// A keyboard-only insertion recipe on this contract's exact node.
     var keyboardInsertion: NativeKeyboardTextEntry? = nil
+    var geckoKeyboardInsertion: NativeGeckoTextProvider.Proof? = nil
 }

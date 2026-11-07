@@ -9,6 +9,8 @@ import ApplicationServices
     struct Contract: Equatable {
         let role: String
         let replace: Bool
+        let geckoProvider: NativeGeckoTextProvider.Proof?
+        let pinnedInsertionSelection: NativeTextSelection?
     }
     let application: NSRunningApplication
     let window: AXUIElement
@@ -16,21 +18,41 @@ import ApplicationServices
     var receiverRelation: NativeReceiverRelation? = nil
     var cellEditor: NativeCellEditorHandoff? = nil
 
-    func contract(replace: Bool) throws -> Contract? {
-        do { return try qualifiedContract(replace: replace) }
+    func contract(
+        replace: Bool, text: String, geckoProvider: NativeGeckoTextProvider.Proof?,
+        pinnedInsertionSelection: NativeTextSelection?
+    ) throws -> Contract? {
+        do {
+            return try qualifiedContract(
+                replace: replace, text: text, geckoProvider: geckoProvider,
+                pinnedInsertionSelection: pinnedInsertionSelection)
+        }
         catch is NativeRouteUnavailable { return nil }
     }
 
     private func qualifiedContract(
-        replace: Bool, expected: Contract? = nil
+        replace: Bool, text: String, geckoProvider: NativeGeckoTextProvider.Proof?,
+        pinnedInsertionSelection: NativeTextSelection?
     ) throws -> Contract? {
         guard let role = AXAccess.read(element, kAXRoleAttribute).value as? String, !role.isEmpty,
             AXAccess.read(element, "AXEditable").value as? Bool != false,
             AXAccess.writable(element, kAXSelectedTextAttribute).value == true,
             !replace || AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true
         else { return nil }
-        let current = Contract(role: role, replace: replace)
-        guard expected == nil || current == expected else { return nil }
+        let current = Contract(
+            role: role, replace: replace, geckoProvider: geckoProvider,
+            pinnedInsertionSelection: geckoProvider == nil || replace ? nil : pinnedInsertionSelection)
+        if geckoProvider != nil {
+            let value = AXAccess.read(element, kAXValueAttribute).value as? String
+            let selection = replace ? nil : NativeTextSelection.readBeforeRanges { AXAccess.read(element, $0) }
+            guard NativeGeckoTextProvider.permitsSelectedText(
+                replace: replace, text: text, value: value, selection: selection,
+                pinnedSelection: current.pinnedInsertionSelection)
+            else {
+                throw NativeRouteUnavailable(
+                    description: "the proved selected-text setter cannot preserve this edit's extent or caret")
+            }
+        }
         // The keyboard recipe owns selection on marker-backed rich editors.
         // Offering a ready numeric SelectedText setter would bypass that plan
         // before its Command-key window route has been prepared.
@@ -66,26 +88,35 @@ import ApplicationServices
         return NativeReadiness([("receiver", receiver), ("selection", known ? "yes" : "unknown")])
     }
 
-    private func validate(_ expected: Contract, check: @MainActor () throws -> Void) throws {
+    private func validate(_ expected: Contract, text: String, check: @MainActor () throws -> Void) throws {
         try check()
         guard AXAccess.read(element, kAXEnabledAttribute).value as? Bool != false
         else { throw DriverError("the selected native text-edit contract changed", code: .inputUnavailable) }
         try BackgroundTarget(application).validate(input: true)
         try RequestDiagnostics.checkCancellation()
-        guard try qualifiedContract(replace: expected.replace, expected: expected) == expected else {
+        let provider = try expected.geckoProvider == nil
+            ? nil : NativeGeckoTextProvider.prove(
+                element: element, presenterPID: application.processIdentifier, originalWindow: { window })
+        guard provider == expected.geckoProvider else {
+            throw NativeRouteUnavailable(description: "the original selected-text provider proof is unavailable")
+        }
+        guard try qualifiedContract(
+            replace: expected.replace, text: text, geckoProvider: provider,
+            pinnedInsertionSelection: expected.pinnedInsertionSelection) == expected
+        else {
             throw DriverError("the selected native text-edit contract changed", code: .inputUnavailable)
         }
     }
 
     func prepare(
-        _ expected: Contract, foreground: Bool, check: @escaping @MainActor () throws -> Void,
+        _ expected: Contract, text: String, foreground: Bool, check: @escaping @MainActor () throws -> Void,
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void = {}
     ) async throws {
         let receiver = NativeReceiverPreparation(
             application: application, window: window, element: element, receiverRelation: receiverRelation,
             cellEditor: cellEditor)
         try await receiver.prepare(
-            foreground: foreground, check: { try validate(expected, check: check) },
+            foreground: foreground, check: { try validate(expected, text: text, check: check) },
             ready: { try readiness(expected).ready }, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown)
     }
 
@@ -97,7 +128,7 @@ import ApplicationServices
     ) async throws -> Bool {
         try validateText(text)
         func ready() throws {
-            try validate(expected, check: check)
+            try validate(expected, text: text, check: check)
             guard try readiness(expected).ready else {
                 throw DriverError(
                     "native editor receiver or selection changed; no further text sent", code: .inputUnavailable)

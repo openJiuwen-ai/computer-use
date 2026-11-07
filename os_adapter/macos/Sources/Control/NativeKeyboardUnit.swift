@@ -18,6 +18,7 @@ import ApplicationServices
     /// Only the qualified dispatch copy compares this immutable original ID.
     var dispatchExpectedNativeID: CGWindowID? = nil
     var keyboardInsertion: NativeKeyboardTextEntry? = nil
+    var geckoInsertion: NativeGeckoTextProvider.Proof? = nil
     var insertionSelection: NativeTextSelection? = nil
     var originalAddressedElement = false
 
@@ -85,7 +86,34 @@ import ApplicationServices
             element.flatMap { CFEqual($0, window) ? nil : $0 } ?? state.relatedEditor ?? state.focus ?? state.rawFocus
         let observation = try NativeKeyboardDeliveryProposal.read(
             element: editor, window: state.window ?? window, pid: application.processIdentifier, policy: textPolicy)
-        return .init(interpreter: NativeKeyboardInterpreterEvidence.applying(textPolicy, to: observation.interpreter))
+        let interpreter = NativeKeyboardInterpreterEvidence.applying(textPolicy, to: observation.interpreter)
+        let qualified = permitsGeckoInsertion(kind, window: state.window ?? window, interpreter: interpreter)
+        if geckoInsertion != nil && !qualified {
+            return .init(interpreter: .init(kind: .observedWebOwnershipUnknown, area: interpreter.area))
+        }
+        return .init(interpreter: interpreter, permitsQualifiedLocalInsertion: qualified)
+    }
+
+    func permitsGeckoInsertion(
+        _ kind: NativeKeyboardIntent.Kind, window: AXUIElement,
+        interpreter: NativeKeyboardInterpreterEvidence.Observation<AXUIElement>
+    ) -> Bool {
+        guard kind == .insert, originalAddressedElement, receiverRelation == nil, cellEditor == nil,
+            keyboardInsertion?.isPlainTextControl == true, let element, let geckoInsertion,
+            interpreter.kind == .localWeb, interpreter.complete, let document = interpreter.area
+        else { return false }
+        return geckoInsertion.pid == application.processIdentifier
+            && CFEqual(geckoInsertion.element, element) && CFEqual(geckoInsertion.document, document)
+            && CFEqual(geckoInsertion.window, window) && CFEqual(self.window, window)
+    }
+
+    static func needsGeckoInsertion(selection: NativeTextSelection?, retained: NativeTextSelection?) -> Bool {
+        if let retained, retained != selection { return true }
+        // A qualified provider's SelectedText can handle a proved empty
+        // buffer or a collapsed selection at the very start. Every other
+        // position belongs to the original text receiver's keyboard path.
+        guard let selection else { return true }
+        return !selection.contiguous || selection.location != 0 || selection.length != 0
     }
 
     func textTransportSupported(
@@ -176,8 +204,14 @@ import ApplicationServices
             }
         }
 
-        let recipient = try BackgroundEvents.keyboardRecipient(
-            NativeWindowUnit(application: application, window: state.window ?? window).mapping())
+        let mapping = try NativeWindowUnit(application: application, window: state.window ?? window).mapping()
+        var recipient = try BackgroundEvents.keyboardRecipient(mapping)
+        if proposal?.permitsQualifiedLocalInsertion == true, let geckoInsertion {
+            guard recipient.pid == geckoInsertion.pid, recipient.presenter == geckoInsertion.pid,
+                recipient.window == mapping.id, recipient.remoteRoute == nil, recipient.remoteElement == nil
+            else { throw NativeRouteUnavailable(description: "qualified local text receiver has a different event endpoint") }
+            recipient.expectedLocalFocus = geckoInsertion.element
+        }
         let recipientRoute: String
         switch recipient.remoteRoute {
         case .some(.hostedWeb(_, _)): recipientRoute = "hostedWeb"
@@ -190,7 +224,8 @@ import ApplicationServices
                 "kind": "keyboard_delivery_plan", "delivery": "process",
                 "interpreter": proposal?.interpreter.kind.rawValue ?? "textless", "recipientRoute": recipientRoute,
                 "presenterPID": recipient.presenter, "recipientPID": recipient.pid,
-                "window": recipient.window as Any? ?? NSNull()
+                "window": recipient.window as Any? ?? NSNull(),
+                "qualifiedLocalInsertion": proposal?.permitsQualifiedLocalInsertion == true
             ] as [String: Any])
         onSelection(
             .init(
@@ -580,7 +615,23 @@ import ApplicationServices
         case .insert:
             var started = false
             var continuationState: State?
+            func validateInsertionSelection() throws {
+                guard let keyboardInsertion, let element,
+                    NativeKeyboardTextEntry.read(element) == keyboardInsertion,
+                    let selection = keyboardInsertion.selection(element),
+                    insertionSelection == nil || selection == insertionSelection
+                else {
+                    throw DriverError("original keyboard selection is unconfirmed; no text sent", code: .inputUnavailable)
+                }
+            }
             func validateInsertion() async throws {
+                if !started, let geckoInsertion, let element {
+                    guard try NativeGeckoTextProvider.prove(
+                        element: element, presenterPID: application.processIdentifier, originalWindow: { keyboardWindow }
+                    ) == geckoInsertion else {
+                        throw NativeRouteUnavailable(description: "the original process text provider is unconfirmed")
+                    }
+                }
                 if var state = continuationState {
                     try check()
                     try self.checkEnabled()
@@ -588,14 +639,11 @@ import ApplicationServices
                 } else {
                     try await validateReceiver()
                 }
-                if !started, let keyboardInsertion, let element {
-                    guard NativeKeyboardTextEntry.read(element) == keyboardInsertion,
-                        let selection = keyboardInsertion.selection(element),
-                        insertionSelection == nil || selection == insertionSelection
-                    else {
-                        throw DriverError("original keyboard selection is unconfirmed; no text sent", code: .inputUnavailable)
-                    }
-                    try await validateReceiver()
+                if !started, keyboardInsertion != nil {
+                    try validateInsertionSelection()
+                    // The qualified recipient checks the exact original
+                    // focus after this range read, before every scalar down.
+                    if geckoInsertion == nil { try await validateReceiver() }
                 }
             }
             let resolveSavePanelPath: (@MainActor (String) throws -> NativeSavePanelPathContinuation.Proof?)?

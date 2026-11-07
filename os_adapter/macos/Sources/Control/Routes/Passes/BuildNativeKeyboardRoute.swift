@@ -39,6 +39,14 @@ import ApplicationServices
             unit.keyboardInsertion = contract.keyboardInsertion
             unit.insertionSelection = op.keyboardInsertionSelection
         }
+        if let provider = contract.geckoKeyboardInsertion {
+            guard expected == .insert, provider == op.geckoTextProvider,
+                unit.originalAddressedElement, unit.keyboardInsertion?.isPlainTextControl == true,
+                let element = unit.element, CFEqual(element, provider.element), CFEqual(unit.window, provider.window),
+                provider.pid == unit.application.processIdentifier
+            else { throw NativeRouteUnavailable(description: "original process text insertion contract changed") }
+            unit.geckoInsertion = provider
+        }
         if let element = unit.element, AXAccess.read(element, kAXEnabledAttribute).value as? Bool == false {
             throw DriverError("the selected keyboard target is disabled", code: .inputUnavailable)
         }

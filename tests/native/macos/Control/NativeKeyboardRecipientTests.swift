@@ -94,6 +94,21 @@ import ApplicationServices
             renderer.pid == web.window.pid && renderer.window == web.window.id,
             "a proven hosted Web route does not require an AppKit renderer endpoint")
 
+        let local = Scene()
+        local.actual = local.window.pid
+        let generic = try NativeKeyboardRecipient.resolve(local.window, using: local.queries())
+        var exact = generic
+        exact.expectedLocalFocus = local.focus
+        try exact.validateFocus(using: local.queries())
+        for replacement in [local.other, nil] as [AXUIElement?] {
+            local.current = replacement
+            try generic.validateFocus(using: local.queries())
+            do {
+                try exact.validateFocus(using: local.queries())
+                preconditionFailure("a changed or unavailable same-process focus must stop exact editor input")
+            } catch let error as DriverError { precondition(error.code == .staleTarget) }
+        }
+
         for change in 0..<7 {
             let scene = Scene()
             let original = try NativeKeyboardRecipient.resolve(scene.window, using: scene.queries())

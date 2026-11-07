@@ -809,7 +809,7 @@ extension DocumentProbe: NativeQueryObjectAccess, NativeContractAccess {
     }
     func nativeSelectionContract(_ ref: String) throws -> NativeRowSelection.Contract? { nil }
     func nativeTextValueFacts(
-        _ ref: String, originalWindow: () throws -> AXUIElement?
+        _ ref: String, replacementText: String, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.TextValueFacts {
         preconditionFailure("unselected edit")
     }

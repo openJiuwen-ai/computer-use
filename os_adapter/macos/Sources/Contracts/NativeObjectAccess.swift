@@ -19,7 +19,7 @@ import ApplicationServices
     func nativeExplicitActionFacts(_ ref: String, request: String) throws -> NativeElementControl.ActionFacts
     func nativeSelectionContract(_ ref: String) throws -> NativeRowSelection.Contract?
     func nativeTextValueFacts(
-        _ ref: String, originalWindow: () throws -> AXUIElement?
+        _ ref: String, replacementText: String, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.TextValueFacts
 }
 

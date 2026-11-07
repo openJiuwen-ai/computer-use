@@ -50,11 +50,61 @@ import ApplicationServices
         providerChangesCannotInheritAnExclusion()
         redundantBundleMetadataDoesNotReplaceExecutableEvidence()
         try chromiumWebDelegateIsDistinctFromViews()
+        geckoAtomicReplacementWithdrawsOnlyTheBrokenSetter()
         relatedEditorRemainsAKeyboardReceiver()
         try providerWindowUsesFixedIdentityWithoutWeakeningTextEvidence()
         try qualificationRefreshPrecedesPreparation()
         try onlyPreInputRouteRefusalsPermitContinuation()
         print("PASS selected-text implementation qualification preserves native Views and related keyboard receivers")
+    }
+
+    @MainActor static func geckoAtomicReplacementWithdrawsOnlyTheBrokenSetter() {
+        typealias Provider = NativeGeckoTextProvider
+        let marker = "AXMozDebugDescriptionForTextMarker"
+        let range = "AXMozDebugDescriptionForTextMarkerRange"
+        precondition(Provider.exposesContract([marker, range]))
+        precondition(!Provider.exposesContract([marker, "AXReplaceRangeWithText"]))
+        precondition(!Provider.exposesContract(nil))
+
+        let field = AXUIElementCreateApplication(811)
+        let document = AXUIElementCreateApplication(812)
+        let window = AXUIElementCreateApplication(813)
+        let proof = Provider.Proof(element: field, document: document, window: window, pid: 811)
+        let same = Provider.Proof(element: AXUIElementCreateApplication(811), document: document, window: window, pid: 811)
+        let changed = Provider.Proof(element: field, document: document, window: field, pid: 811)
+        precondition(proof == same && proof != changed)
+        let contract = NativeElementControl.TextValueContract(
+            role: kAXTextFieldRole, subrole: kAXSearchFieldSubrole, gecko: proof)
+        precondition(contract.independent && contract.unit == "native_text_edit")
+        precondition(Provider.needsAtomicReplacement(text: "网络", value: "代理"))
+        precondition(!Provider.permitsSelectedText(
+            replace: true, text: "网络", value: "代理", selection: nil, pinnedSelection: nil),
+            "a known split setter must not be dispatched when replacing a populated field")
+        precondition(Provider.needsAtomicReplacement(text: "网络", value: nil))
+        precondition(!Provider.permitsSelectedText(
+            replace: true, text: "网络", value: nil, selection: nil, pinnedSelection: nil),
+            "an unreadable value must not revive the known split setter")
+        precondition(Provider.permitsSelectedText(
+            replace: true, text: "网络", value: "", selection: nil, pinnedSelection: nil))
+        precondition(Provider.permitsSelectedText(
+            replace: true, text: "", value: "代理", selection: nil, pinnedSelection: nil))
+
+        let start = NativeTextSelection(count: 2, location: 0, length: 0)
+        let end = NativeTextSelection(count: 2, location: 2, length: 0)
+        precondition(Provider.permitsSelectedText(
+            replace: false, text: "网", value: "代理", selection: start, pinnedSelection: nil))
+        precondition(!Provider.permitsSelectedText(
+            replace: false, text: "网", value: "代理", selection: end, pinnedSelection: nil))
+        precondition(!Provider.permitsSelectedText(
+            replace: false, text: "网", value: "", selection: end, pinnedSelection: nil),
+            "a fresh nonzero caret is stronger than an older empty value")
+        precondition(Provider.permitsSelectedText(
+            replace: false, text: "网", value: "", selection: nil, pinnedSelection: nil))
+        precondition(!Provider.permitsSelectedText(
+            replace: false, text: "网", value: "代理", selection: nil, pinnedSelection: nil))
+        precondition(!Provider.permitsSelectedText(
+            replace: false, text: "网", value: "代理", selection: start, pinnedSelection: end),
+            "a live caret at zero cannot authorize an insertion pinned at offset two")
     }
 
     @MainActor static func providerWindowUsesFixedIdentityWithoutWeakeningTextEvidence() throws {

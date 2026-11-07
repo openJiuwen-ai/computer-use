@@ -53,6 +53,8 @@ import ApplicationServices
     let remoteRoute: RemoteRoute?
     let endpoint: Endpoint?
     let endpointProcess: NativeProcessIdentity?
+    /// Retained only by a qualified local editor route with an exact receiver.
+    var expectedLocalFocus: AXUIElement? = nil
 
     static func resolve(_ window: WindowGeometry.WindowMapping) throws -> Self {
         try resolve(window, using: Queries())
@@ -188,8 +190,11 @@ import ApplicationServices
             guard let current, CFEqual(current, remoteElement) else {
                 throw DriverError("embedded input focus changed; remaining input was not sent", code: .staleTarget)
             }
-        } else if let current {
-            guard query.actualPID(current) == pid else {
+        } else {
+            if let expectedLocalFocus, current.map({ CFEqual($0, expectedLocalFocus) }) != true {
+                throw DriverError("the original local editor lost focus; remaining input was not sent", code: .staleTarget)
+            }
+            if let current, query.actualPID(current) != pid {
                 throw DriverError(
                     "keyboard recipient process changed; remaining input was not sent", code: .staleTarget)
             }

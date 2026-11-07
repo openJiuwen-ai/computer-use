@@ -81,17 +81,19 @@ import ApplicationServices
     func declare(
         _ unit: NativeInputUnit, supported: Bool, enabled: Bool?, actionDocument: NativeActionDocumentContract? = nil,
         keyboardInsertion: NativeKeyboardTextEntry? = nil,
+        geckoKeyboardInsertion: NativeGeckoTextProvider.Proof? = nil,
         readiness: (Bool) throws -> NativeReadiness
     ) rethrows {
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
                 && $0.unit == unit && $0.keyboardInsertion == keyboardInsertion
+                && $0.geckoKeyboardInsertion == geckoKeyboardInsertion
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
             receiver: receiver, basis: basis, unit: unit, actionDocument: actionDocument,
-            keyboardInsertion: keyboardInsertion)
+            keyboardInsertion: keyboardInsertion, geckoKeyboardInsertion: geckoKeyboardInsertion)
         current.append(contract)
         let sampled = try readiness(op.preparationConfirmed(contract.id))
         let conditions: NativeReadiness

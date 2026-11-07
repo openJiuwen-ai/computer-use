@@ -164,9 +164,9 @@ import ApplicationServices
     }
 
     func nativeTextValueFacts(
-        _ ref: String, originalWindow: () throws -> AXUIElement?
+        _ ref: String, replacementText: String, originalWindow: () throws -> AXUIElement?
     ) throws -> NativeElementControl.TextValueFacts {
-        try control.nativeTextValueFacts(ref, originalWindow: originalWindow)
+        try control.nativeTextValueFacts(ref, replacementText: replacementText, originalWindow: originalWindow)
     }
 
     func executeNativeTextValue(

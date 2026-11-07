@@ -257,6 +257,45 @@ import ApplicationServices
         precondition(keyWindowMovedAfterSampling == nil, "unchanged selection cannot authorize keys in another key window")
     }
 
+    @MainActor static func qualifiedLocalInsertionKeepsTheOriginalSelectionAndScope() {
+        let window = AXUIElementCreateApplication(91071)
+        let editor = AXUIElementCreateApplication(91072)
+        let document = AXUIElementCreateApplication(91073)
+        let other = AXUIElementCreateApplication(91074)
+        let proof = NativeGeckoTextProvider.Proof(
+            element: editor, document: document, window: window, pid: NSRunningApplication.current.processIdentifier)
+        var unit = NativeKeyboardUnit(application: .current, window: window, element: editor)
+        unit.originalAddressedElement = true
+        unit.keyboardInsertion = .init(role: kAXTextFieldRole, subrole: kAXSearchFieldSubrole)
+        let local = NativeKeyboardInterpreterEvidence.Observation(kind: .localWeb, area: document, complete: true)
+        precondition(!unit.permitsGeckoInsertion(.insert, window: window, interpreter: local))
+        precondition(NativeKeyboardDeliveryProposal(interpreter: local).processTextUnavailable,
+                     "ordinary local web text transport stays restricted")
+        unit.geckoInsertion = proof
+        precondition(unit.permitsGeckoInsertion(.insert, window: window, interpreter: local))
+        precondition(!unit.permitsGeckoInsertion(.replace, window: window, interpreter: local))
+        precondition(!unit.permitsGeckoInsertion(.paste, window: window, interpreter: local))
+        precondition(!unit.permitsGeckoInsertion(.insert, window: other, interpreter: local))
+        precondition(!unit.permitsGeckoInsertion(
+            .insert, window: window, interpreter: .init(kind: .localWeb, area: other, complete: true)))
+        precondition(!unit.permitsGeckoInsertion(
+            .insert, window: window, interpreter: .init(kind: .observedWebOwnershipUnknown, area: document)))
+        unit.originalAddressedElement = false
+        precondition(!unit.permitsGeckoInsertion(.insert, window: window, interpreter: local))
+
+        let empty = NativeTextSelection(count: 0, location: 0, length: 0)
+        let start = NativeTextSelection(count: 4, location: 0, length: 0)
+        let caret = NativeTextSelection(count: 4, location: 2, length: 0)
+        let selection = NativeTextSelection(count: 4, location: 0, length: 2)
+        precondition(!NativeKeyboardUnit.needsGeckoInsertion(selection: empty, retained: nil))
+        precondition(!NativeKeyboardUnit.needsGeckoInsertion(selection: start, retained: nil))
+        precondition(NativeKeyboardUnit.needsGeckoInsertion(selection: caret, retained: nil))
+        precondition(NativeKeyboardUnit.needsGeckoInsertion(selection: selection, retained: nil))
+        precondition(NativeKeyboardUnit.needsGeckoInsertion(selection: nil, retained: nil))
+        precondition(NativeKeyboardUnit.needsGeckoInsertion(selection: start, retained: caret),
+                     "a changed position must not select the native setter's offset-zero route")
+    }
+
     @MainActor static func comboFocusDoesNotRequireATextContract() {
         precondition(NativePointerFocusUnit.supportsEditorPreparation(role: kAXComboBoxRole, intent: .focus))
         for intent: NativeKeyboardIntent.Kind in [.insert, .replace, .paste, .key] {
@@ -498,6 +537,7 @@ import ApplicationServices
         try coldPanelProofDoesNotBorrowAHostedOrUnrelatedReceiver()
         try selectedRangeRemainsInTheOriginalTable()
         comboFocusDoesNotRequireATextContract()
+        qualifiedLocalInsertionKeepsTheOriginalSelectionAndScope()
         try savePanelContinuesOnlyTheProvedUnsentSuffix()
         try await cellSelectionUsesOneAddressedPreparation()
         explicitAXSelectionWritabilityDoesNotExpandDefaultReads()
