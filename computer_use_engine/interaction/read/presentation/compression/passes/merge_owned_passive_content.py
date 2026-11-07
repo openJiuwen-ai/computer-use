@@ -89,14 +89,15 @@ def _text_parts(view: ProjectionView, node: ViewNode, evidence: CompressionEvide
 
 
 def _branch(
-    view: ProjectionView, owner: ViewNode, root: ViewNode, evidence: CompressionEvidence
+    view: ProjectionView, owner: ViewNode, root: ViewNode, evidence: CompressionEvidence, visual_labels: set[str]
 ) -> tuple[list[ViewNode], list[Record]] | None:
     """Collect one wholly passive branch and its deepest readable caption sources."""
     nodes: list[ViewNode] = []
 
     def visit(node: ViewNode) -> list[Record] | None:
         if (
-            node["role"] not in _CONTENT_ROLES
+            node["ref"] in visual_labels
+            or node["role"] not in _CONTENT_ROLES
             or view.keep(node)
             or display_boundary_reasons(view, node)
             or not same_blocking(node, owner)
@@ -163,6 +164,8 @@ def merge_owned_passive_content(view: ProjectionView, edit: ProjectionEditor) ->
     evidence = view.context.get("compressionEvidence")
     if not isinstance(evidence, CompressionEvidence):
         return
+    # Published visual labels require an independent display endpoint.
+    visual_labels = {node["visualLabelRef"] for node in view.nodes.values() if "visualLabelRef" in node}
     pending = list(reversed(view.roots))
     while pending:
         owner = pending.pop()
@@ -176,7 +179,7 @@ def merge_owned_passive_content(view: ProjectionView, edit: ProjectionEditor) ->
             or owner["ref"] in evidence.incomplete_content
         ):
             continue
-        candidates = [(child, _branch(view, owner, child, evidence)) for child in owner["children"]]
+        candidates = [(child, _branch(view, owner, child, evidence, visual_labels)) for child in owner["children"]]
         whole, represented = _captions(view, owner, evidence)
         text = [part for _, branch in candidates if branch is not None for part in branch[1]]
         # Use one occurrence per source fact, retaining duplicate values as a

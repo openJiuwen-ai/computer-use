@@ -171,7 +171,12 @@ def _rule_map() -> dict[Callable[..., Any], Rule]:
         ),
         (
             merge_owned_passive_content,
-            ("complete local ownership", "exact caption sources", "display boundary evidence"),
+            (
+                "complete local ownership",
+                "exact caption sources",
+                "display boundary evidence",
+                "visual label references",
+            ),
             ("owned content elisions", "derived caption fields", "ordered children"),
         ),
         (

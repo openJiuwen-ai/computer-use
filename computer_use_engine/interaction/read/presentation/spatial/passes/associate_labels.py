@@ -73,7 +73,10 @@ def associate_spatial_labels(view: ProjectionView, edit: ProjectionEditor, geome
                 continue
             # An input's own value descendant is content, rather than an external
             # caption. Keep native label relationships and independent siblings intact.
-            if covered_value_lines(view, target, sources(label)) is not None:
+            own_value = (
+                target is parent and label.get("value") not in (None, "") and label["value"] == target.get("value")
+            )
+            if own_value or covered_value_lines(view, target, sources(label)) is not None:
                 continue
             if (
                 not view.context.get("deferVisualComposition")
