@@ -9,6 +9,8 @@ import ApplicationServices
 @MainActor final class NativeInputActivity {
     @TaskLocal static var current: NativeInputActivity?
     @TaskLocal static var stage = Stage.input
+    private static let keyboardEventDetailsEnabled =
+        ProcessInfo.processInfo.environment["COMPUTER_USE_DIAGNOSE_KEY_EVENTS"] == "1"
 
     enum Stage: String, Hashable { case preparation, input, cleanup }
     enum Device: String, Hashable { case mouse, keyboard, focus, element, clipboard, application }
@@ -109,13 +111,14 @@ import ApplicationServices
         return current?.begin(
             device: device, transport: transport, mechanism: mechanism, pid: pid, window: window,
             eventType: event.map { Int($0.type.rawValue) }, point: device == .mouse ? event?.location : nil,
-            stage: stage ?? (release ? .cleanup : Self.stage), presenterPID: presenterPID)
+            stage: stage ?? (release ? .cleanup : Self.stage), presenterPID: presenterPID, event: event)
     }
 
     /// The injected ports exercise the same recorder without sending OS input.
     func begin(
         device: Device, transport: Transport, mechanism: String, pid: pid_t? = nil, window: CGWindowID? = nil,
-        eventType: Int? = nil, point: CGPoint? = nil, stage: Stage = .input, presenterPID: pid_t? = nil
+        eventType: Int? = nil, point: CGPoint? = nil, stage: Stage = .input, presenterPID: pid_t? = nil,
+        event: CGEvent? = nil
     ) -> Effect? {
         guard !ended else { return nil }
         effects += 1
@@ -132,7 +135,7 @@ import ApplicationServices
         let presenter = presenterPID ?? pid
         let receiver = device == .keyboard && presenter != nil && (before["foregroundPID"] as? Int32) == presenter
         foregroundReceiver = foregroundReceiver || receiver
-        let fields: [String: Any] = [
+        var fields: [String: Any] = [
             "effectId": effects, "stage": stage.rawValue, "device": device.rawValue, "transport": transport.rawValue,
             "mechanism": mechanism, "targetPID": pid as Any? ?? NSNull(),
             "recipientPID": (transport == .process ? pid : nil) as Any? ?? NSNull(),
@@ -144,6 +147,14 @@ import ApplicationServices
             } as Any? ?? NSNull(), "point": point.map { ["x": $0.x, "y": $0.y] } as Any? ?? NSNull(),
             "sharedResources": resources, "foregroundReceiver": receiver
         ]
+        // Read only the already-constructed event. Text payload and the
+        // operation's structured receipt stay outside this opt-in trace.
+        if Self.keyboardEventDetailsEnabled, device == .keyboard, let event,
+            [.keyDown, .keyUp, .flagsChanged].contains(event.type)
+        {
+            fields["keycode"] = event.getIntegerValueField(.keyboardEventKeycode)
+            fields["flags"] = event.flags.rawValue
+        }
         let effect = Effect(id: effects, fields: fields, before: before, started: clock(), owner: self)
         record("willCall", fields.merging(["before": before]) { _, new in new })
         return effect

@@ -1,5 +1,6 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+import ApplicationServices
 import Foundation
 
 /// Only injected snapshots/recording ports; no OS input or clipboard writes.
@@ -79,7 +80,35 @@ import Foundation
         precondition(compact["coverage"] as? String == "partial")
         try providerInitialization()
         foregroundRestorationEvidence()
+        keyboardEventDetails()
         print("PASS grouped invoked/possible/notInvoked effects, cleanup, clipboard ownership, foreground uncertainty, bounded impact")
+    }
+
+    @MainActor static func keyboardEventDetails() {
+        let enabled = ProcessInfo.processInfo.environment["COMPUTER_USE_DIAGNOSE_KEY_EVENTS"] == "1"
+        var log = [[String: Any]](), snapshots = 0
+        let activity = NativeInputActivity(
+            operation: "command", step: 1, command: "key_sequence", intent: "key", target: [:],
+            globalInputAllowed: false, snapshot: { snapshots += 1; return ["foregroundPID": Int32(1)] },
+            emit: { log.append($0) })
+        NativeInputActivity.$current.withValue(activity) {
+            for down in [true, false] {
+                let event = CGEvent(keyboardEventSource: nil, virtualKey: 31, keyDown: down)!
+                event.flags = .maskCommand
+                NativeInputActivity.begin(
+                    device: .keyboard, transport: .process, mechanism: "postToPid", pid: 1, event: event
+                )?.returned()
+            }
+        }
+        let impact = activity.finish(dispatch: "dispatched", cleanup: "complete")
+        let events = log.filter { $0["phase"] as? String == "willCall" || $0["phase"] as? String == "didReturn" }
+        precondition(events.count == 4 && snapshots == 6)
+        precondition(events.last?["eventRole"] as? String == "release")
+        for event in events {
+            precondition((event["keycode"] as? Int64) == (enabled ? 31 : nil))
+            precondition((event["flags"] as? UInt64) == (enabled ? CGEventFlags.maskCommand.rawValue : nil))
+        }
+        precondition((impact["effects"] as? [[String: String]])?.allSatisfy { $0["keycode"] == nil } == true)
     }
 
     @MainActor static func foregroundRestorationEvidence() {
