@@ -71,6 +71,24 @@ import ApplicationServices
         return service != nil
     }
 
+    /// Only the standard-window clipboard mechanism retains the stricter
+    /// key-window proof. A generic activation may have prepared a different
+    /// supported receiver, including a focused AX root without AXFocusedWindow.
+    static func validateClipboard(
+        _ state: NativeReceiverSnapshot, window: AXUIElement, requiredKeyWindow: AXUIElement?,
+        needsForeground: () throws -> Bool
+    ) throws {
+        if let requiredKeyWindow {
+            guard CFEqual(requiredKeyWindow, window) else {
+                throw DriverError("the clipboard command's original key window changed", code: .staleTarget)
+            }
+            try requireForeground(state, window: window, exactKey: true)
+        } else if !state.foreground, try needsForeground() {
+            throw DriverError("the clipboard command requires the original key window in foreground",
+                              code: .inputUnavailable)
+        }
+    }
+
     static func requireForeground(_ state: NativeReceiverSnapshot, window: AXUIElement, exactKey: Bool) throws {
         guard state.foreground else {
             throw DriverError("the command's original receiving window is no longer foreground", code: .inputUnavailable)

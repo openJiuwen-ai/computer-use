@@ -228,7 +228,7 @@ import ApplicationServices
         check: @escaping @MainActor () throws -> Void,
         validateReceiver: @escaping @MainActor () async throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
-        onCleanupUnknown: @escaping () -> Void
+        onCleanupUnknown: @escaping () -> Void, windowReceiver: NativeReplacementWindowReceiver? = nil
     ) async throws -> Bool {
         func validateImmediate() throws {
             try check()
@@ -348,44 +348,85 @@ import ApplicationServices
             return false
         }
         _ = try await observeFullSelection()
-        var restorationAttempted = false
+        var rangeRecoveryAttempted = false
+        var receiverRecoveryAttempted = false
         var contentStarted = false
-        func beforeContent() async throws {
-            if !contentStarted {
+        func validateBeforeContent() async throws -> Bool {
+            do {
                 try await validate()
-                var full = selected()
-                if !full, let recoveryLiteral, !restorationAttempted, observationsRemaining > 0 {
-                    restorationAttempted = true
-                    if try await Self.restoreCollapsedRange(
-                        original: recoveryLiteral, fullObserved: fullOriginalRangeObserved, readText: boundedLiteral,
-                        readRange: { liveRecoveryRange(recoveryLiteral.count) },
-                        validateReceiver: validate,
-                        restore: { count in
-                            try selectRange(
-                                count: count, check: beforeSelectionMutation,
-                                onDispatch: onDispatch, onPosted: onPosted)
-                        })
-                    {
-                        full = try await observeFullSelection()
-                    }
+                return false
+            } catch let failure as DriverError where failure.code == .inputUnavailable {
+                guard let windowReceiver, let recoveryLiteral, fullOriginalRangeObserved,
+                    !receiverRecoveryAttempted, !rangeRecoveryAttempted, observationsRemaining > 1,
+                    let deadline = RequestDiagnostics.deadline, deadline - ProcessInfo.processInfo.systemUptime >= 0.025
+                else { throw failure }
+                try validateImmediate()
+                guard try windowReceiver.prepare(ifUnchanged: { boundedLiteral() == recoveryLiteral }) else {
+                    throw failure
                 }
-                if !full {
-                    throw DriverError(
-                        selection == .selectAll
-                            ? """
-                            Select All did not produce a stable selection inside the addressed editor; no \
-                            replacement text sent
-                            """ : "the target does not have a confirmed full-text selection; no replacement text sent",
-                        code: .inputUnavailable)
+                receiverRecoveryAttempted = true
+                // Share the selected recipe's allowance. A different receiver
+                // or desktop event ends recovery immediately; only the proved
+                // Window-only transition can still settle to the original.
+                while observationsRemaining > 0 {
+                    observationsRemaining -= 1
+                    do {
+                        try await validate()
+                        return true
+                    } catch let pending as DriverError where pending.code == .inputUnavailable {
+                        guard observationsRemaining > 0, try windowReceiver.windowOnly() else { throw pending }
+                    }
+                    try await Task.sleep(for: .milliseconds(25))
+                }
+                throw failure
+            }
+        }
+        func requireFullSelection() async throws {
+            if selected() { return }
+            if let recoveryLiteral, !rangeRecoveryAttempted, observationsRemaining > 0 {
+                rangeRecoveryAttempted = true
+                if try await Self.restoreCollapsedRange(
+                    original: recoveryLiteral, fullObserved: fullOriginalRangeObserved, readText: boundedLiteral,
+                    readRange: { liveRecoveryRange(recoveryLiteral.count) },
+                    validateReceiver: validate,
+                    restore: { count in
+                        try selectRange(
+                            count: count, check: beforeSelectionMutation,
+                            onDispatch: onDispatch, onPosted: onPosted)
+                    }), try await observeFullSelection()
+                {
+                    return
                 }
             }
+            throw DriverError(
+                selection == .selectAll
+                    ? "Select All did not produce a stable selection inside the addressed editor; no replacement text sent"
+                    : "the target does not have a confirmed full-text selection; no replacement text sent",
+                code: .inputUnavailable)
+        }
+        func beforeContent() async throws {
+            if contentStarted {
+                try await validate()
+                return
+            }
+            _ = try await validateBeforeContent()
+            try await requireFullSelection()
             // Selection/parent queries can call into application code. A valid
             // range is not authority to use a receiver sampled before them.
-            try await validate()
-            if !contentStarted, restorationAttempted, let recoveryLiteral {
+            if try await validateBeforeContent() {
+                try await requireFullSelection()
+                try await validate()
+            }
+            if (rangeRecoveryAttempted || receiverRecoveryAttempted), let recoveryLiteral {
                 guard boundedLiteral() == recoveryLiteral, liveRecoveryRange(recoveryLiteral.count)?.full == true else {
                     throw DriverError(
                         "the restored selection changed before replacement dispatch", code: .inputUnavailable)
+                }
+                if receiverRecoveryAttempted {
+                    try await validate()
+                    guard windowReceiver?.desktopUnchanged() == true else {
+                        throw DriverError("desktop input changed during receiver recovery", code: .inputUnavailable)
+                    }
                 }
             }
         }

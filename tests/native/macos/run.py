@@ -60,6 +60,7 @@ GROUPS = (
     "NativePointerEventValidation",
     "NativeKeyboardRecipient",
     "NativeApplicationKeyboard",
+    "NativeAppEditorHandoff",
     "NativeKeyboardReceiverReadiness",
     "NativeWriteStage",
     "NativeElementIdentity",

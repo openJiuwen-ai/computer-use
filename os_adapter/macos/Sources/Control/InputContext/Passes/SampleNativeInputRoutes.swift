@@ -109,6 +109,8 @@ import ApplicationServices
             }
         } else if let kind = NativeKeyboardIntent.Kind(rawValue: op.intent) {
             var unit = try access.units.keyboardUnit(binding.wire, actuator: actuator, receiver: receiver)
+            unit.originalAddressedElement = actuator == nil && receiver == nil && binding.node != nil
+                && binding.node == op.target["node"] as? String && !(binding.wire["capture"] is String)
             let facts = try unit.sample(includeAncestors: true)
             let cellActivation = try kind == .replace && unit.requiresCellEditorActivation()
             let enabledRead = unit.element.map { AXAccess.read($0, kAXEnabledAttribute) }
@@ -198,11 +200,10 @@ import ApplicationServices
             let observedInterpreter =
                 try unit.textProposal(kind: kind, text: op.request.parameters["text"] as? String, state: facts)?
                 .interpreter.kind ?? .noObservedWeb
-            let originalEntry = actuator == nil && receiver == nil && binding.node != nil
-                && binding.node == op.target["node"] as? String && !(binding.wire["capture"] is String)
-                && !cellActivation
             func keyboardEntry() -> NativeKeyboardTextEntry? {
-                guard originalEntry, let element = unit.element, let enabledRead else { return nil }
+                guard unit.originalAddressedElement, !cellActivation, let element = unit.element, let enabledRead else {
+                    return nil
+                }
                 return NativeKeyboardTextEntry.read(role: nativeRole, enabled: enabledRead) {
                     AXAccess.read(element, $0)
                 }

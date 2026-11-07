@@ -7,6 +7,7 @@ import ApplicationServices
     @MainActor static func main() async throws {
         try keyboardTextEntryUsesReadProtocol()
         try await restoreOnlyProvedCollapsedRange()
+        try refocusOnlyProvedOriginalForegroundWindow()
         scalarRecipeRequiresTextCapability()
         richEditorSelectionUsesScopedCommand()
         try richTextFragmentsPreserveInput()
@@ -175,6 +176,47 @@ import ApplicationServices
             validateReceiver: { current = Array("ABCD".utf16) },
             restore: { _ in preconditionFailure("text changed while receiver was sampled") })
         precondition(!changedDuringValidation)
+    }
+
+    @MainActor static func refocusOnlyProvedOriginalForegroundWindow() throws {
+        let window = AXUIElementCreateApplication(1_000_001)
+        let original = AXUIElementCreateApplication(1_000_002)
+        let other = AXUIElementCreateApplication(1_000_003)
+        func sample(foreground: Bool = true, reported: AXUIElement? = nil) -> NativeReceiverSnapshot {
+            .init(windowRoute: "yes", focus: window, ancestors: [], foreground: foreground, window: window,
+                  reportedFocus: reported ?? window, rawFocus: reported ?? window, rawFocusOwner: window)
+        }
+        func windowOnly(_ state: NativeReceiverSnapshot) -> Bool {
+            NativeReplacementWindowReceiver.isWindowOnly(state, original: original, window: window)
+        }
+        var steps = [String]()
+        var state = sample()
+        let recovery = NativeReplacementWindowReceiver(
+            windowOnly: { steps.append("receiver"); return windowOnly(state) },
+            canSetFocus: { steps.append("permission"); return true },
+            focusOriginal: { steps.append("focus original") }, desktopUnchanged: { true })
+        let prepared = try recovery.prepare(ifUnchanged: { steps.append("literal"); return true })
+        precondition(prepared && steps == ["receiver", "permission", "literal", "receiver", "focus original"])
+        steps.removeAll()
+        let changedLiteral = try recovery.prepare(ifUnchanged: { false })
+        precondition(!changedLiteral && !steps.contains("focus original"))
+        steps.removeAll()
+        let changedDuringRead = try recovery.prepare(ifUnchanged: {
+            state = sample(reported: other)
+            return true
+        })
+        precondition(!changedDuringRead && !steps.contains("focus original"))
+        state = sample(foreground: false)
+        let background = try recovery.prepare(ifUnchanged: {
+            preconditionFailure("background Window-only loss does not authorize recovery")
+        })
+        precondition(!background)
+        state = sample()
+        state.reportedFocus = nil
+        precondition(!windowOnly(state), "missing provider focus is not proved Window-only loss")
+        state = sample()
+        state.scopeRoute = "no"
+        precondition(!windowOnly(state), "a competing modal or surface remains a strict boundary")
     }
 
     static func richEditorSelectionUsesScopedCommand() {

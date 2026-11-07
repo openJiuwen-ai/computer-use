@@ -2,6 +2,7 @@
 
 import AppKit
 import ApplicationServices
+import ApplicationServices
 
 /// One operation owns its original foreground across every selected candidate.
 /// Restoration phases borrow this one owner; it never qualifies AX input.
@@ -34,6 +35,7 @@ import ApplicationServices
     private var lastRestoration: NativeForegroundRestorationScope.Outcome?
     private var candidateIdentity: String?
     private(set) var retainsForegroundForInput = false
+    private(set) var requiredKeyWindow: AXUIElement?
 
     init(
         snapshot: @escaping @MainActor () -> Snapshot = NativeForegroundResponsibility.desktopSnapshot,
@@ -117,13 +119,20 @@ import ApplicationServices
         // An unaddressed step or a different candidate starts a new dependency.
         if identity == nil || identity != candidateIdentity {
             retainsForegroundForInput = false
+            requiredKeyWindow = nil
             candidateIdentity = identity
         }
     }
-    func requireForegroundForCandidate() { retainsForegroundForInput = true }
+    func requireForegroundForCandidate(keyWindow: AXUIElement? = nil) {
+        retainsForegroundForInput = true
+        if let keyWindow { requiredKeyWindow = keyWindow }
+    }
     /// Only addressed input with a fixed recipient may discharge
     /// its preparation-only foreground dependency before requested input.
-    func releaseForegroundForAddressedInput() { retainsForegroundForInput = false }
+    func releaseForegroundForAddressedInput() {
+        retainsForegroundForInput = false
+        requiredKeyWindow = nil
+    }
 
     func recordActivation(_ identity: NativeProcessIdentity) {
         guard foregroundObligation, identity != original, !targets.contains(identity) else { return }

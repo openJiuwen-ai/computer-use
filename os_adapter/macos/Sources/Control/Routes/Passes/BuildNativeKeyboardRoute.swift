@@ -27,6 +27,9 @@ import ApplicationServices
         }
         var unit = try context.access.units.keyboardUnit(
             bound, actuator: contract.actuator, receiver: contract.receiver)
+        unit.originalAddressedElement = contract.node != nil
+            && contract.node == op.target["node"] as? String && contract.actuator == nil
+            && contract.receiver == nil && !(bound["capture"] is String)
         if let entry = contract.keyboardInsertion ?? replacement?.keyboardEntry {
             guard let element = unit.element, contract.actuator == nil, contract.receiver == nil,
                 let node = contract.node, node == bound["node"] as? String,
@@ -123,6 +126,8 @@ import ApplicationServices
                 check: dispatchCheck,
                 onDispatch: markDispatch, onPosted: receipt.recordAccepted, onPreparation: receipt.recordPreparation,
                 onClipboardRestore: receipt.recordClipboardRestore, onCleanupUnknown: receipt.recordCleanupUnknown,
+                allowsAttachedEditorHandoff: keyboard.kind == .insert && unconstrained && unit.windowCommandScope
+                    && !(bound["capture"] is String),
                 checkSavePanelPath: checkSavePanelPath)
             receipt.detail =
                 alreadySatisfied

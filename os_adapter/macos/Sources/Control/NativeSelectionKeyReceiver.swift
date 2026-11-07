@@ -52,13 +52,15 @@ import ApplicationServices
         }
         func owner(of row: AXUIElement) throws -> AXUIElement? {
             guard access.read(row, kAXRoleAttribute).value as? String == kAXRowRole, owned(row) else { return nil }
-            var current = row
+            var current = row, visited = [row]
             for _ in 0..<8 {
                 try RequestDiagnostics.checkCancellation()
-                guard let parent = object(current, kAXParentAttribute), owned(parent) else { return nil }
+                guard let parent = object(current, kAXParentAttribute),
+                    !visited.contains(where: { CFEqual($0, parent) }), owned(parent) else { return nil }
                 let role = access.read(parent, kAXRoleAttribute).value as? String
                 if role == kAXTableRole || role == kAXOutlineRole { return parent }
                 guard role == kAXGroupRole else { return nil }
+                visited.append(parent)
                 current = parent
             }
             return nil
@@ -70,6 +72,17 @@ import ApplicationServices
         for (index, row) in rows.enumerated() {
             guard !rows.prefix(index).contains(where: { CFEqual($0, row) }) else { return nil }
         }
+        // Selection discovery may have issued several AX round trips after
+        // the unit sampled focus. Before the chord can use the alternative
+        // receiver, prove that its exact focus and key window still hold.
+        try RequestDiagnostics.checkCancellation()
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.05)
+        guard access.read(focused, kAXFocusedAttribute).value as? Bool == true,
+            object(app, kAXFocusedWindowAttribute).map({ CFEqual($0, window) }) == true,
+            object(app, kAXFocusedUIElementAttribute).map({ CFEqual($0, focused) }) == true
+        else { return nil }
+        try RequestDiagnostics.checkCancellation()
         return Self(owner: table, rows: rows)
     }
 }

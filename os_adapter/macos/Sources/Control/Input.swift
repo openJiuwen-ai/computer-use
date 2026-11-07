@@ -165,18 +165,25 @@ import Carbon
         validate: @escaping @MainActor () async throws -> Void, onDispatch: @escaping @MainActor () throws -> Void,
         onPosted: @escaping @MainActor () -> Void, onCleanupUnknown: @escaping () -> Void,
         beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil,
-        savePanelPath: (@MainActor (String) throws -> NativeSavePanelPathContinuation.Proof?)? = nil
+        savePanelPath: (@MainActor (String) throws -> NativeSavePanelPathContinuation.Proof?)? = nil,
+        attachedEditor: (@MainActor () throws -> NativeAppEditorHandoff.Proof?)? = nil
     ) async throws {
         try validateText(text)
         let source = try source(), ascii = asciiKeys()
         var postedPrefix = ""
+        var releasedContent = false
         let nextPath: (@MainActor () throws -> NativeSavePanelPathContinuation.Proof?)?
         if let savePanelPath {
             nextPath = { try savePanelPath(postedPrefix) }
         } else { nextPath = nil }
+        let nextEditor: (@MainActor () throws -> NativeAppEditorHandoff.Proof?)?
+        if let attachedEditor {
+            nextEditor = { try releasedContent ? attachedEditor() : nil }
+        } else { nextEditor = nil }
         try await withPreparedRoute(
             source: source, delivery: delivery, validate: validate, onDispatch: onDispatch, onPosted: onPosted,
-            onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: beforeFirstKeyDown, savePanelPath: nextPath
+            onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: beforeFirstKeyDown,
+            savePanelPath: nextPath, attachedEditor: nextEditor
         ) { press, release in
             var notBefore: TimeInterval?
             for scalar in text.unicodeScalars {
@@ -195,6 +202,7 @@ import Carbon
                     try await Task.sleep(for: .milliseconds(10))
                 }
                 try release()
+                releasedContent = true
                 if savePanelPath != nil { postedPrefix.unicodeScalars.append(scalar) }
                 // Subsequent preflight work counts toward the same minimum
                 // release interval. Every wait is followed by fresh checks.
@@ -315,6 +323,7 @@ import Carbon
         onCleanupUnknown: @escaping () -> Void,
         beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil,
         savePanelPath: (@MainActor () throws -> NativeSavePanelPathContinuation.Proof?)? = nil,
+        attachedEditor: (@MainActor () throws -> NativeAppEditorHandoff.Proof?)? = nil,
         send:
             @MainActor (
                 _ press: @MainActor (CGEvent, CGEvent, TimeInterval?) async throws -> Void,
@@ -356,6 +365,14 @@ import Carbon
                 { down, up, notBefore in
                     try await firstDown.run(beforeFirstKeyDown)
                     try await InputPacing.validate(notBefore: notBefore) {
+                        if let editor = try attachedEditor?() {
+                            guard let recipient, editor.authorizes(recipient, lifetime: process) else {
+                                throw DriverError("the attached editor changed keyboard process", code: .staleTarget)
+                            }
+                            try editor.validateFocus()
+                            activeDelivery = .process(editor.recipient)
+                            return
+                        }
                         if let path = try savePanelPath?() { try usePath(path); return }
                         do { try await validateOriginal() } catch {
                             // The modal/focus change may arrive during ordinary

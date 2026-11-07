@@ -120,6 +120,92 @@ import ApplicationServices
         try NativeKeyboardCommandContext.requireForeground(ready, window: window, exactKey: true)
     }
 
+    @MainActor static func coldPanelProofDoesNotBorrowAHostedOrUnrelatedReceiver() throws {
+        let panel = AXUIElementCreateApplication(91071)
+        let child = AXUIElementCreateApplication(91072)
+        let other = AXUIElementCreateApplication(91073)
+        let mapping = WindowGeometry.WindowMapping(id: 101, pid: 91071, frame: .zero, title: nil, width: 1, height: 1)
+        var children = [child]
+        var ownsPanel = true
+        var hosted = false
+        var kind: RemoteApplicationKind = .prohibitedApplication
+        var query = NativeKeyboardRecipient.Queries()
+        query.actualPID = { CFEqual($0, child) ? 91072 : 91073 }
+        query.belongs = { _, window in ownsPanel && window.id == mapping.id }
+        query.endpoint = { object in
+            .init(element: object, pid: CFEqual(object, child) ? 91072 : 91073, kind: kind)
+        }
+        query.process = { .init(pid: $0, parent: 1, seconds: 2, microseconds: 0, executable: "service") }
+        query.windowID = { _ in hosted ? mapping.id : nil }
+        query.webArea = { _, _, _ in hosted ? child : nil }
+        query.focus = { _ in preconditionFailure("cold panel preparation must not depend on old focus") }
+        func sample() throws -> Bool {
+            try NativeKeyboardCommandContext.coldService(
+                window: panel, mapping: mapping, children: { _ in children }, role: { _ in kAXSheetRole }, query: query)
+        }
+        let proven = try sample()
+        precondition(proven)
+        ownsPanel = false
+        let foreign = try sample()
+        precondition(!foreign)
+        ownsPanel = true
+        hosted = true
+        let relay = try sample()
+        precondition(!relay)
+        hosted = false
+        kind = .ordinaryApplication
+        let ordinary = try sample()
+        precondition(!ordinary)
+        kind = .prohibitedApplication
+        children = [child, other]
+        let ambiguous = try sample()
+        precondition(!ambiguous)
+    }
+
+    @MainActor static func clipboardRetainsOnlyItsOwnKeyWindowRequirement() throws {
+        let window = AXUIElementCreateApplication(91071)
+        let other = AXUIElementCreateApplication(91072)
+        let attached = NativeReceiverSnapshot(windowRoute: "yes", focus: window, ancestors: [], foreground: true,
+                                              window: window, focusedWindowRead: .unsupported)
+        let responsibility = NativeForegroundResponsibility(watchActivation: false)
+        responsibility.beginCandidate("paste")
+        responsibility.requireForegroundForCandidate()
+        // ForegroundAssist is shared by sheet/attached receiver preparation.
+        // Its generic obligation cannot impose AXFocusedWindow on this route.
+        try NativeKeyboardCommandContext.validateClipboard(
+            attached, window: window, requiredKeyWindow: responsibility.requiredKeyWindow,
+            needsForeground: { preconditionFailure("frontmost receiver does not need another native probe") })
+        responsibility.requireForegroundForCandidate(keyWindow: window)
+        responsibility.requireForegroundForCandidate()
+        responsibility.beginCandidate("paste")
+        do {
+            try NativeKeyboardCommandContext.validateClipboard(
+                attached, window: window, requiredKeyWindow: responsibility.requiredKeyWindow,
+                needsForeground: { false })
+            preconditionFailure("an explicitly required key window cannot be confirmed by focused-root evidence")
+        } catch let error as DriverError { precondition(error.code == .inputUnavailable) }
+        let ready = NativeReceiverSnapshot(windowRoute: "yes", focus: nil, ancestors: [], foreground: true,
+                                           window: window, focusedWindowRead: .value(window))
+        try NativeKeyboardCommandContext.validateClipboard(
+            ready, window: window, requiredKeyWindow: responsibility.requiredKeyWindow, needsForeground: { false })
+        do {
+            try NativeKeyboardCommandContext.validateClipboard(
+                ready, window: other, requiredKeyWindow: responsibility.requiredKeyWindow, needsForeground: { false })
+            preconditionFailure("a key-window requirement cannot transfer to another target")
+        } catch let error as DriverError { precondition(error.code == .staleTarget) }
+        responsibility.beginCandidate("other")
+        precondition(responsibility.requiredKeyWindow == nil)
+        let background = NativeReceiverSnapshot(windowRoute: "yes", focus: window, ancestors: [], foreground: false,
+                                                window: window, focusedWindowRead: .value(window))
+        try NativeKeyboardCommandContext.validateClipboard(
+            background, window: window, requiredKeyWindow: nil, needsForeground: { false })
+        do {
+            try NativeKeyboardCommandContext.validateClipboard(
+                background, window: window, requiredKeyWindow: nil, needsForeground: { true })
+            preconditionFailure("positive late loss of the actual key window cannot pass a synthetic preparation receipt")
+        } catch let error as DriverError { precondition(error.code == .inputUnavailable) }
+    }
+
     @MainActor static func selectedRangeRemainsInTheOriginalTable() throws {
         let window = AXUIElementCreateApplication(91071)
         let table = AXUIElementCreateApplication(91072)
@@ -128,12 +214,17 @@ import ApplicationServices
         let otherTable = AXUIElementCreateApplication(91075)
         var rows = [first, second]
         var focusOwner = table
+        var currentFocus = second
+        var currentWindow = window
         let access = NativeSelectionKeyReceiver.Access(
             read: { node, key in
                 switch key {
                 case kAXRoleAttribute:
                     return .value((CFEqual(node, table) || CFEqual(node, otherTable) ? kAXTableRole : kAXRowRole) as CFString)
                 case kAXWindowAttribute: return .value(window)
+                case kAXFocusedWindowAttribute: return .value(currentWindow)
+                case kAXFocusedUIElementAttribute: return .value(currentFocus)
+                case kAXFocusedAttribute: return .value(kCFBooleanTrue)
                 case kAXParentAttribute: return .value(CFEqual(node, second) ? focusOwner : table)
                 default: return .unsupported
                 }
@@ -156,6 +247,14 @@ import ApplicationServices
         focusOwner = otherTable
         let foreign = try sample()
         precondition(foreign == nil)
+        focusOwner = table
+        currentFocus = first
+        let focusMovedAfterSampling = try sample()
+        precondition(focusMovedAfterSampling == nil, "the sampled receiver cannot authorize keys after focus changes")
+        currentFocus = second
+        currentWindow = otherTable
+        let keyWindowMovedAfterSampling = try sample()
+        precondition(keyWindowMovedAfterSampling == nil, "unchanged selection cannot authorize keys in another key window")
     }
 
     @MainActor static func comboFocusDoesNotRequireATextContract() {
@@ -327,10 +426,76 @@ import ApplicationServices
         precondition(!AXAttributeProfile.field("settable.AXUnknown"))
     }
 
+    @MainActor static func compoundTextReturnRequiresExactLiveOwner() throws {
+        let window = AXUIElementCreateApplication(91071)
+        let owner = AXUIElementCreateApplication(91072)
+        let field = AXUIElementCreateApplication(91073)
+        let other = AXUIElementCreateApplication(91074)
+        let text = "00:00:09.000"
+        var children: [AXUIElement]? = [field]
+        var ownerWindow = window, focused = owner, delegated = text
+        var state = NativeReceiverSnapshot(
+            windowRoute: "yes", focus: owner, ancestors: [], foreground: false, window: window,
+            rawFocus: owner, rawFocusOwner: window, rawLocalFocus: true)
+        var access = NativeCompositeTextKeyReceiver.Access()
+        access.read = { node, fieldKey in
+            if fieldKey == kAXRoleAttribute {
+                return .value((CFEqual(node, owner) ? kAXIncrementorRole : kAXTextFieldRole) as CFString)
+            }
+            if fieldKey == kAXValueAttribute {
+                precondition(CFEqual(node, field), "the compound control's scalar value is not the editor text")
+                return .value(text as CFString)
+            }
+            if fieldKey == kAXNumberOfCharactersAttribute { return .value(NSNumber(value: text.utf16.count)) }
+            if fieldKey == kAXFocusedAttribute {
+                return .value(CFEqual(node, owner) ? kCFBooleanTrue : kCFBooleanFalse)
+            }
+            return .unsupported
+        }
+        access.valueWritable = { CFEqual($0, field) }
+        access.parent = { node in CFEqual(node, field) ? owner : CFEqual(node, owner) ? ownerWindow : nil }
+        access.children = { _ in children }
+        access.pid = { _ in 91071 }
+        access.focus = { _ in focused }
+        access.string = { _, count in count == text.utf16.count ? delegated : nil }
+        func capture() throws -> NativeCompositeTextKeyReceiver? {
+            try .capture(field: field, state: state, window: window, pid: 91071, using: access)
+        }
+        let proof = try capture()
+        precondition(proof != nil && state.receiver(field) == "no")
+        precondition(NativeCompositeTextKeyReceiver.accepts(.key, key: "Return"))
+        precondition(!NativeCompositeTextKeyReceiver.accepts(.key, key: "BackSpace"))
+        precondition(!NativeCompositeTextKeyReceiver.accepts(.replace, key: nil))
+        for invalid in [[field, other], [other], nil] {
+            children = invalid
+            let missing = try capture()
+            precondition(missing == nil, "child membership must be complete and exact")
+        }
+        children = [field]
+        delegated = "00:00:03.000"
+        let mismatch = try capture()
+        precondition(mismatch == nil)
+        delegated = text
+        ownerWindow = other
+        let moved = try capture()
+        precondition(moved == nil)
+        ownerWindow = window
+        focused = other
+        let changed = try capture()
+        precondition(changed == nil, "provider queries can change the final reported focus")
+        focused = owner
+        state.rawFocusOwner = other
+        let outside = try capture()
+        precondition(outside == nil)
+    }
+
     @MainActor static func main() async throws {
+        try compoundTextReturnRequiresExactLiveOwner()
         onlyConfirmedLocalReceiverQualifies()
         try windowCommandsKeepTheirPreparation()
         try commandPreparationNeedsPositiveEvidence()
+        try clipboardRetainsOnlyItsOwnKeyWindowRequirement()
+        try coldPanelProofDoesNotBorrowAHostedOrUnrelatedReceiver()
         try selectedRangeRemainsInTheOriginalTable()
         comboFocusDoesNotRequireATextContract()
         try savePanelContinuesOnlyTheProvedUnsentSuffix()
