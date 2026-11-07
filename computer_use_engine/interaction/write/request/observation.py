@@ -15,6 +15,7 @@ from computer_use.interaction.read.acquisition.loading import window_content_une
 from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
+from computer_use.interaction.write.request.menu_observation import observed_menu_window
 from computer_use.interaction.write.request.model import ObservedAction
 from computer_use.native.contracts import Binding
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
@@ -74,7 +75,9 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             ), None)
             context_root = WindowIdentity.of(parent) if parent is not None else None
         source_owner = getattr(instance, "owners", {}).get(getattr(request.target, "root_window", None))
-        before_tree = self.controller.state(source_owner).query_snapshot if source_owner is not None else None
+        source = self.controller.state(source_owner) if source_owner is not None else None
+        before_tree = source.query_snapshot if source is not None else None
+        before_target = source.query_target if source is not None else None
         image_identity = WindowIdentity(
             getattr(request.target, "root_window", None), getattr(request.target, "surface", None),
             getattr(request.target, "instance", None),
@@ -145,6 +148,14 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
+            if (
+                request.intent.kind == "openMenu" and error._invoked_menu_target == request.target
+                and instance is not None and outcome.observation is not None
+                and self.session_usable(request, session_identity)
+            ):
+                error.observed_menu_window = observed_menu_window(
+                    request.target, before_target, before_tree, outcome.observation, instance.windows,
+                )
             if outcome.observation_error is not None:
                 from computer_use.session.events import action_observation_completed
 

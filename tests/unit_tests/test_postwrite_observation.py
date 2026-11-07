@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 from computer_use.client.factory import session_controller
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
+from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead
 from computer_use.interaction.requests import ExecuteAction
@@ -21,6 +22,7 @@ from computer_use.interaction.write.request.observation import WriteWithObservat
 from computer_use.native.contracts import Binding, Intent
 from computer_use.native.lifecycle import CallLifecycle
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, RunningApplication
+from computer_use.protocol.observation import Action, NativeNode, NativeObservation, Relation, States
 from computer_use.session.events import set_action_handler
 from computer_use.session.observation import CapturedTextDocument, lazy_observation
 from computer_use.session.observation_data import retain_observation_data
@@ -107,6 +109,74 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertEqual(result.observation_status, "partial")
         self.assertIs(result.observation, self.observation)
         self.assertEqual(result.window_lifecycle, "observed")
+
+    async def test_uncertain_menu_reports_new_local_menu_in_original_scope(self):
+        root = replace(self.target, node="window")
+        self.ui._instance.directory = self.directory
+        self.ui._instance.owners = {"root": self.ui}
+        self.ui._instance.windows = {7: "root"}
+        self.controller.state(self.ui).query_target = root
+
+        def snapshot(*, menu, partial=False):
+            def children(*targets, total=None):
+                return Relation("children", targets, total=len(targets) if total is None else total)
+
+            def parent(token):
+                return Relation("parent", (token,), total=1)
+
+            nodes = {
+                "window": NativeNode(role="window", relations={"children": children("outline")}),
+                "outline": NativeNode(role="tree", relations={
+                    "parent": parent("window"), "children": children(
+                        *(("node", "menu") if menu else ("node",)), total=2 if partial else None,
+                    ),
+                }),
+                "node": NativeNode(role="text_field", relations={"parent": parent("outline")}),
+            }
+            if menu:
+                nodes.update(
+                    menu=NativeNode(role="menu", relations={"parent": parent("outline"), "children": children("item")}),
+                    item=NativeNode(
+                        role="menu_item", states=States(enabled=True), actions=(Action("invoke", key="AXPress"),),
+                        relations={"parent": parent("menu")},
+                    ),
+                )
+            native = NativeObservation(
+                backend="macos", session="test", id="after" if menu else "before",
+                interval_ns=(3, 4) if menu else (1, 2), roots=("window",), nodes=nodes,
+            )
+            return SemanticSnapshot(native, {}, [], {"8": "item"} if menu else {}, [], {}, {}, scope_kind="window")
+
+        for case, invoked, before_menu, partial, read_target, expected in (
+            ("exact original scope", self.target, False, False, root, 7),
+            ("before native invocation", None, False, False, root, None),
+            ("different invoked element", replace(self.target, node="another"), False, False, root, None),
+            ("menu already present", self.target, True, False, root, None),
+            ("incomplete local children", self.target, False, True, root, None),
+            ("different surface", self.target, False, False, replace(root, surface="other"), None),
+        ):
+            with self.subTest(case=case):
+                self.execute.reset_mock()
+                self.read.reset_mock()
+                self.controller.state(self.ui).query_snapshot = snapshot(menu=before_menu, partial=partial)
+                retain_observation_data(
+                    self.observation, (), ("8",), directory=self.directory,
+                    captured_trees=((read_target, snapshot(menu=True)),),
+                    window_coverage=({"window": "root", "surface": "surface", "instance": "app", "included": ("tree",)},),
+                )
+                error = ComputerUseError({
+                    "code": "execution_unknown", "effect": "possible", "target": "native element",
+                    "detail": "Original AX error",
+                })
+                error._invoked_menu_target = invoked
+                self.execute.side_effect = error
+                with self.assertRaises(ComputerUseError) as caught:
+                    await self.controller.run(ExecuteAction(self.ui, Intent("openMenu", {}), self.target))
+                self.assertIs(caught.exception, error)
+                self.assertEqual(error.effect, "possible")
+                self.assertEqual(getattr(error, "observed_menu_window", None), expected)
+                self.execute.assert_awaited_once()
+                self.read.assert_awaited_once()
 
     async def test_dispatched_app_event_baseline_remains_internal_to_related_observation(self):
         self.ui._instance.directory = self.directory

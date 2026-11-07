@@ -57,6 +57,7 @@ class ComputerUseError(Exception):
         self.observation = None
         self.observation_status = "not_requested"
         self.observation_error = None
+        self.observed_menu_window = None
         self.window_lifecycle = "unknown"
         self.choices = ()
         self.impact = failure.get("impact")

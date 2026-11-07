@@ -224,3 +224,27 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertEqual(re.findall(r"Action \[dispatched\]: #(\d+) ", text), ["1", "2"])
         self.assertIn("Observation rendering failed", text)
+
+    async def test_menu_hint_requires_delivery_of_the_same_observation(self):
+        state = Record(text="Window 7\n8 menu item Apply")
+        observation = {
+            "source": Record(), "scope": "fixture", "view": "window",
+            "state": state, "refs": {}, "full": False,
+        }
+        failure = ComputerUseError({
+            "code": "execution_unknown", "target": "Window 7 / Element 3", "effect": "possible",
+            "detail": "native action returned AX error -25204; effect unknown, not retried",
+        })
+        failure.observed_menu_window = 7
+        self.runtime.task_namespace.update(
+            failure=failure, capture=partial(self.runtime.executor.call, observation_completed, observation),
+        )
+        for delivered_state in (state, Record(text=state.text)):
+            failure.observation = delivered_state
+            result = await self.execute("capture()\nraise failure")
+            self.assertTrue(result["isError"], result)
+            text = "\n".join(block["text"] for block in result["content"])
+            self.assertIn("8 menu item Apply", text)
+            self.assertIn("AX error -25204", text)
+            self.assertIn("Effect: possible", text)
+            self.assertEqual("Use its menu elements in Window 7." in text, delivered_state is state)

@@ -626,7 +626,16 @@ class Runtime:
                     # An observation gap already reports the original window's lifecycle.
                     outcome += "\nOriginal window: closed."
                 message = detail + outcome + newline + facts
-            message = message[:4096]
+            menu_hint = ""
+            if (
+                isinstance(error, ComputerUseError) and error.observed_menu_window is not None
+                and any(state is error.observation for state in run["deliveredObservations"])
+            ):
+                menu_hint = (
+                    f"\nA new AX menu was observed in Window {error.observed_menu_window} after the input. "
+                    f"Use its menu elements in Window {error.observed_menu_window}. Exact opener unconfirmed."
+                )
+            message = message[:4096 - len(menu_hint)] + menu_hint
             if not run.get("evaluationStarted"):
                 message += "\nCode execution: not started."
             result["content"].append(dict(type="text", text=message))
