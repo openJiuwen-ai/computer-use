@@ -61,6 +61,21 @@ from .worker_transport import WorkerMessageWriter, consume_protocol, read_messag
 _runs = ContextVar("computer_use_execution", default=None)
 
 
+def _window_closed_without_input(error: ComputerUseError) -> bool:
+    """Require confirmed closure and complete evidence about the requested input."""
+    if error.window_lifecycle != "closed":
+        return False
+    attempts = (error.impact or {}).get("attempts", ())
+    return bool(attempts) and all(
+        attempt["dispatch"] == "notDispatched"
+        and (actual := attempt.get("actual")) is not None
+        and actual["coverage"] == "complete"
+        and actual["omitted_effects"] == 0
+        and all(effect["stage"] != "input" or effect["state"] == "notInvoked" for effect in actual["effects"])
+        for attempt in attempts
+    )
+
+
 class Runtime:
     def __init__(self, send, computer_factory=Computer):
         self.send, self.computer_factory = send, computer_factory
@@ -603,7 +618,15 @@ class Runtime:
         result = dict(content=run["output"].content.copy())
         message = None
         if error is not None:
-            message = (type(error).__name__ + ": " + str(error))[:4096]
+            message = type(error).__name__ + ": " + str(error)
+            if isinstance(error, ComputerUseError) and _window_closed_without_input(error):
+                detail, newline, facts = message.partition("\n")
+                outcome = "\nRequested input: not dispatched."
+                if error.observation_error is None:
+                    # An observation gap already reports the original window's lifecycle.
+                    outcome += "\nOriginal window: closed."
+                message = detail + outcome + newline + facts
+            message = message[:4096]
             if not run.get("evaluationStarted"):
                 message += "\nCode execution: not started."
             result["content"].append(dict(type="text", text=message))

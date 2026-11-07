@@ -160,6 +160,56 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Action [verified]", text)
         self.assertIn("Only some input may have arrived", text)
 
+    async def test_closed_window_reports_proven_no_input_and_preserves_preparation(self):
+        actual = {
+            "coverage": "complete", "omitted_effects": 0,
+            "effects": ({"stage": "preparation", "device": "focus", "transport": "activation", "state": "invoked"},),
+            "foreground_changed": "yes", "foreground_restoration": "restored",
+        }
+        attempt = {
+            "dispatch": "notDispatched", "cleanup": "complete", "actual": actual,
+            "preparation": ("foreground window activation",),
+        }
+        possible_input = {"stage": "input", "device": "mouse", "transport": "process", "state": "possible"}
+        observation = {
+            "source": Record(), "scope": "fixture", "view": "window",
+            "state": Record(text="Related window still available"), "refs": {}, "full": False,
+        }
+        self.runtime.task_namespace["capture"] = partial(self.runtime.executor.call, observation_completed, observation)
+
+        for case, lifecycle, attempts, confirmed in (
+            ("complete evidence", "closed", (attempt,), True),
+            ("unknown window", "unknown", (attempt,), False),
+            ("no attempts", "closed", (), False),
+            ("unknown input", "closed", (dict(attempt, dispatch="unknown"),), False),
+            ("earlier partial dispatch", "closed", (dict(attempt, dispatch="partial"), attempt), False),
+            ("missing impact", "closed", (dict(attempt, actual=None),), False),
+            ("incomplete impact", "closed", (dict(attempt, actual=dict(actual, coverage="partial")),), False),
+            ("possible input", "closed", (dict(attempt, actual=dict(actual, effects=(possible_input,))),), False),
+        ):
+            with self.subTest(case=case):
+                failure = ComputerUseError({
+                    "code": "stale_target", "target": "Working window", "effect": "possible",
+                    "detail": "Observed native window closed or its process changed",
+                    "impact": {"attempts": attempts},
+                })
+                failure.observation_status = "available"
+                failure.window_lifecycle = lifecycle
+                self.runtime.task_namespace["failure"] = failure
+
+                result = await self.execute("capture()\nraise failure")
+
+                self.assertTrue(result["isError"], result)
+                text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+                self.assertIn("Related window still available", text)
+                self.assertIn("Effect: possible", text)
+                self.assertEqual("Requested input: not dispatched." in text, confirmed)
+                self.assertEqual("Original window: closed." in text, confirmed)
+                if confirmed:
+                    self.assertIn("Preparation: foreground window activation", text)
+                    self.assertIn("Foreground changed: yes", text)
+                    self.assertIn("Foreground restoration: restored", text)
+
     async def test_final_observation_render_failure_preserves_later_completed_inputs(self):
         observation = {
             "source": Record(), "scope": "fixture", "view": "window",
