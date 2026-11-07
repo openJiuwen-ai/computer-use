@@ -23,6 +23,7 @@ class RelatedRead:
 
     Newly discovered windows are observation candidates, not evidence that the
     action created them. The original target remains independent of selection.
+    menu_origin reserves exact tree work after an uncertain native menu invocation.
     """
 
     original: Binding
@@ -30,6 +31,7 @@ class RelatedRead:
     context_owner: ReferenceType[UIHandle] | None = None
     context_root: WindowIdentity | None = None
     changes: PostwriteChanges | None = None
+    menu_origin: WindowIdentity | None = None
 
     @property
     def original_window(self) -> WindowIdentity | None:

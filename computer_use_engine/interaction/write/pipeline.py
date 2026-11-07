@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, cast
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord, freeze_result
 from computer_use.interaction.control import scope_control
+from computer_use.interaction.write.impact import action_impact, invoked_ax_menu_target
 from computer_use.interaction.write.model import OpenedWrite
-from computer_use.interaction.write.impact import action_impact
 from computer_use.interaction.write.passes.complete_empty_input import stage as complete_empty_input
 from computer_use.interaction.write.passes.format_write_result import stage as format_write_result
 from computer_use.interaction.write.passes.observe_selected_pair import stage as observe_selected_pair
@@ -187,6 +187,8 @@ class WritePipeline:
                     minimum_effect="possible" if self.state.native_mutation_possible else "none",
                 )
             error.impact = freeze_result(action_impact(self.state, self.native.policy))
+            if isinstance(error, ComputerUseError) and intent.kind == "openMenu":
+                error._invoked_menu_target = invoked_ax_menu_target(self.state)
             if self.app_change_baseline is not None:
                 error.app_change_baseline = self.app_change_baseline
             if error is caught:

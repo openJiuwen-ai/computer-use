@@ -16,6 +16,7 @@ from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.interaction.write.request.model import ObservedAction
+from computer_use.native.contracts import Binding
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
@@ -101,6 +102,26 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             if prior is not None
             else None
         )
+        menu_origin = None
+        if (
+            related is not None and prior["platform"] == "macos" and request.intent.kind == "openMenu"
+            and isinstance(request.target, Binding) and request.target.root_window is not None
+            and prior["session"] == request.target.session
+        ):
+            target = request.target
+            origin = WindowIdentity(target.root_window, target.surface, target.instance)
+            application = prior["application"]
+
+            def remember_pre_input_directory(directory):
+                nonlocal related, menu_origin
+                if (directory["session"], directory["application"]) != (target.session, application):
+                    return
+                known = tuple(WindowIdentity.of(item) for item in directory["surfaces"])
+                if origin in known:
+                    related = replace(related, known_windows=tuple(dict.fromkeys((*related.known_windows, *known))))
+                    menu_origin = origin
+
+            request = replace(request, on_pre_input_directory=remember_pre_input_directory)
         try:
             receipt = await self.body.arun(request, control)
         except ComputerUseError as error:
@@ -113,6 +134,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             # This is still the original exception, not a fabricated successful
             # receipt. Preparation/dispatch evidence and its original cause stay
             # authoritative while the shared read suffix may add current facts.
+            if menu_origin is not None and error._invoked_menu_target == request.target:
+                related = replace(related, menu_origin=menu_origin)
             outcome = await self.observe(
                 request,
                 ObservedAction(None),

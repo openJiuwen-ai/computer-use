@@ -62,6 +62,7 @@ class ComputerUseError(Exception):
         self.impact = failure.get("impact")
         self.action_receipt = None
         self.scope_cleanup = None
+        self._invoked_menu_target = None
         if cause is not None:
             self.__cause__ = cause
 

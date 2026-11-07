@@ -444,7 +444,9 @@ class InterfaceReadPipeline:
             identity, member_view = work
             key = identity.window
             item = permitted[key]
-            if initial and principal_error is None and ui._anchor is None:
+            # The App reader can follow another modal from its working root.
+            # This menu evidence requires the scheduled member's own AX root.
+            if initial and principal_error is None and ui._anchor is None and identity != plan.menu_origin:
                 initial = False
                 selected = controller.reader._selection(
                     instance.anchor.application, instance.anchor.name, directory, anchor
@@ -541,7 +543,10 @@ class InterfaceReadPipeline:
             if key not in permitted or WindowIdentity.of(permitted[key]) != identity:
                 continue
             item = permitted[key]
-            companion = companion_capture(item, directory, parts) if ui._anchor is None and not full else None
+            companion = (
+                companion_capture(item, directory, parts)
+                if ui._anchor is None and not full and identity != plan.menu_origin else None
+            )
             part = None
             if companion is not None:
                 from computer_use.interaction.read.facts.capture_companion import (
@@ -563,7 +568,8 @@ class InterfaceReadPipeline:
                     part = probe
             if part is None:
                 part = await self.member(
-                    ui, item, member_view, max_nodes=DEFAULT_WINDOW_MAX_NODES if not parts else 200,
+                    ui, item, member_view,
+                    max_nodes=DEFAULT_WINDOW_MAX_NODES if not parts or identity == plan.menu_origin else 200,
                     component_budget_ms=2000 if related is not None else None,
                 )
             previous = next((old for old in parts if old.identity == part.identity), None)

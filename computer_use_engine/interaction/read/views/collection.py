@@ -51,6 +51,7 @@ class CollectionPlan:
     principal: str | None = None
     selection_error: ComputerUseError | None = None
     capture_status: set[WindowIdentity] = field(default_factory=set)
+    menu_origin: WindowIdentity | None = None
 
     def update(self, directory: NativeDirectory, permitted: dict[str, SurfaceInfo]) -> None:
         anchor = self.related.preferred(directory, self.anchor) if self.related is not None else self.anchor
@@ -69,7 +70,18 @@ class CollectionPlan:
         # Prioritize actual blockers before ordinary attached or new peers.
         attached.sort(key=lambda key: permitted[key].get("modal") is not True)
         keys = dict.fromkeys((self.principal, *attached, *newly_seen))
-        self.order = tuple(WindowIdentity.of(permitted[key]) for key in keys if key in permitted)
+        self.menu_origin = None
+        origin = self.related.menu_origin if self.related is not None else None
+        original = permitted.get(origin.window) if origin is not None else None
+        if (
+            original is not None and original.get("node") is not None
+            and WindowIdentity.of(original) == origin and directory["session"] == self.related.original.session
+        ):
+            self.menu_origin = origin
+        priority = (self.menu_origin.window,) if self.menu_origin is not None else ()
+        self.order = tuple(
+            WindowIdentity.of(permitted[key]) for key in dict.fromkeys((*priority, *keys)) if key in permitted
+        )
         for identity in self.order:
             item = permitted[identity.window]
             root = item.get("node")
@@ -95,6 +107,8 @@ class CollectionPlan:
                 requested = components("both")
             if identity in self.capture_status:
                 requested = components("tree")
+            if identity == self.menu_origin:
+                requested = requested | {"tree"} if identity.window in keys else frozenset({"tree"})
             self.requested[identity] = self.requested.get(identity, frozenset()) | requested
 
     def next(self) -> tuple[WindowIdentity, str] | None:
@@ -107,6 +121,8 @@ class CollectionPlan:
             if identity in self.pending_upgrades and "tree" in self.requested[identity]:
                 missing |= {"tree"}
             if missing:
+                if identity == self.menu_origin and "tree" in missing:
+                    missing = frozenset({"tree"})
                 self.attempted[identity] = attempted | missing
                 if "tree" in missing:
                     self.attempted_tree_roots[identity] = self.tree_roots.get(identity)

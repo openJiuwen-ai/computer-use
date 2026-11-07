@@ -1,0 +1,239 @@
+{
+  "20": {
+    "kind": "surfaces",
+    "application": "application",
+    "appChange": {
+      "session": "896840A6-D881-4604-8CBF-F8DDC4B646C3",
+      "application": "instance:843B1D9A-D486-49C1-A300-E1BCF7A227D3:42",
+      "incarnation": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6",
+      "token": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6:28"
+    },
+    "surfaces": [
+      {
+        "window": "0",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:0",
+        "surface": "l41popl6ktu0:scope0",
+        "node": "l41popl6ktu0:t1",
+        "title": "Trash",
+        "kind": "window",
+        "parent": null,
+        "parentState": "none",
+        "modal": false,
+        "nativeWindow": true,
+        "accessibility": true
+      }
+    ],
+    "rootDiscoveryComplete": true,
+    "endedWindows": [],
+    "focusedWindow": "0",
+    "provider": {
+      "status": "alreadyAttempted",
+      "attribute": null,
+      "writeStatus": null
+    },
+    "session": "session",
+    "platform": "macos",
+    "observed": {
+      "id": "1E729A77-D256-43FC-9847-A593BE5B5EA5",
+      "startedAt": 1794091572630,
+      "completedAt": 1794091572873
+    },
+    "stopReasons": [
+      "attached surface discovery incomplete: child/node budget or changing relation",
+      "attached surface discovery incomplete: time/node budget"
+    ]
+  },
+  "29": {
+    "kind": "surfaces",
+    "application": "application",
+    "appChange": {
+      "session": "896840A6-D881-4604-8CBF-F8DDC4B646C3",
+      "application": "instance:843B1D9A-D486-49C1-A300-E1BCF7A227D3:42",
+      "incarnation": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6",
+      "token": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6:46"
+    },
+    "surfaces": [
+      {
+        "window": "21",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:22",
+        "surface": "l41popl6ktu0:scope22",
+        "node": "l41popl6ktu0:t211",
+        "title": "Window",
+        "kind": "dialog",
+        "parent": "0",
+        "parentState": "known",
+        "modal": false,
+        "nativeWindow": true,
+        "accessibility": true
+      },
+      {
+        "window": "0",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:0",
+        "surface": "l41popl6ktu0:scope0",
+        "node": "l41popl6ktu0:t1",
+        "title": "Trash",
+        "kind": "window",
+        "parent": null,
+        "parentState": "none",
+        "modal": false,
+        "nativeWindow": true,
+        "accessibility": true
+      },
+      {
+        "window": "22",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:23",
+        "surface": "l41popl6ktu0:scope23",
+        "node": "l41popl6ktu0:t212",
+        "title": "",
+        "kind": "window",
+        "parent": null,
+        "parentState": "none",
+        "modal": false,
+        "nativeWindow": false,
+        "accessibility": true
+      }
+    ],
+    "rootDiscoveryComplete": true,
+    "endedWindows": [],
+    "focusedWindow": "0",
+    "provider": {
+      "status": "alreadyAttempted",
+      "attribute": null,
+      "writeStatus": null
+    },
+    "session": "session",
+    "platform": "macos",
+    "observed": {
+      "id": "991EA6A7-BF9B-46DA-B730-7B1D1A042317",
+      "startedAt": 1794091574580,
+      "completedAt": 1794091574865
+    },
+    "stopReasons": [
+      "attached surface discovery incomplete: child/node budget or changing relation",
+      "attached surface discovery incomplete: time/node budget"
+    ]
+  },
+  "36": {
+    "kind": "surfaces",
+    "application": "application",
+    "appChange": {
+      "session": "896840A6-D881-4604-8CBF-F8DDC4B646C3",
+      "application": "instance:843B1D9A-D486-49C1-A300-E1BCF7A227D3:42",
+      "incarnation": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6",
+      "token": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6:76"
+    },
+    "surfaces": [
+      {
+        "window": "21",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:22",
+        "surface": "l41popl6ktu0:scope22",
+        "node": "l41popl6ktu0:t211",
+        "title": "Window",
+        "kind": "dialog",
+        "parent": "0",
+        "parentState": "known",
+        "modal": false,
+        "nativeWindow": true,
+        "accessibility": true
+      },
+      {
+        "window": "0",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:0",
+        "surface": "l41popl6ktu0:scope0",
+        "node": "l41popl6ktu0:t1",
+        "title": "Trash",
+        "kind": "window",
+        "parent": null,
+        "parentState": "none",
+        "modal": false,
+        "nativeWindow": true,
+        "accessibility": true
+      },
+      {
+        "window": "22",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:23",
+        "surface": "l41popl6ktu0:scope23",
+        "node": "l41popl6ktu0:t212",
+        "title": "",
+        "kind": "window",
+        "parent": null,
+        "parentState": "none",
+        "modal": false,
+        "nativeWindow": false,
+        "accessibility": true
+      },
+      {
+        "window": "23",
+        "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:24",
+        "surface": "l41popl6ktu0:scope24",
+        "node": null,
+        "title": "",
+        "kind": "window",
+        "parent": "0",
+        "parentState": "known",
+        "modal": null,
+        "nativeWindow": true,
+        "accessibility": false
+      }
+    ],
+    "rootDiscoveryComplete": true,
+    "endedWindows": [],
+    "focusedWindow": null,
+    "provider": {
+      "status": "alreadyAttempted",
+      "attribute": null,
+      "writeStatus": null
+    },
+    "session": "session",
+    "platform": "macos",
+    "observed": {
+      "id": "DE779E3D-5E2E-4F80-B950-56B61DBDB1C8",
+      "startedAt": 1794091578127,
+      "completedAt": 1794091578504
+    },
+    "stopReasons": [
+      "attached surface discovery incomplete: child/node budget or changing relation",
+      "attached surface discovery incomplete: time/node budget"
+    ]
+  },
+  "33": {
+    "target": {
+      "session": "session",
+      "instance": "app:C1F7305D-3E8D-45C5-ABA3-BBB14D1D4B84:0",
+      "rootWindow": "0",
+      "surface": "l41popl6ktu0:scope0",
+      "node": "l41popl6ktu0:t165",
+      "capture": null
+    },
+    "dispatch": "unknown",
+    "detail": "native action returned AX error -25204; effect unknown, not retried",
+    "preparation": [],
+    "confirmation": "notRequested",
+    "cleanup": "complete",
+    "errorCode": "execution_unknown",
+    "retryReason": null,
+    "context": null,
+    "impact": {
+      "coverage": "complete",
+      "effects": [
+        {
+          "stage": "input",
+          "device": "element",
+          "transport": "accessibility",
+          "mechanism": "AXShowMenu",
+          "state": "invoked"
+        }
+      ],
+      "foregroundChanged": "no",
+      "clipboardRestoration": "notUsed",
+      "foregroundRestoration": "notUsed",
+      "omittedEffects": 0
+    },
+    "appChangeInputBaseline": {
+      "session": "896840A6-D881-4604-8CBF-F8DDC4B646C3",
+      "application": "instance:843B1D9A-D486-49C1-A300-E1BCF7A227D3:42",
+      "incarnation": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6",
+      "token": "9E4DCAC5-7C3B-46D9-9EB4-ED7CE5B618F6:62"
+    }
+  }
+}

@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING
 from .agent.requests import INTERFACE_REQUESTS
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from computer_use.interaction.records import ElementPath as LookupPath
     from computer_use.interaction.records import ElementSnapshot
     from computer_use.native.contracts import Intent, OperationTarget
+    from computer_use.protocol.records import NativeDirectory
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,7 @@ class ExecuteAction:
         app_keyboard: Treat keyboard input as addressed to the App's current receiver.
         forward_current: Forward container input to its current receiver.
         snapshot: Original element provenance for write-time scope validation.
+        on_pre_input_directory: Optional call-local observer of a validated directory.
     """
 
     owner: object | None
@@ -57,6 +61,7 @@ class ExecuteAction:
     app_keyboard: bool = False
     forward_current: bool = False
     snapshot: ElementSnapshot | None = None
+    on_pre_input_directory: Callable[[NativeDirectory], None] | None = None
 
 
 @dataclass(frozen=True)
