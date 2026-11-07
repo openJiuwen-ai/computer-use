@@ -5,8 +5,10 @@
 
 import asyncio
 import base64
+from dataclasses import replace
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from computer_use.client.images import image_delivery_epoch, image_label, register_image
@@ -153,6 +155,45 @@ def test_composite_caption_preserves_independent_window_capture_state_once():
     for ref, state in [(0, "true"), (7, "false")]:
         fact = f"Image note (Window {ref}): Window state (independent samples during capture): onScreen={state}"
         assert body.count(fact) == caption.count(fact) == combined.count(fact) == 1
+
+
+@pytest.mark.parametrize(("scope_changed", "changed_again"), [(False, False), (True, False), (True, True)])
+def test_explicit_window_capture_rechecks_only_a_reported_member_change(monkeypatch, scope_changed, changed_again):
+    from computer_use.interaction.query.instances.scope import adopt
+    from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, member_target
+    from unit_tests.test_d34_read_contracts import UI, directory, setup, window
+
+    original, child = captured_part("A"), captured_part("Child", x=100)
+    a = {**window("A"), "instance": original.target.instance, "surface": original.target.surface}
+    b = {**window("Child", parent="A", title="Newly attached window"),
+         "instance": child.target.instance, "surface": child.target.surface}
+    before, after = directory(a), directory(a, b)
+    controller, app, state = setup(before)
+    fixed = UI(
+        _instance=state, _app=app, _anchor="A", _context="A", _image=None, _window_identity=member_target(state, a),
+    )
+    controller.register(fixed, {"selector": "Fixture"})
+    original.image = replace(original.image, scope_changed=scope_changed)
+    child.image = replace(child.image, scope_changed=changed_again)
+    pipeline = InterfaceReadPipeline(controller)
+    pipeline.member = AsyncMock(side_effect=[original, child])
+
+    async def refresh(controller, ui, *, accessibility):
+        assert not accessibility
+        adopt(controller, ui, after)
+        return after
+
+    recheck = AsyncMock(side_effect=refresh)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", recheck)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
+    result = asyncio.run(pipeline._collect(fixed, "image", False, None, before, None, None, None))
+    assert recheck.await_count == int(scope_changed)
+    assert pipeline.member.await_count == 1 + int(scope_changed)
+    assert ("Newly attached window" in result.text) is scope_changed
+    assert ("Window scope changed again" in result.text) is changed_again
+    assert fixed._image.pieces[0].image.target == original.image.target
+    if scope_changed:
+        assert any(piece.image.target == child.image.target for piece in fixed._image.pieces)
 
 
 def expired_budget(monkeypatch):

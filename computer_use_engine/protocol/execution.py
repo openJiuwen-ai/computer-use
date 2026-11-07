@@ -623,6 +623,7 @@ _schemas = {
             binding=binding,
             observed=unknown(),
             image=unknown(),
+            windowScopeChanged=boolean().optional(),
             coordinates=obj(
                 dict(
                     space=enum("window-pixels"),

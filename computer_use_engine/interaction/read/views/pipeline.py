@@ -330,6 +330,7 @@ class InterfaceReadPipeline:
         ui._lookup_scopes, ui._menu_only = (), False
         initial = True
         recheck_pending = False
+        reconciled_captures = None
         change_waited = False
         # Only an epoch sampled before this component batch proves which
         # notifications its capture may cover. A later catalogue reconciliation
@@ -369,14 +370,26 @@ class InterfaceReadPipeline:
                             raise
                         except Exception as error:  # noqa: BLE001 - the first capture remains available
                             collection_gaps.append(_collection_gap("changes", error))
-                if not recheck_pending:
+                capture_changes = (
+                    {part.image.target for part in parts if part.image is not None and part.image.scope_changed}
+                    if related is None and view != "tree" else set()
+                )
+                capture_recheck = bool(capture_changes) and reconciled_captures is None
+                if not recheck_pending and not capture_recheck:
+                    if reconciled_captures is not None and capture_changes - reconciled_captures:
+                        collection_gaps.append(ObservationGap(
+                            "directory", "observation_incomplete",
+                            "Window scope changed again after its bounded capture refresh.",
+                        ))
                     break
                 # Reconcile once after the currently known component batch,
                 # not once for every child toolbar/tree/image. Any new member
                 # or newly available AX root becomes concrete missing work.
                 recheck_pending = False
+                if capture_recheck:
+                    reconciled_captures = capture_changes
                 try:
-                    directory = await refresh(controller, ui, accessibility=True)
+                    directory = await refresh(controller, ui, accessibility=related is not None or view != "image")
                     permitted = allowed(ui)
                     plan.update(directory, permitted)
                 except asyncio.CancelledError:

@@ -84,6 +84,7 @@ import ApplicationServices
         let scope = try string(binding["surface"], label: "surface")
         let interval = CaptureInterval()
         let selected = try directory.windowScope(instance: instance, root: root, surface: scope).surface
+        let scopeBefore = directory.windowScopeEpoch(selected.owner)
         let screen = WindowCapture(sharing: sharing)
         let native = selected.native
         let mapping: WindowGeometry.WindowMapping?
@@ -133,7 +134,7 @@ import ApplicationServices
         order.removeAll { retired.contains($0) }
         for id in retired { entries.removeValue(forKey: id) }
         let frame = captured.window.frame
-        return [
+        var result: [String: Any] = [
             "kind": "capture", "binding": binding, "observed": interval.observation(),
             "image": captured.image.protocolValue(kind: .window, scope: scope),
             "coordinates": [
@@ -144,5 +145,10 @@ import ApplicationServices
                 ]
             ]
         ]
+        if let scopeBefore, let current = directory.windowScopeEpoch(selected.owner),
+            current.incarnation == scopeBefore.incarnation, current.epoch > scopeBefore.epoch {
+            result["windowScopeChanged"] = true
+        }
+        return result
     }
 }

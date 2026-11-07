@@ -173,6 +173,15 @@ import ApplicationServices
         return record.stamp()
     }
 
+    /// Borrow an already-armed change marker without querying or registering the provider.
+    func windowScopeEpoch(owner: NSRunningApplication, session: String) -> (incarnation: String, epoch: UInt64)? {
+        guard !closed, let record = records[owner.processIdentifier], record.owner.isEqual(owner),
+            record.session == session else { return nil }
+        let notifications = ["AXWindowCreated", "AXUIElementDestroyed", "AXMenuOpened", "AXMenuClosed"]
+        let epoch = notifications.compactMap { record.last[$0] }.max() ?? 0
+        return (record.incarnation, epoch)
+    }
+
     private func notified(_ observer: AXObserver, name: String) {
         guard let record = records.values.first(where: {
             $0.registration.observer.map { CFEqual($0, observer) } == true

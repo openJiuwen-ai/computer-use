@@ -21,6 +21,7 @@ import ApplicationServices
             expected: process, arm: false)
         precondition(!passive.available && registrations == 0,
                      "a first visual-only read cannot implicitly initialize an AX subscription")
+        precondition(observer.windowScopeEpoch(owner: owner, session: "session") == nil)
         func status() -> NativeAppObserver.Stamp {
             try! observer.status(owner: owner, application: "instance:fixture", session: "session", expected: process)
                 .stamp!
@@ -33,10 +34,16 @@ import ApplicationServices
         precondition(status() == baseline && registrations == 1,
                      "observation and pre-write arming must share one incarnation subscription")
         let beforeEvents = processReads
+        let beforeWindow = observer.windowScopeEpoch(owner: owner, session: "session")
+        precondition(beforeWindow?.epoch == 0 && processReads == beforeEvents,
+                     "taking the capture marker must not query the process or provider")
         observer.recordEvent(pid: process.pid, incarnation: "retired", name: "AXWindowCreated")
         observer.recordEvent(pid: process.pid, incarnation: baseline.incarnation, name: "AXUnregistered")
         precondition(processReads == beforeEvents && status() == baseline)
         observer.recordEvent(pid: process.pid, incarnation: baseline.incarnation, name: "AXWindowCreated")
+        let afterWindow = observer.windowScopeEpoch(owner: owner, session: "session")
+        precondition(afterWindow?.incarnation == beforeWindow?.incarnation && afterWindow?.epoch == 1,
+                     "an armed window notification can trigger capture reconciliation")
         let already = try await observer.wait(owner: owner, application: baseline.application, session: "session",
             after: baseline.token, timeoutMs: 100)
         precondition(already.reason == "event" && already.events == ["AXWindowCreated"] && already.elapsedMs == 0,
@@ -52,6 +59,8 @@ import ApplicationServices
         let readsBeforeCallback = processReads
         observer.recordEvent(pid: process.pid, incarnation: baseline.incarnation, name: "AXValueChanged")
         precondition(processReads == readsBeforeCallback, "the callback must not query any provider/process fact")
+        precondition(observer.windowScopeEpoch(owner: owner, session: "session")?.epoch == afterWindow?.epoch,
+                     "a value notification alone cannot trigger window capture reconciliation")
         let changed = try await waiting.value
         precondition(changed.reason == "event" && changed.events == ["AXValueChanged"])
         let current = status()

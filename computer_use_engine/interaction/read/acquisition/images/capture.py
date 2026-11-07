@@ -28,12 +28,14 @@ class WindowImage:
         image: Captured pixels and their original coordinate/identity metadata, when available.
         observed: Capture provenance or original observation used by the current stage.
         coordinates: Original native-to-image coordinate map with its declared coordinate space.
+        scope_changed: An armed native window or menu change notification arrived during capture.
     """
 
     target: Binding
     image: PNG
     observed: Mapping[str, Any]
     coordinates: Mapping[str, Any]
+    scope_changed: bool = False
 
 
 class NativeImages:
@@ -90,5 +92,6 @@ class NativeImages:
             image,
             result["observed"],
             frozen(result["coordinates"]),
+            scope_changed=result.get("windowScopeChanged", False),
         )
         return value

@@ -116,6 +116,10 @@ import ApplicationServices
         state.appObserver.latest(armed)
     }
 
+    func windowScopeEpoch(_ owner: NSRunningApplication) -> (incarnation: String, epoch: UInt64)? {
+        state.appObserver.windowScopeEpoch(owner: owner, session: session)
+    }
+
     private func changeOwner(_ application: String) throws -> NSRunningApplication {
         guard ApplicationInstances<NSRunningApplication>.isInstanceSelector(application),
             case .running(let owner) = try state.discovery.locate(application) else {
