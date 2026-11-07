@@ -260,6 +260,7 @@ class ApplicationListingTests(unittest.IsolatedAsyncioTestCase):
 
         from computer_use.interaction.query.instances.pipeline import ApplicationDiscoveryPipeline
         from computer_use.session.interfaces import ApplicationReferences
+        from computer_use.session.windows import WindowReferences
 
         catalogue = {
             "session": "session",
@@ -287,7 +288,7 @@ class ApplicationListingTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         references = ApplicationReferences()
-        pipeline = ApplicationDiscoveryPipeline(directory, references)
+        pipeline = ApplicationDiscoveryPipeline(directory, references, WindowReferences())
         first = await pipeline.run()
         catalogue["applications"][0]["displayName"] = "Updated"
         second = await pipeline.run()

@@ -340,7 +340,12 @@ def decode_selection_basis(value):
 
 _inspect_queries = {
     "launch": obj(dict(kind=enum("launch"))),
-    "applications": obj(dict(kind=enum("applications"), path=identity.optional(), installation=identity.optional())),
+    "applications": obj(
+        {
+            "kind": enum("applications"), "path": identity.optional(), "installation": identity.optional(),
+            "includeEnded": boolean().optional(),
+        }
+    ),
     "surfaceBatch": obj(
         dict(kind=enum("surfaceBatch"), applications=array(identity, min=1, max=64), profile=enum("visual").optional())
     ),
@@ -414,6 +419,10 @@ def decode_inspect_query(value):
         "installation" in result or not result["path"].startswith("/")
     ):
         raise ValueError("protocol: invalid exact application query")
+    if "includeEnded" in result and (
+        result["includeEnded"] is not True or "path" in result or "installation" in result
+    ):
+        raise ValueError("protocol: ended lifetimes require a full application query")
     if "profile" in result and "includeAccessibility" in result:
         raise ValueError("protocol: surface profile and legacy accessibility flag cannot be combined")
     if "currentReceiver" in result and (

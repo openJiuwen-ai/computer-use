@@ -138,6 +138,7 @@ import CoreGraphics
                                 "nativeClickPipelineV1", "nativeClickPipelineV2", "nativeDirectory", "nativeApplicationPath",
                                 "nativeVisualSurfaceQuery", "nativeSurfaceBatch", "nativeVisualSurfaceBatch",
                                 "nativeApplicationListing", "nativeApplicationRoots", "nativeApplicationContent",
+                                "nativeApplicationLifetime",
                                 "nativeMenuActions",
                                 "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeCaptureRetention",
                                 "nativeGlobalInput", "nativePointLocation",

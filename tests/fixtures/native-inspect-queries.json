@@ -1,5 +1,9 @@
 [
   {"name":"application catalogue","valid":true,"query":{"kind":"applications"}},
+  {"name":"application catalogue with ended lifetimes","valid":true,"query":{"kind":"applications","includeEnded":true}},
+  {"name":"ended lifetimes flag must be true","valid":false,"query":{"kind":"applications","includeEnded":false}},
+  {"name":"ended lifetimes exclude path scopes","valid":false,"query":{"kind":"applications","path":"/Fixture.app","includeEnded":true}},
+  {"name":"ended lifetimes exclude installation scopes","valid":false,"query":{"kind":"applications","installation":"installation-fixture","includeEnded":true}},
   {"name":"exact native application path","valid":true,"query":{"kind":"applications","path":"/outside/Fixture.app"}},
   {"name":"retained installation observation","valid":true,"query":{"kind":"applications","installation":"installation-fixture"}},
   {"name":"relative application path","valid":false,"query":{"kind":"applications","path":"Fixture.app"}},

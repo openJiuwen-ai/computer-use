@@ -634,7 +634,7 @@ import ApplicationServices
         ]
     }
 
-    func applications(scope: NativeInspectQuery.ApplicationScope = .all) throws -> [String: Any] {
+    func applications(scope: NativeInspectQuery.ApplicationScope = .all(includeEnded: false)) throws -> [String: Any] {
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 3)
         let path: URL?, installation: NativeInstallation?, echo: [String: String]
@@ -658,6 +658,9 @@ import ApplicationServices
         if limited { reasons.append("application catalogue time budget; installed entries may be missing") }
         if entries.count > 4096 { reasons.append("application catalogue entry limit") }
         var value = result("applications", began: began, reasons: reasons).merging(echo) { current, _ in current }
+        if case .all(includeEnded: true) = scope {
+            value["endedApplications"] = state.discovery.endedApplicationIDs
+        }
         // A retained installation scope is observation-only after a launch
         // may have been sent. Only its current running instances can resolve it.
         let eligible = installation == nil ? entries : entries.filter { $0["isRunning"] as? Bool == true }

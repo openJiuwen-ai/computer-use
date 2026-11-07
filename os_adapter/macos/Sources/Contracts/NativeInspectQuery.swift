@@ -120,7 +120,7 @@ enum NativeInspectQuery {
         }
     }
 
-    enum ApplicationScope { case all, path(String), installation(String) }
+    enum ApplicationScope { case all(includeEnded: Bool), path(String), installation(String) }
     case applications(ApplicationScope)
     case surfaceBatch(applications: [String], profile: SurfaceProfile)
     case launch
@@ -161,8 +161,12 @@ enum NativeInspectQuery {
                 let p = try object(raw, keys: ["kind", "installation"])
                 self = .applications(.installation(try string(p["installation"], label: "installation")))
             } else {
-                _ = try object(raw, keys: ["kind"])
-                self = .applications(.all)
+                let includeEnded = keys.contains("includeEnded")
+                let p = try object(raw, keys: includeEnded ? ["kind", "includeEnded"] : ["kind"])
+                if includeEnded, try !boolean(p["includeEnded"], label: "includeEnded") {
+                    throw DriverError("includeEnded must be true when requested", code: .invalidRequest)
+                }
+                self = .applications(.all(includeEnded: includeEnded))
             }
         case "surfaceBatch":
             let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true

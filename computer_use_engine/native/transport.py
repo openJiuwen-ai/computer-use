@@ -230,8 +230,10 @@ class ConnectionPort:
                 or query["kind"] in ("surfaces", "roots")
                 and result["application"] != query["application"]
                 or result["platform"] != self.platform
-                or query["kind"] == "applications"
-                and any(result.get(key) != query.get(key) for key in ("path", "installation"))
+                or query["kind"] == "applications" and (
+                    any(result.get(key) != query.get(key) for key in ("path", "installation"))
+                    or ("endedApplications" in result) != (query.get("includeEnded") is True)
+                )
             )
             else False
         )

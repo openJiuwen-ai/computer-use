@@ -17,6 +17,7 @@ from computer_use.native.transport import ConnectionPort
 from computer_use.protocol.directory import decode_directory
 from computer_use.protocol.execution import decode_inspect_query
 from computer_use.session.interfaces import ApplicationReferences
+from computer_use.session.windows import WindowReferences
 
 
 class DirectoryFixture:
@@ -27,7 +28,7 @@ class DirectoryFixture:
         self.stop_reasons = []
         self.failure = None
 
-    async def applications(self):
+    async def applications(self, *, include_ended=False):
         self.calls.append(dict(kind="applications"))
         if self.failure is not None:
             raise self.failure
@@ -57,7 +58,7 @@ class ApplicationDiscoveryTests(IsolatedAsyncioTestCase):
         fixture = DirectoryFixture()
         fixture.apps.insert(1, dict(id="installed", displayName="Installed", isRunning=False))
         references = ApplicationReferences()
-        result = await ApplicationDiscoveryPipeline(fixture, references).run()
+        result = await ApplicationDiscoveryPipeline(fixture, references, WindowReferences()).run()
         self.assertEqual([item.display_name for item in result], ["Editor 0", "Installed", "Editor 1", "Editor 2"])
         self.assertEqual([item.is_running for item in result], [True, False, True, True])
         self.assertEqual(
@@ -69,7 +70,7 @@ class ApplicationDiscoveryTests(IsolatedAsyncioTestCase):
     async def test_large_listing_does_not_add_per_application_window_queries(self):
         fixture = DirectoryFixture(("nativeSurfaceBatch",), count=130)
         references = ApplicationReferences()
-        result = await ApplicationDiscoveryPipeline(fixture, references).run()
+        result = await ApplicationDiscoveryPipeline(fixture, references, WindowReferences()).run()
         self.assertEqual(len(result), 130)
         self.assertEqual(
             [references.resolve(item.id, "session").selector for item in result],
@@ -82,7 +83,7 @@ class ApplicationDiscoveryTests(IsolatedAsyncioTestCase):
         for item in fixture.apps:
             item["displayName"] = "Same name"
         references = ApplicationReferences()
-        result = await ApplicationDiscoveryPipeline(fixture, references).run()
+        result = await ApplicationDiscoveryPipeline(fixture, references, WindowReferences()).run()
         self.assertNotEqual(result[0].id, result[1].id)
         self.assertEqual(
             [references.resolve(item.id, "session").selector for item in result], ["app:0", "app:1"]
@@ -93,7 +94,7 @@ class ApplicationDiscoveryTests(IsolatedAsyncioTestCase):
         fixture = DirectoryFixture(("nativeSurfaceBatch",))
         fixture.failure = failure("possible")
         with self.assertRaises(ComputerUseError) as caught:
-            await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
+            await ApplicationDiscoveryPipeline(fixture, ApplicationReferences(), WindowReferences()).run()
         self.assertIs(caught.exception, fixture.failure)
         self.assertEqual(caught.exception.effect, "possible")
         self.assertEqual(fixture.calls, [dict(kind="applications")])
@@ -102,7 +103,7 @@ class ApplicationDiscoveryTests(IsolatedAsyncioTestCase):
         fixture = DirectoryFixture(count=0)
         fixture.stop_reasons = ["provider unavailable"]
         with self.assertRaises(ComputerUseError) as caught:
-            await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
+            await ApplicationDiscoveryPipeline(fixture, ApplicationReferences(), WindowReferences()).run()
         self.assertEqual(caught.exception.code, "observation_incomplete")
         self.assertEqual(caught.exception.effect, "none")
         self.assertIn("provider unavailable", caught.exception.detail)
@@ -121,7 +122,7 @@ class ApplicationDiscoveryTests(IsolatedAsyncioTestCase):
         for supported in capabilities:
             with self.subTest(capabilities=supported):
                 fixture = DirectoryFixture(supported)
-                result = await ApplicationDiscoveryPipeline(fixture, ApplicationReferences()).run()
+                result = await ApplicationDiscoveryPipeline(fixture, ApplicationReferences(), WindowReferences()).run()
                 if baseline is None:
                     baseline = result
                 self.assertEqual(result, baseline)

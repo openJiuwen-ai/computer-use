@@ -103,7 +103,7 @@ class AgentInterfacePipeline:
         self.windows = WindowReferences()
         controller.reader.window_registry = self.windows
         self.text_cursors = TextCursors()
-        self.discovery = ApplicationDiscoveryPipeline(controller.reader.directory, self.references)
+        self.discovery = ApplicationDiscoveryPipeline(controller.reader.directory, self.references, self.windows)
         self.read_pipeline = InterfaceReadPipeline(controller)
 
     def application(self, ref: int) -> Record:

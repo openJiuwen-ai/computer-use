@@ -31,8 +31,13 @@ class NativeDirectory:
     def __init__(self, port: NativePort) -> None:
         self.port = port
 
-    async def applications(self, *, selector: str | None = None, timeout_ms: int = 30000) -> DirectoryFacts:
-        return await self._query(dict(kind="applications"), timeout_ms, application_selector=selector)
+    async def applications(
+        self, *, selector: str | None = None, timeout_ms: int = 30000, include_ended: bool = False
+    ) -> DirectoryFacts:
+        query: Record = {"kind": "applications"}
+        if include_ended:
+            query["includeEnded"] = True
+        return await self._query(query, timeout_ms, application_selector=selector)
 
     async def surfaces(self, application: str, *, timeout_ms: int = 30000) -> DirectoryFacts:
         if not isinstance(application, str) or not application:

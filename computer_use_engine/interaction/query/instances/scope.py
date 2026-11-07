@@ -44,8 +44,12 @@ def validate_session(controller: SessionController, ui: UIHandle) -> None:
     running = controller.state(ui).running
     if session is None and running is not None:
         session = running.session
-    if session is not None and session != controller.transport.session:
-        raise local_failure("the application belongs to an expired session", "stale_target")
+    if session is not None:
+        if session != controller.transport.session:
+            raise local_failure("the application belongs to an expired session", "stale_target")
+        application = running.application if running is not None else instance.selector
+        if controller.interfaces.windows.application_ended(session, application):
+            raise local_failure("the observed application lifetime expired", "stale_target")
     identity = getattr(ui, "_window_identity", None)
     if identity is not None:
         controller.validate_element(identity)

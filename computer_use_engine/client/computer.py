@@ -126,6 +126,15 @@ class Computer:
                 "app expects an integer reference or application selector string",
             )
         app = self._apps.get(key)
+        # An explicit textual lookup may create a new handle after the prior
+        # process ended. Previously returned handles keep their own lifetime.
+        if app is not None and isinstance(selector, str):
+            running = self._controller.state(app).running
+            if (
+                running is not None and selector != running.application
+                and self._controller.interfaces.windows.application_ended(running.session, running.application)
+            ):
+                app = None
         if app is None:
             app = App(self._controller, scope, _internal=True)
             self._apps[key] = app

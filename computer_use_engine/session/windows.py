@@ -40,6 +40,7 @@ class WindowReferences:
         self._aliases = {}
         self._applications = {}
         self._application_selectors = {}
+        self._ended_applications = set()
         self._physical = {}
         self._variants = {}
         self._target_captures = WeakKeyDictionary()
@@ -54,14 +55,26 @@ class WindowReferences:
             state.name = name
         return state
 
+    def retire_applications(self, session, selectors):
+        """Record exact ended lifetimes from the native application catalogue."""
+        self._ended_applications.update((session, selector) for selector in selectors)
+
+    def application_ended(self, session, application):
+        return (session, application) in self._ended_applications
+
     def remember_application_selector(self, selector, state):
-        """Keep a resolved public selector bound to the first exact native instance."""
-        self._application_selectors.setdefault((state.session, selector), state.selector)
+        """Reuse the first exact native instance until its lifetime ends."""
+        key = (state.session, selector)
+        previous = self._application_selectors.get(key)
+        if previous is None or self.application_ended(state.session, previous):
+            self._application_selectors[key] = state.selector
 
     def application_for_selector(self, session, selector):
         """Reuse verified identity across wrappers without looking up another process."""
         application = self._application_selectors.get((session, selector))
-        return self._applications.get((session, application)) if application is not None else None
+        if application is None or self.application_ended(session, application):
+            return None
+        return self._applications.get((session, application))
 
     def register_directory(self, directory, name=""):
         # App reads and desktop rows feed the same lifetime authority. Visible

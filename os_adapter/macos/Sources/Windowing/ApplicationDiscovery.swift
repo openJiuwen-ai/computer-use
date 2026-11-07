@@ -6,6 +6,7 @@ import AppKit
 /// AX trees, window capture and foreground selection play no part in identity.
 @MainActor final class ApplicationDiscovery {
     private let instances = ApplicationInstances<NSRunningApplication>()
+    var endedApplicationIDs: [String] { instances.ended }
     private var applicationRoots: [URL] {
         ["/Applications", "/System/Applications", "/System/Library/CoreServices", NSHomeDirectory() + "/Applications"]
             .map { URL(fileURLWithPath: $0) }

@@ -56,6 +56,7 @@ _schemas = {
             scope=enum("runningWindows").optional(),
             path=identity.optional(),
             installation=identity.optional(),
+            endedApplications=array(identity, max=4096).optional(),
             **_common,
         )
     ),
@@ -143,6 +144,14 @@ def decode_directory(value):
         identifiers = [item["id"] for item in result["applications"]]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("protocol: duplicate application lifetime")
+        if "endedApplications" in result:
+            ended = result["endedApplications"]
+            if (
+                result["platform"] != "macos" or any(key in result for key in ("path", "installation", "scope"))
+                or any(not application.startswith("instance:") for application in ended)
+                or len(set(ended)) != len(ended) or set(ended).intersection(identifiers)
+            ):
+                raise ValueError("protocol: conflicting ended application lifetime")
         for item in result["applications"]:
             keys = item.get("matchKeys", [])
             if len(set(keys)) != len(keys):

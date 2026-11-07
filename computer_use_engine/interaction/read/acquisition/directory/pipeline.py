@@ -74,6 +74,8 @@ class DirectoryReadPipeline(Pipeline["DirectoryRequest", "DirectoryFacts"]):
                 query = request.query
                 if request.application_selector is not None:
                     query = applications_query(request.application_selector, capabilities=port.connection.capabilities)
+                elif query.get("includeEnded") and "nativeApplicationLifetime" not in port.connection.capabilities:
+                    query = {"kind": "applications"}
                 yield DirectoryPlan(read, query)
 
         return Scope(

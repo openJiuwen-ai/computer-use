@@ -9,6 +9,7 @@ final class ApplicationInstances<Identity: Hashable> {
     private var next: UInt64 = 0
     private var ids = [Identity: String]()
     private var instances = [String: Identity]()
+    private(set) var ended = [String]()
 
     static func isInstanceSelector(_ selector: String) -> Bool { selector.hasPrefix("instance:") }
 
@@ -27,6 +28,8 @@ final class ApplicationInstances<Identity: Hashable> {
         for (identity, id) in ids where predicate(identity) {
             ids.removeValue(forKey: identity)
             instances.removeValue(forKey: id)
+            ended.append(id)
         }
+        if ended.count > 4096 { ended.removeFirst(ended.count - 4096) }
     }
 }
