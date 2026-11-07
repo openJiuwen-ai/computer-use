@@ -135,6 +135,7 @@ def adopt(controller, ui, directory, selection=None):
     state.directory, state.refs, state.windows = directory, instance.refs, aliases
     if ui._anchor is None:
         state.selection = None
+        controller.interfaces.windows.remember_application_selector(state.selector, instance)
         if selection is not None:
             instance.anchor = selection
     else:

@@ -197,14 +197,19 @@ class App:
         self._menu_only = False
         self._context = None
         controller.register(self, scope)
+        from computer_use.native.scopes import RunningApplication
         from computer_use.session.interfaces import InstanceState
 
-        running = controller.state(self).running
-        self._instance = (
-            controller.interfaces.windows.application(running.session, running.application, running.name)
-            if running is not None
-            else InstanceState(scope["selector"])
-        )
+        state = controller.state(self)
+        running, windows = state.running, controller.interfaces.windows
+        if running is not None:
+            self._instance = windows.application(running.session, running.application, running.name)
+        else:
+            retained = windows.application_for_selector(controller.transport.session, scope["selector"])
+            self._instance = retained if retained is not None else InstanceState(scope["selector"])
+            if retained is not None:
+                state.running = RunningApplication(retained.selector, retained.name, retained.session)
+                state.directory, state.refs = retained.directory, retained.refs
         self._anchor, self._image = None, None
         handle_created(self, dict(kind="App", controller=controller, selector=scope["selector"]))
 

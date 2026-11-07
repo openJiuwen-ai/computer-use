@@ -25,6 +25,10 @@ def create(*, services: NativeAppReader) -> Callable[[RenderedObservation, Contr
         """Format the acquisition header and build its element-binding and window-alias maps."""
         acquired, rendered = value.acquired, value.rendered
         plan, components = acquired.plan, acquired.components
+        if plan.scope_managed:
+            # The interface collector owns aliases and projection for the
+            # complete capture. Leave the component snapshots intact.
+            return ObservationDraft(value, {}, {}, DisplayDocument.join(()), components.overview)
         target, directory = acquired.target, acquired.directory
         refs = {
             ref: replace(target, node=node, capture=None)
@@ -33,11 +37,6 @@ def create(*, services: NativeAppReader) -> Callable[[RenderedObservation, Contr
             )
         }
         windows = services.window_aliases(directory)
-        if plan.scope_managed:
-            # The interface collector will prepare these same facts once, after
-            # missing windows have been acquired. Projection must not consume
-            # the remaining native-query budget before a late sheet is read.
-            return ObservationDraft(value, refs, windows, DisplayDocument.join(()), components.overview)
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
         document = services._document(

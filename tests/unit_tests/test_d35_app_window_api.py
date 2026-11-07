@@ -4,6 +4,7 @@ import asyncio
 import gc
 import hashlib
 import inspect
+import weakref
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -93,6 +94,33 @@ def test_same_element_ref_across_window_selection_and_other_app_read():
     assert app.element(42)._snapshot is first._snapshot is original
     with pytest.raises(ComputerUseError, match="outside"):
         app.element(42, window=ref(app, "b"))
+
+
+@pytest.mark.parametrize("selector", ["Editor", "/Outside/Editor.app"])
+def test_recreated_textual_app_retains_exact_delivered_element_without_discovery(selector):
+    controller, source = setup()
+    computer = computer_for_controller(controller)
+    temporary = computer.app(selector)
+    adopt(controller, temporary, source._instance.directory)
+    identity = WindowIdentity.of(temporary._instance.members["a"])
+    original = {
+        "binding": Binding("session", identity.instance, identity.window, identity.surface, "field"),
+        "window_identity": identity,
+    }
+    temporary._instance.refs["42"] = original
+    retired_wrapper = weakref.ref(temporary)
+    del temporary
+    gc.collect()
+    assert retired_wrapper() is None
+
+    controller.reader.directory.applications = AsyncMock(side_effect=AssertionError("discovery must not rebind a ref"))
+    assert computer.app(selector).element(42)._snapshot is original
+    with pytest.raises(ComputerUseError, match="not observed"):
+        computer.app("different selector").element(42)
+    controller.transport.session = "next-session"
+    with pytest.raises(ComputerUseError, match="not observed"):
+        computer.app(selector).element(42)
+    controller.reader.directory.applications.assert_not_called()
 
 
 def test_window_context_delivery_survives_request_collection_and_other_window():

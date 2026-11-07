@@ -5,7 +5,7 @@
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from computer_use.interaction.read.acquisition.components.support import collect_component
@@ -197,6 +197,7 @@ def test_postcapture_unconfirmed_window_keeps_its_exact_facts_pixels_and_interva
     monkeypatch.setattr("computer_use.native.lifecycle.time.monotonic", lambda: clock.now)
     port = Port(clock, expired_at="none")
     reader = NativeAppReader(port)
+    reader.window_aliases = Mock(wraps=reader.window_aliases)
     selected = WorkingWindow("application", "Fixture", Binding("session", "instance:A", "A", "surface:A"))
     original, later = directory(window("A")), directory()
     image = captured_part("A").image
@@ -213,6 +214,12 @@ def test_postcapture_unconfirmed_window_keeps_its_exact_facts_pixels_and_interva
     assert observed.tree.native.interval_ns == (1, 2)
     assert any(node.name == "Search" for node in observed.tree.native.nodes.values())
     assert observed.image is image and not observed.scope_confirmed
+    if scope_managed:
+        reader.window_aliases.assert_not_called()
+        assert not observed.refs and not observed.windows and observed.tree.refs
+    else:
+        reader.window_aliases.assert_called_once_with(later)
+        assert observed.refs
     assert any(gap.component == "scope" and "original facts, pixels" in gap.detail for gap in observed.gaps)
     assert len(port.queries) == 1 and reader.images.collect.await_count == 1
 

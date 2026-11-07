@@ -65,7 +65,9 @@ def window_scope(controller, app, ref):
     if instance.directory is None:
         adopt(controller, app, entry.directory)
     require_identity(app, entry.identity)
-    return RequestScope(controller, app, entry)
+    scope = RequestScope(controller, app, entry)
+    controller.interfaces.windows.remember_application_selector(controller.state(app).selector, instance)
+    return scope
 
 
 async def request_scope(controller, app, ref):

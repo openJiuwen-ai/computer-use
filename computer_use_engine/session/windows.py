@@ -32,13 +32,14 @@ class WindowEntry:
 
 
 class WindowReferences:
-    """Publish one stable reference per native window lifetime, never per label."""
+    """Retain canonical App scopes and stable references for exact native windows."""
 
     def __init__(self):
         self._next = 0
         self._entries = OrderedDict()
         self._aliases = {}
         self._applications = {}
+        self._application_selectors = {}
         self._physical = {}
         self._variants = {}
         self._target_captures = WeakKeyDictionary()
@@ -52,6 +53,15 @@ class WindowReferences:
         elif name:
             state.name = name
         return state
+
+    def remember_application_selector(self, selector, state):
+        """Keep a resolved public selector bound to the first exact native instance."""
+        self._application_selectors.setdefault((state.session, selector), state.selector)
+
+    def application_for_selector(self, session, selector):
+        """Reuse verified identity across wrappers without looking up another process."""
+        application = self._application_selectors.get((session, selector))
+        return self._applications.get((session, application)) if application is not None else None
 
     def register_directory(self, directory, name=""):
         # App reads and desktop rows feed the same lifetime authority. Visible
