@@ -172,9 +172,9 @@ import Carbon
         let source = try source(), ascii = asciiKeys()
         var postedPrefix = ""
         var releasedContent = false
-        let nextPath: (@MainActor () throws -> NativeSavePanelPathContinuation.Proof?)?
+        let nextPath: (@MainActor () async throws -> NativeSavePanelPathContinuation.Proof?)?
         if let savePanelPath {
-            nextPath = { try savePanelPath(postedPrefix) }
+            nextPath = { try await savePanelPathReceiver(after: postedPrefix, resolve: savePanelPath) }
         } else { nextPath = nil }
         let nextEditor: (@MainActor () throws -> NativeAppEditorHandoff.Proof?)?
         if let attachedEditor {
@@ -210,6 +210,32 @@ import Carbon
             }
             if notBefore != nil { try await Task.sleep(for: .milliseconds(10)) }
         }
+    }
+
+    static func savePanelPathReceiver(
+        after releasedPrefix: String,
+        now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        pause: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
+        resolve: (String) throws -> NativeSavePanelPathContinuation.Proof?
+    ) async throws -> NativeSavePanelPathContinuation.Proof? {
+        guard releasedPrefix == "/" else { return try resolve(releasedPrefix) }
+        // The recognized SavePanel can open Go To after a slash. Its previous
+        // name field can still appear focused before the new receiver is published.
+        // Do not let that transient state authorize the next scalar.
+        let deadline = min(RequestDiagnostics.deadline ?? .infinity, now() + 0.25)
+        while now() < deadline {
+            try RequestDiagnostics.checkCancellation()
+            if let proof = try resolve(releasedPrefix) {
+                try RequestDiagnostics.checkCancellation()
+                return proof
+            }
+            let remaining = deadline - now()
+            guard remaining > 0 else { break }
+            try await pause(min(0.025, remaining))
+        }
+        try RequestDiagnostics.checkCancellation()
+        throw DriverError(
+            "Go To did not confirm the path receiver after the slash; remaining text was not sent", code: .inputUnavailable)
     }
 
     struct AtomicTextEvents {
@@ -322,7 +348,7 @@ import Carbon
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
         onCleanupUnknown: @escaping () -> Void,
         beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil,
-        savePanelPath: (@MainActor () throws -> NativeSavePanelPathContinuation.Proof?)? = nil,
+        savePanelPath: (@MainActor () async throws -> NativeSavePanelPathContinuation.Proof?)? = nil,
         attachedEditor: (@MainActor () throws -> NativeAppEditorHandoff.Proof?)? = nil,
         send:
             @MainActor (
@@ -373,14 +399,14 @@ import Carbon
                             activeDelivery = .process(editor.recipient)
                             return
                         }
-                        if let path = try savePanelPath?() { try usePath(path); return }
+                        if let path = try await savePanelPath?() { try usePath(path); return }
                         do { try await validateOriginal() } catch {
                             // The modal/focus change may arrive during ordinary
                             // validation. Only the same exact path proof can
                             // handle it; all other errors keep their meaning.
                             guard let failure = error as? any ClassifiedFailure,
                                 [.blockedByModal, .staleTarget, .inputUnavailable].contains(failure.code),
-                                let path = try savePanelPath?()
+                                let path = try await savePanelPath?()
                             else { throw error }
                             try usePath(path)
                         }

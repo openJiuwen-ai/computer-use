@@ -303,7 +303,7 @@ import ApplicationServices
         }
     }
 
-    @MainActor static func savePanelContinuesOnlyTheProvedUnsentSuffix() throws {
+    @MainActor static func savePanelContinuesOnlyTheProvedUnsentSuffix() async throws {
         let objects = (91071...91077).map { AXUIElementCreateApplication(pid_t($0)) }
         let panel = objects[0], group = objects[1], original = objects[2]
         let sheet = objects[3], path = objects[4], foreign = objects[5], unrelatedSheet = objects[6]
@@ -419,6 +419,51 @@ import ApplicationServices
             try proof.validateFocus()
             preconditionFailure("late focus change must stop the remaining input")
         } catch let error as DriverError { precondition(error.code == .staleTarget) }
+
+        // A released slash triggers a new sheet. The old receiver can still be
+        // current when the next scalar asks for a proof.
+        focus = original
+        value = "/"
+        children = [group]
+        let delayed = try capture()!
+        var time: TimeInterval = 0, reads = 0
+        let resolved = try await Input.savePanelPathReceiver(
+            after: "/", now: { time }, pause: {
+                time += $0
+                children = [group, sheet]
+                focus = path
+            }, resolve: { prefix in
+                reads += 1
+                return try delayed.resolve(postedPrefix: prefix, state: state())
+            })
+        precondition(resolved?.authorizes(recipient, lifetime: service) == true && reads == 2,
+                     "the next scalar must wait for the exact receiver after the released slash")
+
+        time = 0
+        reads = 0
+        do {
+            _ = try await Input.savePanelPathReceiver(
+                after: "/", now: { time }, pause: { time += $0 }, resolve: { _ in reads += 1; return nil })
+            preconditionFailure("an unproved handoff must not fall back to the old name field")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable && time > 0 && time <= 0.25 && reads > 1)
+        }
+        do {
+            _ = try await Input.savePanelPathReceiver(
+                after: "/", pause: { _ in throw CancellationError() }, resolve: { _ in nil })
+            preconditionFailure("cancellation must stop before another scalar")
+        } catch is CancellationError {}
+        for prefix in ["", "/t", "//"] {
+            reads = 0
+            _ = try await Input.savePanelPathReceiver(after: prefix, pause: { _ in
+                preconditionFailure("only the first released slash may wait for a handoff")
+            }, resolve: { checked in
+                precondition(checked == prefix)
+                reads += 1
+                return nil
+            })
+            precondition(reads == 1)
+        }
     }
 
     @MainActor static func cellSelectionUsesOneAddressedPreparation() async throws {
@@ -538,7 +583,7 @@ import ApplicationServices
         try selectedRangeRemainsInTheOriginalTable()
         comboFocusDoesNotRequireATextContract()
         qualifiedLocalInsertionKeepsTheOriginalSelectionAndScope()
-        try savePanelContinuesOnlyTheProvedUnsentSuffix()
+        try await savePanelContinuesOnlyTheProvedUnsentSuffix()
         try await cellSelectionUsesOneAddressedPreparation()
         explicitAXSelectionWritabilityDoesNotExpandDefaultReads()
         try await firstKeyDownConsumesBeforeAwait()
