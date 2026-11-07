@@ -31,6 +31,15 @@ struct NativeElementHitEvidence {
         default: return false
         }
     }
+
+    static func permitsServiceAncestorProbe(
+        _ relation: Relation?, systemStatus: AXError?, differentSystemHit: Bool
+    ) -> Bool {
+        // A distinct returned object can contradict the original point. A
+        // failed or empty refinement leaves the app-scoped hit unchanged.
+        guard systemStatus != .success || !differentSystemHit else { return false }
+        return relation == .windowRoot || relation == .coarseAncestorWindow || relation == .otherControl
+    }
 }
 
 /// Bounded read-only candidates. The provider's activation point is a hint,

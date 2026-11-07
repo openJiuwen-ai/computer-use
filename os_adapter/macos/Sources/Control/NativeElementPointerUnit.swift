@@ -303,7 +303,7 @@ import ApplicationServices
                     // it is not an exact AX hit or ordinary geometry fallback.
                     relation = .providerStackedTarget
                 }
-                var systemStatus: AXError?, systemWindow = false, coarseForeground = false
+                var systemStatus: AXError?, systemWindow = false, coarseForeground = false, differentSystemHit = false
                 var systemRelation: String?, systemHitPID: pid_t?
                 // A provider can stop at the original window or a direct
                 // layout parent. A sibling never qualifies for this query.
@@ -335,6 +335,7 @@ import ApplicationServices
                             coarseForeground = pointer.foregroundWindow(at: candidate.point)
                             relation = .coarseAncestorWindow
                         } else {
+                            differentSystemHit = true
                             systemRelation = "differentElement"
                             if WindowGeometry.inputDiagnosticsEnabled {
                                 var pid: pid_t = 0
@@ -345,14 +346,19 @@ import ApplicationServices
                             }
                         }
                     }
-                    // All other system results preserve the original rejected
-                    // mismatch. They cannot enter background geometry fallback.
+                    // Other results do not refine the original app-scoped hit.
+                    // A distinct returned element remains a conflict for the
+                    // retained service route below.
                 }
                 if expand, candidate.permitsGeometryFallback, let hit,
-                    relation == .otherControl || relation == .coarseAncestorWindow
-                        || (relation == .windowRoot && systemStatus == nil),
+                    NativeElementHitEvidence.permitsServiceAncestorProbe(
+                        relation, systemStatus: systemStatus, differentSystemHit: differentSystemHit),
                     let process = BackgroundEvents.accessibilityProcessID(member ?? element), process != mapping.pid,
-                    try hasCurrentParentPath(to: hit, until: deadline),
+                    // The system read at the original root already required
+                    // this strict parent path. A slow optional read must not
+                    // exhaust a second path check. The endpoint proof below
+                    // still rechecks live ownership and the exact host.
+                    try (systemStatus != nil && CFEqual(hit, window) || hasCurrentParentPath(to: hit, until: deadline)),
                     coarseForeground || pointer.foregroundWindow(at: candidate.point),
                     let recipient = try NativePointerRecipient.coarseServiceHit(
                         hit, target: member ?? element, nativeWindow: window, host: mapping, point: candidate.point)

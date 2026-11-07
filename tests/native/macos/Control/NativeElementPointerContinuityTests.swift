@@ -25,6 +25,7 @@ import ApplicationServices
         try preparedClickUsesItsSelectedPoint()
         try qualifiedCompoundCaptionUsesMouseSemantics()
         ownedControlParts()
+        serviceAncestorProbeKeepsIndependentEvidence()
         opaqueRowClickPreservesAlternativeActions()
         let original = geometry()
         let expanded = geometry(frame: original.frame.insetBy(dx: -25, dy: -15))
@@ -69,6 +70,23 @@ import ApplicationServices
                          "original coordinate mapping, point and current visible scope remain mandatory")
         }
         print("Element pointer continuity regressions passed")
+    }
+
+    private static func serviceAncestorProbeKeepsIndependentEvidence() {
+        for status: AXError? in [nil, .noValue, .cannotComplete, .notImplemented, .success] {
+            precondition(NativeElementHitEvidence.permitsServiceAncestorProbe(
+                .windowRoot, systemStatus: status, differentSystemHit: false),
+                "an empty or failed system-wide read must not erase the original presenter hit")
+        }
+        precondition(!NativeElementHitEvidence.permitsServiceAncestorProbe(
+            .windowRoot, systemStatus: .success, differentSystemHit: true),
+            "a successful hit on a different object must not authorize the service fallback")
+        precondition(!NativeElementHitEvidence.permitsServiceAncestorProbe(
+            .otherWindow, systemStatus: .cannotComplete, differentSystemHit: false),
+            "missing system-wide evidence cannot qualify a different window")
+        precondition(NativeElementHitEvidence.permitsServiceAncestorProbe(
+            .otherControl, systemStatus: nil, differentSystemHit: false),
+            "a same-window service ancestor can still be proved by its parent path and endpoint")
     }
 
     @MainActor private static func opaqueRowClickPreservesAlternativeActions() {
