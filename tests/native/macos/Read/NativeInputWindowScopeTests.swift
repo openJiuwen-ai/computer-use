@@ -235,11 +235,13 @@ import ApplicationServices
 
     @MainActor static func main() async throws {
         try nativeOnlyAttachmentOwnership()
+        // Move, down, stationary tracking, 60 displacement samples, and up.
+        let completeEventCount = 64
         let old = try await drag(legacy: true)
-        expect(old.dispatch == "partial" && old.events > 2 && old.events < 63 && !old.endpoint)
+        expect(old.dispatch == "partial" && old.events > 2 && old.events < completeEventCount && !old.endpoint)
         let fixed = try await drag(legacy: false)
         print("baseline=\(old) inputBoundary=\(fixed)")
-        expect(fixed.dispatch == "dispatched" && fixed.events == 63 && fixed.endpoint)
+        expect(fixed.dispatch == "dispatched" && fixed.events == completeEventCount && fixed.endpoint)
         expect(fixed.deep == 0 && old.deep > 10000)
         try frontierAndModalChanges()
         try requiredSurfaceAndOwnership()
@@ -258,15 +260,15 @@ import ApplicationServices
             expect(refused.dispatch == "notDispatched" && refused.events == 0 && !refused.endpoint)
         }
         let ownVisual = try await drag(legacy:false,change:"ownModalUnavailable")
-        expect(ownVisual.dispatch == "dispatched" && ownVisual.events == 63 && ownVisual.endpoint)
+        expect(ownVisual.dispatch == "dispatched" && ownVisual.events == completeEventCount && ownVisual.endpoint)
         let unrelated = try await drag(legacy:false,change:"cgUnrelated")
-        expect(unrelated.dispatch == "dispatched" && unrelated.events == 63 && unrelated.endpoint)
+        expect(unrelated.dispatch == "dispatched" && unrelated.events == completeEventCount && unrelated.endpoint)
         for change in ["sheet", "appModal", "knownDeepModal", "unknownModalAncestor", "cgModal", "cgUnknown", "cgReparent", "cgOwnerUnknown", "identity", "unknownSheet", "cancel"] {
             // Cancellation remains confined to this original gesture's task.
             let stopped = try await Task { @MainActor in try await drag(legacy: false, change: change) }.value
             expect(stopped.dispatch == "partial" && stopped.events == 4 && !stopped.endpoint)
         }
-        print("PASS production inputWindowScope + real collector/event/receipt/ledger: old partial, boundary63 endpoint; fresh sheets/modals/identity and noReplay")
+        print("PASS production inputWindowScope + real collector/event/receipt/ledger: old partial, full drag endpoint; fresh sheets/modals/identity and noReplay")
     }
 
     @MainActor static func visualDirectoryBoundaryCombinations() throws {
@@ -435,7 +437,11 @@ import ApplicationServices
         expect(receipt["cleanup"] as? String == "complete")
         if beforeInput { expect(posted.isEmpty) }
         else { expect(posted.last?.0 == .leftMouseUp) }
-        if !legacy && change == nil { expect(hits == 62 && scene.calls["count",default:0] < 1000) }
+        if !legacy && change == nil {
+            expect(posted.count > 3 && posted[2].0 == .leftMouseDragged && posted[2].1 == from)
+            expect(hits == posted.count - 1) // Every dispatched event except the paired cleanup up.
+            expect(scene.calls["count", default: 0] < 1000)
+        }
         if change != nil && !beforeInput { expect(posted.last?.1 == posted.dropLast().last?.1) }
         let count = posted.count
         _ = try await op.execute(step:1,payload:Data("same-drag".utf8)) { bodies += 1; return [:] }
