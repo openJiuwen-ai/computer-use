@@ -23,7 +23,7 @@ from computer_use.interaction.agent.requests import (
 from computer_use.interaction.requests import ComputerInput
 from computer_use.native.contracts import Intent
 from computer_use.protocol.primitives import nonempty
-from computer_use.protocol.validation import validate_key, validate_paste_text, validate_text
+from computer_use.protocol.validation import normalize_key, validate_paste_text, validate_text
 from computer_use.session.operations import operation
 
 from . import parameters
@@ -54,15 +54,10 @@ def _text(text, paste=False):
 
 
 def _key(key):
-    if isinstance(key, str):
-        prefix, separator, name = key.rpartition("+")
-        if name == "Backspace":
-            key = prefix + separator + "BackSpace"
     try:
-        validate_key(key)
+        return normalize_key(key)
     except Exception as error:
         raise local_failure(str(error)) from error
-    return key
 
 
 def _window(window):

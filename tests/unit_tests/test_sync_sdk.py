@@ -136,8 +136,10 @@ def test_operation_error_propagates_at_the_call_and_closed_handles_do_not_execut
 
 @pytest.mark.parametrize("key, canonical", [
     ("Backspace", "BackSpace"), ("BackSpace", "BackSpace"), ("shift+ctrl+Backspace", "shift+ctrl+BackSpace"),
+    ("super+tab", "super+Tab"), ("tAb", "Tab"), ("shift+page_down", "shift+Page_Down"), ("f12", "F12"),
+    ("ctrl+a", "ctrl+a"),
 ])
-def test_public_key_methods_canonicalize_backspace_without_changing_the_scope(key, canonical):
+def test_public_key_methods_canonicalize_named_keys_without_changing_the_scope(key, canonical):
     class RecordingController(Controller):
         async def run(self, request):
             if isinstance(request, ComputerInput):
@@ -154,8 +156,10 @@ def test_public_key_methods_canonicalize_backspace_without_changing_the_scope(ke
         field = app.element("Field")
         for target in (computer, app, field):
             target.press_key(key)
-            with pytest.raises(ComputerUseError):
-                target.press_key("ctrl+ctrl+Backspace")
+            for invalid in ("ctrl+ctrl+Backspace", "Super+tab", "ctrl+A", "super+tabs"):
+                with pytest.raises(ComputerUseError) as error:
+                    target.press_key(invalid)
+                assert error.value.code == "invalid_request" and error.value.effect == "none"
     assert controller.actions == [
         ("desktop", "key", {"key": canonical}),
         (app, "press_key", {"key": canonical}),
