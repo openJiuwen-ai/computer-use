@@ -54,10 +54,15 @@ def _text(text, paste=False):
 
 
 def _key(key):
+    if isinstance(key, str):
+        prefix, separator, name = key.rpartition("+")
+        if name == "Backspace":
+            key = prefix + separator + "BackSpace"
     try:
         validate_key(key)
     except Exception as error:
         raise local_failure(str(error)) from error
+    return key
 
 
 def _window(window):
@@ -167,8 +172,7 @@ class Computer:
 
     @synchronous
     def press_key(self, key):
-        _key(key)
-        return self._global_input("key", {"key": key})
+        return self._global_input("key", {"key": _key(key)})
 
     @synchronous
     def paste(self, text):
@@ -282,7 +286,7 @@ class App:
     @synchronous
     def press_key(self, key, *, window=None):
         _window(window)
-        _key(key)
+        key = _key(key)
         return operation(lambda: self._controller.run(UIKeyboard(self, "press_key", dict(key=key), window)))
 
     @synchronous
@@ -363,8 +367,7 @@ class Element:
 
     @synchronous
     def press_key(self, key):
-        _key(key)
-        return self._act("key", dict(key=key))
+        return self._act("key", {"key": _key(key)})
 
     @synchronous
     def focus(self):

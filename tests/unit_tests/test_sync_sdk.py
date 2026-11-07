@@ -10,7 +10,8 @@ from computer_use import App, Computer, Element
 from computer_use.client.computer import computer_for_controller
 from computer_use.client.execution import ExecutionCancellation, SessionExecutor, execution_scope
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.agent.requests import ActOnElement, ObserveUI, ResolveElement
+from computer_use.interaction.agent.requests import ActOnElement, ObserveUI, ResolveElement, UIKeyboard
+from computer_use.interaction.requests import ComputerInput
 from computer_use.session import operations
 from computer_use.session.observation import CapturedTextDocument, LazyObservation, lazy_observation
 
@@ -130,6 +131,35 @@ def test_operation_error_propagates_at_the_call_and_closed_handles_do_not_execut
     assert controller.transport.close_events == [
         ("close", controller.transport.close_events[0][1]),
         ("closed", controller.transport.close_events[0][1]),
+    ]
+
+
+@pytest.mark.parametrize("key, canonical", [
+    ("Backspace", "BackSpace"), ("BackSpace", "BackSpace"), ("shift+ctrl+Backspace", "shift+ctrl+BackSpace"),
+])
+def test_public_key_methods_canonicalize_backspace_without_changing_the_scope(key, canonical):
+    class RecordingController(Controller):
+        async def run(self, request):
+            if isinstance(request, ComputerInput):
+                self.actions.append(("desktop", request.intent.kind, request.intent.parameters))
+                return None
+            if isinstance(request, UIKeyboard):
+                self.actions.append((request.owner, request.method, request.parameters))
+                return None
+            return await super().run(request)
+
+    controller = RecordingController()
+    with computer_for_controller(controller) as computer:
+        app = computer.app("Editor")
+        field = app.element("Field")
+        for target in (computer, app, field):
+            target.press_key(key)
+            with pytest.raises(ComputerUseError):
+                target.press_key("ctrl+ctrl+Backspace")
+    assert controller.actions == [
+        ("desktop", "key", {"key": canonical}),
+        (app, "press_key", {"key": canonical}),
+        (controller.current, "key", {"key": canonical}),
     ]
 
 
