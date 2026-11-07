@@ -144,6 +144,28 @@ def test_native_mechanism_can_require_pointer_before_any_action_is_dispatched():
 
 
 @pytest.mark.parametrize(
+    ("role", "uses_pointer"),
+    [("AXCell", True), ("AXTextField", True), ("AXButton", False), ("AXRow", False), ("AXTable", False)],
+)
+def test_macos_primary_click_and_explicit_press_keep_their_own_semantics(role, uses_pointer):
+    press, pointer = click_route("object_action"), click_route("surface_pointer")
+    observed = facts(press, pointer, native_role=role)
+    selected = choose(observed, CLICK, HostPolicy(), Attempts())
+    assert selected.primitive == (pointer if uses_pointer else press)
+    assert selected.target == observed.binding
+    explicit = choose(observed, Intent("action", {"action": "AXPress"}), HostPolicy(), Attempts())
+    assert explicit.primitive == press and explicit.target == observed.binding
+
+
+@pytest.mark.parametrize("admission", [None, "unavailable", "insufficientEvidence"])
+def test_macos_cell_without_directed_pointer_cannot_fall_back_to_press(admission):
+    press = click_route("object_action")
+    pointer = (click_route("surface_pointer", admission),) if admission is not None else ()
+    with pytest.raises(ComputerUseError):
+        choose(facts(press, *pointer, native_role="AXCell"), CLICK, HostPolicy(), Attempts())
+
+
+@pytest.mark.parametrize(
     "parameters",
     [{"button": "right", "count": 1}, {"button": "left", "count": 2}, {"x": 12, "y": 20, "button": "left", "count": 1}],
 )

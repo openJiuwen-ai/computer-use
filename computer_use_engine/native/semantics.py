@@ -555,10 +555,9 @@ def action_for_intent(
             return "AXPress"
         return None
     if intent == "click":
-        if role == "AXTextField":
-            # Text-field Press may report success without placing the caret.
-            # A physical element click retains ordinary file/grid selection
-            # semantics as well; AXOpen/Confirm are separate explicit actions.
+        if role in ("AXTextField", "AXCell"):
+            # Press can omit caret placement or open a cell editor. An
+            # ordinary click keeps mouse selection semantics for these roles.
             return None
         if "AXPress" in actions:
             return "AXPress"
