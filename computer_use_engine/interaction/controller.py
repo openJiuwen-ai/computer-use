@@ -19,6 +19,7 @@ from computer_use.interaction.requests import ComputerInput, ExecuteAction, Find
 from computer_use.interaction.write.engine import Engine
 from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
+from computer_use.native.scopes import RunningApplication
 from computer_use.native.transport import ConnectionPort
 from computer_use.pipeline import Control
 from computer_use.protocol.observation import NativeNode
@@ -189,6 +190,12 @@ class SessionController:
 
     def register(self, owner: object, scope: Record) -> None:
         self.bindings.register(owner, scope)
+        if scope.get("_nativeState") is None:
+            state = self.bindings.state(owner)
+            retained = self.interfaces.windows.application_for_selector(self.transport.session, state.selector)
+            if retained is not None:
+                state.running = RunningApplication(retained.selector, retained.name, retained.session)
+                state.directory, state.refs = retained.directory, retained.refs
 
     def state(self, owner: object) -> AppState:
         return self.bindings.state(owner)
