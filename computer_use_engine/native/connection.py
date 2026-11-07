@@ -705,7 +705,11 @@ class Connection:
         )
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        pure = method in ("capture", "locatePoint") or method == "inspect" and params.get("query", {}).get("kind") == "capturedText"
+        # Input-context queries can leave an admitted lease unconfirmed, but
+        # they do not send input. The write pipeline retains earlier effects.
+        pure = method in ("capture", "locatePoint") or (
+            method == "inspect" and params["query"]["kind"] in ("capturedText", "inputContext")
+        )
         pending = dict(
             id=id__value,
             method=method,
