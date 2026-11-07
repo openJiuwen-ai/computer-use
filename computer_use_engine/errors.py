@@ -11,6 +11,11 @@ from typing import Any, Mapping
 def format_failure(failure: Mapping[str, Any], method: str | None = None) -> str:
     prefix = f"{method} [{failure['target']}]: " if method else ""
     lines = [prefix + failure["detail"], f"Effect: {failure['effect']}"]
+    receipt = failure.get("action_receipt")
+    if receipt is not None:
+        lines.append(f"Action [{receipt['status']}]: {receipt['target']}. {receipt['detail']}")
+    if failure.get("scope_cleanup") == "unknown":
+        lines.append("Scope cleanup: unknown.")
     impact = failure.get("impact")
     for index, attempt in enumerate(impact.get("attempts", ()) if impact else (), start=1):
         lines.append(f"Attempt {index}: input={attempt['dispatch']}; cleanup={attempt['cleanup']}.")
@@ -55,6 +60,8 @@ class ComputerUseError(Exception):
         self.window_lifecycle = "unknown"
         self.choices = ()
         self.impact = failure.get("impact")
+        self.action_receipt = None
+        self.scope_cleanup = None
         if cause is not None:
             self.__cause__ = cause
 

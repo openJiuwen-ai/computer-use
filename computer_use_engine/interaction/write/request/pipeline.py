@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from computer_use.errors import ComputerUseError
+from computer_use.identity import FrozenRecord
 from computer_use.interaction.operation import HostOperation
 from computer_use.interaction.query.pipeline import AppScopeReconciliation
 from computer_use.interaction.write.request.model import ActionPlan
@@ -78,6 +79,11 @@ class ExecuteNativeWrite(Node["ActionPlan", "Record"]):
             error._method = request.intent.kind
             if label:
                 error.target = f"{label} / {error.target}"
+            if error.action_receipt is not None:
+                receipt = error.action_receipt
+                error.action_receipt = FrozenRecord(
+                    {**receipt, "intent": request.intent.kind, "target": label or receipt.target}
+                )
             raise
         finally:
             self.children = ()

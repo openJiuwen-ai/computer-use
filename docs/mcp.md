@@ -138,6 +138,8 @@ SDK 内切片值及文件输出仍保持原意。需要限制读取范围时使�
 目标失效、目标信息暂时无法确认、模态阻挡，
 以及 `effect="partial"` 或 `"possible"` 的 `ComputerUseError`，在原会话仍可观察时也附带这些字段。
 可直接使用错误附带的当前观察决定下一步；原错误与效果保持不变，SDK 不会重放不确定的输入。
+如果原生操作已确认派发，随后释放操作资源失败，`ComputerUseError.action_receipt` 保留派发回执，
+`scope_cleanup="unknown"` 表示资源收尾未确认。输入配对清理仍由 `impact.attempts` 单独报告，会话退役后无法启动写后观察。
 macOS 的 Computer 全局输入不强制写后观察，`observation_status="not_requested"`；需要界面结果时显式读取，读取失败不阻止下一次全局输入。
 
 ### Python SDK

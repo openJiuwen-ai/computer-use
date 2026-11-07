@@ -159,17 +159,19 @@ class WindowInfo:
     id: int
     title: str
 
-class ActionResult:
+class _ActionReceipt:
     target: str
     intent: str | None
     status: Literal["dispatched", "verified"]
     detail: str
+    impact: ActionImpact | None
+
+class ActionResult(_ActionReceipt):
     observation: Observation | None
     observation_status: Literal["available", "partial", "unavailable", "not_requested"]
     observation_error: ObservationError | None
     window_lifecycle: Literal["observed", "closed", "unknown", "not_applicable"]
     choices: tuple[WindowInfo, ...]
-    impact: ActionImpact | None
 
 class PreparationImpact:
     mouse: Literal["yes", "no", "unknown"]
@@ -225,6 +227,8 @@ class ComputerUseError(Exception):
     target: str
     detail: str
     impact: ActionImpact | None
+    action_receipt: _ActionReceipt | None
+    scope_cleanup: Literal["unknown"] | None
     observation: Observation | None
     observation_status: Literal["available", "partial", "unavailable", "not_requested"]
     observation_error: ObservationError | None

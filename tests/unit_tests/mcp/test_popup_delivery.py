@@ -17,7 +17,7 @@ from mcp.client.stdio import stdio_client
 from PIL import Image
 
 
-def popup_fixture(failure=None):
+def popup_fixture(failure=None, *, capture_parent=False):
     """Replace native I/O only; retain public SDK, read, numbering and delivery paths."""
     import base64
     from contextlib import nullcontext
@@ -152,7 +152,7 @@ def popup_fixture(failure=None):
         async def capture(self, token, target, max_dimension, timeout):
             self.trace.append(("image", target.root_window))
             self.suffix_budgets.append(("image", timeout))
-            assert target.root_window == "Sheet", "A tree-only click must not capture the unchanged parent"
+            assert capture_parent or target.root_window == "Sheet", "A tree-only click must not capture the unchanged parent"
             if failure in ("image", "both"):
                 raise TimeoutError("Popup screenshot unavailable")
             buffer = BytesIO()
@@ -160,7 +160,7 @@ def popup_fixture(failure=None):
                 image.save(buffer, format="PNG")
             png = decode_capture(
                 {
-                    "id": "popup-capture",
+                    "id": "popup-capture" if target.root_window == "Sheet" else "parent-capture",
                     "kind": "window",
                     "scope": target.surface,
                     "startedAt": 1,

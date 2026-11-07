@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, cast
 
 from computer_use.errors import ComputerUseError
-from computer_use.identity import freeze_result
+from computer_use.identity import FrozenRecord, freeze_result
 from computer_use.interaction.control import scope_control
 from computer_use.interaction.write.model import OpenedWrite
 from computer_use.interaction.write.impact import action_impact
@@ -29,7 +29,7 @@ from computer_use.interaction.write.progress import WriteRunState, failure
 from computer_use.interaction.write.resolution.pipeline import TargetResolutionPipeline
 from computer_use.interaction.write.routes.pipeline import RouteExecutionPipeline, RouteSelectionPipeline
 from computer_use.native.contracts import Dispatch
-from computer_use.pipeline import Repeat, Scope, Select, Sequence
+from computer_use.pipeline import Done, Repeat, Scope, Select, Sequence
 
 if TYPE_CHECKING:
     from typing import AsyncIterator
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.write.model import AttemptOutcome, BoundWrite, WriteRequest
     from computer_use.native.contracts import Intent, OperationTarget
     from computer_use.native.port import NativePort
-    from computer_use.pipeline.core import Continue, Control, Done
+    from computer_use.pipeline.core import Continue, Control
     from computer_use.protocol.records import Record
 
 
@@ -60,6 +60,7 @@ class WritePipeline:
 
     def __init__(self, native: NativePort) -> None:
         self.native, self.state = native, WriteRunState()
+        self.completed_receipt: Record | None = None
         self.app_change_baseline = None
         self.app_change_input_baseline = None
         self.intent = Sequence(name="IntentPipeline", steps=[parse_write_intent()])
@@ -190,6 +191,20 @@ class WritePipeline:
                 error.app_change_baseline = self.app_change_baseline
             if error is caught:
                 raise
+            if self.completed_receipt is not None and self.native.calls.retired:
+                # The Gate accepted the original input before finish failed.
+                # Keep resource finalization separate from the input cleanup.
+                result = self.completed_receipt
+                error.action_receipt = FrozenRecord(
+                    {
+                        "status": result["status"],
+                        "target": result["target"],
+                        "detail": result["detail"],
+                        "intent": request.intent.kind,
+                        "impact": error.impact,
+                    }
+                )
+                error.scope_cleanup = "unknown"
             for note in getattr(caught, "__notes__", ()):
                 error.add_note(note)
             raise error from caught
@@ -217,6 +232,8 @@ class WritePipeline:
             if self.app_change_input_baseline is None:
                 self.app_change_input_baseline = sampled
         self.state.consume(outcome, transition.reason)
+        if isinstance(transition, Done) and self.state.dispatched == Dispatch.DISPATCHED:
+            self.completed_receipt = transition.value
 
 
 if TYPE_CHECKING:

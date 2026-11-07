@@ -156,6 +156,10 @@ A `ComputerUseError` for an expired target,
 temporarily incomplete target evidence, a modal blocker, or `effect="partial"` / `"possible"` also retains
 these fields when the original session can still be observed. Use the attached current observation to
 decide the next action. The original error and effect remain unchanged; the SDK does not replay uncertain input.
+If native input was dispatched and releasing the operation resources then fails,
+`ComputerUseError.action_receipt` retains the dispatch receipt and `scope_cleanup="unknown"` reports unconfirmed
+resource finalization. `impact.attempts` reports paired input cleanup separately. The retired session cannot
+start the related observation.
 On macOS, Computer global input does not force a post-action observation and returns
 `observation_status="not_requested"`. Read explicitly when needed; a failed read does not
 block subsequent global input.
