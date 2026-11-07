@@ -151,22 +151,14 @@ class CollectionPlan:
         current = {WindowIdentity.of(item) for item in directory["surfaces"]}
         records = []
         for identity, requested in self.requested.items():
-            part = next(
-                (
-                    part
-                    for part in parts
-                    if (part.target.root_window, part.target.surface, part.target.instance)
-                    == (identity.window, identity.surface, identity.instance)
-                ),
-                None,
-            )
+            part = next((part for part in parts if part.identity == identity), None)
             captured = tuple(name for name in ("tree", "image") if part is not None and getattr(part, name) is not None)
             lifecycle = window_lifecycle(identity, directory)
             included = tuple(
                 name
                 for name in captured
                 if (name != "image" or identity.window in included_images)
-                and (name != "tree" or included_trees is None or identity.surface in included_trees)
+                and (name != "tree" or included_trees is None or identity in included_trees)
             )
             records.append(
                 {

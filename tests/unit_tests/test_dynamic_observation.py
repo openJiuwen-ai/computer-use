@@ -66,7 +66,7 @@ def deliver_through_runtime(observations, *, prefix_blocks=0):
     return asyncio.run(deliver())
 
 
-def tree(item, title):
+def tree(item, title, references=None):
     root, child = item["node"], item["node"] + ":child"
     native = NativeObservation(
         "macos",
@@ -85,7 +85,7 @@ def tree(item, title):
             child: NativeNode(role="button", name=title),
         },
     )
-    return normalize_facts(native, DisplayReferences("session"))
+    return normalize_facts(native, references if references is not None else DisplayReferences("session"))
 
 
 def pixels(state, item):
@@ -191,6 +191,81 @@ def test_late_sheet_is_delivered_in_same_observation_with_partial_catalogue(monk
     assert set(coverage["Sheet"]["delivered"]) == set(coverage["Sheet"]["included"])
     if failure not in ("tree", "both"):
         assert "Use Touch ID or enter password" in received[0]
+
+
+@pytest.mark.parametrize(
+    "relationship", ["attached", "attached-partial", "independent", "unknown", "replaced", "wrong-anchor"],
+)
+def test_related_read_accounts_for_parent_bound_sheet_by_its_own_window(monkeypatch, relationship):
+    parent, other = window("A"), window("B")
+    sheet = {**window("Sheet", title="Go To", parent="A"), "modal": True, "kind": "sheet"}
+    if relationship in ("independent", "unknown"):
+        sheet = {**sheet, "parent": None, "parentState": "none" if relationship == "independent" else "unknown"}
+    reasons = ("unrelated AX budget",) if relationship == "attached-partial" else ()
+    source = directory(parent, other, sheet, focused="Sheet", reasons=reasons)
+    current = (
+        directory(parent, other, {**sheet, "instance": "replacement", "node": "node:replacement"},
+                  focused="Sheet", ended=(sheet,))
+        if relationship == "replaced" else source
+    )
+    controller, app, state = setup(source)
+    parent_target = member_target(state, parent)
+    target = replace(
+        parent_target, surface=sheet["surface"], node=sheet["node"],
+        instance=other["instance"] if relationship == "wrong-anchor" else parent_target.instance,
+    )
+    image = pixels(state, sheet)
+    image = replace(image, target=replace(target, node=None, capture=image.target.capture))
+    references = DisplayReferences("session")
+    snapshot = tree(sheet, "Path input", references)
+    first = replace(
+        parent_result(state, parent, source, current), target=target, tree=snapshot,
+        image=image, scope_confirmed=not reasons,
+    )
+    controller.reader.read = AsyncMock(return_value=first)
+    pipeline = InterfaceReadPipeline(controller)
+
+    async def member(_owner, item, _view, **_kwargs):
+        return WindowPart(member_target(state, item), tree=tree(item, "Other content", references))
+
+    async def recheck(*_args, **_kwargs):
+        adopt(controller, app, current)
+        return current
+
+    pipeline.member = member
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", recheck)
+    related = RelatedRead(parent_target, tuple(WindowIdentity.of(item) for item in source["surfaces"]))
+    events = []
+    set_observation_handler(events.append)
+    try:
+        observation = asyncio.run(pipeline._collect(app, "tree", False, None, source, None, None, related))
+    finally:
+        set_observation_handler(None)
+    coverage = {record["window"]: record for record in observation_data(observation)["window_coverage"]}
+    if relationship not in ("attached", "attached-partial"):
+        assert "Path input" not in observation.text and observation.screenshot is None
+        assert not set(snapshot.refs).intersection(state.refs)
+        assert not any(item.get("window_identity") == WindowIdentity.of(sheet) for item in state.refs.values())
+        return
+
+    assert "Path input" in observation.text and observation.screenshot is image.image
+    sheet_ref = next(ref for ref, key in state.windows.items() if key == "Sheet")
+    heading = next(line for line in observation.text.splitlines() if line.startswith(f"Window {sheet_ref}:"))
+    assert "current" in heading and "modal" in heading and "not expanded" not in heading
+    assert f"Window {sheet_ref}: image, tree content was not included" not in observation.text
+    assert coverage["Sheet"]["captured"] == coverage["Sheet"]["included"] == ("tree", "image")
+    assert app._image.pieces[0].window == "Sheet"
+    assert app._image.pieces[0].image.target == image.target
+    assert not app._image.pieces[0].scope_confirmed  # coordinate authority still needs the exact member binding
+    result = deliver_through_runtime([event["observation"] for event in events])
+    assert not result.get("isError")
+    assert any("Path input" in block.get("text", "") for block in result["content"])
+    assert any(block["type"] == "image" for block in result["content"])
+    coverage = {record["window"]: record for record in observation_data(observation)["window_coverage"]}
+    assert set(coverage["Sheet"]["delivered"]) == {"tree", "image"}
+    for ref in snapshot.refs:
+        assert state.refs[ref]["binding"].root_window == "A"
+        assert state.refs[ref]["window_identity"] == WindowIdentity.of(sheet)
 
 
 def test_explicit_tree_view_keeps_contract_but_still_collects_late_sheet(monkeypatch):

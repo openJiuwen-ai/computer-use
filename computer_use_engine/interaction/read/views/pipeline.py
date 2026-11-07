@@ -39,7 +39,7 @@ from computer_use.interaction.read.presentation.model import SnapshotRenderReque
 from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
 from computer_use.native.contracts import Binding
 from computer_use.native.query.directory import select_surface
-from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
+from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
 from computer_use.pipeline.core import Control
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
@@ -70,7 +70,8 @@ class WindowPart:
     """Facts, pixels, and menus collected for one member of an interface scope.
 
     Attributes:
-        target: Native identity of the element, window, or application being observed.
+        target: Original native acquisition and execution binding.
+        display_identity: Confirmed member identity when the native binding is anchored at its parent.
         tree: Semantic snapshot with retained native facts and display-reference bindings.
         image: Captured pixels and their original coordinate/identity metadata, when available.
         menus: Menu snapshots collected for the same application scope.
@@ -88,6 +89,30 @@ class WindowPart:
     image_directory: NativeDirectory | None = None
     capture_companion: CapturedSharingControl | None = None
     snapshots_numbered: bool = True
+    display_identity: WindowIdentity | None = None
+
+    @property
+    def identity(self) -> WindowIdentity:
+        """The display member does not change the native binding."""
+        return self.display_identity or WindowIdentity(self.target.root_window, self.target.surface, self.target.instance)
+
+
+def _matches_observed_member(directory: NativeDirectory, item: SurfaceInfo, target: Binding) -> bool:
+    """Prove an exact member or a native parent-anchored modal view in this catalogue."""
+    if directory["session"] != target.session or item["surface"] != target.surface:
+        return False
+    if WindowIdentity.of(item) == WindowIdentity(target.root_window, target.surface, target.instance):
+        return True
+    if (
+        directory["platform"] != "macos" or target.root_window is None or target.root_window == item["window"]
+        or item["modal"] is not True or not ancestor(directory, item["window"], target.root_window)
+    ):
+        return False
+    try:
+        selected = select_surface(directory, target.root_window)
+    except ComputerUseError:
+        return False
+    return window_binding(selected) == window_binding(target)
 
 
 def member_target(instance: InstanceState, item: SurfaceInfo) -> Binding:
@@ -120,7 +145,11 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     # The pipeline shares retained bindings with their owning service.
     # pylint: disable-next=protected-access
     instance = ui._instance
-    window = next(key for key, item in instance.members.items() if item["surface"] == part.target.surface)
+    identity = part.identity
+    window = identity.window
+    item = instance.members.get(window)
+    if item is None or WindowIdentity.of(item) != identity:
+        return
     owner = instance.owners[window]
     state = controller.state(owner)
     previous = state.query_target
@@ -144,7 +173,6 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     if part.tree is not None and part.snapshots_numbered:
         # pylint: disable-next=protected-access
         controller._remember(state, part.target, part.tree)
-        identity = WindowIdentity.of(instance.members[window])
         for ref in part.tree.refs:
             instance.refs[ref]["window_identity"] = identity
     # An explicit bounded window read observes its identity even if AX and
@@ -466,27 +494,35 @@ class InterfaceReadPipeline:
                     directory, permitted = observed.directory, allowed(ui)
                 plan.update(directory, permitted)
                 if observed is not None:
-                    item = next(
-                        (member for member in permitted.values() if member["surface"] == observed.target.surface), None
-                    )
-                    if item is None and not observed.scope_confirmed:
-                        # A post-capture catalogue omission is not proof that
-                        # the fixed object ended. Keep this call's actual
-                        # captured member, separately from current App scope.
-                        identity = WindowIdentity(
-                            observed.target.root_window, observed.target.surface, observed.target.instance
-                        )
-                        if window_lifecycle(identity, directory) in ("unknown", "closed"):
-                            item = next((
-                                member for member in observed.source_directory["surfaces"]
-                                if WindowIdentity.of(member) == identity
-                            ), None)
+                    source = observed.source_directory
+                    source_members = []
+                    if source["application"] == directory["application"] == observed.selection.application:
+                        source_members = [
+                            member for member in source["surfaces"]
+                            if _matches_observed_member(source, member, observed.target)
+                        ]
+                    item = None
+                    if len(source_members) == 1:
+                        original = source_members[0]
+                        identity = WindowIdentity.of(original)
+                        current = permitted.get(identity.window)
+                        if (
+                            current is not None and WindowIdentity.of(current) == identity
+                            and _matches_observed_member(directory, current, observed.target)
+                        ):
+                            item = current
+                        elif not observed.scope_confirmed and window_lifecycle(identity, directory) in (
+                            "unknown", "closed",
+                        ):
+                            # An omitted or ended exact member can still be
+                            # shown as history, without granting current scope.
+                            item = original
                     if item is not None:
                         part = WindowPart(
                             observed.target, observed.tree, observed.image,
                             observed.menus, observed.gaps, observed,
                             image_directory=observed.source_directory if observed.image is not None else None,
-                            snapshots_numbered=observed.snapshots_numbered,
+                            snapshots_numbered=observed.snapshots_numbered, display_identity=WindowIdentity.of(item),
                         )
                         parts.append(part)
                         plan.captured(item, part)
@@ -530,7 +566,7 @@ class InterfaceReadPipeline:
                     ui, item, member_view, max_nodes=DEFAULT_WINDOW_MAX_NODES if not parts else 200,
                     component_budget_ms=2000 if related is not None else None,
                 )
-            previous = next((old for old in parts if old.target.surface == part.target.surface), None)
+            previous = next((old for old in parts if old.identity == part.identity), None)
             if previous is not None:
                 # A late discovery may add image work to an already captured tree.
                 resolved = {name for name in ("tree", "image") if getattr(part, name) is not None}
@@ -565,20 +601,20 @@ class InterfaceReadPipeline:
                 related, directory, instance.windows,
                 refresh_incomplete=any(gap.component == "directory" for gap in collection_gaps),
             ))
-        captured = {part.target.surface for part in parts}
+        captured = {part.identity for part in parts}
         current_identities = {WindowIdentity.of(item) for item in directory["surfaces"]}
         if related is not None and not any(
             (part.tree is not None or part.image is not None)
-            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance) in current_identities
+            and part.identity in current_identities
             for part in parts
         ):
             # Historical content proves acquisition, not a current App view.
             # A popup can remain alive while leaving the current directory.
             # Keep its facts and observe the actual surviving scope using the
             # same deadline and original requested components, without input replay.
-            unavailable = frozenset(part.target.root_window for part in parts)
+            unavailable = frozenset(part.identity.window for part in parts)
             old = permitted.get(related.recovery_window(directory, unavailable))
-            if old is not None and old["surface"] not in captured and len(parts) < 6:
+            if old is not None and WindowIdentity.of(old) not in captured and len(parts) < 6:
                 fallback_view = "both" if related.new_windows(directory) else view
                 fallback = await self.member(ui, old, fallback_view, component_budget_ms=2000)
                 identity = WindowIdentity.of(old)
@@ -588,7 +624,6 @@ class InterfaceReadPipeline:
                 plan.captured(old, fallback)
                 plan.order = tuple(dict.fromkeys((*plan.order, identity)))
                 remember(controller, ui, fallback)
-                captured.add(old["surface"])
                 if fallback.tree is not None or fallback.image is not None:
                     ui._context = old["window"]
                     if ui._anchor is None:
@@ -609,7 +644,9 @@ class InterfaceReadPipeline:
                     )
         # Convenience context follows locally bound content. Ambiguity still
         # leaves every explicitly bound window readable.
-        current_part = next((part for part in parts if part.target.root_window == plan.principal), None)
+        current_member = permitted.get(plan.principal)
+        current_identity = WindowIdentity.of(current_member) if current_member is not None else None
+        current_part = next((part for part in parts if part.identity == current_identity), None)
         if current_part is not None and (current_part.tree is not None or current_part.image is not None):
             principal, principal_error = plan.principal, plan.selection_error
             if principal_error is None and (related is not None or ui._anchor is not None):
@@ -629,8 +666,9 @@ class InterfaceReadPipeline:
         displayed_parts: list[tuple[str, WindowPart]] = []
         shown: set[WindowIdentity] = set()
         for part in parts:
-            identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
-            key = next((key for key, item in permitted.items() if WindowIdentity.of(item) == identity), None)
+            identity = part.identity
+            current = permitted.get(identity.window)
+            key = identity.window if current is not None and WindowIdentity.of(current) == identity else None
             if key is None and part.source is not None and not part.source.scope_confirmed:
                 retained = next((
                     item for item in part.source.source_directory["surfaces"]
@@ -647,14 +685,13 @@ class InterfaceReadPipeline:
         displayed_parts.sort(key=lambda entry: entry[0] != plan.principal)
         has_current_capture = any(
             (part.tree is not None or part.image is not None)
-            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance) in current_identities
+            and part.identity in current_identities
             for _, part in displayed_parts
         )
         summarized_history = {
             id(part) for _, part in displayed_parts
             if has_current_capture
-            and WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
-            not in current_identities
+            and part.identity not in current_identities
         }
         delivered_gaps = tuple(
             (part.source.directory, part.gaps)
@@ -665,9 +702,7 @@ class InterfaceReadPipeline:
         screenshot, included_images = None, ()
         image_parts = [
             part for _, part in displayed_parts
-            if part.image is not None or "image" in plan.requested.get(
-                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
-            )
+            if part.image is not None or "image" in plan.requested.get(part.identity, ())
         ]
         if image_parts:
             from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
@@ -681,7 +716,7 @@ class InterfaceReadPipeline:
                     included_images = tuple(piece.window for piece in getattr(image, "pieces", ()))
                     if not included_images:
                         included_images = tuple(
-                            part.target.root_window for part in image_parts
+                            part.identity.window for part in image_parts
                             if part.image is not None and image.png is part.image.image
                         )
                 lines += image_notes
@@ -695,7 +730,7 @@ class InterfaceReadPipeline:
         if isinstance(first, AppObservation) and first.launch:
             lines.insert(1, template("Launch: {0}", first.launch["detail"]))
         trees = []
-        included_tree_surfaces = set()
+        member_trees = {}
         presentation_exhausted = any(not part.snapshots_numbered for _, part in displayed_parts)
         tree_heading = len(lines)
         if any(part.tree is not None for _, part in displayed_parts):
@@ -708,7 +743,7 @@ class InterfaceReadPipeline:
         for key, part in displayed_parts:
             ref = controller.interfaces.windows.reference(
                 part.target.session, directory["application"],
-                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance),
+                part.identity,
             )
             if len(header.scoped) != 1 or header.scoped[0].native_window != key:
                 lines.append(
@@ -730,9 +765,7 @@ class InterfaceReadPipeline:
                     ref, parent_ref, aliases[proof.root], aliases[proof.button],
                     proof.context.capture, proof.context.before, proof.context.after,
                 ),)))
-            requested = plan.requested.get(
-                WindowIdentity(part.target.root_window, part.target.surface, part.target.instance), ()
-            )
+            requested = plan.requested.get(part.identity, ())
             ax_status = (
                 "collected" if part.tree is not None else "unavailable" if "tree" in requested else "not requested"
             )
@@ -798,7 +831,7 @@ class InterfaceReadPipeline:
                     ))
                 else:
                     trees.append((part.target, part.tree))
-                    included_tree_surfaces.add(part.target.surface)
+                    member_trees[part.identity] = part.tree
                     recovery_prefix = max(
                         (
                             group.recovery_units
@@ -849,7 +882,7 @@ class InterfaceReadPipeline:
         if content_gap is not None:
             collection_gaps.append(content_gap)
         try:
-            coverage = plan.coverage(directory, parts, included_images, included_trees=included_tree_surfaces)
+            coverage = plan.coverage(directory, parts, included_images, included_trees=member_trees)
         except Exception as error:  # noqa: BLE001 - accounting cannot veto already acquired content or the action
             coverage = ()
             collection_gaps.append(_collection_gap("coverage", error))
@@ -869,7 +902,7 @@ class InterfaceReadPipeline:
             lines[tree_heading] = (
                 "Tree: partial (presentation budget exhausted; unprepared captured facts not expanded)"
             )
-            prepared_windows = {target.root_window for target, _tree in trees}
+            prepared_windows = {identity.window for identity in member_trees}
             header = replace(header, windows=tuple(
                 replace(member, expanded=member.expanded and (
                     member.native_window in prepared_windows or member.native_window in included_images
@@ -898,6 +931,7 @@ class InterfaceReadPipeline:
             content_available=bool(trees) or screenshot is not None,
             gaps=tuple(gap for part in parts for gap in part.gaps) + tuple(collection_gaps),
             window_coverage=coverage,
+            member_trees=member_trees,
             context_owner=related.context_owner if related is not None else None,
             content_owner=content_owner,
             partial=bool(

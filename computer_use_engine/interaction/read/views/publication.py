@@ -158,6 +158,7 @@ def publish(
     lookup_context: LookupContext | None = None,
     on_observation=None,
     window_coverage=(),
+    member_trees: Mapping[WindowIdentity, SemanticSnapshot] | None = None,
 ) -> Observation:
     """Publish the combined interface observation and retain its source data.
 
@@ -201,7 +202,9 @@ def publish(
             "Observation coverage: partial. " + " ".join(dict.fromkeys(gap.detail for gap in collection_gaps)),
         ))
         by_window = {
-            (target.root_window, target.surface, target.instance): snapshot
+            identity: snapshot for identity, snapshot in member_trees.items() if tree_collection_issues(snapshot)
+        } if member_trees is not None else {
+            WindowIdentity(target.root_window, target.surface, target.instance): snapshot
             for target, snapshot, _ in incomplete
         }
         window_coverage = tuple(
@@ -215,7 +218,7 @@ def publish(
                 },
             }
             if "tree" in record["included"]
-            and (snapshot := by_window.get((record["window"], record["surface"], record["instance"]))) is not None
+            and (snapshot := by_window.get(WindowIdentity(record["window"], record["surface"], record["instance"]))) is not None
             else record
             for record in window_coverage
         )
@@ -334,7 +337,7 @@ def publish(
         # this observation was made through an explicit window parameter.
         instance_state = owner._instance
         captured_lookup = lookup_context
-        captured_query_windows = frozenset(
+        captured_query_windows = frozenset(member_trees) if member_trees is not None else frozenset(
             WindowIdentity(target.root_window, target.surface, target.instance)
             for target, snapshot in trees
             if target.root_window is not None and any(source is snapshot.native for source in shown)
@@ -454,7 +457,7 @@ def capture_header(
     for key, part in parts:
         if part.source is None:
             continue
-        identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+        identity = part.identity
         ref = controller.interfaces.windows.reference(part.target.session, directory["application"], identity)
         item = next((
             member for member in part.source.source_directory["surfaces"]
@@ -463,9 +466,7 @@ def capture_header(
         if ref is not None and item is not None and ref not in entries:
             entries[ref] = (key, item)
     for ref, (key, item) in entries.items():
-        part = next((part for _, part in parts if WindowIdentity(
-            part.target.root_window, part.target.surface, part.target.instance
-        ) == WindowIdentity.of(item)), None)
+        part = next((part for _, part in parts if part.identity == WindowIdentity.of(item)), None)
         source = part.source if part is not None else None
         current_member = permitted.get(key)
         current_member = current_member is not None and WindowIdentity.of(current_member) == WindowIdentity.of(item)
