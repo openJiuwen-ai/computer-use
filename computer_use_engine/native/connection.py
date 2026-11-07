@@ -459,6 +459,8 @@ class Connection:
             if method == "locatePoint"
             else "nativeGlobalInput"
             if method == "begin" and params.get("target", {}).get("global") is True
+            else "nativeApplicationContent"
+            if method == "inspect" and params.get("query", {}).get("applicationContent") is True
             else "nativeApplicationRoots"
             if method == "inspect" and params.get("query", {}).get("kind") == "roots"
             else "nativeRelationPages"

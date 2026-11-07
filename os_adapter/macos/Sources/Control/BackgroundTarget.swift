@@ -45,24 +45,37 @@ import ApplicationServices
 
     static func validateDesktop(input: Bool = false) throws {
         let foreground = NSWorkspace.shared.frontmostApplication
-        guard foreground?.bundleIdentifier != "com.apple.loginwindow", !input || foreground != nil else {
-            // Preserve the actual evidence behind a desktop refusal. A missing
-            // foreground or loginwindow is not proof of a particular lock setting.
-            let session = CGSessionCopyCurrentDictionary() as? [String: Any] ?? [:]
-            func state(_ key: String) -> String { session[key].map { String(describing: $0) } ?? "unknown" }
-            diagnose(
-                """
-                desktop unavailable: foreground=\(foreground?.bundleIdentifier ?? "none") \
-                pid=\(foreground?.processIdentifier ?? 0), \
-                displayAsleep=\(CGDisplayIsAsleep(CGMainDisplayID())), \
-                loginDone=\(state("kCGSessionLoginDoneKey")), onConsole=\(state("kCGSessionOnConsoleKey")), \
-                screenLocked=\(state("CGSSessionScreenIsLocked"))
-                """)
-            let reason = foreground == nil ? "foreground application unavailable" : "login window is in the foreground"
-            throw DriverError(
-                "desktop unavailable: \(reason)", code: .desktopUnavailable,
-                next: "resume the desktop session before continuing")
+        let systemUI = foreground?.bundleIdentifier == "com.apple.loginwindow"
+        guard systemUI || (input && foreground == nil) else { return }
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any] ?? [:]
+        if systemUI && permitsLoginWindowInterface(session) { return }
+
+        func state(_ key: String) -> String { session[key].map { String(describing: $0) } ?? "unknown" }
+        diagnose(
+            """
+            desktop unavailable: foreground=\(foreground?.bundleIdentifier ?? "none") \
+            pid=\(foreground?.processIdentifier ?? 0), \
+            displayAsleep=\(CGDisplayIsAsleep(CGMainDisplayID())), \
+            loginDone=\(state(kCGSessionLoginDoneKey)), onConsole=\(state(kCGSessionOnConsoleKey)), \
+            screenLocked=\(state("CGSSessionScreenIsLocked"))
+            """)
+        let reason = systemUI ? "login window is in the foreground and session availability is unconfirmed"
+            : "foreground application unavailable"
+        throw DriverError("desktop unavailable: \(reason)", code: .desktopUnavailable)
+    }
+
+    /// loginwindow can own ordinary system dialogs in an active user session.
+    /// The private lock flag is normally absent in that case. Only use this
+    /// convention with affirmative, typed public login and console facts.
+    static func permitsLoginWindowInterface(_ session: [String: Any]) -> Bool {
+        func matches(_ value: Any?, _ expected: Bool) -> Bool {
+            guard let value, CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() else { return false }
+            return value as? Bool == expected
         }
+        guard matches(session[kCGSessionLoginDoneKey], true), matches(session[kCGSessionOnConsoleKey], true)
+        else { return false }
+        let locked = session["CGSSessionScreenIsLocked"]
+        return locked == nil || matches(locked, false)
     }
 
     enum MenuRecipient { case window(AXUIElement), application }

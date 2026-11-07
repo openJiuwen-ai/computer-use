@@ -20,13 +20,20 @@ import ApplicationServices
             candidate: .init(point: point, source: .center))
     }
 
-    @MainActor static func main() {
+    @MainActor static func main() throws {
         dispatchBasis()
+        try preparedClickUsesItsSelectedPoint()
+        try qualifiedCompoundCaptionUsesMouseSemantics()
+        ownedControlParts()
+        opaqueRowClickPreservesAlternativeActions()
         let original = geometry()
         let expanded = geometry(frame: original.frame.insetBy(dx: -25, dy: -15))
         precondition(expanded.permitsFrozenDispatch(
             from: original, basis: .exactHit, requiresExactGeometry: false),
                      "hover layout must not reject the same original object at the frozen point")
+        precondition(expanded.permitsFrozenDispatch(
+            from: original, basis: .ownedControlPart, requiresExactGeometry: false),
+                     "a fresh passive part still proves the original object after hover changes layout")
         precondition(!expanded.same(as: original),
                      "retained popup/capture geometry equality must remain strict")
         precondition(!expanded.permitsFrozenDispatch(
@@ -64,18 +71,118 @@ import ApplicationServices
         print("Element pointer continuity regressions passed")
     }
 
+    @MainActor private static func opaqueRowClickPreservesAlternativeActions() {
+        let roles = ["cell": kAXCellRole, "row": kAXRowRole, "table": kAXTableRole]
+        let parents = ["leaf": "cell", "cell": "row", "row": "table"]
+        let children = ["cell": ["leaf"], "row": ["cell"]]
+        func matches(
+            selected: String? = nil, foreign: String? = nil, originalScope: Bool = true, rows: [String] = ["row"]
+        ) -> Bool {
+            NativeOpaqueRowClick.matches(
+                "leaf", same: ==, readRole: { roles[$0] }, readParent: { parents[$0] },
+                readChildren: { children[$0] }, readRows: { _ in rows }, readSelected: { $0 == selected },
+                sameProcess: { $0 != foreign && $1 != foreign }, inScope: { $0 == "table" && originalScope })
+        }
+        precondition(matches() && !matches(selected: "cell") && !matches(selected: "row"))
+        precondition(!matches(foreign: "table") && !matches(originalScope: false) && !matches(rows: ["other"]))
+        let action = NativeClickContract(
+            routeFamily: "macos.axAction.AXPress", delivery: .objectAction, admission: .ready,
+            reason: nil, preparationOptions: [])
+        precondition(NativeOpaqueRowClick.actionOffer(action, preferPointer: false) == action)
+        precondition(NativeOpaqueRowClick.actionOffer(action, preferPointer: true).admission == .insufficientEvidence)
+        let other = NativeClickContract(
+            routeFamily: "macos.axAction.AXShowMenu", delivery: .objectAction, admission: .ready,
+            reason: nil, preparationOptions: [])
+        precondition(NativeOpaqueRowClick.actionOffer(other, preferPointer: true) == other)
+    }
+
+    @MainActor private static func preparedClickUsesItsSelectedPoint() throws {
+        // The probe has no window or pointer geometry to rediscover. Delivery
+        // must consume preparation's point while its later live guard remains
+        // independently responsible for verifying that point.
+        let probe = AXUIElementCreateApplication(getpid())
+        let unit = NativeElementPointerUnit(application: .current, window: probe, element: probe)
+        let original = geometry()
+        let edge = Geometry(mapping: original.mapping, frame: original.frame, visible: original.visible,
+                            candidate: .init(point: CGPoint(x: 204, y: 230), source: .edge))
+        let delivered = try unit.geometry(prepared: edge)
+        precondition(delivered.same(as: edge) && delivered.point != original.point)
+    }
+
+    private static func qualifiedCompoundCaptionUsesMouseSemantics() throws {
+        let intent = try NativeIntent(["kind": "click", "parameters": ["button": "right"]], mode: "write")
+        func qualification(memberRole: String, exactHit: Bool, actions: [String]?)
+            -> NativeAddressedPointerReceiver.Qualification?
+        {
+            NativeAddressedPointerReceiver.compoundTextContextQualification(
+                intent: intent, ownerRole: kAXStaticTextRole, ownerActions: actions, memberRole: memberRole,
+                exactMemberHit: exactHit)
+        }
+        let right = qualification(memberRole: kAXStaticTextRole, exactHit: true, actions: [kAXPressAction])
+        precondition(right?.requirement(captured: false) == .contentReceiver)
+        precondition(qualification(memberRole: kAXButtonRole, exactHit: true, actions: [kAXPressAction]) == nil)
+        precondition(qualification(memberRole: kAXStaticTextRole, exactHit: false, actions: [kAXPressAction]) == nil)
+        precondition(qualification(memberRole: kAXStaticTextRole, exactHit: true, actions: nil) == nil)
+    }
+
+    @MainActor private static func ownedControlParts() {
+        let frame = CGRect(x: 10, y: 10, width: 50, height: 30)
+        let roles = ["button": kAXButtonRole, "label": kAXStaticTextRole, "link": "AXLink",
+                     "row": kAXRowRole, "cell": kAXCellRole, "table": kAXTableRole,
+                     "layout": kAXGroupRole, "foreign": kAXStaticTextRole]
+        let parents = ["label": "button", "link": "button", "foreign": "button",
+                       "cell": "row", "layout": "row", "row": "table"]
+        func accepts(_ target: String, _ hit: String, passive: Bool = true, layout: CGRect? = nil) -> Bool {
+            NativeOwnedElementHit.matches(
+                target, hit: hit, frame: frame, same: ==, role: { roles[$0] }, parent: { parents[$0] },
+                inWindow: { $0 != "foreign" }, passive: { _ in passive }, hitFrame: { _ in layout })
+        }
+        precondition(accepts("button", "label"))
+        precondition(!accepts("button", "link") && !accepts("button", "label", passive: false))
+        precondition(!accepts("button", "foreign") && !accepts("row", "label"))
+        precondition(accepts("row", "cell") && accepts("row", "layout", layout: frame))
+        precondition(!accepts("row", "layout", layout: frame.insetBy(dx: 2, dy: 2)))
+        precondition(!accepts("row", "layout", passive: false, layout: frame))
+        let point = NativeElementHitSelection.Candidate(point: CGPoint(x: 14, y: 15), source: .edge)
+        let hit = NativeElementHitSelection.select([point], canContinue: { _ in true }) { _ in
+            NativeElementHitSelection.Observation<String>(
+                evidence: .init(status: .success, relation: .ownedControlPart), hit: "label", foreground: false)
+        }
+        precondition(hit?.basis == .ownedControlPart && hit?.candidate == point)
+        let row = NativeAddressedPointerReceiver(role: kAXRowRole, actions: [])
+        precondition(row.retainedElementQualification(basis: .ownedControlPart, preparation: .geometryReady,
+            exactOriginalHit: false, popup: false) == .originalElementForegroundGeometry)
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 60)
+        let label = CGRect(x: 5, y: 5, width: 20, height: 20)
+        let candidates = NativeElementHitSelection.candidates(bounds: bounds, activationPoint: nil, memberBounds: label)
+        precondition(candidates.first?.source == .memberCenter && candidates.first?.point == CGPoint(x: 15, y: 15))
+    }
+
     @MainActor private static func dispatchBasis() {
-        let bases: [Basis] = [.exactHit, .providerStackingGeometry, .coarseAncestorGeometry, .backgroundGeometry, .rejected]
+        let bases: [Basis] = [
+            .exactHit, .ownedControlPart, .providerStackingGeometry, .coarseAncestorGeometry,
+            .serviceAncestorGeometry, .backgroundGeometry, .rejected
+        ]
         for basis in bases {
             for exactOriginalHit in [false, true] {
                 for hasMember in [false, true] {
                     precondition(NativeElementPointerUnit.allowsDispatchBasis(
                         basis, requirement: .contentReceiver, exactOriginalHit: exactOriginalHit, hasMember: hasMember
-                    ) == (basis != .rejected), "existing geometry and member routes keep their qualification")
+                    ) == (hasMember ? basis == .exactHit : basis != .rejected),
+                        "a selected control part needs its own exact hit, not the owner's geometry")
+                    precondition(NativeElementPointerUnit.allowsDispatchBasis(
+                        basis, requirement: .contentReceiver, exactOriginalHit: exactOriginalHit,
+                        hasMember: hasMember, kind: .scroll
+                    ) == (basis != .rejected), "scroll retains its original viewport and hit policy")
+                    precondition(NativeElementPointerUnit.allowsDispatchBasis(
+                        basis, requirement: .contentReceiver, exactOriginalHit: exactOriginalHit,
+                        hasMember: hasMember, requiresExactElementHit: true
+                    ) == (basis == .exactHit && exactOriginalHit && !hasMember),
+                        "opaque row content requires its exact hit without imposing foreground")
                     precondition(NativeElementPointerUnit.allowsDispatchBasis(
                         basis, requirement: .foregroundWindowPoint, exactOriginalHit: exactOriginalHit, hasMember: hasMember
-                    ) == (basis == .exactHit && exactOriginalHit && !hasMember),
-                        "foreground preparation cannot replace the original-element exact hit with a weaker basis")
+                    ) == (!hasMember && (basis == .exactHit && exactOriginalHit || basis == .ownedControlPart)),
+                        "foreground preparation needs an exact hit on the original element or its proved part")
                 }
             }
         }

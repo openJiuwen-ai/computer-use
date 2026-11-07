@@ -56,11 +56,13 @@ class ControlPartQuery(NativeGraph):
             fields=("role", "editable", "focusWritable", "valueWritable", "textWritable"),
         )
 
-    async def resolve(self, hit: str | None) -> Actuator | None:
-        """Qualify the native hit through its role, actions, and path to the control.
+    async def resolve(self, hit: str | None, *, allow_passive_candidate: bool = False) -> Actuator | None:
+        """Qualify a pointer member through its role, actions, and path to the control.
 
         Args:
             hit: Native token returned by pointer hit testing, or None when unavailable.
+            allow_passive_candidate: Let initial compound text refinement use a passive label
+                whose point the driver must still confirm.
 
         Returns:
             The confirmed control-part actuator, or None when the path crosses an
@@ -86,10 +88,19 @@ class ControlPartQuery(NativeGraph):
         ):
             return None
         owner_actions = None
+        text_context_owner = (
+            self.platform == "macos"
+            and owner_role == "staticText"
+            and self.intent is not None
+            and self.intent.kind == "click"
+            and self.intent.parameters.get("button") == "right"
+        )
         if owner_role not in POINTER_CONTROL_OWNERS | {"row", "cell", "textField", "textArea", "webArea"}:
-            if owner_role not in LAYOUT_ROLES:
+            if owner_role not in LAYOUT_ROLES and not text_context_owner:
                 return None
             owner_actions = await self._actions(owner)
+            if text_context_owner and owner_actions["state"] != "complete":
+                return None
             if not action_for_intent(
                 self.platform,
                 role,
@@ -118,20 +129,22 @@ class ControlPartQuery(NativeGraph):
                 if owner_role in {"row", "cell"} or any(a["name"] == "AXShowMenu" for a in owner_actions["items"]):
                     support_actions.add("AXShowMenu")
 
-        async def visit(token: str, ancestors: tuple[str, ...]) -> bool:
+        async def visit(token: str, ancestors: tuple[str, ...], *, alternate: bool) -> str | None:
             """Check one member and retain the parent evidence on an accepted hit path."""
             if token in ancestors or len(ancestors) > self.max_depth:
                 self.fail("observation_incomplete", "Control composition is cyclic or exceeds its depth budget.")
             raw_role = await self._field(token, "role")
             if raw_role is UNKNOWN:
-                return False
+                return None
             role = role_name(self.platform, raw_role)
-            matches_owner_role_condition = (
-                True
-                if self.platform == "macos" and owner_role in {"row", "cell"} and token == hit and role == "textField"
-                else False
+            renameable_caption = (
+                not alternate
+                and self.platform == "macos"
+                and owner_role in {"row", "cell"}
+                and token == hit
+                and role == "textField"
             )
-            if matches_owner_role_condition:
+            if renameable_caption:
                 # Outline/table captions can be renameable text fields. A
                 # single click at their confirmed native hit selects that item;
                 # it does not confirm/open it or authorize typing. Do not
@@ -151,7 +164,7 @@ class ControlPartQuery(NativeGraph):
                 )
                 if matches_names:
                     self._check_parent(token, ancestors)
-                    return True
+                    return token
             kind = control_member_role(role)
             # A cell is a logical item, not a transparent button wrapper.
             # A table row may expose its ordinary passive cell content as
@@ -167,38 +180,53 @@ class ControlPartQuery(NativeGraph):
             if row_cell:
                 row_cell = await self._field(hit, "role") in ("AXStaticText", "AXHeading", "AXImage")
             if kind is None:
-                return False
+                return None
             if kind == "layout" and role not in LAYOUT_ROLES and not row_cell:
-                return False
+                return None
             actions = await self._actions(token)
-            allowed_actions = support_actions if kind == "layout" else set()
+            allowed_actions = support_actions if kind == "layout" or text_context_owner and kind == "label" else set()
             if actions["state"] != "complete" or any(a["name"] not in allowed_actions for a in actions["items"]):
-                return False
+                return None
             for field in ("editable", "focusWritable", "valueWritable", "textWritable"):
                 value = await self._field(token, field)
                 if value is True or value is UNKNOWN:
-                    return False
+                    return None
             children = await self._relation(token, "children")
             if kind != "layout" and children:
-                return False
-            found = token == hit
+                return None
+            found = token if (kind == "label" if alternate else token == hit) else None
             if not found and kind == "layout":
-                found = await descend(children, ancestors + (token,))
+                found = await descend(children, ancestors + (token,), alternate=alternate)
             if found:
                 self._check_parent(token, ancestors)
             return found
 
-        async def descend(children: Sequence[str], ancestors: tuple[str, ...]) -> bool:
+        async def descend(children: Sequence[str], ancestors: tuple[str, ...], *, alternate: bool) -> str | None:
             """Search the bounded child path and retain dependencies only for an accepted member."""
             for child in children:
                 previous = deepcopy(self.dependencies)
-                if await visit(child, ancestors):
-                    return True
+                if selected := await visit(child, ancestors, alternate=alternate):
+                    return selected
                 # The identity of the supplied hit is already fixed. An
                 # unrelated sibling's role/action state is not a dependency.
                 self.dependencies = previous
-            return False
+            return None
 
-        if await descend(await self._relation(owner, "children"), (owner,)):
-            return Actuator(hit, "controlPart")
-        return None
+        children = await self._relation(owner, "children")
+        owner_basis = deepcopy(self.dependencies)
+        selected = await descend(children, (owner,), alternate=False)
+        if (
+            allow_passive_candidate
+            and text_context_owner
+            and self.intent.parameters.get("count", 1) == 1
+            and "AXShowMenu" in support_actions
+            and (selected is None or role_name(self.platform, await self._field(selected, "role")) in LAYOUT_ROLES)
+        ):
+            hit_basis = self.dependencies
+            self.dependencies = owner_basis
+            preferred = await descend(children, (owner,), alternate=True)
+            if preferred is None:
+                self.dependencies = hit_basis
+            else:
+                selected = preferred
+        return Actuator(selected, "controlPart") if selected is not None else None

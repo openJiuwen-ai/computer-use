@@ -49,14 +49,19 @@ import ApplicationServices
                 unit: command.kind, kind: "click", parameters: op.request.parameters, foreground: false,
                 element: !capture)
             pointer = request
-            if let qualification = offer.popupPointer {
+            if offer.routeFamily == NativeMenuCommandPolicy.pointerFamily {
+                guard !capture, contract.actuator == nil, contract.receiver == nil,
+                    NativePopupClickPolicy.permitsIntent(op.request)
+                else { throw DriverError("menu mouse contract mismatch", code: .invalidRequest) }
+                target = .menuPointer(try access.units.menuUnit(command.target, within: contract.within))
+            } else if let qualification = offer.popupPointer {
                 guard !capture, contract.actuator == nil,
                     offer.delivery == .windowDirected, !command.foreground,
                     NativePopupClickPolicy.permitsIntent(op.request)
                 else { throw DriverError("popup point contract mismatch", code: .invalidRequest) }
                 target = .popupPointer(try access.units.popupPointerUnit(command.target, qualification: qualification))
             } else if capture {
-                guard !offer.requiresForegroundGeometry else {
+                guard !offer.requiresForegroundGeometry, !offer.requiresExactElementHit else {
                     throw DriverError("retained-element geometry cannot authorize a captured point", code: .invalidRequest)
                 }
                 guard offer.pointerRequirement == .contentReceiver || offer.delivery == .windowDirected else {
@@ -71,7 +76,9 @@ import ApplicationServices
                     throw DriverError("original element point requirement needs its window-directed route", code: .invalidRequest)
                 }
                 let unit = try access.units.elementPointerUnit(command.target, actuator: contract.actuator)
-                    .requiring(offer.pointerRequirement, foregroundGeometry: offer.requiresForegroundGeometry)
+                    .requiring(
+                        offer.pointerRequirement, foregroundGeometry: offer.requiresForegroundGeometry,
+                        exactElementHit: offer.requiresExactElementHit)
                 if let original = offer.qtComboChoice {
                     guard let current = unit.qtComboChoice, original.matches(current) else {
                         throw DriverError("the selected Qt popup choice changed before dispatch", code: .staleTarget)

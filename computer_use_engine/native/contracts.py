@@ -516,6 +516,7 @@ class Primitive:
     click: ClickOffer | None = None
     global_input: Knowledge = Knowledge.UNKNOWN
     preparation_impact: PreparationImpact | None = None
+    keyboard_editing: Literal["insert", "replace"] | None = None
 
     def __post_init__(self):
         from computer_use.protocol.execution import unit_contracts
@@ -523,6 +524,13 @@ class Primitive:
         if self.unit not in unit_contracts or not self.id:
             raise ValueError("Invalid native primitive contract")
         validate_primitive_contract(self.unit, self.channel, self.supported, self.readiness, self.pending, self.action)
+        if self.keyboard_editing is not None and (
+            self.keyboard_editing not in ("insert", "replace")
+            or self.unit != "key_sequence"
+            or self.channel != Channel.KEYBOARD
+            or self.global_input != Knowledge.NO
+        ):
+            raise ValueError("Keyboard editing evidence requires an addressed keyboard primitive")
         if self.unit == "native_selection" and self.click is None:
             raise ValueError("Native selection requires an integrated click offer")
         if self.click is not None:

@@ -101,6 +101,7 @@ class ReceiverQuery(NativeGraph):
         focused: str | None = None,
         allow_internal: bool = True,
         keyboard_input: bool = False,
+        declared_cell_preparation: bool = False,
     ) -> ReceiverResolution | None:
         """Resolve an editor within the requested control's semantic boundary.
 
@@ -112,6 +113,7 @@ class ReceiverQuery(NativeGraph):
             focused: Provider-reported focus token to check as a possible owned editor.
             allow_internal: Allow a confirmed descendant editor to become the actuator.
             keyboard_input: Resolve insertion/paste recipients without requiring a writable AX buffer.
+            declared_cell_preparation: A typed native preparation can select the original cell before reinspection.
 
         Returns:
             The internal editor, when needed, and whether native editing evidence
@@ -168,7 +170,11 @@ class ReceiverQuery(NativeGraph):
                 reverse = await self._focused_receiver(focused, keyboard_input=keyboard_input)
             else:
                 return ReceiverResolution()
-        can_prepare = require_editable and allow_preparation and preparable_editor(role, values, platform=self.platform)
+        can_prepare = (
+            require_editable
+            and allow_preparation
+            and (preparable_editor(role, values, platform=self.platform) or role == "cell" and declared_cell_preparation)
+        )
         if role not in COMPOSITE_OWNERS:
             if require_editable and direct is not True:
                 self.fail("input_unavailable", "The requested element has no text-editing semantics.")

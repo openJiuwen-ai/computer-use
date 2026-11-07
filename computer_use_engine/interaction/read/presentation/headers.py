@@ -9,9 +9,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Literal
 
-from computer_use.json import dumps
+from computer_use.interaction.read.delivery.image_caption import window_state_notes
 from computer_use.interaction.read.presentation.formatting import json_string
 from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.json import dumps
 
 
 @dataclass(frozen=True)
@@ -184,12 +185,25 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
     return "\n".join(lines)
 
 
+def image_state_notes(header: ImageHeader) -> tuple[str, ...]:
+    """Report independent capture-time state for the windows that supplied pixels."""
+    return tuple(
+        f"Image note (Window {source['ref']}): {note}"
+        for source in header.captures
+        if source.get("displayed") is True and source.get("ref") in header.windows
+        if isinstance(capture := source.get("capture"), Mapping)
+        for note in window_state_notes(capture)
+    )
+
+
 def image_header(header: ImageHeader) -> str:
-    """Identify a complete image's window coordinates; actual failure notes stay explicit."""
-    if header.kind in ("partial", "unavailable"):
-        return ""
-    label = "Window " if len(header.windows) == 1 else "windows "
-    return "Image: " + label + ", ".join(map(str, header.windows))
+    """Identify complete image coordinates and report the displayed sources' state."""
+    lines = []
+    if header.kind not in ("partial", "unavailable"):
+        label = "Window " if len(header.windows) == 1 else "windows "
+        lines.append("Image: " + label + ", ".join(map(str, header.windows)))
+    lines.extend(image_state_notes(header))
+    return "\n".join(lines)
 
 
 def _plain(value: object) -> object:

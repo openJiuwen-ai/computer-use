@@ -14,6 +14,7 @@ import Foundation
     private let settleUnpaired: Bool
     private var held: [Event] = []
     private var released = false
+    private var releaseUnconfirmed = false
 
     init(
         source: AnyObject? = nil, post: @escaping (Event) -> Void, canRelease: @escaping () -> Bool,
@@ -29,18 +30,31 @@ import Foundation
         self.settleUnpaired = settleUnpaired
     }
 
-    func press(_ event: Event, release: Event) {
+    func press(_ event: Event, release: Event) throws {
+        try requireReleaseKnown()
         held.append(release)
         post(event)
     }
 
-    func release() {
+    func release() throws {
+        releasePending()
+        try requireReleaseKnown()
+    }
+
+    private func requireReleaseKnown() throws {
+        if releaseUnconfirmed {
+            throw DriverError("release of an earlier input event could not be confirmed", code: .inputUnavailable)
+        }
+    }
+
+    private func releasePending() {
         let pending = held.reversed()
         held.removeAll()
         guard !pending.isEmpty else { return }
         // Ordinary focus/window validation may now fail; release only requires
         // the original delivery process. Never release into a recycled PID.
         guard canRelease() else {
+            releaseUnconfirmed = true
             skipped()
             return
         }
@@ -49,19 +63,23 @@ import Foundation
     }
 
     func run<Value>(_ operation: () async throws -> Value) async throws -> Value {
+        let result: Value
         do {
             try Task.checkCancellation()
-            let result = try await operation()
-            await finish()
-            return result
+            result = try await operation()
         } catch {
+            // The earlier failure remains authoritative. The cleanup callback
+            // independently records the result of releasing our held events.
             await finish()
             throw error
         }
+        await finish()
+        try requireReleaseKnown()
+        return result
     }
 
     private func finish() async {
-        release()
+        releasePending()
         // Event posting is asynchronous. Cancellation used to skip the normal
         // post-release interval and let shutdown discard a queued mouse-up.
         // Keep that same bounded interval on both paths, inside the input lease.

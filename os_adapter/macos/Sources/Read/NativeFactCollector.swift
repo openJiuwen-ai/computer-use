@@ -17,10 +17,7 @@ import ApplicationServices
             "AXDisclosureLevel", "AXEditable", "AXOrientation", "AXRowIndexRange", "AXColumnIndexRange", "AXRowCount",
             "AXColumnCount", "AXIndex", "AXMenuItemCmdChar", "AXMenuItemCmdModifiers", "AXMenuItemCmdVirtualKey",
             "AXMenuItemCmdGlyph"
-        ] + writableFields.keys.sorted()
-    static let writableFields = [
-        "settable.AXFocused": "AXFocused", "settable.AXValue": "AXValue", "settable.AXSelectedText": "AXSelectedText"
-    ]
+        ] + AXAttributeProfile.defaultWritableFields.sorted()
     static let relations = ["AXChildren", "AXParent", "AXTitleUIElement", "AXServesAsTitleForUIElements", "AXWindow"]
     // Optional relationships are selected by the caller. Advertised-property
     // checks avoid invoking undeclared getters on every unrelated node.
@@ -39,6 +36,7 @@ import ApplicationServices
         let batchFields: [String]
         let batch: AXAttributeReader.Result
         let identity: AXRead<ElementIdentity.Facts>?
+        let identityFromFallback: Bool
     }
     init(
         registry: ApplicationElements, inspection: NativeElementInspection,
@@ -190,6 +188,34 @@ import ApplicationServices
         } catch let error as DriverError where error.code == .staleTarget { return nil }
     }
 
+    /// Identity fields returned by the display sample itself. Unknown fields add no constraint.
+    private static func sampledIdentity(_ batch: AXAttributeReader.Result) -> AXRead<ElementIdentity.Facts> {
+        if batch.status == .invalidUIElement { return .invalid }
+        var facts = ElementIdentity.Facts()
+        for field in batch.fields where ElementIdentity.keys.contains(field.name) {
+            if field.status == .invalidUIElement { return .invalid }
+            if [.noValue, .attributeUnsupported, .notImplemented].contains(field.status) {
+                facts.absent.insert(field.name)
+                continue
+            }
+            guard field.status == .success, let value = field.value else { continue }
+            switch AXIdentity.decode(.success, [value] as CFArray, keys: [field.name]) {
+            case .invalid: return .invalid
+            case .value(let decoded):
+                facts.values.merge(decoded.values) { _, current in current }
+                facts.absent.formUnion(decoded.absent)
+            default: break
+            }
+        }
+        return .value(facts)
+    }
+
+    private static func conflicts(_ identity: ElementIdentity, with sample: AXRead<ElementIdentity.Facts>) -> Bool {
+        if case .invalid = sample { return true }
+        guard let facts = sample.value else { return false }
+        return identity.check(facts) == .changed
+    }
+
     private func stamp(_ began: Int64) -> [String: Any] {
         ["id": UUID().uuidString, "startedAt": began, "completedAt": Int64(Date().timeIntervalSince1970 * 1000)]
     }
@@ -198,7 +224,7 @@ import ApplicationServices
         _ ref: String, session: String, fields requested: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
         advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false,
-        actionDetail: NativeActionDetail = .full
+        actionDetail: NativeActionDetail = .full, focusedElement: Bool = false
     ) throws -> [String: Any] {
         var root = try readTarget(ref)
         // Only the path traversed in this collection is complete. Historical
@@ -274,23 +300,26 @@ import ApplicationServices
             }
         }
         let needsCatalogue = !advertisedFields.isEmpty || !followRelations.isEmpty || textContent
-        func acquire(_ element: AXUIElement, includeIdentity: Bool) throws -> Acquisition {
-            AXMessaging.configure(element)
+        func acquire(
+            _ element: AXUIElement, includeIdentity: Bool, withinBudget: (() throws -> Bool)? = nil
+        ) throws -> Acquisition {
+            if withinBudget == nil { AXMessaging.configure(element) }
+            let canRead = withinBudget ?? reading
             let catalogue: (status: AXError, names: CFArray?)?
-            if includeIdentity || needsCatalogue {
+            if (includeIdentity || needsCatalogue), try canRead() {
                 let metric = RequestDiagnostics.metrics?.start(.readCatalogue)
                 var names: CFArray?
                 let status = AXUIElementCopyAttributeNames(element, &names)
                 metric?.end()
                 catalogue = (status, names)
             } else { catalogue = nil }
-            let names = advertisedFields.map { Self.writableFields[$0] ?? $0 }
+            let names = advertisedFields.map { AXAttributeProfile.writableAttribute($0) ?? $0 }
             let unavailable = catalogue.map {
                 AXFactEncoding.advertisedFieldFailures(Array(Set(names)), status: $0.status, names: $0.names)
             } ?? [:]
             let sampleFields = requested.filter {
-                Self.writableFields[$0] == nil
-                    && unavailable[Self.writableFields[$0] ?? $0]?["state"] as? String != "unsupported"
+                AXAttributeProfile.writableAttribute($0) == nil
+                    && unavailable[AXAttributeProfile.writableAttribute($0) ?? $0]?["state"] as? String != "unsupported"
             }
             var fields = sampleFields
             if includeIdentity, let catalogue {
@@ -299,27 +328,30 @@ import ApplicationServices
                 fields += identity.keys.filter { !fields.contains($0) }
             }
             let metric = RequestDiagnostics.metrics?.start(.readAttributes)
-            let batch = try AXAttributeReader.read(element, fields: fields, api: attributes, withinBudget: reading)
+            let batch = try AXAttributeReader.read(element, fields: fields, api: attributes, withinBudget: canRead)
             metric?.end()
             var identity: AXRead<ElementIdentity.Facts>?
+            var identityFromFallback = false
             if includeIdentity, let catalogue {
                 identity = AXIdentity.fromObservationBatch(
                     status: batch.status, raw: batch.raw, fields: fields,
                     catalogueStatus: catalogue.status, catalogue: catalogue.names)
                 if identity == nil {
                     let fallback = RequestDiagnostics.metrics?.start(.readIdentityFallback)
-                    identity = try reading() ? AXIdentity.read(element) : .unavailable(.cannotComplete)
+                    identity = try canRead() ? AXIdentity.read(element) : .unavailable(.cannotComplete)
+                    identityFromFallback = true
                     fallback?.end()
                 }
             }
             return Acquisition(
-                catalogue: catalogue, sampleFields: sampleFields, batchFields: fields, batch: batch, identity: identity)
+                catalogue: catalogue, sampleFields: sampleFields, batchFields: fields, batch: batch, identity: identity,
+                identityFromFallback: identityFromFallback)
         }
-        func sample(_ target: Target, nodeID: String, acquisition: Acquisition? = nil) throws
-            -> [String: [String: Any]]
-        {
-            AXMessaging.configure(target.element)
-            let acquisition = try acquisition ?? acquire(target.element, includeIdentity: false)
+        func sample(
+            _ target: Target, nodeID: String, acquisition: Acquisition, withinBudget: (() throws -> Bool)? = nil
+        ) throws -> [String: [String: Any]] {
+            if withinBudget == nil { AXMessaging.configure(target.element) }
+            let canRead = withinBudget ?? reading
             var values = [String: Any](), missing = [String: Any]()
             var relationFailures = [String: [String: Any]]()
             var nativeProperties = [[String: Any]]()
@@ -344,11 +376,11 @@ import ApplicationServices
                 nativeProperties.append(catalogue)
                 // Writable probes use a different API, but their underlying
                 // attribute declaration is still the provider's native name.
-                let names = advertisedFields.map { Self.writableFields[$0] ?? $0 }
+                let names = advertisedFields.map { AXAttributeProfile.writableAttribute($0) ?? $0 }
                 let unavailable = AXFactEncoding.advertisedFieldFailures(
                     Array(Set(names)), status: status, names: attributes)
                 for name in advertisedFields {
-                    if let failure = unavailable[Self.writableFields[name] ?? name] {
+                    if let failure = unavailable[AXAttributeProfile.writableAttribute(name) ?? name] {
                         if failure["state"] as? String == "unsupported" {
                             missing[name] = failure
                         } else {
@@ -363,7 +395,9 @@ import ApplicationServices
             let batch = acquisition.batch
             let raw = batch.raw, status = batch.status
             let canReadFields = batch.queried
-            if batch.fields.contains(where: { $0.timedOut }) { reasons.insert("collection time budget") }
+            if withinBudget == nil, batch.fields.contains(where: { $0.timedOut }) {
+                reasons.insert("collection time budget")
+            }
             let attributes = raw as? [Any]
             if let raw, attributes?.count != keys.count {
                 // A malformed batch cannot be zipped to requested names.
@@ -416,10 +450,10 @@ import ApplicationServices
             }
             for name in requested {
                 guard missing[name] == nil else { continue }
-                guard let attribute = Self.writableFields[name] else { continue }
-                guard try reading() else {
+                guard let attribute = AXAttributeProfile.writableAttribute(name) else { continue }
+                guard try canRead() else {
                     missing[name] = ["state": "timeout", "detail": "collection time budget"]
-                    reasons.insert("collection time budget")
+                    if withinBudget == nil { reasons.insert("collection time budget") }
                     continue
                 }
                 var writable = DarwinBoolean(false)
@@ -438,7 +472,7 @@ import ApplicationServices
             }
             if textContent && textCountDeclared {
                 nativeProperties += try AXTextContentReader.read(
-                    target.element, values: values, failures: missing, withinBudget: reading)
+                    target.element, values: values, failures: missing, withinBudget: canRead)
             }
             for (name, value) in values {
                 guard let text = value as? String else { continue }
@@ -450,18 +484,13 @@ import ApplicationServices
                     previewBytes += preview.utf8.count
                     var limited: [String: Any] = ["state": "truncated", "totalUnits": text.utf16.count]
                     if text.utf8.count <= 8 * 1024 * 1024 - capturedBytes {
-                        let identity = key(target.element)
-                        let life = registry.observe(
-                            identity,
-                            evidence: .init(
-                                identity: target.identity, provider: target.provider, context: target.context,
-                                providerKnown: target.providerKnown), value: target)
-                        if let textRef = registry.bind(life, text: text), registry.text(textRef) != nil {
+                        if let textRef = registry.bind(nodeID, text: text), registry.text(textRef) != nil {
                             limited["textRef"] = textRef
                             capturedBytes += text.utf8.count
+                        } else {
+                            limited["detail"] = "immutable text continuation unavailable; preview only"
                         }
-                    }
-                    if limited["textRef"] == nil {
+                    } else {
                         limited["detail"] = "immutable text capture budget exhausted; preview only"
                     }
                     missing[name] = limited
@@ -470,7 +499,7 @@ import ApplicationServices
                 }
             }
             let actionRead = try AXActionCatalogue.collect(
-                detail: actionDetail, withinBudget: reading,
+                detail: actionDetail, withinBudget: canRead,
                 names: {
                     var names: CFArray?
                     let status = AXUIElementCopyActionNames(target.element, &names)
@@ -495,7 +524,12 @@ import ApplicationServices
         // Capture facts when an object is discovered, before another container
         // can replace its virtual children. Keep already discovered siblings'
         // own fields/actions even if a deep branch exhausts the shared budget.
-        var sampled = [ref: try sample(root, nodeID: ref)]
+        let rootAcquisition = try acquire(root.element, includeIdentity: false)
+        if Self.conflicts(root.identity, with: Self.sampledIdentity(rootAcquisition.batch)) {
+            registry.invalidate { $0.scope == root.scope && CFEqual($0.element, root.element) }
+            throw DriverError("native read target identity changed", code: .staleTarget)
+        }
+        var sampled = [ref: try sample(root, nodeID: ref, acquisition: rootAcquisition)]
         while index < queue.count, try reading() {
             let (target, nodeID, depth) = queue[index]
             index += 1
@@ -567,6 +601,14 @@ import ApplicationServices
                             continue
                         }
                         let acquisition = try acquire(element, includeIdentity: true)
+                        if acquisition.identityFromFallback, let identity = acquisition.identity?.value,
+                            Self.conflicts(.init(facts: identity), with: Self.sampledIdentity(acquisition.batch))
+                        {
+                            // A fallback identity read observed a different lifetime from the fields.
+                            // Leave a continuation for the unresolved slot rather than mixing samples.
+                            expired = true
+                            break
+                        }
                         guard
                             let (life, child) = try related(
                                 element, app: root.application, scope: root.scope,
@@ -619,6 +661,120 @@ import ApplicationServices
                     links.append(AXFactEncoding.relationFailure(source: nodeID, property: property))
                 }
             }
+        }
+        if focusedElement, rootPage == nil, [kAXWindowRole, kAXSheetRole].contains(root.role) {
+            // Optional supplemental collection spends only remaining budget and does
+            // not alter the already collected Children pages or count.
+            let focusDeadline = min(deadline, clock() + 0.075)
+            let app = AXUIElementCreateApplication(root.application.processIdentifier)
+            func canReadFocus() throws -> Bool { try reading() && clock() < focusDeadline }
+            func setFocusTimeout(_ element: AXUIElement) throws -> Bool {
+                guard try canReadFocus() else { return false }
+                AXUIElementSetMessagingTimeout(element, Float(max(0.001, min(0.05, focusDeadline - clock()))))
+                return true
+            }
+            func readFocusElement(
+                _ element: AXUIElement, _ attribute: String, optional: Bool = false
+            ) throws -> AXUIElement? {
+                guard try setFocusTimeout(element) else { throw RequestDeadlineExceeded() }
+                defer { AXMessaging.configure(element) }
+                let (status, value) = attributes.single(element, attribute)
+                if [.noValue, .attributeUnsupported, .notImplemented].contains(status) { return nil }
+                guard status == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+                    if optional, status != .invalidUIElement { return nil }
+                    throw DriverError("focused element evidence is unavailable", code: .observationIncomplete)
+                }
+                return unsafeDowncast(value, to: AXUIElement.self)
+            }
+            var focusRef: String?
+            var focusState = "unavailable"
+            do {
+                if let focus = try readFocusElement(app, kAXFocusedUIElementAttribute) {
+                    if let existing = known[key(focus)], sampled[existing] != nil {
+                        focusRef = existing
+                        focusState = "included"
+                    } else if nodes.count < maxNodes, maxDepth > 0,
+                        let path = try NativeFocusedReadSeed.path(
+                            from: focus, to: root.element, maximumDepth: min(128, maxDepth),
+                            parent: { try readFocusElement($0, kAXParentAttribute) },
+                            canContinue: canReadFocus)
+                    {
+                        let owner = try readFocusElement(focus, kAXWindowAttribute, optional: true)
+                        let window = root.role == kAXWindowRole ? root.element
+                            : try readFocusElement(root.element, kAXWindowAttribute, optional: true)
+                        if let owner, let window, !CFEqual(owner, window) {
+                            focusState = "outside"
+                            throw DriverError("reported focus is outside this window", code: .observationIncomplete)
+                        }
+                        let canReadLeaf = { try setFocusTimeout(focus) }
+                        let acquisition = try acquire(focus, includeIdentity: false, withinBudget: canReadLeaf)
+                        defer { AXMessaging.configure(focus) }
+                        let identity = Self.sampledIdentity(acquisition.batch)
+                        if identity.value?.values[kAXRoleAttribute] != nil,
+                            let final = try readFocusElement(app, kAXFocusedUIElementAttribute), CFEqual(focus, final)
+                        {
+                            var parent = root
+                            var parentRef = ref
+                            for element in path.dropFirst().reversed() {
+                                guard try setFocusTimeout(element) else { throw RequestDeadlineExceeded() }
+                                defer { AXMessaging.configure(element) }
+                                let (status, fields) = attributes.batch(element, ElementIdentity.keys)
+                                let evidence = AXIdentity.decode(status, fields, keys: ElementIdentity.keys)
+                                guard let (reference, retained) = try related(
+                                    element, app: root.application, scope: root.scope, parent: parent,
+                                    identityEvidence: evidence
+                                ), !retained.role.isEmpty else {
+                                    throw DriverError(
+                                        "focused element's parent is unavailable", code: .observationIncomplete)
+                                }
+                                parent = retained
+                                parentRef = reference
+                                known[key(element)] = reference
+                            }
+                            guard try canReadFocus(),
+                                let (reference, target) = try related(
+                                    focus, app: root.application, scope: root.scope, parent: parent,
+                                    identityEvidence: identity)
+                            else { throw RequestDeadlineExceeded() }
+                            let unavailable = try sample(
+                                target, nodeID: reference, acquisition: acquisition, withinBudget: canReadLeaf)
+                            known[key(focus)] = reference
+                            focusRef = reference
+                            focusState = "confirmed"
+                            links.append([
+                                "source": reference, "property": kAXParentAttribute, "targets": [parentRef],
+                                "state": "complete", "certainty": "confirmed", "total": 1,
+                                "nativeAPI": "AXUIElementCopyAttributeValue", "nativeType": "AXUIElement"
+                            ])
+                            // Every sampled node must account for the requested relationship profile.
+                            // The supplemental focus read proves its parent only.
+                            for property in relations where property != kAXParentAttribute {
+                                var link: [String: Any] = [
+                                    "source": reference, "property": property, "targets": [String](),
+                                    "certainty": "unknown", "state": "partial",
+                                    "detail": "relationship not collected in the supplemental focus sample"
+                                ]
+                                if let failure = unavailable[property] { link.merge(failure) { _, value in value } }
+                                links.append(link)
+                            }
+                        }
+                    }
+                } else {
+                    focusState = "absent"
+                }
+            } catch is RequestDeadlineExceeded {
+                // Ordinary tree coverage is independent of the optional focus sample.
+            } catch let error as DriverError where [.observationIncomplete, .staleTarget].contains(error.code) {}
+            var properties = nodes[0]["nativeProperties"] as? [[String: Any]] ?? []
+            let seed = focusRef.map { NativeObservationEncoding.value("AXUIElement", ["ref": $0]) }
+                ?? NativeObservationEncoding.value("CFNull", NSNull())
+            properties.append([
+                "key": ["toolkit", "focused_read_seed"], "value": seed,
+                "read": ["api": "AXUIElementCopyAttributeValue", "complete": focusState != "unavailable",
+                         "details": NativeObservationEncoding.details(["attribute": kAXFocusedUIElementAttribute,
+                                                                        "source": "application", "state": focusState])]
+            ])
+            nodes[0]["nativeProperties"] = properties
         }
         let collected = Set(nodes.compactMap { $0["node"] as? String })
         for page in pendingLinks {

@@ -229,6 +229,8 @@ class ConnectionPort:
                 or query["kind"] in ("surfaces", "roots")
                 and result["application"] != query["application"]
                 or result["platform"] != self.platform
+                or query["kind"] == "applications"
+                and any(result.get(key) != query.get(key) for key in ("path", "installation"))
             )
             else False
         )
@@ -444,6 +446,7 @@ class ConnectionPort:
                 action_description=p.get("action", {}).get("description"),
                 click=decode_click_offer(p.get("click")),
                 global_input=Knowledge(p.get("globalInput", "unknown")),
+                keyboard_editing=p.get("keyboardEditing"),
                 preparation_impact=(
                     PreparationImpact(**{key: Knowledge(item) for key, item in p["preparationImpact"].items()})
                     if "preparationImpact" in p
@@ -502,6 +505,7 @@ class ConnectionPort:
         focused_fields=None,
         primary_fields=None,
         text_content=None,
+        focused_element=None,
     ):
         """Collect unified observation facts with their separate query scope."""
         from computer_use.protocol.observation.adapters import decode_driver_reply
@@ -517,6 +521,7 @@ class ConnectionPort:
             focused_fields=focused_fields,
             primary_fields=primary_fields,
             text_content=text_content,
+            focused_element=focused_element,
         )
         payload, facts = await self._nodes_payload(operation, target, request, timeout_ms)
         reply = decode_driver_reply(payload)
@@ -544,6 +549,12 @@ class ConnectionPort:
     ) -> tuple[Record, Record]:
         self._check(operation)
         query = dict(kind="nodes", fields=list(request.fields), maxNodes=request.max_nodes, maxDepth=request.max_depth)
+        if request.focused_element is not None:
+            if self.platform != "macos" or "nativeFocusedReadV1" not in self.connection.capabilities:
+                raise ValueError("This driver cannot collect a supplementary focused element")
+            if type(request.focused_element) is not bool:
+                raise ValueError("focused_element must be a boolean")
+            query["focusedElement"] = request.focused_element
         if request.action_detail is not None:
             if self.platform != "macos" or "nativeQueryActionProfile" not in self.connection.capabilities:
                 raise ValueError("This driver cannot select an action evidence profile")

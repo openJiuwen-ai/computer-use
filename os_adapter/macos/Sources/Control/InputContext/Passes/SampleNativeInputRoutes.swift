@@ -97,11 +97,22 @@ import ApplicationServices
             enabled = facts.enabled
             foreground = facts.foreground
             try declare(.textValue(contract), supported: true)
+        } else if op.intent == "key", binding.node == nil, binding.wire["rootWindow"] is NSNull,
+            binding.wire["capture"] is NSNull, plan.within.isEmpty, actuator == nil, receiver == nil,
+            let unit = try access.units.applicationKeyboardUnit(binding.wire)
+        {
+            enabled = nil
+            foreground = unit.isForeground()
+            applicationMenu = true
+            if foreground, let key = op.request.parameters["key"] as? String, let command = try unit.command(key) {
+                try declare(.applicationCommand(command), supported: true)
+            }
         } else if let kind = NativeKeyboardIntent.Kind(rawValue: op.intent) {
-            let unit = try access.units.keyboardUnit(binding.wire, actuator: actuator, receiver: receiver)
+            var unit = try access.units.keyboardUnit(binding.wire, actuator: actuator, receiver: receiver)
             let facts = try unit.sample(includeAncestors: true)
             let cellActivation = try kind == .replace && unit.requiresCellEditorActivation()
-            enabled = unit.element.flatMap { AXAccess.read($0, kAXEnabledAttribute).value as? Bool }
+            let enabledRead = unit.element.map { AXAccess.read($0, kAXEnabledAttribute) }
+            enabled = enabledRead?.value as? Bool
             foreground = facts.foreground
             nativeRole = unit.element.flatMap { AXAccess.read($0, kAXRoleAttribute).value as? String }
             if let contract = textFacts?.contract { try declare(.textValue(contract), supported: true) }
@@ -132,8 +143,8 @@ import ApplicationServices
                 input["editor"] = actuator.node
                 input["editorOwner"] = binding.node!
             }
-            if !cellActivation, [.focus, .insert, .replace, .paste].contains(kind), let element = unit.element,
-                [kAXTextFieldRole, kAXTextAreaRole, "AXWebArea"].contains(nativeRole ?? "")
+            if !cellActivation, let element = unit.element,
+                NativePointerFocusUnit.supportsEditorPreparation(role: nativeRole, intent: kind)
             {
                 let pointer = NativePointerFocusUnit(
                     application: unit.application, window: unit.window, element: element,
@@ -157,6 +168,15 @@ import ApplicationServices
                     declare(.pointerFocus(.scalarText), supported: true, readiness: { _ in readiness })
                 }
             }
+            if kind == .insert, nativeRole == kAXCellRole, actuator == nil, receiver == nil,
+                let node = binding.node, node == op.target["node"] as? String, let element = unit.element,
+                let selection = try NativeCellSelectionPreparation(
+                    application: unit.application, window: unit.window, element: element).offer()
+            {
+                declare(.cellSelection(selection), supported: true) { _ in
+                    NativeReadiness([("receiver", "unknown")])
+                }
+            }
             if !cellActivation, [.insert, .replace, .paste].contains(kind), let element = unit.element {
                 let edit = NativeSelectedTextUnit(
                     application: unit.application, window: unit.window, element: element,
@@ -178,8 +198,22 @@ import ApplicationServices
             let observedInterpreter =
                 try unit.textProposal(kind: kind, text: op.request.parameters["text"] as? String, state: facts)?
                 .interpreter.kind ?? .noObservedWeb
+            let originalEntry = actuator == nil && receiver == nil && binding.node != nil
+                && binding.node == op.target["node"] as? String && !(binding.wire["capture"] is String)
+                && !cellActivation
+            func keyboardEntry() -> NativeKeyboardTextEntry? {
+                guard originalEntry, let element = unit.element, let enabledRead else { return nil }
+                return NativeKeyboardTextEntry.read(role: nativeRole, enabled: enabledRead) {
+                    AXAccess.read(element, $0)
+                }
+            }
             if kind == .replace {
-                if let element = unit.element, let selection = NativeReplacementUnit(element: element).contract() {
+                if let element = unit.element,
+                    let selection = NativeReplacementUnit(element: element).contract()
+                        ?? keyboardEntry().flatMap({
+                            $0.isPlainTextControl && $0.selection(element) != nil ? .keyboardSelectAll($0) : nil
+                        })
+                {
                     let textPolicy = declarations.keyboardPolicy(
                         kind: kind, selection: selection, observed: observedInterpreter)
                     let keyboardSupported = try unit.textTransportSupported(
@@ -196,10 +230,34 @@ import ApplicationServices
                     }
                 }
             } else {
+                if kind == .insert, let element = unit.element, let entry = keyboardEntry(),
+                    op.keyboardInsertionSelection != nil
+                        || (AXAccess.read(element, "AXEditable").value as? Bool != true
+                            && !(entry.isPlainTextControl
+                                && AXAccess.writable(element, kAXFocusedAttribute).value == true))
+                {
+                    let selection = entry.selection(element)
+                    // A composite without its own text protocol can still
+                    // expose a separate editor through receiver resolution.
+                    if selection != nil || entry.isPlainTextControl || op.keyboardInsertionSelection != nil {
+                        // Preparation may establish the editor's actual caret.
+                        // Pin a selection only on an already confirmed receiver.
+                        if let selection, unit.exactTextEntryReceiver(facts) == "yes" {
+                            op.retainKeyboardInsertionSelection(selection)
+                        }
+                        unit.keyboardInsertion = entry
+                        unit.insertionSelection = op.keyboardInsertionSelection
+                    }
+                }
                 let textPolicy = declarations.keyboardPolicy(kind: kind, selection: nil, observed: observedInterpreter)
                 let keyboardSupported = try unit.textTransportSupported(
                     kind: kind, text: op.request.parameters["text"] as? String, state: facts, textPolicy: textPolicy)
-                try declare(.keyboard(kind, nil, textPolicy), supported: keyboardSupported) { prepared in
+                try declarations.declare(
+                    .keyboard(kind, nil, textPolicy),
+                    supported: keyboardSupported
+                        && (op.keyboardInsertionSelection == nil || unit.keyboardInsertion != nil),
+                    enabled: enabled, keyboardInsertion: unit.keyboardInsertion
+                ) { prepared in
                     try unit.readiness(
                         kind: kind, key: op.request.parameters["key"] as? String,
                         text: op.request.parameters["text"] as? String, prepared: prepared, state: facts,

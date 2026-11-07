@@ -73,8 +73,12 @@ def select_application(directory, selector):
         return dict(windows[0])
     # Exact native identifiers/paths outrank names. Declared alternate names
     # only broaden discovery; they never bind or merge application lifetimes.
-    matches = [item for item in entries if selector in (item["identifier"], item["path"])]
-    if not matches:
+    matches = (
+        list(entries)
+        if directory.get("path") == selector
+        else [item for item in entries if selector in (item["identifier"], item["path"])]
+    )
+    if not matches and not selector.startswith("/"):
         name = selector.strip().casefold()
         matches = []
         for item in entries:
@@ -103,6 +107,17 @@ def select_application(directory, selector):
             "application",
         )
     return _running_match(directory, matches[0])
+
+
+def applications_query(selector=None, *, installation=None, capabilities=()):
+    """Resolve exact paths or retained installations on the driver host."""
+    query = dict(kind="applications")
+    if "nativeApplicationPath" in capabilities:
+        if installation is not None:
+            query["installation"] = installation
+        elif selector is not None and selector.startswith("/"):
+            query["path"] = selector
+    return query
 
 
 def selected_window(application, selector):

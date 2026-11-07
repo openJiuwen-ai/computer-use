@@ -261,3 +261,30 @@ def test_explicit_element_read_keeps_fixed_window_and_original_menu_context():
     assert source.query_target == snapshot["binding"]
     assert source.menu_window_identity == identity
     assert app._instance.input_context == identity
+
+
+@pytest.mark.parametrize("refs", [{"1": "field", "2": "child"}, {"2": "child"}])
+def test_explicit_read_retains_selected_reference_or_reports_unconfirmed(refs):
+    from computer_use.interaction.read.element.agent import AgentElementReadPipeline
+
+    controller, app = setup()
+    identity = WindowIdentity.of(app._instance.members["a"])
+    snapshot = dict(binding=Binding("session", identity.instance, "a", identity.surface, "field"),
+                    window_identity=identity, scope_kind="window")
+    controller.interfaces.validate_snapshot = lambda *_: None
+    tree = SimpleNamespace(refs=refs, facts={"unread": ()})
+    controller.reader.reader = SimpleNamespace(read=AsyncMock(return_value=tree))
+    controller.reader.number_snapshots = lambda sources: sources
+
+    def remember(state, target, captured):
+        state.refs.update({ref: {"source": {"ref": ref}} for ref in captured.refs})
+
+    controller._remember = remember
+    pipeline = AgentElementReadPipeline(controller)
+    if "1" in refs:
+        _, fresh = asyncio.run(pipeline.collect(app, snapshot))
+        assert fresh["source"]["ref"] == "1"
+    else:
+        with pytest.raises(ComputerUseError) as caught:
+            asyncio.run(pipeline.collect(app, snapshot))
+        assert caught.value.code == "observation_incomplete"

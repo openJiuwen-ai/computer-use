@@ -21,25 +21,36 @@ import ApplicationServices
     /// uniquely matching native popup surface proves that keyboard input must
     /// preserve menu tracking instead of preparing the document normally.
     static func isPresentedPopup(_ menu: AXUIElement, pid: pid_t) -> Bool {
+        mapping(menu, pid: pid) != nil
+    }
+
+    /// Reuse the unique visible popup proof as the addressed event mapping.
+    static func mapping(_ menu: AXUIElement, pid: pid_t) -> WindowGeometry.WindowMapping? {
         guard let frame = frame(menu, pid: pid),
             let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]
-        else { return false }
-        let matches = windows.filter { info in
+        else { return nil }
+        let matches = windows.compactMap { info -> WindowGeometry.WindowMapping? in
             guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
                 (info[kCGWindowLayer as String] as? NSNumber)?.intValue == Int(CGWindowLevelForKey(.popUpMenuWindow)),
+                let id = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value, id != 0,
                 let raw = info[kCGWindowBounds as String] as? [String: Any],
-                let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary)
-            else { return false }
-            return WindowSelection.sameFrame(frame, bounds)
+                let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary),
+                WindowSelection.sameFrame(frame, bounds),
+                let width = Int(exactly: bounds.width.rounded()), let height = Int(exactly: bounds.height.rounded())
+            else { return nil }
+            return .init(id: id, pid: pid, frame: bounds, title: nil, width: width, height: height)
         }
-        return matches.count == 1
+        return matches.count == 1 ? matches.first : nil
     }
 
     static func matches(_ menu: AXUIElement, window: WindowGeometry.WindowMapping) -> Bool {
         guard let frame = frame(menu, pid: window.pid), WindowSelection.sameFrame(frame, window.frame),
             let current = WindowServerInfo.window(window.id),
             (current[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == window.pid,
-            (current[kCGWindowLayer as String] as? NSNumber)?.intValue == Int(CGWindowLevelForKey(.popUpMenuWindow))
+            (current[kCGWindowLayer as String] as? NSNumber)?.intValue == Int(CGWindowLevelForKey(.popUpMenuWindow)),
+            let raw = current[kCGWindowBounds as String] as? [String: Any],
+            let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary),
+            WindowSelection.sameFrame(bounds, window.frame)
         else { return false }
         return true
     }

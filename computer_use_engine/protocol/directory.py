@@ -54,6 +54,8 @@ _schemas = {
             kind=enum("applications"),
             applications=array(_application, max=4096),
             scope=enum("runningWindows").optional(),
+            path=identity.optional(),
+            installation=identity.optional(),
             **_common,
         )
     ),
@@ -127,6 +129,17 @@ def decode_directory(value):
         if len(applications) != len(set(applications)):
             raise ValueError("protocol: duplicate batch application")
     elif result["kind"] == "applications":
+        if "path" in result or "installation" in result:
+            paths = {item["path"] for item in result["applications"]}
+            if (
+                result["platform"] != "macos"
+                or "scope" in result
+                or "path" in result and ("installation" in result or not result["path"].startswith("/"))
+                or len(paths) > 1
+                or any(not path or not path.startswith("/") for path in paths)
+                or "installation" in result and any(not item["isRunning"] for item in result["applications"])
+            ):
+                raise ValueError("protocol: invalid exact application scope")
         identifiers = [item["id"] for item in result["applications"]]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("protocol: duplicate application lifetime")

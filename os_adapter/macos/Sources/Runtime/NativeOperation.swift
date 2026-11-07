@@ -34,6 +34,7 @@ import Foundation
     private var inputReferences = [String: () -> Void]()
     private var unavailableBackgroundPreparation = Set<String>()
     private var confirmedPreparation = Set<String>()
+    private(set) var keyboardInsertionSelection: NativeTextSelection?
     /// The operation owns original document evidence independently of the
     /// currently declared AX capability list.
     let actionDocuments = NativeActionDocumentContexts()
@@ -106,6 +107,12 @@ import Foundation
     func recordUnconfirmedCleanup() { cleanup = "unknown" }
 
     func preparationConfirmed(_ primitive: String) -> Bool { confirmedPreparation.contains(primitive) }
+
+    /// The initial proved caret/selection belongs to the immutable addressed
+    /// insertion. Later preparation or inspection may confirm it, never move it.
+    func retainKeyboardInsertionSelection(_ selection: NativeTextSelection) {
+        if keyboardInsertionSelection == nil { keyboardInsertionSelection = selection }
+    }
 
     func confirmPreparation(_ primitive: String) throws {
         try check(write: true)

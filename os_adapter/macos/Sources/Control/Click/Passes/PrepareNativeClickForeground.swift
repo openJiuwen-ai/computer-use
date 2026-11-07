@@ -14,6 +14,7 @@ import AppKit
         try await ForegroundAssist().prepare(
             BackgroundTarget(pointer.application), window: pointer.window.id,
             pointerAt: pointer.foregroundPreparationPoint(at: preparation.point),
+            reusePointerAt: preparation.kind == .click ? preparation.point : nil,
             onAction: {
                 if !changed {
                     evidence.record(

@@ -27,6 +27,7 @@ import ApplicationServices
     )
     func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String]
     func qtComboChoiceBoundary(_ raw: Any?, qualification: NativeQtComboChoice) throws -> [String]
+    func savePanelPathBoundary(_ raw: Any?, proof: NativeSavePanelPathContinuation.Proof) throws -> [String]
     func keyboardBoundaryAnchor(_ binding: [String: Any], application: NSRunningApplication, window: AXUIElement) throws
         -> NativeKeyboardBoundaryAnchor?
     func keyboardBoundary(_ anchor: NativeKeyboardBoundaryAnchor) throws -> NativeKeyboardBoundaryDecision
@@ -46,6 +47,9 @@ extension NativeScopeAccess {
     }
     func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String] {
         throw DriverError("qualified popup pointer boundary unavailable", code: .inputUnavailable)
+    }
+    func savePanelPathBoundary(_ raw: Any?, proof: NativeSavePanelPathContinuation.Proof) throws -> [String] {
+        throw DriverError("the Go To sheet's original SavePanel boundary is unavailable", code: .inputUnavailable)
     }
     // Existing adapters do not opt into this new strategy implicitly.
     func keyboardBoundaryAnchor(_ binding: [String: Any], application: NSRunningApplication, window: AXUIElement) throws

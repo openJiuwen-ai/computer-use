@@ -177,9 +177,35 @@ import ApplicationServices
                      "host local activity cannot qualify a remote event service")
     }
 
+    @MainActor static func coarseServicePoint() throws {
+        let scene = Scene()
+        func qualify(_ hit: AXUIElement) throws -> NativePointerRecipient? {
+            try NativePointerRecipient.coarseServiceHit(
+                hit, target: scene.element, nativeWindow: scene.nativeWindow,
+                host: scene.host, point: scene.point, using: scene.queries())
+        }
+        let shifted = try qualify(scene.nativeWindow)
+        precondition(shifted == nil, "a coarse hit does not prove a shifted service's coordinate space")
+        scene.windows[2858] = .init(id: 2858, pid: scene.endpointPID, frame: scene.host.frame)
+        let retained = try qualify(scene.nativeWindow)
+        precondition(retained?.eventWindow.id == 2858)
+        let unchanged = try qualify(scene.nativeWindow)
+        precondition(retained?.matchesService(unchanged!) == true)
+        let unrelated = try qualify(scene.other)
+        precondition(unrelated == nil, "an unrelated coarse hit cannot borrow the retained service")
+        scene.processes[scene.endpointPID] = scene.identity(scene.endpointPID, seconds: 2)
+        let restarted = try qualify(scene.nativeWindow)
+        precondition(retained?.matchesService(restarted!) == false)
+        expectError(.staleTarget) { _ = try retained?.validate(host: scene.host, using: scene.queries()) }
+        scene.membership = false
+        let unowned = try qualify(scene.nativeWindow)
+        precondition(unowned == nil, "the service must remain part of the original presenter")
+    }
+
     @MainActor static func main() throws {
         preparedLocalPointReadiness()
         try preparedPointLifetime()
+        try coarseServicePoint()
         let retained = Scene()
         // A pointer target is not the keyboard focus or a separately queried hit.
         retained.hit = retained.other

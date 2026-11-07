@@ -14,6 +14,7 @@ from computer_use.interaction.write.resolution.focus_member import FocusMemberQu
 from computer_use.interaction.write.resolution.focus_scope import FocusScopeQuery
 from computer_use.interaction.write.resolution.virtual_focus import VirtualFocusQuery
 from computer_use.interaction.write.routes.policy import (
+    has_exact_keyboard_edit_route,
     has_independent_text_route,
     has_ready_route,
     selects_ready_value_replacement,
@@ -49,6 +50,7 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
                 and (facts.input.focused_node is not None)
                 and (not has_ready_route(facts, intent))
                 and (not has_independent_text_route(facts, intent, frame.request.history))
+                and not has_exact_keyboard_edit_route(facts, intent, frame.request.history)
                 and not selects_ready_value_replacement(
                     facts,
                     intent,

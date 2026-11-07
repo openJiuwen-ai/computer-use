@@ -41,6 +41,14 @@ import ApplicationServices
     let eventWindow: WindowGeometry.WindowMapping
     private let remote: Remote?
     var isRemote: Bool { remote != nil }
+
+    func matchesService(_ other: Self) -> Bool {
+        guard let remote, let candidate = other.remote else { return false }
+        return presenter == other.presenter && eventWindow.id == other.eventWindow.id
+            && remote.process == candidate.process && remote.elementProcess == candidate.elementProcess
+            && CFEqual(remote.element, candidate.element)
+    }
+
     private var localContentProcessConfirmed = false
     /// Address evidence only. The caller separately establishes actual local
     /// activity/key-window state after returning the user's foreground.
@@ -76,6 +84,36 @@ import ApplicationServices
             host, nativeWindow: nativeWindow, element: element, at: point, foregroundHit: foregroundHit, using: Queries())
         try RequestDiagnostics.checkCancellation()
         return result
+    }
+
+    /// A hit can stop at the presenting window or at a service ancestor.
+    /// The caller proves the live parent path from the original target to the
+    /// hit. Resolve the target itself so a coarse hit never becomes its endpoint.
+    static func coarseServiceHit(
+        _ hit: AXUIElement, target: AXUIElement, nativeWindow: AXUIElement,
+        host: WindowGeometry.WindowMapping, point: CGPoint, using query: Queries = .init()
+    ) throws -> Self? {
+        guard let actual = query.actualPID(target), actual != host.pid else { return nil }
+        try RequestDiagnostics.checkCancellation()
+        do {
+            let recipient = try resolve(host, nativeWindow: nativeWindow, element: target, at: point, using: query)
+            guard recipient.isRemote, recipient.eventWindow.frame == host.frame,
+                recipient.eventWindow.frame.contains(point) else { return nil }
+            if CFEqual(hit, nativeWindow) {
+                guard query.actualPID(hit) == host.pid, query.windowID(hit) == host.id else { return nil }
+            } else {
+                let ancestor = try resolve(host, nativeWindow: nativeWindow, element: hit, at: point, using: query)
+                guard ancestor.isRemote, ancestor.eventWindow.id == recipient.eventWindow.id,
+                    ancestor.remote?.process == recipient.remote?.process else { return nil }
+            }
+            try RequestDiagnostics.checkCancellation()
+            return recipient
+        } catch let error as DriverError where error.code == .inputUnavailable || error.code == .staleTarget {
+            // This only withdraws the coarse geometry proof. An exact hit
+            // or independent AX action can still qualify on its own evidence.
+            try RequestDiagnostics.checkCancellation()
+            return nil
+        }
     }
 
     static func resolve(

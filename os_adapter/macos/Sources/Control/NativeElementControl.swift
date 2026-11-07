@@ -35,14 +35,14 @@ import ApplicationServices
     func declaredActions(_ element: AXUIElement) throws -> [NativeAction.Item]? {
         try RequestDiagnostics.checkCancellation()
         var raw: CFArray?
-        guard AXUIElementCopyActionNames(element, &raw) == .success, let rawNames = raw as? [String],
-            let names = NativeAction.boundedNames(rawNames)
-        else { return nil }
-        return try names.map { name in
+        guard AXUIElementCopyActionNames(element, &raw) == .success, let rawNames = raw as? [String] else {
+            return nil
+        }
+        return try NativeAction.catalogue(rawNames) { name in
             try RequestDiagnostics.checkCancellation()
             var description: CFString?
             AXUIElementCopyActionDescription(element, name as CFString, &description)
-            return NativeAction.Item(name: name, description: description as String?)
+            return description as String?
         }
     }
 

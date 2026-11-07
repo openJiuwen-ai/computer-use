@@ -4,7 +4,9 @@ import AppKit
 import ApplicationServices
 
 @main enum NativeReplacementReceiverTests {
-    @MainActor static func main() throws {
+    @MainActor static func main() async throws {
+        try keyboardTextEntryUsesReadProtocol()
+        try await restoreOnlyProvedCollapsedRange()
         scalarRecipeRequiresTextCapability()
         richEditorSelectionUsesScopedCommand()
         try richTextFragmentsPreserveInput()
@@ -77,6 +79,102 @@ import ApplicationServices
             preconditionFailure("whole-string encoding silently introduced a submit/control key")
         } catch let error as DriverError { precondition(error.code == .invalidRequest) }
         print("PASS replacement receiver, scalar text contract and atomic encoding regressions")
+    }
+
+    @MainActor static func keyboardTextEntryUsesReadProtocol() throws {
+        let window = AXUIElementCreateApplication(1_000_001)
+        let element = AXUIElementCreateApplication(1_000_002)
+        let other = AXUIElementCreateApplication(1_000_003)
+        var rawRange = CFRange(location: 1, length: 2)
+        let range = AXValueCreate(.cfRange, &rawRange)!
+        var fields: [String: AXRead<CFTypeRef>] = [
+            kAXValueAttribute: .value("a😀b" as CFString),
+            kAXSelectedTextRangeAttribute: .value(range),
+        ]
+        func read(_ name: String) -> AXRead<CFTypeRef> { fields[name] ?? .unsupported }
+        func entry(_ role: String, enabled: AXRead<CFTypeRef> = .unsupported) -> NativeKeyboardTextEntry? {
+            NativeKeyboardTextEntry.read(role: role, enabled: enabled, field: read)
+        }
+        let original = entry(kAXTextFieldRole)!
+        let selection = original.selection(read)!
+        precondition(selection == .init(count: 4, location: 1, length: 2),
+                     "keyboard replacement eligibility is independent of AX setters")
+        precondition(entry(kAXTextFieldRole, enabled: .value(kCFBooleanFalse)) == nil)
+        fields["AXReadOnly"] = .value(kCFBooleanTrue)
+        precondition(entry(kAXTextFieldRole) == nil)
+        fields.removeValue(forKey: "AXReadOnly")
+        fields[kAXSubroleAttribute] = .value(kAXSecureTextFieldSubrole as CFString)
+        precondition(entry(kAXTextFieldRole) == nil)
+        fields.removeValue(forKey: kAXSubroleAttribute)
+        precondition(entry(kAXIncrementorRole) == nil,
+                     "structured scalar replacement keeps its separate recipe")
+        precondition(entry(kAXComboBoxRole)?.selection(read) == nil,
+                     "a numeric-only ValueInterface cannot qualify as a text editor")
+        fields[kAXValueAttribute] = .unsupported
+        fields[kAXNumberOfCharactersAttribute] = .value(NSNumber(value: 4))
+        fields[kAXSelectedTextAttribute] = .value("😀" as CFString)
+        precondition(entry(kAXComboBoxRole)?.selection(read) == selection,
+                     "a composite qualifies through the owner's own readable extent and range")
+        fields[kAXSelectedTextAttribute] = .value("x" as CFString)
+        precondition(entry(kAXComboBoxRole)?.selection(read) == nil)
+
+        let unit = NativeKeyboardUnit(application: .current, window: window, element: element)
+        var state = NativeReceiverSnapshot(windowRoute: "yes", focus: element, ancestors: [], foreground: true)
+        state.window = window
+        state.rawFocus = element
+        func readiness() throws -> NativeReadiness {
+            try unit.readiness(
+                kind: .replace, replacement: .keyboardSelectAll(original), state: state,
+                includeDelivery: false, replacementSnapshot: { _, _ in .numeric(selection) })
+        }
+        let confirmed = try readiness()
+        precondition(confirmed.ready)
+        state.rawFocus = other
+        let rejected = try readiness()
+        precondition(!rejected.ready && rejected.pending.contains("receiver"),
+                     "the original text-entry proof cannot follow another focus object")
+        state.rawFocus = element
+        state.window = other
+        state.rawFocusOwner = other
+        let changedWindow = try readiness()
+        precondition(!changedWindow.ready)
+        state.surface = window
+        let normalizedWindow = try readiness()
+        precondition(normalizedWindow.ready, "a validated surface can resolve its original keyboard window")
+    }
+
+    @MainActor static func restoreOnlyProvedCollapsedRange() async throws {
+        let text = Array("abcd".utf16)
+        let lost = NativeTextSelection(count: 4, location: 3, length: 0)
+        for full in [true, false] {
+            for current in [text, Array("ABCD".utf16)] {
+                var restored = [Int]()
+                var sampled = [String]()
+                let didRestore = try await NativeReplacementUnit.restoreCollapsedRange(
+                    original: text, fullObserved: full,
+                    readText: { sampled.append("text"); return current },
+                    readRange: { sampled.append("range"); return lost },
+                    validateReceiver: { sampled.append("receiver") },
+                    restore: { restored.append($0) })
+                if full && current == text {
+                    precondition(didRestore && restored == [4] && sampled == ["range", "text", "receiver", "text", "range"])
+                } else {
+                    precondition(!didRestore && restored.isEmpty)
+                }
+            }
+        }
+        var samples = [lost, NativeTextSelection(count: 4, location: 0, length: 2)]
+        let moved = try await NativeReplacementUnit.restoreCollapsedRange(
+            original: text, fullObserved: true, readText: { text }, readRange: { samples.removeFirst() },
+            validateReceiver: {},
+            restore: { _ in preconditionFailure("a changed range must not be overwritten") })
+        precondition(!moved)
+        var current = text
+        let changedDuringValidation = try await NativeReplacementUnit.restoreCollapsedRange(
+            original: text, fullObserved: true, readText: { current }, readRange: { lost },
+            validateReceiver: { current = Array("ABCD".utf16) },
+            restore: { _ in preconditionFailure("text changed while receiver was sampled") })
+        precondition(!changedDuringValidation)
     }
 
     static func richEditorSelectionUsesScopedCommand() {

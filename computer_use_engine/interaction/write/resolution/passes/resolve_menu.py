@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Resolve menu."""
@@ -16,7 +15,7 @@ from computer_use.native.contracts import Knowledge
 from computer_use.pipeline import Contract, Effect, Pass
 
 if TYPE_CHECKING:
-    from typing import Awaitable, Callable
+    from collections.abc import Awaitable, Callable
 
     from computer_use.native.port import NativePort
     from computer_use.pipeline.core import Control
@@ -24,26 +23,26 @@ if TYPE_CHECKING:
 
 def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaitable[ResolutionFrame]]:
     async def resolve_menu(frame: ResolutionFrame, _: object) -> ResolutionFrame:
-        """Attach menu ancestry and submenu evidence to a native menu action.
+        """Attach menu ancestry and submenu evidence to a native menu route.
 
-        For a supported macOS menu action, establish and retain its ancestor bounds;
+        For a supported macOS menu route, establish and retain its ancestor bounds;
         inspect submenu state when opening a menu. Reinspect the bounded target and
         return facts containing the retained submenu state.
         """
         intent, target, operation, remaining = parts(frame)
         facts, memory = (frame.facts, frame.request.memory)
         scope = frame.scope
-        matches_getattr = (
-            True
-            if (
-                "nativeMenuActions" in getattr(native, "capabilities", ())
-                and facts.platform == "macos"
-                and (facts.native_role in ("AXMenuBarItem", "AXMenuItem", "AXMenu"))
-                and any((p.unit == "native_action" and p.supported == Knowledge.YES for p in facts.primitives))
+        menu_route = (
+            "nativeMenuActions" in getattr(native, "capabilities", ())
+            and facts.platform == "macos"
+            and facts.native_role in ("AXMenuBarItem", "AXMenuItem", "AXMenu")
+            and any(
+                p.supported == Knowledge.YES
+                and (p.unit == "native_action" or facts.application_menu is True and p.unit == "pointer_sequence")
+                for p in facts.primitives
             )
-            else False
         )
-        if matches_getattr:
+        if menu_route:
             if memory.menu_context is None:
                 query = MenuContextQuery(native, operation, target, remaining)
                 if facts.application_menu is False:

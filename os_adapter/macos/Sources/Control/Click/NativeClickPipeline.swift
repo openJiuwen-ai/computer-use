@@ -17,8 +17,8 @@ import ApplicationServices
                 command, resolved: resolved, op: operation, step: step, access: access)
             func execute() async throws {
                 var preparedPoint: NativePreparedPointerPoint?
-                try await NativeInputActivity.$stage.withValue(.preparation) {
-                    try await NativeClickPreparationPipeline.run(
+                let elementGeometry = try await NativeInputActivity.$stage.withValue(.preparation) {
+                    let geometry = try await NativeClickPreparationPipeline.run(
                         plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects)
                     if command.foreground, plan.offer.qtComboChoice == nil, case .captured(let unit) = plan.target {
                         preparedPoint = try await unit.prepareBackgroundPoint(
@@ -26,17 +26,20 @@ import ApplicationServices
                             onPreparation: receipt.recordPreparation, onCleanupUnknown: receipt.recordCleanupUnknown,
                             onNativePreparation: evidence.record)
                     }
+                    return geometry
                 }
                 NativeForegroundRestorationScope.current?.willDispatchInput()
                 try await DispatchNativeClickPass.run(
                     plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: access.objects,
-                    resolveWindow: { try access.scopes.fixedInputWindow(command.target) }, preparedPoint: preparedPoint)
+                    resolveWindow: { try access.scopes.fixedInputWindow(command.target) }, preparedPoint: preparedPoint,
+                    elementGeometry: elementGeometry)
             }
             let application: NSRunningApplication?
             switch plan.target {
             case .element(let unit): application = unit.application
             case .captured(let unit): application = unit.application
             case .menu(let unit, _, _, _): application = unit.application
+            case .menuPointer(let unit): application = unit.application
             default: application = nil
             }
             func knownTransientResult() throws -> Bool {

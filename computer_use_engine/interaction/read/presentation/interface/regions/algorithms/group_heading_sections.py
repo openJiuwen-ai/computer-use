@@ -7,13 +7,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from computer_use.interaction.read.presentation.interface.helpers import element_key, revise, synthetic_key, same_scope
+from computer_use.interaction.read.presentation.interface.helpers import element_key, revise, same_scope, synthetic_key
 from computer_use.interaction.read.presentation.interface.model import InterfaceBlock, InterfaceDraft
 from computer_use.interaction.read.presentation.interface.regions.headings import HeadingSection, heading_sections
+from computer_use.interaction.read.presentation.interface.regions.scope import block_sources
 
 
 def apply(draft: InterfaceDraft) -> InterfaceDraft:
-    """Group heading-led sibling spans while keeping headings and content independently bound."""
+    """Group heading-led reading units with their existing containment."""
     if not draft.enabled:
         return draft
     blocks = dict(draft.blocks)
@@ -24,15 +25,20 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
             continue
         if node["role"] not in ("group", "window", "sheet", "scrollArea", "webArea", "document", "tabPanel"):
             continue
-        children = tuple(node.get("children", ()))
-        if not any(draft.projected_nodes[child]["role"] == "heading" for child in children):
-            continue
-        if draft.evidence[ref].hidden:
+        parent = blocks[element_key(ref)]
+        children = parent.children
+        unit_nodes = {
+            key: draft.projected_nodes[blocks[key].primary_ref] if blocks[key].primary_ref is not None else {}
+            for key in children
+        }
+        if draft.evidence[ref].hidden or not any(unit.get("role") == "heading" for unit in unit_nodes.values()):
             continue
 
-        def materialize(section: str | HeadingSection) -> tuple[str, ...]:
+        def materialize(
+            section: str | HeadingSection, owner: str = ref, siblings: tuple[str, ...] = children
+        ) -> tuple[str, ...]:
             if isinstance(section, str):
-                return (element_key(section),)
+                return (section,)
             descendants = []
             pending = list(section.children)
             while pending:
@@ -41,19 +47,18 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
                     descendants.append(member)
                 else:
                     pending.extend(member.children)
-            if not same_scope(draft, (ref, *descendants)):
-                return tuple(element_key(member) for member in children if member in descendants)
+            sources = (source for key in descendants for source in block_sources(key, blocks))
+            if not same_scope(draft, (owner, *sources)):
+                return tuple(member for member in siblings if member in descendants)
             members = tuple(key for child in section.children for key in materialize(child))
-            key = synthetic_key("section", ref, members)
+            key = synthetic_key("section", owner, members)
             blocks[key] = InterfaceBlock(
-                key, "region", None, (), members, label_ref=section.heading, region_role="region"
+                key, "region", None, (), members, label_ref=blocks[section.heading].primary_ref, region_role="region"
             )
             return (key,)
 
-        new_children = tuple(
-            key for section in heading_sections(children, draft.projected_nodes) for key in materialize(section)
-        )
-        if new_children != blocks[element_key(ref)].children:
-            blocks[element_key(ref)] = replace(blocks[element_key(ref)], children=new_children)
+        new_children = tuple(key for section in heading_sections(children, unit_nodes) for key in materialize(section))
+        if new_children != parent.children:
+            blocks[parent.key] = replace(parent, children=new_children)
             decisions.append("heading-sections:" + ref)
     return revise(draft, blocks, *decisions)

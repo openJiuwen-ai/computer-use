@@ -65,12 +65,12 @@ import ApplicationServices
         _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
         advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false,
-        actionDetail: NativeActionDetail = .full
+        actionDetail: NativeActionDetail = .full, focusedElement: Bool = false
     ) throws -> [String: Any] {
         try facts.collect(
             ref, session: session, fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: childrenPage,
             relationPage: relationPage, advertisedFields: advertisedFields, followRelations: followRelations,
-            textContent: textContent, actionDetail: actionDetail)
+            textContent: textContent, actionDetail: actionDetail, focusedElement: focusedElement)
     }
 
     func nativeReadTarget(_ ref: String) throws -> ApplicationElements.Target { try facts.readTarget(ref) }

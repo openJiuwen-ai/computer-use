@@ -17,6 +17,8 @@ import ApplicationServices
     var windowCommandScope = false
     /// Only the qualified dispatch copy compares this immutable original ID.
     var dispatchExpectedNativeID: CGWindowID? = nil
+    var keyboardInsertion: NativeKeyboardTextEntry? = nil
+    var insertionSelection: NativeTextSelection? = nil
 
     typealias State = NativeReceiverSnapshot
     enum ReadinessUse { case admission, receiver }
@@ -112,7 +114,35 @@ import ApplicationServices
         {
             return true
         }
-        return false
+        guard request.kind == .paste
+            || windowCommandScope && request.kind == .key && request.usesWindowCommand()
+        else { return false }
+        return try commandNeedsForeground(kind: request.kind, key: request.key, state: sample())
+    }
+
+    private func commandNeedsForeground(kind: NativeKeyboardIntent.Kind, key: String?, state: State) throws -> Bool {
+        guard !state.foreground else { return false }
+        let selectedWindow = state.window ?? window
+        let pid = application.processIdentifier
+        if kind == .paste {
+            return try NativeKeyboardCommandContext.clipboardNeedsForeground(selectedWindow, pid: pid)
+        }
+        guard windowCommandScope, kind == .key, NativeKeyboardIntent.usesWindowCommand(kind, key: key) else {
+            return false
+        }
+        let mapping = try NativeWindowUnit(application: application, window: selectedWindow).mapping()
+        // An unrelated current focus cannot disprove the selected panel's
+        // receiver. Use it only when it belongs to this exact window.
+        if state.rawFocusOwner.map({ CFEqual($0, selectedWindow) }) == true, state.rawFocus != nil {
+            do {
+                if try NativeKeyboardCommandContext.isViewService(BackgroundEvents.keyboardRecipient(mapping)) {
+                    return true
+                }
+            } catch let error as DriverError where error.code == .inputUnavailable {
+                try RequestDiagnostics.checkCancellation()
+            }
+        }
+        return try NativeKeyboardCommandContext.coldService(window: selectedWindow, mapping: mapping)
     }
 
     func requiresCellEditorActivation() throws -> Bool {
@@ -177,14 +207,37 @@ import ApplicationServices
         use: ReadinessUse = .admission,
         replacementSnapshot: (AXUIElement, NativeReplacementUnit.Selection) -> NativeReplacementUnit.Snapshot? = {
             NativeReplacementUnit(element: $0).snapshot($1)
-        }
+        }, selectionKeyReady: Bool? = nil
     ) throws -> NativeReadiness {
         let state = try state ?? sample()
-        let receiver = state.receiver(element)
+        let exact = keyboardInsertion != nil || replacement?.keyboardEntry != nil
+            ? exactTextEntryReceiver(state) : state.receiver(element)
+        let rangeReady: Bool
+        if let selectionKeyReady { rangeReady = selectionKeyReady }
+        else if use == .admission && exact != "yes" {
+            rangeReady = try selectionKeyReceiver(kind: kind, key: key, state: state) != nil
+        } else { rangeReady = false }
+        let receiver = rangeReady ? "yes" : exact
         let windowCommand = NativeKeyboardIntent.usesWindowCommand(
             kind, key: key, replacementShortcut: replacement?.usesWindowCommand == true)
         let needsWindow = windowCommand && !state.foreground && !prepared
-        var conditions = [("receiver", receiver == "yes" && needsWindow ? "unknown" : receiver)]
+        var receiverReadiness = receiver == "yes" && needsWindow ? "unknown" : receiver
+        var conditions: [(String, String)] = []
+        var preparationAllowed = true
+        if use == .admission, let keyboardInsertion, let element {
+            let selection = keyboardInsertion.selection(element)
+            let confirmed = selection != nil && (insertionSelection == nil || selection == insertionSelection)
+            if !confirmed {
+                conditions.append(("selection", "unknown"))
+                // An unresolved receiver may publish its own selection after
+                // preparation. An already focused object needs that evidence
+                // now, and a proved changed selection cannot be reprepared.
+                preparationAllowed = receiver != "yes" && insertionSelection == nil
+            }
+        }
+        if use == .admission, try commandNeedsForeground(kind: kind, key: key, state: state) {
+            conditions.append(("foreground", "unknown"))
+        }
         // A preparation receipt records this operation's native window setup,
         // not application consumption. Live receiver checks still apply at
         // every dispatch; it never authorizes activation or replay afterwards.
@@ -192,6 +245,9 @@ import ApplicationServices
             if use == .admission {
                 let selection = element.flatMap { node in replacement.flatMap { replacementSnapshot(node, $0) } }
                 conditions.append(("selection", selection == nil ? "unknown" : "yes"))
+                if replacement?.keyboardEntry != nil, selection == nil, receiver == "yes" {
+                    preparationAllowed = false
+                }
             }
             if try requiresCellEditorActivation(), let element,
                 try NativeCellEditorHandoff.activationNeedsForeground(
@@ -204,10 +260,32 @@ import ApplicationServices
             let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
         {
             if proposal.unavailable || proposal.processTextUnavailable {
-                conditions.append(("textTransport", "unknown"))
+                if receiverReadiness == "yes" { receiverReadiness = "unknown" }
+                preparationAllowed = false
             }
         }
-        return NativeReadiness(conditions)
+        return NativeReadiness([("receiver", receiverReadiness)] + conditions, preparationAllowed: preparationAllowed)
+    }
+
+    func exactTextEntryReceiver(_ state: State) -> String {
+        guard let element, state.windowRoute == "yes", state.scopeRoute == "yes",
+            let keyboardWindow = state.window, CFEqual(state.surface ?? keyboardWindow, window)
+        else { return "unknown" }
+        if let reported = state.rawFocus, !CFEqual(reported, element) { return "no" }
+        if state.rawLocalFocus == false || state.rawFocusOwner.map({ CFEqual($0, keyboardWindow) }) == false {
+            return "no"
+        }
+        // The normal exact-target receiver policy includes the independent
+        // local proof when the application focus report is explicitly absent.
+        return state.receiver(element)
+    }
+
+    private func selectionKeyReceiver(
+        kind: NativeKeyboardIntent.Kind, key: String?, state: State
+    ) throws -> NativeSelectionKeyReceiver? {
+        guard let element, NativeSelectionKeyReceiver.accepts(kind, key: key) else { return nil }
+        return try NativeSelectionKeyReceiver.capture(
+            original: element, state: state, window: window, pid: application.processIdentifier)
     }
 
     /// Selection is sampled for admission; the replacement owner alone proves
@@ -217,11 +295,12 @@ import ApplicationServices
         _ request: NativeKeyboardIntent, replacement: NativeReplacementUnit.Selection?, prepared: Bool, state: State,
         replacementSnapshot: (AXUIElement, NativeReplacementUnit.Selection) -> NativeReplacementUnit.Snapshot? = {
             NativeReplacementUnit(element: $0).snapshot($1)
-        }
+        }, selectionKeyReady: Bool? = nil
     ) throws -> NativeReadiness {
         try readiness(
             kind: request.kind, key: request.key, text: request.value, replacement: replacement, prepared: prepared,
-            state: state, includeDelivery: false, use: .receiver, replacementSnapshot: replacementSnapshot)
+            state: state, includeDelivery: false, use: .receiver, replacementSnapshot: replacementSnapshot,
+            selectionKeyReady: selectionKeyReady)
     }
 
     func prepare(
@@ -261,6 +340,10 @@ import ApplicationServices
         }
         try check()
         try checkEnabled()
+        if !foreground, try backgroundTextTransportUnavailable(request, textPolicy: textPolicy), !activateCell {
+            throw NativePreparationUnavailable(
+                description: "the selected command requires the original foreground window; no requested input was sent")
+        }
         let proposal = try textProposal(
             kind: request.kind, text: request.value, state: try initial ?? sample(), textPolicy: textPolicy)
         if proposal?.unavailable == true {
@@ -332,16 +415,20 @@ import ApplicationServices
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
         onPreparation: @escaping @MainActor (String) -> Void,
         onClipboardRestore: (PasteboardTransaction.RestoreResult) -> Void,
-        onCleanupUnknown: @escaping @MainActor () -> Void
+        onCleanupUnknown: @escaping @MainActor () -> Void,
+        checkSavePanelPath: (@MainActor (NativeSavePanelPathContinuation.Proof) throws -> Void)? = nil
     ) async throws -> Bool {
         try check()
         try checkEnabled()
         try delivery.requireAdmission()
         let initial = try sample()
+        let rowSelection = try initial.receiver(element) == "yes"
+            ? nil : selectionKeyReceiver(kind: request.kind, key: request.key, state: initial)
+        let use: ReadinessUse = keyboardInsertion != nil || replacement?.keyboardEntry != nil ? .receiver : .admission
         guard
             try readiness(
                 kind: request.kind, key: request.key, text: request.value, replacement: replacement, prepared: prepared,
-                state: initial, includeDelivery: false
+                state: initial, includeDelivery: false, use: use, selectionKeyReady: rowSelection != nil
             ).ready
         else { throw DriverError("the selected keyboard unit is not ready before dispatch", code: .inputUnavailable) }
         let keyboardWindow = initial.window ?? window
@@ -357,10 +444,17 @@ import ApplicationServices
         let target = background
         let process = target.capturedProcessIdentity
         let recipient = delivery.processRecipient
+        let clipboardKeyWindow = request.kind == .paste
+            && NativeForegroundResponsibility.current?.retainsForegroundForInput == true
+        let serviceCommand = windowCommandScope && request.kind == .key && request.usesWindowCommand()
+            && NativeKeyboardCommandContext.isViewService(recipient)
         func validateState(_ current: inout State) throws {
             guard current.window.map({ CFEqual($0, keyboardWindow) }) == true else {
                 throw DriverError(
                     "the surface's keyboard window changed; remaining input was not sent", code: .staleTarget)
+            }
+            if clipboardKeyWindow || serviceCommand {
+                try NativeKeyboardCommandContext.requireForeground(current, window: keyboardWindow, exactKey: clipboardKeyWindow)
             }
             let ownedEditor = try cellEditor?.prove(current)
             if ownedEditor != nil, let cellEditor { cellEditorState?.retain(cellEditor) }
@@ -368,8 +462,14 @@ import ApplicationServices
             // proof, not an observation hint, authorizes the retained owner.
             if let ownedEditor { current.relatedEditor = ownedEditor.owner }
             try continuity?.validate(current, ownedEditor: ownedEditor)
+            if let rowSelection,
+                try !rowSelection.matches(selectionKeyReceiver(kind: request.kind, key: request.key, state: current))
+            {
+                throw DriverError("the original selected row range changed before its key command", code: .staleTarget)
+            }
             guard try self.receiverReadiness(
-                request, replacement: replacement, prepared: prepared, state: current).ready
+                request, replacement: replacement, prepared: prepared, state: current,
+                selectionKeyReady: rowSelection != nil).ready
             else {
                 throw DriverError(
                     "keyboard unit readiness changed; remaining key events were not sent", code: .inputUnavailable)
@@ -443,10 +543,53 @@ import ApplicationServices
                 onPosted: onPosted, onCleanupUnknown: onCleanupUnknown,
                 beforeFirstKeyDown: handoffBeforeFirstKeyDown)
         case .insert:
+            var started = false
+            var pathState: State?
+            func validateInsertion() async throws {
+                if var state = pathState {
+                    try check()
+                    try self.checkEnabled()
+                    try validateState(&state)
+                } else {
+                    try await validateReceiver()
+                }
+                if !started, let keyboardInsertion, let element {
+                    guard NativeKeyboardTextEntry.read(element) == keyboardInsertion,
+                        let selection = keyboardInsertion.selection(element),
+                        insertionSelection == nil || selection == insertionSelection
+                    else {
+                        throw DriverError("original keyboard selection is unconfirmed; no text sent", code: .inputUnavailable)
+                    }
+                    try await validateReceiver()
+                }
+            }
+            let resolveSavePanelPath: (@MainActor (String) throws -> NativeSavePanelPathContinuation.Proof?)?
+            if let checkSavePanelPath, cellEditor == nil, receiverRelation == nil,
+                let path = try NativeSavePanelPathContinuation.capture(
+                    window: keyboardWindow, element: element, text: request.value!, state: initial, delivery: delivery)
+            {
+                resolveSavePanelPath = { posted in
+                    guard !posted.isEmpty else { return nil }
+                    let state = try self.sample()
+                    pathState = state
+                    if let proof = try path.resolve(postedPrefix: posted, state: state) {
+                        try checkSavePanelPath(proof)
+                        return proof
+                    }
+                    guard !path.transitioned else {
+                        throw DriverError("the Go To path field changed before the remaining input", code: .staleTarget)
+                    }
+                    return nil
+                }
+            } else { resolveSavePanelPath = nil }
             try await Input.preparedText(
                 request.value!, delivery: delivery, applicationPID: application.processIdentifier,
-                validate: validateReceiver, onDispatch: onDispatch, onPosted: onPosted,
-                onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: handoffBeforeFirstKeyDown)
+                validate: validateInsertion, onDispatch: onDispatch, onPosted: {
+                    started = true
+                    onPosted()
+                },
+                onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: handoffBeforeFirstKeyDown,
+                savePanelPath: resolveSavePanelPath)
         case .replace:
             guard let element, let replacement else {
                 throw DriverError("replacement requires an addressed editing/selection contract", code: .invalidRequest)

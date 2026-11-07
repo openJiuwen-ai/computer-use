@@ -139,7 +139,14 @@ enum ApplicationCatalog {
         return result.sorted { $0.path < $1.path }
     }
 
-    static func list(roots: [URL], running: [Running], continuing: () -> Bool = { true }) -> [Entry] {
+    static func list(
+        roots: [URL], running: [Running], path: URL? = nil, continuing: () -> Bool = { true }
+    ) -> [Entry] {
+        let exact = path?.standardizedFileURL.resolvingSymlinksInPath()
+        let running = running.filter { app in
+            guard let exact else { return true }
+            return app.url?.standardizedFileURL.resolvingSymlinksInPath().path == exact.path
+        }
         var candidates = [String: Candidate]()
         func nonempty(_ values: String?...) -> String? {
             values.compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -157,7 +164,8 @@ enum ApplicationCatalog {
             candidates[canonical.path] = Candidate(
                 url: canonical, identifier: identifier, name: name, regularUI: declaredRegularUI(bundle))
         }
-        for url in installedURLs(roots: roots, continuing: continuing) {
+        // Explicit paths may lie outside the standard enumeration roots.
+        for url in exact.map({ [$0] }) ?? installedURLs(roots: roots, continuing: continuing) {
             guard continuing() else { break }
             add(url)
         }

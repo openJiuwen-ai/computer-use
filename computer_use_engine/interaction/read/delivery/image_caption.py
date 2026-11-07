@@ -43,6 +43,7 @@ def render_image_caption(width: int, height: int, facts: Mapping[str, Any]) -> s
     return (
         _base_caption(width, height, facts)
         + ("\nCapture: " + json_string(facts["capture"]) if facts.get("capture") else "")
+        + "".join("\n" + note for note in facts.get("captureState", ()))
         + "".join("\nImage note: " + json_string(reason) for reason in facts.get("stopReasons", ()))
         + _visual_text(facts.get("visualText"))
     )

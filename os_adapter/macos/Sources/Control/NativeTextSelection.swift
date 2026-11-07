@@ -6,7 +6,7 @@ import ApplicationServices
 /// A complete selection belongs to the currently observed text extent.
 /// No content string equality, selected row or caret/focus flag substitutes for
 /// this check. Platform readers retain their own text-offset units.
-struct NativeTextSelection {
+struct NativeTextSelection: Equatable {
     let count: Int
     let location: Int?
     let length: Int?
@@ -19,25 +19,42 @@ struct NativeTextSelection {
     /// Decode a live native sample. Keeping field acquisition explicit lets
     /// tests exercise provider errors and changes between reads without UI input.
     static func read(_ field: (String) -> AXRead<CFTypeRef>) -> Self? {
-        func extent() -> Int? {
-            switch field(kAXNumberOfCharactersAttribute) {
-            case .value(let raw):
-                guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-                    let count = Int(number.stringValue), count >= 0
-                else { return nil }
-                return count
-            case .unsupported, .unavailable(.noValue):
-                // AppKit AX/NSRange uses UTF-16, not grapheme/scalar counts.
-                return (field(kAXValueAttribute).value as? String).map { ($0 as NSString).length }
-            default: return nil
-            }
+        guard let count = extent(field), let selection = readRanges(textUTF16Count: count, field),
+            extent(field) == count
+        else { return nil }
+        return selection
+    }
+
+    /// Value and other text getters can change selection. Make range the last
+    /// query when it supplies a first-input or restoration proof.
+    static func readBeforeRanges(_ field: (String) -> AXRead<CFTypeRef>, allowValueFallback: Bool = true) -> Self? {
+        guard let count = extent(field, allowValueFallback: allowValueFallback),
+            extent(field, allowValueFallback: allowValueFallback) == count else { return nil }
+        return readRanges(textUTF16Count: count, field)
+    }
+
+    private static func extent(_ field: (String) -> AXRead<CFTypeRef>, allowValueFallback: Bool = true) -> Int? {
+        switch field(kAXNumberOfCharactersAttribute) {
+        case .value(let raw):
+            guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                let count = Int(number.stringValue), count >= 0
+            else { return nil }
+            return count
+        case .unsupported, .unavailable(.noValue):
+            guard allowValueFallback else { return nil }
+            // AppKit AX/NSRange uses UTF-16, not grapheme/scalar counts.
+            return (field(kAXValueAttribute).value as? String).map { ($0 as NSString).length }
+        default: return nil
         }
+    }
+
+    static func readRanges(textUTF16Count count: Int, _ field: (String) -> AXRead<CFTypeRef>) -> Self? {
+        guard count >= 0 else { return nil }
         func range(_ raw: CFTypeRef) -> CFRange? {
             guard CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
             var result = CFRange()
             return AXValueGetValue(unsafeDowncast(raw, to: AXValue.self), .cfRange, &result) ? result : nil
         }
-        guard let count = extent() else { return nil }
         let selection: CFRange?
         switch field(kAXSelectedTextRangeAttribute) {
         case .value(let raw):
@@ -61,9 +78,6 @@ struct NativeTextSelection {
         case .unsupported, .unavailable(.noValue): break
         default: return nil
         }
-        // A changing text extent cannot prove a complete selection. Equal
-        // extent is not content equality and imposes no post-input comparison.
-        guard extent() == count else { return nil }
         return Self(count: count, location: selection?.location, length: selection?.length, contiguous: contiguous)
     }
 }

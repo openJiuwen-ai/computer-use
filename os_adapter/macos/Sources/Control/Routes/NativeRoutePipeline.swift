@@ -20,6 +20,8 @@ import ApplicationServices
             return try BuildNativeMenuRoutePass.run(context, name: name, description: description)
         case .textValue(let valueContract):
             return try BuildNativeTextValueRoutePass.run(context, valueContract: valueContract)
+        case .cellSelection(let selection):
+            return try NativeCellSelectionPreparation.route(context, selection: selection)
         case .receiverContext(let receiverContract):
             return try BuildNativeReceiverRoutePass.run(context, receiverContract: receiverContract)
         case .pointerFocus(let target): return try BuildNativePointerFocusRoutePass.run(context, target: target)
@@ -29,6 +31,8 @@ import ApplicationServices
         case .keyboard(let expected, let replacement, let textPolicy):
             return try BuildNativeKeyboardRoutePass.run(
                 context, expected: expected, replacement: replacement, textPolicy: textPolicy)
+        case .applicationCommand(let command):
+            return try NativeApplicationKeyboardUnit.route(context, command: command)
         case .pointer(let expected): return try BuildNativePointerRoutePass.run(context, expected: expected)
         }
 

@@ -268,13 +268,15 @@ class InterfaceWriter:
             return ()
         result = []
         if coverage.start is not None and coverage.total is not None:
-            read = coverage.end - coverage.start if coverage.end is not None else coverage.read
+            read = coverage.read
             count = (str(read) if read is not None else "?") + "/" + str(coverage.total) + " read"
             if coverage.start:
                 count += f", offset {coverage.start}"
             if coverage.next_offset is not None:
                 count += "; partial; cursor below"
             elif coverage.end == coverage.total:
+                if read is not None and read < coverage.end - coverage.start:
+                    count += "; partial; unavailable native slots"
                 count += "; end of direct children"
             else:
                 count += "; partial; read()"

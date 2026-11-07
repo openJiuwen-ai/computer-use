@@ -1,5 +1,9 @@
 [
   {"name":"application catalogue","valid":true,"query":{"kind":"applications"}},
+  {"name":"exact native application path","valid":true,"query":{"kind":"applications","path":"/outside/Fixture.app"}},
+  {"name":"retained installation observation","valid":true,"query":{"kind":"applications","installation":"installation-fixture"}},
+  {"name":"relative application path","valid":false,"query":{"kind":"applications","path":"Fixture.app"}},
+  {"name":"conflicting application scopes","valid":false,"query":{"kind":"applications","path":"/outside/Fixture.app","installation":"installation-fixture"}},
   {"name":"read-only parameterized text enabled","valid":true,"query":{"kind":"nodes","fields":["AXRole","AXValue"],"maxNodes":1,"maxDepth":0,"textContent":true}},
   {"name":"read-only parameterized text disabled","valid":true,"query":{"kind":"nodes","fields":["AXRole","AXValue"],"maxNodes":1,"maxDepth":0,"textContent":false}},
   {"name":"parameterized text rejects nonboolean","valid":false,"query":{"kind":"nodes","fields":["AXRole","AXValue"],"maxNodes":1,"maxDepth":0,"textContent":"yes"}},

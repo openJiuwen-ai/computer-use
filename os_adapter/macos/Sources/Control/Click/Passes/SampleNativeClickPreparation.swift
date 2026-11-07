@@ -17,13 +17,14 @@ import ApplicationServices
         try boundary.checkConditions()
         let pointer: NativePointerUnit, point: CGPoint
         var kind: NativePointerIntent.Kind = .click
+        var elementGeometry: NativeElementPointerUnit.Geometry?
         switch plan.target {
         case .captured(let unit):
             pointer = try unit.resolvingCaptureTranslation()
             point = try pointer.point(plan.pointer!.start!)
         case .element(let unit):
             if !afterPreparation, let exposure = try unit.exposure() {
-                pointer = unit.pointerUnit(mapping: exposure.mapping)
+                pointer = unit.exposurePointerUnit(exposure)
                 point = exposure.point
                 // Exposure addresses a passive wheel receiver. A click/key
                 // receiver is prepared only after the target becomes visible.
@@ -32,6 +33,7 @@ import ApplicationServices
                 let geometry = try afterPreparation ? unit.geometry() : unit.preparationGeometry()
                 pointer = unit.pointerUnit(mapping: geometry.mapping)
                 point = geometry.point
+                elementGeometry = geometry
             }
         default: return nil
         }
@@ -46,6 +48,7 @@ import ApplicationServices
         // These synchronous queries have no preparation effect or suspension.
         // The selected preparation/event checks its own live boundary next.
         try RequestDiagnostics.checkCancellation()
-        return NativeClickWindowPreparation(pointer: pointer, point: point, needed: needed, kind: kind)
+        return NativeClickWindowPreparation(
+            pointer: pointer, point: point, needed: needed, kind: kind, elementGeometry: elementGeometry)
     }
 }

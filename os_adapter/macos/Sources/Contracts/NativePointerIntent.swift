@@ -15,12 +15,15 @@ struct NativePointerIntent {
     let count: Int
     let direction: String?
     let pages: Double?
+    /// Only the explicit Computer route supplies raw screen coordinates.
+    let screen: Bool
 
     init(unit: String, kind: String, parameters: Any?, foreground: Bool, element: Bool = false, screen: Bool = false) throws {
         guard let kind = Kind(rawValue: kind), ["prepare_receiver", "pointer_sequence"].contains(unit),
             !foreground || unit == "prepare_receiver"
         else { throw DriverError("invalid pointer unit", code: .invalidRequest) }
         self.kind = kind
+        self.screen = screen
         guard !element || kind == .click || kind == .scroll else {
             throw DriverError("element pointer input supports click and scroll", code: .invalidRequest)
         }

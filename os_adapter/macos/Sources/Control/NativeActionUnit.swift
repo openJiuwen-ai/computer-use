@@ -70,8 +70,7 @@ extension NativeElementControl {
         var facts = ActionFacts(
             role: role, actions: actions,
             enabled: (inspection.attribute(target.element, kAXEnabledAttribute) as? NSNumber)?.boolValue,
-            applicationMenuContext: [kAXMenuBarRole, kAXMenuBarItemRole].contains(role ?? "")
-                || target.ancestors.contains { inspection.attribute($0, kAXRoleAttribute) as? String == kAXMenuBarRole },
+            applicationMenuContext: registry.isApplicationMenuScope(target.scope, owner: target.application),
             foreground: BackgroundTarget(target.application).isForeground)
         if [kAXMenuButtonRole, kAXPopUpButtonRole, kAXComboBoxRole].contains(role ?? "") {
             let identifier = inspection.attribute(target.element, kAXIdentifierAttribute) as? String

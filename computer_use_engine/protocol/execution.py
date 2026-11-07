@@ -168,6 +168,7 @@ primitive = obj(
         pending=array(enum(*pending_conditions), max=5),
         backgroundPreparation=knowledge,
         globalInput=knowledge.optional(),
+        keyboardEditing=enum("insert", "replace").optional(),
         preparationImpact=obj(dict(mouse=knowledge, keyboard=knowledge, activation=knowledge, clipboard=knowledge)).optional(),
         action=obj(dict(name=identity, description=string().optional())).optional(),
         click=click_offer.optional(),
@@ -339,7 +340,7 @@ def decode_selection_basis(value):
 
 _inspect_queries = {
     "launch": obj(dict(kind=enum("launch"))),
-    "applications": obj(dict(kind=enum("applications"))),
+    "applications": obj(dict(kind=enum("applications"), path=identity.optional(), installation=identity.optional())),
     "surfaceBatch": obj(
         dict(kind=enum("surfaceBatch"), applications=array(identity, min=1, max=64), profile=enum("visual").optional())
     ),
@@ -351,7 +352,7 @@ _inspect_queries = {
             profile=enum("visual").optional(),
         )
     ),
-    "roots": obj(dict(kind=enum("roots"), application=identity)),
+    "roots": obj(dict(kind=enum("roots"), application=identity, applicationContent=boolean().optional())),
     "appChanges": obj({"kind": enum("appChanges"), "application": identity}),
     "waitAppChange": obj(
         {
@@ -377,6 +378,7 @@ _inspect_queries = {
             fields=array(identity, min=1, max=128),
             advertisedFields=array(identity, min=1, max=128).optional(),
             textContent=boolean().optional(),
+            focusedElement=boolean().optional(),
             actionDetail=enum("none", "names", "full").optional(),
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),
@@ -408,6 +410,10 @@ def decode_inspect_query(value):
     if not isinstance(value, dict) or not isinstance(value.get("kind"), str) or value["kind"] not in _inspect_queries:
         raise ValueError("protocol: unknown native inspection query")
     result = _inspect_queries[value["kind"]].parse(value)
+    if result["kind"] == "applications" and "path" in result and (
+        "installation" in result or not result["path"].startswith("/")
+    ):
+        raise ValueError("protocol: invalid exact application query")
     if "profile" in result and "includeAccessibility" in result:
         raise ValueError("protocol: surface profile and legacy accessibility flag cannot be combined")
     if "currentReceiver" in result and (
@@ -477,6 +483,10 @@ def validate_primitive_contract(unit, channel, supported, readiness, pending, ac
 
 def _validate_primitive(p):
     validate_primitive_contract(p["unit"], p["channel"], p["supported"], p["readiness"], p["pending"], p.get("action"))
+    if "keyboardEditing" in p and (
+        p["unit"] != "key_sequence" or p["channel"] != "keyboard" or p.get("globalInput") != "no"
+    ):
+        raise ValueError("protocol: keyboard editing evidence requires an addressed keyboard primitive")
     if p["unit"] == "native_selection" and "click" not in p:
         raise ValueError("protocol: native selection requires an integrated click offer")
     if "click" in p:

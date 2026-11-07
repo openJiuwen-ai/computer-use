@@ -15,4 +15,6 @@ struct NativePrimitiveContract {
     /// Once another document is known, a later unavailable focus read cannot
     /// erase the original window's responder-context requirement.
     var actionDocument: NativeActionDocumentContract? = nil
+    /// A keyboard-only insertion recipe on this contract's exact node.
+    var keyboardInsertion: NativeKeyboardTextEntry? = nil
 }

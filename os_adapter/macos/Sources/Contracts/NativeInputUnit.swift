@@ -11,10 +11,12 @@ enum NativeInputUnit: Equatable {
     case textValue(NativeElementControl.TextValueContract)
     case selectedText(NativeSelectedTextUnit.Contract)
     case receiverContext(NativeReceiverPreparation.Contract)
+    case cellSelection(NativeCellSelectionPreparation.Contract)
     case pointerFocus(NativePointerFocusUnit.TargetKind)
     case keyboard(
         NativeKeyboardIntent.Kind, NativeReplacementUnit.Selection? = nil,
         NativeKeyboardInterpreterEvidence.Policy = .existing)
+    case applicationCommand(NativeApplicationKeyboardUnit.Command)
     case pointer(NativePointerIntent.Kind)
     case scroll
     case launch(NativeInstallation)
@@ -39,7 +41,7 @@ enum NativeInputUnit: Equatable {
             // not a text editor or a keyboard receiver.
             wire["backgroundPreparation"] = readiness.pending.contains("receiver") ? "yes" : "no"
         case .textValue(let contract): wire["unit"] = contract.unit
-        case .selectedText, .receiverContext:
+        case .selectedText, .receiverContext, .cellSelection:
             if case .selectedText = self {
                 wire["unit"] = "native_text_edit"
             } else {
@@ -56,6 +58,9 @@ enum NativeInputUnit: Equatable {
             wire["unit"] = kind.unit
             wire["channel"] = "keyboard"
             wire["backgroundPreparation"] = readiness.pending.contains("foreground") ? "no" : "yes"
+        case .applicationCommand:
+            wire["unit"] = "key_sequence"
+            wire["channel"] = "keyboard"
         case .pointer:
             wire["unit"] = "pointer_sequence"
             wire["channel"] = "pointer"
@@ -73,7 +78,7 @@ enum NativeInputUnit: Equatable {
     private var preparationImpact: [String: String] {
         var value = ["mouse": "no", "keyboard": "no", "activation": "no", "clipboard": "no"]
         switch self {
-        case .textValue, .selection, .scroll, .launch: break
+        case .textValue, .selection, .cellSelection, .scroll, .launch, .applicationCommand: break
         case .selectedText, .receiverContext:
             value["activation"] = "yes"
         case .action, .menuAction:

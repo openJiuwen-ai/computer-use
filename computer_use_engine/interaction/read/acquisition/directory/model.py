@@ -19,10 +19,12 @@ class DirectoryRequest:
     Attributes:
         query: Native directory query specifying its catalogue kind and scope.
         timeout_ms: Maximum duration in milliseconds, bounded by the enclosing call deadline.
+        application_selector: Optional exact path, negotiated after opening the driver session.
     """
 
     query: Record
     timeout_ms: int = 30000
+    application_selector: str | None = None
 
 
 @dataclass(frozen=True)

@@ -40,6 +40,12 @@ import Foundation
         // appended superclass declaration does not introduce another command.
         try expect(.selected(.init(name: "AXPress", description: nil)), request: "AXPress",
                    names: ["AXPress", "OtherAction", "AXPress"], reads: [])
+        try expect(.selected(.init(name: "AXPick", description: nil)), request: "AXPick",
+                   names: ["AXPick", "AXPick"], reads: [])
+        let uniquePick = NativeAction.catalogue(["AXPick"]) { _ in nil }
+        let repeatedPick = NativeAction.catalogue(["AXPick", "AXPick"]) { _ in nil }
+        precondition(NativeAction.matches(uniquePick, name: "AXPick", description: nil))
+        precondition(!NativeAction.matches(repeatedPick, name: "AXPick", description: nil))
 
         // The description budget must not truncate the native-name identity
         // check. Repeating that same name after the budget adds no ambiguity.

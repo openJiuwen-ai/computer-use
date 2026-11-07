@@ -36,7 +36,7 @@ def member(window, parent=None):
     )
 
 
-def captured_part(window, *, x=0):
+def captured_part(window, *, x=0, on_screen=None):
     buffer = BytesIO()
     with Image.new("RGBA", (100, 80), "white") as image:
         image.save(buffer, format="PNG")
@@ -51,6 +51,11 @@ def captured_part(window, *, x=0):
             width=100,
             height=80,
             png=base64.b64encode(buffer.getvalue()).decode(),
+            **(
+                {"windowState": {"sampledAt": 1, "onScreen": on_screen, "ownerForeground": None}}
+                if on_screen is not None
+                else {}
+            ),
         ),
         "window",
     )
@@ -132,6 +137,22 @@ def test_fixed_window_composite_needs_no_prior_app_primary_or_anchor():
     assert "Window references: 0, 7" in caption
     assert "unknown" not in caption
     assert controller.transport.session == "session"
+
+
+def test_composite_caption_preserves_independent_window_capture_state_once():
+    from computer_use.interaction.read.presentation.document import DisplayDocument
+
+    ui, _, pipeline = fixture(fixed=True)
+    root = captured_part("root", on_screen=True)
+    child = captured_part("child", x=120, on_screen=False)
+    canvas, notes = pipeline.run(ui, [root, child])
+    ui._image = canvas
+    body = DisplayDocument(tuple(notes)).text
+    caption = image_label(canvas.png)
+    combined = body + image_label(canvas.png, context_already_shown=True)
+    for ref, state in [(0, "true"), (7, "false")]:
+        fact = f"Image note (Window {ref}): Window state (independent samples during capture): onScreen={state}"
+        assert body.count(fact) == caption.count(fact) == combined.count(fact) == 1
 
 
 def expired_budget(monkeypatch):

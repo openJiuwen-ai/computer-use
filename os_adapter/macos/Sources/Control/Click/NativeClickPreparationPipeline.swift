@@ -18,10 +18,10 @@ import ApplicationServices
         }
     }
 
-    static func run(
+    @discardableResult static func run(
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
         evidence: NativeClickEvidence, objects: any NativeControlObjectAccess
-    ) async throws {
+    ) async throws -> NativeElementPointerUnit.Geometry? {
         let metric = RequestDiagnostics.metrics?.start(.clickPreparation)
         defer { metric?.end() }
         func checkDocumentAction() throws {
@@ -55,6 +55,14 @@ import ApplicationServices
         if let context = plan.actionContext, plan.qtPopupOpener != nil {
             try await PrepareNativeActionContextPass.run(
                 context, plan: plan, boundary: boundary, receipt: receipt, evidence: evidence, objects: objects)
+        }
+        if case .menuPointer(let unit) = plan.target, plan.command.foreground {
+            try AuthorizeNativeClickForegroundPass.run(plan)
+            try await unit.prepare(
+                foreground: true, check: boundary.checkConditions, onPreparation: receipt.recordPreparation,
+                onCleanupUnknown: receipt.recordCleanupUnknown, onNativePreparation: evidence.record,
+                onFocusOutcome: evidence.observe, onPreparationWait: evidence.recordWait, observeOutcome: true,
+                refreshMenu: false)
         }
         if case .menu(let unit, _, _, _) = plan.target {
             let foreground = plan.command.foreground && !BackgroundTarget(unit.application).isForeground
@@ -108,5 +116,6 @@ import ApplicationServices
             throw NativePreparationUnavailable(
                 description: "selected click delivery remains unprepared; requested input was not sent")
         }
+        return current?.elementGeometry
     }
 }

@@ -11,6 +11,14 @@ import ApplicationServices
     let responderWindow: AXUIElement?
     let windows: [AXUIElement]?
     let foreground: Bool
+    let applicationElement: AXUIElement
+    private let responderAbsent: Bool
+
+    func attachedDialogWindows(_ target: AXUIElement) -> [AXUIElement]? {
+        guard responderAbsent, main.map({ CFEqual($0, target) }) == true,
+            focused.map({ CFEqual($0, target) }) == true else { return nil }
+        return windows
+    }
     func document(for target: AXUIElement) -> AXUIElement? {
         guard let windows else { return nil }
         let deadline = ProcessInfo.processInfo.systemUptime + 0.2
@@ -59,21 +67,29 @@ import ApplicationServices
             && (responderWindow.map { CFEqual($0, target) } ?? (soleWindow || foreground))
     }
 
-    init(application: NSRunningApplication) {
+    init(
+        application: NSRunningApplication, read: @MainActor (AXUIElement, String) -> AXRead<CFTypeRef> = AXAccess.read
+    ) {
         let root = AXUIElementCreateApplication(application.processIdentifier)
-        func element(_ key: String) -> AXUIElement? {
-            guard let raw = AXAccess.read(root, key).value, CFGetTypeID(raw) == AXUIElementGetTypeID() else {
+        applicationElement = root
+        func element(_ result: AXRead<CFTypeRef>) -> AXUIElement? {
+            guard let raw = result.value, CFGetTypeID(raw) == AXUIElementGetTypeID() else {
                 return nil
             }
             return unsafeDowncast(raw, to: AXUIElement.self)
         }
-        let responder = element(kAXFocusedUIElementAttribute).flatMap {
+        let focusedUI = read(root, kAXFocusedUIElementAttribute)
+        switch focusedUI {
+        case .unsupported, .unavailable(.noValue): responderAbsent = true
+        default: responderAbsent = false
+        }
+        let responder = element(focusedUI).flatMap {
             WindowGeometry.owningWindow($0, pid: application.processIdentifier)
         }
-        main = element(kAXMainWindowAttribute)
-        focused = element(kAXFocusedWindowAttribute)
+        main = element(read(root, kAXMainWindowAttribute))
+        focused = element(read(root, kAXFocusedWindowAttribute))
         responderWindow = responder
-        windows = AXAccess.read(root, kAXWindowsAttribute).value as? [AXUIElement]
+        windows = read(root, kAXWindowsAttribute).value as? [AXUIElement]
         foreground = BackgroundTarget(application).isForeground
     }
 }

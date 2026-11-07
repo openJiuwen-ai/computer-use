@@ -7,6 +7,7 @@ import ApplicationServices
     case action(node: String, name: String, description: String?)
     case selection(node: String, contract: NativeRowSelection.Contract)
     case menu(NativeMenuUnit, node: String, name: String, description: String?)
+    case menuPointer(NativeMenuUnit)
     case captured(NativePointerUnit)
     case element(NativeElementPointerUnit)
     case popupPointer(any NativePopupPointerInput)
@@ -33,4 +34,5 @@ import ApplicationServices
     let point: CGPoint
     let needed: Bool
     var kind: NativePointerIntent.Kind = .click
+    var elementGeometry: NativeElementPointerUnit.Geometry? = nil
 }

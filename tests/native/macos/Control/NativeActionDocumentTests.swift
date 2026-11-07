@@ -5,6 +5,10 @@ import ApplicationServices
 
 @main enum NativeActionDocumentTests {
     @MainActor static func main() async throws {
+        applicationMenuScopeIsDistinctFromWindowContent()
+        menuCommandSourceSelectsAddressedPointer()
+        attachedDialogReceiverNeedsCurrentParentProof()
+        try retainedMenuMembershipUsesTheCompleteProviderRelation()
         try fixedDocumentEvidenceIsLazy()
         try fixedWindowQuerySeparatesAXAbsenceFromEndedLifetime()
         for explicit in [false, true] {
@@ -45,6 +49,68 @@ import ApplicationServices
         try await skipsPreparedDocument()
         try await documentPreparationBoundary()
         print("PASS original-window action receiver preparation, retained evidence and no-replay boundaries")
+    }
+
+    @MainActor static func applicationMenuScopeIsDistinctFromWindowContent() {
+        let registry = ApplicationElements()
+        let app = NSRunningApplication.current
+        let window = AXUIElementCreateApplication(1_000_009)
+        let local = registry.observationScope(app, window: window)
+        precondition(!registry.isApplicationMenuScope(local, owner: app))
+        let menu = registry.observationScope(app, window: nil)
+        precondition(registry.isApplicationMenuScope(menu, owner: app))
+        precondition(!registry.isApplicationMenuScope(local, owner: app))
+    }
+
+    static func menuCommandSourceSelectsAddressedPointer() {
+        func requires(
+            framework: Bool = true, role: String = kAXMenuItemRole, action: String = kAXPressAction,
+            submenu: Bool? = false, shortcut: String? = "n"
+        ) -> Bool {
+            NativeMenuCommandPolicy.requiresPointer(
+                electronFramework: framework, action: action, role: role, hasSubmenu: submenu,
+                commandCharacter: shortcut)
+        }
+        precondition(requires())
+        precondition(!requires(framework: false) && !requires(role: kAXMenuBarItemRole))
+        precondition(!requires(action: "AXPick") && !requires(submenu: true) && !requires(submenu: nil))
+        precondition(!requires(shortcut: nil) && !requires(shortcut: ""))
+        let ready = NativeMenuCommandPolicy.offer(ready: true, available: true, canPrepare: false)
+        let prepare = NativeMenuCommandPolicy.offer(ready: false, available: true, canPrepare: true)
+        let missing = NativeMenuCommandPolicy.offer(ready: false, available: false, canPrepare: true)
+        precondition(ready.delivery == .windowDirected && ready.admission == .ready)
+        precondition(prepare.delivery == .windowDirected && prepare.admission == .preparationRequired)
+        precondition(prepare.preparationOptions == ["foreground"] && prepare.backgroundUnavailable)
+        precondition(missing.admission == .unavailable && missing.preparationOptions.isEmpty)
+    }
+
+    @MainActor static func attachedDialogReceiverNeedsCurrentParentProof() {
+        let root = AXUIElementCreateApplication(1_000_018)
+        let dialog = AXUIElementCreateApplication(1_000_019)
+        func context(_ responder: AXRead<CFTypeRef>, focus: AXUIElement? = nil) -> NativeMenuContext {
+            NativeMenuContext(application: .current, read: { _, key in
+                switch key {
+                case kAXMainWindowAttribute: .value(root)
+                case kAXFocusedWindowAttribute: .value(focus ?? root)
+                case kAXWindowsAttribute: .value([root, dialog] as CFArray)
+                case kAXFocusedUIElementAttribute: responder
+                default: .unsupported
+                }
+            })
+        }
+        precondition(context(.unavailable(.noValue)).attachedDialogWindows(root)?.count == 2)
+        precondition(context(.unavailable(.cannotComplete)).attachedDialogWindows(root) == nil)
+        precondition(context(.value(kCFBooleanTrue)).attachedDialogWindows(root) == nil)
+        precondition(context(.unavailable(.noValue), focus: dialog).attachedDialogWindows(root) == nil)
+        func owns(_ ax: [CGWindowID: CGWindowID], _ native: [CGWindowID: CGWindowID]) -> Bool {
+            NativeMenuAttachedDialogs.provesAttachment(ids: [10, 20, 30], axParents: ax, nativeParents: native)
+        }
+        precondition(owns([30: 20], [20: 10, 30: 0]))
+        precondition(owns([:], [20: 10, 30: 20]))
+        precondition(!owns([:], [20: 10]))
+        precondition(!owns([30: 10], [20: 10, 30: 20]))
+        precondition(!owns([20: 30, 30: 20], [:]))
+        precondition(!owns([20: 10], [30: 40]))
     }
 
     @MainActor static func fixedDocumentEvidenceIsLazy() throws {
@@ -90,6 +156,34 @@ import ApplicationServices
             _ = try original.resolvingDocument { throw Cancelled() }
             preconditionFailure("cancellation must propagate")
         } catch is Cancelled { }
+    }
+
+    @MainActor static func retainedMenuMembershipUsesTheCompleteProviderRelation() throws {
+        let menuBar = AXUIElementCreateApplication(1_000_061)
+        let menuItem = AXUIElementCreateApplication(1_000_062)
+        let replacement = AXUIElementCreateApplication(1_000_063)
+        let menu = AXUIElementCreateApplication(1_000_064)
+        let leaf = AXUIElementCreateApplication(1_000_065)
+        let path = [menuBar, menuItem, menu, leaf]
+        var currentLeaf = leaf, listAvailable = true
+        var api = AXRelationReader.API()
+        api.count = { _, _ in (.attributeUnsupported, 0) }
+        api.range = { _, _, _ in preconditionFailure("provider supports only the complete array getter") }
+        api.single = { parent, _ in
+            if CFEqual(parent, menuBar) { return (.success, [menuItem] as CFArray) }
+            if CFEqual(parent, menuItem) { return (.success, [menu] as CFArray) }
+            if CFEqual(parent, menu), listAvailable { return (.success, [currentLeaf] as CFArray) }
+            return (.cannotComplete, nil)
+        }
+        let reader = AXRelationReader(api: api)
+        let confirmed = try NativeMenuUnit.membership(path, root: menuBar, reader: reader)
+        precondition(confirmed == .confirmed)
+        currentLeaf = replacement
+        let changed = try NativeMenuUnit.membership(path, root: menuBar, reader: reader)
+        precondition(changed == .changed)
+        listAvailable = false
+        let unavailable = try NativeMenuUnit.membership(path, root: menuBar, reader: reader)
+        precondition(unavailable == .unavailable)
     }
 
     @MainActor static func fixedWindowQuerySeparatesAXAbsenceFromEndedLifetime() throws {
@@ -667,7 +761,8 @@ extension DocumentProbe: NativeQueryObjectAccess, NativeContractAccess {
     func nativeFacts(
         _ ref: String, session: String, fields: [String], maxNodes: Int, maxDepth: Int,
         childrenPage: NativeInspectQuery.ChildrenPage?, relationPage: NativeInspectQuery.RelationPage?,
-        advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail
+        advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail,
+        focusedElement: Bool
     ) throws -> [String: Any] { preconditionFailure("unselected query") }
     func nativeRelation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws
         -> [String: Any]

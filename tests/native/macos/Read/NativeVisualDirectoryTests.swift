@@ -23,6 +23,8 @@ import ApplicationServices
         var inputWindow: AXUIElement?
         var focusedElement: AXUIElement?
         var nativeAvailable = true
+        var hintUnavailable = false
+        var hintCalls = 0
         var nativeIDs: [CGWindowID] = [380]
         var hiddenNativeIDs = Set<CGWindowID>()
         var nativePresenceUnavailable = false
@@ -126,7 +128,13 @@ import ApplicationServices
             api.inputWindow = { _, _, _ in self.content.append("inputWindow focused-control policy"); return self.inputWindow }
             api.presentedWindow = { node, _, _ in node }
             api.nativeID = { self.ids[CFHash($0)] }
-            api.hint = { node, _ in self.ids[CFHash(node)].map { .init(frame: CGRect(x: 10, y: 10, width: 500, height: 400), title: "", id: $0) } }
+            api.hint = { node, _ in
+                self.hintCalls += 1
+                if self.hintUnavailable { return nil }
+                return self.ids[CFHash(node)].map {
+                    .init(frame: CGRect(x: 10, y: 10, width: 500, height: 400), title: "", id: $0)
+                }
+            }
             api.relations.count = { node, _ in
                 if self.unavailableChildren.contains(CFHash(node)) { return (.cannotComplete, 0) }
                 if CFEqual(node, self.files) { self.content.append("file-list.AXChildren poison"); return (.cannotComplete, 0) }
@@ -170,6 +178,7 @@ import ApplicationServices
         precondition(scope.surface.native?.mapping.id == 380, "original image capture identity unavailable")
         precondition(row["parentState"] as? String == "none", "fresh application parent was lost")
         precondition((result?["provider"] as? [String: Any])?["status"] as? String == "notRequested")
+        try exactVisualIdentitySurvivesOptionalHintFailure()
         try visualWindowFacts()
         try rootCoverageIsIndependentOfDescendantGaps()
         try nativeOnlyRefreshRetainsBinding()
@@ -188,6 +197,17 @@ import ApplicationServices
         try desktopAndApplicationShareNativeIdentity()
         confirmedHelperMembershipDoesNotGuessByPath()
         print("NativeVisualDirectoryTests passed")
+    }
+
+    @MainActor static func exactVisualIdentitySurvivesOptionalHintFailure() throws {
+        let scene = Scene()
+        scene.hintUnavailable = true
+        let rows = try scene.collect()["surfaces"] as! [[String: Any]]
+        precondition(scene.hintCalls == 0, "an exact visual ID needs no optional geometry enrichment")
+        precondition(rows.count == 1 && rows[0]["nativeWindow"] as? Bool == true)
+        let retained = scene.directory.surface(rows[0]["surface"] as! String)
+        precondition(retained?.element.map { CFEqual($0, scene.window) } == true)
+        precondition(retained?.native?.mapping.id == 380)
     }
 
     @MainActor static func confirmedHelperMembershipDoesNotGuessByPath() {

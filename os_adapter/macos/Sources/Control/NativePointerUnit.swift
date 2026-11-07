@@ -463,6 +463,7 @@ enum NativePointerDeliveryPolicy {
             // preparation for non-key panels, menus and visual-only surfaces.
             try await assist.prepare(
                 target, window: window.id, pointerAt: kind != .scroll && windowKind == .keyRequiring ? nil : point,
+                reusePointerAt: kind == .click ? point : nil,
                 onAction: { onPreparation("foreground window activation") }, onCleanupUnknown: onCleanupUnknown)
         } else {
             guard backgroundPreparationAvailable(kind: kind) else {
@@ -678,7 +679,8 @@ enum NativePointerDeliveryPolicy {
         onCleanupUnknown: @escaping @MainActor () -> Void, delivery: NativeClickDelivery? = nil,
         onPreparation: @escaping @MainActor (String) -> Void = { _ in },
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in },
-        preparedPoint: NativePreparedPointerPoint? = nil
+        preparedPoint: NativePreparedPointerPoint? = nil, confirmedService: NativePointerRecipient? = nil,
+        continueSecondClick: ((CGPoint) throws -> WindowGeometry.WindowMapping?)? = nil
     ) async throws {
         try check()
         try target.validate(input: true)
@@ -701,10 +703,10 @@ enum NativePointerDeliveryPolicy {
         guard let process = NativeProcessIdentity.read(window.pid) else {
             throw DriverError("pointer recipient disappeared", code: .staleTarget)
         }
-        let recipient = try preparedRecipient ?? NativePointerRecipient.resolve(
+        let recipient = try confirmedService ?? preparedRecipient ?? NativePointerRecipient.resolve(
             window, nativeWindow: nativeWindow, element: recipientElement, at: start,
             foregroundHit: initial.foreground ? initial.hit : nil)
-        var eventWindow = recipient.eventWindow
+        var eventWindow = try confirmedService?.validate(host: window) ?? recipient.eventWindow
         let sequence = try NativePointerEvents(
             request: request, from: start, to: end, viewport: viewport, source: source)
         guard
@@ -843,11 +845,30 @@ enum NativePointerDeliveryPolicy {
                           "requestedMouseDownAttempted": false, "replayedPointerEvents": 0])
             }
         }
+        func validateSecondDown(_ point: CGPoint) throws -> Bool {
+            guard let continueSecondClick, !recipient.isRemote, point == start else { return false }
+            try guardOperation()
+            try queryRecipient(continuingDrag: false)
+            guard let child = try continueSecondClick(point) else { return false }
+            guard child.id != window.id, child.pid == window.pid, child.frame.contains(point),
+                NativeProcessIdentity.read(child.pid) == process
+            else { throw DriverError("the cell editor pointer endpoint changed", code: .staleTarget) }
+            try BackgroundEvents.requirePointerRoute(window: child)
+            try guardOperation()
+            // After the first up, the second down and its cleanup can keep
+            // this one proved endpoint without a new move or gesture.
+            eventWindow = child
+            return true
+        }
+        let secondDown: ((CGPoint) throws -> Bool)?
+        if continueSecondClick != nil { secondDown = { try validateSecondDown($0) } }
+        else { secondDown = nil }
         try await sequence.deliver(
             entry: entry, check: validate, post: post,
             canRelease: canRelease, skipped: onCleanupUnknown,
             onDispatch: onDispatch, onPosted: onPosted, recoverLocalActivity: restoreLocalActivity,
-            beforeFirstMouseDown: handoffBeforeFirstDown)
+            beforeFirstMouseDown: handoffBeforeFirstDown,
+            validateSecondDown: secondDown)
     }
 }
 
@@ -901,6 +922,12 @@ enum NativePointerDeliveryPolicy {
         var result = [Item(event: try mouse(.mouseMoved, at: from), release: nil, point: from, delayMs: 0)]
         switch request.kind {
         case .click:
+            if request.screen {
+                // The first HID move can queue an AppKit tracking area's
+                // enter. Send one more move at that same point after the
+                // queued enter has had time to run, before any button down.
+                result.append(.init(event: try mouse(.mouseMoved, at: from), release: nil, point: from, delayMs: 15))
+            }
             for count in 1...request.count {
                 result.append(
                     .init(
@@ -962,7 +989,8 @@ enum NativePointerDeliveryPolicy {
         canRelease: @escaping () -> Bool, skipped: @escaping () -> Void, onDispatch: () throws -> Void,
         onPosted: () -> Void,
         recoverLocalActivity: ((CGPoint, NativePointerActivityRecovery.Missing) async throws -> Void)? = nil,
-        beforeFirstMouseDown: ((CGPoint) async throws -> Void)? = nil
+        beforeFirstMouseDown: ((CGPoint) async throws -> Void)? = nil,
+        validateSecondDown: ((CGPoint) throws -> Bool)? = nil
     ) async throws {
         var lastPoint = items[0].point
         var releaseMetric: NativeMetrics.Interval?
@@ -1004,6 +1032,7 @@ enum NativePointerDeliveryPolicy {
         }
         try await pair.run {
             var held = false
+            var completedClickPairs = 0
             if let entry {
                 do { try validate(lastPoint, false) }
                 catch let missing as NativePointerActivityRecovery.Missing {
@@ -1020,7 +1049,8 @@ enum NativePointerDeliveryPolicy {
                 // Mouse-up belongs to the original event route, even when the
                 // down closed its window. Do not require post-action UI state.
                 guard let event = item.event else {
-                    pair.release()
+                    try pair.release()
+                    if isClick && held { completedClickPairs += 1 }
                     held = false
                     continue
                 }
@@ -1028,10 +1058,15 @@ enum NativePointerDeliveryPolicy {
                     [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
                     try await beforeFirstMouseDown?(item.point)
                 }
-                do { try validate(item.point, held) }
-                catch let missing as NativePointerActivityRecovery.Missing {
-                    try await recover(missing, at: item.point, held: held)
-                    try validate(item.point, held)
+                let continued = try completedClickPairs == 1 && item.release != nil
+                    && event.getIntegerValueField(.mouseEventClickState) == 2
+                    && validateSecondDown?(item.point) == true
+                if !continued {
+                    do { try validate(item.point, held) }
+                    catch let missing as NativePointerActivityRecovery.Missing {
+                        try await recover(missing, at: item.point, held: held)
+                        try validate(item.point, held)
+                    }
                 }
                 lastPoint = item.point
                 if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
@@ -1039,7 +1074,7 @@ enum NativePointerDeliveryPolicy {
                 }
                 try onDispatch()
                 if let release = item.release {
-                    pair.press(event, release: release)
+                    try pair.press(event, release: release)
                     held = true
                 } else {
                     post(event, lastPoint)

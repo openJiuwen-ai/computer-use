@@ -234,6 +234,7 @@ import ApplicationServices
     static func expect(_ condition: Bool, file: StaticString = #fileID, line: UInt = #line) { precondition(condition, file: file, line: line) }
 
     @MainActor static func main() async throws {
+        try nativeOnlyAttachmentOwnership()
         let old = try await drag(legacy: true)
         expect(old.dispatch == "partial" && old.events > 2 && old.events < 63 && !old.endpoint)
         let fixed = try await drag(legacy: false)
@@ -511,6 +512,65 @@ import ApplicationServices
             preconditionFailure("retained-only AX child revived")
         } catch let error as DriverError { expect(error.code == .inputUnavailable) }
     }
+
+    @MainActor static func nativeOnlyAttachmentOwnership() throws {
+        let scene = Scene()
+        scene.put(scene.open, kAXModalAttribute, kCFBooleanFalse)
+        scene.bind()
+        scene.nativeIDs.append(contentsOf: [501, 502])
+        scene.nativeParents[501] = 502
+        scene.nativeParents[502] = 380
+        let windows = scene.windows()
+        let intermediate = windows.first { $0.mapping.id == 502 }!
+        let child = windows.first { $0.mapping.id == 501 }!
+        let parentRef = scene.access.windowReference(intermediate)
+        let childRef = scene.access.windowReference(child)
+        for (native, ref, parent) in [(intermediate, parentRef, scene.rootRef), (child, childRef, parentRef)] {
+            scene.directory.remember(.init(owner: scene.app, window: ref,
+                scope: scene.access.nativeScope(native, owner: scene.app), parent: parent, element: nil, native: native))
+        }
+        let boundary = try scene.access.inputBoundary(scene.app, nativeWindows: windows, contentRoot: scene.open,
+                                                       required: [scene.open])
+        expect(!boundary.windows.contains { $0.ref == childRef || $0.ref == parentRef })
+        expect(boundary.parentEvidence?.parents[childRef] == parentRef)
+        expect(boundary.parentEvidence?.parents[parentRef] == scene.rootRef)
+
+        func scope() throws -> [String] {
+            try scene.directory.inputWindowScope(instance: scene.instance, root: scene.rootRef,
+                surface: scene.access.nativeScope(child, owner: scene.app)).blocked
+        }
+        func refused() throws {
+            do { _ = try scope(); preconditionFailure("unproved attachment authorized") }
+            catch let error as DriverError { expect([.staleTarget, .inputUnavailable].contains(error.code)) }
+        }
+        expect(try scope().isEmpty)
+        expect(scene.deepCount == 0)
+
+        scene.unknownNativeParents.insert(502)
+        try refused()
+        scene.unknownNativeParents.remove(502)
+        scene.nativeParents[502] = 207
+        try refused()
+        scene.nativeParents[502] = 501
+        try refused()
+        scene.nativeParents[502] = 380
+
+        let process = intermediate.process
+        scene.nativeProcesses[502] = .init(pid: process.pid, parent: process.parent, seconds: process.seconds + 1,
+                                           microseconds: process.microseconds, executable: process.executable)
+        try refused()
+        scene.nativeProcesses.removeValue(forKey: 502)
+        scene.nativeIDs.append(502)
+        try refused()
+        scene.nativeIDs.removeLast()
+
+        let sheet = scene.node(kAXSheetRole, parent: scene.open)
+        scene.put(sheet, kAXModalAttribute, kCFBooleanTrue)
+        scene.put(sheet, "AXSheets", [] as CFArray)
+        scene.put(scene.open, "AXSheets", [sheet] as CFArray)
+        expect(!(try scope()).isEmpty)
+    }
+
     @MainActor static func originalOwnerBoundaries() throws {
         // The popup/leaf graph stays non-modal and unchanged while its original
         // logical owner gains a sheet or app-modal. This is the owner-negative

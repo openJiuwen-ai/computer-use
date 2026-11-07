@@ -154,6 +154,7 @@ def publish(
     gaps: tuple[ObservationGap, ...] = (),
     preparation: dict | None = None,
     context_owner=None,
+    content_owner=None,
     lookup_context: LookupContext | None = None,
     on_observation=None,
     window_coverage=(),
@@ -227,6 +228,7 @@ def publish(
             WindowIdentity.of(item) if item is not None and content_available else None,
             bool(getattr(owner, "_menu_only", False)),
             tuple(getattr(owner, "_lookup_scopes", ())),
+            content_owner,
         )
     if owner is not None:
         # The pipeline shares retained bindings with their owning service.

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -42,6 +43,7 @@ from computer_use.pipeline.core import Control
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 
+from .application_content import collect_application_content, remember_application_content
 from .capture_companions import CapturedSharingControl, companion_capture
 from .collection import CollectionPlan, components
 from .menus import InterfaceMenuPipeline, remember_menu
@@ -237,8 +239,50 @@ class InterfaceReadPipeline:
                 observed=first if isinstance(first, MenuAppObservation) else None,
                 preparation=preparation,
             )
+
+        async def application_content():
+            if (
+                ui._anchor is not None or view == "image"
+                or "nativeApplicationContent" not in controller.transport.capabilities
+                or any(surface["node"] is not None for surface in directory["surfaces"])
+            ):
+                return None, None
+            content, gap = await collect_application_content(controller, directory["application"], presentation_control)
+            if content is None:
+                return None, gap
+            target, tree = content
+            try:
+                (tree,) = controller.reader.number_snapshots((tree,), _control=presentation_control)
+                prepared = self.preparation.run(
+                    SnapshotRenderRequest(tree, compact=True, public_api=True), presentation_control
+                )
+            except OperationDeadlineExceeded as error:
+                return None, _collection_gap("application content", error)
+            owner = remember_application_content(controller, ui, target, tree)
+            return (target, tree, tree_document(controller, target, tree, prepared=prepared), owner), gap
+
         if instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
+            launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
+            ui._context = None
+            content, content_gap = await application_content()
+            if content is not None:
+                target, tree, document, owner = content
+                lines = [
+                    DisplayText("interface_header", (capture_header(controller, ui, directory, parts=()),)),
+                    "Application content (observation only)",
+                    "Tree: full",
+                    document,
+                ]
+                if view == "both":
+                    lines.append("Image: unavailable for application content.")
+                if isinstance(launch, Mapping) and "detail" in launch:
+                    lines.append(template("Launch: {0}", launch["detail"]))
+                return publish(
+                    controller, ui, DisplayDocument.join(lines), trees=((target, tree),), full=full,
+                    scope=target.surface + ":" + view, directory=directory, content_owner=owner,
+                    partial=bool(directory["stopReasons"]), on_observation=on_observation,
+                )
             matches_view = (
                 bool(
                     not directory["surfaces"] and not directory["stopReasons"] and state.running is not None
@@ -249,7 +293,6 @@ class InterfaceReadPipeline:
                 return await InterfaceMenuPipeline(controller).run(
                     ui, menu_path or (), observed=first if isinstance(first, MenuAppObservation) else None
                 )
-            ui._context = None
             choices = controller.interfaces.windows.choices(directory, state.name or str(instance.selector))
             lines = [
                 DisplayText("interface_header", (capture_header(controller, ui, directory, parts=()),)),
@@ -259,8 +302,10 @@ class InterfaceReadPipeline:
                 lines.append("Observable working window: unavailable.")
             if related is not None:
                 lines.append(related_window_summary(related, directory, instance.windows))
-            if isinstance(first, dict) and "detail" in first:
-                lines.append(template("Launch: {0}", first["detail"]))
+            if isinstance(launch, Mapping) and "detail" in launch:
+                lines.append(template("Launch: {0}", launch["detail"]))
+            if content_gap is not None:
+                lines.append(_gap_line(content_gap))
             return publish(
                 controller,
                 ui,
@@ -269,7 +314,8 @@ class InterfaceReadPipeline:
                 scope="choices:" + str(instance.selector),
                 directory=directory,
                 content_available=False,
-                partial=bool(directory["stopReasons"]),
+                partial=bool(directory["stopReasons"] or content_gap),
+                gaps=(content_gap,) if content_gap is not None else (),
                 on_observation=on_observation,
             )
         permitted = allowed(ui)
@@ -764,6 +810,16 @@ class InterfaceReadPipeline:
                     template("Image note: {0}", note)
                     for note in capture_metadata(part.image.image).get("stopReasons", ())
                 ]
+        content, content_gap = await application_content()
+        content_owner = None
+        if content is not None:
+            target, tree, document, content_owner = content
+            if not trees:
+                lines[tree_heading] = "Tree: full"
+            trees.append((target, tree))
+            lines.extend(("Application content (observation only)", document))
+        if content_gap is not None:
+            collection_gaps.append(content_gap)
         try:
             coverage = plan.coverage(directory, parts, included_images, included_trees=included_tree_surfaces)
         except Exception as error:  # noqa: BLE001 - accounting cannot veto already acquired content or the action
@@ -815,6 +871,7 @@ class InterfaceReadPipeline:
             gaps=tuple(gap for part in parts for gap in part.gaps) + tuple(collection_gaps),
             window_coverage=coverage,
             context_owner=related.context_owner if related is not None else None,
+            content_owner=content_owner,
             partial=bool(
                 principal_error
                 or directory["stopReasons"]

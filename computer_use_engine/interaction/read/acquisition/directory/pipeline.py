@@ -16,6 +16,7 @@ from computer_use.interaction.read.acquisition.directory.passes.collect_director
 from computer_use.interaction.read.acquisition.directory.passes.validate_directory_scope import (
     stage as validate_directory_scope,
 )
+from computer_use.native.query.directory import applications_query
 from computer_use.pipeline import Pipeline, Scope, Sequence
 
 if TYPE_CHECKING:
@@ -70,7 +71,10 @@ class DirectoryReadPipeline(Pipeline["DirectoryRequest", "DirectoryFacts"]):
         @asynccontextmanager
         async def lease(request: DirectoryRequest, control: Control) -> AsyncIterator[DirectoryPlan]:
             async with port.calls.open(None, request.timeout_ms) as read:
-                yield DirectoryPlan(read, request.query)
+                query = request.query
+                if request.application_selector is not None:
+                    query = applications_query(request.application_selector, capabilities=port.connection.capabilities)
+                yield DirectoryPlan(read, query)
 
         return Scope(
             name="DirectoryReadScope",

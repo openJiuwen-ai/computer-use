@@ -13,6 +13,7 @@ import ApplicationServices
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeKeyboardUnit
+    func applicationKeyboardUnit(_ binding: [String: Any]) throws -> NativeApplicationKeyboardUnit?
     func selectedTextUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, receiver: NativeInspectQuery.Receiver?
     ) throws -> NativeSelectedTextUnit
@@ -26,6 +27,7 @@ import ApplicationServices
 
 extension NativeInputUnitAccess {
     func actionContextUnit(_ binding: [String: Any], action: String) throws -> (any NativeApplicationContextInput)? { nil }
+    func applicationKeyboardUnit(_ binding: [String: Any]) throws -> NativeApplicationKeyboardUnit? { nil }
     func popupPointerUnit(_ binding: [String: Any], qualification: NativePopupPointerQualification) throws
         -> any NativePopupPointerInput
     { NativePopupPointerUnit(element: try elementPointerUnit(binding, actuator: nil), qualification: qualification) }

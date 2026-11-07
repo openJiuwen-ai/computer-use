@@ -83,11 +83,12 @@ class WindowIdentity:
 
 @dataclass(frozen=True)
 class LookupContext:
-    """Exact delivered window and menu sources available to name/path lookup."""
+    """Exact delivered sources available to name/path lookup."""
 
     window: WindowIdentity | None
     menu_only: bool = False
     menus: tuple[object, ...] = ()
+    application_content: object | None = None
 
 
 class WindowLifetime(str, Enum):

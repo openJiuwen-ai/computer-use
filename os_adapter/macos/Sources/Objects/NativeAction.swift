@@ -8,6 +8,11 @@ enum NativeAction {
     struct Item: Equatable {
         let name: String
         let description: String?
+        var declarationCount = 1
+
+        /// Duplicate native names remain addressable explicitly. Inferring
+        /// a menu-choice click needs a unique declaration of Pick.
+        var permitsInferredClick: Bool { name != "AXPick" || declarationCount == 1 }
     }
 
     enum ExplicitResolution: Equatable {
@@ -47,7 +52,9 @@ enum NativeAction {
         let standard = [
             "AXPress", "AXPick", "AXConfirm", "AXCancel", "AXIncrement", "AXDecrement", "AXShowMenu", "AXRaise"
         ]
-        guard let declared = actions?.filter({ $0.name == name }), declared.count == 1 else { return false }
+        guard let declared = actions?.filter({ $0.name == name }), declared.count == 1,
+            declared[0].permitsInferredClick
+        else { return false }
         return standard.contains(name) || declared[0].description == description
     }
 
@@ -62,6 +69,17 @@ enum NativeAction {
             result.append(name)
         }
         return result
+    }
+
+    static func catalogue(
+        _ rawNames: [String], description: (String) throws -> String?
+    ) rethrows -> [Item]? {
+        guard let names = boundedNames(rawNames) else { return nil }
+        var counts = [String: Int]()
+        for name in rawNames { counts[name, default: 0] += 1 }
+        return try names.map {
+            Item(name: $0, description: try description($0), declarationCount: counts[$0]!)
+        }
     }
 
 }

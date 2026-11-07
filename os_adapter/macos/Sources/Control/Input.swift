@@ -86,6 +86,14 @@ import Carbon
     /// Validation must happen before an element command performs focus preparation.
     static func validateKey(_ key: String) throws { _ = try chord(key) }
 
+    static func applicationCommandCode(_ key: String) throws -> CGKeyCode? {
+        let encoded = try chord(key)
+        guard let character = key.split(separator: "+").last.map(String.init),
+            let translated = asciiKeys()[character], translated.0 == encoded.code, translated.1.isEmpty
+        else { return nil }
+        return encoded.code
+    }
+
     private struct KeyEvents {
         let source: CGEventSource
         let downs: [CGEvent]
@@ -146,7 +154,7 @@ import Carbon
         ) { press, release in
             for index in events.downs.indices { try await press(events.downs[index], events.ups[index], nil) }
             try await Task.sleep(for: .milliseconds(15))
-            release()
+            try release()
         }
     }
 
@@ -156,13 +164,19 @@ import Carbon
         _ text: String, delivery: NativeKeyboardDelivery, applicationPID: pid_t?,
         validate: @escaping @MainActor () async throws -> Void, onDispatch: @escaping @MainActor () throws -> Void,
         onPosted: @escaping @MainActor () -> Void, onCleanupUnknown: @escaping () -> Void,
-        beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil
+        beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil,
+        savePanelPath: (@MainActor (String) throws -> NativeSavePanelPathContinuation.Proof?)? = nil
     ) async throws {
         try validateText(text)
         let source = try source(), ascii = asciiKeys()
+        var postedPrefix = ""
+        let nextPath: (@MainActor () throws -> NativeSavePanelPathContinuation.Proof?)?
+        if let savePanelPath {
+            nextPath = { try savePanelPath(postedPrefix) }
+        } else { nextPath = nil }
         try await withPreparedRoute(
             source: source, delivery: delivery, validate: validate, onDispatch: onDispatch, onPosted: onPosted,
-            onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: beforeFirstKeyDown
+            onCleanupUnknown: onCleanupUnknown, beforeFirstKeyDown: beforeFirstKeyDown, savePanelPath: nextPath
         ) { press, release in
             var notBefore: TimeInterval?
             for scalar in text.unicodeScalars {
@@ -171,15 +185,17 @@ import Carbon
                 try await press(down, up, notBefore)
                 // Keep release behind a bounded provider round trip. This is
                 // delivery settling, not a post-input focus or value assertion.
-                if let applicationPID {
-                    let root = AXUIElementCreateApplication(applicationPID)
+                let settlePID = savePanelPath == nil ? applicationPID : delivery.processRecipient?.pid
+                if let settlePID {
+                    let root = AXUIElementCreateApplication(settlePID)
                     AXUIElementSetMessagingTimeout(root, 0.2)
                     var ignored: CFTypeRef?
                     _ = AXUIElementCopyAttributeValue(root, kAXFocusedUIElementAttribute as CFString, &ignored)
                 } else {
                     try await Task.sleep(for: .milliseconds(10))
                 }
-                release()
+                try release()
+                if savePanelPath != nil { postedPrefix.unicodeScalars.append(scalar) }
                 // Subsequent preflight work counts toward the same minimum
                 // release interval. Every wait is followed by fresh checks.
                 notBefore = ProcessInfo.processInfo.systemUptime + 0.010
@@ -263,7 +279,7 @@ import Carbon
             } else {
                 try await Task.sleep(for: .milliseconds(10))
             }
-            release()
+            try release()
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -298,10 +314,11 @@ import Carbon
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
         onCleanupUnknown: @escaping () -> Void,
         beforeFirstKeyDown: (@MainActor () async throws -> Void)? = nil,
+        savePanelPath: (@MainActor () throws -> NativeSavePanelPathContinuation.Proof?)? = nil,
         send:
             @MainActor (
                 _ press: @MainActor (CGEvent, CGEvent, TimeInterval?) async throws -> Void,
-                _ release: @MainActor () -> Void
+                _ release: @MainActor () throws -> Void
             ) async throws -> Void
     ) async throws {
         try delivery.requireAdmission()
@@ -310,28 +327,51 @@ import Carbon
         guard recipient == nil || process != nil else {
             throw DriverError("keyboard recipient is no longer identifiable", code: .staleTarget)
         }
+        var activeDelivery = delivery
         let pair = PairedInput<CGEvent>(
             source: source,
-            post: { event in delivery.post(event) },
-            canRelease: { delivery.canRelease(expectedProcess: process) },
-            postRelease: { delivery.post($0) },
+            post: { activeDelivery.post($0) },
+            canRelease: { activeDelivery.canRelease(expectedProcess: process) },
+            postRelease: { activeDelivery.post($0) },
             skipped: onCleanupUnknown)
+        func validateOriginal() async throws {
+            try await validate()
+            guard recipient.map({ NativeProcessIdentity.read($0.pid) == process }) ?? true else {
+                throw DriverError("keyboard receiving process changed", code: .staleTarget)
+            }
+            try recipient?.validateFocus()
+        }
+        func usePath(_ proof: NativeSavePanelPathContinuation.Proof) throws {
+            guard let recipient, proof.authorizes(recipient, lifetime: process),
+                NativeProcessIdentity.read(recipient.pid) == process
+            else { throw DriverError("the Go To keyboard service changed", code: .staleTarget) }
+            try proof.validateFocus()
+            // This callback is supplied only to literal text. Its prefix
+            // includes only released pairs, so no held event can be retargeted.
+            activeDelivery = .process(proof.recipient)
+        }
         let firstDown = FirstKeyDown()
         try await pair.run {
             try await send(
                 { down, up, notBefore in
                     try await firstDown.run(beforeFirstKeyDown)
                     try await InputPacing.validate(notBefore: notBefore) {
-                        try await validate()
-                        guard recipient.map({ NativeProcessIdentity.read($0.pid) == process }) ?? true else {
-                            throw DriverError("keyboard receiving process changed", code: .staleTarget)
+                        if let path = try savePanelPath?() { try usePath(path); return }
+                        do { try await validateOriginal() } catch {
+                            // The modal/focus change may arrive during ordinary
+                            // validation. Only the same exact path proof can
+                            // handle it; all other errors keep their meaning.
+                            guard let failure = error as? any ClassifiedFailure,
+                                [.blockedByModal, .staleTarget, .inputUnavailable].contains(failure.code),
+                                let path = try savePanelPath?()
+                            else { throw error }
+                            try usePath(path)
                         }
-                        try recipient?.validateFocus()
                     }
                     try onDispatch()
-                    pair.press(down, release: up)
+                    try pair.press(down, release: up)
                     onPosted()
-                }, { pair.release() })
+                }, { try pair.release() })
         }
     }
 }

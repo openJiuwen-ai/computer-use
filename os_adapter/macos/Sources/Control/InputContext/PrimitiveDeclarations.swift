@@ -80,15 +80,18 @@ import ApplicationServices
 
     func declare(
         _ unit: NativeInputUnit, supported: Bool, enabled: Bool?, actionDocument: NativeActionDocumentContract? = nil,
+        keyboardInsertion: NativeKeyboardTextEntry? = nil,
         readiness: (Bool) throws -> NativeReadiness
     ) rethrows {
         let prior = previous.first {
             $0.node == binding.node && $0.within == within && $0.actuator == actuator && $0.receiver == receiver
-                && $0.unit == unit && selection.equivalent($0.basis, basis, scope: scope)
+                && $0.unit == unit && $0.keyboardInsertion == keyboardInsertion
+                && selection.equivalent($0.basis, basis, scope: scope)
         }
         let contract = NativePrimitiveContract(
             id: prior?.id ?? UUID().uuidString, node: binding.node, within: within, actuator: actuator,
-            receiver: receiver, basis: basis, unit: unit, actionDocument: actionDocument)
+            receiver: receiver, basis: basis, unit: unit, actionDocument: actionDocument,
+            keyboardInsertion: keyboardInsertion)
         current.append(contract)
         let sampled = try readiness(op.preparationConfirmed(contract.id))
         let conditions: NativeReadiness
@@ -114,7 +117,13 @@ import ApplicationServices
         } else {
             conditions = sampled.requiringEnabled(enabled)
         }
-        primitives.append(unit.declaration(id: contract.id, supported: supported, readiness: conditions))
+        var wire = unit.declaration(id: contract.id, supported: supported, readiness: conditions)
+        if case .keyboard(let kind, let replacement, _) = unit,
+            keyboardInsertion != nil || replacement?.keyboardEntry != nil
+        {
+            wire["keyboardEditing"] = kind.rawValue
+        }
+        primitives.append(wire)
     }
 
     func declareClick(

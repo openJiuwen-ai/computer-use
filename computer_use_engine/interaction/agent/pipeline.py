@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from string import ascii_lowercase
 from time import monotonic
 from typing import TYPE_CHECKING, cast
 
@@ -29,7 +30,12 @@ from computer_use.interaction.read.views.publication import publish
 from computer_use.interaction.requests import ExecuteAction, FindElement
 from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
 from computer_use.native.contracts import Binding, Intent, Knowledge
-from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, QueryRootUnavailable
+from computer_use.native.scopes import (
+    FixedWindowInvalidated,
+    FixedWindowUnconfirmed,
+    QueryRootUnavailable,
+    RunningApplication,
+)
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.protocol.element_path import element_path
@@ -109,7 +115,6 @@ class AgentInterfacePipeline:
         Returns:
             Selector and native state for constructing the corresponding App handle.
         """
-        from computer_use.native.scopes import RunningApplication
         from computer_use.session.state import AppState
 
         entry = self.references.resolve(ref, self.controller.transport.session)
@@ -266,6 +271,10 @@ class AgentInterfacePipeline:
             if evidence is not None and identity is None:
                 snapshot["window_identity"] = evidence.identity
             return
+        if ui._anchor is None and target.root_window is None and snapshot.get("scope_kind") == "applicationContent":
+            # The reference came from this App. Native read admission proves
+            # the original application and the node's content membership.
+            return
         if snapshot.get("scope_kind") == "applicationMenu" and "menu_window_identity" in snapshot:
             menu_window = snapshot["menu_window_identity"]
             if menu_window is None:
@@ -369,6 +378,7 @@ class AgentInterfacePipeline:
                         native.query_scope_kind = "window"
                         native.selection, native.observation = None, None
         menu_only = lookup_context.menu_only if lookup_context is not None else False
+        content_owner = lookup_context.application_content if lookup_context is not None else None
 
         def lookup_remaining():
             # This adapter also owns pure-Python polling. A loop with no native
@@ -432,7 +442,7 @@ class AgentInterfacePipeline:
                 if context is not None and ancestor(instance.directory, key, context)
             }
             incomplete = []
-            if not menu_only and context is None:
+            if not menu_only and context is None and content_owner is None:
                 incomplete.append("application")
             if not menu_only and context is not None and context not in choices:
                 incomplete.append(context)
@@ -445,11 +455,13 @@ class AgentInterfacePipeline:
                 query_available = observed_query(item)
                 if query_available:
                     owners.append(owner)
-                elif key == context:
+                elif key == context and content_owner is None:
                     incomplete.append(key)
                 # Ancillary name scopes come from owned AX query evidence. A new
                 # child seen only as pixels is not a new required AX search scope;
                 # every previously AX-observed descendant still participates.
+            if content_owner is not None and ui._anchor is None:
+                owners.append(content_owner)
             return owners, incomplete
 
         lookup_remaining()
@@ -573,6 +585,36 @@ class AgentInterfacePipeline:
             )
         return Binding(instance.session, identity.instance, identity.window, identity.surface, None)
 
+    def _application_command_target(self, ui: UIHandle, key: object) -> Binding | None:
+        """Use the delivered menu scope for a windowless Command-letter shortcut."""
+        if (
+            "nativeApplicationCommand" not in self.controller.transport.capabilities
+            or not isinstance(key, str) or len(key) != 7 or not key.startswith("super+") or key[-1] not in ascii_lowercase
+            or ui._anchor is not None or getattr(ui, "_window_identity", None) is not None
+        ):
+            return None
+        instance = ui._instance
+        state = self.controller.state(ui)
+        running, lookup = state.running, instance.lookup_context
+        if (
+            type(running) is not RunningApplication or running.session != instance.session
+            or state.selection is not None or instance.anchor is not None
+            or instance.input_context is not None or instance.members or instance.evidence
+            or instance.delivered_lookup_windows
+            or lookup is None or lookup.window is not None or not lookup.menu_only or len(lookup.menus) != 1
+        ):
+            return None
+        source = self.controller.state(lookup.menus[0])
+        target = source.query_target
+        if (
+            source.running != running or source.query_scope_kind != "applicationMenu"
+            or source.menu_window_identity is not None or target is None
+            or target.session != running.session or target.instance is None or target.surface is None
+            or target.root_window is not None or target.capture is not None
+        ):
+            return None
+        return replace(target, node=None)
+
     async def keyboard(
         self, ui: UIHandle, method: str, parameters: Record, control: Control, *, global_input=False, target=None
     ) -> ActionResult:
@@ -581,6 +623,11 @@ class AgentInterfacePipeline:
         # Capture before a new query: neither focus changes nor hidden sampling
         # may turn this operation into input in another document.
         validate_session(self.controller, ui)
+        intent = Intent({"type_text": "insert", "press_key": "key"}.get(method, method), parameters, global_input)
+        if target is None and method == "press_key" and not global_input:
+            command_target = self._application_command_target(ui, parameters.get("key"))
+            if command_target is not None:
+                return await self.write.arun(ExecuteAction(ui, intent, command_target), control)
         target = target or self.keyboard_context(ui, require_observed=ui._anchor is None)
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
         await refresh(self.controller, ui)
@@ -590,7 +637,6 @@ class AgentInterfacePipeline:
                 "the delivered receiver is no longer confirmed inside this fixed Window",
                 "observation_incomplete",
             )
-        intent = Intent(dict(type_text="insert", press_key="key").get(method, method), parameters, global_input)
         return await self.write.arun(ExecuteAction(ui, intent, target), control)
 
     async def act_element(

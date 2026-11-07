@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from computer_use.interaction.read.facts.decisions import decision_fields
 from computer_use.interaction.read.facts.documents import document_projection
 from computer_use.interaction.read.facts.groups import render_properties
 from computer_use.interaction.read.facts.index import data, field_name, observation_index
@@ -146,7 +147,7 @@ def normalize_facts(
     Preserve independent values, relationship views, collection gaps and native
     identities. Platform interpretation is completed before this entry point.
     """
-    if scope_kind not in (None, "window", "applicationMenu"):
+    if scope_kind not in (None, "window", "applicationMenu", "applicationContent"):
         raise ValueError("Unknown observation scope kind")
     if not isinstance(value, NativeObservation):
         raise TypeError("normalizeFacts requires a normalized NativeObservation")
@@ -229,6 +230,7 @@ def _project_facts(
         disclosure_fields = _disclosure_fields(source, original.role)
         document = document_projection(source, original.supplements)
         states = supplement_states(source)
+        decisions = decision_fields(source)
         if primary is not None:
             value_fields[ref] = primary
         if aliases_of_value := numeric_aliases(source, primary, field_sources or {}):
@@ -254,6 +256,16 @@ def _project_facts(
                     field = candidate
             elif key in READ_ONLY_FIELDS and key not in source["fieldStatus"]:
                 field = READ_ONLY_FIELDS[key]
+            elif key in decisions:
+                field, item = decisions[key]
+                if field == "rangeAllowedValues":
+                    item = tuple(
+                        {"element": aliases[value["element"]]}
+                        if isinstance(value, Mapping) and set(value) == {"element"}
+                        else value
+                        for value in item
+                    )
+                node["preserveGroup"] = True
             elif key in states:
                 field, item = states[key]
             elif key.startswith("states.") and key[7:] in _DISPLAY_STATES:

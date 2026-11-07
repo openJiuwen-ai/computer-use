@@ -11,8 +11,13 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.write.model import ResolutionFrame
 from computer_use.interaction.write.resolution.checks import parts, require_actuators
 from computer_use.interaction.write.resolution.receiver import ReceiverQuery
-from computer_use.interaction.write.routes.policy import has_independent_text_route, route_key, validate_target
-from computer_use.native.contracts import Knowledge, UnitCommand
+from computer_use.interaction.write.routes.policy import (
+    has_exact_keyboard_edit_route,
+    has_independent_text_route,
+    route_key,
+    validate_target,
+)
+from computer_use.native.contracts import Channel, Knowledge, UnitCommand
 from computer_use.pipeline import Contract, Effect, Pass
 
 if TYPE_CHECKING:
@@ -54,7 +59,9 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         # Native insertion may address the object and its own known selection
         # directly. Do not require an unrelated keyboard/editor tree for that
         # contract. Candidate filtering preserves paste/key/focus semantics.
-        if has_independent_text_route(facts, intent, frame.request.history):
+        if has_independent_text_route(facts, intent, frame.request.history) or has_exact_keyboard_edit_route(
+            facts, intent, frame.request.history
+        ):
             return replace(frame, facts=facts)
         query = ReceiverQuery(native, operation, target, remaining)
         receiver = await query.resolve(
@@ -63,6 +70,17 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
             focused=facts.input.focused_node if "nativeActuators" in capabilities else None,
             allow_internal="nativeActuators" in capabilities,
             keyboard_input=intent.kind in ("insert", "paste"),
+            declared_cell_preparation=intent.kind == "insert"
+            and facts.platform == "macos"
+            and facts.native_role == "AXCell"
+            and any(
+                primitive.unit == "prepare_receiver"
+                and primitive.channel == Channel.EDITOR
+                and primitive.supported == Knowledge.YES
+                and primitive.background_preparation == Knowledge.YES
+                and route_key(UnitCommand(primitive, target, intent)) not in frame.request.history.unavailable
+                for primitive in facts.primitives
+            ),
         )
         frame = replace(frame, facts=facts, needs_editing_evidence=receiver.needs_editing_evidence)
         if receiver.actuator is not None:

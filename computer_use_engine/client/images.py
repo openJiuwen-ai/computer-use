@@ -118,8 +118,11 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
         facts["stopReasons"] = known["metadata"].get("stopReasons", ())
         facts["capture"] = known["metadata"].get("id")
         # The observation body already carries these sampled window facts.
-        notes = window_state_notes(known["metadata"])
-        facts["stopReasons"] += () if facts.get("omitContext") else notes
+        if not context_already_shown:
+            if "windowStateNotes" in source:
+                facts["captureState"] = source["windowStateNotes"]
+            else:
+                facts["stopReasons"] += window_state_notes(known["metadata"])
         facts["visualText"] = known["metadata"].get("visualText")
         if coordinates is not None and facts["visualText"] is not None:
             visual = facts["visualText"]

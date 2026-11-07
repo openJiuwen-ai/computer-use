@@ -187,9 +187,14 @@ import ApplicationServices
             }
         }
         if let menu = try directory.applicationRootScope(instance: instance, root: value.rootWindow, surface: surface) {
+            guard menu.kind == .menuBar else {
+                throw DriverError(
+                    "the application content scope does not have an addressed input receiver", code: .inputUnavailable)
+            }
             if let root = entry.root {
+                let native = NativeWindows.listIfAvailable(entry.owner)
                 let windows = try applications.windows(
-                    entry.owner, nativeWindows: NativeWindows.list(entry.owner),
+                    entry.owner, nativeWindows: native ?? [],
                     contentRoot: directory.windowElement(root, owner: entry.owner), purpose: .inputValidation)
                 guard let window = windows.first(where: { $0.ref == root })?.element else {
                     throw DriverError("the menu's original working window closed", code: .staleTarget)
@@ -199,7 +204,8 @@ import ApplicationServices
                     windows: windows.map { .init(ref: $0.ref, parent: $0.parent, modal: $0.modal == true) },
                     focused: applications.focusedWindow(entry.owner, windows: windows))
                 return NativeInputScope(
-                    wire: value.wire, application: entry.owner, window: window, menuRoot: menu.element, blocked: blocked
+                    wire: value.wire, application: entry.owner, window: window, menuRoot: menu.element, blocked: blocked,
+                    windowEvidence: .init(windows: windows, nativeWindows: native)
                 )
             }
             try BackgroundTarget(entry.owner).validateWindowlessMenu()
@@ -374,14 +380,24 @@ import ApplicationServices
     func checkContainment(_ binding: [String: Any], within: [String], op: NativeOperation) throws {
         guard !within.isEmpty else { return }
         let node = try string(binding["node"], label: "node")
-        let leaf = try applications.readRoot(node).element
+        let read = try applications.readRoot(node)
+        if let menu = directory.applicationRoot(read.scope), menu.kind == .menuBar {
+            let anchors = try within.map { try applications.readRoot($0) }
+            guard anchors.allSatisfy({ $0.scope == read.scope && $0.application.isEqual(menu.owner) }) else {
+                throw DriverError("selected menu ancestry belongs to a different scope", code: .staleTarget)
+            }
+            try op.check()
+            if try NativeMenuUnit.membership(anchors.map(\.element) + [read.element], root: menu.element) == .confirmed {
+                return
+            }
+        }
         let anchors = try within.map { ref in
             var anchored = binding
             anchored["node"] = ref
             _ = try target(anchored, input: true)
             return try applications.readRoot(ref).element
         }
-        try checkNativeContainment(leaf, anchors: anchors, op: op)
+        try checkNativeContainment(read.element, anchors: anchors, op: op)
     }
 
     func checkNativeContainment(_ leaf: AXUIElement, anchors: [AXUIElement], op: NativeOperation) throws {
@@ -499,13 +515,19 @@ import ApplicationServices
         if let menu = scope.menuRoot {
             // An application menu has no AXWindow. Its membership is proved
             // against the retained, freshly re-read AXMenuBar instead.
-            if !CFEqual(read.element, menu) {
+            if !CFEqual(read.element, menu),
+                try NativeMenuUnit.membership(read.ancestors + [read.element], root: menu) != .confirmed
+            {
+                let reader = AXRelationReader()
                 let evidence = try NativeContainment.check(
                     leaf: read.element, within: [menu], same: { CFEqual($0, $1) },
                     parent: { AXAccess.element($0, kAXParentAttribute) },
-                    children: { AXAccess.elements($0, kAXChildrenAttribute, limit: 2048) },
+                    children: { try NativeMenuUnit.menuChildren($0, limit: 2048, reader: reader) },
                     check: { try RequestDiagnostics.checkCancellation() })
                 guard evidence == .confirmed else {
+                    diagnose(["kind": "application_menu_membership", "node": node,
+                              "retainedAncestors": read.ancestors.count,
+                              "result": evidence == .changed ? "changed" : "unavailable"])
                     throw DriverError(
                         "the selected item is no longer confirmed within the observed application menu",
                         code: evidence == .changed ? .staleTarget : .inputUnavailable)
@@ -558,6 +580,25 @@ import ApplicationServices
         }
         let value = try target(raw, input: input, attachedMenuAction: attachedMenuAction)
         return (value.wire, value.blocked, value.node)
+    }
+
+    /// The original field remains the operation target. Only its proved
+    /// attached sheet may receive the unsent path suffix.
+    func savePanelPathBoundary(_ raw: Any?, proof: NativeSavePanelPathContinuation.Proof) throws -> [String] {
+        let requested = try NativeTarget(raw)
+        try requested.requireSession(session)
+        let original = try applications.readRoot(try string(requested.node, label: "node"))
+        guard CFEqual(original.element, proof.original), original.application.processIdentifier == proof.presenter.pid
+        else { throw DriverError("the SavePanel's original name field changed", code: .staleTarget) }
+        let scope = try inputScope(requested, canonicalize: false, observed: original)
+        try original.validate()
+        guard let window = scope.window, CFEqual(window, proof.panel), let graph = scope.windowEvidence,
+            NativeProcessIdentity.read(proof.presenter.pid) == proof.presenter,
+            NativeProcessIdentity.read(proof.service.pid) == proof.service
+        else { throw DriverError("the Go To sheet's original SavePanel scope changed", code: .staleTarget) }
+        return try proof.blocked(
+            in: graph.windows, root: string(requested.rootWindow, label: "rootWindow"),
+            focused: applications.focusedWindow(scope.application, windows: graph.windows))
     }
 
     /// Only a selected Qt choice pointer consumes its two-path membership.
@@ -706,6 +747,15 @@ import ApplicationServices
         return NativeApplicationContextUnit(application: scope.application)
     }
 
+    func applicationKeyboardUnit(_ binding: [String: Any]) throws -> NativeApplicationKeyboardUnit? {
+        guard binding["node"] is NSNull, binding["rootWindow"] is NSNull, binding["capture"] is NSNull else {
+            return nil
+        }
+        let scope = try inputScope(binding)
+        guard scope.window == nil, let menu = scope.menuRoot else { return nil }
+        return .init(application: scope.application, menu: menu)
+    }
+
     func keyboardUnit(
         _ binding: [String: Any], actuator: NativeInspectQuery.Actuator? = nil,
         receiver: NativeInspectQuery.Receiver? = nil
@@ -770,7 +820,11 @@ import ApplicationServices
         }
         return NativeMenuUnit(
             application: scope.application, window: scope.window, element: try applications.readRoot(node).element,
-            root: scope.menuRoot!, path: try (within + [node]).map { try applications.readRoot($0).element })
+            root: scope.menuRoot!, path: try (within + [node]).map { try applications.readRoot($0).element },
+            attachedDialogs: scope.window.flatMap {
+                NativeMenuAttachedDialogs.candidate(root: $0, evidence: scope.windowEvidence,
+                                                    pid: scope.application.processIdentifier)
+            })
     }
 
     func scrollUnit(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator) throws -> NativeScrollUnit {
@@ -823,6 +877,11 @@ import ApplicationServices
         let surface = try string(scope.wire["surface"], label: "surface")
         guard observed.scope == surface, observed.application.isEqual(scope.owner) else {
             throw DriverError("observed node belongs to another UI scope", code: .staleTarget)
+        }
+        if directory.applicationRoot(surface)?.kind == .applicationContent {
+            _ = try directory.applicationRootScope(
+                instance: string(value.instance, label: "instance"), root: value.rootWindow,
+                surface: surface, containing: observed.element)
         }
         value.rootWindow = scope.wire["rootWindow"] as? String
         return (value.wire, node)

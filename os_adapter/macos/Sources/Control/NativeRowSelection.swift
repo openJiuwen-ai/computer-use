@@ -66,6 +66,79 @@ import ApplicationServices
     }
 }
 
+/// Some tables expose a Press on their opaque cell content that does not
+/// select the containing row. Prefer an already ready pointer on that same
+/// leaf when the original, unselected row is proved by native relations.
+enum NativeOpaqueRowClick {
+    static func matches<Object>(
+        _ leaf: Object, same: (Object, Object) -> Bool,
+        readRole: (Object) throws -> String?, readParent: (Object) throws -> Object?,
+        readChildren: (Object) throws -> [Object]?, readRows: (Object) throws -> [Object]?,
+        readSelected: (Object) throws -> Bool?, sameProcess: (Object, Object) -> Bool,
+        inScope: (Object) throws -> Bool
+    ) rethrows -> Bool {
+        guard let cell = try readParent(leaf), try readRole(cell) == kAXCellRole,
+            try readSelected(cell) == false, let content = try readChildren(cell), content.count == 1,
+            same(content[0], leaf), let row = try readParent(cell), try readRole(row) == kAXRowRole,
+            try readSelected(row) == false, let cells = try readChildren(row), cells.count == 1,
+            same(cells[0], cell), let owner = try readParent(row),
+            let ownerRole = try readRole(owner), [kAXTableRole, kAXOutlineRole].contains(ownerRole),
+            [cell, row, owner].allSatisfy({ sameProcess(leaf, $0) }), try inScope(owner),
+            let rows = try readRows(owner), rows.filter({ same($0, row) }).count == 1
+        else { return false }
+        return true
+    }
+
+    @MainActor static func provesPointerReceiver(
+        _ unit: NativeElementPointerUnit, role: String?, enabled: Bool?, focusWritable: Bool,
+        actions: [NativeAction.Item]?
+    ) throws -> Bool {
+        guard role == kAXUnknownRole, enabled == true, !focusWritable,
+            let actions, actions.count == 1, actions[0].name == kAXPressAction, actions[0].declarationCount == 1
+        else { return false }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.15
+        func canQuery() throws -> Bool {
+            try RequestDiagnostics.checkCancellation()
+            return ProcessInfo.processInfo.systemUptime < deadline
+        }
+        guard try [kAXValueAttribute, kAXSelectedAttribute, kAXFocusedAttribute].allSatisfy({ key in
+            guard try canQuery() else { return false }
+            switch AXAccess.read(unit.element, key) {
+            case .unsupported, .unavailable(.noValue): return true
+            default: return false
+            }
+        }) else { return false }
+        let result = try matches(
+            unit.element, same: CFEqual,
+            readRole: { try canQuery() ? AXAccess.read($0, kAXRoleAttribute).value as? String : nil },
+            readParent: { try canQuery() ? AXAccess.element($0, kAXParentAttribute) : nil },
+            readChildren: { try canQuery() ? AXAccess.elements($0, kAXChildrenAttribute, limit: 2) : nil },
+            readRows: { try canQuery() ? AXAccess.elements($0, kAXRowsAttribute, limit: 256) : nil },
+            readSelected: { try canQuery() ? AXAccess.read($0, kAXSelectedAttribute).value as? Bool : nil },
+            sameProcess: { a, b in
+                var left: pid_t = 0, right: pid_t = 0
+                return AXUIElementGetPid(a, &left) == .success && AXUIElementGetPid(b, &right) == .success
+                    && left == right && left == unit.application.processIdentifier
+            }, inScope: {
+                // Presented rows may omit AXWindow on every node in this
+                // chain. Follow their live parents to the retained sheet or
+                // window. Transport separately resolves the exact service.
+                try unit.hasCurrentParentPath(from: $0, to: unit.logicalWindow ?? unit.window, until: deadline)
+            })
+        try RequestDiagnostics.checkCancellation()
+        return result
+    }
+
+    static func actionOffer(_ original: NativeClickContract, preferPointer: Bool) -> NativeClickContract {
+        guard preferPointer, original.delivery == .objectAction, original.admission == .ready,
+            original.routeFamily == "macos.axAction.AXPress"
+        else { return original }
+        return .init(
+            routeFamily: original.routeFamily, delivery: original.delivery, admission: .insufficientEvidence,
+            reason: "Press on this cell content does not establish row selection.", preparationOptions: [])
+    }
+}
+
 extension NativeElementControl {
     func nativeSelectionContract(_ ref: String) throws -> NativeRowSelection.Contract? {
         guard let target = registry.target(ref) else {

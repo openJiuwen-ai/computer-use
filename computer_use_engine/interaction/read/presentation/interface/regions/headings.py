@@ -36,7 +36,7 @@ def heading_sections(refs: Sequence[str], nodes: Mapping[str, Mapping[str, Any]]
     headings remain peers. A menu, separate window, modal or window control ends
     the current section and keeps its existing placement.
     """
-    headings = [ref for ref in refs if nodes[ref]["role"] == "heading"]
+    headings = [ref for ref in refs if nodes[ref].get("role") == "heading"]
     levels_known = bool(headings) and all(
         type(nodes[ref].get("headingLevel")) is int and nodes[ref]["headingLevel"] > 0 for ref in headings
     )
@@ -53,9 +53,10 @@ def heading_sections(refs: Sequence[str], nodes: Mapping[str, Mapping[str, Any]]
 
     for ref in refs:
         node = nodes[ref]
+        role = node.get("role")
         if (
-            node["role"] in _CHROME
-            or node["role"] == "button"
+            role in _CHROME
+            or role == "button"
             and node.get("subrole") in _WINDOW_BUTTONS
             or node.get("modal") is True
             or node.get("subrole") in ("dialog", "alert", "systemDialog", "popover")
@@ -64,7 +65,7 @@ def heading_sections(refs: Sequence[str], nodes: Mapping[str, Mapping[str, Any]]
                 close()
             stack[0].children.append(ref)
             continue
-        if node["role"] == "heading":
+        if role == "heading":
             level = node["headingLevel"] if levels_known else 0
             while len(stack) > 1 and stack[-1].level >= level:
                 close()

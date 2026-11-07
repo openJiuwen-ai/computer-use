@@ -51,7 +51,8 @@ from computer_use.interaction.read.app_read.passes.validate_explicit_startup imp
 )
 from computer_use.interaction.read.app_read.startup.pipeline import StartupServiceNode
 from computer_use.native.contracts import ApplicationBinding, Dispatch, Intent
-from computer_use.native.query.directory import surfaces_query
+from computer_use.native.query.directory import applications_query, surfaces_query
+from computer_use.native.scopes import PendingApplicationLaunch
 from computer_use.pipeline import Contract, Effect, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
 
@@ -85,6 +86,27 @@ class DirectorySelectionPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
             async with services.port.calls.operation(None, call.remaining) as read:
                 yield DirectoryLease(call, read)
 
+        async def recover_launch(pending: PendingApplicationLaunch, read, control: Control):
+            if read.target.session != pending.session:
+                raise failure("stale_target", "The pending startup belongs to an expired session.")
+            query = applications_query(
+                installation=pending.installation, capabilities=services.port.connection.capabilities
+            )
+            catalogue = await services.directory.collect(read, query, _control=control)
+            if catalogue["stopReasons"]:
+                raise failure("observation_incomplete", "Application discovery is partial. Startup remains unconfirmed.")
+            if "installation" in query:
+                candidates = catalogue["applications"]
+                if len(candidates) > 1:
+                    raise failure("ambiguous_target", "Several running instances match the original installation.")
+                application = candidates[0] if candidates else None
+            else:
+                application = select_application(catalogue, pending.installation)
+            if application is None or not application["isRunning"]:
+                raise failure("observation_incomplete", "The previous application startup remains unconfirmed.")
+            services.pending_launches.pop(pending.installation)
+            return catalogue, application
+
         async def resolve(value: Any, control: Control) -> DirectoryLease:
             request, read = (value.call.request, value.read)
             selector, window = (request.selector, request.window)
@@ -94,8 +116,21 @@ class DirectorySelectionPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                     raise failure("stale_target", "The selected application belongs to a previous driver session.")
                 application = dict(id=selector.application, displayName=selector.name, isRunning=True)
             else:
-                applications = await services.directory.collect(read, dict(kind="applications"), _control=control)
-                application = select_application(applications, selector)
+                pending = services.pending_launch(selector)
+                if pending is None:
+                    applications = request.source_applications
+                    if applications is None:
+                        applications = await services.directory.collect(
+                            read, applications_query(selector, capabilities=services.port.connection.capabilities),
+                            _control=control,
+                        )
+                    elif applications["session"] != read.target.session:
+                        raise failure("stale_target", "The selected installation belongs to a previous driver session.")
+                    application = select_application(applications, selector)
+                    if not application["isRunning"]:
+                        pending = services.pending_launches.get(application["id"])
+                if pending is not None:
+                    applications, application = await recover_launch(pending, read, control)
                 chosen_window = selected_window(application, selector)
                 if chosen_window is not None:
                     if window is not None and window != chosen_window:
@@ -171,13 +206,26 @@ class _LaunchDispatch(Node["ApplicationSelection", "ApplicationSelection"]):
 
         pipeline = WritePipeline(self.services.port)
         self.children = (pipeline.intent, pipeline.main)
+        session, installation = value.applications["session"], value.application["id"]
         try:
-            receipt = await pipeline.run_in_call(
-                Intent("launch"),
-                ApplicationBinding(value.applications["session"], value.application["id"]),
-                value.call.remaining,
-                _control=control,
-            )
+            try:
+                receipt = await pipeline.run_in_call(
+                    Intent("launch"), ApplicationBinding(session, installation), value.call.remaining, _control=control
+                )
+            except BaseException as error:
+                # NativeUnitPipeline marks interrupted in-flight dispatches
+                # unknown. Earlier cancellation needs no pending launch.
+                if pipeline.state.dispatched != Dispatch.NOT_DISPATCHED or (
+                    isinstance(error, ComputerUseError) and error.effect in ("possible", "partial")
+                ):
+                    selectors = tuple(
+                        selector for selector in (value.request.selector, value.application.get("path"))
+                        if isinstance(selector, str)
+                    )
+                    self.services.pending_launches[installation] = PendingApplicationLaunch(
+                        session, installation, selectors
+                    )
+                raise
             value.call.receipt.launch = MappingProxyType(
                 {**receipt, "application": MappingProxyType(dict(receipt["application"]))}
             )

@@ -107,12 +107,19 @@ def plan_fact_profile(scope: FactScope, capabilities: NativeReadCapabilities) ->
     # are separate read dimensions. Keep the same bounded content profile
     # for App.read and Element.read, including continued children pages.
     if fields is None:
-        relations = followed_relations(platform, features)
+        relations = () if request.scope_kind == "applicationContent" else followed_relations(platform, features)
         if relations:
             options["follow_relations"] = list(relations)
-        # Popup ownership is operation-specific receiver evidence. Query
-        # it for a selected editor, not every node of a display read (or
-        # older drivers which do not implement nativeVirtualFocus).
+        if (
+            platform == "macos"
+            and request.scope_kind == "window"
+            and "nativeFocusedReadV1" in features
+            and children_page is None
+            and relation_page is None
+        ):
+            options["focused_element"] = True
+        # Query popup state only where the provider declares it. It is an
+        # observation fact; resolving the actual popup receiver is separate.
         fields = [key for key, semantic in FIELDS[platform].items() if semantic != "hasPopup"]
         if platform == "windows" and "nativeUiaReadV2" not in features:
             fields = [key for key in fields if key not in WINDOWS_READ_V2_FIELDS]
@@ -169,6 +176,9 @@ def plan_fact_profile(scope: FactScope, capabilities: NativeReadCapabilities) ->
             # Reuse the provider's declared attributes, avoiding getters
             # for menu-only properties on unrelated document controls.
             options.setdefault("advertised_fields", []).extend(MACOS_MENU_SHORTCUT_FIELDS)
+        if platform == "macos" and "nativeAdvertisedFields" in features:
+            fields.append("AXHasPopup")
+            options.setdefault("advertised_fields", []).append("AXHasPopup")
         if platform == "macos" and "nativeParameterizedText" in features:
             options["text_content"] = True
         if "nativeRawNodeMetadata" in features:

@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.records import RenderedTree
     from computer_use.interaction.records import Remaining
     from computer_use.native.port import NativePort
+    from computer_use.native.scopes import PendingApplicationLaunch
     from computer_use.pipeline.core import Control, T
     from computer_use.protocol.records import ApplicationInfo
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
@@ -154,6 +155,14 @@ class NativeAppReader:
         self._window_references = None
         self.window_registry = None
         self._element_references = None
+        # The reader owns a driver session. Recovery survives temporary App
+        # wrapper lifetimes and is keyed by the retained installation.
+        self.pending_launches: dict[str, PendingApplicationLaunch] = {}
+
+    def pending_launch(self, selector: str) -> PendingApplicationLaunch | None:
+        return self.pending_launches.get(selector) or next(
+            (item for item in self.pending_launches.values() if selector in item.selectors), None
+        )
 
     def number_snapshots(
         self, snapshots: Iterable[SemanticSnapshot], *, _control: Control | None = None
@@ -204,6 +213,7 @@ class NativeAppReader:
         source_directory: DirectoryFacts | None = None,
         scope_managed: bool = False,
         include_menus: bool = True,
+        source_applications: DirectoryFacts | None = None,
     ) -> AppObservation | MenuAppObservation:
         """Read an application through request, acquisition and delivery pipelines.
 
@@ -223,6 +233,7 @@ class NativeAppReader:
             scope_managed: The enclosing interface owns member discovery and final presentation;
                 retain numbered components without an inner scope recollection or duplicate projection.
             include_menus: Collect the optional application menu summary after window content.
+            source_applications: Catalogue that selected the installation before the startup branch.
         """
         from computer_use.interaction.read.app_read.model import ReadRequest
         from computer_use.interaction.read.pipeline import ApplicationObservationPipeline
@@ -243,6 +254,7 @@ class NativeAppReader:
             source_directory,
             scope_managed,
             include_menus,
+            source_applications,
         )
         return await ApplicationObservationPipeline(self).arun(request)
 

@@ -55,6 +55,24 @@ import ApplicationServices
     private let api: API
     init(api: API = API()) { self.api = api }
 
+    func completeArray(
+        _ element: AXUIElement, property: String, limit: Int, withinBudget: () throws -> Bool
+    ) throws -> AXRead<[AXUIElement]> {
+        switch try read(element, source: "complete-array", property: property, limit: limit, withinBudget: withinBudget) {
+        case .page(let page):
+            guard page.isArray == true, page.total == page.prefix.count, page.issue == nil else {
+                return .unavailable(.failure)
+            }
+            return .value(page.prefix)
+        case .failure(let failure):
+            switch failure["state"] as? String {
+            case "unsupported": return .unsupported
+            case "absent": return .unavailable(.noValue)
+            default: return .unavailable(.failure)
+            }
+        }
+    }
+
     func read(
         _ element: AXUIElement, source: String, property: String, limit: Int, cursor: String? = nil,
         withinBudget: () throws -> Bool = { true }

@@ -7,6 +7,12 @@ import ApplicationServices
 /// this route after AX preparation; this unit never sends requested text/keys.
 @MainActor struct NativePointerFocusUnit {
     enum TargetKind: Equatable { case editor, scalarText }
+
+    static func supportsEditorPreparation(role: String?, intent: NativeKeyboardIntent.Kind) -> Bool {
+        guard [.focus, .insert, .replace, .paste].contains(intent) else { return false }
+        if role == kAXComboBoxRole { return intent == .focus }
+        return [kAXTextFieldRole, kAXTextAreaRole, "AXWebArea"].contains(role ?? "")
+    }
     /// Narrow native leaves for the one pointer-focus preparation sequence.
     /// Tests drive the same sequence without posting desktop input.
     struct PreparationAccess {

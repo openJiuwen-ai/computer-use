@@ -562,6 +562,8 @@ def action_for_intent(
             return None
         if "AXPress" in actions:
             return "AXPress"
+        if complete and role == "AXMenuItem" and not has_submenu and sum(action == "AXPick" for action in actions) == 1:
+            return "AXPick"
         # Absence of Press must be known, not inferred from a partial catalogue.
         if complete and role in ("AXPopUpButton", "AXMenuButton", "AXComboBox") and "AXShowMenu" in actions:
             return "AXShowMenu"
@@ -771,6 +773,8 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
     Unknown capabilities do not erase native fields or actions.
     """
     caps = {key: "unknown" for key in ("click", "typeText", "replaceText", "focus")}
+    if scope_kind == "applicationContent":
+        return dict.fromkeys(caps, "unavailable")
     if platform == "windows":
         scope = node["values"].get("UIA.ReferenceScopeEvidence")
         if (
@@ -907,6 +911,7 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
                 raw_role not in ("AXMenuBar", "AXMenuBarItem", "AXMenuItem", "AXMenu")
                 or scope_kind == "applicationMenu"
                 and "nativeMenuActions" in driver_features
+                and any(action["name"] == "AXPress" for action in actions["items"])
             )
             and action_for_intent(
                 platform, raw_role, [a["name"] for a in actions["items"]], actions["state"] == "complete", "click"

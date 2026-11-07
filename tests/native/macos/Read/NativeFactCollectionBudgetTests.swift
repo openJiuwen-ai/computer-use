@@ -18,22 +18,116 @@ import ApplicationServices
             try preservesSmallRoot(milliseconds)
             try preservesSmallRelation(milliseconds)
         }
+        try changedRootFactsCannotUseRetainedIdentity()
+        try observesScopedFocusWithoutInventingChildren()
         try expiredRequestDoesNotCollect()
         try closeButtonUsesSingleObjectGetter()
         try await cancelledRequestDoesNotCollect()
         print("PASS short observation budgets collect real root/relation facts and preserve expired/cancelled boundaries")
     }
 
-    @MainActor private static func root(_ registry: ApplicationElements) -> (String, AXUIElement) {
+    @MainActor private static func root(_ registry: ApplicationElements, role: String = "AXButton")
+        -> (String, AXUIElement)
+    {
         let owner = NSRunningApplication.current
         let element = AXUIElementCreateApplication(owner.processIdentifier)
-        let identity = ElementIdentity(facts: .init(values: ["AXRole": "AXButton"]))
+        let identity = ElementIdentity(facts: .init(values: ["AXRole": role]))
         let target = ApplicationElements.Target(application: owner, launched: owner.launchDate,
-            element: element, scope: "budget-window", role: "AXButton", identity: identity)
+            element: element, scope: "budget-window", role: role, identity: identity)
         let ref = registry.observe(.init(pid: owner.processIdentifier, launched: owner.launchDate,
             element: element, scope: target.scope), evidence: .init(identity: identity, provider: nil, context: []),
             value: target)
         return (ref, element)
+    }
+
+    @MainActor private static func observesScopedFocusWithoutInventingChildren() throws {
+        let registry = ApplicationElements()
+        let (ref, window) = root(registry, role: "AXWindow")
+        let pid = NSRunningApplication.current.processIdentifier
+        let focus = AXUIElementCreateApplication(pid + 100_000)
+        let otherWindow = AXUIElementCreateApplication(pid + 100_001)
+        var owner = window
+        var focusedReads = 0
+        var attributes = AXAttributeReader.API()
+        attributes.batch = { element, fields in
+            let isFocus = CFEqual(element, focus)
+            return (.success, fields.map { _ in isFocus ? "AXTextField" : "AXWindow" } as CFArray)
+        }
+        attributes.single = { element, field in
+            switch field {
+            case kAXFocusedUIElementAttribute:
+                focusedReads += 1
+                return (.success, focus)
+            case kAXParentAttribute where CFEqual(element, focus):
+                return (.success, window)
+            case kAXWindowAttribute where CFEqual(element, focus):
+                return (.success, owner)
+            default:
+                return (.noValue, nil)
+            }
+        }
+        var relations = AXRelationReader.API()
+        relations.count = { _, _ in (.success, 0) }
+        relations.single = { _, _ in (.noValue, nil) }
+        let collector = NativeFactCollector(registry: registry, inspection: .init(registry: registry),
+            attributes: attributes, relations: relations)
+        func read(focused: Bool) throws -> [String: Any] {
+            try collector.collect(ref, session: "budget-session", fields: ["AXRole"], maxNodes: 3, maxDepth: 2,
+                followRelations: ["AXVisibleRows"], actionDetail: .none, focusedElement: focused)
+        }
+        let ordinary = try read(focused: false)
+        precondition((ordinary["nodes"] as! [[String: Any]]).count == 1 && focusedReads == 0)
+        let captured = try read(focused: true)
+        let nodes = captured["nodes"] as! [[String: Any]]
+        precondition(nodes.count == 2 && focusedReads == 2,
+            "the scoped focused element omitted from Children must be sampled once")
+        let links = captured["relations"] as! [[String: Any]]
+        let children = links.first {
+            $0["source"] as? String == ref && $0["property"] as? String == kAXChildrenAttribute
+        }
+        precondition(children?["targets"] as? [String] == [], "focus is not a fabricated child")
+        let focusRef = nodes[1]["node"] as! String
+        let parent = links.first {
+            $0["source"] as? String == focusRef && $0["property"] as? String == kAXParentAttribute
+        }
+        precondition(parent?["targets"] as? [String] == [ref], "the actual native Parent relation survives")
+        let focusLinks = links.filter { $0["source"] as? String == focusRef }
+        precondition(Set(focusLinks.compactMap { $0["property"] as? String })
+            == Set(captured["requestedRelations"] as! [String]),
+            "the wire protocol requires a result for every requested relationship on a sampled node")
+        let focusChildren = focusLinks.first { $0["property"] as? String == kAXChildrenAttribute }
+        precondition(focusChildren?["state"] as? String == "partial" && focusChildren?["certainty"] as? String == "unknown"
+            && focusChildren?["targets"] as? [String] == [] && focusChildren?["total"] == nil)
+        let encoded = NativeObservationEncoding.encode(captured)
+        let graph = encoded["nodes"] as! [[String: Any]]
+        let properties = graph.first { $0["id"] as? String == ref }!["properties"] as! [[String: Any]]
+        let seed = properties.first { $0["key"] as? [String] == ["toolkit", "focused_read_seed"] }!
+        precondition((seed["value"] as? [String: Any])?["nativeType"] as? String == "AXUIElement")
+        owner = otherWindow
+        let outside = try read(focused: true)
+        precondition((outside["nodes"] as! [[String: Any]]).count == 1,
+            "an actual window contradiction cannot expand the selected root")
+        let outsideGraph = NativeObservationEncoding.encode(outside)["nodes"] as! [[String: Any]]
+        let outsideProperties = outsideGraph[0]["properties"] as! [[String: Any]]
+        let outsideSeed = outsideProperties.first { $0["key"] as? [String] == ["toolkit", "focused_read_seed"] }!
+        precondition((outsideSeed["value"] as? [String: Any])?["nativeType"] as? String == "CFNull")
+    }
+
+    @MainActor private static func changedRootFactsCannotUseRetainedIdentity() throws {
+        let registry = ApplicationElements()
+        let (ref, _) = root(registry)
+        var attributes = AXAttributeReader.API()
+        attributes.batch = { _, fields in
+            (.success, fields.map { $0 == "AXRole" ? "AXTextField" : "New object" } as CFArray)
+        }
+        let collector = NativeFactCollector(registry: registry, inspection: .init(registry: registry),
+            attributes: attributes)
+        do {
+            _ = try collector.collect(ref, session: "budget-session", fields: ["AXRole", "AXTitle"],
+                maxNodes: 1, maxDepth: 0, actionDetail: .none)
+            throw DriverError("replacement facts were published under the original button's reference")
+        } catch let error as DriverError where error.code == .staleTarget {}
+        precondition(registry.target(ref) == nil)
     }
 
     @MainActor private static func closeButtonUsesSingleObjectGetter() throws {

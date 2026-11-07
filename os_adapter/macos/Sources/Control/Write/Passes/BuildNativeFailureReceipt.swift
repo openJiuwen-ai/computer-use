@@ -9,6 +9,9 @@ import ApplicationServices
         _ error: Error, kind: String, foreground: Bool, id: String, op: NativeOperation, receipt: NativeExecutionReceipt
     ) {
         receipt.recordFailure(error)
+        // A cell's selection/focus setter may have taken effect before a
+        // dependency expires. Reinspection cannot authorize replay here.
+        guard !receipt.nonRepeatablePreparation else { return }
         if error is NativeRouteUnavailable {
             // A positively disqualified mechanism cannot be repaired by
             // foreground preparation. Do not let its dispatched cases fall

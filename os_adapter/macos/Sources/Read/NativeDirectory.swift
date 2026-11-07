@@ -46,9 +46,11 @@ import ApplicationServices
     private var surfaces = [String: Surface]()
     private var endedWindows = [String: (owner: NSRunningApplication, value: [String: Any])]()
     struct ApplicationRoot {
+        enum Kind: String { case menuBar, applicationContent }
         let owner: NSRunningApplication
         let element: AXUIElement
         let scope: String
+        let kind: Kind
     }
     private var applicationRoots = [String: ApplicationRoot]()
     private struct InstallationEntry {
@@ -149,7 +151,9 @@ import ApplicationServices
     /// Application UI such as the menu bar is not a document window. When a
     /// caller has selected a document, keep that binding and its lifetime; a
     /// read of a global root cannot revive a closed working window.
-    func applicationRootScope(instance: String, root: String?, surface: String) throws -> ApplicationRoot? {
+    func applicationRootScope(
+        instance: String, root: String?, surface: String, containing: AXUIElement? = nil
+    ) throws -> ApplicationRoot? {
         guard let selected = applicationRoots[surface] else { return nil }
         let entry = try state.appSelections.entry(instance)
         guard entry.owner.isEqual(selected.owner), entry.root == root else {
@@ -163,13 +167,63 @@ import ApplicationServices
         }
         let app = AXUIElementCreateApplication(selected.owner.processIdentifier)
         AXMessaging.configure(app)
-        guard let current = AXAccess.element(app, kAXMenuBarAttribute), CFEqual(current, selected.element) else {
-            throw DriverError("the observed application menu root changed or is unavailable", code: .staleTarget)
+        switch selected.kind {
+        case .menuBar:
+            guard let current = AXAccess.element(app, kAXMenuBarAttribute), CFEqual(current, selected.element) else {
+                throw DriverError("the observed application menu root changed or is unavailable", code: .staleTarget)
+            }
+        case .applicationContent:
+            guard root == nil, CFEqual(app, selected.element) else {
+                throw DriverError("the observed application content root changed", code: .staleTarget)
+            }
+            guard let containing else { return selected }
+            switch try applicationContent(app, owner: selected.owner, containing: containing) {
+            case .confirmed: break
+            case .absent:
+                throw DriverError("the application content scope is no longer present", code: .staleTarget)
+            case .incomplete:
+                throw DriverError("the application content scope could not be confirmed", code: .observationIncomplete)
+            }
         }
         return selected
     }
 
-    func collectRoots(_ application: String) throws -> [String: Any] {
+    private func applicationContent(
+        _ application: AXUIElement, owner: NSRunningApplication, containing: AXUIElement? = nil
+    ) throws -> NativeApplicationContent.Evidence {
+        let deadline = min(ProcessInfo.processInfo.systemUptime + 0.2, RequestDiagnostics.deadline ?? .infinity)
+        func withinBudget() throws -> Bool {
+            try RequestDiagnostics.checkCancellation()
+            return ProcessInfo.processInfo.systemUptime < deadline
+        }
+        func withBoundedTimeout<T>(_ element: AXUIElement, fallback: T, _ query: () throws -> T) rethrows -> T {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard AXUIElementSetMessagingTimeout(element, Float(max(0.001, min(0.05, remaining)))) == .success else {
+                return fallback
+            }
+            defer { AXMessaging.configure(element) }
+            return try query()
+        }
+        return try NativeApplicationContent.evidence(
+            application, pid: owner.processIdentifier, containing: containing,
+            role: { element in
+                withBoundedTimeout(element, fallback: nil) {
+                    AXAccess.read(element, kAXRoleAttribute).value as? String
+                }
+            },
+            elements: { element, attribute, limit in
+                try withBoundedTimeout(element, fallback: .unavailable(.failure)) {
+                    try NativeApplicationContent.array(element, attribute, limit: limit, withinBudget: withinBudget)
+                }
+            },
+            owner: { element in
+                var pid: pid_t = 0
+                return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+            },
+            withinBudget: withinBudget)
+    }
+
+    func collectRoots(_ application: String, applicationContent requestedContent: Bool = false) throws -> [String: Any] {
         guard ApplicationInstances<NSRunningApplication>.isInstanceSelector(application),
             case .running(let app) = try state.discovery.locate(application)
         else { throw DriverError("root discovery requires an observed running-application id", code: .invalidRequest) }
@@ -180,17 +234,27 @@ import ApplicationServices
             _ = state.accessibilityActivation.ensure(app)
             let element = AXUIElementCreateApplication(app.processIdentifier)
             AXMessaging.configure(element)
-            let read = AXAccess.read(element, kAXMenuBarAttribute)
-            switch read {
-            case .value(let raw) where CFGetTypeID(raw) == AXUIElementGetTypeID():
-                let menu = unsafeDowncast(raw, to: AXUIElement.self)
-                let scope = state.applications.observationScope(app, window: nil)
-                let node = try state.applications.registerNativeRoot(menu, app: app, scope: scope)
+            func retain(_ root: AXUIElement, kind: ApplicationRoot.Kind) throws {
+                let scope = state.applications.observationScope(app, window: kind == .menuBar ? nil : root)
+                let node = try state.applications.registerNativeRoot(root, app: app, scope: scope)
                 let instance = state.appSelections.get(owner: app, root: nil)
-                applicationRoots[scope] = ApplicationRoot(owner: app, element: menu, scope: scope)
-                roots.append(["kind": "menuBar", "instance": instance.id, "surface": scope, "node": node])
-            case .unsupported, .unavailable(.noValue): break
-            default: reasons.append("application menu root could not be read")
+                applicationRoots[scope] = ApplicationRoot(owner: app, element: root, scope: scope, kind: kind)
+                roots.append(["kind": kind.rawValue, "instance": instance.id, "surface": scope, "node": node])
+            }
+            if requestedContent {
+                switch try applicationContent(element, owner: app) {
+                case .confirmed: try retain(element, kind: .applicationContent)
+                case .absent: break
+                case .incomplete: reasons.append("application content root could not be confirmed")
+                }
+            } else {
+                let read = AXAccess.read(element, kAXMenuBarAttribute)
+                switch read {
+                case .value(let raw) where CFGetTypeID(raw) == AXUIElementGetTypeID():
+                    try retain(unsafeDowncast(raw, to: AXUIElement.self), kind: .menuBar)
+                case .unsupported, .unavailable(.noValue): break
+                default: reasons.append("application menu root could not be read")
+                }
             }
         } else {
             reasons.append("accessibility permission unavailable")
@@ -325,6 +389,9 @@ import ApplicationServices
             return (selected, [])
         }
         let windows = boundary.windows
+        let inputWindows = windows.map { AppSelection.Window(ref: $0.ref, parent: $0.parent, modal: $0.modal == true) }
+            + nativeInputAttachments(boundary, native: native)
+        let unknownParents = Set(windows.filter(\.parentUnknown).map(\.ref))
         if selected.native == nil {
             // An AX-only surface has no independent physical-window identity
             // to retain the visual route when provider membership disappears.
@@ -335,7 +402,7 @@ import ApplicationServices
         var path = Set<String>(), current: String? = selected.window
         while let ref = current, path.insert(ref).inserted {
             if ref == root { break }
-            guard let row = windows.first(where: { $0.ref == ref }), !row.parentUnknown else {
+            guard let row = inputWindows.first(where: { $0.ref == ref }), !unknownParents.contains(ref) else {
                 throw DriverError("current input-surface ownership cannot be confirmed", code: .inputUnavailable)
             }
             current = row.parent
@@ -361,8 +428,8 @@ import ApplicationServices
             var current: String? = modal.ref, seen = Set<String>()
             while let ref = current {
                 if path.contains(ref) { return false }
-                guard seen.insert(ref).inserted, let owner = windows.first(where: { $0.ref == ref }),
-                    !owner.parentUnknown else { return true }
+                guard seen.insert(ref).inserted, let owner = inputWindows.first(where: { $0.ref == ref }),
+                    !unknownParents.contains(ref) else { return true }
                 current = owner.parent
             }
             // Only a complete chain to a positively known independent root
@@ -373,11 +440,34 @@ import ApplicationServices
             throw DriverError("a live modal surface has unresolved ownership", code: .inputUnavailable)
         }
         let blocked = try NativeWindowBoundary.blocked(
-            root: root, target: selected.window,
-            windows: windows.map { .init(ref: $0.ref, parent: $0.parent, modal: $0.modal == true) },
+            root: root, target: selected.window, windows: inputWindows,
             focused: state.applications.focusedWindow(selected.owner, windows: windows))
         return (selected, blocked)
     }
+
+    /// Native-only rows can supply live containment without supplying AX
+    /// content or a modal claim. Reuse the collector's conflict/cycle proof and
+    /// require both ends to be unique in the current process incarnation.
+    private func nativeInputAttachments(
+        _ boundary: NativeApplicationReader.InputBoundary, native: [NativeWindows.Window]
+    ) -> [AppSelection.Window] {
+        guard let evidence = boundary.parentEvidence else { return [] }
+        let axRefs = Set(boundary.windows.map(\.ref))
+        guard evidence.parents.keys.contains(where: { !axRefs.contains($0) }) else { return [] }
+        let refs = native.map { (ref: state.applications.windowReference($0), window: $0) }
+        let byRef = Dictionary(grouping: refs, by: \.ref)
+        let byID = Dictionary(grouping: native, by: \.mapping.id)
+        return refs.compactMap { ref, window in
+            guard !axRefs.contains(ref), byRef[ref]?.count == 1, byID[window.mapping.id]?.count == 1,
+                !evidence.unresolved.contains(ref), let parent = evidence.parents[ref],
+                !evidence.unresolved.contains(parent), let candidates = byRef[parent], candidates.count == 1,
+                let owner = candidates.first?.window, byID[owner.mapping.id]?.count == 1,
+                window.parentID == owner.mapping.id, owner.process == window.process
+            else { return nil }
+            return .init(ref: ref, parent: parent, modal: false)
+        }
+    }
+
     /// An unavailable modal proxy is irrelevant only with positive current
     /// native attachment into a different, fully known independent AX root.
     /// Reuse this collector's parent evidence; no historical edge authorizes it.
@@ -540,21 +630,34 @@ import ApplicationServices
         ]
     }
 
-    func applications() throws -> [String: Any] {
+    func applications(scope: NativeInspectQuery.ApplicationScope = .all) throws -> [String: Any] {
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 3)
+        let path: URL?, installation: NativeInstallation?, echo: [String: String]
+        switch scope {
+        case .all: (path, installation, echo) = (nil, nil, [:])
+        case .path(let requested):
+            (path, installation, echo) = (URL(fileURLWithPath: requested), nil, ["path": requested])
+        case .installation(let id):
+            let original = try self.installation(["session": session, "application": id]).identity
+            (path, installation, echo) = (original.url, original, ["installation": id])
+        }
         var limited = false
-        let entries = state.discovery.nativeApplications {
+        let entries = state.discovery.nativeApplications(path: path) {
             let allowed = !Task.isCancelled && ProcessInfo.processInfo.systemUptime < deadline
             if !allowed { limited = true }
             return allowed
         }
         try RequestDiagnostics.checkCancellation()
+        try installation?.validate()
         var reasons = [String]()
         if limited { reasons.append("application catalogue time budget; installed entries may be missing") }
         if entries.count > 4096 { reasons.append("application catalogue entry limit") }
-        var value = result("applications", began: began, reasons: reasons)
-        value["applications"] = try entries.prefix(4096).map { item in
+        var value = result("applications", began: began, reasons: reasons).merging(echo) { current, _ in current }
+        // A retained installation scope is observation-only after a launch
+        // may have been sent. Only its current running instances can resolve it.
+        let eligible = installation == nil ? entries : entries.filter { $0["isRunning"] as? Bool == true }
+        value["applications"] = try eligible.prefix(4096).map { item in
             try RequestDiagnostics.checkCancellation()
             return item["isRunning"] as? Bool == false ? retainInstallation(item) : item
         }

@@ -8,6 +8,7 @@ from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.preparation import prepare_snapshot
 from computer_use.protocol.observation import (
+    Action,
     CoordinateSpace,
     Geometry,
     NativeNode,
@@ -65,3 +66,33 @@ def test_heading_and_visual_columns_keep_each_original_target_once(rows, heading
         for label in (f"Setting {index}", f"Description {index}", f"Toggle {index}"):
             assert label in text
     assert encode_observation(native) == original
+
+
+def test_heading_keeps_an_already_composed_control():
+    native = NativeObservation(
+        "macos", "settings", "capture", (1, 2), ("window",),
+        {
+            "window": NativeNode(role="window", actions=(),
+                geometry={"bounds": Geometry("screen", 0, 0, 300, 200, True)},
+                relations={"children": Relation("children", ("heading", "wrapper"), total=2)}),
+            "heading": NativeNode(role="heading", name="Downloads", actions=()),
+            "wrapper": NativeNode(
+                role="group", name="Location /Downloads", actions=(Action("custom", "context-help"),),
+                geometry={"bounds": Geometry("screen", 0, 40, 100, 30, True)},
+                relations={"children": Relation("children", ("change",), total=1)},
+            ),
+            "change": NativeNode(
+                role="button", name="Change", actions=(Action("invoke", "change-location"),),
+                relations={"children": Relation("children", (), total=0)},
+                geometry={"bounds": Geometry("screen", 0, 40, 100, 30, True)},
+            ),
+        },
+        coordinate_spaces={"screen": CoordinateSpace("point", "primary_screen_top_left", "down")},
+    )
+    prepared = prepare_snapshot(normalize_facts(native, DisplayReferences(native.session)))
+    assert prepared.roots[0].failure is None
+    interface = prepared.roots[0].interface
+    assert interface is not None
+    control, = (block for block in interface.blocks.values() if block.layout == "compound-control")
+    section, = (block for block in interface.blocks.values() if block.label_ref is not None and block.kind == "region")
+    assert control.key in section.children

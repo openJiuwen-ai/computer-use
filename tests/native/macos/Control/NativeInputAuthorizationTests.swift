@@ -1,5 +1,6 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+import CoreGraphics
 import Foundation
 
 @main struct NativeInputAuthorizationTests {
@@ -45,7 +46,26 @@ import Foundation
             } catch let error as DriverError { precondition(error.code == .invalidRequest) }
         }
         try lateDenialContinuation()
+        loginWindowInterface()
         print("PASS explicit global permission, strict grant parsing, nested scope isolation, pre-input denial")
+    }
+
+    @MainActor static func loginWindowInterface() {
+        let console: [String: Any] = [kCGSessionLoginDoneKey: true, kCGSessionOnConsoleKey: true]
+        precondition(BackgroundTarget.permitsLoginWindowInterface(console))
+        precondition(BackgroundTarget.permitsLoginWindowInterface(
+            console.merging(["CGSSessionScreenIsLocked": false]) { _, value in value }))
+        for key in [kCGSessionLoginDoneKey, kCGSessionOnConsoleKey, "CGSSessionScreenIsLocked"] {
+            for invalid in [1, NSNull()] as [Any] {
+                precondition(!BackgroundTarget.permitsLoginWindowInterface(
+                    console.merging([key: invalid]) { _, value in value }))
+            }
+        }
+        precondition(!BackgroundTarget.permitsLoginWindowInterface(
+            console.merging(["CGSSessionScreenIsLocked": true]) { _, value in value }))
+        precondition(!BackgroundTarget.permitsLoginWindowInterface(
+            console.merging([kCGSessionOnConsoleKey: false]) { _, value in value }))
+        precondition(!BackgroundTarget.permitsLoginWindowInterface([:]))
     }
 
     @MainActor static func lateDenialContinuation() throws {

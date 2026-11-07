@@ -183,7 +183,8 @@ import ApplicationServices
     }
 
     func prepare(
-        _ target: BackgroundTarget, window: CGWindowID, pointerAt: CGPoint? = nil, onAction: () -> Void,
+        _ target: BackgroundTarget, window: CGWindowID, pointerAt: CGPoint? = nil,
+        reusePointerAt: CGPoint? = nil, onAction: () -> Void,
         onWait: (NativePreparationWait) -> Void = { _ in }, onCleanupUnknown: @escaping @MainActor () -> Void = {},
         beforeAction: @escaping @MainActor () throws -> Void = {}
     ) async throws {
@@ -192,7 +193,11 @@ import ApplicationServices
         _ = try Self.nativeWindow(target.application.processIdentifier, window)
         // Preserve the document's existing first responder when its exact
         // foreground context is already established. No activation is needed.
-        if pointerAt == nil, target.isForeground, Self.focusedWindow(target.application.processIdentifier) == window {
+        if pointerAt == nil, Self.canReuseFocusedWindow(
+            foreground: target.isForeground, window: window,
+            focused: Self.focusedWindow(target.application.processIdentifier),
+            pointerAt: reusePointerAt, hit: BackgroundEvents.inputWindow)
+        {
             onWait(.notNeeded)
             return
         }
@@ -219,5 +224,15 @@ import ApplicationServices
             beforeAction: beforeAction)
         try target.validate(input: true)
         diagnose("foreground assist: prepared pid=\(target.application.processIdentifier), window=\(window)")
+    }
+
+    /// Some clicks require both the standard window's key context and its
+    /// physical point to be exposed. Preserve the former when the latter has
+    /// already been proved, or prepare again when another window covers it.
+    static func canReuseFocusedWindow(
+        foreground: Bool, window: CGWindowID, focused: @autoclosure () -> CGWindowID?,
+        pointerAt: CGPoint?, hit: (CGPoint) -> CGWindowID?
+    ) -> Bool {
+        foreground && focused() == window && (pointerAt.map { hit($0) == window } ?? true)
     }
 }

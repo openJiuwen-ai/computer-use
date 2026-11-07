@@ -54,6 +54,7 @@ class ReadRequest:
             acquisition still rechecks scope after collection.
         scope_managed: The enclosing interface owns member collection and final presentation.
         include_menus: Whether this acquisition includes the optional application-menu summary.
+        source_applications: Catalogue that selected the installation before the startup branch.
     """
 
     selector: str | RunningApplication | WorkingWindow
@@ -71,6 +72,7 @@ class ReadRequest:
     source_directory: DirectoryFacts | None = None
     scope_managed: bool = False
     include_menus: bool = True
+    source_applications: DirectoryFacts | None = None
 
     @property
     def directory_profile(self) -> SurfaceReadProfile:

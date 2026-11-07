@@ -64,6 +64,18 @@ struct NativeAddressedPointerReceiver {
         supported ? .declaredInteraction : .originalElementNeedsExposure
     }
 
+    /// Compound text declares interaction on the owner. Its qualified passive
+    /// caption supplies the right-click point; dispatch remains a mouse pair.
+    static func compoundTextContextQualification(
+        intent: NativeIntent, ownerRole: String?, ownerActions: [String]?, memberRole: String?, exactMemberHit: Bool
+    ) -> Qualification? {
+        guard intent.kind == "click", intent.parameters["button"] as? String == "right",
+            ownerRole == kAXStaticTextRole, ownerActions?.contains(kAXPressAction) == true,
+            [kAXStaticTextRole, "AXHeading"].contains(memberRole ?? ""), exactMemberHit
+        else { return nil }
+        return .declaredInteraction
+    }
+
     /// A retained control can need window preparation before its provider
     /// exposes a usable hit. Admission preserves that obligation; it does not
     /// claim that the coarse window is already the requested receiver. Final
@@ -76,7 +88,10 @@ struct NativeAddressedPointerReceiver {
             return supported ? .declaredInteraction : popup ? .unconfirmed : .originalElementExactHit
         }
         guard !popup else { return nil }
-        if basis == .coarseAncestorGeometry || preparation == .foreground {
+        if basis == .ownedControlPart {
+            return supported ? .declaredInteraction : .originalElementForegroundGeometry
+        }
+        if basis == .coarseAncestorGeometry || basis == .serviceAncestorGeometry || preparation == .foreground {
             return .originalElementForegroundGeometry
         }
         return nil

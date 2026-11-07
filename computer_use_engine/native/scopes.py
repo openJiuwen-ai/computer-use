@@ -95,6 +95,15 @@ class StartingApplication(RunningApplication):
 
 
 @dataclass(frozen=True)
+class PendingApplicationLaunch:
+    """Original installation retained when launch may have reached the system."""
+
+    session: str
+    installation: str
+    selectors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class WorkingWindow:
     application: str
     name: str

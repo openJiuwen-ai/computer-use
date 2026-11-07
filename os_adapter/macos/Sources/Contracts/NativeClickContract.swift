@@ -21,11 +21,15 @@ struct NativeClickContract: Equatable {
     /// Original-element geometry must be confirmed in the exposed foreground
     /// window, even when addressed transport already has a background lease.
     var requiresForegroundGeometry = false
+    /// Opaque row contents qualify by an exact original hit, independently
+    /// of whether their retained window is foreground.
+    var requiresExactElementHit = false
 
     /// The retained native offer, never an execute field, owns this requirement.
     /// A qualified popup or member keeps its separate existing admission proof.
     func permitsElementPointer(hasActuator: Bool) -> Bool {
         guard popupPointer == nil else { return false }
+        guard !requiresExactElementHit || delivery == .windowDirected && !hasActuator else { return false }
         guard !requiresForegroundGeometry || delivery == .windowDirected && !hasActuator else { return false }
         return pointerRequirement == .contentReceiver || delivery == .windowDirected && !hasActuator
     }
@@ -49,6 +53,7 @@ struct NativeClickContract: Equatable {
             && lhs.backgroundUnavailable == rhs.backgroundUnavailable
             && lhs.pointerRequirement == rhs.pointerRequirement
             && lhs.requiresForegroundGeometry == rhs.requiresForegroundGeometry
+            && lhs.requiresExactElementHit == rhs.requiresExactElementHit
     }
 
     var wire: [String: Any] {

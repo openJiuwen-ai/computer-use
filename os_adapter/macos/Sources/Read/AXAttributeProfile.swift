@@ -10,7 +10,15 @@ enum AXAttributeProfile {
         name.hasPrefix("AX") && name.utf16.count > 2 && name.utf16.count <= 256
             && !name.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
+    static let defaultWritableFields = ["settable.AXFocused", "settable.AXValue", "settable.AXSelectedText"]
+    private static let explicitSelectionFields = ["settable.AXSelectedChildren", "settable.AXSelectedRows"]
+
+    static func writableAttribute(_ field: String) -> String? {
+        guard defaultWritableFields.contains(field) || explicitSelectionFields.contains(field) else { return nil }
+        return String(field.dropFirst("settable.".count))
+    }
+
     static func field(_ name: String) -> Bool {
-        attribute(name) || ["settable.AXFocused", "settable.AXValue", "settable.AXSelectedText"].contains(name)
+        attribute(name) || writableAttribute(name) != nil
     }
 }

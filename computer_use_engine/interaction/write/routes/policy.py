@@ -169,6 +169,26 @@ def has_ready_route(facts: Facts, intent: Intent) -> bool:
     return any(stage_admission(p).ready and p.unit != "native_value_replace" for p in _candidates(facts, intent))
 
 
+def has_exact_keyboard_edit_route(facts: Facts, intent: Intent, attempts: RouteHistory) -> bool:
+    """Use a native exact-owner keyboard recipe without interpreting AX setters."""
+    if (
+        facts.platform != "macos"
+        or intent.kind not in ("insert", "replace")
+        or not isinstance(facts.binding, Binding)
+        or facts.binding.node is None
+        or facts.binding.capture is not None
+        or facts.actuator is not None
+        or facts.receiver is not None
+    ):
+        return False
+    from computer_use.interaction.write.routes.selection.model import CandidateSet, SelectionRequest
+    from computer_use.interaction.write.routes.selection.unit_choice import eligible_unit_routes, select_unit_route
+
+    request = SelectionRequest(facts, intent, history=attempts)
+    exact = tuple(primitive for primitive in _candidates(facts, intent) if primitive.keyboard_editing == intent.kind)
+    return select_unit_route(eligible_unit_routes(CandidateSet(request, exact))).selected is not None
+
+
 def selects_ready_value_replacement(
     facts: Facts,
     intent: Intent,

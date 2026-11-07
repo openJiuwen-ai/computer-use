@@ -203,10 +203,17 @@ async def resolve(controller, ui, view):
     if state.running is not None or ui._instance.session is not None:
         directory = await refresh(controller, ui, accessibility=view != "image")
     else:
-        applications = await controller.reader.directory.applications()
-        application = select_application(applications, ui._instance.selector)
+        selector = ui._instance.selector
+        if controller.reader.pending_launch(selector) is not None:
+            return await observe_startup(controller, ui, selector, view)
+        applications = (
+            await controller.reader.directory.applications(selector=selector)
+            if selector.startswith("/")
+            else await controller.reader.directory.applications()
+        )
+        application = select_application(applications, selector)
         if not application["isRunning"]:
-            return await observe_startup(controller, ui, ui._instance.selector, view)
+            return await observe_startup(controller, ui, selector, view, source_applications=applications)
         state.running = RunningApplication(application["id"], application["displayName"], applications["session"])
         directory = await refresh(controller, ui, accessibility=view != "image")
     if ui._anchor is None:
@@ -214,7 +221,7 @@ async def resolve(controller, ui, view):
     return directory, None
 
 
-async def observe_startup(controller, ui, selector, view):
+async def observe_startup(controller, ui, selector, view, *, source_applications=None):
     """Preserve the existing single-launch contract, then publish application scope."""
     state = controller.state(ui)
 
@@ -226,7 +233,9 @@ async def observe_startup(controller, ui, selector, view):
         )
 
     try:
-        observed = await controller.reader.read(selector, view=view, overview=False, on_scope=remember)
+        observed = await controller.reader.read(
+            selector, view=view, overview=False, on_scope=remember, source_applications=source_applications
+        )
     except WindowSelectionRequired as choices:
         state.running = RunningApplication(choices.application, choices.display_name, choices.directory["session"])
         adopt(controller, ui, choices.directory)

@@ -25,12 +25,21 @@ import ApplicationServices
         guard keyboard.kind == expected else {
             throw DriverError("keyboard primitive intent changed", code: .invalidRequest)
         }
-        let unit = try context.access.units.keyboardUnit(
+        var unit = try context.access.units.keyboardUnit(
             bound, actuator: contract.actuator, receiver: contract.receiver)
+        if let entry = contract.keyboardInsertion ?? replacement?.keyboardEntry {
+            guard let element = unit.element, contract.actuator == nil, contract.receiver == nil,
+                let node = contract.node, node == bound["node"] as? String,
+                node == op.target["node"] as? String, !(bound["capture"] is String),
+                NativeKeyboardTextEntry.read(element) == entry
+            else { throw NativeRouteUnavailable(description: "original keyboard text-entry contract changed") }
+            unit.keyboardInsertion = contract.keyboardInsertion
+            unit.insertionSelection = op.keyboardInsertionSelection
+        }
         if let element = unit.element, AXAccess.read(element, kAXEnabledAttribute).value as? Bool == false {
             throw DriverError("the selected keyboard target is disabled", code: .inputUnavailable)
         }
-        if expected == .replace {
+        if expected == .replace, replacement?.keyboardEntry == nil {
             guard let element = unit.element, let replacement,
                 NativeReplacementUnit(element: element).contract() == replacement
             else { throw DriverError("the selected replacement contract changed", code: .inputUnavailable) }
@@ -99,11 +108,22 @@ import ApplicationServices
                     try checkBoundary()
                 }
             }
+            let checkSavePanelPath: (@MainActor (NativeSavePanelPathContinuation.Proof) throws -> Void)?
+            if keyboard.kind == .insert, bound["node"] is String, contract.within.isEmpty,
+                contract.actuator == nil, contract.receiver == nil
+            {
+                checkSavePanelPath = { proof in
+                    try context.boundary.keyboardDispatchCheck {
+                        try context.access.scopes.savePanelPathBoundary(bound, proof: proof)
+                    }()
+                }
+            } else { checkSavePanelPath = nil }
             let alreadySatisfied = try await dispatchUnit.deliver(
                 keyboard, delivery: delivery, replacement: replacement, prepared: op.preparationConfirmed(id),
                 check: dispatchCheck,
                 onDispatch: markDispatch, onPosted: receipt.recordAccepted, onPreparation: receipt.recordPreparation,
-                onClipboardRestore: receipt.recordClipboardRestore, onCleanupUnknown: receipt.recordCleanupUnknown)
+                onClipboardRestore: receipt.recordClipboardRestore, onCleanupUnknown: receipt.recordCleanupUnknown,
+                checkSavePanelPath: checkSavePanelPath)
             receipt.detail =
                 alreadySatisfied
                 ? "The complete target text is already empty; no replacement input was sent."

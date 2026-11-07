@@ -191,7 +191,7 @@ import ApplicationServices
             switch item.key[1] {
             case "field":
                 let property = item.key[2]
-                if let key = NativeFactCollector.writableFields[property] {
+                if let key = AXAttributeProfile.writableAttribute(property) {
                     var writable = DarwinBoolean(false)
                     let status = AXUIElementIsAttributeSettable(element, key as CFString, &writable)
                     actual = try Self.scalar(

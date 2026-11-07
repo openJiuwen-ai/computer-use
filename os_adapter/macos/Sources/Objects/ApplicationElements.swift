@@ -232,6 +232,13 @@ import ApplicationServices
         return "\(namespace):scope" + scopeReferences.reference(for: ScopeIdentity(owner: app, window: windowRef))
     }
 
+    /// The application menu is registered independently of window content.
+    /// A menu-bar role in a window's observation does not change its scope.
+    func isApplicationMenuScope(_ scope: String, owner: NSRunningApplication) -> Bool {
+        scopeReferences.knownReference(for: ScopeIdentity(owner: owner, window: nil))
+            .map { "\(namespace):scope" + $0 == scope } ?? false
+    }
+
     func windowReference(_ window: NativeWindows.Window, element: AXUIElement? = nil) -> String {
         windowReference(
             nativeID: window.mapping.id, process: window.process, owner: window.application, element: element)

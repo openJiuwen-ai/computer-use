@@ -7,7 +7,8 @@ import ApplicationServices
 /// facts. A messaging failure is neither an empty point nor window occlusion.
 struct NativeElementHitEvidence {
     enum Relation: String {
-        case target, providerStackedTarget, windowRoot, coarseAncestorWindow, otherWindow, otherControl, unknownOwner
+        case target, ownedControlPart, providerStackedTarget, windowRoot, coarseAncestorWindow, otherWindow
+        case serviceAncestor, otherControl, unknownOwner
         case noElement, unsupported, queryFailed
     }
     let status: AXError
@@ -27,7 +28,7 @@ struct NativeElementHitEvidence {
     var permitsBackgroundGeometry: Bool {
         switch relation {
         case .otherWindow, .noElement, .unsupported, .queryFailed: return true
-        case .target, .providerStackedTarget, .windowRoot, .coarseAncestorWindow, .otherControl, .unknownOwner: return false
+        default: return false
         }
     }
 }
@@ -36,7 +37,7 @@ struct NativeElementHitEvidence {
 /// never evidence of a safe click by itself; only an exact AX hit admits it.
 enum NativeElementHitSelection {
     struct Candidate: Equatable {
-        enum Source: String { case activationPoint, center, edge }
+        enum Source: String { case activationPoint, memberCenter, center, edge }
         let point: CGPoint
         let source: Source
         var permitsGeometryFallback: Bool { source == .center }
@@ -45,8 +46,8 @@ enum NativeElementHitSelection {
         var queryTimeout: Float? { source == .center ? nil : 0.05 }
     }
     enum Basis: String {
-        case exactHit, providerStackingGeometry, coarseAncestorGeometry, backgroundGeometry
-        case unsupportedForegroundGeometry, rejected
+        case exactHit, ownedControlPart, providerStackingGeometry, coarseAncestorGeometry, backgroundGeometry
+        case serviceAncestorGeometry, unsupportedForegroundGeometry, rejected
     }
     enum Preparation { case geometryReady, foreground, unavailable }
     struct Observation<Hit> {
@@ -94,7 +95,9 @@ enum NativeElementHitSelection {
         return false
     }
 
-    static func candidates(bounds: CGRect, activationPoint: CGPoint?, expand: Bool = true) -> [Candidate] {
+    static func candidates(
+        bounds: CGRect, activationPoint: CGPoint?, memberBounds: CGRect? = nil, expand: Bool = true
+    ) -> [Candidate] {
         guard [bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy(\.isFinite), !bounds.isNull,
             bounds.width > 0, bounds.height > 0
         else { return [] }
@@ -111,6 +114,12 @@ enum NativeElementHitSelection {
         // Wheel input keeps the previously observed region center. Its public
         // resolver qualifies that exact hit; it does not request a control click.
         guard expand else { return [Candidate(point: center, source: .center)] }
+        if let memberBounds {
+            let visibleMember = memberBounds.intersection(bounds)
+            if !visibleMember.isNull, !visibleMember.isEmpty {
+                append(CGPoint(x: visibleMember.midX, y: visibleMember.midY), .memberCenter)
+            }
+        }
         if let activationPoint, activationPoint != center { append(activationPoint, .activationPoint) }
         append(center, .center)
         let dx = min(4, bounds.width / 4), dy = min(4, bounds.height / 4)
@@ -132,23 +141,24 @@ enum NativeElementHitSelection {
         for candidate in candidates {
             guard try canContinue(candidate) else { continue }
             let observation = try query(candidate)
-            let basis: Basis =
-                observation.evidence.relation == .target
-                ? .exactHit
-                : (observation.evidence.relation == .providerStackedTarget
-                    ? .providerStackingGeometry
-                    : observation.evidence.relation == .coarseAncestorWindow && observation.foreground
-                    && candidate.permitsGeometryFallback
-                    ? .coarseAncestorGeometry
-                    : observation.evidence.relation == .unsupported && observation.foreground
-                    && observation.originalWindowGeometry && candidate.permitsGeometryFallback
-                    ? .unsupportedForegroundGeometry
-                    : (!observation.foreground && candidate.permitsGeometryFallback
-                        && observation.evidence.permitsBackgroundGeometry ? .backgroundGeometry : .rejected))
+            let foregroundGeometry = observation.foreground && candidate.permitsGeometryFallback
+            let basis: Basis
+            switch observation.evidence.relation {
+            case .target: basis = .exactHit
+            case .ownedControlPart: basis = .ownedControlPart
+            case .providerStackedTarget: basis = .providerStackingGeometry
+            case .serviceAncestor where foregroundGeometry: basis = .serviceAncestorGeometry
+            case .coarseAncestorWindow where foregroundGeometry: basis = .coarseAncestorGeometry
+            case .unsupported where foregroundGeometry && observation.originalWindowGeometry:
+                basis = .unsupportedForegroundGeometry
+            default:
+                basis = !observation.foreground && candidate.permitsGeometryFallback
+                    && observation.evidence.permitsBackgroundGeometry ? .backgroundGeometry : .rejected
+            }
             let result = Selection(candidate: candidate, observation: observation, basis: basis)
-            if basis == .exactHit { return result }
+            if basis == .exactHit || basis == .ownedControlPart { return result }
             if basis == .providerStackingGeometry { return result }
-            if basis == .coarseAncestorGeometry { coarse = result }
+            if basis == .coarseAncestorGeometry || basis == .serviceAncestorGeometry { coarse = result }
             if basis == .unsupportedForegroundGeometry { coarse = result }
             if basis == .backgroundGeometry { fallback = result }
             if preparation(result) == .foreground, preparable == nil || candidate.source == .center {
@@ -162,5 +172,30 @@ enum NativeElementHitSelection {
             }
         }
         return coarse ?? fallback ?? preparable ?? representative
+    }
+}
+
+/// Classify one exact native hit without turning a child into a new actuator.
+enum NativeOwnedElementHit {
+    static func matches<Object>(
+        _ target: Object, hit: Object, frame: CGRect, same: (Object, Object) -> Bool,
+        role: (Object) throws -> String?, parent: (Object) throws -> Object?,
+        inWindow: (Object) throws -> Bool, passive: (Object) throws -> Bool,
+        hitFrame: (Object) throws -> CGRect?
+    ) rethrows -> Bool {
+        guard let targetRole = try role(target), [kAXButtonRole, kAXRowRole].contains(targetRole),
+            let hitRole = try role(hit), let owner = try parent(hit), same(owner, target),
+            try inWindow(target), try inWindow(hit)
+        else { return false }
+        if targetRole == kAXButtonRole { return try hitRole == kAXStaticTextRole && passive(hit) }
+        switch hitRole {
+        case kAXCellRole:
+            guard let table = try parent(target), try role(table) == kAXTableRole, try inWindow(table)
+            else { return false }
+            return true
+        case kAXGroupRole:
+            return try hitFrame(hit) == frame && passive(hit)
+        default: return false
+        }
     }
 }

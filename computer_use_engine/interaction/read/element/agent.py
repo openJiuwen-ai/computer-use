@@ -84,6 +84,9 @@ class AgentElementReadPipeline:
             target, scope_kind=snapshot.get("scope_kind"), max_nodes=max_nodes, **options
         )
         (tree,) = controller.reader.number_snapshots((tree,))
+        selected = next((ref for ref, node in tree.refs.items() if node == target.node), None)
+        if selected is None or target.node in tree.facts["unread"]:
+            raise local_failure("the retained element was unconfirmed in this observation", "observation_incomplete")
         state = controller.state(ui)
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
@@ -92,8 +95,7 @@ class AgentElementReadPipeline:
             if field in snapshot:
                 for ref in tree.refs:
                     state.refs[ref][field] = snapshot[field]
-        ref = next(ref for ref, node in tree.refs.items() if node == target.node)
-        return tree, state.refs[ref]
+        return tree, state.refs[selected]
 
     async def run(self, ui: UIHandle, snapshot: ElementSnapshot, cursor: str | None) -> Observation:
         tree, fresh = await self.collect(ui, snapshot, cursor)
@@ -110,20 +112,26 @@ class AgentElementReadPipeline:
         # An explicit subtree belongs to its snapshot, even when the App
         # wrapper last staged an unrelated window/menu observation.
         menus = ()
+        content_owner = None
         menu_only = fresh.get("scope_kind") == "applicationMenu"
         identity = fresh.get("menu_window_identity") if menu_only else fresh.get("window_identity")
-        if menu_only:
+        content = fresh.get("scope_kind") == "applicationContent"
+        if menu_only or content:
             state = self.controller.state(ui)
             source = AppState(
                 state.selector,
                 running=state.running,
                 refs=ui._instance.refs,
                 query_target=fresh["binding"],
-                query_scope_kind="applicationMenu",
+                query_scope_kind=fresh["scope_kind"],
                 menu_window_identity=identity,
             )
-            menus = (SurfaceOwner(self.controller, source),)
-        lookup_context = LookupContext(identity, menu_only, menus)
+            source_owner = SurfaceOwner(self.controller, source)
+            if menu_only:
+                menus = (source_owner,)
+            else:
+                content_owner = source_owner
+        lookup_context = LookupContext(identity, menu_only, menus, content_owner)
         return publish(
             self.controller,
             ui,

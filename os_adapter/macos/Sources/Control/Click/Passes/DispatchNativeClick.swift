@@ -9,7 +9,8 @@ import ApplicationServices
         _ plan: NativeClickPlan, boundary: NativeUnitBoundary, receipt: NativeExecutionReceipt,
         evidence: NativeClickEvidence, objects: any NativeControlObjectAccess,
         resolveWindow: () throws -> NativeFixedInputWindow? = { nil },
-        preparedPoint: NativePreparedPointerPoint? = nil
+        preparedPoint: NativePreparedPointerPoint? = nil,
+        elementGeometry: NativeElementPointerUnit.Geometry? = nil
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickDispatch)
         defer { metric?.end() }
@@ -63,6 +64,11 @@ import ApplicationServices
             try await unit.perform(
                 action: name, opensMenu: false, check: boundary.checkConditions, onDispatch: actionBoundary,
                 onReturned: evidence.markReturned)
+        case .menuPointer(let unit):
+            try await unit.performPointer(
+                plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
+                onDispatch: pointerBoundary, onPosted: posted, onPreparation: receipt.recordPreparation,
+                onCleanupUnknown: receipt.recordCleanupUnknown, onNativePreparation: evidence.record)
         case .captured(let unit):
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
@@ -71,13 +77,17 @@ import ApplicationServices
                 onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record,
                 preparedPoint: preparedPoint)
         case .element(let unit):
-            // This samples the original element after preparation. Only this
-            // ensuing gesture freezes geometry; no new screenshot RPC is needed.
+            guard let elementGeometry else {
+                throw DriverError("the selected element click has no prepared point", code: .invalidRequest)
+            }
+            // Verify this same point before each event. Searching again here
+            // could switch the ready candidate after preparation.
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
                 onDispatch: pointerBoundary, onPosted: posted,
                 onCleanupUnknown: receipt.recordCleanupUnknown, delivery: plan.offer.delivery,
-                onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record)
+                onPreparation: receipt.recordPreparation, onNativePreparation: evidence.record,
+                preparedGeometry: elementGeometry)
         case .popupPointer(let unit):
             try await unit.deliver(
                 plan.pointer!, check: boundary.checkConditions, onDispatch: pointerBoundary, onPosted: posted,

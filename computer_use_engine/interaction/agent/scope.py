@@ -76,8 +76,13 @@ async def request_scope(controller, app, ref):
     if state.running is None and app._instance.session is None:
         # Resolve selector aliases by native application identity. Selecting an
         # existing window never launches a second application or reads a tree.
-        applications = await controller.reader.directory.applications()
-        application = select_application(applications, app._instance.selector)
+        selector = app._instance.selector
+        applications = (
+            await controller.reader.directory.applications(selector=selector)
+            if selector.startswith("/")
+            else await controller.reader.directory.applications()
+        )
+        application = select_application(applications, selector)
         if not application["isRunning"]:
             raise local_failure("the selected window's application is no longer running", "stale_target")
         state.running = RunningApplication(application["id"], application["displayName"], applications["session"])

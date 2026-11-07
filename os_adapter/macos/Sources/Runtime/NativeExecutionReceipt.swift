@@ -17,6 +17,7 @@ import Foundation
     private(set) var errorCode: FailureCode?
     private(set) var acceptedCount = 0
     private(set) var preparation = [String]()
+    private(set) var nonRepeatablePreparation = false
     private(set) var cleanup = "complete"
     private var clipboard: String?
     private let onEffect: () -> Void
@@ -35,6 +36,10 @@ import Foundation
     func recordPreparation(_ change: String) {
         preparation.append(change)
         onEffect()
+    }
+    func recordNonRepeatablePreparation(_ change: String) {
+        nonRepeatablePreparation = true
+        recordPreparation(change)
     }
     func recordAccepted() { acceptedCount += 1 }
     func recordCleanupUnknown() { cleanup = "unknown" }

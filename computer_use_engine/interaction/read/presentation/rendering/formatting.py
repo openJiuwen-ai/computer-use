@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
 import regex
+from computer_use.interaction.read.facts.decisions import DECISION_SLOTS
 from computer_use.interaction.read.facts.groups import reference_set
 from computer_use.interaction.read.presentation.accounting.fields import RenderedFields, RenderedResult, SourceEmission
 from computer_use.interaction.read.presentation.actions.layout import action_fields
@@ -595,6 +596,11 @@ def render_projection_lines(
                 "Description: "
                 + caption("description", display(node["description"], "Description", attribute="description"))
             )
+        for attribute, label, format in DECISION_SLOTS:
+            if attribute in node:
+                value = field(node[attribute]) if format == "text" else literal(node[attribute])
+                fields.append(label + ": " + value)
+                record(node, attribute)
         if node.get("fullDescription"):
             fields.append(
                 "Full description: " + display(node["fullDescription"], "Full description", attribute="fullDescription")

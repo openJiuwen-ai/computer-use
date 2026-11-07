@@ -3,15 +3,15 @@
 import AppKit
 import ApplicationServices
 
-/// One menu command and the exact ancestor path selected by Python. Window
-/// preparation and temporary menu tracking finish before the leaf is sent.
-/// This unit never locates a replacement item or chooses a foreground fallback.
+/// One menu command and the exact ancestor path selected by Python. The
+/// selected native action or mouse mechanism controls the tracking lifetime.
 @MainActor struct NativeMenuUnit {
     let application: NSRunningApplication
     let window: AXUIElement?
     let element: AXUIElement
     let root: AXUIElement
     let path: [AXUIElement]
+    var attachedDialogs: NativeMenuAttachedDialogs? = nil
 
     private struct Branch {
         let opener: AXUIElement
@@ -21,7 +21,12 @@ import ApplicationServices
 
     func receiverReady() throws -> Bool {
         try background.validate(input: true)
-        if let window { return NativeMenuContext(application: application).confirms(window) }
+        if let window {
+            let context = NativeMenuContext(application: application)
+            if context.confirms(window) { return true }
+            guard let attachedDialogs, let windows = context.attachedDialogWindows(window) else { return false }
+            return try attachedDialogs.confirm(windows, application: context.applicationElement)
+        }
         try background.validateWindowlessMenu()
         return true
     }
@@ -32,18 +37,35 @@ import ApplicationServices
     }
 
     private func validatePath() throws {
-        guard path.last.map({ CFEqual($0, element) }) == true, path.count <= 17,
-            try ObservedPath.matches(
-                path, root: root, same: { CFEqual($0, $1) },
-                children: { parent in
-                    guard let children = AXAccess.elements(parent, kAXChildrenAttribute, limit: 512) else {
-                        throw DriverError(
-                            "menu ancestry cannot be revalidated within its native budget", code: .observationIncomplete
-                        )
-                    }
-                    return children
-                })
-        else { throw DriverError("the selected native menu path changed", code: .staleTarget) }
+        guard path.last.map({ CFEqual($0, element) }) == true else {
+            throw DriverError("the selected native menu path changed", code: .staleTarget)
+        }
+        switch try Self.membership(path, root: root) {
+        case .confirmed: return
+        case .changed: throw DriverError("the selected native menu path changed", code: .staleTarget)
+        case .unavailable:
+            throw DriverError("menu ancestry cannot be revalidated within its native budget", code: .observationIncomplete)
+        }
+    }
+
+    static func membership(_ path: [AXUIElement], root: AXUIElement, reader: AXRelationReader = .init()) throws
+        -> NativeContainment.Evidence
+    {
+        guard path.count <= 17 else { return .unavailable }
+        var complete = true
+        let matched = try ObservedPath.matches(path, root: root, same: { CFEqual($0, $1) }, children: { parent in
+            if let children = try menuChildren(parent, limit: 512, reader: reader) { return children }
+            complete = false
+            return []
+        })
+        return matched ? .confirmed : complete ? .changed : .unavailable
+    }
+
+    static func menuChildren(_ element: AXUIElement, limit: Int, reader: AXRelationReader) throws -> [AXUIElement]? {
+        try reader.completeArray(element, property: kAXChildrenAttribute, limit: limit, withinBudget: {
+            try RequestDiagnostics.checkCancellation()
+            return RequestDiagnostics.deadline.map { ProcessInfo.processInfo.systemUptime < $0 } ?? true
+        }).value
     }
 
     private func declares(_ action: String, on element: AXUIElement) -> Bool {
@@ -54,6 +76,7 @@ import ApplicationServices
     private func branches() throws -> [Branch] {
         try validatePath()
         var branches = [Branch]()
+        guard path.count > 2 else { return branches }
         // The requested target is never a preparatory opener. For an explicit
         // openMenu request its own submenu must remain open after dispatch.
         for index in 1..<(path.count - 1)
@@ -103,20 +126,41 @@ import ApplicationServices
         return accepted
     }
 
-    private func refresh(
+    private func withTracking(
         _ branches: [Branch], check: @MainActor () throws -> Void, onPreparation: (String) -> Void,
         onCleanupUnknown: () -> Void,
-        onNativePreparation: (NativePreparationEffect) -> Void
+        onNativePreparation: (NativePreparationEffect) -> Void,
+        pointerBody: (() async throws -> Void)? = nil
     ) async throws {
         guard let process = NativeProcessIdentity.read(application.processIdentifier) else {
             throw DriverError("menu process disappeared", code: .staleTarget)
         }
         var opened = [AXUIElement]()
+        let pointerActivity = pointerBody.map { _ in NativeForegroundResponsibility.desktopSnapshot().activity }
+        func closePrepared() async -> Bool {
+            var remaining = opened
+            if let pointerActivity {
+                // Selection normally closes tracking itself. Only cancel a
+                // branch opened here if the user has not since taken over.
+                remaining = opened.filter { NativeMenuSurfaces.isPresentedPopup($0, pid: process.pid) }
+                if !remaining.isEmpty {
+                    let current = NativeForegroundResponsibility.desktopSnapshot()
+                    guard current.activity == pointerActivity, current.foregroundPID == process.pid else {
+                        onCleanupUnknown()
+                        return false
+                    }
+                }
+            }
+            return await close(
+                remaining, process: process, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
+                onNativePreparation: onNativePreparation)
+        }
         do {
             for branch in branches {
                 try check()
                 try validatePath()
                 try await NativePhysicalInput.wait(.menuTracking, check: check)
+                if pointerBody != nil, NativeMenuSurfaces.isPresentedPopup(branch.menu, pid: process.pid) { continue }
                 guard try receiverReady(), AXAccess.read(branch.opener, kAXEnabledAttribute).value as? Bool != false,
                     declares(kAXPressAction, on: branch.opener), declares(kAXCancelAction, on: branch.menu)
                 else {
@@ -138,19 +182,18 @@ import ApplicationServices
                 }
                 try await Task.sleep(for: .milliseconds(50))
             }
+            try await pointerBody?()
         } catch {
-            _ = await close(
-                opened, process: process, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
-                onNativePreparation: onNativePreparation)
+            _ = await closePrepared()
             throw error
         }
-        guard
-            await close(
-                opened, process: process, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
-                onNativePreparation: onNativePreparation)
-        else { throw DriverError("menu preparation cleanup could not be confirmed", code: .executionUnknown) }
-        try check()
-        try validatePath()
+        guard await closePrepared() else {
+            throw DriverError("menu preparation cleanup could not be confirmed", code: .executionUnknown)
+        }
+        if pointerBody == nil {
+            try check()
+            try validatePath()
+        }
     }
 
     func prepare(
@@ -158,10 +201,12 @@ import ApplicationServices
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in },
         onFocusOutcome: @escaping @MainActor (NativeFocusOutcome) -> Void = { _ in },
-        onPreparationWait: @escaping @MainActor (NativePreparationWait) -> Void = { _ in }, observeOutcome: Bool = false
+        onPreparationWait: @escaping @MainActor (NativePreparationWait) -> Void = { _ in }, observeOutcome: Bool = false,
+        refreshMenu: Bool = true
     ) async throws {
         try check()
-        let branches = try branches()
+        let semanticBranches = refreshMenu ? try branches() : nil
+        if semanticBranches == nil { try validatePath() }
         guard let window else { return }
         if foreground {
             guard let id = BackgroundEvents.nativeWindowID(window) else {
@@ -248,11 +293,74 @@ import ApplicationServices
         }
         // NSMenu may retain both stale false AND stale true values after a
         // document switch. Validate its observed parent path on every command.
-        try await refresh(
-            branches, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
+        guard let semanticBranches else { return }
+        try await withTracking(
+            semanticBranches, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
             onNativePreparation: onNativePreparation)
         if AXAccess.read(element, kAXEnabledAttribute).value as? Bool == false {
             throw DriverError("the menu command remains disabled in the selected document", code: .inputUnavailable)
+        }
+    }
+
+    func performPointer(
+        _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void,
+        guardOperation: @escaping @MainActor () throws -> Void,
+        onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
+        onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void,
+        onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
+    ) async throws {
+        try check()
+        let role = AXAccess.read(element, kAXRoleAttribute).value as? String
+        guard request.kind == .click, request.button == "left", request.count == 1,
+            background.isForeground, try receiverReady(), declares(kAXPressAction, on: element),
+            NativeMenuCommandPolicy.requiresPointer(self, action: kAXPressAction, role: role)
+        else {
+            throw NativePreparationUnavailable(
+                description: "The menu command's original addressed mouse receiver is unavailable.")
+        }
+        let branches = try branches()
+        guard let menu = branches.last?.menu else {
+            throw DriverError("the original menu leaf has no containing menu", code: .inputUnavailable)
+        }
+        try await NativeInputActivity.$stage.withValue(.preparation) {
+            try await withTracking(
+                branches, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
+                onNativePreparation: onNativePreparation
+            ) {
+                let pid = application.processIdentifier
+                guard let mapping = NativeMenuSurfaces.mapping(menu, pid: pid),
+                    let frame = WindowGeometry.hint(element)?.frame, frame.width > 1, frame.height > 1
+                else { throw DriverError("the menu leaf has no confirmed visible popup", code: .inputUnavailable) }
+                let point = CGPoint(x: frame.midX, y: frame.midY)
+                guard mapping.frame.contains(point) else {
+                    throw DriverError("the menu leaf is outside its confirmed popup", code: .inputUnavailable)
+                }
+                let pointer = NativePointerUnit(
+                    application: application, window: mapping, pointerRequirement: .foregroundWindowPoint,
+                    recipientElement: element)
+                let validate: @MainActor () throws -> Void = {
+                    try check()
+                    try validatePath()
+                    guard background.isForeground, try receiverReady(),
+                        AXAccess.read(element, kAXEnabledAttribute).value as? Bool != false,
+                        NativeMenuSurfaces.matches(menu, window: mapping),
+                        WindowGeometry.hint(element)?.frame == frame
+                    else { throw DriverError("the menu leaf changed before mouse delivery", code: .inputUnavailable) }
+                    let root = AXUIElementCreateApplication(pid)
+                    AXUIElementSetMessagingTimeout(root, 0.05)
+                    var hit: AXUIElement?
+                    let status = AXUIElementCopyElementAtPosition(root, Float(point.x), Float(point.y), &hit)
+                    guard status == .success, hit.map({ CFEqual($0, element) }) == true else {
+                        throw DriverError("the mouse point does not identify the original menu leaf", code: .inputUnavailable)
+                    }
+                }
+                try await NativeInputActivity.$stage.withValue(.input) {
+                    try await pointer.deliver(
+                        request, from: point, to: nil, viewport: mapping.frame.size, check: validate,
+                        guardOperation: guardOperation, onDispatch: onDispatch, onPosted: onPosted,
+                        onCleanupUnknown: onCleanupUnknown, delivery: .windowDirected)
+                }
+            }
         }
     }
 

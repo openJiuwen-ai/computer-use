@@ -19,11 +19,15 @@ import ApplicationServices
     var frozenGeometry: Geometry? = nil
     var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
     var requiresForegroundGeometry = false
+    var requiresExactElementHit = false
 
-    func requiring(_ requirement: NativePointerReadiness.Requirement, foregroundGeometry: Bool = false) -> Self {
+    func requiring(
+        _ requirement: NativePointerReadiness.Requirement, foregroundGeometry: Bool = false, exactElementHit: Bool = false
+    ) -> Self {
         var unit = self
         unit.pointerRequirement = requirement
         unit.requiresForegroundGeometry = foregroundGeometry
+        unit.requiresExactElementHit = exactElementHit
         return unit
     }
 
@@ -36,12 +40,25 @@ import ApplicationServices
             recipientElement: member ?? element)
     }
 
+    func exposurePointerUnit(_ exposure: NativeElementViewport.Exposure) -> NativePointerUnit {
+        let mapping = exposure.mapping
+        let process = BackgroundEvents.accessibilityProcessID(exposure.region)
+        let remote = process.map { $0 != mapping.pid } == true
+        return NativePointerUnit(
+            application: application, window: mapping, nativeWindow: window,
+            pointerRequirement: requiresForegroundGeometry ? .foregroundWindowPoint : pointerRequirement,
+            recipientElement: remote ? exposure.region : nil)
+    }
+
     static func allowsDispatchBasis(
         _ basis: NativeElementHitSelection.Basis, requirement: NativePointerReadiness.Requirement,
-        exactOriginalHit: Bool, hasMember: Bool
+        exactOriginalHit: Bool, hasMember: Bool, kind: NativePointerIntent.Kind = .click,
+        requiresExactElementHit: Bool = false
     ) -> Bool {
+        if requiresExactElementHit { return basis == .exactHit && exactOriginalHit && !hasMember }
+        if kind == .click, hasMember { return requirement == .contentReceiver && basis == .exactHit }
         guard requirement == .foregroundWindowPoint else { return basis != .rejected }
-        return basis == .exactHit && exactOriginalHit && !hasMember
+        return !hasMember && (basis == .exactHit && exactOriginalHit || basis == .ownedControlPart)
     }
 
     struct Geometry {
@@ -51,6 +68,7 @@ import ApplicationServices
         // pixels are visible. AX hit evidence owns coverage at the chosen point.
         let visible: CGRect
         let candidate: NativeElementHitSelection.Candidate
+        var serviceRecipient: NativePointerRecipient? = nil
         var point: CGPoint { candidate.point }
 
         func same(as other: Geometry) -> Bool {
@@ -58,16 +76,16 @@ import ApplicationServices
                 && frame == other.frame && point == other.point
         }
 
-        /// A live exact hit can retain the original dispatch point through an
-        /// element layout change. The window coordinate transform stays fixed;
-        /// geometry-only fallbacks and qualified popup proofs remain stricter.
+        /// A live hit on the element or its proved passive part can retain the
+        /// original point through a layout change. Geometry-only fallbacks and
+        /// qualified popup proofs remain stricter.
         func permitsFrozenDispatch(
             from original: Geometry, basis: NativeElementHitSelection.Basis, requiresExactGeometry: Bool
         ) -> Bool {
             guard basis != .rejected, mapping.id == original.mapping.id, mapping.pid == original.mapping.pid,
                 mapping.frame == original.mapping.frame, point == original.point, visible.contains(point)
             else { return false }
-            return frame == original.frame || !requiresExactGeometry && basis == .exactHit
+            return frame == original.frame || !requiresExactGeometry && (basis == .exactHit || basis == .ownedControlPart)
         }
     }
 
@@ -90,7 +108,8 @@ import ApplicationServices
     private func allowsDispatch(_ sampled: Sample) -> Bool {
         Self.allowsDispatchBasis(
             sampled.selection.basis, requirement: pointerRequirement,
-            exactOriginalHit: sampled.hit.map { CFEqual($0, element) } == true, hasMember: member != nil)
+            exactOriginalHit: sampled.hit.map { CFEqual($0, element) } == true, hasMember: member != nil, kind: kind,
+            requiresExactElementHit: requiresExactElementHit)
     }
 
     private func activationPoint() -> CGPoint? {
@@ -127,9 +146,11 @@ import ApplicationServices
         }
     }
 
-    private func hasCurrentParentPathToWindow(until deadline: TimeInterval) throws -> Bool {
+    func hasCurrentParentPath(
+        from target: AXUIElement? = nil, to ancestor: AXUIElement? = nil, until deadline: TimeInterval
+    ) throws -> Bool {
         try NativeElementHitSelection.reachesWindow(
-            member ?? element, window: window, same: { CFEqual($0, $1) },
+            target ?? member ?? element, window: ancestor ?? window, same: { CFEqual($0, $1) },
             parent: { AXAccess.element($0, kAXParentAttribute) },
             isSurface: { node in
                 guard let role = AXAccess.read(node, kAXRoleAttribute).value as? String else { return true }
@@ -139,6 +160,57 @@ import ApplicationServices
                 try RequestDiagnostics.checkCancellation()
                 return ProcessInfo.processInfo.systemUptime < deadline
             })
+    }
+
+    func inOriginalWindow(_ object: AXUIElement, pid: pid_t) -> Bool {
+        var owner: pid_t = 0
+        return AXUIElementGetPid(object, &owner) == .success && owner == pid
+            && BackgroundEvents.accessibilityProcessID(object).map { $0 == pid } != false
+            && AXAccess.element(object, kAXWindowAttribute).map { CFEqual($0, window) } == true
+    }
+
+    /// Member points use the member's own reported bounds. Window title and
+    /// catalogue queries cannot improve that geometry.
+    private func controlFrame(_ object: AXUIElement) -> CGRect? {
+        guard let position = AXAccess.read(object, kAXPositionAttribute).value,
+            let dimensions = AXAccess.read(object, kAXSizeAttribute).value,
+            CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(dimensions) == AXValueGetTypeID()
+        else { return nil }
+        var origin = CGPoint.zero, size = CGSize.zero
+        guard AXValueGetValue(unsafeDowncast(position, to: AXValue.self), .cgPoint, &origin),
+            AXValueGetValue(unsafeDowncast(dimensions, to: AXValue.self), .cgSize, &size),
+            [origin.x, origin.y, size.width, size.height].allSatisfy(\.isFinite), size.width > 0, size.height > 0
+        else { return nil }
+        return CGRect(origin: origin, size: size)
+    }
+
+    private func relatedControlHit(
+        _ hit: AXUIElement, mapping: WindowGeometry.WindowMapping, frame: CGRect, until deadline: TimeInterval
+    ) throws -> Bool {
+        guard member == nil, logicalWindow == nil, qtComboChoice == nil, frozenGeometry == nil else { return false }
+        func check() throws -> Bool {
+            try RequestDiagnostics.checkCancellation()
+            return ProcessInfo.processInfo.systemUptime < deadline
+        }
+        return try NativeOwnedElementHit.matches(
+            element, hit: hit, frame: frame, same: CFEqual,
+            role: { try check() ? AXAccess.read($0, kAXRoleAttribute).value as? String : nil },
+            parent: { try check() ? AXAccess.element($0, kAXParentAttribute) : nil },
+            inWindow: { try check() && inOriginalWindow($0, pid: mapping.pid) },
+            passive: { object in
+                var names: CFArray?
+                guard try check(), AXUIElementCopyActionNames(object, &names) == .success,
+                    let actions = names as? [String],
+                    actions.allSatisfy({ [kAXShowMenuAction, "AXScrollToVisible"].contains($0) })
+                else { return false }
+                return try [kAXFocusedAttribute, kAXValueAttribute, kAXSelectedTextAttribute].allSatisfy { key in
+                    guard try check() else { return false }
+                    switch AXAccess.writable(object, key) {
+                    case .value(false), .unsupported, .unavailable(.noValue): return true
+                    default: return false
+                    }
+                }
+            }, hitFrame: { try check() ? controlFrame($0) : nil })
     }
 
     private func sample(frozen: Geometry? = nil) throws -> Sample {
@@ -165,12 +237,14 @@ import ApplicationServices
             candidates = [frozen.candidate]
         } else {
             candidates = NativeElementHitSelection.candidates(
-                bounds: visible, activationPoint: expand ? activationPoint() : nil, expand: expand)
+                bounds: visible, activationPoint: expand ? activationPoint() : nil,
+                memberBounds: expand ? member.flatMap(controlFrame) : nil, expand: expand)
         }
         let pointer = pointerUnit(mapping: mapping)
         let root = AXUIElementCreateApplication(application.processIdentifier)
         var boundedRoot: AXUIElement?
         var observations = [[String: Any]]()
+        var serviceRecipient: NativePointerRecipient?
         let selected = try NativeElementHitSelection.select(
             candidates,
             canContinue: { candidate in
@@ -214,6 +288,11 @@ import ApplicationServices
                 } else {
                     relation = nil
                 }
+                if expand, relation == .otherControl, let hit,
+                    try relatedControlHit(hit, mapping: mapping, frame: frame, until: deadline)
+                {
+                    relation = .ownedControlPart
+                }
                 if expand, candidate.source == .center, relation == .otherControl, let current = hit,
                     try NativeQtInlineListHitEvidence.sample(
                         target: member ?? element, hit: current, window: window, pid: application.processIdentifier,
@@ -226,12 +305,11 @@ import ApplicationServices
                 }
                 var systemStatus: AXError?, systemWindow = false, coarseForeground = false
                 var systemRelation: String?, systemHitPID: pid_t?
-                // A provider can return its original window without descending
-                // into an exposed child. This is not a known sibling hit. Try
-                // the independent system-wide query only for that exact case;
-                // normal exact hits retain their original query and contract.
-                if expand, candidate.source == .center, status == .success, let current = hit, CFEqual(current, window),
-                    try hasCurrentParentPathToWindow(until: deadline), pointer.foregroundWindow(at: candidate.point)
+                // A provider can stop at the original window or a direct
+                // layout parent. A sibling never qualifies for this query.
+                if expand, status == .success, let current = hit,
+                    try canQuerySystemHit(
+                        current, relation: relation, candidate: candidate, pointer: pointer, until: deadline)
                 {
                     let system = AXUIElementCreateSystemWide()
                     // Setting timeout on a system-wide object changes this
@@ -249,9 +327,9 @@ import ApplicationServices
                             systemRelation = "target"
                             hit = systemHit
                             relation = .target
-                        } else if CFEqual(systemHit, window) {
-                            systemRelation = "originalWindow"
-                            systemWindow = true
+                        } else if member == nil, CFEqual(systemHit, current) {
+                            systemWindow = CFEqual(systemHit, window)
+                            systemRelation = systemWindow ? "originalWindow" : "originalButtonParent"
                             // The geometry attempt still needs the physical
                             // original foreground window after the AX query.
                             coarseForeground = pointer.foregroundWindow(at: candidate.point)
@@ -270,11 +348,23 @@ import ApplicationServices
                     // All other system results preserve the original rejected
                     // mismatch. They cannot enter background geometry fallback.
                 }
+                if expand, candidate.permitsGeometryFallback, let hit,
+                    relation == .otherControl || relation == .coarseAncestorWindow
+                        || (relation == .windowRoot && systemStatus == nil),
+                    let process = BackgroundEvents.accessibilityProcessID(member ?? element), process != mapping.pid,
+                    try hasCurrentParentPath(to: hit, until: deadline),
+                    coarseForeground || pointer.foregroundWindow(at: candidate.point),
+                    let recipient = try NativePointerRecipient.coarseServiceHit(
+                        hit, target: member ?? element, nativeWindow: window, host: mapping, point: candidate.point)
+                {
+                    relation = .serviceAncestor
+                    serviceRecipient = recipient
+                }
                 let evidence = NativeElementHitEvidence.result(status, relation: relation)
                 let originalWindowGeometry = try expand && candidate.permitsGeometryFallback
                     && evidence.relation == .unsupported
                     && pointer.foregroundWindow(at: candidate.point)
-                    && hasCurrentParentPathToWindow(until: deadline)
+                    && hasCurrentParentPath(until: deadline)
                 if WindowGeometry.inputDiagnosticsEnabled {
                     var observation: [String: Any] = [
                         "source": candidate.source.rawValue, "point": [candidate.point.x, candidate.point.y],
@@ -316,11 +406,40 @@ import ApplicationServices
         }
         try RequestDiagnostics.checkCancellation()
         return Sample(
-            geometry: Geometry(mapping: mapping, frame: frame, visible: visible, candidate: selected.candidate),
+            geometry: Geometry(
+                mapping: mapping, frame: frame, visible: visible, candidate: selected.candidate,
+                serviceRecipient: selected.basis == .serviceAncestorGeometry ? serviceRecipient : nil),
             selection: selected)
     }
 
-    func geometry() throws -> Geometry {
+    private func canQuerySystemHit(
+        _ hit: AXUIElement, relation: NativeElementHitEvidence.Relation?, candidate: NativeElementHitSelection.Candidate,
+        pointer: NativePointerUnit, until deadline: TimeInterval
+    ) throws -> Bool {
+        if let member {
+            guard candidate.source == .memberCenter,
+                relation == .windowRoot || relation == .otherControl,
+                inOriginalWindow(member, pid: pointer.window.pid)
+            else { return false }
+            if CFEqual(hit, window) { return try hasCurrentParentPath(until: deadline) }
+            return try inOriginalWindow(hit, pid: pointer.window.pid)
+                && hasCurrentParentPath(to: hit, until: deadline)
+                && (CFEqual(hit, element) || hasCurrentParentPath(from: hit, to: element, until: deadline))
+        }
+        guard candidate.source == .center else { return false }
+        if relation != .windowRoot {
+            guard relation == .otherControl,
+                AXAccess.read(element, kAXRoleAttribute).value as? String == kAXButtonRole,
+                AXAccess.read(hit, kAXRoleAttribute).value as? String == kAXGroupRole,
+                AXAccess.element(element, kAXParentAttribute).map({ CFEqual($0, hit) }) == true,
+                inOriginalWindow(element, pid: pointer.window.pid), inOriginalWindow(hit, pid: pointer.window.pid)
+            else { return false }
+        }
+        return try hasCurrentParentPath(until: deadline) && pointer.foregroundWindow(at: candidate.point)
+    }
+
+    func geometry(prepared: Geometry? = nil) throws -> Geometry {
+        if let prepared { return prepared }
         let sampled = try sample(frozen: frozenGeometry)
         // A distinct member is selected by the Python semantic resolver and
         // guarded by its native fact dependencies. This unit never searches
@@ -358,7 +477,7 @@ import ApplicationServices
     /// accepts another control in that window, and dispatch still uses geometry().
     func preparationGeometry() throws -> Geometry {
         let observed = try observedGeometry()
-        guard observed.preparation != .unavailable else {
+        guard observed.preparation != .unavailable, !requiresExactElementHit || observed.basis == .exactHit else {
             throw DriverError(
                 "no sampled pointer point belongs to this native target or its available window route",
                 code: .inputUnavailable)
@@ -404,6 +523,11 @@ import ApplicationServices
             requiresExactGeometry: frozenGeometry != nil || kind != .click)
         else {
             throw DriverError("element pointer geometry changed during the sequence", code: .inputUnavailable)
+        }
+        if let service = selected.serviceRecipient, sampled.selection.basis != .exactHit,
+            sampled.geometry.serviceRecipient.map({ service.matchesService($0) }) != true
+        {
+            throw DriverError("the original service no longer confirms the frozen pointer point", code: .inputUnavailable)
         }
     }
 
@@ -498,19 +622,33 @@ import ApplicationServices
         guardOperation: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
         onPosted: () -> Void, onCleanupUnknown: @escaping @MainActor () -> Void, delivery: NativeClickDelivery? = nil,
         onPreparation: @escaping @MainActor (String) -> Void = { _ in },
-        onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in }
+        onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void = { _ in },
+        preparedGeometry: Geometry? = nil
     ) async throws {
         guard request.kind == kind, request.start == nil, request.end == nil else {
             throw DriverError("element pointer contract requires its original addressed intent", code: .invalidRequest)
         }
         try check()
-        let selected = try geometry()
+        let selected = try geometry(prepared: preparedGeometry)
         let pointer = pointerUnit(mapping: selected.mapping)
+        let cellContinuation: NativeCellPointerContinuation?
+        if request.kind == .click, request.button == "left", request.count == 2, member == nil,
+            qtComboChoice == nil, selected.serviceRecipient == nil
+        {
+            cellContinuation = try NativeCellPointerContinuation(cell: element, window: window, geometry: selected)
+        } else { cellContinuation = nil }
+        let continueSecondClick: ((CGPoint) throws -> WindowGeometry.WindowMapping?)? = cellContinuation.map { cell in
+            { point in
+                try check()
+                return try cell.resolve(at: point)
+            }
+        }
         try await pointer.deliver(
             request, from: selected.point, to: nil, viewport: selected.visible.size,
             check: { try validate(selected, check: check) }, guardOperation: guardOperation,
             onDispatch: onDispatch, onPosted: onPosted,
             onCleanupUnknown: onCleanupUnknown, delivery: delivery,
-            onPreparation: onPreparation, onNativePreparation: onNativePreparation)
+            onPreparation: onPreparation, onNativePreparation: onNativePreparation,
+            confirmedService: selected.serviceRecipient, continueSecondClick: continueSecondClick)
     }
 }

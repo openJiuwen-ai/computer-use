@@ -13,7 +13,48 @@ import Foundation
         } catch { preconditionFailure("unexpected decoder failure: \(error)") }
     }
 
-    static func main() throws {
+    @MainActor static func exactApplicationLookup() throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        let app = root.appendingPathComponent("Fixture.app")
+        let contents = app.appendingPathComponent("Contents")
+        let binaries = contents.appendingPathComponent("MacOS")
+        try files.createDirectory(at: binaries, withIntermediateDirectories: true)
+        let metadata = [
+            "CFBundleIdentifier": "local.computer-use.test.exact-path",
+            "CFBundleExecutable": "Fixture",
+            "CFBundleName": "Fixture",
+            "CFBundlePackageType": "APPL",
+        ]
+        try PropertyListSerialization.data(fromPropertyList: metadata, format: .xml, options: 0)
+            .write(to: contents.appendingPathComponent("Info.plist"))
+        let executable = binaries.appendingPathComponent("Fixture")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+        try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let alias = root.appendingPathComponent("Alias.app")
+        try files.createSymbolicLink(at: alias, withDestinationURL: app)
+
+        let directory = NativeDirectory(state: NativeDesktopState(), session: "test-session")
+        let result = try directory.applications(scope: .path(alias.path))
+        let rows = result["applications"] as! [[String: Any]]
+        precondition(result["path"] as? String == alias.path && rows.count == 1)
+        precondition(rows[0]["path"] as? String == app.resolvingSymlinksInPath().path)
+        precondition(rows[0]["isRunning"] as? Bool == false)
+        let installation = rows[0]["id"] as! String
+        let pending = try directory.applications(scope: .installation(installation))
+        precondition(pending["installation"] as? String == installation)
+        precondition((pending["applications"] as! [[String: Any]]).isEmpty)
+
+        // A newly written executable at the same path is a different installation.
+        try Data("#!/bin/sh\nexit 1\n# replaced\n".utf8).write(to: executable, options: .atomic)
+        do {
+            _ = try directory.applications(scope: .installation(installation))
+            preconditionFailure("retained installation matched replacement file identity")
+        } catch let error as DriverError { precondition(error.code == .staleTarget) }
+    }
+
+    @MainActor static func main() throws {
         if CommandLine.arguments.dropFirst().first == "--stdio" {
             // The real Python encoder supplies these frames during the native
             // test run. No desktop session or application objects are involved.
@@ -26,16 +67,17 @@ import Foundation
         let source = URL(fileURLWithPath: CommandLine.arguments[1])
         let cases = try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as! [[String: Any]]
         for test in cases { precondition(accepted(test["query"]!) == test["valid"] as! Bool, test["name"] as! String) }
+        try exactApplicationLookup()
         let nodes: [String: Any] = ["kind": "nodes", "fields": ["AXRole"], "maxNodes": 1, "maxDepth": 0]
         for requested in ["none", "names", "full"] {
             var raw = nodes
             raw["actionDetail"] = requested
-            guard case .nodes(_, _, _, _, _, _, _, _, let detail) = try NativeInspectQuery(raw) else {
+            guard case .nodes(_, _, _, _, _, _, _, _, let detail, _) = try NativeInspectQuery(raw) else {
                 preconditionFailure("lost explicit node action profile")
             }
             precondition(detail.rawValue == requested)
         }
-        guard case .nodes(_, _, _, _, _, _, _, _, let defaultDetail) = try NativeInspectQuery(nodes) else {
+        guard case .nodes(_, _, _, _, _, _, _, _, let defaultDetail, _) = try NativeInspectQuery(nodes) else {
             preconditionFailure("lost ordinary observation profile")
         }
         precondition(defaultDetail == .full, "ordinary observations still collect complete action descriptions")

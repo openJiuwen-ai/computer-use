@@ -120,16 +120,18 @@ enum NativeInspectQuery {
         }
     }
 
-    case applications
+    enum ApplicationScope { case all, path(String), installation(String) }
+    case applications(ApplicationScope)
     case surfaceBatch(applications: [String], profile: SurfaceProfile)
     case launch
     case surfaces(application: String, profile: SurfaceProfile)
-    case roots(application: String)
+    case roots(application: String, applicationContent: Bool)
     case inputContext(
         within: [String], actuator: Actuator?, receiver: Receiver?, basis: [Dependency], currentReceiver: Bool)
     case nodes(
         fields: [String], maxNodes: Int, maxDepth: Int, childrenPage: ChildrenPage?, relationPage: RelationPage?,
-        advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail)
+        advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail,
+        focusedElement: Bool)
     case relation(property: String, cursor: String?, limit: Int)
     case capturedText(ref: String, offset: Int, length: Int)
 
@@ -147,8 +149,21 @@ enum NativeInspectQuery {
             _ = try object(raw, keys: ["kind"])
             self = .launch
         case "applications":
-            _ = try object(raw, keys: ["kind"])
-            self = .applications
+            let keys = Set((raw as? [String: Any])?.keys.map { $0 } ?? [])
+            if keys.contains("path") {
+                let p = try object(raw, keys: ["kind", "path"])
+                let path = try string(p["path"], label: "path")
+                guard path.hasPrefix("/") else {
+                    throw DriverError("application path must be absolute", code: .invalidRequest)
+                }
+                self = .applications(.path(path))
+            } else if keys.contains("installation") {
+                let p = try object(raw, keys: ["kind", "installation"])
+                self = .applications(.installation(try string(p["installation"], label: "installation")))
+            } else {
+                _ = try object(raw, keys: ["kind"])
+                self = .applications(.all)
+            }
         case "surfaceBatch":
             let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true
             let p = try object(raw, keys: hasProfile ? ["kind", "applications", "profile"] : ["kind", "applications"])
@@ -167,8 +182,11 @@ enum NativeInspectQuery {
             self = .surfaces(application: try string(p["application"], label: "application"),
                              profile: hasProfile ? .visual : .accessibility)
         case "roots":
-            let p = try object(raw, keys: ["kind", "application"])
-            self = .roots(application: try string(p["application"], label: "application"))
+            let content = (raw as? [String: Any])?.keys.contains("applicationContent") == true
+            let p = try object(raw, keys: content ? ["kind", "application", "applicationContent"] : ["kind", "application"])
+            self = .roots(
+                application: try string(p["application"], label: "application"),
+                applicationContent: content ? try boolean(p["applicationContent"], label: "applicationContent") : false)
         case "inputContext":
             let hasActuator = (raw as? [String: Any])?.keys.contains("actuator") == true
             let hasReceiver = (raw as? [String: Any])?.keys.contains("receiver") == true
@@ -219,13 +237,14 @@ enum NativeInspectQuery {
             let hasFollow = (raw as? [String: Any])?.keys.contains("followRelations") == true
             let hasText = (raw as? [String: Any])?.keys.contains("textContent") == true
             let hasActions = (raw as? [String: Any])?.keys.contains("actionDetail") == true
+            let hasFocus = (raw as? [String: Any])?.keys.contains("focusedElement") == true
             let p = try object(
                 raw,
                 keys: Set(
                     ["kind", "fields", "maxNodes", "maxDepth"] + (hasPage ? ["childrenPage"] : [])
                         + (hasAdvertised ? ["advertisedFields"] : []) + (hasRelationPage ? ["relationPage"] : [])
                         + (hasFollow ? ["followRelations"] : []) + (hasText ? ["textContent"] : [])
-                        + (hasActions ? ["actionDetail"] : [])))
+                        + (hasActions ? ["actionDetail"] : []) + (hasFocus ? ["focusedElement"] : [])))
             let fields = try Self.names(p["fields"], label: "fields", min: 1, max: 128)
             let advertised =
                 hasAdvertised ? try Self.names(p["advertisedFields"], label: "advertisedFields", min: 1, max: 128) : []
@@ -255,7 +274,7 @@ enum NativeInspectQuery {
                 followRelations: hasFollow
                     ? try Self.names(p["followRelations"], label: "followRelations", min: 1, max: 16) : [],
                 textContent: hasText ? try boolean(p["textContent"], label: "textContent") : false,
-                actionDetail: actionDetail)
+                actionDetail: actionDetail, focusedElement: hasFocus ? try boolean(p["focusedElement"], label: "focusedElement") : false)
         case "relation":
             let p = try object(raw, keys: ["kind", "property", "cursor", "limit"])
             self = .relation(

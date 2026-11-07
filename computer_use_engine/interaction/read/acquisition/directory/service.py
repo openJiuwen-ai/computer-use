@@ -31,8 +31,8 @@ class NativeDirectory:
     def __init__(self, port: NativePort) -> None:
         self.port = port
 
-    async def applications(self, *, timeout_ms: int = 30000) -> DirectoryFacts:
-        return await self._query(dict(kind="applications"), timeout_ms)
+    async def applications(self, *, selector: str | None = None, timeout_ms: int = 30000) -> DirectoryFacts:
+        return await self._query(dict(kind="applications"), timeout_ms, application_selector=selector)
 
     async def surfaces(self, application: str, *, timeout_ms: int = 30000) -> DirectoryFacts:
         if not isinstance(application, str) or not application:
@@ -54,11 +54,13 @@ class NativeDirectory:
             query["profile"] = "visual"
         return await self._query(query, timeout_ms)
 
-    async def _query(self, query: Record, timeout_ms: int) -> DirectoryFacts:
+    async def _query(
+        self, query: Record, timeout_ms: int, *, application_selector: str | None = None
+    ) -> DirectoryFacts:
         from computer_use.interaction.read.acquisition.directory.model import DirectoryRequest
         from computer_use.interaction.read.acquisition.directory.pipeline import DirectoryReadPipeline
 
-        return await DirectoryReadPipeline(self.port).arun(DirectoryRequest(query, timeout_ms))
+        return await DirectoryReadPipeline(self.port).arun(DirectoryRequest(query, timeout_ms, application_selector))
 
     async def collect(
         self, read: OperationLease[Binding], query: Record, *, _control: Control | None = None

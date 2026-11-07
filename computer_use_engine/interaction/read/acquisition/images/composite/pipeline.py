@@ -17,7 +17,7 @@ from uuid import uuid4
 from computer_use.interaction.query.instances.membership import ancestor
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.presentation.content import DisplayText, join, template, text
-from computer_use.interaction.read.presentation.headers import ImageHeader
+from computer_use.interaction.read.presentation.headers import ImageHeader, image_state_notes
 from computer_use.protocol.captures import capture_metadata, decode_capture
 from computer_use.session.interface_images import (
     ImagePiece,
@@ -271,7 +271,7 @@ class InterfaceImagePipeline:
         summary = self.metadata(canvas, collected, displayed, kind, aliases, confirmed)
         target = canvas.pieces[0].image.target if canvas.pieces else images[0][1].target
         self.register(
-            ui, canvas, target, summary.windows, historical=(*layout_notes, *historical),
+            ui, canvas, target, summary, historical=(*layout_notes, *historical),
             has_confirmed_pixels=any(confirmed[key] for key in displayed),
         )
         notes.append(DisplayText("image_header", (summary,)))
@@ -327,7 +327,7 @@ class InterfaceImagePipeline:
         )
 
     def register(
-        self, ui: UIHandle, canvas: InterfaceImage, target: Binding, windows: tuple[int, ...],
+        self, ui: UIHandle, canvas: InterfaceImage, target: Binding, summary: ImageHeader,
         *, historical: tuple[DisplayText, ...], has_confirmed_pixels: bool,
     ) -> None:
         """Retain the composite image's source windows and coordinate mapping.
@@ -336,7 +336,7 @@ class InterfaceImagePipeline:
             ui: App or request scope whose instance and observation bounds constrain the
                 operation.
             target: A captured source identity whose native session owns this image.
-            windows: Public references for the windows actually displayed in this PNG.
+            summary: Exact displayed window identities and capture-time evidence.
         """
         adapters = self.controller.adapters
         canvas.digest = hashlib.sha256(canvas.png).digest()
@@ -458,7 +458,8 @@ class InterfaceImagePipeline:
             canvas.png,
             dict(
                 kind="window",
-                windows=windows,
+                windows=summary.windows,
+                windowStateNotes=image_state_notes(summary),
                 mappingAvailable=not canvas.unavailable_mapping and has_confirmed_pixels,
                 historical=bool(historical),
                 # pylint: disable-next=protected-access

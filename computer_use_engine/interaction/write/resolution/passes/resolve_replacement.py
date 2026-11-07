@@ -13,6 +13,7 @@ from computer_use.interaction.write.model import ResolutionFrame
 from computer_use.interaction.write.resolution.checks import parts, require_actuators
 from computer_use.interaction.write.resolution.receiver import ReceiverQuery
 from computer_use.interaction.write.routes.policy import (
+    has_exact_keyboard_edit_route,
     has_independent_text_route,
     selects_ready_value_replacement,
     validate_target,
@@ -47,6 +48,7 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         # extra prerequisite imposed by the driver's actuator capability.
         if not (
             has_independent_text_route(facts, intent, frame.request.history)
+            or has_exact_keyboard_edit_route(facts, intent, frame.request.history)
             or selects_ready_value_replacement(facts, intent, native.policy, frame.request.history)
         ):
             if cast("Binding", target).node is None:

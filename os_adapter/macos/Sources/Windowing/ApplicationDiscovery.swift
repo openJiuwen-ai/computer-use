@@ -28,18 +28,15 @@ import AppKit
         return instances.id(for: app)
     }
 
-    private func catalogue(continuing: () -> Bool = { true }) -> [ApplicationCatalog.Entry] {
+    func nativeApplications(path: URL? = nil, continuing: () -> Bool) -> [[String: Any]] {
         let active = running.compactMap { app -> ApplicationCatalog.Running? in
             guard let id = selector(for: app) else { return nil }
             return ApplicationCatalog.Running(
                 id: id, url: app.bundleURL, identifier: app.bundleIdentifier, name: app.localizedName,
                 regularUI: app.activationPolicy == .regular)
         }
-        return ApplicationCatalog.list(roots: applicationRoots, running: active, continuing: continuing)
-    }
-
-    func nativeApplications(continuing: () -> Bool) -> [[String: Any]] {
-        catalogue(continuing: continuing).map(\.nativeJSON)
+        return ApplicationCatalog.list(roots: applicationRoots, running: active, path: path, continuing: continuing)
+            .map(\.nativeJSON)
     }
 
     func nativeEntry(for app: NSRunningApplication) -> [String: Any]? {

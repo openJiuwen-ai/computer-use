@@ -45,6 +45,15 @@ import Foundation
         let other = NativeActionDocumentPolicy.preparation(
             action: "AXPress", exactStandardWindow: true, otherDocument: true)
         precondition(other.windowSelectionRequired, "a confirmed other document still requires exact window selection")
+        let point = CGPoint(x: 30, y: 40)
+        precondition(!ForegroundAssist.canReuseFocusedWindow(
+            foreground: true, window: 7, focused: 7, pointerAt: point, hit: { _ in 8 }))
+        precondition(!ForegroundAssist.canReuseFocusedWindow(
+            foreground: true, window: 7, focused: 7, pointerAt: point, hit: { _ in nil }))
+        precondition(ForegroundAssist.canReuseFocusedWindow(
+            foreground: true, window: 7, focused: 7, pointerAt: point, hit: { _ in 7 }))
+        precondition(ForegroundAssist.canReuseFocusedWindow(
+            foreground: true, window: 7, focused: 7, pointerAt: nil, hit: { _ in preconditionFailure() }))
         print("PASS foreground preparation requires original-scope pre-dispatch evidence")
     }
 }

@@ -11,6 +11,7 @@ struct NativeInputScope {
     let blocked: [String]
     struct WindowEvidence {
         let windows: [NativeApplicationAccess.Window]
+        var nativeWindows: [NativeWindows.Window]? = nil
     }
     /// One query's result, never a catalogue cache. Qualified popup checks use
     /// the same graph for fixed-root and original-owner modal boundaries.

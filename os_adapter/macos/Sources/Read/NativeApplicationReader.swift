@@ -666,7 +666,9 @@ import ApplicationServices
             if let timing, let item = result.last { timing.root(item.element, ref: item.ref) }
             if projection == .inputBoundary || projection == .visualCatalogue {
                 try RequestDiagnostics.checkCancellation()
-                inputNativeIDs.append((element, query.nativeID(element)))
+                let nativeID = query.nativeID(element)
+                inputNativeIDs.append((element, nativeID))
+                timing?.root(element, nativeID: nativeID)
             }
             // Sheets are often absent from AXWindows. Explicit native ownership
             // is retained; title, screen position and current focus prove no owner.
@@ -866,11 +868,12 @@ import ApplicationServices
         // must not collapse, nor may a sheet borrow its parent's identity.
         var remapped = [String: String]()
         var exactNativeIDs = [String: CGWindowID]()
-        // Read each AX hint once, not once per pair of AX/native windows.
-        let hints = try result.map { item in
+        // Visual matching already has the original object's native ID when available.
+        let hints: [WindowSelection.Hint?] = try result.map { item in
             try RequestDiagnostics.checkCancellation()
-            if projection == .visualCatalogue, item.kind == "unknown" {
-                return reportedID(item.element).map { WindowSelection.Hint(frame: nil, title: "", id: $0) }
+            if projection == .visualCatalogue {
+                if let id = reportedID(item.element) { return .init(frame: nil, title: "", id: id) }
+                if item.kind == "unknown" { return nil }
             }
             return timed("helper.nativeHint", root: item.element) {
                 query.hint(item.element, timing)

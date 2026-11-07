@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from computer_use.interaction.read.facts.decisions import DECISION_SLOTS
 from computer_use.interaction.read.presentation.actions.control_raises import capture_control_raises
 from computer_use.interaction.read.presentation.interface.atoms.indices import index_has_collection_context
 from computer_use.interaction.read.presentation.actions.menu_mechanisms import capture_menu_mechanisms
@@ -390,6 +391,9 @@ def plan_atom(
             builder.add("description", "Description")
     elif node.get("description") and node["description"] == node.get("name"):
         builder.equivalent("description", "name")
+    for attribute, label, format in DECISION_SLOTS:
+        if attribute in node:
+            builder.add(attribute, label, format=format, protection="state")
     if node.get("fullDescription"):
         builder.add("fullDescription", "Full description")
     for attribute, label in (("valueDescription", "Value description"), ("rangeDescription", "Range description")):

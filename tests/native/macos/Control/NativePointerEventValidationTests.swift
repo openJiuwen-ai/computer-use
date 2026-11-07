@@ -9,14 +9,15 @@ import ApplicationServices
     @MainActor final class Scene {
         enum Fault {
             case none, operationCancelled, queryFailed, cancelDuringQuery, receiverChangedAfterHover,
-                 readinessLostAfterHover, heldDuringFinalQuery, closeOnDown, closeBeforeSecondClick, processGoneOnDown
+                 readinessLostAfterHover, refusedAfterFinalQuery, closeOnDown, closeBeforeSecondClick,
+                 processGoneOnDown, processGoneBeforeSecondClick
         }
         let fault: Fault
         let point = CGPoint(x: 25, y: 35)
         var posts = [CGEventType]()
         var operationChecks = 0, queries = 0, targetChecks = 0, physicalChecks = 0
         var releaseChecks = 0, skippedReleases = 0, marked = 0, returned = 0
-        var targetExists = true, processExists = true, cancelled = false, held = false
+        var targetExists = true, processExists = true, cancelled = false, boundaryConflict = false
         var stages = [String]()
 
         init(_ fault: Fault = .none) { self.fault = fault }
@@ -24,7 +25,8 @@ import ApplicationServices
         func run() async throws {
             let request = try NativePointerIntent(
                 unit: "pointer_sequence", kind: "click",
-                parameters: ["x": 25, "y": 35, "count": fault == .closeBeforeSecondClick ? 2 : 1],
+                parameters: ["x": 25, "y": 35,
+                             "count": [.closeBeforeSecondClick, .processGoneBeforeSecondClick].contains(fault) ? 2 : 1],
                 foreground: false)
             let sequence = try NativePointerEvents(
                 request: request, from: point, to: nil, viewport: CGSize(width: 100, height: 100),
@@ -50,10 +52,10 @@ import ApplicationServices
                             if self.fault == .receiverChangedAfterHover && self.posts.contains(.mouseMoved) {
                                 throw DriverError("original receiver changed", code: .staleTarget)
                             }
-                            // A real user can press a physical button while
-                            // this final AX query is in flight.
-                            if self.fault == .heldDuringFinalQuery && self.posts.contains(.mouseMoved) {
-                                self.held = true
+                            // A final query can change the facts consumed by
+                            // the supplied event guard.
+                            if self.fault == .refusedAfterFinalQuery && self.posts.contains(.mouseMoved) {
+                                self.boundaryConflict = true
                             }
                         }, queryRecipient: {
                             self.queries += 1
@@ -66,16 +68,18 @@ import ApplicationServices
                         }, checkPhysicalInput: {
                             self.physicalChecks += 1
                             self.stages.append("physical")
-                            try NativePhysicalInput.validate(.globalHID, sample: {
-                                .init(modifiers: [], buttons: self.held ? [.left] : [])
-                            })
+                            if self.boundaryConflict {
+                                throw DriverError("event guard refused", code: .inputUnavailable)
+                            }
                         }, unavailable: { DriverError("receiver not ready", code: .inputUnavailable) })
                 }, post: { event, point in
                     precondition(point == self.point)
                     self.posts.append(event.type)
                     if event.type == .leftMouseDown {
                         if [.closeOnDown, .closeBeforeSecondClick].contains(self.fault) { self.targetExists = false }
-                        if self.fault == .processGoneOnDown { self.processExists = false }
+                        if [.processGoneOnDown, .processGoneBeforeSecondClick].contains(self.fault) {
+                            self.processExists = false
+                        }
                     }
                 }, canRelease: {
                     self.releaseChecks += 1
@@ -86,6 +90,7 @@ import ApplicationServices
     }
 
     @MainActor static func main() async throws {
+        try await secondPairContinuesOnlyAfterTheFirstUp()
         let normal = Scene()
         try await normal.run()
         precondition(normal.posts.map(\.rawValue) == [8, 5, 1, 2])
@@ -102,9 +107,9 @@ import ApplicationServices
             catch let error as DriverError { precondition(fault == .queryFailed && error.code == .observationIncomplete) }
             precondition(scene.posts.isEmpty && scene.marked == 0 && scene.releaseChecks == 0)
         }
-        for fault in [Scene.Fault.receiverChangedAfterHover, .readinessLostAfterHover, .heldDuringFinalQuery] {
+        for fault in [Scene.Fault.receiverChangedAfterHover, .readinessLostAfterHover, .refusedAfterFinalQuery] {
             let scene = Scene(fault)
-            do { try await scene.run(); preconditionFailure("changed receiver/held conflict received down") }
+            do { try await scene.run(); preconditionFailure("a refused event received down") }
             catch let error as DriverError {
                 precondition(error.code == (fault == .receiverChangedAfterHover ? .staleTarget : .inputUnavailable))
             }
@@ -122,12 +127,61 @@ import ApplicationServices
         catch let error as DriverError { precondition(error.code == .staleTarget) }
         precondition(second.posts.map(\.rawValue) == [8, 5, 1, 2] && second.releaseChecks == 1)
 
-        let dead = Scene(.processGoneOnDown)
-        try await dead.run()
-        precondition(dead.posts.map(\.rawValue) == [8, 5, 1] && dead.skippedReleases == 1,
-                     "cleanup cannot release into a replacement/dead original process")
+        for fault in [Scene.Fault.processGoneOnDown, .processGoneBeforeSecondClick] {
+            let dead = Scene(fault)
+            do { try await dead.run(); preconditionFailure("unknown release was reported as success") }
+            catch let error as DriverError { precondition(error.code == .inputUnavailable) }
+            precondition(dead.posts.map(\.rawValue) == [8, 5, 1] && dead.skippedReleases == 1,
+                         "cleanup cannot release into a replacement process or allow a second down")
+            precondition(dead.marked == 3 && dead.returned == 3,
+                         "the already dispatched events must retain their progress")
+        }
         try nonClickBoundariesRemainExplicit()
         print("Pointer event query/final-target/held ordering and original paired release passed")
+    }
+
+    @MainActor static func secondPairContinuesOnlyAfterTheFirstUp() async throws {
+        let point = CGPoint(x: 15, y: 20)
+        let request = try NativePointerIntent(
+            unit: "pointer_sequence", kind: "click", parameters: ["button": "left", "count": 2],
+            foreground: false, element: true)
+        guard let source = CGEventSource(stateID: .privateState) else { preconditionFailure("no event source") }
+        let sequence = try NativePointerEvents(request: request, from: point, to: nil,
+                                               viewport: CGSize(width: 100, height: 100), source: source)
+        for releaseSucceeds in [true, false] {
+            var events = [(CGEventType, Int)]()
+            var destination = 1
+            var continuationCount = 0
+            do {
+                try await sequence.deliver(
+                    check: { _, _ in
+                        guard !events.contains(where: { $0.0 == .leftMouseUp }) else {
+                            throw DriverError("the new editor covers the original cell", code: .staleTarget)
+                        }
+                    }, post: { event, postedPoint in
+                        precondition(postedPoint == point)
+                        events.append((event.type, destination))
+                    }, canRelease: { releaseSucceeds }, skipped: {}, onDispatch: {}, onPosted: {},
+                    validateSecondDown: { suppliedPoint in
+                        precondition(suppliedPoint == point)
+                        precondition(events.map(\.0) == [.mouseMoved, .leftMouseDown, .leftMouseUp])
+                        continuationCount += 1
+                        destination = 2
+                        return true
+                    })
+                precondition(releaseSucceeds)
+            } catch let error as DriverError {
+                precondition(!releaseSucceeds && error.code == .inputUnavailable)
+            }
+            if releaseSucceeds {
+                precondition(continuationCount == 1)
+                precondition(events.map(\.0) == [.mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp])
+                precondition(events.map(\.1) == [1, 1, 1, 2, 2])
+            } else {
+                precondition(continuationCount == 0)
+                precondition(events.map(\.0) == [.mouseMoved, .leftMouseDown])
+            }
+        }
     }
 
     @MainActor static func nonClickBoundariesRemainExplicit() throws {

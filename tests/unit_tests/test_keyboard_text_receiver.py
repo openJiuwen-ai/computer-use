@@ -2,10 +2,12 @@
 
 """A text receiver's read-only AX buffer is not a read-only keyboard stream."""
 
+from dataclasses import replace
+
 import pytest
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.write.engine import Engine
-from computer_use.native.contracts import Intent, Knowledge
+from computer_use.native.contracts import Channel, Intent, Knowledge, Primitive
 from computer_use.native.semantics import control_capabilities, keyboard_input_evidence
 from unit_tests.test_confirmed_text_receiver_evidence import SCOPE, TARGET, TextEvidencePort
 
@@ -115,3 +117,71 @@ def test_observation_advertises_text_input_separately_from_replacement():
 def test_explicit_read_only_declarations_do_not_qualify_a_text_stream(declaration):
     values = {"focusWritable": True, "valueWritable": False, "textWritable": False, declaration: True}
     assert keyboard_input_evidence("textArea", values, platform="macos") is not True
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("offers_cell_selection", [False, True])
+async def test_cell_selection_preparation_reinspects_the_original_before_text(offers_cell_selection):
+    class CellPort(TextEvidencePort):
+        capabilities = (*TextEvidencePort.capabilities, "nativeEditorPreparation")
+
+        def __init__(self):
+            super().__init__(editable=None)
+            self.focused = None
+            self.key_state = None
+            self.selected = False
+
+        def raw_role(self):
+            return "AXCell"
+
+        async def inspect(self, operation, target, timeout_ms, **options):
+            facts = await super().inspect(operation, target, timeout_ms, **options)
+            if self.selected:
+                actuator = options.get("actuator")
+                if actuator is None:
+                    return replace(facts, primitives=())
+                assert actuator.node == "original-editor"
+                return replace(facts, actuator=actuator)
+            if not offers_cell_selection:
+                return facts
+            preparation = Primitive(
+                "cell-selection", "prepare_receiver", Channel.EDITOR, Knowledge.YES,
+                Knowledge.NO, ("receiver",), Knowledge.YES,
+            )
+            return replace(facts, primitives=(preparation,))
+
+        async def query_nodes(self, operation, target, fields, max_nodes, max_depth, timeout_ms):
+            batch = await super().query_nodes(operation, target, fields, max_nodes, max_depth, timeout_ms)
+            if self.selected and target.node == TARGET.node:
+                batch["relations"][0]["targets"] = ["original-editor"]
+            elif target.node == "original-editor":
+                node = batch["nodes"][0]
+                node["values"].update({"AXRole": "AXTextField", "AXEnabled": True, "AXEditable": True})
+                node["fieldStatus"].pop("AXEditable", None)
+                batch["relations"].append(
+                    {
+                        "source": target.node, "property": "AXParent", "targets": [TARGET.node],
+                        "state": "complete", "certainty": "confirmed",
+                    }
+                )
+            return batch
+
+        async def execute(self, operation, step, command, timeout_ms):
+            if command.prepare:
+                self.selected = True
+            return await super().execute(operation, step, command, timeout_ms)
+
+    port = CellPort()
+    if not offers_cell_selection:
+        with pytest.raises(ComputerUseError):
+            await Engine(port).execute(Intent("insert", {"text": "X"}), TARGET)
+        assert not port.commands
+        return
+    result = await Engine(port).execute(Intent("insert", {"text": "X"}), TARGET)
+    assert result["status"] == "dispatched"
+    preparation, insertion = port.commands
+    assert preparation.prepare and not insertion.prepare
+    assert preparation.target == insertion.target == TARGET
+    assert preparation.actuator is None and insertion.actuator.node == "original-editor"
+    assert not preparation.foreground and not insertion.foreground
+    assert port.contents == "originalX"

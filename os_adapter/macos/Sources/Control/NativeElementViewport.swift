@@ -3,9 +3,9 @@
 import AppKit
 import ApplicationServices
 
-/// One original element and its known clipping ancestors. Ordinary wrapper
-/// frames do not clip. A scroll region is a preparation target, never a click
-/// substitute for the original element.
+/// One original element and its known clipping ancestors. A table bounds its
+/// direct rows; ordinary wrapper frames do not clip. A scroll region can
+/// prepare the original element for a click.
 @MainActor struct NativeElementViewport {
     struct Exposure {
         let mapping: WindowGeometry.WindowMapping
@@ -46,7 +46,11 @@ import ApplicationServices
             let role = AXAccess.read(node, kAXRoleAttribute).value as? String
             if [kAXScrollAreaRole, kAXListRole, kAXTableRole, kAXOutlineRole].contains(role ?? ""),
                 let bounds = WindowGeometry.hint(node)?.frame, !bounds.isEmpty
-            { regions.append((node, bounds, role == kAXScrollAreaRole)) }
+            {
+                let elementRole = seen.count == 1 && role == kAXTableRole
+                    ? AXAccess.read(element, kAXRoleAttribute).value as? String : nil
+                regions.append((node, bounds, Self.clips(role: role, distance: seen.count, elementRole: elementRole)))
+            }
             current = AXAccess.element(node, kAXParentAttribute)
         }
         let clipped = regions.filter(\.clips).reduce(frame.intersection(mapping.frame)) { $0.intersection($1.bounds) }
@@ -77,6 +81,10 @@ import ApplicationServices
             }
         }
         return NativeElementViewport(frame: frame, clipped: clipped, exposure: exposure, mapping: mapping)
+    }
+
+    nonisolated static func clips(role: String?, distance: Int, elementRole: String?) -> Bool {
+        role == kAXScrollAreaRole || role == kAXTableRole && distance == 1 && elementRole == kAXRowRole
     }
 
     nonisolated static func progressed(

@@ -45,7 +45,9 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         )
         if matches_needs_pointer_member:
             query = ControlPartQuery(native, operation, target, remaining, intent=intent)
-            selected = await query.resolve(facts.input.pointer_hit)
+            selected = await query.resolve(
+                facts.input.pointer_hit, allow_passive_candidate=frame.request.memory.pointer_member is None
+            )
             if selected is not None:
                 memory = replace(frame.request.memory, pointer_member=selected.node)
                 facts = await native.inspect(

@@ -5,6 +5,10 @@ import ApplicationServices
 
 @main enum NativeWindowScrollExposureTests {
     @MainActor static func main() async throws {
+        precondition(NativeElementViewport.clips(role: kAXTableRole, distance: 1, elementRole: kAXRowRole))
+        precondition(!NativeElementViewport.clips(role: kAXTableRole, distance: 2, elementRole: kAXRowRole))
+        precondition(!NativeElementViewport.clips(role: kAXTableRole, distance: 1, elementRole: kAXButtonRole))
+        precondition(NativeElementViewport.clips(role: kAXScrollAreaRole, distance: 2, elementRole: kAXButtonRole))
         let window = CGRect(x: -1138, y: 189, width: 440, height: 700)
         let bar = CGRect(x: -704, y: 221, width: 6, height: 596)
         let target = CGRect(x: -1068, y: 1032, width: 78, height: 22)

@@ -8,7 +8,14 @@ import ApplicationServices
 @MainActor struct NativeReplacementUnit {
     enum Selection: Equatable {
         case range, shortcut, markers, selectAll
-        var usesWindowCommand: Bool { self == .shortcut || self == .selectAll }
+        case keyboardSelectAll(NativeKeyboardTextEntry)
+
+        var keyboardEntry: NativeKeyboardTextEntry? {
+            if case .keyboardSelectAll(let entry) = self { return entry }
+            return nil
+        }
+
+        var usesWindowCommand: Bool { self == .shortcut || self == .selectAll || keyboardEntry != nil }
     }
     let element: AXUIElement
 
@@ -82,6 +89,7 @@ import ApplicationServices
     }
 
     func snapshot(_ selection: Selection) -> Snapshot? {
+        if let entry = selection.keyboardEntry { return entry.selection(element).map(Snapshot.numeric) }
         if selection != .markers { return snapshot().map(Snapshot.numeric) }
         func parameter(_ name: String, _ value: CFTypeRef) -> AXRead<CFTypeRef> {
             var result: CFTypeRef?
@@ -194,6 +202,24 @@ import ApplicationServices
         onPosted()
     }
 
+    /// Only an observed whole range that later became a caret can be restored.
+    /// Query the unchanged literal before rechecking the range: querying Value
+    /// can itself collapse the range in some native editor implementations.
+    static func restoreCollapsedRange(
+        original: [UInt16], fullObserved: Bool, readText: () -> [UInt16]?,
+        readRange: () -> NativeTextSelection?, validateReceiver: () async throws -> Void,
+        restore: (Int) throws -> Void
+    ) async throws -> Bool {
+        guard fullObserved, !original.isEmpty, let lost = readRange(),
+            lost.count == original.count, lost.contiguous, lost.location != nil, lost.length == 0,
+            readText() == original
+        else { return false }
+        try await validateReceiver()
+        guard readText() == original, readRange() == lost else { return false }
+        try restore(original.count)
+        return true
+    }
+
     /// Returns true only for an already-empty target replaced with empty text.
     /// Selection mutation and content delivery share one dispatch barrier. Any
     /// uncertain selection result stops here; there is no second recipe.
@@ -206,7 +232,10 @@ import ApplicationServices
     ) async throws -> Bool {
         func validateImmediate() throws {
             try check()
-            guard contract() == selection else {
+            let valid = if let entry = selection.keyboardEntry {
+                NativeKeyboardTextEntry.read(element) == entry
+            } else { contract() == selection }
+            guard valid else {
                 throw DriverError("replacement editing/selection contract changed", code: .inputUnavailable)
             }
         }
@@ -220,6 +249,23 @@ import ApplicationServices
             throw DriverError("target text extent is unavailable; no replacement sent", code: .inputUnavailable)
         }
         if before.empty && text.isEmpty { return true }
+        func boundedLiteral() -> [UInt16]? {
+            switch AXAccess.read(element, kAXSubroleAttribute) {
+            case .value(let raw):
+                guard let subrole = raw as? String, subrole != kAXSecureTextFieldSubrole else { return nil }
+            case .unsupported, .unavailable(.noValue): break
+            default: return nil
+            }
+            guard let value = AXAccess.read(element, kAXValueAttribute).value as? String,
+                (1...4096).contains(value.utf16.count) else { return nil }
+            return Array(value.utf16)
+        }
+        let recoveryLiteral: [UInt16]?
+        if selection == .range, case .numeric(let range) = before, !range.full, (1...4096).contains(range.count),
+            let value = boundedLiteral(), value.count == range.count
+        {
+            recoveryLiteral = value
+        } else { recoveryLiteral = nil }
         // Structured scalar editors can validate each intermediate character
         // and retain a segment independently of their full AX range. Establish
         // editing, a forward complete range, and one whole-string input. Qt
@@ -256,7 +302,7 @@ import ApplicationServices
                 try select(
                     markers.range, attribute: NativeTextMarkerSelection.selectedAttribute,
                     check: beforeSelectionMutation, onDispatch: onDispatch, onPosted: onPosted)
-            case (.shortcut, .numeric), (.selectAll, .numeric):
+            case (.shortcut, .numeric), (.selectAll, .numeric), (.keyboardSelectAll, .numeric):
                 try await Input.preparedKey(
                     "super+a", delivery: delivery, validate: validate, onDispatch: onDispatch, onPosted: onPosted,
                     onCleanupUnknown: onCleanupUnknown)
@@ -271,25 +317,59 @@ import ApplicationServices
             try selectRange(
                 count: numeric.count, check: beforeSelectionMutation, onDispatch: onDispatch, onPosted: onPosted)
         }
+        var fullOriginalRangeObserved = false
         func selected() -> Bool {
             // Keep the original exact numeric/full-marker proof. Some providers
             // map markers to the surrounding document even for an independently
             // editable text area. Only a shortened rich-editor selection needs
             // the additional opaque-marker ownership proof.
-            snapshot(selection)?.full == true || selection == .selectAll && keyboardSelectionIsScoped()
+            if let recoveryLiteral {
+                let range = NativeTextSelection.readBeforeRanges { AXAccess.read(element, $0) }
+                if range?.full == true && range?.count == recoveryLiteral.count {
+                    fullOriginalRangeObserved = true
+                }
+                return range?.full == true
+            }
+            return snapshot(selection)?.full == true || selection == .selectAll && keyboardSelectionIsScoped()
         }
-        // Selection changes may be asynchronous. Observe only, without
-        // repeating Select All or comparing normal formatted text values.
-        for attempt in 0..<12 {
-            try await validate()
-            if selected() { break }
-            if attempt < 11 { try await Task.sleep(for: .milliseconds(25)) }
+        func liveRecoveryRange(_ extent: Int) -> NativeTextSelection? {
+            NativeTextSelection.readRanges(textUTF16Count: extent) { AXAccess.read(element, $0) }
         }
+        // Both initial verification and possible recovery consume the same
+        // observation allowance and remain inside the original operation.
+        var observationsRemaining = 12
+        func observeFullSelection() async throws -> Bool {
+            while observationsRemaining > 0 {
+                observationsRemaining -= 1
+                try await validate()
+                if selected() { return true }
+                if observationsRemaining > 0 { try await Task.sleep(for: .milliseconds(25)) }
+            }
+            return false
+        }
+        _ = try await observeFullSelection()
+        var restorationAttempted = false
         var contentStarted = false
         func beforeContent() async throws {
             if !contentStarted {
                 try await validate()
-                if !selected() {
+                var full = selected()
+                if !full, let recoveryLiteral, !restorationAttempted, observationsRemaining > 0 {
+                    restorationAttempted = true
+                    if try await Self.restoreCollapsedRange(
+                        original: recoveryLiteral, fullObserved: fullOriginalRangeObserved, readText: boundedLiteral,
+                        readRange: { liveRecoveryRange(recoveryLiteral.count) },
+                        validateReceiver: validate,
+                        restore: { count in
+                            try selectRange(
+                                count: count, check: beforeSelectionMutation,
+                                onDispatch: onDispatch, onPosted: onPosted)
+                        })
+                    {
+                        full = try await observeFullSelection()
+                    }
+                }
+                if !full {
                     throw DriverError(
                         selection == .selectAll
                             ? """
@@ -302,6 +382,12 @@ import ApplicationServices
             // Selection/parent queries can call into application code. A valid
             // range is not authority to use a receiver sampled before them.
             try await validate()
+            if !contentStarted, restorationAttempted, let recoveryLiteral {
+                guard boundedLiteral() == recoveryLiteral, liveRecoveryRange(recoveryLiteral.count)?.full == true else {
+                    throw DriverError(
+                        "the restored selection changed before replacement dispatch", code: .inputUnavailable)
+                }
+            }
         }
         func posted() {
             contentStarted = true
