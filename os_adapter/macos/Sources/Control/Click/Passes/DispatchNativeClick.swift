@@ -67,7 +67,8 @@ import ApplicationServices
         case .menuPointer(let unit):
             try await unit.performPointer(
                 plan.pointer!, check: boundary.checkConditions, guardOperation: guardOperation,
-                onDispatch: pointerBoundary, onPosted: posted, onPreparation: receipt.recordPreparation,
+                onDispatch: pointerBoundary, onPosted: posted, onDelivered: { receipt.dispatch = "dispatched" },
+                onPreparation: receipt.recordPreparation,
                 onCleanupUnknown: receipt.recordCleanupUnknown, onNativePreparation: evidence.record)
         case .captured(let unit):
             try await unit.deliver(

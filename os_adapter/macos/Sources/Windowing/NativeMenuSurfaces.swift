@@ -7,12 +7,19 @@ import ApplicationServices
 /// Require native menu semantics AND a unique same-process WindowServer match.
 /// A popup layer alone never removes an unknown/custom window from discovery.
 @MainActor enum NativeMenuSurfaces {
-    static func frame(_ menu: AXUIElement, pid: pid_t) -> CGRect? {
+    static func visibleChildCount(_ menu: AXUIElement, pid: pid_t) -> Int? {
         var owner: pid_t = 0, count: CFIndex = 0
         guard AXUIElementGetPid(menu, &owner) == .success, owner == pid,
             AXAccess.read(menu, kAXRoleAttribute).value as? String == kAXMenuRole,
             AXUIElementGetAttributeValueCount(menu, kAXVisibleChildrenAttribute as CFString, &count) == .success,
-            count > 0, let frame = WindowGeometry.hint(menu)?.frame, frame.width > 1, frame.height > 1
+            count >= 0
+        else { return nil }
+        return count
+    }
+
+    static func frame(_ menu: AXUIElement, pid: pid_t) -> CGRect? {
+        guard let count = visibleChildCount(menu, pid: pid), count > 0,
+            let frame = WindowGeometry.hint(menu)?.frame, frame.width > 1, frame.height > 1
         else { return nil }
         return frame
     }

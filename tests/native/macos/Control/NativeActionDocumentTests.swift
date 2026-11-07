@@ -9,6 +9,8 @@ import ApplicationServices
         menuCommandSourceSelectsAddressedPointer()
         attachedDialogReceiverNeedsCurrentParentProof()
         try retainedMenuMembershipUsesTheCompleteProviderRelation()
+        await trackedMenuWaitsForActualPopupTransitions()
+        try trackedMenuRequiresThePhysicalPointerInItsOriginalLeaf()
         try fixedDocumentEvidenceIsLazy()
         try fixedWindowQuerySeparatesAXAbsenceFromEndedLifetime()
         for explicit in [false, true] {
@@ -184,6 +186,38 @@ import ApplicationServices
         listAvailable = false
         let unavailable = try NativeMenuUnit.membership(path, root: menuBar, reader: reader)
         precondition(unavailable == .unavailable)
+    }
+
+    @MainActor static func trackedMenuWaitsForActualPopupTransitions() async {
+        var elapsed: TimeInterval = 0
+        let popup = await NativeMenuUnit.waitForEvidence(seconds: 0.25, sample: {
+            elapsed >= 0.061 ? CGWindowID(42) : nil
+        }, now: { elapsed }, pause: { elapsed += $0 })
+        precondition(popup == 42 && elapsed >= 0.061 && elapsed <= 0.076)
+
+        elapsed = 0
+        let closed = await NativeMenuUnit.waitForEvidence(seconds: 0.30, sample: {
+            elapsed >= 0.204 ? true : nil
+        }, now: { elapsed }, pause: { elapsed += $0 })
+        precondition(closed == true && elapsed >= 0.204 && elapsed <= 0.219)
+
+        elapsed = 0
+        let missing = await NativeMenuUnit.waitForEvidence(seconds: 0.25, sample: { nil as CGWindowID? },
+                                                          now: { elapsed }, pause: { elapsed += $0 })
+        precondition(missing == nil && elapsed == 0.25)
+    }
+
+    @MainActor static func trackedMenuRequiresThePhysicalPointerInItsOriginalLeaf() throws {
+        let leaf = CGRect(x: 94, y: 39, width: 276, height: 24)
+        try NativeMenuUnit.requireTrackingPointer(CGPoint(x: 179, y: 49), in: leaf)
+        for pointer in [CGPoint(x: 179, y: 72), CGPoint(x: 739, y: 990), nil] {
+            do {
+                try NativeMenuUnit.requireTrackingPointer(pointer, in: leaf)
+                preconditionFailure("unproved physical menu receiver was admitted")
+            } catch let error as DriverError {
+                precondition(error.code == .inputUnavailable)
+            }
+        }
     }
 
     @MainActor static func fixedWindowQuerySeparatesAXAbsenceFromEndedLifetime() throws {

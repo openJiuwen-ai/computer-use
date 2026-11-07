@@ -17,6 +17,10 @@ import ApplicationServices
         let opener: AXUIElement
         let menu: AXUIElement
     }
+    private struct TrackedMenu {
+        let menu: AXUIElement
+        var windowID: CGWindowID?
+    }
     private var background: BackgroundTarget { BackgroundTarget(application) }
 
     func receiverReady() throws -> Bool {
@@ -99,7 +103,8 @@ import ApplicationServices
     /// Cancel only the retained native menus; never send a global Escape key.
     private func close(
         _ menus: [AXUIElement], process: NativeProcessIdentity, onPreparation: (String) -> Void,
-        onCleanupUnknown: () -> Void, onNativePreparation: (NativePreparationEffect) -> Void
+        onCleanupUnknown: () -> Void, onNativePreparation: (NativePreparationEffect) -> Void,
+        tracked: [TrackedMenu]? = nil
     ) async -> Bool {
         guard !menus.isEmpty else { return true }
         guard NativeProcessIdentity.read(application.processIdentifier) == process else {
@@ -116,11 +121,15 @@ import ApplicationServices
             if status != .success { accepted = false }
             onNativePreparation(.init(kind: .menuContext, phase: .returned, detail: "close prepared menu", window: nil))
         }
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { continuation.resume() }
-        }
-        if menus.contains(where: { NativeMenuSurfaces.isPresentedPopup($0, pid: application.processIdentifier) }) {
-            accepted = false
+        if let tracked {
+            accepted = await Self.waitForEvidence(seconds: 0.30, sample: {
+                pendingTrackedMenus(tracked, pid: process.pid).isEmpty ? true : nil
+            }, pause: Self.cleanupPause) != nil
+        } else {
+            await Self.cleanupPause(0.05)
+            if menus.contains(where: { NativeMenuSurfaces.isPresentedPopup($0, pid: application.processIdentifier) }) {
+                accepted = false
+            }
         }
         if !accepted { onCleanupUnknown() }
         return accepted
@@ -130,19 +139,26 @@ import ApplicationServices
         _ branches: [Branch], check: @MainActor () throws -> Void, onPreparation: (String) -> Void,
         onCleanupUnknown: () -> Void,
         onNativePreparation: (NativePreparationEffect) -> Void,
-        pointerBody: (() async throws -> Void)? = nil
+        pointerBody: ((WindowGeometry.WindowMapping) async throws -> Void)? = nil
     ) async throws {
         guard let process = NativeProcessIdentity.read(application.processIdentifier) else {
             throw DriverError("menu process disappeared", code: .staleTarget)
         }
-        var opened = [AXUIElement]()
+        var opened = [TrackedMenu]()
+        var pointerMenu: WindowGeometry.WindowMapping?
         let pointerActivity = pointerBody.map { _ in NativeForegroundResponsibility.desktopSnapshot().activity }
-        func closePrepared() async -> Bool {
+        func closePrepared(afterClick: Bool = false) async -> Bool {
             var remaining = opened
             if let pointerActivity {
-                // Selection normally closes tracking itself. Only cancel a
-                // branch opened here if the user has not since taken over.
-                remaining = opened.filter { NativeMenuSurfaces.isPresentedPopup($0, pid: process.pid) }
+                if afterClick, !opened.isEmpty {
+                    // Give the native command its own menu-close transition
+                    // before sending any cancellation of our preparation.
+                    let closed = await Self.waitForEvidence(seconds: 0.25, sample: {
+                        pendingTrackedMenus(opened, pid: process.pid).isEmpty ? true : nil
+                    }, pause: Self.cleanupPause)
+                    if closed != nil { return true }
+                }
+                remaining = pendingTrackedMenus(opened, pid: process.pid)
                 if !remaining.isEmpty {
                     let current = NativeForegroundResponsibility.desktopSnapshot()
                     guard current.activity == pointerActivity, current.foregroundPID == process.pid else {
@@ -152,15 +168,18 @@ import ApplicationServices
                 }
             }
             return await close(
-                remaining, process: process, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
-                onNativePreparation: onNativePreparation)
+                remaining.map(\.menu), process: process, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
+                onNativePreparation: onNativePreparation, tracked: pointerBody == nil ? nil : remaining)
         }
         do {
             for branch in branches {
                 try check()
                 try validatePath()
                 try await NativePhysicalInput.wait(.menuTracking, check: check)
-                if pointerBody != nil, NativeMenuSurfaces.isPresentedPopup(branch.menu, pid: process.pid) { continue }
+                if pointerBody != nil, let mapping = NativeMenuSurfaces.mapping(branch.menu, pid: process.pid) {
+                    pointerMenu = mapping
+                    continue
+                }
                 guard try receiverReady(), AXAccess.read(branch.opener, kAXEnabledAttribute).value as? Bool != false,
                     declares(kAXPressAction, on: branch.opener), declares(kAXCancelAction, on: branch.menu)
                 else {
@@ -169,7 +188,7 @@ import ApplicationServices
                 }
                 // Retain cleanup before calling: an AX error can still leave
                 // menu tracking active. Never invoke the requested leaf here.
-                opened.append(branch.menu)
+                opened.append(.init(menu: branch.menu, windowID: nil))
                 onPreparation("refresh selected menu branch")
                 onNativePreparation(
                     .init(kind: .menuContext, phase: .willSend, detail: "refresh selected menu branch", window: nil))
@@ -180,19 +199,75 @@ import ApplicationServices
                     throw DriverError(
                         "menu opening could not be confirmed; requested command was not sent", code: .executionUnknown)
                 }
-                try await Task.sleep(for: .milliseconds(50))
+                if pointerBody != nil {
+                    guard let mapping = try await Self.waitForEvidence(seconds: 0.25, sample: {
+                        try RequestDiagnostics.checkCancellation()
+                        return NativeMenuSurfaces.mapping(branch.menu, pid: process.pid)
+                    }, pause: { try await Task.sleep(for: .seconds($0)) }) else {
+                        throw DriverError("the prepared menu did not publish its original popup", code: .inputUnavailable)
+                    }
+                    opened[opened.count - 1].windowID = mapping.id
+                    pointerMenu = mapping
+                } else {
+                    try await Task.sleep(for: .milliseconds(50))
+                }
             }
-            try await pointerBody?()
+            if let pointerBody {
+                guard let pointerMenu else {
+                    throw DriverError("the original menu leaf has no tracked popup", code: .inputUnavailable)
+                }
+                try await pointerBody(pointerMenu)
+            }
         } catch {
             _ = await closePrepared()
             throw error
         }
-        guard await closePrepared() else {
+        guard await closePrepared(afterClick: pointerBody != nil) else {
             throw DriverError("menu preparation cleanup could not be confirmed", code: .executionUnknown)
         }
         if pointerBody == nil {
             try check()
             try validatePath()
+        }
+    }
+
+    private func pendingTrackedMenus(_ menus: [TrackedMenu], pid: pid_t) -> [TrackedMenu] {
+        guard !menus.isEmpty else { return [] }
+        let windows = WindowServerInfo.onScreenWindows()
+        return menus.filter { tracked in
+            if let id = tracked.windowID, let windows { return windows.contains(id) }
+            return NativeMenuSurfaces.visibleChildCount(tracked.menu, pid: pid) != 0
+        }
+    }
+
+    static func waitForEvidence<Value>(
+        seconds: TimeInterval, sample: () throws -> Value?,
+        now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, pause: (TimeInterval) async throws -> Void
+    ) async rethrows -> Value? {
+        let deadline = now() + seconds
+        while true {
+            if let evidence = try sample() { return evidence }
+            let remaining = deadline - now()
+            guard remaining > 0 else { return nil }
+            try await pause(min(0.015, remaining))
+        }
+    }
+
+    private static func cleanupPause(_ seconds: TimeInterval) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { continuation.resume() }
+        }
+    }
+
+    static func requireTrackingPointer(_ pointer: CGPoint?, in leaf: CGRect) throws {
+        guard let pointer else {
+            throw DriverError("the physical pointer location is unavailable for native menu tracking", code: .inputUnavailable)
+        }
+        guard leaf.contains(pointer) else {
+            throw DriverError(
+                "native menu tracking uses the physical pointer, which is outside the selected item",
+                code: .inputUnavailable,
+                next: "use explicit desktop input when moving the physical pointer is acceptable")
         }
     }
 
@@ -306,6 +381,7 @@ import ApplicationServices
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void,
         guardOperation: @escaping @MainActor () throws -> Void,
         onDispatch: @escaping @MainActor () throws -> Void, onPosted: @escaping @MainActor () -> Void,
+        onDelivered: @escaping @MainActor () -> Void,
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: @escaping @MainActor (NativePreparationEffect) -> Void
     ) async throws {
@@ -326,15 +402,17 @@ import ApplicationServices
             try await withTracking(
                 branches, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
                 onNativePreparation: onNativePreparation
-            ) {
+            ) { mapping in
                 let pid = application.processIdentifier
-                guard let mapping = NativeMenuSurfaces.mapping(menu, pid: pid),
-                    let frame = WindowGeometry.hint(element)?.frame, frame.width > 1, frame.height > 1
+                guard let frame = WindowGeometry.hint(element)?.frame, frame.width > 1, frame.height > 1
                 else { throw DriverError("the menu leaf has no confirmed visible popup", code: .inputUnavailable) }
                 let point = CGPoint(x: frame.midX, y: frame.midY)
                 guard mapping.frame.contains(point) else {
                     throw DriverError("the menu leaf is outside its confirmed popup", code: .inputUnavailable)
                 }
+                // AppKit menu tracking still samples the physical pointer
+                // when it consumes window-directed button events.
+                try Self.requireTrackingPointer(CGEvent(source: nil)?.location, in: frame)
                 let pointer = NativePointerUnit(
                     application: application, window: mapping, pointerRequirement: .foregroundWindowPoint,
                     recipientElement: element)
@@ -353,6 +431,7 @@ import ApplicationServices
                     guard status == .success, hit.map({ CFEqual($0, element) }) == true else {
                         throw DriverError("the mouse point does not identify the original menu leaf", code: .inputUnavailable)
                     }
+                    try Self.requireTrackingPointer(CGEvent(source: nil)?.location, in: frame)
                 }
                 try await NativeInputActivity.$stage.withValue(.input) {
                     try await pointer.deliver(
@@ -360,6 +439,7 @@ import ApplicationServices
                         guardOperation: guardOperation, onDispatch: onDispatch, onPosted: onPosted,
                         onCleanupUnknown: onCleanupUnknown, delivery: .windowDirected)
                 }
+                onDelivered()
             }
         }
     }
