@@ -18,6 +18,7 @@ from computer_use.interaction.query.instances.scope import (
     adopt,
     allowed,
     display_selection,
+    observe_application,
     refresh,
     resolve,
     retain_fixed_failure,
@@ -261,6 +262,7 @@ class InterfaceReadPipeline:
             owner = remember_application_content(controller, ui, target, tree)
             return (target, tree, tree_document(controller, target, tree, prepared=prepared), owner), gap
 
+        content_gap = None
         if instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
             launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
@@ -290,9 +292,22 @@ class InterfaceReadPipeline:
                 )
             )
             if matches_view:
-                return await InterfaceMenuPipeline(controller).run(
-                    ui, menu_path or (), observed=first if isinstance(first, MenuAppObservation) else None
-                )
+                if not isinstance(first, MenuAppObservation):
+                    # A starting application can publish its first window between
+                    # these reads. Continue with the retained application and let
+                    # its actual observation select the window or menu branch.
+                    directory, first = await observe_application(controller, ui, state.running, view)
+                    instance = ui._instance
+                    if (
+                        isinstance(first, AppObservation) and instance.anchor is not None
+                        and first.selection.root != instance.anchor.root
+                    ):
+                        first = first.launch
+                if not directory["surfaces"] and isinstance(first, MenuAppObservation):
+                    return await InterfaceMenuPipeline(controller).run(ui, (), observed=first)
+        if instance.anchor is None and ui._anchor is None:
+            state = controller.state(ui)
+            launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
             choices = controller.interfaces.windows.choices(directory, state.name or str(instance.selector))
             lines = [
                 DisplayText("interface_header", (capture_header(controller, ui, directory, parts=()),)),
