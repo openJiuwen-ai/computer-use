@@ -646,8 +646,11 @@ import ApplicationServices
                             canContinue: canReadFocus)
                     {
                         let owner = try readFocusElement(focus, kAXWindowAttribute, optional: true)
-                        let window = root.role == kAXWindowRole ? root.element
-                            : try readFocusElement(root.element, kAXWindowAttribute, optional: true)
+                        // A control in the proved Parent path may report the
+                        // selected sheet itself as its AXWindow.
+                        let window =
+                            root.role == kAXWindowRole || owner.map({ CFEqual($0, root.element) }) == true
+                            ? root.element : try readFocusElement(root.element, kAXWindowAttribute, optional: true)
                         if let owner, let window, !CFEqual(owner, window) {
                             focusState = "outside"
                             throw DriverError("reported focus is outside this window", code: .observationIncomplete)

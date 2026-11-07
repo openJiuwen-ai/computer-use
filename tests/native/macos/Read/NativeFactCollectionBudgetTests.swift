@@ -37,6 +37,7 @@ import ApplicationServices
             display: ["AXRole": "AXTextField"], fallback: .value(.init(values: ["AXRole": "AXButton"])),
             expected: nil)
         try observesScopedFocusWithoutInventingChildren()
+        try observesScopedFocusWithoutInventingChildren(scopeRole: kAXSheetRole)
         _ = try sparseRelationSlots()
         try expiredRequestDoesNotCollect()
         try closeButtonUsesSingleObjectGetter()
@@ -136,18 +137,23 @@ import ApplicationServices
         return (ref, element)
     }
 
-    @MainActor private static func observesScopedFocusWithoutInventingChildren() throws {
+    @MainActor private static func observesScopedFocusWithoutInventingChildren(
+        scopeRole: String = kAXWindowRole
+    ) throws {
         let registry = ApplicationElements()
-        let (ref, window) = root(registry, role: "AXWindow")
+        let (ref, window) = root(registry, role: scopeRole)
         let pid = NSRunningApplication.current.processIdentifier
         let focus = AXUIElementCreateApplication(pid + 100_000)
         let otherWindow = AXUIElementCreateApplication(pid + 100_001)
+        let outerWindow = AXUIElementCreateApplication(pid + 100_003)
         var owner = window
+        var focusParent = window
         var focusedReads = 0
+        var enclosingWindowReads = 0
         var attributes = AXAttributeReader.API()
         attributes.batch = { element, fields in
-            let isFocus = CFEqual(element, focus)
-            return (.success, fields.map { _ in isFocus ? "AXTextField" : "AXWindow" } as CFArray)
+            let role = CFEqual(element, focus) ? kAXTextFieldRole : scopeRole
+            return (.success, fields.map { _ in role } as CFArray)
         }
         attributes.single = { element, field in
             switch field {
@@ -155,9 +161,12 @@ import ApplicationServices
                 focusedReads += 1
                 return (.success, focus)
             case kAXParentAttribute where CFEqual(element, focus):
-                return (.success, window)
+                return (.success, focusParent)
             case kAXWindowAttribute where CFEqual(element, focus):
                 return (.success, owner)
+            case kAXWindowAttribute where scopeRole == kAXSheetRole && CFEqual(element, window):
+                enclosingWindowReads += 1
+                return (.success, outerWindow)
             default:
                 return (.noValue, nil)
             }
@@ -181,6 +190,7 @@ import ApplicationServices
         let nodes = captured["nodes"] as! [[String: Any]]
         precondition(nodes.count == 2 && focusedReads == 2,
             "the scoped focused element omitted from Children must be sampled once")
+        precondition(enclosingWindowReads == 0, "the exact selected sheet needs no enclosing-window lookup")
         let links = captured["relations"] as! [[String: Any]]
         let children = links.first {
             $0["source"] as? String == ref && $0["property"] as? String == kAXChildrenAttribute
@@ -203,6 +213,17 @@ import ApplicationServices
         let properties = graph.first { $0["id"] as? String == ref }!["properties"] as! [[String: Any]]
         let seed = properties.first { $0["key"] as? [String] == ["toolkit", "focused_read_seed"] }!
         precondition((seed["value"] as? [String: Any])?["nativeType"] as? String == "AXUIElement")
+        if scopeRole == kAXSheetRole {
+            owner = outerWindow
+            let ownedByEnclosingWindow = try read(focused: true)
+            precondition((ownedByEnclosingWindow["nodes"] as! [[String: Any]]).count == 2,
+                "the enclosing window may also own focus whose Parent path reaches the selected sheet")
+            focusParent = otherWindow
+            let sibling = try read(focused: true)
+            precondition((sibling["nodes"] as! [[String: Any]]).count == 1,
+                "sharing the enclosing window cannot borrow focus from a sibling sheet")
+            focusParent = window
+        }
         owner = otherWindow
         let outside = try read(focused: true)
         precondition((outside["nodes"] as! [[String: Any]]).count == 1,
