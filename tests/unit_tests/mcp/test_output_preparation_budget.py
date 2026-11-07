@@ -139,6 +139,38 @@ class OutputPreparationBudgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.image_acks, [])
         self.assertFalse(any(block["type"] == "image" for block in result["content"]))
 
+    async def test_oversized_observation_retains_detail_pages_receipt_and_image(self):
+        with patch.object(self.runtime.presenter, "text", return_value="表" * 100_000):
+            result = await self.execute("capture()\naction()")
+        self.assertFalse(result.get("isError"), result)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn("Tree: deferred (MCP text budget)", text)
+        self.assertIn("captured_observation_1.read_details()", text)
+        self.assertIn("Action [dispatched]", text)
+        self.assertLessEqual(len(text.encode()), 256 * 1024)
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
+        self.assertEqual(self.image_acks, [self.png])
+        self.assertEqual(self.tree_acks, [])
+        self.assertFalse(self.runtime.presenter._baselines.memory)
+        self.assertIs(self.runtime.task_namespace["captured_observation_1"], self.state)
+
+        details = await self.execute("print(captured_observation_1.read_details().text)")
+        self.assertFalse(details.get("isError"), details)
+        self.assertIn("Form", details["content"][0]["text"])
+        self.assertEqual(self.tree_acks, [])
+
+    async def test_observation_does_not_consume_space_for_later_receipt(self):
+        # The rendered text by itself fits, but not beside its image and a
+        # receipt already accepted while the script ran.
+        with patch.object(self.runtime.presenter, "text", return_value="o" * (256 * 1024 - 128)):
+            result = await self.execute("capture()\nprint('x' * 128)\naction()")
+        self.assertFalse(result.get("isError"), result)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn("Tree: deferred (MCP text budget)", text)
+        self.assertIn("Action [dispatched]", text)
+        self.assertEqual(self.image_acks, [self.png])
+        self.assertEqual(self.tree_acks, [])
+
 
 class PurePresentationCheckpointTests(unittest.TestCase):
     def deadline_after_two_batches(self):

@@ -28,10 +28,16 @@ from .baseline_store import DeliveredBaselineStore
 
 
 class OutputBuffer:
+    TEXT_LIMIT = 256 * 1024
+
     def __init__(self):
         self.content = []
         self._bytes = self._text_bytes = 0
         self._merge_text = False
+
+    @property
+    def remaining_text_bytes(self):
+        return self.TEXT_LIMIT - self._text_bytes
 
     def append(self, block, merge_text=False):
         last = self.content[-1] if self.content else None
@@ -42,7 +48,7 @@ class OutputBuffer:
         if self._bytes + size > 8 * 1024 * 1024 or not append and len(self.content) >= 128:
             raise RuntimeError("Output limit reached (8 MiB / 128 blocks); this block was omitted.")
         text_bytes = len(utf8(block["text"])) + (1 if append else 0) if block["type"] == "text" else 0
-        if self._text_bytes + text_bytes > 256 * 1024:
+        if text_bytes > self.remaining_text_bytes:
             raise RuntimeError(("Output limit reached (256 KiB UTF-8 text per call); this text block was omitted."))
         self._bytes += size
         self._text_bytes += text_bytes

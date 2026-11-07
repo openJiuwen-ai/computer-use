@@ -37,6 +37,7 @@ from computer_use.client.result_presentation import result_receipt, text_source_
 from computer_use.errors import ComputerUseError
 from computer_use.identity import Record, WeakIdentityMap
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
+from computer_use.json import utf8
 from computer_use.native.preview import latest_preview_sink
 from computer_use.session.events import observation_delivered
 from computer_use.session.observation import (
@@ -69,6 +70,8 @@ class Runtime:
         self.command_runs = {}
         self.executions = set()
         self.closed = False
+        self._next_captured_observation = 0
+        self._captured_observations = deque()
         require_image_delivery()
         set_execution_guard(self.guard)
         set_diagnostic_handler(self.diagnostic)
@@ -158,23 +161,25 @@ class Runtime:
         run["publishing"] = True
         run["output"] = OutputBuffer()
         failure = None
-        for entry in run["outputEntries"]:
+        entries = run["outputEntries"]
+
+        def text_cost(entry):
+            if entry["kind"] == "block" and entry["block"]["type"] == "text":
+                return len(utf8(entry["block"]["text"])) + int(entry["merge"])
+            return 0
+
+        # These blocks already fit while the script ran. Captures inserted
+        # during final publication must leave room for subsequent receipts.
+        reserved = sum(map(text_cost, entries))
+        for entry in entries:
             try:
                 if entry["kind"] == "block":
+                    reserved -= text_cost(entry)
                     run["output"].append(dict(entry["block"]), entry["merge"])
                 elif entry["kind"] == "image":
                     self.emit_image(entry["delivery"])
                 elif not entry["superseded"]:
-                    observation = entry["observation"]
-                    gap = observation.get("presentationGap")
-                    self.emit({"type": "text", "text": gap or self.presenter.text(observation)})
-                    if not gap:
-                        self.presenter.delivered(observation)
-                        run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
-                    delivery = observation.get("imageDelivery")
-                    if delivery is not None:
-                        run["imageContexts"].set(delivery.source, True)
-                        self.emit_image(delivery)
+                    self.publish_observation(run, entry["observation"], reserved)
             except Exception as error:  # noqa: BLE001 - retain later receipts, then rethrow the rendering failure
                 # Rendering an earlier capture must not erase receipts for
                 # later inputs which already completed in the script.
@@ -182,6 +187,55 @@ class Runtime:
                     failure = error
         if failure is not None:
             raise failure
+
+    def defer_observation(self, observation):
+        state = observation.get("sourceState", observation["state"])
+        message = "Tree: deferred (MCP text budget)."
+        if not isinstance(state, LazyObservation):
+            return message + " Captured detail pages are unavailable."
+        namespace = self.task_namespace
+        while True:
+            self._next_captured_observation += 1
+            name = f"captured_observation_{self._next_captured_observation}"
+            if name not in namespace:
+                break
+        namespace[name] = state
+        self._captured_observations.append((name, state))
+        return message + (
+            f"\npage = {name}.read_details()\nprint(page)"
+            f"\nContinue with {name}.read_details(cursor=page.next) when page.next is set."
+        )
+
+    def publish_observation(self, run, observation, reserved):
+        gap = observation.get("presentationGap")
+        text = gap or self.presenter.text(observation)
+        delivery = observation.get("imageDelivery")
+        available = run["output"].remaining_text_bytes - reserved
+        caption_bytes = 0
+        if delivery is not None:
+            # Reserve the standalone caption because a deferred tree no
+            # longer supplies the window and coordinate context.
+            label = image_label(delivery.source, False, delivery.coordinates)
+            index = len(run["imageOutputs"]) + 1
+            caption_bytes = len(utf8(f"Image {run['id']}.{index}\n{label}"))
+        remaining = available - caption_bytes
+        deferred = len(utf8(text)) > remaining
+        if deferred:
+            text = self.defer_observation(observation)
+        fits = not deferred or len(utf8(text)) <= remaining
+        if fits:
+            self.emit({"type": "text", "text": text})
+            if not gap and not deferred:
+                self.presenter.delivered(observation)
+                run["deliveredObservations"].append(observation.get("sourceState", observation["state"]))
+        if delivery is not None and caption_bytes <= available:
+            if fits and not deferred:
+                run["imageContexts"].set(delivery.source, True)
+            self.emit_image(delivery)
+        if not fits:
+            if delivery is not None and caption_bytes > available:
+                text += " Image caption exceeds the remaining text budget."
+            raise RuntimeError(text)
 
     def action(self, receipt):
         if not self.executor.is_owner:
@@ -627,6 +681,12 @@ class Runtime:
             return result
         execution = asyncio.current_task()
         self.executions.add(execution)
+        # Bound automatic capture retention across calls. Ordinary user
+        # bindings are untouched.
+        while len(self._captured_observations) > 128:
+            name, state = self._captured_observations.popleft()
+            if self.task_namespace.get(name) is state:
+                self.task_namespace.pop(name)
         code, id_ = message["code"], message["executionId"]
         run = Record(
             id=id_,
