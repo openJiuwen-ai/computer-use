@@ -292,6 +292,7 @@ class Relation(_Immutable):
 
     ``offset`` records a requested page start even when no target was returned.
     ``positions`` records the original slot of each acquired target.
+    ``inspected_count`` includes checked slots that yielded no usable object.
     """
 
     kind: RelationKind
@@ -302,6 +303,8 @@ class Relation(_Immutable):
     enumeration: Literal["enumerated", "sampled", "provider_managed"] = "enumerated"
     evidence: Literal["reported", "verified", "candidate"] = "reported"
     offset: int | None = None
+    inspected_count: int | None = None
+    unavailable_positions: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, eq=False)

@@ -328,6 +328,25 @@ def validate_query_observation(observation: NativeObservation) -> None:
             _nonnegative(value.offset, (*path, "offset"))
             if value.offset is not None and value.total is not None and value.offset > value.total:
                 raise _type_error(path, "relationship page starts beyond its total")
+            gaps, inspected = value.unavailable_positions, value.inspected_count
+            if inspected is not None or gaps:
+                start, total = value.offset, value.total
+                # Exact integer types keep booleans and arbitrary page ranges out.
+                # Count agreement bounds the subsequent range by existing data.
+                if (
+                    type(start) is not int or type(total) is not int or type(inspected) is not int or not gaps
+                    or inspected != len(value.targets) + len(gaps) or start + inspected > total
+                    or value.enumeration != "sampled"
+                    or any(type(slot) is not int or not start <= slot < start + inspected for slot in gaps)
+                    or gaps != tuple(sorted(set(gaps)))
+                ):
+                    raise _type_error(path, "invalid relationship slot progress")
+                missing = set(gaps)
+                if (
+                    value.positions is None or any(type(slot) is not int for slot in value.positions)
+                    or value.positions != tuple(slot for slot in range(start, start + inspected) if slot not in missing)
+                ):
+                    raise _type_error(path, "relationship targets do not match the inspected slots")
             if value.positions is not None:
                 if len(value.positions) != len(value.targets):
                     raise _type_error(path, "positions and targets have different lengths")

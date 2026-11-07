@@ -18,6 +18,7 @@ from computer_use.interaction.read.acquisition.text.model import CapturedTextReq
 from computer_use.interaction.read.acquisition.text.pipeline import CapturedTextPipeline
 from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.pipeline import Control
+from computer_use.protocol.records import relation_end
 
 if TYPE_CHECKING:
     from typing import Mapping
@@ -85,9 +86,7 @@ def captured_children(
     relation = relations.get(token)
     if relation is None or relation["certainty"] != "confirmed" or "cursor" not in relation:
         return None
-    return ChildContinuation(
-        relation["cursor"], relation.get("offset", 0) + len(relation["targets"]), relation["total"]
-    )
+    return ChildContinuation(relation["cursor"], relation_end(relation), relation["total"])
 
 
 def captured_field(

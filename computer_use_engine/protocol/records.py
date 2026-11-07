@@ -10,6 +10,7 @@ variants. Field status records preserve absent and failed reads explicitly.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
 Record: TypeAlias = dict[str, Any]
@@ -64,6 +65,8 @@ class NativeRelation(TypedDict):
         total: Full target count when reported by the provider.
         detail: Provider explanation of incomplete or conflicting evidence.
         membershipObservedAt: Capture interval of retained relationship members; not current membership.
+        inspectedCount: Number of checked native slots, including unavailable objects.
+        unavailablePositions: Absolute positions checked without a usable object reference.
     """
 
     source: str
@@ -76,6 +79,18 @@ class NativeRelation(TypedDict):
     total: NotRequired[int]
     detail: NotRequired[str]
     membershipObservedAt: NotRequired[Record]
+    inspectedCount: NotRequired[int]
+    unavailablePositions: NotRequired[list[int]]
+
+
+def relation_slots(relation: Mapping[str, Any]) -> int:
+    """Count the checked native slots rather than the references they supplied."""
+    return relation.get("inspectedCount", len(relation["targets"]))
+
+
+def relation_end(relation: Mapping[str, Any]) -> int:
+    """Return the first uninspected native slot."""
+    return relation.get("offset", 0) + relation_slots(relation)
 
 
 class FactCollection(TypedDict):

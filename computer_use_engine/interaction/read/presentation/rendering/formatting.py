@@ -828,7 +828,8 @@ def render_projection_lines(
             if compact and "childrenStart" in node:
                 start = node.get("childrenStart", 0)
                 end = node.get("childrenEnd", start)
-                child_coverage = f"{end - start}/{node['childCount']} read" + (f", offset {start}" if start else "")
+                read = node.get("childrenRead", end - start)
+                child_coverage = f"{read}/{node['childCount']} read" + (f", offset {start}" if start else "")
                 if "nextChildOffset" in node:
                     child_coverage += "; partial; " + (
                         "cursor below"
@@ -837,6 +838,8 @@ def render_projection_lines(
                     )
                     inline_children.add(node["ref"])
                 elif end == node["childCount"]:
+                    if read < end - start:
+                        child_coverage += "; partial; unavailable native slots"
                     child_coverage += "; end of direct children"
                 else:
                     child_coverage += "; partial; read()" if context.get("publicApi") else "; partial"

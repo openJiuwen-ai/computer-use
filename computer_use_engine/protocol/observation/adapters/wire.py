@@ -377,7 +377,21 @@ def relation_record(
     )
     if invalid_offset:
         raise ValueError("driver observation: invalid relation range or evidence")
-    end = offset + len(items)
+    inspected, slots = len(items), {}
+    if "inspectedCount" in details or "unavailablePositions" in details:
+        inspected, gaps = details.get("inspectedCount"), details.get("unavailablePositions")
+        detail = details.get("detail")
+        if (
+            type(inspected) is not int or not isinstance(gaps, (list, tuple)) or not gaps
+            or inspected != len(items) + len(gaps)
+            or any(type(position) is not int or not offset <= position < offset + inspected for position in gaps)
+            or list(gaps) != sorted(set(gaps))
+            or "offset" not in details or total is None or state != "partial"
+            or not isinstance(detail, str) or not detail
+        ):
+            raise ValueError("driver observation: invalid relation slot progress")
+        slots = {"inspectedCount": inspected, "unavailablePositions": list(gaps)}
+    end = offset + inspected
     if total is not None and end > total:
         raise ValueError("driver observation: relation count exceeds its range")
     if (offset or "cursor" in details) and total is None:
@@ -428,6 +442,7 @@ def relation_record(
             for name in ("offset", "total", "cursor", "detail", "membershipObservedAt")
             if name in details
         },
+        **slots,
     }
 
 

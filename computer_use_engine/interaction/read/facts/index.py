@@ -286,6 +286,9 @@ def observation_index(observation: NativeObservation) -> _FactIndex:
                 edge["offset"] = relation.offset
             if relation.total is not None:
                 edge["total"] = relation.total
+            if relation.inspected_count is not None:
+                edge["inspectedCount"] = relation.inspected_count
+                edge["unavailablePositions"] = relation.unavailable_positions
             if issues:
                 edge["issues"] = tuple(encoded_issues[id(issue)] for issue in issues)
                 if state.get("detail"):

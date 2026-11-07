@@ -24,6 +24,7 @@ from computer_use.interaction.read.presentation.content import (
     text,
 )
 from computer_use.native.contracts import Binding
+from computer_use.protocol.records import relation_end
 
 if TYPE_CHECKING:
     from typing import Iterable
@@ -80,7 +81,7 @@ class ContentPages:
                 replace(target, node=relation["source"], capture=None),
                 selector,
                 relation["cursor"],
-                relation.get("offset", 0) + len(relation["targets"]),
+                relation_end(relation),
                 relation["total"],
             )
             if page in self._aliases:
@@ -179,7 +180,7 @@ class ContentPages:
                 replace(target, node=relation["source"], capture=None),
                 selector,
                 relation["cursor"],
-                relation.get("offset", 0) + len(relation["targets"]),
+                relation_end(relation),
                 relation["total"],
             )
             alias = self._aliases.get(page)

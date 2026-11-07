@@ -51,6 +51,16 @@ import ApplicationServices
         case page(Page)
         case failure([String: Any])
     }
+    enum RegistrationStep {
+        case target(String)
+        case unavailable
+        case stop
+    }
+    struct Registration {
+        var targets = [String]()
+        var inspectedCount = 0
+        var unavailablePositions = [Int]()
+    }
     private let pages = NativeRelationPages<AXUIElement>(equal: { CFEqual($0, $1) })
     private let api: API
     init(api: API = API()) { self.api = api }
@@ -164,15 +174,36 @@ import ApplicationServices
         return try page(prefix, total: total, array: true, nativeAPI: "AXUIElementCopyAttributeValues", issue: issue)
     }
 
-    /// Only registered/returned targets are consumed. If a collection budget
-    /// ends during registration, a continuation starts at the first omitted one.
-    func encode(_ page: Page, targets: [String]) -> [String: Any] {
-        precondition(targets.count <= page.targets.count)
-        let end = page.offset + targets.count
+    /// A witnessed invalid object consumes its native slot. Stopping for
+    /// budget or unresolved evidence leaves that slot for the continuation.
+    func register(_ page: Page, resolve: (AXUIElement) throws -> RegistrationStep) rethrows -> Registration {
+        var result = Registration()
+        for element in page.targets {
+            switch try resolve(element) {
+            case .target(let reference): result.targets.append(reference)
+            case .unavailable: result.unavailablePositions.append(page.offset + result.inspectedCount)
+            case .stop: return result
+            }
+            result.inspectedCount += 1
+        }
+        return result
+    }
+
+    private func gapDetail(_ positions: [Int]) -> String {
+        "native relation has unavailable objects at positions "
+            + positions.map(String.init).joined(separator: ", ")
+            + "; read its source again to revisit those slots"
+    }
+
+    func encode(_ page: Page, registration: Registration) -> [String: Any] {
+        precondition(registration.inspectedCount <= page.targets.count)
+        precondition(registration.inspectedCount == registration.targets.count + registration.unavailablePositions.count)
+        let end = page.offset + registration.inspectedCount
+        let gaps = registration.unavailablePositions
         var value: [String: Any] = [
-            "source": page.source, "property": page.property, "targets": targets, "total": page.total,
+            "source": page.source, "property": page.property, "targets": registration.targets, "total": page.total,
             "offset": page.offset, "certainty": "confirmed",
-            "state": end == page.total && page.offset == 0 && page.issue == nil ? "complete" : "partial",
+            "state": end == page.total && page.offset == 0 && page.issue == nil && gaps.isEmpty ? "complete" : "partial",
             "nativeType": (page.isArray ?? Self.arrayProperties.contains(page.property)) ? "CFArray" : "AXUIElement",
             "nativeAPI": page.nativeAPI
                 ?? (Self.arrayProperties.contains(page.property)
@@ -181,7 +212,7 @@ import ApplicationServices
         if end < page.total {
             if let issue = page.issue {
                 value["detail"] = issue
-            } else if end == 0 {
+            } else if registration.inspectedCount == 0 {
                 // No native prefix has been consumed. The source and count
                 // describe this unexpanded edge; a fresh first page needs no
                 // retained objects. Do not evict real continuations for it.
@@ -198,6 +229,11 @@ import ApplicationServices
             value["detail"] = "continuation page; earlier targets belong to the preceding observation"
         }
         if let issue = page.issue { value["detail"] = issue }
+        if !gaps.isEmpty {
+            value["inspectedCount"] = registration.inspectedCount
+            value["unavailablePositions"] = gaps
+            value["detail"] = [value["detail"] as? String, gapDetail(gaps)].compactMap { $0 }.joined(separator: "; ")
+        }
         if let note = page.note {
             value["detail"] = [note, value["detail"] as? String].compactMap { $0 }.joined(separator: "; ")
         }
@@ -208,7 +244,9 @@ import ApplicationServices
         for index in relations.indices {
             if let cursor = relations[index]["cursor"] as? String, !pages.contains(cursor) {
                 relations[index].removeValue(forKey: "cursor")
-                relations[index]["detail"] = "native relation continuation retention budget; read its source again"
+                let exhausted = "native relation continuation retention budget; read its source again"
+                let gaps = relations[index]["unavailablePositions"] as? [Int]
+                relations[index]["detail"] = gaps.map { exhausted + "; " + gapDetail($0) } ?? exhausted
             }
         }
     }

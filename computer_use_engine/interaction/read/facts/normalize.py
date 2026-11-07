@@ -24,7 +24,7 @@ from computer_use.interaction.read.presentation.fallback import literal
 from computer_use.interaction.read.presentation.records import ReferenceAllocator
 from computer_use.protocol.observation import FieldPath, NativeNode, NativeObservation
 from computer_use.protocol.primitives import required_item, safe_integer
-from computer_use.protocol.records import FactCollection
+from computer_use.protocol.records import FactCollection, relation_end
 
 _ROLES = {
     "checkbox": "checkBox",
@@ -461,9 +461,11 @@ def _project_facts(
                 if "total" in relation:
                     source["childCount"] = relation["total"]
                 if "offset" in relation:
-                    source.update(childrenStart=relation["offset"], childrenEnd=relation["offset"] + len(targets))
+                    source.update(childrenStart=relation["offset"], childrenEnd=relation_end(relation))
                     if "cursor" in relation:
                         source["nextChildOffset"] = source["childrenEnd"]
+                if "unavailablePositions" in relation:
+                    source["childrenRead"] = len(targets)
                 source["partialReason"] = "observed children partly collected; see Relation details"
             if any(target in batch["unread"] for target in targets):
                 source["partialReason"] = "child facts have not been collected"

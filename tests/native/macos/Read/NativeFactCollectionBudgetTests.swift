@@ -14,6 +14,11 @@ import ApplicationServices
         // A windowless process supplies only its own lifetime/PID. Every AX
         // getter below is injected; no surface is opened, activated or changed.
         NSApplication.shared.setActivationPolicy(.prohibited)
+        if CommandLine.arguments.contains("--relation-slots-wire") {
+            let pages = try sparseRelationSlots()
+            print(String(decoding: try JSONSerialization.data(withJSONObject: pages), as: UTF8.self))
+            return
+        }
         for milliseconds in [10, 50, 150, 200] {
             try preservesSmallRoot(milliseconds)
             try preservesSmallRelation(milliseconds)
@@ -32,10 +37,89 @@ import ApplicationServices
             display: ["AXRole": "AXTextField"], fallback: .value(.init(values: ["AXRole": "AXButton"])),
             expected: nil)
         try observesScopedFocusWithoutInventingChildren()
+        _ = try sparseRelationSlots()
         try expiredRequestDoesNotCollect()
         try closeButtonUsesSingleObjectGetter()
         try await cancelledRequestDoesNotCollect()
         print("PASS short observation budgets collect real root/relation facts and preserve expired/cancelled boundaries")
+    }
+
+    @MainActor private static func sparseRelationSlots() throws -> [[String: Any]] {
+        let registry = ApplicationElements()
+        let (ref, window) = root(registry, role: "AXWindow")
+        let pid = NSRunningApplication.current.processIdentifier
+        let elements = (0..<5).map { AXUIElementCreateApplication(pid + 110_000 + pid_t($0)) }
+        var order = elements
+        func invalid(_ element: AXUIElement) -> Bool {
+            CFEqual(element, elements[1]) || CFEqual(element, elements[3])
+        }
+        var attributes = AXAttributeReader.API()
+        attributes.batch = { element, fields in
+            if invalid(element) { return (.invalidUIElement, nil) }
+            return (.success, fields.map { _ in CFEqual(element, window) ? "AXWindow" : "AXButton" } as CFArray)
+        }
+        var relations = AXRelationReader.API()
+        let labelTargets = "AXServesAsTitleForUIElements"
+        relations.count = { element, property in
+            (.success, CFEqual(element, window) && [kAXChildrenAttribute, labelTargets].contains(property)
+                ? order.count : 0)
+        }
+        relations.range = { _, _, length in (.success, Array(order.prefix(length)) as CFArray) }
+        relations.single = { _, _ in (.noValue, nil) }
+        let collector = NativeFactCollector(registry: registry, inspection: .init(registry: registry),
+            attributes: attributes, relations: relations, readIdentity: { element in
+                invalid(element) ? .invalid : .value(.init(values: ["AXRole": "AXButton"]))
+            })
+        let first = try collector.collect(ref, session: "budget-session", fields: ["AXRole"],
+            maxNodes: 4, maxDepth: 1, actionDetail: .none)
+        let links = first["relations"] as! [[String: Any]]
+        let children = links.first { $0["source"] as? String == ref && $0["property"] as? String == kAXChildrenAttribute }!
+        let acquired = children["targets"] as! [String]
+        precondition(acquired.count == 2 && registry.target(acquired[1]).map { CFEqual($0.element, elements[2]) } == true,
+            "a native invalid child must not hide readable siblings behind it")
+        precondition(children["inspectedCount"] as? Int == 3 && children["unavailablePositions"] as? [Int] == [1]
+            && children["state"] as? String == "partial")
+        let deferred = links.first { $0["source"] as? String == ref && $0["property"] as? String == labelTargets }!
+        let related = deferred["targets"] as! [String]
+        precondition(related.count == 3 && deferred["inspectedCount"] as? Int == 5
+            && deferred["unavailablePositions"] as? [Int] == [1, 3] && deferred["cursor"] == nil,
+            "deferred metadata-only relations must preserve sparse native positions too")
+
+        let cursor = children["cursor"] as! String
+        let later = try collector.relation(ref, session: "budget-session", property: kAXChildrenAttribute,
+            cursor: cursor, limit: 2)
+        let suffix = later["relation"] as! [String: Any]
+        let suffixTargets = suffix["targets"] as! [String]
+        precondition(suffix["offset"] as? Int == 3 && suffix["inspectedCount"] as? Int == 2
+            && suffix["unavailablePositions"] as? [Int] == [3] && suffix["cursor"] == nil
+            && suffixTargets.count == 1 && registry.target(suffixTargets[0]).map {
+                CFEqual($0.element, elements[4])
+            } == true, "continuation must start after the original native slots, including gaps")
+
+        let reader = AXRelationReader(api: relations)
+        guard case .page(let page) = try reader.read(window, source: ref, property: kAXChildrenAttribute, limit: 4)
+        else { preconditionFailure("expected the first relation page") }
+        let stopped = reader.register(page) { element in
+            if CFEqual(element, elements[2]) { return .stop }
+            return invalid(element) ? .unavailable : .target(acquired[0])
+        }
+        let afterStop = reader.encode(page, registration: stopped)["cursor"] as! String
+        guard case .page(let resumed) = try reader.read(
+            window, source: ref, property: kAXChildrenAttribute, limit: 2, cursor: afterStop)
+        else { preconditionFailure("expected the continued relation page") }
+        precondition(resumed.offset == 2 && CFEqual(resumed.targets.first!, elements[2]),
+            "budget stop must not consume the first unresolved slot")
+        let blocked = reader.encode(resumed, registration: reader.register(resumed) { _ in .stop })
+        precondition(blocked["cursor"] == nil && blocked["inspectedCount"] == nil,
+            "a zero-progress continuation must not mint a new cursor")
+
+        order.swapAt(1, 2)
+        do {
+            _ = try collector.relation(ref, session: "budget-session", property: kAXChildrenAttribute,
+                cursor: cursor, limit: 2)
+            preconditionFailure("a missing slot's original native identity must anchor the cursor")
+        } catch let error as DriverError { precondition(error.code == .snapshotExpired) }
+        return [NativeObservationEncoding.encode(first), NativeObservationEncoding.encode(later)]
     }
 
     @MainActor private static func root(_ registry: ApplicationElements, role: String = "AXButton")

@@ -230,6 +230,7 @@ class NativeGraph:
                 can_batch
                 and relation["certainty"] == "confirmed"
                 and relation["state"] in ("complete", "partial")
+                and not relation.get("unavailablePositions")
                 and any(target not in self.nodes for target in relation["targets"])
             )
             else False
@@ -251,6 +252,7 @@ class NativeGraph:
                 if (
                     collected is None
                     or collected["targets"] != relation["targets"]
+                    or collected.get("unavailablePositions")
                     or len(collected["targets"]) > limit
                     or collected.get("offset", 0) != relation.get("offset", 0)
                     or collected.get("total") != relation.get("total")
@@ -327,6 +329,8 @@ class NativeGraph:
                 or relation.get("offset", 0) != 0
             ):
                 self.fail("observation_incomplete", "Required native relation is incomplete: " + kind)
+            if relation.get("unavailablePositions"):
+                self.fail("observation_incomplete", "Required native relation contains unavailable object slots.")
             result = list(relation["targets"])
             seen = set()
             while relation.get("cursor") is not None or (
@@ -355,6 +359,8 @@ class NativeGraph:
                 )
                 if matches_token:
                     self.fail("observation_incomplete", "Relation changed while resolving the target.")
+                if next_relation.get("unavailablePositions"):
+                    self.fail("observation_incomplete", "Required native relation contains unavailable object slots.")
                 if batch is not None:
                     self._remember_nodes(batch)
                 self.edge_sources[cache_key].append(page["observed"]["id"])

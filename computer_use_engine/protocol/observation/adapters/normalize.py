@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from computer_use.protocol.primitives import required_item
+from computer_use.protocol.records import relation_end
 
 from ..model import (
     Action,
@@ -1478,15 +1479,22 @@ class Adapter:
             index += 1
         targets = tuple(NodeId(x) for x in edge["targets"])
         offset = edge.get("offset")
-        # pylint: disable-next=unidiomatic-typecheck
-        positions = tuple(range(offset, offset + len(targets))) if type(offset) is int else None
+        unavailable = tuple(edge.get("unavailablePositions", ()))
+        positions = None
+        if offset is not None:
+            slots = range(offset, relation_end(edge))
+            if unavailable:
+                gaps = set(unavailable)
+                positions = tuple(index for index in slots if index not in gaps)
+            else:
+                positions = tuple(slots)
         evidence = {
             "confirmed": "reported",
             "inferred": "candidate",
             "unknown": "candidate",
             "conflicting": "candidate",
         }[edge["certainty"]]
-        mode = "sampled" if kind == "viewport_candidates" else "enumerated"
+        mode = "sampled" if kind == "viewport_candidates" or unavailable else "enumerated"
         node.relations[key] = Relation(
             RelationKind(kind),
             targets,
@@ -1496,6 +1504,8 @@ class Adapter:
             mode,
             evidence,
             offset=offset,
+            inspected_count=edge.get("inspectedCount"),
+            unavailable_positions=unavailable,
         )
         membership = edge.get("membershipObservedAt")
         if membership is not None:

@@ -45,6 +45,7 @@ from computer_use.native.queries import NativeNodeQuery
 from computer_use.native.semantics import control_capabilities, input_container
 from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.primitives import utf16_length
+from computer_use.protocol.records import relation_end, relation_slots
 
 if TYPE_CHECKING:
     from computer_use.protocol.records import Record
@@ -646,7 +647,7 @@ class ConnectionPort:
                         relation.get("offset", 0) != (expected[4] if expected else 0)
                         or expected is not None
                         and relation.get("total") != expected[5]
-                        or len(relation["targets"]) > page["limit"]
+                        or relation_slots(relation) > page["limit"]
                     )
                     else False
                 )
@@ -745,7 +746,7 @@ class ConnectionPort:
                     result["surface"],
                     relation["source"],
                     relation["property"],
-                    relation.get("offset", 0) + len(relation["targets"]),
+                    relation_end(relation),
                     relation["total"],
                 )
         while len(self._continuations) > 512:
@@ -797,7 +798,7 @@ class ConnectionPort:
         if (
             relation["source"] != target.node
             or relation["property"] != relation_property
-            or len(relation["targets"]) > limit
+            or relation_slots(relation) > limit
         ):
             raise ValueError("Native relation page changed its source, property or budget")
         if relation["state"] in ("complete", "partial"):

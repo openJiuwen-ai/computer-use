@@ -727,46 +727,42 @@ import ApplicationServices
                         pendingLinks.append(page)
                         continue
                     }
-                    var targets = [String](), unresolved: String?
-                    for element in page.targets {
-                        guard try reading() else { break }
+                    var unresolved: String?
+                    let registration = try relationReader.register(page) { element in
+                        guard try reading() else { return .stop }
                         let nativeKey = key(element)
                         if let previous = known[nativeKey] {
-                            targets.append(previous)
                             if let supplement, previous == supplement.reference, queued.insert(previous).inserted {
                                 // The ordinary relation reached the existing
                                 // sample. Reuse its reserved slot at this depth.
                                 queue.insert((supplement.target, previous, depth + 1), at: childInsertion)
                                 childInsertion += 1
                             }
-                            continue
+                            return .target(previous)
                         }
                         let reserved = supplement.map { queued.contains($0.reference) ? 0 : 1 } ?? 0
-                        guard queue.count + reserved < maxNodes else { break }
+                        guard queue.count + reserved < maxNodes else { return .stop }
                         let acquisition = try acquire(element, includeIdentity: true)
                         if acquisition.identityConflict {
                             unresolved = "native identity samples disagreed before registration"
-                            break
+                            return .stop
                         }
                         guard
                             let (life, child) = try related(
                                 element, app: root.application, scope: root.scope,
                                 parent: property == "AXChildren" ? target : nil, diagnosticBudget: reading,
                                 observationDeadline: deadline, identityEvidence: acquisition.identity)
-                        else {
-                            unresolved = "a related native object expired before registration"
-                            break
-                        }
+                        else { return .unavailable }
                         known[nativeKey] = life
-                        targets.append(life)
                         if queued.insert(life).inserted {
                             sampled[life] = try sample(child, nodeID: life, acquisition: acquisition)
                             queue.insert((child, life, depth + 1), at: childInsertion)
                             childInsertion += 1
                         }
+                        return .target(life)
                     }
-                    edgeCount += targets.count
-                    var link = relationReader.encode(page, targets: targets)
+                    edgeCount += registration.targets.count
+                    var link = relationReader.encode(page, registration: registration)
                     if let issue = relationFailures[property] {
                         // The getter can still return useful objects when its
                         // attribute catalogue is unavailable. Keep that payload
@@ -774,10 +770,11 @@ import ApplicationServices
                         link["state"] = "partial"
                         link["detail"] = [link["detail"] as? String, issue["detail"] as? String].compactMap { $0 }
                             .joined(separator: "; ")
-                        if targets.isEmpty { link["certainty"] = "unknown" }
+                        if registration.targets.isEmpty { link["certainty"] = "unknown" }
                     }
                     if let unresolved {
-                        link["detail"] = unresolved
+                        link["detail"] = [link["detail"] as? String, unresolved].compactMap { $0 }
+                            .joined(separator: "; ")
                     }
                     if link["state"] as? String != "complete" { reasons.insert("partial native relation: " + property) }
                     links.append(link)
@@ -821,29 +818,25 @@ import ApplicationServices
         }
         let collected = Set(nodes.compactMap { $0["node"] as? String })
         for page in pendingLinks {
-            var targets = [String](), expired = false
-            for element in page.targets {
-                guard edgeCount + targets.count < 32768 else { break }
+            var availableEdges = 32768 - edgeCount
+            let registration = try relationReader.register(page) { element in
+                guard availableEdges > 0 else { return .stop }
                 if let previous = known[key(element)] {
-                    targets.append(previous)
-                    continue
+                    availableEdges -= 1
+                    return .target(previous)
                 }
-                guard known.count < 8192, try reading() else { break }
+                guard known.count < 8192, try reading() else { return .stop }
                 // A native related object remains inspectable even when it is
                 // not a child. This does not authorize it as an input recipient.
                 guard let (life, _) = try related(element, app: root.application, scope: root.scope) else {
-                    expired = true
-                    break
+                    return .unavailable
                 }
                 known[key(element)] = life
-                targets.append(life)
+                availableEdges -= 1
+                return .target(life)
             }
-            edgeCount += targets.count
-            var link = relationReader.encode(page, targets: targets)
-            if expired {
-                link["detail"] = "a related native object expired before registration"
-            }
-            links.append(link)
+            edgeCount += registration.targets.count
+            links.append(relationReader.encode(page, registration: registration))
         }
         for item in pendingValues {
             let encoded = try encodeField(item.value)
@@ -956,28 +949,18 @@ import ApplicationServices
             }
             link = failure
         case .page(let page):
-            var targets = [String](), expired = false
-            for element in page.targets {
+            let registration = try relationReader.register(page) { element in
                 try RequestDiagnostics.checkCancellation()
-                guard budget.canCollect() else { break }
-                if CFEqual(element, root.element) {
-                    targets.append(ref)
-                    continue
-                }
+                guard budget.canCollect() else { return .stop }
+                if CFEqual(element, root.element) { return .target(ref) }
                 guard
                     let (life, _) = try related(
                         element, app: root.application, scope: root.scope, parent: property == "AXChildren" ? root : nil
                     )
-                else {
-                    expired = true
-                    break
-                }
-                targets.append(life)
+                else { return .unavailable }
+                return .target(life)
             }
-            link = relationReader.encode(page, targets: targets)
-            if expired {
-                link["detail"] = "a related native object expired before registration"
-            }
+            link = relationReader.encode(page, registration: registration)
         }
         return [
             "kind": "relation", "session": session, "surface": root.scope, "platform": "macos",
