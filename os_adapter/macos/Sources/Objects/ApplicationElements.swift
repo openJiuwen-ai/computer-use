@@ -24,6 +24,7 @@ import ApplicationServices
         // window. A retained/partial ancestor list is not removal evidence.
         var contextComplete = false
         var popupOwner: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>? = nil
+        var documentLocation: NativeDocumentLocation? = nil
         // Input ownership follows this exact registered target lifetime. A new
         // observation can refine it, but cannot transfer an editor to a new cell.
         var cellEditorState = NativeCellEditorState()
@@ -73,6 +74,7 @@ import ApplicationServices
     struct Context: Equatable {
         let native: Identity
         let identity: ElementIdentity
+        var documentLocation: NativeDocumentLocation? = nil
     }
     struct Evidence: Equatable {
         let identity: ElementIdentity
@@ -149,7 +151,7 @@ import ApplicationServices
         return context.compactMap { item in
             inMenu = inMenu || item.identity.attributes["AXRole"] == "AXMenuBar"
             guard let identity = item.identity.inheritedBoundary(inMenu: inMenu) else { return nil }
-            return Context(native: item.native, identity: identity)
+            return Context(native: item.native, identity: identity, documentLocation: item.documentLocation)
         }
     }
 
@@ -190,7 +192,9 @@ import ApplicationServices
                               "fields": merged[index].identity.changedFields(in: .init(values: current.identity.attributes, absent: current.identity.absent))])
                     return nil
                 }
-                let refined = Context(native: current.native, identity: identity)
+                let refined = Context(
+                    native: current.native, identity: identity,
+                    documentLocation: current.documentLocation ?? merged[index].documentLocation)
                 merged[index] = refined
                 ordered.append(refined)
             } else {
@@ -302,7 +306,7 @@ import ApplicationServices
             Context(
                 native: Identity(
                     pid: target.application.processIdentifier, launched: target.launched,
-                    element: target.element), identity: target.identity)
+                        element: target.element), identity: target.identity, documentLocation: target.documentLocation)
         ])
     }
     func bind(_ lifetime: String, text: String?) -> String? { elements.bind(lifetime, text: text) }

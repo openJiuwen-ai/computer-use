@@ -54,6 +54,38 @@ import ApplicationServices
         print("PASS role, identifier, URL/document and advertised position constraints remain enforced")
     }
 
+    static func verifyDocumentLocationClassification() {
+        let originalValues = [
+            "AXRole": "AXWebArea", "AXURL": "https://example.invalid/settings#before",
+            "AXDocument": "document-one", "AXIdentifier": "original-native-owner"
+        ]
+        let original = ElementIdentity(facts: .init(values: originalValues))
+        let moved = originalValues.merging(["AXURL": "https://example.invalid/settings#after"]) { _, new in new }
+        precondition(original.check(.init(values: moved)) == .changed
+            && original.locationChange(.init(values: moved)),
+            "only a positive different location on an otherwise matching original document may request proof")
+        let projected = ElementIdentity(facts: .init(values: moved)).preservingLocation(from: original)
+        precondition(projected?.attributes["AXURL"] == originalValues["AXURL"],
+            "a verified location projection keeps the original expected URL")
+
+        let withoutURL = moved.filter { $0.key != "AXURL" }
+        let negative: [ElementIdentity.Facts] = [
+            .init(values: originalValues),
+            .init(values: withoutURL),
+            .init(values: withoutURL, absent: ["AXURL"]),
+            .init(values: moved.merging(["AXURL": ""]) { _, new in new }),
+            .init(values: moved.merging(["AXRole": "AXGroup"]) { _, new in new }),
+            .init(values: moved.merging(["AXDocument": "document-two"]) { _, new in new }),
+            .init(values: moved.filter { $0.key != "AXIdentifier" })
+        ]
+        precondition(negative.allSatisfy { !original.locationChange($0) },
+            "lost location, changed document/role and unknown required evidence remain strict")
+        let link = ElementIdentity(facts: .init(values: ["AXRole": "AXLink", "AXURL": originalValues["AXURL"]!]))
+        precondition(!link.locationChange(.init(values: ["AXRole": "AXLink", "AXURL": moved["AXURL"]!])),
+            "a link URL remains identity evidence, not a document location")
+        print("PASS only an isolated positive WebArea URL conflict can request document continuity proof")
+    }
+
     @MainActor static func verifyCommandPresentation() {
         for role in ["AXButton", "AXMenuItem", "AXMenuBarItem", "AXCheckBox", "AXRadioButton", "AXLink"] {
             let values = ["AXRole": role, "AXIdentifier": "control", "AXTitle": "Count 0", "AXDescription": "Off"]
@@ -349,6 +381,133 @@ import ApplicationServices
         print("PASS complete paths distinguish new nested evidence from actual different-role document replacement")
     }
 
+    @MainActor static func verifyDocumentMarkerEvidence() throws {
+        struct Node {
+            let element: AXUIElement
+            var role: String?
+            var parent: AXUIElement?
+        }
+        let scene = Scene(), window = AXUIElementCreateApplication(19110)
+        let document = scene.row, field = scene.field, group = AXUIElementCreateApplication(19111)
+        let firstOwner = scene.cell, lastOwner = AXUIElementCreateApplication(19112)
+        let substituteOwner = AXUIElementCreateApplication(19113), nestedDocument = AXUIElementCreateApplication(19114)
+        let originalNodes = [
+            Node(element: scene.window, role: "AXWindow"),
+            Node(element: window, role: "AXWindow"),
+            Node(element: document, role: "AXWebArea", parent: scene.window),
+            Node(element: group, role: "AXGroup", parent: document),
+            Node(element: field, role: "AXTextField", parent: group),
+            Node(element: firstOwner, role: "AXStaticText", parent: group),
+            Node(element: lastOwner, role: "AXStaticText", parent: document),
+            Node(element: substituteOwner, role: "AXStaticText", parent: document),
+            Node(element: nestedDocument, role: "AXWebArea", parent: document)
+        ]
+        func marker(_ value: UInt8) -> AXTextMarker {
+            var bytes = [value]
+            return AXTextMarkerCreate(nil, &bytes, bytes.count)
+        }
+        let start = marker(1), end = marker(2)
+        var nodes = originalNodes, endMarker = end
+        var markerOwners: [AXUIElement?] = [firstOwner, lastOwner]
+        var time = 1.0, reads = 0
+        var expireOnOwnerRead = false, readsAtExpiration: Int?
+        var moveFieldOnLastOwnerRead = false, movedDuringProof = false
+        let deadline = 2.0
+        func change(_ element: AXUIElement, _ update: (inout Node) -> Void) {
+            update(&nodes[nodes.firstIndex { CFEqual($0.element, element) }!])
+        }
+        let query = NativeDocumentLocation.Query(
+            attribute: { element, attribute in
+                reads += 1
+                guard let node = nodes.first(where: { CFEqual($0.element, element) }) else { return nil }
+                switch attribute {
+                case kAXRoleAttribute: return node.role.map { $0 as CFString }
+                case kAXParentAttribute: return node.parent
+                case NativeTextMarkerSelection.startAttribute where CFEqual(element, document): return start
+                case NativeTextMarkerSelection.endAttribute where CFEqual(element, document): return endMarker
+                default: return nil
+                }
+            },
+            markerOwner: { element, marker in
+                reads += 1
+                if expireOnOwnerRead {
+                    time = deadline
+                    readsAtExpiration = reads
+                }
+                guard CFEqual(element, document) else { return nil }
+                if CFEqual(marker, start) { return markerOwners[0] }
+                guard CFEqual(marker, end) else { return nil }
+                if moveFieldOnLastOwnerRead {
+                    change(field) { $0.parent = nestedDocument }
+                    movedDuringProof = true
+                }
+                return markerOwners[1]
+            },
+            clock: { time })
+        func capture() throws -> NativeDocumentLocation? {
+            try NativeDocumentLocation.capture(document: document, window: scene.window, deadline: deadline, query: query)
+        }
+
+        endMarker = start
+        let duplicateMarker = try capture()
+        precondition(duplicateMarker == nil, "duplicate opaque markers cannot supply two witnesses")
+        endMarker = end
+        markerOwners[1] = firstOwner
+        let duplicateOwner = try capture()
+        precondition(duplicateOwner == nil, "distinct opaque markers must resolve to distinct original native owners")
+        markerOwners[1] = lastOwner
+        guard let original = try capture() else { preconditionFailure("expected the original document witnesses") }
+        let confirmed = try original.confirms(target: field, deadline: deadline, query: query)
+        precondition(confirmed, "the two original live owners and original field share the exact nearest document and window")
+
+        let contradictions: [(String, () -> Void)] = [
+            ("a marker now resolves to a different owner with the same role and parent", {
+                markerOwners[0] = substituteOwner
+            }),
+            ("a marker no longer resolves", { markerOwners[1] = nil }),
+            ("an original marker owner's role changed", { change(firstOwner) { $0.role = "AXButton" } }),
+            ("the exact original field moved to a nearer different document", {
+                change(field) { $0.parent = nestedDocument }
+            }),
+            ("an original marker owner moved to a nearer different document", {
+                change(lastOwner) { $0.parent = nestedDocument }
+            }),
+            ("the original document moved to a different window", { change(document) { $0.parent = window } }),
+            ("the field's native parent path contains a cycle", { change(group) { $0.parent = field } }),
+            ("a required parent edge is unavailable", { change(group) { $0.parent = nil } })
+        ]
+        for (reason, contradict) in contradictions {
+            nodes = originalNodes
+            markerOwners = [firstOwner, lastOwner]
+            contradict()
+            let confirmed = try original.confirms(target: field, deadline: deadline, query: query)
+            precondition(!confirmed, "document proof must fail when \(reason)")
+        }
+        nodes = originalNodes
+        markerOwners = [firstOwner, lastOwner]
+        time = deadline
+        let beforeExpired = reads
+        do {
+            let confirmed = try original.confirms(target: field, deadline: deadline, query: query)
+            precondition(!confirmed, "an expired budget cannot prove document continuity")
+        } catch is RequestDeadlineExceeded {}
+        precondition(reads == beforeExpired, "an expired proof must not invoke any native getter")
+
+        time = 1.0
+        expireOnOwnerRead = true
+        let expiredMidRead = try original.confirms(target: field, deadline: deadline, query: query)
+        precondition(!expiredMidRead && readsAtExpiration == reads,
+            "a successful getter at the deadline cannot authorize the remaining proof or trigger more queries")
+
+        time = 1.0
+        expireOnOwnerRead = false
+        moveFieldOnLastOwnerRead = true
+        let stillConfirmed = try original.confirms(target: field, deadline: deadline, query: query)
+        precondition(movedDuringProof && !stillConfirmed,
+            "resolve the original markers before the final field containment check")
+        print("PASS live document marker witnesses retain exact owners and reject changed, unavailable and expired paths")
+    }
+
     @MainActor static func verifyCurrentBoundaryOrder(complete: Bool) {
         let scene = Scene()
         let root = scene.target(scene.window, values: ["AXRole": "AXWindow"])
@@ -624,6 +783,7 @@ import ApplicationServices
         NSApplication.shared.setActivationPolicy(.prohibited)
         verifyRowPresentation()
         verifyStrongEvidence()
+        verifyDocumentLocationClassification()
         verifyCommandPresentation()
         try verifyActionSelection()
         verifyRegistryContinuity()
@@ -633,6 +793,7 @@ import ApplicationServices
         verifyIdentifiedRowMovement()
         verifyIdentityFailureEvidence()
         verifyDocumentOwnershipAcrossRoles()
+        try verifyDocumentMarkerEvidence()
         verifyCurrentBoundaryOrder(complete: true)
         verifyCurrentBoundaryOrder(complete: false)
         verifyUncertainReobservation()

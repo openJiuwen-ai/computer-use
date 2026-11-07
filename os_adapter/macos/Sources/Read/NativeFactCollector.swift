@@ -124,7 +124,7 @@ import ApplicationServices
             registry.invalidate { $0.scope == scope && CFEqual($0.element, element) }
             throw DriverError("native node no longer exists", code: .staleTarget)
         }
-        let identity = ElementIdentity(facts: read.value ?? .init())
+        var identity = ElementIdentity(facts: read.value ?? .init())
         let role = identity.attributes["AXRole"] ?? ""
         let provider = inspection.providerFacts(element, app: app)
         var target = Target(
@@ -134,6 +134,35 @@ import ApplicationServices
             context: parent.map(ApplicationElements.childContext) ?? [])
         target.contextComplete = parent?.contextComplete ?? (role == kAXWindowRole)
         target.popupOwner = parent?.popupOwner
+        if role == "AXWebArea", identity.attributes[kAXURLAttribute] != nil, provider.known {
+            let until = min(observationDeadline ?? .infinity, clock() + 0.12)
+            if let previous, previous.providerKnown, previous.provider == provider.identity {
+                if previous.identity.refining(with: identity) != nil {
+                    target.documentLocation = previous.documentLocation
+                } else if let retained = previous.documentLocation,
+                    let projected = identity.preservingLocation(from: previous.identity)
+                {
+                    if try retained.confirms(target: element, deadline: until) {
+                        target.documentLocation = retained
+                        identity = projected
+                        target.identity = projected
+                    } else if clock() >= until, observationDeadline != nil, diagnosticBudget == nil {
+                        // The optional focused seed must not retire a
+                        // document before ordinary collection can examine it.
+                        throw DriverError(
+                            "document location continuity was not sampled before the observation deadline",
+                            code: .observationIncomplete)
+                    }
+                }
+            }
+            if target.documentLocation == nil, observationDeadline != nil, target.contextComplete,
+                let window = target.context.last(where: { $0.identity.attributes[kAXRoleAttribute] == kAXWindowRole })?
+                    .native.element
+            {
+                target.documentLocation = try NativeDocumentLocation.capture(
+                    document: element, window: window, deadline: until)
+            }
+        }
         if role == kAXListRole, let parent, parent.role == kAXWindowRole,
             parent.identity.attributes[kAXSubroleAttribute] == "AXDialog", let budget = diagnosticBudget,
             let observationDeadline
@@ -559,9 +588,21 @@ import ApplicationServices
         // can replace its virtual children. Keep already discovered siblings'
         // own fields/actions even if a deep branch exhausts the shared budget.
         let rootAcquisition = try acquire(root.element, includeIdentity: false)
-        if Self.conflicts(root.identity, with: Self.sampledIdentity(rootAcquisition.batch)) {
-            registry.invalidate { $0.scope == root.scope && CFEqual($0.element, root.element) }
-            throw DriverError("native read target identity changed", code: .staleTarget)
+        let rootIdentity = Self.sampledIdentity(rootAcquisition.batch)
+        if Self.conflicts(root.identity, with: rootIdentity) {
+            let until = min(deadline, clock() + 0.12)
+            let locationOnly = rootIdentity.value.map { root.identity.locationChange($0) } == true
+            let confirmed =
+                try locationOnly && root.documentLocation?.confirms(target: root.element, deadline: until) == true
+            if !confirmed {
+                if locationOnly, root.documentLocation != nil, clock() >= until {
+                    throw DriverError(
+                        "document location continuity was not sampled before the observation deadline",
+                        code: .observationIncomplete)
+                }
+                registry.invalidate { $0.scope == root.scope && CFEqual($0.element, root.element) }
+                throw DriverError("native read target identity changed", code: .staleTarget)
+            }
         }
         var sampled = [ref: try sample(root, nodeID: ref, acquisition: rootAcquisition)]
         var supplement: (target: Target, reference: String, parent: String)?
@@ -627,7 +668,7 @@ import ApplicationServices
                                 let evidence = AXIdentity.decode(status, fields, keys: ElementIdentity.keys)
                                 guard let (reference, retained) = try related(
                                     element, app: root.application, scope: root.scope, parent: parent,
-                                    identityEvidence: evidence
+                                        observationDeadline: focusDeadline, identityEvidence: evidence
                                 ), !retained.role.isEmpty else {
                                     throw DriverError(
                                         "focused element's parent is unavailable", code: .observationIncomplete)
@@ -638,7 +679,7 @@ import ApplicationServices
                             guard try canReadFocus(),
                                 let (reference, target) = try related(
                                     focus, app: root.application, scope: root.scope, parent: parent,
-                                    identityEvidence: identity)
+                                    observationDeadline: focusDeadline, identityEvidence: identity)
                             else { throw RequestDeadlineExceeded() }
                             sampled[reference] = try sample(
                                 target, nodeID: reference, acquisition: acquisition, withinBudget: canReadLeaf)

@@ -104,11 +104,22 @@ import ApplicationServices
             registry.invalidate { $0.scope == target.scope && CFEqual($0.element, target.element) }
             throw error
         }
-        func check(_ element: AXUIElement, _ identity: ElementIdentity, subject: String, isTarget: Bool)
-            -> (state: ElementIdentity.Check, detail: String)
+        func check(
+            _ element: AXUIElement, _ identity: ElementIdentity, subject: String, isTarget: Bool,
+            location: NativeDocumentLocation? = nil
+        ) throws -> (state: ElementIdentity.Check, detail: String)
         {
             let evidence = AXIdentity.read(element, keys: identity.attributes.keys.sorted())
             let result = Self.identityCheck(identity, evidence: evidence, isTarget: isTarget)
+            if result.state == .changed, let location, let facts = evidence.value, identity.locationChange(facts) {
+                let deadline = ProcessInfo.processInfo.systemUptime + 0.15
+                if try location.confirms(target: target.element, deadline: deadline) {
+                    return (.matched, "original document location advanced")
+                }
+                if ProcessInfo.processInfo.systemUptime >= deadline {
+                    return (.unavailable, "document location continuity was not sampled before the input deadline")
+                }
+            }
             let detail = "\(subject) role=\(identity.attributes[kAXRoleAttribute] ?? "unknown") \(result.detail)"
             if result.state != .matched {
                 diagnose(["event": "element_identity_check", "subject": subject,
@@ -116,9 +127,15 @@ import ApplicationServices
             }
             return (result.state, detail)
         }
+        let boundaries = ApplicationElements.boundaryContext(target.context)
+        let nearestDocument = boundaries.lastIndex { $0.identity.attributes[kAXRoleAttribute] == "AXWebArea" }
         let checks =
-            [check(target.element, target.identity, subject: "element", isTarget: true)]
-            + ApplicationElements.boundaryContext(target.context).enumerated().map { index, context in
+            [
+                try check(
+                    target.element, target.identity, subject: "element", isTarget: true,
+                    location: target.documentLocation)
+            ]
+            + (try boundaries.enumerated().map { index, context in
                 if context.identity.attributes[kAXRoleAttribute] == kAXWindowRole {
                     // The input scope checks the original physical window and
                     // membership. Do not let a dead AXWindow proxy invalidate a
@@ -128,14 +145,17 @@ import ApplicationServices
                         return (.matched, "context[\(index)] window lifetime is checked by the input scope")
                     }
                     let current = AXAccess.element(target.element, kAXWindowAttribute) ?? context.native.element
-                    return current.map {
-                        check($0, context.identity, subject: "context[\(index)] current window document", isTarget: false)
+                    return try current.map {
+                        try check(
+                            $0, context.identity, subject: "context[\(index)] current window document", isTarget: false)
                     } ?? (.unavailable, "context[\(index)] window document cannot be obtained")
                 }
-                return context.native.element.map {
-                    check($0, context.identity, subject: "context[\(index)]", isTarget: false)
+                return try context.native.element.map {
+                    try check(
+                        $0, context.identity, subject: "context[\(index)]", isTarget: false,
+                        location: index == nearestDocument ? context.documentLocation : nil)
                 } ?? (.unavailable, "context[\(index)] has no native reference")
-            }
+            })
         if let changed = checks.first(where: { $0.state == .changed }) {
             // Do not revive a handle after a known identity/structural
             // contradiction. Re-observation establishes a new lifetime.

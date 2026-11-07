@@ -71,6 +71,26 @@ struct ElementIdentity: Equatable {
 
     func matches(_ current: [String: String]) -> Bool { check(Facts(values: current)) == .matched }
 
+    /// An optional native document witness may resolve exactly one reported
+    /// location change. Other attributes, unknown fields and absent URLs keep
+    /// their ordinary identity semantics.
+    func locationChange(_ current: Facts) -> Bool {
+        guard attributes["AXRole"] == "AXWebArea", let url = attributes["AXURL"], let latest = current.values["AXURL"],
+            !latest.isEmpty, latest != url
+        else { return false }
+        var fixed = current
+        fixed.values["AXURL"] = url
+        return check(fixed) == .matched
+    }
+
+    func preservingLocation(from previous: Self) -> Self? {
+        guard previous.locationChange(.init(values: attributes, absent: absent)), let url = previous.attributes["AXURL"]
+        else { return nil }
+        var fixed = attributes
+        fixed["AXURL"] = url
+        return Self(attributes: fixed, absent: absent)
+    }
+
     /// Ancestor metadata is not automatically a descendant's identity. A
     /// layout group's identifier/URL, or a window's subrole/identifier, can
     /// change while the exact child remains alive. Keep only actual ownership
