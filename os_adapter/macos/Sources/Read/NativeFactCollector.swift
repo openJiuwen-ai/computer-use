@@ -28,6 +28,7 @@ import ApplicationServices
     private let inspection: NativeElementInspection
     private let relationReader: AXRelationReader
     private let attributes: AXAttributeReader.API
+    private let readIdentity: (AXUIElement) -> AXRead<ElementIdentity.Facts>
     private let clock: @Sendable () -> TimeInterval
     private let nativeResources = AXNativeValueResources()
     private struct Acquisition {
@@ -36,18 +37,20 @@ import ApplicationServices
         let batchFields: [String]
         let batch: AXAttributeReader.Result
         let identity: AXRead<ElementIdentity.Facts>?
-        let identityFromFallback: Bool
+        let identityConflict: Bool
     }
     init(
         registry: ApplicationElements, inspection: NativeElementInspection,
         attributes: AXAttributeReader.API = AXAttributeReader.API(),
         relations: AXRelationReader.API = AXRelationReader.API(),
+        readIdentity: @escaping (AXUIElement) -> AXRead<ElementIdentity.Facts> = { AXIdentity.read($0) },
         clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.registry = registry
         self.inspection = inspection
         self.attributes = attributes
         self.relationReader = AXRelationReader(api: relations)
+        self.readIdentity = readIdentity
         self.clock = clock
     }
 
@@ -116,7 +119,7 @@ import ApplicationServices
         AXMessaging.configure(element)
         let key = Identity(pid: app.processIdentifier, launched: app.launchDate, element: element, scope: scope)
         let previous = registry.observed(key)?.value
-        let read = identityEvidence ?? AXIdentity.read(element)
+        let read = identityEvidence ?? readIdentity(element)
         if case .invalid = read {
             registry.invalidate { $0.scope == scope && CFEqual($0.element, element) }
             throw DriverError("native node no longer exists", code: .staleTarget)
@@ -189,10 +192,12 @@ import ApplicationServices
     }
 
     /// Identity fields returned by the display sample itself. Unknown fields add no constraint.
-    private static func sampledIdentity(_ batch: AXAttributeReader.Result) -> AXRead<ElementIdentity.Facts> {
+    private static func sampledIdentity(
+        _ batch: AXAttributeReader.Result, keys: Set<String> = Set(ElementIdentity.keys), absent: Set<String> = []
+    ) -> AXRead<ElementIdentity.Facts> {
         if batch.status == .invalidUIElement { return .invalid }
-        var facts = ElementIdentity.Facts()
-        for field in batch.fields where ElementIdentity.keys.contains(field.name) {
+        var facts = ElementIdentity.Facts(absent: absent)
+        for field in batch.fields where keys.contains(field.name) && !field.timedOut {
             if field.status == .invalidUIElement { return .invalid }
             if [.noValue, .attributeUnsupported, .notImplemented].contains(field.status) {
                 facts.absent.insert(field.name)
@@ -208,6 +213,27 @@ import ApplicationServices
             }
         }
         return .value(facts)
+    }
+
+    /// An unavailable read contributes nothing. A definite disagreement leaves
+    /// this slot unresolved, while a native invalid result retires the object.
+    private static func reconcileSamples(
+        _ observed: AXRead<ElementIdentity.Facts>, _ independent: AXRead<ElementIdentity.Facts>
+    ) -> AXRead<ElementIdentity.Facts>? {
+        switch (observed, independent) {
+        case (.invalid, _), (_, .invalid):
+            return .invalid
+        case (.value(let first), .value(let second)):
+            let sampled = ElementIdentity(facts: first), later = ElementIdentity(facts: second)
+            guard let combined = sampled.refining(with: later), later.refining(with: sampled) != nil else {
+                return nil
+            }
+            return .value(.init(values: combined.attributes, absent: combined.absent))
+        case (.value(let facts), _) where !facts.values.isEmpty || !facts.absent.isEmpty:
+            return observed
+        default:
+            return independent
+        }
     }
 
     private static func conflicts(_ identity: ElementIdentity, with sample: AXRead<ElementIdentity.Facts>) -> Bool {
@@ -322,30 +348,38 @@ import ApplicationServices
                     && unavailable[AXAttributeProfile.writableAttribute($0) ?? $0]?["state"] as? String != "unsupported"
             }
             var fields = sampleFields
-            if includeIdentity, let catalogue {
-                let identity = AXIdentity.positionRequest(
-                    ElementIdentity.keys, status: catalogue.status, names: catalogue.names)
+            let identityFields = includeIdentity ? catalogue.map {
+                AXIdentity.positionRequest(ElementIdentity.keys, status: $0.status, names: $0.names)
+            } : nil
+            if let identity = identityFields {
                 fields += identity.keys.filter { !fields.contains($0) }
             }
             let metric = RequestDiagnostics.metrics?.start(.readAttributes)
             let batch = try AXAttributeReader.read(element, fields: fields, api: attributes, withinBudget: canRead)
             metric?.end()
             var identity: AXRead<ElementIdentity.Facts>?
-            var identityFromFallback = false
-            if includeIdentity, let catalogue {
+            var identityConflict = false
+            if let identityFields, let catalogue {
                 identity = AXIdentity.fromObservationBatch(
                     status: batch.status, raw: batch.raw, fields: fields,
                     catalogueStatus: catalogue.status, catalogue: catalogue.names)
                 if identity == nil {
-                    let fallback = RequestDiagnostics.metrics?.start(.readIdentityFallback)
-                    identity = try canRead() ? AXIdentity.read(element) : .unavailable(.cannotComplete)
-                    identityFromFallback = true
-                    fallback?.end()
+                    let sampled = Self.sampledIdentity(
+                        batch, keys: Set(identityFields.keys), absent: identityFields.absent)
+                    if case .invalid = sampled {
+                        identity = .invalid
+                    } else {
+                        let fallback = RequestDiagnostics.metrics?.start(.readIdentityFallback)
+                        let independent = try canRead() ? readIdentity(element) : .unavailable(.cannotComplete)
+                        fallback?.end()
+                        identity = Self.reconcileSamples(sampled, independent)
+                        identityConflict = identity == nil
+                    }
                 }
             }
             return Acquisition(
                 catalogue: catalogue, sampleFields: sampleFields, batchFields: fields, batch: batch, identity: identity,
-                identityFromFallback: identityFromFallback)
+                identityConflict: identityConflict)
         }
         func sample(
             _ target: Target, nodeID: String, acquisition: Acquisition, withinBudget: (() throws -> Bool)? = nil
@@ -530,142 +564,13 @@ import ApplicationServices
             throw DriverError("native read target identity changed", code: .staleTarget)
         }
         var sampled = [ref: try sample(root, nodeID: ref, acquisition: rootAcquisition)]
-        while index < queue.count, try reading() {
-            let (target, nodeID, depth) = queue[index]
-            index += 1
-            let relationFailures = sampled[nodeID] ?? [:]
-            // Expand the current branch before materializing another container.
-            // Retaining an AX proxy does not keep the remote view alive. Native
-            // sibling/relation order and total queue reservations stay intact.
-            var childInsertion = index
-
-            // The caller chooses which raw edges to follow. Collecting an edge
-            // does not reinterpret it as parentage or input ownership.
-            for property in relations {
-                if let failure = relationFailures[property], failure["state"] as? String == "unsupported" {
-                    var link: [String: Any] = [
-                        "source": nodeID, "property": property, "targets": [String](), "certainty": "unknown"
-                    ]
-                    link.merge(failure) { _, value in value }
-                    links.append(link)
-                    continue
-                }
-                guard try reading() else {
-                    links.append(AXFactEncoding.relationFailure(source: nodeID, property: property))
-                    reasons.insert("collection time budget")
-                    continue
-                }
-                let page = nodeID == ref && property == pageProperty ? rootPage : nil
-                let shouldFollow = followed.contains(property) || page != nil
-                var limit =
-                    shouldFollow
-                    ? (depth < maxDepth ? min(maxNodes - queue.count, 8192 - known.count, 32768 - edgeCount) : 0)
-                    : min(128, 32768 - edgeCount)
-                // A wide collection must not reserve the entire node budget
-                // for sibling shells before their labels/actions can be read.
-                // Use the same page size as ordinary Element.read; retain the
-                // native total and cursor instead of declaring omitted rows
-                // absent. An explicitly requested page keeps its own limit.
-                limit = min(limit, page?.limit ?? 128)
-                let relation: AXRelationReader.Result
-                do {
-                    relation = try relationReader.read(
-                        target.element, source: nodeID, property: property, limit: limit, cursor: page?.cursor,
-                        withinBudget: reading)
-                } catch let error as DriverError where error.code == .snapshotExpired {
-                    // A changing branch is a local observation gap, not loss of
-                    // the fields and unrelated branches already collected.
-                    var failure = AXFactEncoding.relationFailure(source: nodeID, property: property, error: .failure)
-                    failure["detail"] = error.localizedDescription
-                    links.append(failure)
-                    reasons.insert("native relation changed during collection")
-                    continue
-                }
-                switch relation {
-                case .failure(var value):
-                    if let raw = value.removeValue(forKey: "rawNativeValue") {
-                        value["wrappedNativeValue"] = try encodeNative(raw as CFTypeRef)
-                    }
-                    links.append(value)
-                case .page(let page):
-                    if !shouldFollow {
-                        pendingLinks.append(page)
-                        continue
-                    }
-                    var targets = [String](), expired = false
-                    for element in page.targets {
-                        guard try reading() else { break }
-                        let nativeKey = key(element)
-                        if let previous = known[nativeKey] {
-                            targets.append(previous)
-                            continue
-                        }
-                        let acquisition = try acquire(element, includeIdentity: true)
-                        if acquisition.identityFromFallback, let identity = acquisition.identity?.value,
-                            Self.conflicts(.init(facts: identity), with: Self.sampledIdentity(acquisition.batch))
-                        {
-                            // A fallback identity read observed a different lifetime from the fields.
-                            // Leave a continuation for the unresolved slot rather than mixing samples.
-                            expired = true
-                            break
-                        }
-                        guard
-                            let (life, child) = try related(
-                                element, app: root.application, scope: root.scope,
-                                parent: property == "AXChildren" ? target : nil, diagnosticBudget: reading,
-                                observationDeadline: deadline, identityEvidence: acquisition.identity)
-                        else {
-                            expired = true
-                            break
-                        }
-                        known[nativeKey] = life
-                        targets.append(life)
-                        if queued.insert(life).inserted {
-                            sampled[life] = try sample(child, nodeID: life, acquisition: acquisition)
-                            queue.insert((child, life, depth + 1), at: childInsertion)
-                            childInsertion += 1
-                        }
-                    }
-                    edgeCount += targets.count
-                    var link = relationReader.encode(page, targets: targets)
-                    if let issue = relationFailures[property] {
-                        // The getter can still return useful objects when its
-                        // attribute catalogue is unavailable. Keep that payload
-                        // without claiming a complete declaration/empty relation.
-                        link["state"] = "partial"
-                        link["detail"] = [link["detail"] as? String, issue["detail"] as? String].compactMap { $0 }
-                            .joined(separator: "; ")
-                        if targets.isEmpty { link["certainty"] = "unknown" }
-                    }
-                    if expired {
-                        link["detail"] =
-                            "a related native object expired before registration"
-                    }
-                    if link["state"] as? String != "complete" { reasons.insert("partial native relation: " + property) }
-                    links.append(link)
-                }
-            }
-        }
-        if index < queue.count { reasons.insert("collection time budget") }
-        // Prefetched fields are real observations, but their unexplored edges
-        // must remain explicitly unknown and offer the same subtree read route.
-        for (_, nodeID, _) in queue.dropFirst(index) where sampled[nodeID] != nil {
-            for property in relations {
-                if let failure = sampled[nodeID]?[property] {
-                    var link: [String: Any] = [
-                        "source": nodeID, "property": property, "targets": [String](), "certainty": "unknown"
-                    ]
-                    link.merge(failure) { _, value in value }
-                    links.append(link)
-                } else {
-                    links.append(AXFactEncoding.relationFailure(source: nodeID, property: property))
-                }
-            }
-        }
+        var supplement: (target: Target, reference: String, parent: String)?
         if focusedElement, rootPage == nil, [kAXWindowRole, kAXSheetRole].contains(root.role) {
-            // Optional supplemental collection spends only remaining budget and does
-            // not alter the already collected Children pages or count.
-            let focusDeadline = min(deadline, clock() + 0.075)
+            // Reserve a single slot for a proved focused object before a wide
+            // Children traversal can exhaust it. Keep most of the time for
+            // ordinary collection even on short observations.
+            let focusStarted = clock()
+            let focusDeadline = focusStarted + min(0.075, max(0, deadline - focusStarted) / 4)
             let app = AXUIElementCreateApplication(root.application.processIdentifier)
             func canReadFocus() throws -> Bool { try reading() && clock() < focusDeadline }
             func setFocusTimeout(_ element: AXUIElement) throws -> Bool {
@@ -729,34 +634,18 @@ import ApplicationServices
                                 }
                                 parent = retained
                                 parentRef = reference
-                                known[key(element)] = reference
                             }
                             guard try canReadFocus(),
                                 let (reference, target) = try related(
                                     focus, app: root.application, scope: root.scope, parent: parent,
                                     identityEvidence: identity)
                             else { throw RequestDeadlineExceeded() }
-                            let unavailable = try sample(
+                            sampled[reference] = try sample(
                                 target, nodeID: reference, acquisition: acquisition, withinBudget: canReadLeaf)
                             known[key(focus)] = reference
+                            supplement = (target, reference, parentRef)
                             focusRef = reference
                             focusState = "confirmed"
-                            links.append([
-                                "source": reference, "property": kAXParentAttribute, "targets": [parentRef],
-                                "state": "complete", "certainty": "confirmed", "total": 1,
-                                "nativeAPI": "AXUIElementCopyAttributeValue", "nativeType": "AXUIElement"
-                            ])
-                            // Every sampled node must account for the requested relationship profile.
-                            // The supplemental focus read proves its parent only.
-                            for property in relations where property != kAXParentAttribute {
-                                var link: [String: Any] = [
-                                    "source": reference, "property": property, "targets": [String](),
-                                    "certainty": "unknown", "state": "partial",
-                                    "detail": "relationship not collected in the supplemental focus sample"
-                                ]
-                                if let failure = unavailable[property] { link.merge(failure) { _, value in value } }
-                                links.append(link)
-                            }
                         }
                     }
                 } else {
@@ -775,6 +664,160 @@ import ApplicationServices
                                                                         "source": "application", "state": focusState])]
             ])
             nodes[0]["nativeProperties"] = properties
+        }
+        while index < queue.count, try reading() {
+            let (target, nodeID, depth) = queue[index]
+            index += 1
+            let relationFailures = sampled[nodeID] ?? [:]
+            // Expand the current branch before materializing another container.
+            // Retaining an AX proxy does not keep the remote view alive. Native
+            // sibling/relation order and total queue reservations stay intact.
+            var childInsertion = index
+
+            // The caller chooses which raw edges to follow. Collecting an edge
+            // does not reinterpret it as parentage or input ownership.
+            for property in relations {
+                if let failure = relationFailures[property], failure["state"] as? String == "unsupported" {
+                    var link: [String: Any] = [
+                        "source": nodeID, "property": property, "targets": [String](), "certainty": "unknown"
+                    ]
+                    link.merge(failure) { _, value in value }
+                    links.append(link)
+                    continue
+                }
+                guard try reading() else {
+                    links.append(AXFactEncoding.relationFailure(source: nodeID, property: property))
+                    reasons.insert("collection time budget")
+                    continue
+                }
+                let page = nodeID == ref && property == pageProperty ? rootPage : nil
+                let shouldFollow = followed.contains(property) || page != nil
+                var limit =
+                    shouldFollow
+                    ? (depth < maxDepth ? min(maxNodes - queue.count, 8192 - known.count, 32768 - edgeCount) : 0)
+                    : min(128, 32768 - edgeCount)
+                // A wide collection must not reserve the entire node budget
+                // for sibling shells before their labels/actions can be read.
+                // Use the same page size as ordinary Element.read; retain the
+                // native total and cursor instead of declaring omitted rows
+                // absent. An explicitly requested page keeps its own limit.
+                limit = min(limit, page?.limit ?? 128)
+                let relation: AXRelationReader.Result
+                do {
+                    relation = try relationReader.read(
+                        target.element, source: nodeID, property: property, limit: limit, cursor: page?.cursor,
+                        withinBudget: reading)
+                } catch let error as DriverError where error.code == .snapshotExpired {
+                    // A changing branch is a local observation gap, not loss of
+                    // the fields and unrelated branches already collected.
+                    var failure = AXFactEncoding.relationFailure(source: nodeID, property: property, error: .failure)
+                    failure["detail"] = error.localizedDescription
+                    links.append(failure)
+                    reasons.insert("native relation changed during collection")
+                    continue
+                }
+                switch relation {
+                case .failure(var value):
+                    if let raw = value.removeValue(forKey: "rawNativeValue") {
+                        value["wrappedNativeValue"] = try encodeNative(raw as CFTypeRef)
+                    }
+                    links.append(value)
+                case .page(let page):
+                    if !shouldFollow {
+                        pendingLinks.append(page)
+                        continue
+                    }
+                    var targets = [String](), unresolved: String?
+                    for element in page.targets {
+                        guard try reading() else { break }
+                        let nativeKey = key(element)
+                        if let previous = known[nativeKey] {
+                            targets.append(previous)
+                            if let supplement, previous == supplement.reference, queued.insert(previous).inserted {
+                                // The ordinary relation reached the existing
+                                // sample. Reuse its reserved slot at this depth.
+                                queue.insert((supplement.target, previous, depth + 1), at: childInsertion)
+                                childInsertion += 1
+                            }
+                            continue
+                        }
+                        let reserved = supplement.map { queued.contains($0.reference) ? 0 : 1 } ?? 0
+                        guard queue.count + reserved < maxNodes else { break }
+                        let acquisition = try acquire(element, includeIdentity: true)
+                        if acquisition.identityConflict {
+                            unresolved = "native identity samples disagreed before registration"
+                            break
+                        }
+                        guard
+                            let (life, child) = try related(
+                                element, app: root.application, scope: root.scope,
+                                parent: property == "AXChildren" ? target : nil, diagnosticBudget: reading,
+                                observationDeadline: deadline, identityEvidence: acquisition.identity)
+                        else {
+                            unresolved = "a related native object expired before registration"
+                            break
+                        }
+                        known[nativeKey] = life
+                        targets.append(life)
+                        if queued.insert(life).inserted {
+                            sampled[life] = try sample(child, nodeID: life, acquisition: acquisition)
+                            queue.insert((child, life, depth + 1), at: childInsertion)
+                            childInsertion += 1
+                        }
+                    }
+                    edgeCount += targets.count
+                    var link = relationReader.encode(page, targets: targets)
+                    if let issue = relationFailures[property] {
+                        // The getter can still return useful objects when its
+                        // attribute catalogue is unavailable. Keep that payload
+                        // without claiming a complete declaration/empty relation.
+                        link["state"] = "partial"
+                        link["detail"] = [link["detail"] as? String, issue["detail"] as? String].compactMap { $0 }
+                            .joined(separator: "; ")
+                        if targets.isEmpty { link["certainty"] = "unknown" }
+                    }
+                    if let unresolved {
+                        link["detail"] = unresolved
+                    }
+                    if link["state"] as? String != "complete" { reasons.insert("partial native relation: " + property) }
+                    links.append(link)
+                }
+            }
+        }
+        if index < queue.count { reasons.insert("collection time budget") }
+        // Prefetched fields are real observations, but their unexplored edges
+        // must remain explicitly unknown and offer the same subtree read route.
+        for (_, nodeID, _) in queue.dropFirst(index) where sampled[nodeID] != nil {
+            for property in relations {
+                if let failure = sampled[nodeID]?[property] {
+                    var link: [String: Any] = [
+                        "source": nodeID, "property": property, "targets": [String](), "certainty": "unknown"
+                    ]
+                    link.merge(failure) { _, value in value }
+                    links.append(link)
+                } else {
+                    links.append(AXFactEncoding.relationFailure(source: nodeID, property: property))
+                }
+            }
+        }
+        let detached = supplement.flatMap { queued.contains($0.reference) ? nil : $0 }
+        if let detached {
+            links.append([
+                "source": detached.reference, "property": kAXParentAttribute, "targets": [detached.parent],
+                "state": "complete", "certainty": "confirmed", "total": 1,
+                "nativeAPI": "AXUIElementCopyAttributeValue", "nativeType": "AXUIElement"
+            ])
+            // Every sampled node accounts for the requested relationship
+            // profile. Only the real Parent was sampled by the focus read.
+            for property in relations where property != kAXParentAttribute {
+                var link: [String: Any] = [
+                    "source": detached.reference, "property": property, "targets": [String](),
+                    "certainty": "unknown", "state": "partial",
+                    "detail": "relationship not collected in the supplemental focus sample"
+                ]
+                if let failure = sampled[detached.reference]?[property] { link.merge(failure) { _, value in value } }
+                links.append(link)
+            }
         }
         let collected = Set(nodes.compactMap { $0["node"] as? String })
         for page in pendingLinks {
@@ -870,10 +913,12 @@ import ApplicationServices
         }
         relationReader.retainAvailableCursors(&links)
         guard !nodes.isEmpty else { throw RequestDeadlineExceeded() }
+        var unread = Set(known.values).subtracting(collected)
+        if let detached, !collected.contains(detached.parent) { unread.insert(detached.parent) }
         return [
             "kind": "nodes", "session": session, "surface": root.scope, "platform": "macos", "observed": stamp(began),
             "roots": [ref], "nodes": nodes, "requestedRelations": relations, "relations": links,
-            "unread": known.values.filter { !collected.contains($0) }.sorted(), "stopReasons": reasons.sorted(),
+            "unread": unread.sorted(), "stopReasons": reasons.sorted(),
             "nativeResources": nativeEncoder.resources
         ]
     }

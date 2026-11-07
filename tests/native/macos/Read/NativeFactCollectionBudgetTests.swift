@@ -19,6 +19,18 @@ import ApplicationServices
             try preservesSmallRelation(milliseconds)
         }
         try changedRootFactsCannotUseRetainedIdentity()
+        try childIndividualFactsCannotUseRetainedIdentity(
+            display: ["AXRole": "AXTextField"], fallback: .unavailable(.cannotComplete),
+            expected: ["AXRole": "AXTextField"])
+        try childIndividualFactsCannotUseRetainedIdentity(
+            display: ["AXIdentifier": "new"], fallback: .value(.init(values: ["AXRole": "AXTextField"])),
+            expected: ["AXRole": "AXTextField", "AXIdentifier": "new"])
+        try childIndividualFactsCannotUseRetainedIdentity(
+            display: ["AXRole": "AXButton"], fallback: .value(.init(values: ["AXIdentifier": "new"])),
+            expected: ["AXRole": "AXButton", "AXIdentifier": "new"])
+        try childIndividualFactsCannotUseRetainedIdentity(
+            display: ["AXRole": "AXTextField"], fallback: .value(.init(values: ["AXRole": "AXButton"])),
+            expected: nil)
         try observesScopedFocusWithoutInventingChildren()
         try expiredRequestDoesNotCollect()
         try closeButtonUsesSingleObjectGetter()
@@ -67,12 +79,16 @@ import ApplicationServices
             }
         }
         var relations = AXRelationReader.API()
-        relations.count = { _, _ in (.success, 0) }
+        var ordinaryChild: AXUIElement?
+        relations.count = { element, property in
+            (.success, CFEqual(element, window) && property == kAXChildrenAttribute && ordinaryChild != nil ? 1 : 0)
+        }
+        relations.range = { _, _, _ in (.success, ordinaryChild.map { [$0] as CFArray }) }
         relations.single = { _, _ in (.noValue, nil) }
         let collector = NativeFactCollector(registry: registry, inspection: .init(registry: registry),
             attributes: attributes, relations: relations)
-        func read(focused: Bool) throws -> [String: Any] {
-            try collector.collect(ref, session: "budget-session", fields: ["AXRole"], maxNodes: 3, maxDepth: 2,
+        func read(focused: Bool, maxNodes: Int = 3) throws -> [String: Any] {
+            try collector.collect(ref, session: "budget-session", fields: ["AXRole"], maxNodes: maxNodes, maxDepth: 2,
                 followRelations: ["AXVisibleRows"], actionDetail: .none, focusedElement: focused)
         }
         let ordinary = try read(focused: false)
@@ -111,6 +127,29 @@ import ApplicationServices
         let outsideProperties = outsideGraph[0]["properties"] as! [[String: Any]]
         let outsideSeed = outsideProperties.first { $0["key"] as? [String] == ["toolkit", "focused_read_seed"] }!
         precondition((outsideSeed["value"] as? [String: Any])?["nativeType"] as? String == "CFNull")
+
+        owner = window
+        ordinaryChild = AXUIElementCreateApplication(pid + 100_002)
+        let capped = try read(focused: true, maxNodes: 2)
+        let cappedNodes = capped["nodes"] as! [[String: Any]]
+        precondition(cappedNodes.count == 2 && cappedNodes[1]["node"] as? String == focusRef,
+            "an omitted focused editor must get one slot even when ordinary traversal would fill the node budget")
+        let cappedLinks = capped["relations"] as! [[String: Any]]
+        let cappedChildren = cappedLinks.first {
+            $0["source"] as? String == ref && $0["property"] as? String == kAXChildrenAttribute
+        }
+        precondition(cappedChildren?["targets"] as? [String] == [] && cappedChildren?["total"] as? Int == 1,
+            "the focus slot must not replace a real child in the Children relation")
+
+        ordinaryChild = focus
+        let contained = try read(focused: true, maxNodes: 2)
+        let containedLinks = contained["relations"] as! [[String: Any]]
+        let containedChildren = containedLinks.first {
+            $0["source"] as? String == ref && $0["property"] as? String == kAXChildrenAttribute
+        }
+        precondition(containedChildren?["targets"] as? [String] == [focusRef]
+            && containedChildren?["state"] as? String == "complete",
+            "an ordinary path reuses the focused sample and preserves actual child coverage")
     }
 
     @MainActor private static func changedRootFactsCannotUseRetainedIdentity() throws {
@@ -128,6 +167,65 @@ import ApplicationServices
             throw DriverError("replacement facts were published under the original button's reference")
         } catch let error as DriverError where error.code == .staleTarget {}
         precondition(registry.target(ref) == nil)
+    }
+
+    @MainActor private static func childIndividualFactsCannotUseRetainedIdentity(
+        display: [String: String], fallback: AXRead<ElementIdentity.Facts>, expected: [String: String]?
+    ) throws {
+        let registry = ApplicationElements()
+        let (ref, window) = root(registry, role: "AXWindow")
+        let parent = registry.target(ref)!
+        let app = parent.application
+        let child = AXUIElementCreateApplication(app.processIdentifier + 100_000)
+        let identity = ElementIdentity(facts: .init(values: ["AXRole": "AXButton", "AXIdentifier": "old"]))
+        let context = ApplicationElements.childContext(parent)
+        let original = ApplicationElements.Target(application: app, launched: parent.launched,
+            element: child, scope: parent.scope, role: "AXButton", identity: identity,
+            ancestors: [window], context: context)
+        let key = ApplicationElements.Identity(pid: app.processIdentifier, launched: parent.launched,
+            element: child, scope: parent.scope)
+        let old = registry.observe(key, evidence: .init(identity: identity, provider: nil, context: context),
+            value: original)
+        var attributes = AXAttributeReader.API()
+        attributes.batch = { element, fields in
+            if CFEqual(element, child) { return (.cannotComplete, nil) }
+            return (.success, fields.map { _ in "AXWindow" } as CFArray)
+        }
+        attributes.single = { element, field in
+            if CFEqual(element, child), let value = display[field] { return (.success, value as CFString) }
+            return (.cannotComplete, nil)
+        }
+        var relations = AXRelationReader.API()
+        relations.count = { element, property in
+            (.success, CFEqual(element, window) && property == kAXChildrenAttribute ? 1 : 0)
+        }
+        relations.range = { _, _, _ in (.success, [child] as CFArray) }
+        relations.single = { _, _ in (.noValue, nil) }
+        var fallbackReads = 0
+        let collector = NativeFactCollector(registry: registry, inspection: .init(registry: registry),
+            attributes: attributes, relations: relations, readIdentity: { element in
+                precondition(CFEqual(element, child))
+                fallbackReads += 1
+                return fallback
+            })
+        let result = try collector.collect(ref, session: "budget-session", fields: ["AXRole", "AXIdentifier"],
+            maxNodes: 2, maxDepth: 1, actionDetail: .none)
+        let nodes = result["nodes"] as! [[String: Any]]
+        precondition(fallbackReads == 1, "weak display identity must still allow an independent recovery")
+        guard let expected else {
+            precondition(nodes.count == 1 && registry.target(old) != nil,
+                "contradictory samples cannot publish or retire either candidate")
+            let links = result["relations"] as! [[String: Any]]
+            let children = links.first { $0["source"] as? String == ref && $0["property"] as? String == kAXChildrenAttribute }
+            precondition(children?["state"] as? String == "partial"
+                && (children?["detail"] as? String)?.contains("samples disagreed") == true)
+            return
+        }
+        precondition(nodes.count == 2, "the independently sampled child must stay observable")
+        let observed = nodes[1]["node"] as! String
+        precondition(observed != old && registry.target(old) == nil,
+            "a failed independent identity fallback must not publish changed child facts under the original token")
+        precondition(registry.target(observed)?.identity.attributes == expected)
     }
 
     @MainActor private static func closeButtonUsesSingleObjectGetter() throws {

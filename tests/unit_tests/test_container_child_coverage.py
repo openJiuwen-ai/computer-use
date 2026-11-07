@@ -5,6 +5,7 @@
 from dataclasses import replace
 from unittest import TestCase
 
+from computer_use.interaction.read.delivery.coverage import document_coverage
 from computer_use.interaction.read.facts.normalize import normalize_facts
 from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.interaction.read.presentation.document import DisplayDocument
@@ -68,6 +69,27 @@ def display(observation):
 
 
 class ContainerChildCoverageTests(TestCase):
+    def test_relation_component_issue_prevents_proven_children_coverage(self):
+        for property_path, state, edge_state in (
+            (("targets", 0), "conflict", "conflict"),
+            (("total",), "absent", "partial"),
+            (("targets", 0), "unsupported", "partial"),
+        ):
+            with self.subTest(property_path=property_path, state=state):
+                native = replace(content_observation(state=None), issues=(
+                    ReadIssue(("nodes",), "partial"),
+                    ReadIssue(("nodes", "window", "relations", "children", *property_path), state),
+                ))
+                snapshot, prepared, _ = display(native)
+                edge = next(edge for edge in snapshot.facts["relations"] if edge["source"] == "window")
+                self.assertEqual(edge["state"], edge_state)
+                self.assertEqual([issue["state"] for issue in edge["issues"]], [state])
+                self.assertEqual(edge["targets"], ("browser", "cancel"))
+                refs = {token: ref for ref, token in snapshot.refs.items()}
+                coverage = document_coverage(DisplayDocument.tree(prepared))
+                self.assertNotIn(refs["window"], coverage["complete"])
+                self.assertIn(refs["browser"], coverage["complete"])
+
     def test_unsupported_collection_has_a_local_unknown_contents_notice(self):
         native = content_observation()
         original = encode_observation(native)

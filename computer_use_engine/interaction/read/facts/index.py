@@ -208,8 +208,11 @@ def observation_index(observation: NativeObservation) -> _FactIndex:
             status = status_record(matching, encoded_issues)
             if status is not None:
                 statuses[name] = status
+        constrained_relations = set()
         for issue in issue_index.for_node(token):
             if len(issue.path) > 2 and issue.path[2] == "relations":
+                if len(issue.path) > 4:
+                    constrained_relations.add(issue.path[3])
                 continue
             path = issue.path[2:]
             name = field_name(path) or "node"
@@ -247,15 +250,26 @@ def observation_index(observation: NativeObservation) -> _FactIndex:
             )
         )
         for key, relation in node.relations.items():
-            issues = issue_index.applicable((*base, "relations", key))
+            path = (*base, "relations", key)
+            issues = (
+                [issue for issue in issue_index.overlapping(path) if len(issue.path) >= len(base)]
+                if key in constrained_relations else issue_index.applicable(path)
+            )
             state = status_record(issues, encoded_issues)
+            relation_state = state["state"] if state else "complete"
+            if relation_state in ("absent", "unsupported") and not any(
+                len(issue.path) <= len(path) and issue.state in ("absent", "unsupported") for issue in issues
+            ):
+                # A missing target slot or count restricts coverage without
+                # invalidating the relationship or discarding acquired targets.
+                relation_state = "partial"
             edge = dict(
                 source=token,
                 property=key,
                 recordKey=key,
                 kind=relation.kind,
                 targets=tuple(relation.targets),
-                state=state["state"] if state else "complete",
+                state=relation_state,
                 certainty="unknown" if relation.evidence == "candidate" else "confirmed",
             )
             if relation.enumeration != "enumerated":
