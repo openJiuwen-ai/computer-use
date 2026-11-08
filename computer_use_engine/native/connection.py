@@ -705,10 +705,10 @@ class Connection:
         )
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        # Input-context queries can leave an admitted lease unconfirmed, but
-        # they do not send input. The write pipeline retains earlier effects.
+        # These queries can leave an admitted lease unconfirmed without
+        # sending input. The write pipeline retains earlier effects.
         pure = method in ("capture", "locatePoint") or (
-            method == "inspect" and params["query"]["kind"] in ("capturedText", "inputContext")
+            method == "inspect" and params["query"]["kind"] in ("capturedText", "inputContext", "surfaces")
         )
         pending = dict(
             id=id__value,

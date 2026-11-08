@@ -10,9 +10,11 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock
 
+import pytest
 from computer_use.client.factory import session_controller
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.requests import DiscoverApps
+from computer_use.interaction.read.acquisition.directory.service import NativeDirectory
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
@@ -119,3 +121,62 @@ class PostwriteSessionContinuityTests(IsolatedAsyncioTestCase):
         self.assertIs(failure.impact, impact)
         self.assertEqual(self.events, [])
         await self.assert_suffix_stopped_and_ordinary_read_can_reconnect(failure)
+
+
+@pytest.mark.parametrize("timeout_reply", ["lost", "acknowledged"])
+def test_postwrite_surface_timeout_preserves_dispatch_and_reports_no_new_effect(monkeypatch, tmp_path, timeout_reply):
+    monkeypatch.setattr("computer_use.native.connection.requestCleanupGraceMs", 100)
+
+    async def run():
+        fixture = Path(__file__).resolve().parents[1] / "fixtures/observation_session_driver.py"
+        spawn_log = tmp_path / "spawns.txt"
+        connection = Connection(
+            lambda: None, driver={"command": sys.executable, "args": [str(fixture), str(spawn_log), timeout_reply]}
+        )
+        port = ConnectionPort(connection, HostPolicy())
+        try:
+            await port.connect(3000)
+            original_session = connection.session_identity
+            controller = session_controller(port)
+            target = Binding(connection.session, "app", "root", "surface", "node")
+            owner = UI(_instance=SimpleNamespace(anchor=SimpleNamespace(name="Fixture")), _image=None)
+            controller.register(owner, {"selector": "fixture"})
+            receipt = {"status": "dispatched", "target": "original", "detail": "Sent once."}
+            controller.engine.execute = AsyncMock(return_value=receipt)
+            directory = NativeDirectory(port)
+            errors = []
+
+            async def observe(*_args):
+                try:
+                    return await directory.surfaces("app", timeout_ms=150)
+                except ComputerUseError as error:
+                    errors.append(error)
+                    raise
+
+            controller.interfaces.read = observe
+            result = await controller.run(ExecuteAction(owner, Intent("click", {}), target))
+
+            assert result_receipt(result) is receipt and result.status == "dispatched"
+            controller.engine.execute.assert_awaited_once()
+            (error,) = errors
+            assert error.effect == "none"
+            assert result.observation_status == "unavailable"
+            assert result.observation_error.detail == error.detail
+            if timeout_reply == "lost":
+                assert error.code == "execution_failed" and "read-only request failed" in error.detail
+                assert "no terminal response within 100 ms cleanup grace" in error.detail
+                assert not result.observation_error.session_usable
+                assert port.calls.retired and connection.session_identity is None
+                assert any("Native operation cleanup unconfirmed" in note for note in error.__notes__)
+            else:
+                assert error.code == "execution_failed" and error.detail == "request deadline exceeded"
+                assert result.observation_error.session_usable
+                assert not port.calls.retired and connection.session_identity == original_session
+                assert (await directory.surfaces("app"))["surfaces"] == []
+            assert len(spawn_log.read_text().splitlines()) == 1
+        finally:
+            connection.close()
+            await connection.wait_closed()
+            await asyncio.gather(*tuple(connection._readers), return_exceptions=True)
+
+    asyncio.run(run())
