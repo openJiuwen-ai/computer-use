@@ -14,8 +14,8 @@ from .contracts import Binding
 class FixedWindowInvalidated(ComputerUseError):
     """Exact old root disproved by native lifetime or replacement evidence.
 
-    Only the fixed-window selector emits this evidence. Generic stale/query
-    errors carry no lifecycle authority and must not retire an App instance.
+    This evidence requires an exact window or application lifetime. Generic
+    stale/query errors cannot retire an App instance.
     """
 
     def __init__(self, binding: Binding, detail: str, *, directory=None):

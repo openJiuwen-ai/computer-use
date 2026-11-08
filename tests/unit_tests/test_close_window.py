@@ -191,6 +191,7 @@ def test_close_observes_exact_document_family_without_expanding_other_windows(mo
     )
     initial = directory(a, b, c) if transition == "during-collection" else after
     controller.reader.directory._query = AsyncMock(side_effect=[initial, after, after])
+    controller.reader.directory.applications = AsyncMock()
     reads = []
     pipeline = controller.interfaces.read_pipeline
 
@@ -229,6 +230,7 @@ def test_close_observes_exact_document_family_without_expanding_other_windows(mo
     result = asyncio.run(suffix.run_observed(request, Control()))
 
     body.arun.assert_awaited_once()
+    controller.reader.directory.applications.assert_not_awaited()
     assert result.receipt is receipt
     assert set(reads).isdisjoint({"b", "c", "other-sheet"})
     assert "Unrelated document B" in result.observation.text and "Unrelated document C" in result.observation.text
@@ -244,3 +246,69 @@ def test_close_observes_exact_document_family_without_expanding_other_windows(mo
         assert "Other windows are listed without expansion." in result.observation.text
         assert {choice.id for choice in result.choices} == {ref(app, "b"), ref(app, "c")}
         assert result.window_lifecycle == ("closed" if transition == "during-collection" else "unknown")
+
+
+@pytest.mark.parametrize(
+    ("stage", "proof", "lifecycle"),
+    [
+        ("recheck", "ended", "closed"),
+        ("initial", "ended", "closed"),
+        ("recheck", "other-incarnation", "unknown"),
+        ("recheck", "other-session", "unknown"),
+        ("recheck", "timeout", "unknown"),
+    ],
+)
+def test_close_uses_exact_application_retirement_after_stale_family_directory(stage, proof, lifecycle):
+    from contextlib import nullcontext
+
+    from computer_use.interaction.read.acquisition.components.support import ObservationGap
+    from computer_use.interaction.read.views.pipeline import WindowPart, member_target
+    from computer_use.interaction.write.request.observation import WriteWithObservation
+
+    a, companion, peer = surface("a", accessible=False), surface("child", parent="a"), surface("b")
+    controller, app = setup(a, companion, peer)
+    owner = window_scope(controller, app, ref(app, "a"))
+    request = ExecuteAction(owner, Intent("closeWindow"), owner._window_identity)
+    controller.port.calls.limit = lambda _: nullcontext()
+    controller.transport.retain_session = lambda _: nullcontext()
+    stale = ComputerUseError(
+        {"code": "stale_target", "effect": "none", "target": "native request", "detail": "target process exited or changed"}
+    )
+    last_seen = directory(a, companion, peer)
+    controller.reader.directory._query = AsyncMock(
+        side_effect=[last_seen, stale] if stage == "recheck" else [stale]
+    )
+    lifetime_catalogue = {
+        "session": "other-session" if proof == "other-session" else "session",
+        "endedApplications": ["editor", "another-app"] if proof != "other-incarnation" else ["another-app"],
+        "applications": [{"id": "editor:replacement", "displayName": "Editor", "isRunning": True}],
+    }
+    controller.reader.directory.applications = AsyncMock(
+        return_value=lifetime_catalogue, side_effect=TimeoutError("directory budget") if proof == "timeout" else None,
+    )
+    controller.interfaces.windows.register_directory(directory(surface("unrelated"), application="another-app"))
+
+    async def read_member(_ui, item, _view, **_kwargs):
+        assert item["window"] in {"a", "child"}
+        return WindowPart(
+            member_target(app._instance, item),
+            gaps=(ObservationGap("tree", "stale_target", stale.detail),),
+        )
+
+    controller.interfaces.read_pipeline.member = AsyncMock(side_effect=read_member)
+    receipt = {"status": "dispatched", "detail": "AX close invoked."}
+    body = SimpleNamespace(contract=SimpleNamespace(effects=frozenset()), arun=AsyncMock(return_value=receipt))
+
+    result = asyncio.run(WriteWithObservation(controller, body).run_observed(request, Control()))
+
+    body.arun.assert_awaited_once()
+    assert result.receipt is receipt
+    assert result.window_lifecycle == lifecycle
+    assert not result.choices
+    assert result.observation is None
+    assert controller.reader.directory._query.await_count == (2 if stage == "recheck" else 1)
+    controller.reader.directory.applications.assert_awaited_once_with(include_ended=True)
+    windows = controller.interfaces.windows
+    assert windows.application_ended("session", "editor") is (lifecycle == "closed")
+    assert not windows.application_ended("session", "another-app")
+    assert not windows.application_ended("session", "editor:replacement")

@@ -218,7 +218,11 @@ class InterfaceReadPipeline:
         """
         # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
-        directory, first = await resolve(controller, ui, view)
+        try:
+            directory, first = await resolve(controller, ui, view)
+        except ComputerUseError as error:
+            await self._reconcile_close_application(related, instance.directory, error)
+            raise
         instance = ui._instance
         preparation = None
         if allow_foreground and (ui._anchor is not None or instance.anchor is not None):
@@ -242,6 +246,44 @@ class InterfaceReadPipeline:
                 if annotated is not error:
                     raise annotated from error
             raise
+
+    async def _reconcile_close_application(self, related, directory, error):
+        """Resolve a stale close-family catalogue without reviving its current choices."""
+        if (
+            related is None or not related.window_family_only or directory is None
+            or directory["platform"] != "macos"
+            or not isinstance(error, ComputerUseError) or error.code != "stale_target"
+            or isinstance(error, FixedWindowInvalidated)
+        ):
+            return
+        session, application = related.original.session, related.window_family_application
+        if (directory["session"], directory["application"]) != (session, application):
+            return
+        controller = self.controller
+        if controller.transport.session != session:
+            return
+        if original_lifecycle(related.original, directory, related.original_window) == "closed":
+            raise FixedWindowInvalidated(
+                related.original, "The original window ended, and its current directory is unavailable."
+            )
+        windows = controller.interfaces.windows
+        if not windows.application_ended(session, application):
+            try:
+                # This metadata lookup shares the enclosing write-observation
+                # deadline and never binds or launches a replacement instance.
+                applications = await controller.reader.directory.applications(include_ended=True)
+            except (ComputerUseError, TimeoutError):
+                applications = None
+            if applications is not None and applications["session"] == session and application in applications.get(
+                "endedApplications", ()
+            ):
+                windows.retire_applications(session, (application,))
+        if windows.application_ended(session, application):
+            raise FixedWindowInvalidated(related.original, "The original application instance exited.")
+        raise local_failure(
+            "The original application directory is unavailable. The window lifetime is unconfirmed.",
+            "observation_incomplete",
+        )
 
     async def _collect(self, ui, view, full, menu_path, directory, first, preparation, related, on_observation=None):
         collected_started = time.monotonic()
@@ -446,6 +488,7 @@ class InterfaceReadPipeline:
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:  # noqa: BLE001 - optional recheck cannot erase captured content
+                    await self._reconcile_close_application(related, directory, error)
                     collection_gaps.append(_collection_gap("directory", error))
                     break
                 continue
