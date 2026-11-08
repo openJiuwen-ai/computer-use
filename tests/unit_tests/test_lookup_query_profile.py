@@ -371,3 +371,88 @@ async def test_missing_deep_relation_page_still_prevents_a_unique_sibling_match(
 def test_native_query_batch_depth_cannot_be_increased_above_forty():
     with pytest.raises(ValueError, match="Invalid native query budget"):
         PagedPathPort({}, []).query(max_depth=41)
+
+
+class SiblingPagePort(PagedPathPort):
+    """A depth-limited table whose Children page already supplies its VisibleRows."""
+
+    def __init__(self, scenario):
+        super().__init__(
+            {"root": ["target", "table"], "table": ["cell", "row"]},
+            ["target", "row"] if scenario == "duplicate" else ["target"],
+        )
+        self.scenario = scenario
+
+    async def query_nodes(self, operation, target, fields, max_nodes, depth, timeout, **options):
+        page = options.pop("relation_page", None)
+        batch = await super().query_nodes(operation, target, fields, max_nodes, depth, timeout, **options)
+        self.queries[-1] = target.node, depth, page
+        for edge in batch["relations"]:
+            if edge["source"] != "table":
+                continue
+            if edge["property"] == "AXChildren":
+                # The other row was collected through the follow profile.
+                edge.update(targets=["cell"] if page else [], total=1)
+            if edge["property"] != "AXVisibleRows":
+                continue
+            if page is None:
+                edge.update(state="partial", total=2 if self.scenario in ("count", "cursor") else 1)
+                if self.scenario == "cursor":
+                    edge.update(targets=["cell"], cursor="consumed-cell")
+            elif page["property"] == "AXChildren" and self.scenario in ("unsupported", "conflict"):
+                edge.update(
+                    state="unsupported" if self.scenario == "unsupported" else "complete",
+                    certainty="unknown" if self.scenario == "unsupported" else "conflicting",
+                )
+            else:
+                targets = ["cell", "row"] if page["property"] == "AXVisibleRows" and self.scenario == "count" else ["row"]
+                edge.update(targets=targets, total=len(targets))
+            if self.scenario == "unknown_count":
+                edge.pop("total")
+        return batch
+
+    async def query_relation(self, operation, target, relation, cursor, limit, timeout):
+        self._scope(operation, target, timeout)
+        assert (target.node, relation, cursor) == ("table", "AXVisibleRows", "consumed-cell")
+        self.queries.append((target.node, 0, {"property": relation, "cursor": cursor}))
+        return {
+            "session": target.session,
+            "platform": self.platform,
+            "surface": target.surface,
+            "observed": {"id": "continued-rows"},
+            "relation": {
+                "source": target.node, "property": relation, "targets": ["row"],
+                "state": "partial", "certainty": "confirmed", "offset": 1, "total": 2,
+            },
+        }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("scenario", "expected_requests"),
+    [
+        ("same", ["AXChildren"]),
+        ("duplicate", ["AXChildren"]),
+        ("unknown_count", ["AXChildren"]),
+        ("count", ["AXChildren", "AXVisibleRows"]),
+        ("cursor", ["AXChildren", "AXVisibleRows"]),
+        ("conflict", ["AXChildren", "AXVisibleRows"]),
+        ("unsupported", ["AXChildren", "AXVisibleRows"]),
+    ],
+)
+async def test_path_uses_complete_sibling_relation_from_same_native_page(scenario, expected_requests):
+    port = SiblingPagePort(scenario)
+    query = port.query(max_depth=1)
+    path = [{"role": "button", "name": "Find me"}]
+    if scenario in ("duplicate", "unknown_count"):
+        with pytest.raises(ComputerUseError) as failure:
+            await query.resolve(path)
+        assert failure.value.code == ("ambiguous_target" if scenario == "duplicate" else "observation_incomplete")
+    else:
+        assert (await query.resolve(path)).node == "target"
+    assert [page["property"] for _, _, page in port.queries if page is not None] == expected_requests
+    if scenario == "same":
+        assert any(
+            dependency.observed == "nodes-2" and dependency.node == "table" and "AXVisibleRows" in dependency.relations
+            for dependency in query.basis
+        )
