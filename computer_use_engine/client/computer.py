@@ -31,6 +31,7 @@ from computer_use.session.operations import operation
 from . import parameters
 from .execution import on_session, session_executor, synchronous
 from .handles import handle_created
+from .host import global_input_allowed
 from .targets import Target, as_target, element_target, image_target, target_request
 
 
@@ -78,7 +79,7 @@ class Computer:
         self._executor = session_executor()
 
         def create():
-            controller = session_controller(allow_global_input=allow_global_input)
+            controller = session_controller(allow_global_input=allow_global_input and global_input_allowed())
             controller._executor = self._executor
             self._executor.register(controller)
             return controller

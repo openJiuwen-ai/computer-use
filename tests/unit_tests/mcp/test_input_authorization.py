@@ -19,10 +19,23 @@ def test_worker_receives_global_input_policy(tmp_path, monkeypatch, setting):
     async def verify():
         session = ExecutionSession() if setting is None else ExecutionSession(allow_global_input=setting)
         try:
-            result = await session.execute("print(computer._controller.port.policy.allow_global_input)")
+            result = await session.execute(
+                "from computer_use import Computer\n"
+                "from concurrent.futures import ThreadPoolExecutor\n"
+                "def policy(computer):\n"
+                "    controller = computer._controller\n"
+                "    return controller.port.policy.allow_global_input, controller.transport.allow_global_input\n"
+                "def new_policy(**options):\n"
+                "    with Computer(**options) as created:\n"
+                "        return policy(created)\n"
+                "with ThreadPoolExecutor(max_workers=1) as pool:\n"
+                "    print(policy(computer), new_policy(), new_policy(allow_global_input=True),\n"
+                "          new_policy(allow_global_input=False), pool.submit(new_policy).result())"
+            )
             assert not result.get("isError"), result
             text = "\n".join(block.get("text", "") for block in result["content"])
-            assert str(allowed) in text
+            expected = [(allowed, allowed)] * 3 + [(False, False), (allowed, allowed)]
+            assert " ".join(map(str, expected)) in text
             records = [json.loads(line) for line in session._journal.path.read_text().splitlines()]
             assert next(item for item in records if item["kind"] == "session")["globalInputAllowed"] is allowed
         finally:

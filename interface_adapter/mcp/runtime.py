@@ -19,6 +19,7 @@ from contextvars import ContextVar
 from computer_use import Computer
 from computer_use.client.execution import ExecutionCancellation, SessionExecutor, execution_scope
 from computer_use.client.host import (
+    disable_global_input_for_process,
     set_action_handler,
     set_diagnostic_handler,
     set_execution_guard,
@@ -871,7 +872,9 @@ async def main(argv=None):
     reader, writer = await worker_connection()
 
     messages = WorkerMessageWriter(writer, protocol=protocol)
-    runtime = Runtime(messages.send, computer_factory=lambda: Computer(allow_global_input=args.allow_global_input))
+    if not args.allow_global_input:
+        disable_global_input_for_process()
+    runtime = Runtime(messages.send)
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
     if ready_requested:

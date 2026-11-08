@@ -5,6 +5,9 @@
 DESCRIPTION = """Execute synchronous Python on the MCP host in a persistent session.
 Preloaded: computer, print, print_image. SDK methods return results directly;
 variables persist across calls. App selectors and paths refer to this host.
+Use the preloaded computer throughout the task. You may alias it with
+c = computer. A desktop image and its point constructor belong to the
+Computer instance that read the image.
 
 All screenshot coordinates use the displayed image's pixels, with (0, 0) at
 its top-left, x increasing right and y increasing down. Use the point constructor
