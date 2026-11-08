@@ -27,7 +27,10 @@ import ApplicationServices
         if let receiver { response["receiver"] = receiver.wire }
         // The shared reason describes the sole scoped typing refusal. A different
         // condition or another offer keeps its own diagnosis.
-        if let reason = value.webTypingRefusal, binding.node == nil, binding.wire["rootWindow"] is String,
+        let originalFocusedTarget = binding.node.map {
+            $0 == plan.operation.target["node"] as? String && $0 == input["focusedNode"] as? String
+        } ?? true
+        if let reason = value.webTypingRefusal, originalFocusedTarget, binding.wire["rootWindow"] is String,
             binding.wire["capture"] is NSNull, binding.blocked.isEmpty, actuator == nil, receiver == nil,
             input["keyboardSurface"] as? String == plan.query.scope,
             primitives.count == 1, let offer = primitives.first, offer["unit"] as? String == "key_sequence",

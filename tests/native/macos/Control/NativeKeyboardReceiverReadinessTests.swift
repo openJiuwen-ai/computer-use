@@ -309,15 +309,17 @@ import ApplicationServices
         func encode(
             _ reason: String?, node: String? = nil, root: Any = "0", capture: Any = NSNull(),
             keyboardSurface: Any = "window", blocked: [String] = [], alternate: Bool = false,
-            pending: String? = "receiver"
+            pending: String? = "receiver", focusedNode: String? = nil, originalNode: String? = nil
         ) throws -> [String: Any] {
             let binding: [String: Any] = [
                 "session": "s", "instance": "app", "rootWindow": root, "surface": "window",
                 "node": node as Any? ?? NSNull(), "capture": capture,
             ]
             let intent = try NativeIntent(["kind": "insert", "parameters": ["text": "g"]], mode: "write")
+            var target = binding
+            if let originalNode { target["node"] = originalNode }
             let operation = NativeOperation(
-                timeoutMs: 5000, writable: true, intent: intent, target: binding, release: {}, cancelActive: {})
+                timeoutMs: 5000, writable: true, intent: intent, target: target, release: {}, cancelActive: {})
             defer { _ = operation.finish() }
             let query = NativeInputQueryScope(
                 binding: (binding, blocked, node),
@@ -334,22 +336,31 @@ import ApplicationServices
             }
             return EncodeNativeInputContextPass.run(NativeSampledInput(
                 plan: plan, declarations: declarations, enabled: nil, foreground: true,
-                input: ["keyboardSurface": keyboardSurface], nativeRole: nil, actionsComplete: false,
+                input: ["keyboardSurface": keyboardSurface, "focusedNode": focusedNode as Any? ?? NSNull()],
+                nativeRole: nil, actionsComplete: false,
                 applicationMenu: false, webTypingRefusal: reason))
         }
 
         for proposal in [local, unresolved] {
-            let encoded = try encode(proposal.refusalReason)
-            precondition(encoded["unavailableReason"] as? String == proposal.refusalReason,
-                         "the confirmed Web Unicode refusal must reach the caller")
-            let primitive = (encoded["primitives"] as! [[String: Any]])[0]
-            precondition(primitive["supported"] as? String == "no" && primitive["globalInput"] as? String == "no")
+            for encoded in try [
+                encode(proposal.refusalReason),
+                encode(proposal.refusalReason, node: "editor", focusedNode: "editor"),
+            ] {
+                precondition(encoded["unavailableReason"] as? String == proposal.refusalReason,
+                             "the confirmed Web Unicode refusal must reach the caller on its exact target")
+                let primitive = (encoded["primitives"] as! [[String: Any]])[0]
+                precondition(primitive["supported"] as? String == "no" && primitive["globalInput"] as? String == "no")
+            }
         }
         for encoded in try [
             encode(nil), encode(local.refusalReason, node: "editor"), encode(local.refusalReason, root: NSNull()),
             encode(local.refusalReason, capture: "point"), encode(local.refusalReason, pending: nil),
             encode(local.refusalReason, keyboardSurface: NSNull()), encode(local.refusalReason, blocked: ["modal"]),
             encode(local.refusalReason, alternate: true), encode(local.refusalReason, pending: "foreground"),
+            encode(local.refusalReason, node: "editor", focusedNode: "neighbor"),
+            encode(local.refusalReason, node: "editor", focusedNode: "editor", originalNode: "owner"),
+            encode(local.refusalReason, node: "editor", keyboardSurface: "neighbor", focusedNode: "editor"),
+            encode(local.refusalReason, node: "editor", alternate: true, focusedNode: "editor"),
         ] {
             precondition(encoded["unavailableReason"] == nil, "a Web typing reason must not replace another diagnosis")
         }

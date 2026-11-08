@@ -289,7 +289,9 @@ import ApplicationServices
                 let textPolicy = declarations.keyboardPolicy(kind: kind, selection: nil, observed: observedInterpreter)
                 let keyboardSupport = try unit.textTransportSupport(
                     kind: kind, text: op.request.parameters["text"] as? String, state: facts, textPolicy: textPolicy)
-                if kind == .insert, binding.node == nil, facts.focus != nil {
+                if kind == .insert, let focus = facts.focus,
+                    binding.node == nil || (originalAddressedElement && unit.element.map { CFEqual($0, focus) } == true)
+                {
                     webTypingRefusal = keyboardSupport.webRefusal
                 }
                 try declarations.declare(
