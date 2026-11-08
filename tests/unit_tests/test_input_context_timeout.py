@@ -1,16 +1,20 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""A lost input-context query retires the session without implying new input."""
+"""Unconfirmed native replies preserve the effects possible at each write stage."""
 
 import asyncio
 import json
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.global_input import GlobalInput
+from computer_use.interaction.requests import ComputerInput
 from computer_use.interaction.write.engine import Engine
 from computer_use.native.connection import Connection
-from computer_use.native.contracts import Binding, HostPolicy, Intent
+from computer_use.native.contracts import ApplicationBinding, Binding, HostPolicy, Intent
 from computer_use.native.transport import ConnectionPort
 
 
@@ -32,6 +36,8 @@ class SilentStageConnection(Connection):
                 "nativeWindowScope",
                 "nativePointer",
                 "nativeKeyboardIntents",
+                "nativeGlobalInput",
+                "nativeLaunch",
             ),
         }
         self.scenario = scenario
@@ -41,9 +47,29 @@ class SilentStageConnection(Connection):
         assert self._hello is not None, "an admitted write cannot use a successor session"
 
     def _write(self, request):
+        if "cancel" in request:
+            self.sent.append(("cancel", request["cancel"]))
+            return
         method, params = request["method"], request["params"]
         self.sent.append(method)
         if method == "begin":
+            if self.scenario == "lost_begin":
+                return
+            if self.scenario == "rejected_begin":
+                reply = {
+                    "version": self.protocol_version,
+                    "session": "session",
+                    "id": request["id"],
+                    "error": {
+                        "code": "deadline_exceeded",
+                        "target": "native request",
+                        "effect": "none",
+                        "detail": "native begin deadline exceeded",
+                        "next": "read the target",
+                    },
+                }
+                self._receive((json.dumps(reply) + "\n").encode())
+                return
             result = {"operation": "write", "target": params["target"], "remainingMs": 20}
             if "clickContract" in params:
                 result["clickContract"] = params["clickContract"]
@@ -155,3 +181,50 @@ def test_lost_input_context_has_no_effect_of_its_own(monkeypatch, scenario, expe
     if scenario == "lost_execute":
         (attempt,) = error.impact["attempts"]
         assert error.code == "execution_unknown" and attempt["dispatch"] == attempt["cleanup"] == "unknown"
+
+
+@pytest.mark.parametrize("route", ["scoped_key", "launch", "global_key"])
+def test_lost_macos_write_begin_reports_unissued_input_and_unknown_scope_cleanup(monkeypatch, route):
+    monkeypatch.setattr("computer_use.native.connection.requestCleanupGraceMs", 5)
+    connection = SilentStageConnection("lost_begin")
+    child = Mock(returncode=None, pid=999, wait=AsyncMock())
+    connection._child = child
+    port = ConnectionPort(connection, HostPolicy())
+
+    async def run():
+        try:
+            if route == "global_key":
+                await GlobalInput(SimpleNamespace(port=port)).arun(ComputerInput(Intent("key", {"key": "t"}, True)))
+            else:
+                target = Binding("session", "app", "root", "surface")
+                intent = Intent("key", {"key": "t"})
+                if route == "launch":
+                    target, intent = ApplicationBinding("session", "installation"), Intent("launch")
+                await Engine(port).execute(intent, target)
+        finally:
+            await connection.wait_closed()
+
+    with pytest.raises(ComputerUseError) as caught:
+        asyncio.run(run())
+    error = caught.value
+    assert connection.sent == ["begin", ("cancel", 1)]
+    assert port.calls.retired and connection.session_identity is None
+    child.stdin.close.assert_called_once_with()
+    child.terminate.assert_called_once_with()
+    child.wait.assert_awaited_once()
+    assert error.code == "execution_failed" and error.effect == "none"
+    assert "requested action was not dispatched" in error.detail
+    assert error.scope_cleanup == "unknown" and "Scope cleanup: unknown." in str(error)
+    assert error.action_receipt is None and error.impact["attempts"] == ()
+
+
+def test_macos_write_begin_terminal_failure_keeps_confirmed_scope():
+    connection = SilentStageConnection("rejected_begin")
+    port = ConnectionPort(connection, HostPolicy())
+    target = Binding("session", "app", "root", "surface")
+    with pytest.raises(ComputerUseError) as caught:
+        asyncio.run(Engine(port).execute(Intent("key", {"key": "t"}), target))
+    assert connection.sent == ["begin"]
+    assert not port.calls.retired and connection.session_identity == (0, "session")
+    assert caught.value.effect == "none" and caught.value.scope_cleanup is None
+    assert caught.value.detail == "native begin deadline exceeded"

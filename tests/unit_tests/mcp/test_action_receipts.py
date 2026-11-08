@@ -21,8 +21,12 @@ from computer_use.session import images as images_state
 from computer_use.session.results import action_result
 from computer_use.errors import ComputerUseError
 from computer_use.identity import Record
+from computer_use.interaction.write.engine import Engine
+from computer_use.native.contracts import Binding, HostPolicy, Intent
+from computer_use.native.transport import ConnectionPort
 from computer_use.session.events import action_observation_completed, observation_completed
 from computer_use_mcp.runtime import Runtime
+from unit_tests.test_input_context_timeout import SilentStageConnection
 
 
 class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
@@ -224,6 +228,24 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
         self.assertEqual(re.findall(r"Action \[dispatched\]: #(\d+) ", text), ["1", "2"])
         self.assertIn("Observation rendering failed", text)
+
+    async def test_lost_next_admission_preserves_completed_inputs_in_the_same_batch(self):
+        connection = SilentStageConnection("lost_begin")
+        port = ConnectionPort(connection, HostPolicy())
+        target = Binding("session", "app", "root", "surface")
+        with patch("computer_use.native.connection.requestCleanupGraceMs", 5), self.assertRaises(ComputerUseError) as e:
+            await Engine(port).execute(Intent("key", {"key": "t"}), target)
+
+        self.runtime.task_namespace["failure"] = e.exception
+        result = await self.execute("emit_receipt(receipts[0])\nemit_receipt(receipts[1])\nraise failure")
+
+        self.assertTrue(result["isError"], result)
+        *previous, terminal = [block["text"] for block in result["content"]]
+        self.assertEqual(re.findall(r"Action \[dispatched\]: #(\d+) ", "\n".join(previous)), ["1", "2"])
+        self.assertIn("requested action was not dispatched", terminal)
+        self.assertIn("Effect: none", terminal)
+        self.assertIn("Scope cleanup: unknown.", terminal)
+        self.assertNotIn("Action [", terminal)
 
     async def test_menu_hint_requires_delivery_of_the_same_observation(self):
         state = Record(text="Window 7\n8 menu item Apply")

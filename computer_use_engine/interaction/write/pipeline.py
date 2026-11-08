@@ -177,6 +177,7 @@ class WritePipeline:
                         "possible" if caught.effect == "none" and self.state.native_mutation_possible else caught.effect
                     ),
                 )
+                error.scope_cleanup = caught.scope_cleanup
             else:
                 error = failure(
                     "execution_unknown" if self.state.dispatched != Dispatch.NOT_DISPATCHED else "execution_failed",
