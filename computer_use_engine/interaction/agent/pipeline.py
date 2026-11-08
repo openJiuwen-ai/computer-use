@@ -653,6 +653,30 @@ class AgentInterfacePipeline:
             return None
         return replace(target, node=None)
 
+    @staticmethod
+    def _refreshed_key_root(ui: UIHandle, selected: WindowIdentity, directory: DirectoryFacts) -> Binding | None:
+        """Use positive root focus when a delivered child no longer has a current window entry."""
+        fixed = getattr(ui, "_window_identity", None)
+        if (
+            directory["platform"] != "macos" or fixed is None or fixed.root_window == selected.window
+            or directory.get("focusedWindow") != fixed.root_window
+        ):
+            return None
+        evidence = ui._instance.evidence.get(selected)
+        if (
+            evidence is None or evidence.lifetime is not WindowLifetime.RETAINED
+            or evidence.membership is not Knowledge.UNKNOWN
+            or any(item["window"] == selected.window for item in directory["surfaces"])
+        ):
+            return None
+        root = ui._instance.members.get(fixed.root_window)
+        if (
+            root is not None and root["nativeWindow"] and root["accessibility"] and root["parentState"] == "none"
+            and WindowIdentity.of(root) == WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)
+        ):
+            return fixed
+        return None
+
     async def keyboard(
         self, ui: UIHandle, method: str, parameters: Record, control: Control, *, global_input=False, target=None
     ) -> ActionResult:
@@ -662,13 +686,17 @@ class AgentInterfacePipeline:
         # may turn this operation into input in another document.
         validate_session(self.controller, ui)
         intent = Intent({"type_text": "insert", "press_key": "key"}.get(method, method), parameters, global_input)
-        if target is None and method == "press_key" and not global_input:
+        select_key_context = target is None and method == "press_key" and not global_input
+        if select_key_context:
             command_target = self._application_command_target(ui, parameters.get("key"))
             if command_target is not None:
                 return await self.write.arun(ExecuteAction(ui, intent, command_target), control)
         target = target or self.keyboard_context(ui, require_observed=ui._anchor is None)
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
-        await refresh(self.controller, ui)
+        directory = await refresh(self.controller, ui)
+        if select_key_context and (root := self._refreshed_key_root(ui, identity, directory)) is not None:
+            target = root
+            identity = WindowIdentity(root.root_window, root.surface, root.instance)
         require_identity(ui, identity, current=True)
         if ui._anchor is not None and not ancestor(ui._instance.directory, identity.window, ui._anchor):
             raise local_failure(
