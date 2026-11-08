@@ -27,7 +27,11 @@ def create(*, branch: BranchFacts) -> Callable[[SemanticNode, Control], Projecti
         context["deferVisualComposition"] = (
             branch.request.compact and branch.request.public_api and branch.request.share_descriptions
         )
-        context["compressionEvidence"] = capture_evidence(branch.request.snapshot, branch.native_nodes)
+        context["compressionEvidence"] = (
+            branch.snapshot_evidence()
+            if branch.snapshot_evidence is not None
+            else capture_evidence(branch.request.snapshot, branch.native_nodes)
+        )
         return ProjectionInput.build(root, context)
 
     return execute
