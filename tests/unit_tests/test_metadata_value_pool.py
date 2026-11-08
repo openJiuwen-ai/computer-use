@@ -188,6 +188,51 @@ def test_pooled_special_native_values_keep_identical_semantic_facts(failed_value
     assert left == right
 
 
+def attribute_catalogue(*names):
+    return {
+        "nativeType": "CFArray",
+        "data": {"items": [{"nativeType": "CFString", "data": name} for name in names]},
+    }
+
+
+def test_pooled_attribute_catalogue_preserves_per_node_values_and_normalized_evidence():
+    original = payload()
+    names = attribute_catalogue("AXTitle", "AXRole", "AXTitle")
+    original["nodes"][0]["properties"].append({"key": ["toolkit", "attribute_names"], "value": names})
+    original["nodes"].append({**original["nodes"][0], "id": "other"})
+    original["roots"].append("other")
+    compact = copy.deepcopy(original)
+    compact["metadataValues"] = [names]
+    for node in compact["nodes"]:
+        node["properties"][-1]["value"] = {"metadataValue": 0}
+    assert evidence(compact) == evidence(original)
+    wire = DriverWire(compact)
+    a, b = (wire.property(node["properties"][-1]).value for node in compact["nodes"])
+    assert a == b == ["AXTitle", "AXRole", "AXTitle"]
+    assert a is not b
+
+
+@pytest.mark.parametrize(
+    "value, extra",
+    [
+        (scalar("AXRole"), {}),
+        (attribute_catalogue("é"), {}),
+        ({"nativeType": "CFArray", "data": {"items": [scalar("AXRole")]}}, {}),
+        ({"nativeType": "CFArray", "data": {"items": [{"nativeType": "AXUIElement", "data": {"ref": "root"}}]}}, {}),
+        (attribute_catalogue("AXRole"), {"arguments": [scalar("argument")]}),
+        (attribute_catalogue("AXRole"), {"read": {"complete": False}}),
+    ],
+)
+def test_pooled_attribute_catalogue_rejects_other_types_and_property_shapes(value, extra):
+    raw = payload()
+    raw["metadataValues"] = [value]
+    raw["nodes"][0]["properties"].append(
+        {"key": ["toolkit", "attribute_names"], "value": {"metadataValue": 0}, **extra},
+    )
+    with pytest.raises(ValueError):
+        DecodedDriverObservation(raw)
+
+
 @pytest.mark.parametrize("index", [-1, 1, True, False, 0.0, "0", None])
 def test_metadata_reference_requires_a_declared_exact_integer_index(index):
     raw = payload()

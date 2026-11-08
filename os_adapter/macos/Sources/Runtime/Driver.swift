@@ -147,6 +147,7 @@ import CoreGraphics
                                 "nativeQueryActionProfile", "nativeFocusedReadV1",
                                 "nativeRelations", "nativeNodePages", "nativeNodeDepthBudget", "nativeRelationPages",
                                 "nativeCapturedText", "nativeParameterizedText", "nativeRawNodeMetadata",
+                                "nativeAttributeCataloguePool",
                                 "nativeAXAttributeQueries", "nativeActionIntents", "nativeWindowScope",
                                 "nativeKeyboardIntents", "nativeApplicationCommand", "nativeTextInput",
                                 "nativeActuators", "nativeTextReplacement",

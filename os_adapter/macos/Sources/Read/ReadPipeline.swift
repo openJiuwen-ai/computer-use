@@ -41,10 +41,12 @@ import ApplicationServices
             }
         case .nodes(
             let fields, let nodes, let depth, let childrenPage, let relationPage, let advertisedFields,
-            let followRelations, let textContent, let actionDetail, let focusedElement):
+            let followRelations, let textContent, let actionDetail, let focusedElement, let shareAttributeCatalogues):
             try ValidateNativeNodeProfilePass.run(
                 access: access, fields: fields, followRelations: followRelations, relationPage: relationPage)
-            return try NativeNodeQueryPipeline.collect(p["target"], op: op, access: access) { node in
+            return try NativeNodeQueryPipeline.collect(
+                p["target"], op: op, access: access, shareAttributeCatalogues: shareAttributeCatalogues
+            ) { node in
                 try access.objects.nativeFacts(
                     node, session: access.session, fields: fields, maxNodes: nodes, maxDepth: depth,
                     childrenPage: childrenPage, relationPage: relationPage, advertisedFields: advertisedFields,

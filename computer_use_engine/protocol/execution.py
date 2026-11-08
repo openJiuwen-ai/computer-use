@@ -385,6 +385,7 @@ _inspect_queries = {
             advertisedFields=array(identity, min=1, max=128).optional(),
             textContent=boolean().optional(),
             focusedElement=boolean().optional(),
+            shareAttributeCatalogues=enum(True).optional(),
             actionDetail=enum("none", "names", "full").optional(),
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),

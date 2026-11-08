@@ -587,6 +587,11 @@ class ConnectionPort:
             if "nativeAdvertisedFields" not in self.connection.capabilities:
                 raise ValueError("This driver cannot query advertised native fields")
             query["advertisedFields"] = list(request.advertised_fields)
+        if (
+            self.platform == "macos" and "nativeAttributeCataloguePool" in self.connection.capabilities
+            and (request.advertised_fields or request.follow_relations or request.text_content)
+        ):
+            query["shareAttributeCatalogues"] = True
         if request.children_page is not None and request.relation_page is not None:
             raise ValueError("Exactly one root relation page is required")
         page = request.relation_page if request.relation_page is not None else request.children_page

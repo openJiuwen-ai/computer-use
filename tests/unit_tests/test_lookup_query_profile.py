@@ -195,6 +195,39 @@ def test_wire_rejects_non_profile_action_details(detail):
         )
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("supported, advertised", [(True, True), (False, True), (True, False)])
+async def test_attribute_catalogue_sharing_is_requested_only_for_supported_collection(supported, advertised):
+    async def inspect(method, parameters, options):
+        assert method == "inspect"
+        query = decode_inspect_query(parameters["query"])
+        assert query.get("shareAttributeCatalogues") is (True if supported and advertised else None)
+        return payload()
+
+    connection = SimpleNamespace(
+        protocol_version=6,
+        capabilities=("nativeAdvertisedFields", "nativeAttributeCataloguePool") if supported else ("nativeAdvertisedFields",),
+        platform="macos",
+        session_identity=(1, "session"),
+        request=AsyncMock(side_effect=inspect),
+    )
+    port = ConnectionPort(connection, HostPolicy())
+    port._operations["read"] = (connection.session_identity, "read", None)
+    options = {"advertised_fields": ["AXRole"]} if advertised else {}
+    await port.query_nodes(
+        "read", Binding("session", "instance", "window", "surface", "root"), ["AXRole"], 10, 2, 500, **options
+    )
+    assert connection.request.await_count == 1
+
+
+@pytest.mark.parametrize("invalid", [False, 1, "true", None])
+def test_wire_rejects_non_opt_in_catalogue_sharing(invalid):
+    with pytest.raises(ValueError):
+        decode_inspect_query(
+            {"kind": "nodes", "fields": ["AXRole"], "maxNodes": 1, "maxDepth": 0, "shareAttributeCatalogues": invalid}
+        )
+
+
 class PagedPathPort:
     """Return only the graph prefix available within each native collection depth."""
 

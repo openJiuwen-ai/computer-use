@@ -124,6 +124,7 @@ class DriverWire:
         self._metadata_depth = -1
         self.metadata_values = tuple(metadata_values)
         self.metadata_depths = tuple(metadata_depths)
+        self._attribute_catalogues: set[int] = set()
         self.read = self.read_info(self.raw["read"])
         self.details = self.read["details"]
         self.interval = self.read.get("intervalNs")
@@ -144,7 +145,7 @@ class DriverWire:
         return result
 
     def metadata_value(self, value: Any, depth: int = 0) -> Any:
-        """Resolve a pool index only in a declared ReadMetadata NativeValue slot."""
+        """Resolve a pool index in a declared sharing slot."""
         if type(value) is dict and "metadataValue" in value:
             self.remaining -= 1
             if self.remaining < 0 or depth > 96:
@@ -156,6 +157,22 @@ class DriverWire:
                 raise ValueError("driver observation: value budget exceeded")
             return self.metadata_values[index]
         return self.value(value, depth)
+
+    def _attribute_catalogue(self, marker: dict[str, Any]) -> list[str]:
+        """Keep the per-property list while sharing one verified catalogue decode."""
+        value = self.metadata_value(marker)
+        index = marker["metadataValue"]
+        if index not in self._attribute_catalogues:
+            native = record(self.raw["metadataValues"][index], _VALUE_REQUIRED)
+            if native["nativeType"] != "CFArray":
+                raise ValueError("driver observation: invalid shared attribute catalogue")
+            for item in array(record(native["data"], {"items"})["items"]):
+                item = record(item, _VALUE_REQUIRED)
+                name = item["data"]
+                if item["nativeType"] != "CFString" or not isinstance(name, str) or not name.isascii():
+                    raise ValueError("driver observation: invalid shared attribute name")
+            self._attribute_catalogues.add(index)
+        return list(value)
 
     def value(self, value: Any, depth: int = 0) -> Any:
         """Decode one wire value to request-local query evidence."""
@@ -317,11 +334,20 @@ class DriverWire:
         if len(key) != 2 or type(key[1]) not in (str, int):
             raise ValueError("driver observation: invalid property key")
         state = prop.get("state", "value")
-        if state not in _STATES or (state == "value") != (prop["value"] is not None):
+        value = prop["value"]
+        if state not in _STATES or (state == "value") != (value is not None):
             raise ValueError("driver observation: invalid property state or payload")
+        if value is not None:
+            if (
+                self.platform == "macos" and len(prop) == 2 and key == ["toolkit", "attribute_names"]
+                and isinstance(value, dict) and "metadataValue" in value
+            ):
+                value = self._attribute_catalogue(value)
+            else:
+                value = self.value(value)
         return DecodedProperty(
             (text(key[0]), key[1]),
-            self.value(prop["value"]) if prop["value"] is not None else None,
+            value,
             state,
             [self.value(x) for x in array(prop["arguments"])] if "arguments" in prop else [],
             self.read_info(prop.get("read")),

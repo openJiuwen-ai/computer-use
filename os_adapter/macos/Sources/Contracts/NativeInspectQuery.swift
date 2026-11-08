@@ -132,7 +132,7 @@ enum NativeInspectQuery {
     case nodes(
         fields: [String], maxNodes: Int, maxDepth: Int, childrenPage: ChildrenPage?, relationPage: RelationPage?,
         advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail,
-        focusedElement: Bool)
+        focusedElement: Bool, shareAttributeCatalogues: Bool)
     case relation(property: String, cursor: String?, limit: Int)
     case capturedText(ref: String, offset: Int, length: Int)
 
@@ -246,13 +246,18 @@ enum NativeInspectQuery {
             let hasText = (raw as? [String: Any])?.keys.contains("textContent") == true
             let hasActions = (raw as? [String: Any])?.keys.contains("actionDetail") == true
             let hasFocus = (raw as? [String: Any])?.keys.contains("focusedElement") == true
+            let sharesCatalogues = (raw as? [String: Any])?.keys.contains("shareAttributeCatalogues") == true
             let p = try object(
                 raw,
                 keys: Set(
                     ["kind", "fields", "maxNodes", "maxDepth"] + (hasPage ? ["childrenPage"] : [])
                         + (hasAdvertised ? ["advertisedFields"] : []) + (hasRelationPage ? ["relationPage"] : [])
                         + (hasFollow ? ["followRelations"] : []) + (hasText ? ["textContent"] : [])
-                        + (hasActions ? ["actionDetail"] : []) + (hasFocus ? ["focusedElement"] : [])))
+                        + (hasActions ? ["actionDetail"] : []) + (hasFocus ? ["focusedElement"] : [])
+                        + (sharesCatalogues ? ["shareAttributeCatalogues"] : [])))
+            if sharesCatalogues, try !boolean(p["shareAttributeCatalogues"], label: "shareAttributeCatalogues") {
+                throw DriverError("shareAttributeCatalogues must be true when requested", code: .invalidRequest)
+            }
             let fields = try Self.names(p["fields"], label: "fields", min: 1, max: 128)
             let advertised =
                 hasAdvertised ? try Self.names(p["advertisedFields"], label: "advertisedFields", min: 1, max: 128) : []
@@ -282,7 +287,9 @@ enum NativeInspectQuery {
                 followRelations: hasFollow
                     ? try Self.names(p["followRelations"], label: "followRelations", min: 1, max: 16) : [],
                 textContent: hasText ? try boolean(p["textContent"], label: "textContent") : false,
-                actionDetail: actionDetail, focusedElement: hasFocus ? try boolean(p["focusedElement"], label: "focusedElement") : false)
+                actionDetail: actionDetail,
+                focusedElement: hasFocus ? try boolean(p["focusedElement"], label: "focusedElement") : false,
+                shareAttributeCatalogues: sharesCatalogues)
         case "relation":
             let p = try object(raw, keys: ["kind", "property", "cursor", "limit"])
             self = .relation(

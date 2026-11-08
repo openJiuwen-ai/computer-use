@@ -103,12 +103,12 @@ import Foundation
         for requested in ["none", "names", "full"] {
             var raw = nodes
             raw["actionDetail"] = requested
-            guard case .nodes(_, _, _, _, _, _, _, _, let detail, _) = try NativeInspectQuery(raw) else {
+            guard case .nodes(_, _, _, _, _, _, _, _, let detail, _, false) = try NativeInspectQuery(raw) else {
                 preconditionFailure("lost explicit node action profile")
             }
             precondition(detail.rawValue == requested)
         }
-        guard case .nodes(_, _, _, _, _, _, _, _, let defaultDetail, _) = try NativeInspectQuery(nodes) else {
+        guard case .nodes(_, _, _, _, _, _, _, _, let defaultDetail, _, false) = try NativeInspectQuery(nodes) else {
             preconditionFailure("lost ordinary observation profile")
         }
         precondition(defaultDetail == .full, "ordinary observations still collect complete action descriptions")
@@ -116,6 +116,15 @@ import Foundation
             var raw = nodes
             raw["actionDetail"] = invalid
             precondition(!accepted(raw))
+        }
+        var compact = nodes
+        compact["shareAttributeCatalogues"] = true
+        guard case .nodes(_, _, _, _, _, _, _, _, _, _, true) = try NativeInspectQuery(compact) else {
+            preconditionFailure("lost opt-in attribute catalogue sharing")
+        }
+        for invalid: Any in [NSNull(), false, 1, "true"] {
+            compact["shareAttributeCatalogues"] = invalid
+            precondition(!accepted(compact))
         }
         let within = (0..<17).map { "node-\($0)" }
         for visual in [false, true] {

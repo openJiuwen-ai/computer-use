@@ -42,7 +42,53 @@ import Foundation
         referenceInPooledFailureRemainsDeclared()
         finalRelationEvidenceOwnsItsPoolValues()
         sharedFieldFailuresRemainShared()
+        repeatedAttributeCataloguesKeepTheirExactNativeValues()
         print("PASS lossless request-local metadata sharing and independent native object references")
+    }
+
+    static func repeatedAttributeCataloguesKeepTheirExactNativeValues() {
+        func catalogue(_ names: [String], key: [String] = ["toolkit", "attribute_names"]) -> Record {
+            ["key": key, "value": NativeObservationEncoding.scalar(names)]
+        }
+        func row(_ id: String, _ property: Record) -> Record {
+            [
+                "node": id, "requestedFields": [String](), "values": Record(), "fieldStatus": [String: Record](),
+                "actions": ["state": "not_read", "items": [Record]()], "nativeProperties": [property]
+            ]
+        }
+        let names = ["K", "AXTitle", "K"]
+        let repeated = catalogue(names)
+        let reordered = catalogue(["AXTitle", "K", "K"])
+        let ordinary = catalogue(names, key: ["macos.ax", "AXCustomList"])
+        let accent = catalogue(["AXTitle", "\u{e9}"])
+        let equivalentAccent = catalogue(["AXTitle", "e\u{301}"])
+        let error: Record = ["key": ["toolkit", "attribute_names"], "value": NSNull(), "state": "error"]
+        let original = [repeated, repeated, reordered, ordinary, accent, equivalentAccent, error]
+        var source = batch(relations: [])
+        var rows = zip(["original", "second", "third", "fourth", "fifth", "sixth", "seventh"], original).map(row)
+        let kelvin = "\u{212a}"
+        rows[0]["nativeRead"] = ["details": [["arbitrary", NativeObservationEncoding.scalar([kelvin, "AXTitle", kelvin])]]]
+        source["nodes"] = rows
+        let inline = NativeObservationEncoding.encode(source)
+        let inlineNodes = inline["nodes"] as! [Record]
+        for (node, value) in zip(inlineNodes, original) {
+            precondition(((node["properties"] as! [Record])[1] as NSDictionary).isEqual(to: value))
+        }
+        let graph = NativeObservationEncoding.encode(source, shareAttributeCatalogues: true)
+        requireNoOrphanMetadata(graph)
+        let values = graph["metadataValues"] as! [Record]
+        let nodes = graph["nodes"] as! [Record]
+        let properties = nodes.map { ($0["properties"] as! [Record])[1] }
+        let first = (properties[0]["value"] as! Record)["metadataValue"] as? Int
+        precondition(first != nil && (properties[1]["value"] as! Record)["metadataValue"] as? Int == first)
+        let nodeRead = nodes[0]["read"] as! Record
+        let unrelated = ((nodeRead["details"] as! [[Any]])[0][1] as! Record)["metadataValue"] as! Int
+        precondition(first != unrelated, "arbitrary Unicode metadata must not alias a provider ASCII list")
+        precondition((values[first!] as NSDictionary).isEqual(to: repeated["value"] as! Record))
+        for index in 2..<original.count {
+            precondition((properties[index] as NSDictionary).isEqual(to: original[index]),
+                         "unique, ordinary, non-ASCII and failed catalogues must stay inline")
+        }
     }
 
     static func finalRelationEvidenceOwnsItsPoolValues() {
