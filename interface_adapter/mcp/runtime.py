@@ -32,7 +32,7 @@ from computer_use.client.images import (
     image_label,
     image_metadata,
     image_output_scope,
-    image_point_keys,
+    image_point_hints,
     require_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
@@ -592,6 +592,43 @@ class Runtime:
         })
         return True
 
+    @staticmethod
+    def reconcile_image_hints(run, acknowledged):
+        """Describe the maps that are usable in this completed tool response."""
+        images = []
+        current_windows = {}
+        for image in run["imageOutputs"].values():
+            eligible = set()
+            caption = image["caption"]
+            identifier = image["metadata"]["imageId"]
+            for delivery in image["deliveries"]:
+                if id(delivery) not in acknowledged:
+                    continue
+                current = image_point_hints(delivery.source)
+                eligible.update(current.keys())
+                for ref, point in zip(current.windows, current.points):
+                    if point in caption.hints.points and current.owner is not None:
+                        current_windows[id(current.owner), ref] = (current.generation, identifier)
+            images.append((image, eligible))
+
+        for image, eligible in images:
+            caption, label, metadata = image["caption"], image["label"], image["metadata"]
+            if (caption.hints.keys() | label.hints.keys()) <= eligible:
+                continue
+            hints = caption.hints
+            notes = []
+            for ref, point in zip(hints.windows, hints.points):
+                replacement = current_windows.get((id(hints.owner), ref))
+                if point in eligible or replacement is None or replacement[0] <= hints.generation:
+                    continue
+                note = f"Window {ref} coordinates superseded. Use Image {replacement[1]} pixels."
+                if len(note) <= len(point):
+                    # The final caption must fit the budget reserved for its original hints.
+                    notes.append("\n" + note)
+            note = "".join(notes)
+            image["text"]["text"] = f"Image {metadata['imageId']}\n{caption.render(eligible)}{note}"
+            metadata["caption"] = label.render(eligible) + note
+
     async def finish(self, error: BaseException | None = None):
         run = _runs.get()
         if run is None or not run["active"] or run["phase"] != "code":
@@ -621,16 +658,7 @@ class Runtime:
                 acknowledged.add(id(delivery))
         for state in run["deliveredObservations"]:
             observation_delivered(state)
-        for image in run["imageOutputs"].values():
-            eligible = set()
-            for delivery in image["deliveries"]:
-                if id(delivery) in acknowledged:
-                    eligible.update(image_point_keys(delivery.source))
-            if (image["caption"].hints.keys() | image["label"].hints.keys()) <= eligible:
-                continue
-            metadata = image["metadata"]
-            image["text"]["text"] = f"Image {metadata['imageId']}\n{image['caption'].render(eligible)}"
-            metadata["caption"] = image["label"].render(eligible)
+        self.reconcile_image_hints(run, acknowledged)
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())

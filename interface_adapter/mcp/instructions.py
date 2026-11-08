@@ -125,7 +125,9 @@ do not treat it as screenshot pixels.
 
 Use the point constructor beside the current delivered image for the chosen
 window. A newer delivered image can replace that window's default coordinate
-space. Composite images keep whole-image coordinates.
+space. If a caption marks the window's coordinates superseded, use the named
+image's pixels or read that window alone with app.read(view='image', window=ref).
+Composite images keep whole-image coordinates.
 Combine operations whose targets and steps are already known in one call.
 Return at a new menu, dialog or other state that requires a fresh decision.
 Calls execute one at a time; each SDK operation completes or raises before the

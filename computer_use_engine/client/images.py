@@ -85,6 +85,9 @@ class ImagePointHints:
     points: tuple[str, ...] = ()
     actions: tuple[str, ...] = ()
     target: str | None = None
+    windows: tuple[int, ...] = ()
+    owner: object | None = None
+    generation: int = 0
 
     def keys(self) -> set[str]:
         return set(self.points) if self.target is None else {*self.points, self.target}
@@ -124,19 +127,24 @@ def _point_hints(source, stale=False) -> ImagePointHints:
         else (f"Image point: p = {application}.point((x, y))",)
     )
     target = source.get("coordinateTarget")
+    owner = source.get("coordinateOwner")
     return ImagePointHints(
-        points, (f"App click: {application}.click(at=p)", "Global click (explicit): computer.click(target=p)"),
+        points,
+        (f"App click: {application}.click(at=p)", "Global click (explicit): computer.click(target=p)"),
         target() if callable(target) else target,
+        windows=refs,
+        owner=owner() if owner is not None else None,
+        generation=source.get("coordinateGeneration", 0),
     )
 
 
-def image_point_keys(png) -> set[str]:
+def image_point_hints(png) -> ImagePointHints:
     """Return the point hints this capture can still supply after actual delivery."""
     known = _source(png)
     if known is None:
-        return set()
+        return ImagePointHints()
     source = known["source"]
-    return _point_hints(source, source.get("current", lambda: True)() is False).keys()
+    return _point_hints(source, source.get("current", lambda: True)() is False)
 
 
 def image_caption(png, context_already_shown=False, coordinates: ImageCoordinates | None = None) -> ImageCaption:

@@ -479,6 +479,8 @@ class InterfaceImagePipeline:
                 historical=bool(historical),
                 # pylint: disable-next=protected-access
                 selector=str(ui._instance.selector),
+                coordinateOwner=application,
+                coordinateGeneration=generation,
                 coordinateTarget=coordinate_target,
                 context=join((template(
                     "App {}; {}",

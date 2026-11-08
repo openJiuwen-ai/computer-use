@@ -342,20 +342,26 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             parent_canvas=lambda: self.runtime.executor.call(parent_canvas),
         )
         result = await self.execute("standalone = chooser()\ncombined = parent_canvas()")
-        captions = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
-        standalone, combined = captions
+        images = [block["_meta"]["computer-use"] for block in result["content"] if block["type"] == "image"]
+        standalone, combined = [item["caption"] for item in images]
         target = ref(self.app, "b")
         self.assertIn("750x610", standalone)
         self.assertIn(f"Window reference: {target}", standalone)
         self.assertIn('Capture: "capture-0"', standalone)
         self.assertNotIn(f"Image point for window={target}:", standalone)
         self.assertNotIn("Coordinate target=", standalone)
+        superseded = f"Window {target} coordinates superseded. Use Image {images[1]['imageId']} pixels."
+        self.assertIn(superseded, standalone)
         self.assertIn("1220x748", combined)
         self.assertIn(f"Image point for window={target}:", combined)
+        self.assertNotIn("superseded", combined)
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn(superseded, text)
         self.assertEqual(text.count(f"Image point for window={target}:"), 1)
 
         panel = window_scope(self.controller, self.app, target)
+        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+            await self.click(panel, (195, 164))
         await self.click(panel, (430, 233))
         request = self.write.arun.call_args.args[0]
         self.assertEqual(request.target.capture, "capture-2")
@@ -365,6 +371,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         image_captions = [block["_meta"]["computer-use"]["caption"] for block in streamed if block["type"] == "image"]
         self.assertEqual(len(image_captions), 2)
         self.assertTrue(all("Image point" not in caption for caption in image_captions))
+        self.assertTrue(all("superseded" not in caption for caption in image_captions))
 
     async def test_same_response_keeps_distinct_window_hint_on_earlier_canvas(self):
         result = await self.execute("combined = compose(app, ('a', 'b'))\nlatest = observe(window, 'a')")
@@ -373,6 +380,8 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         a, b = ref(self.app, "a"), ref(self.app, "b")
         self.assertNotIn(f"Image point for window={a}:", old)
         self.assertIn(f"Image point for window={b}:", old)
+        self.assertIn(f"Window {a} coordinates superseded.", old)
+        self.assertNotIn(f"Window {b} coordinates superseded.", old)
         self.assertNotIn("Coordinate target=", old)
         self.assertIn(f"Image point for window={a}:", latest)
         await self.click(window_scope(self.controller, self.app, b), (140, 30))
@@ -596,6 +605,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"Window {number} image: historical capture (1–2 native ns)", caption)
         self.assertIn("current scope unconfirmed", caption)
         self.assertNotIn("Coordinate target=", caption)
+        self.assertNotIn("superseded", caption)
         self.assertEqual(displayed, ["pixels"])
         self.assertIsNone(canvas.delivered)
         self.assertIsNone(state.delivered_image)
