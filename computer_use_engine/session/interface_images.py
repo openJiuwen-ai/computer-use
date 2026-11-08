@@ -142,6 +142,16 @@ class InterfaceImage:
                         if pixels.convert("RGBA").getpixel((math.floor(mapped[0]), math.floor(mapped[1])))[3] == 0:
                             raise local_failure("this point is outside confirmed visible window pixels")
                 return piece, mapped
+        if self.source_canvas is not None and len(self.pieces) < len(self.source_canvas.pieces):
+            # A fixed view retains the original RGBA composite. Visible
+            # pixels outside its retained pieces still have no input authority.
+            x, y = point
+            with Image.open(BytesIO(self.png)) as pixels:
+                if (
+                    0 <= x < pixels.width and 0 <= y < pixels.height
+                    and pixels.getpixel((math.floor(x), math.floor(y)))[3] != 0
+                ):
+                    raise local_failure("the point is outside the selected window's captured scope")
         raise local_failure(
             "the point is in a gap outside the captured windows",
         )

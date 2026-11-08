@@ -366,10 +366,12 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.click(b, (140, 30))
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
         self.assertEqual(self.write.arun.call_args.args[0].intent.parameters["x"], 20)
-        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+        with self.assertRaisesRegex(ComputerUseError, "outside the selected window's captured scope"):
             await self.click(b, (20, 30))
-        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+        with self.assertRaisesRegex(ComputerUseError, "outside the selected window's captured scope"):
             await self.click(self.window, (140, 30))
+        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+            await self.click(b, (110, 30))
         await self.execute(f"click(scope({ref(self.app, 'b')}), (140, 30))")
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
 
@@ -424,7 +426,24 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text.count(f"Image point for window={target}:"), 1)
 
         panel = window_scope(self.controller, self.app, target)
-        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+        point_error = await self.runtime.execute({
+            "executionId": len(self.events) + 1,
+            "code": (
+                "from computer_use import ComputerUseError\n"
+                "try:\n"
+                f"    app.point((195, 164), window={target})\n"
+                "except ComputerUseError as error:\n"
+                "    assert error.code == 'invalid_request' and error.effect == 'none'\n"
+                "    raise"
+            ),
+        })
+        self.assertTrue(point_error.get("isError"))
+        self.assertEqual(
+            point_error["content"][-1]["text"],
+            "ComputerUseError: the point is outside the selected window's captured scope\nEffect: none",
+        )
+        self.write.arun.assert_not_awaited()
+        with self.assertRaisesRegex(ComputerUseError, "outside the selected window's captured scope"):
             await self.click(panel, (195, 164))
         await self.click(panel, (430, 233))
         request = self.write.arun.call_args.args[0]
