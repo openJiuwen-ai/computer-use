@@ -13,10 +13,15 @@ from computer_use.native.contracts import Binding
 from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.png import PNG
 from computer_use.protocol.primitives import frozen
+from computer_use.session.interfaces import WindowIdentity
 
 if TYPE_CHECKING:
     from computer_use.native.lifecycle import OperationLease
     from computer_use.native.port import NativePort
+    from computer_use.protocol.records import NativeDirectory
+
+
+ImageMemberScope = tuple[str, tuple[WindowIdentity, ...]]
 
 
 @dataclass(frozen=True)
@@ -29,6 +34,7 @@ class WindowImage:
         observed: Capture provenance or original observation used by the current stage.
         coordinates: Original native-to-image coordinate map with its declared coordinate space.
         scope_changed: An armed native window or menu change notification arrived during capture.
+        rechecked_scope: Exact member path confirmed after capture in an incomplete directory.
     """
 
     target: Binding
@@ -36,6 +42,36 @@ class WindowImage:
     observed: Mapping[str, Any]
     coordinates: Mapping[str, Any]
     scope_changed: bool = False
+    rechecked_scope: ImageMemberScope | None = None
+
+    def member_scope(self, directory: NativeDirectory) -> ImageMemberScope | None:
+        """Identify this native member and its known parent chain independently of peers."""
+        target = self.target
+        if directory.get("platform") != "macos" or directory["session"] != target.session:
+            return None
+        members = {item["window"]: item for item in directory["surfaces"]}
+        window = target.root_window
+        member = members.get(window)
+        if member is None or not member["nativeWindow"] or (member["instance"], member["surface"]) != (
+            target.instance, target.surface,
+        ):
+            return None
+        ended = {WindowIdentity.of(item) for item in directory.get("endedWindows", ())}
+        path, seen = [], set()
+        while window in members and window not in seen:
+            member = members[window]
+            identity = WindowIdentity.of(member)
+            if identity in ended:
+                break
+            path.append(identity)
+            seen.add(window)
+            parent, state = member["parent"], member["parentState"]
+            if state == "none" and parent is None:
+                return directory["application"], tuple(path)
+            if state != "known":
+                break
+            window = parent
+        return None
 
 
 class NativeImages:

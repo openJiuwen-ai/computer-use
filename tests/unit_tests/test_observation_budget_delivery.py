@@ -8,20 +8,23 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from computer_use.client.images import image_label
 from computer_use.interaction.read.acquisition.components.support import collect_component
 from computer_use.interaction.read.acquisition.directory.model import DirectoryRequest
 from computer_use.interaction.read.acquisition.directory.pipeline import DirectoryReadPipeline
 from computer_use.interaction.read.acquisition.images.capture import NativeImages
+from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
 from computer_use.interaction.read.acquisition.images.desktop.model import DesktopReadRequest
 from computer_use.interaction.read.acquisition.images.desktop.pipeline import DesktopReadPipeline
 from computer_use.interaction.read.app import NativeAppReader
+from computer_use.interaction.read.views.pipeline import WindowPart
 from computer_use.native.contracts import Binding, Cleanup, OpenedOperation
 from computer_use.native.lifecycle import CallLifecycle
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, WorkingWindow
 from computer_use.protocol.observation import NativeNode, NativeObservation, ReadIssue, Relation
 from computer_use.protocol.observation.adapters.records import DriverObservationReply, DriverReadMetadata
 from test_bounded_image_composition import captured_part
-from test_d34_read_contracts import directory, window
+from test_d34_read_contracts import directory, setup, window
 
 
 class Port:
@@ -222,6 +225,63 @@ def test_postcapture_unconfirmed_window_keeps_its_exact_facts_pixels_and_interva
         assert observed.refs
     assert any(gap.component == "scope" and "original facts, pixels" in gap.detail for gap in observed.gaps)
     assert len(port.queries) == 1 and reader.images.collect.await_count == 1
+
+
+@pytest.mark.parametrize("later_evidence", [
+    "same", "replaced", "ended", "unknown_parent", "timeout", "capture_scope_changed", "final_parent_changed",
+])
+def test_exact_window_pixels_do_not_require_a_complete_directory(monkeypatch, later_evidence):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("computer_use.native.lifecycle.time.monotonic", lambda: clock.now)
+    reader = NativeAppReader(Port(clock, expired_at="none"))
+    modal = {**window("A"), "modal": True}
+    owner = window("Owner")
+    reasons = ("attached surface children unavailable",)
+    initial = directory(modal, owner, focused="A", reasons=reasons)
+    latest = dict(modal)
+    if later_evidence == "replaced":
+        latest["instance"] = "instance:replacement"
+    if later_evidence == "unknown_parent":
+        latest["parentState"] = "unknown"
+    incomplete = directory(
+        latest, owner, focused="A", reasons=reasons,
+        ended=(modal,) if later_evidence == "ended" else (),
+    )
+    initial["rootDiscoveryComplete"] = incomplete["rootDiscoveryComplete"] = True
+    root = Binding("session", "instance:A", "A", "surface:A")
+    selected = WorkingWindow("application", "Fixture", root)
+    image = replace(
+        captured_part("A").image, target=replace(root, capture="capture-A"),
+        scope_changed=later_evidence == "capture_scope_changed",
+    )
+    reader.images.collect = AsyncMock(return_value=image)
+    reader._discover = (
+        AsyncMock(side_effect=TimeoutError("recheck deadline")) if later_evidence == "timeout"
+        else AsyncMock(return_value=(selected, incomplete))
+    )
+
+    observed = asyncio.run(reader.read(
+        selected, view="both", overview=False, include_menus=False, source_directory=initial, scope_managed=True,
+    ))
+
+    assert observed.image.image is image.image and not observed.scope_confirmed
+    assert observed.directory["stopReasons"] == list(reasons)
+    final_directory, source = observed.directory, observed
+    if later_evidence == "final_parent_changed":
+        final_directory = directory({**latest, "parent": "Owner", "parentState": "known"}, owner, focused="A")
+        # A later tree upgrade can replace the source without replacing the pixels.
+        source = replace(observed, scope_confirmed=True, directory=final_directory)
+    controller, app, _ = setup(final_directory)
+    part = WindowPart(observed.target, image=observed.image, source=source)
+    canvas, notes = InterfaceImagePipeline(controller).run(app, [part])
+    assert canvas.png is image.image
+    assert notes[-1].values[0].mapping_available == (later_evidence == "same")
+    assert ("Image point for window=" in image_label(canvas.png)) == (later_evidence == "same")
+    if later_evidence == "same":
+        assert canvas.for_window("A").hit((20, 30))[0].image.target == image.target
+    else:
+        assert canvas.for_window("A") is None
+    assert reader.images.collect.await_count == reader._discover.await_count == 1
 
 
 def test_overview_timeout_does_not_erase_window_content(monkeypatch):

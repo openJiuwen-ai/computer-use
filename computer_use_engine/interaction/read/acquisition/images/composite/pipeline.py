@@ -87,6 +87,14 @@ class InterfaceImagePipeline:
             # A parent-anchored capture supplies the member's pixels. The
             # existing coordinate contract requires the member's own binding.
             current_capture = current_matches and (source is None or source.scope_confirmed)
+            image = part.image
+            if current_matches and image is not None and image.rechecked_scope is not None:
+                # A later tree collection may replace the source observation
+                # without replacing this capture or its exact member proof.
+                current_capture = (
+                    image.target.root_window == key
+                    and image.rechecked_scope == image.member_scope(ui._instance.directory)
+                )
             if current_capture and part.target.root_window != key:
                 parent_bound.add(identity)
             confirmed[identity] = current_capture and identity not in parent_bound
