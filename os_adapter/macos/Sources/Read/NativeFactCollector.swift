@@ -606,6 +606,7 @@ import ApplicationServices
         }
         var sampled = [ref: try sample(root, nodeID: ref, acquisition: rootAcquisition)]
         var supplement: (target: Target, reference: String, parent: String)?
+        var focusedListPath = [String]()
         if focusedElement, rootPage == nil, [kAXWindowRole, kAXSheetRole].contains(root.role) {
             // Reserve a single slot for a proved focused object before a wide
             // Children traversal can exhaust it. Keep most of the time for
@@ -663,7 +664,7 @@ import ApplicationServices
                             let final = try readFocusElement(app, kAXFocusedUIElementAttribute), CFEqual(focus, final)
                         {
                             var parent = root
-                            var parentRef = ref
+                            var ancestorRefs = [ref]
                             for element in path.dropFirst().reversed() {
                                 guard try setFocusTimeout(element) else { throw RequestDeadlineExceeded() }
                                 defer { AXMessaging.configure(element) }
@@ -677,7 +678,7 @@ import ApplicationServices
                                         "focused element's parent is unavailable", code: .observationIncomplete)
                                 }
                                 parent = retained
-                                parentRef = reference
+                                ancestorRefs.append(reference)
                             }
                             guard try canReadFocus(),
                                 let (reference, target) = try related(
@@ -687,7 +688,10 @@ import ApplicationServices
                             sampled[reference] = try sample(
                                 target, nodeID: reference, acquisition: acquisition, withinBudget: canReadLeaf)
                             known[key(focus)] = reference
-                            supplement = (target, reference, parentRef)
+                            supplement = (target, reference, ancestorRefs.last ?? ref)
+                            if target.role == kAXListRole {
+                                focusedListPath = [reference] + ancestorRefs.reversed()
+                            }
                             focusRef = reference
                             focusState = "confirmed"
                         }
@@ -712,6 +716,8 @@ import ApplicationServices
         while index < queue.count, try reading() {
             let (target, nodeID, depth) = queue[index]
             index += 1
+            let preferredChild = focusedListPath.last == nodeID ? focusedListPath.dropLast().last : nil
+            var preferredIndex: Int?
             let relationFailures = sampled[nodeID] ?? [:]
             // Expand the current branch before materializing another container.
             // Retaining an AX proxy does not keep the remote view alive. Native
@@ -822,7 +828,24 @@ import ApplicationServices
                     }
                     if link["state"] as? String != "complete" { reasons.insert("partial native relation: " + property) }
                     links.append(link)
+                    if let preferredChild, property == kAXChildrenAttribute, page.issue == nil,
+                        registration.targets.contains(preferredChild)
+                    {
+                        preferredIndex = queue[index..<childInsertion].firstIndex { $0.1 == preferredChild }
+                    }
                 }
+            }
+            // A focused list needs its contents to be useful. Advance its
+            // proved path only through freshly registered forward children.
+            // Keep the native page order and use the same traversal budget.
+            if let preferredIndex {
+                if preferredIndex != index {
+                    let child = queue.remove(at: preferredIndex)
+                    queue.insert(child, at: index)
+                }
+                focusedListPath.removeLast()
+            } else {
+                focusedListPath.removeAll()
             }
         }
         if index < queue.count { reasons.insert("collection time budget") }
