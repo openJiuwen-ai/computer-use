@@ -68,6 +68,7 @@ import ApplicationServices
         precondition(!NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: [kAXPressAction]))
         precondition(!NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: nil))
         try clippedLeafReveal()
+        clippedHitContextCanEvolve()
         try await hoverReplacesProbeReceiver()
         print("Window scroll exposure regressions passed")
     }
@@ -92,7 +93,8 @@ import ApplicationServices
         precondition(Clip.isExposed(frame: full, clipped: full, viewport: viewport))
 
         let proof = NativeClickClippedLeaf(
-            region: AXUIElementCreateSystemWide(), viewport: viewport, edge: .bottom, window: 42, pid: 7)
+            region: AXUIElementCreateSystemWide(), passiveAncestor: AXUIElementCreateApplication(7),
+            viewport: viewport, edge: .bottom, window: 42, pid: 7)
         let offer = proof.offer
         precondition(offer.delivery == .windowDirected && offer.admission == .preparationRequired)
         precondition(offer.preparationOptions == ["background"] && offer.requiresExactElementHit)
@@ -125,6 +127,31 @@ import ApplicationServices
         } catch let error as DriverError {
             precondition(error.code == .inputUnavailable)
         }
+    }
+
+    @MainActor private static func clippedHitContextCanEvolve() {
+        // V4 returned the passive main ancestor on inspect and the preceding
+        // row on the same clipped point during refresh. The preceding row
+        // cannot own the click, but is still inside the same passive layout subtree.
+        let parents = [294: 261, 261: 136, 260: 136, 136: 131, 131: 128, 128: 121, 600: 121, 601: 500, 602: 128]
+        func reaches(_ node: Int, _ ancestor: Int) -> Bool {
+            NativeElementHitSelection.reachesWindow(
+                node, window: ancestor, same: ==, parent: { parents[$0] },
+                isSurface: { [121, 500].contains($0) }, canContinue: { true })
+        }
+        func confirms(_ node: Int) -> Bool {
+            NativeClickClippedLeaf.confirmsHitContext(node, ancestor: 131, same: ==, reaches: reaches)
+        }
+        precondition(reaches(294, 131) && reaches(131, 128))
+        precondition(confirms(131))
+        precondition(confirms(260),
+                     "a different hit in the retained clipping context must not invalidate the addressed reveal")
+        precondition(!confirms(600), "a same-window overlay outside the scroll area cannot authorize reveal")
+        precondition(!confirms(601))
+        precondition(!confirms(602), "merely sharing the scroll area does not prove the retained passive context")
+        precondition(!NativeElementPointerUnit.allowsDispatchBasis(
+            .rejected, requirement: .contentReceiver, exactOriginalHit: false, hasMember: false,
+            requiresExactElementHit: true), "the preceding row never becomes a qualified click hit")
     }
 
     @MainActor private static func hoverReplacesProbeReceiver() async throws {

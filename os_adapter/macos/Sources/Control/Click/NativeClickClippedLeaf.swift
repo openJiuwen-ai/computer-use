@@ -9,6 +9,7 @@ import ApplicationServices
 struct NativeClickClippedLeaf: Equatable {
     private static let action = "AXScrollToVisible"
     let region: AXUIElement
+    let passiveAncestor: AXUIElement
     let viewport: CGRect
     let edge: NativeElementViewport.VerticalClip.Edge
     let window: CGWindowID
@@ -16,7 +17,7 @@ struct NativeClickClippedLeaf: Equatable {
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.window == rhs.window && lhs.pid == rhs.pid && lhs.edge == rhs.edge && lhs.viewport == rhs.viewport
-            && CFEqual(lhs.region, rhs.region)
+            && CFEqual(lhs.region, rhs.region) && CFEqual(lhs.passiveAncestor, rhs.passiveAncestor)
     }
 
     var offer: NativeClickContract {
@@ -26,13 +27,14 @@ struct NativeClickClippedLeaf: Equatable {
             clippedLeaf: self, requiresExactElementHit: true)
     }
 
-    @MainActor static func sample(_ unit: NativeElementPointerUnit, hit: NativeElementPointerUnit.Observation) throws
-        -> Self?
-    {
+    @MainActor static func sample(
+        _ unit: NativeElementPointerUnit, hit: NativeElementPointerUnit.Observation, retaining proof: Self? = nil
+    ) throws -> Self? {
         guard !hit.dispatchGeometryReady, hit.preparation == .unavailable, hit.geometry.visible.height <= 1,
-            unit.member == nil, unit.qtComboChoice == nil, let ancestor = hit.hit, !CFEqual(ancestor, unit.element),
+            unit.member == nil, unit.qtComboChoice == nil, let currentHit = hit.hit, !CFEqual(currentHit, unit.element),
             unit.logicalWindow.map({ CFEqual($0, unit.window) }) != false
         else { return nil }
+        let ancestor = proof?.passiveAncestor ?? currentHit
         let geometry = try unit.viewport()
         let mapping = geometry.mapping
         guard let clip = geometry.verticalClip, geometry.clipped == hit.geometry.visible,
@@ -42,7 +44,8 @@ struct NativeClickClippedLeaf: Equatable {
             let role = AXAccess.read(unit.element, kAXRoleAttribute).value as? String,
             [kAXButtonRole, kAXCheckBoxRole, kAXRadioButtonRole, "AXLink"].contains(role),
             unit.inOriginalWindow(unit.element, pid: mapping.pid), unit.inOriginalWindow(clip.region, pid: mapping.pid),
-            unit.inOriginalWindow(ancestor, pid: mapping.pid)
+            unit.inOriginalWindow(ancestor, pid: mapping.pid),
+            CFEqual(currentHit, ancestor) || unit.inOriginalWindow(currentHit, pid: mapping.pid)
         else { return nil }
         var childCount = 0
         guard
@@ -59,6 +62,9 @@ struct NativeClickClippedLeaf: Equatable {
             try
                 (CFEqual(ancestor, clip.region)
                 || unit.hasCurrentParentPath(from: ancestor, to: clip.region, until: deadline)),
+            try confirmsHitContext(
+                currentHit, ancestor: ancestor, same: CFEqual,
+                reaches: { try unit.hasCurrentParentPath(from: $0, to: $1, until: deadline) }),
             BackgroundEvents.inputWindowHit(at: hit.geometry.point, retained: mapping, nativeWindow: unit.window)
                 .windowID == mapping.id
         else { return nil }
@@ -66,8 +72,16 @@ struct NativeClickClippedLeaf: Equatable {
             return nil
         }
         try RequestDiagnostics.checkCancellation()
-        return Self(region: clip.region, viewport: clip.viewport, edge: clip.edge, window: mapping.id, pid: mapping.pid)
+        return Self(
+            region: clip.region, passiveAncestor: ancestor, viewport: clip.viewport, edge: clip.edge,
+            window: mapping.id, pid: mapping.pid)
     }
+
+    /// The fresh point sample can return another node under the already proved
+    /// passive ancestor. This proves context for the addressed reveal only.
+    static func confirmsHitContext<Node>(
+        _ hit: Node, ancestor: Node, same: (Node, Node) -> Bool, reaches: (Node, Node) throws -> Bool
+    ) rethrows -> Bool { try same(hit, ancestor) || reaches(hit, ancestor) }
 
     @MainActor func reveal(
         _ unit: NativeElementPointerUnit, operation: NativeOperation, boundary: NativeUnitBoundary,
@@ -77,12 +91,20 @@ struct NativeClickClippedLeaf: Equatable {
         let hit = try unit.observedGeometry()
         // The target may already be visible by the time the offer executes.
         if hit.dispatchGeometryReady { return }
-        guard !operation.didRevealClippedClickLeaf, let current = try Self.sample(unit, hit: hit), current == self
+        guard !operation.didRevealClippedClickLeaf, let current = try Self.sample(unit, hit: hit, retaining: self),
+            current == self
         else {
             throw DriverError("the selected element's clipping evidence changed before reveal", code: .inputUnavailable)
         }
         try boundary.checkConditions()
         try BackgroundTarget(unit.application).validate(input: true)
+        if WindowGeometry.inputDiagnosticsEnabled {
+            diagnose([
+                "kind": "clipped_click_revalidation", "window": window,
+                "samePassiveHit": hit.hit.map { CFEqual($0, passiveAncestor) } == true,
+                "point": [hit.geometry.point.x, hit.geometry.point.y]
+            ])
+        }
         try performOnce(operation: operation, receipt: receipt, evidence: evidence) { onCall in
             AXMessaging.performAction(unit.element, Self.action as CFString, onCall: onCall)
         }
