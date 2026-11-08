@@ -69,6 +69,7 @@ import ApplicationServices
         precondition(!NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: nil))
         try clippedLeafReveal()
         clippedHitContextCanEvolve()
+        try revealedLeafContinuationRemainsExact()
         try await hoverReplacesProbeReceiver()
         print("Window scroll exposure regressions passed")
     }
@@ -152,6 +153,41 @@ import ApplicationServices
         precondition(!NativeElementPointerUnit.allowsDispatchBasis(
             .rejected, requirement: .contentReceiver, exactOriginalHit: false, hasMember: false,
             requiresExactElementHit: true), "the preceding row never becomes a qualified click hit")
+    }
+
+    @MainActor private static func revealedLeafContinuationRemainsExact() throws {
+        let target: [String: Any] = ["session": "s", "instance": "a", "rootWindow": "w", "surface": "v",
+                                     "node": "leaf", "capture": NSNull()]
+        var sibling = target
+        sibling["node"] = "sibling"
+        let intent = try NativeIntent(["kind": "click", "parameters": [:]], mode: "write")
+        let operation = NativeOperation(
+            timeoutMs: 1000, writable: true, intent: intent, target: target,
+            clickContract: "v2", release: {}, cancelActive: {})
+        try operation.bindInputTarget(target, within: ["w"]) { {} }
+        precondition(!operation.requiresRevealedLeafHit(target, within: ["w"]), "ordinary clicks retain existing routes")
+        operation.recordClippedClickLeafReveal()
+        precondition(operation.requiresRevealedLeafHit(target, within: ["w"]),
+                     "a same-candidate refresh must retain exact-hit and no-preparation obligations after AX reveal")
+        precondition(!operation.requiresRevealedLeafHit(sibling, within: ["w"]))
+        precondition(!operation.requiresRevealedLeafHit(target, within: []))
+        let otherOperation = NativeOperation(
+            timeoutMs: 1000, writable: true, intent: intent, target: target,
+            clickContract: "v2", release: {}, cancelActive: {})
+        try otherOperation.bindInputTarget(target, within: ["w"]) { {} }
+        precondition(!otherOperation.requiresRevealedLeafHit(target, within: ["w"]))
+        let ready = NativeClickClippedLeaf.continuationOffer(ready: true)
+        precondition(NativeClickClippedLeaf.permitsContinuation(ready))
+        precondition(!NativeClickClippedLeaf.permitsContinuation(NativeClickClippedLeaf.continuationOffer(ready: false)))
+        let ordinary = NativeClickContract(
+            routeFamily: ready.routeFamily, delivery: .windowDirected, admission: .ready, reason: nil,
+            preparationOptions: [])
+        precondition(!NativeClickClippedLeaf.permitsContinuation(ordinary), "same family is not the same exact contract")
+        precondition(NativeElementPointerUnit.allowsDispatchBasis(
+            .coarseAncestorGeometry, requirement: .contentReceiver, exactOriginalHit: false, hasMember: false))
+        precondition(!NativeElementPointerUnit.allowsDispatchBasis(
+            .coarseAncestorGeometry, requirement: .contentReceiver, exactOriginalHit: false, hasMember: false,
+            requiresExactElementHit: ready.requiresExactElementHit))
     }
 
     @MainActor private static func hoverReplacesProbeReceiver() async throws {

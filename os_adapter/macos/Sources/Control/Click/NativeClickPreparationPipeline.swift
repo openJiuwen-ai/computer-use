@@ -102,7 +102,7 @@ import ApplicationServices
         var exposedByWheel = false
         if let clippedLeaf = plan.offer.clippedLeaf, case .element(let unit) = plan.target {
             try await clippedLeaf.reveal(unit, operation: plan.operation, boundary: boundary, receipt: receipt, evidence: evidence)
-        } else {
+        } else if !plan.operation.requiresRevealedLeafHit(plan.command.target, within: plan.within) {
             if let preparation = try SampleNativeClickPreparationPass.run(plan, boundary: boundary), preparation.needed {
                 try await prepareReceiver(preparation)
             }

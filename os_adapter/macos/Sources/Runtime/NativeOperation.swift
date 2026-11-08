@@ -189,6 +189,13 @@ import Foundation
 
     func recordClippedClickLeafReveal() { didRevealClippedClickLeaf = true }
 
+    /// The exact-hit obligation belongs to the input target fixed before the
+    /// AX side effect. A read of another node does not inherit that obligation.
+    func requiresRevealedLeafHit(_ value: [String: Any], within: [String]) -> Bool {
+        guard didRevealClippedClickLeaf, let inputTarget, inputWithin == within else { return false }
+        return NSDictionary(dictionary: inputTarget).isEqual(to: value)
+    }
+
     func blockClickContinuation() { clickPreparationRequiresObservation = true }
 
     /// A window envelope permits local observation/selection of a node. It

@@ -163,11 +163,12 @@ import ApplicationServices
                         actionDocument: document)
                 }
             }
+            let continuesReveal = op.requiresRevealedLeafHit(binding.wire, within: plan.within)
             var preferOpaqueRowPointer = false
             if !applicationRoot && !menu {
                 // Independent semantic candidate: no geometry, focus or pointer
                 // capability is required. V1 clients keep their existing schema.
-                if op.clickContract == "v2", plan.actuator == nil, role == kAXRowRole,
+                if !continuesReveal, op.clickContract == "v2", plan.actuator == nil, role == kAXRowRole,
                     let selection = try access.objects.nativeSelectionContract(node)
                 {
                     declarations.declareClick(
@@ -178,6 +179,24 @@ import ApplicationServices
                 }
                 func sampleElementPointer() throws -> Bool {
                     let unit = try access.units.elementPointerUnit(binding.wire, actuator: plan.actuator)
+                    if continuesReveal {
+                        guard plan.actuator == nil, plan.receiver == nil, unit.qtComboChoice == nil,
+                            facts.popupContext == nil
+                        else {
+                            throw DriverError("the revealed original element's route changed", code: .inputUnavailable)
+                        }
+                        let exact = unit.requiring(.contentReceiver, exactElementHit: true)
+                        let geometry = try exact.geometry()
+                        let pointer = exact.pointerUnit(mapping: geometry.mapping)
+                        try BackgroundEvents.requirePointerRoute(window: geometry.mapping)
+                        foreground = pointer.foregroundWindow(at: geometry.point)
+                        let ready = pointer.ready(at: geometry.point, delivery: .windowDirected)
+                        input["geometryCurrent"] = "yes"
+                        input["pointerHit"] = node
+                        input["pointerRoute"] = ready ? "yes" : "no"
+                        declarations.declareClick(.pointer(.click), offer: NativeClickClippedLeaf.continuationOffer(ready: ready))
+                        return false
+                    }
                     if let exposure = try unit.exposure() {
                         if popupChoice {
                             throw DriverError(
@@ -301,7 +320,7 @@ import ApplicationServices
                             admission: .insufficientEvidence, reason: error.description, preparationOptions: []))
                 }
             }
-            try actionOffers(preferOpaqueRowPointer: preferOpaqueRowPointer)
+            if !continuesReveal { try actionOffers(preferOpaqueRowPointer: preferOpaqueRowPointer) }
         } else {
             throw DriverError("click requires an element or captured target", code: .invalidRequest)
         }

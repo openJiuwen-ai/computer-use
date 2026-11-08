@@ -8,6 +8,7 @@ import ApplicationServices
 /// receiver and fresh hit testing still owns the requested click.
 struct NativeClickClippedLeaf: Equatable {
     private static let action = "AXScrollToVisible"
+    private static let family = "macos.windowDirected.v1"
     let region: AXUIElement
     let passiveAncestor: AXUIElement
     let viewport: CGRect
@@ -22,10 +23,19 @@ struct NativeClickClippedLeaf: Equatable {
 
     var offer: NativeClickContract {
         .init(
-            routeFamily: "macos.windowDirected.v1", delivery: .windowDirected, admission: .preparationRequired,
+            routeFamily: Self.family, delivery: .windowDirected, admission: .preparationRequired,
             reason: "The original element is clipped at a scroll viewport edge.", preparationOptions: ["background"],
             clippedLeaf: self, requiresExactElementHit: true)
     }
+
+    static func continuationOffer(ready: Bool) -> NativeClickContract {
+        .init(
+            routeFamily: family, delivery: .windowDirected, admission: ready ? .ready : .insufficientEvidence,
+            reason: ready ? nil : "The revealed original element's directed click is not ready.",
+            preparationOptions: [], requiresExactElementHit: true)
+    }
+
+    static func permitsContinuation(_ offer: NativeClickContract) -> Bool { offer == continuationOffer(ready: true) }
 
     @MainActor static func sample(
         _ unit: NativeElementPointerUnit, hit: NativeElementPointerUnit.Observation, retaining proof: Self? = nil
