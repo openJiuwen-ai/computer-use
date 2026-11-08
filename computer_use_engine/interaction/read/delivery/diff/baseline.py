@@ -20,7 +20,19 @@ if TYPE_CHECKING:
 
 
 STATE_FIELDS = frozenset(
-    ("enabled", "selected", "focused", "busy", "toggleState", "expanded", "disclosing", "visible", "showing", "modal")
+    (
+        "enabled",
+        "selected",
+        "focused",
+        "busy",
+        "toggleState",
+        "expanded",
+        "disclosing",
+        "visible",
+        "showing",
+        "modal",
+        "_boundsOutsideWindow",
+    )
 )
 
 _comparison_trees = WeakIdentityMap()

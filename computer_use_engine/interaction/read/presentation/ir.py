@@ -183,6 +183,7 @@ class ProjectionInput:
         root: Root of the requested semantic view; native bindings remain separate.
         context: Observation scope and rendering options copied for this projection.
         geometry: Read-only comparison bounds; never exported as display fields or input targets.
+        outside_window_fields: Text fields with reported bounds wholly outside this exact window.
     """
 
     native_nodes: Mapping[str, NodeView]
@@ -193,6 +194,7 @@ class ProjectionInput:
     root: SourceKey
     context: Mapping[str, Any]
     geometry: GeometryIndex = field(default_factory=lambda: GeometryIndex({}))
+    outside_window_fields: frozenset[str] = frozenset()
 
     @classmethod
     def build(cls, root: NodeView, context: Mapping[str, Any] | None = None) -> ProjectionInput:
