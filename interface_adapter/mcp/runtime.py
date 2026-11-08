@@ -173,12 +173,13 @@ class Runtime:
             run["observationEntries"].append(entry)
             run["outputEntries"].append(entry)
 
-    def publish_output(self, run):
+    def publish_output(self, run, *, complete):
         """Commit baselines and image authority only for retained output slots."""
         run["publishing"] = True
         run["output"] = OutputBuffer()
         failure = None
         entries = run["outputEntries"]
+        absent = run["observations"].absent_transients(run["observationEntries"], run["lastWrite"]) if complete else {}
 
         def text_cost(entry):
             if entry["kind"] == "block" and entry["block"]["type"] == "text":
@@ -195,6 +196,12 @@ class Runtime:
                     run["output"].append(dict(entry["block"]), entry["merge"])
                 elif entry["kind"] == "image":
                     self.emit_image(entry["delivery"])
+                elif (ref := absent.get(id(entry))) is not None:
+                    note = (
+                        f"Window {ref} was observed earlier and is absent from the latest complete application observation."
+                    )
+                    if len(utf8(note)) <= run["output"].remaining_text_bytes - reserved:
+                        self.emit({"type": "text", "text": note})
                 elif not entry["superseded"]:
                     self.publish_observation(run, entry["observation"], reserved)
             except Exception as error:  # noqa: BLE001 - retain later receipts, then rethrow the rendering failure
@@ -261,6 +268,8 @@ class Runtime:
         if run is None or not run["active"]:
             return
         self.flush_observations(run)
+        if run["lastWrite"] is not None:
+            run["lastWrite"]["dispatched"] = receipt["status"] == "dispatched"
         self.emit(dict(type="text", text=run["actions"].render(receipt)), True)
 
     def text_page(self, source, page):
@@ -289,6 +298,7 @@ class Runtime:
             return
         if event["kind"] == "before-write":
             self.flush_observations(run)
+            run["lastWrite"] = {"source": event["source"], "dispatched": False}
             return
         if event["kind"] == "action-observation":
             result = event["result"]
@@ -308,7 +318,7 @@ class Runtime:
                 )
             self.emit(dict(type="text", text=message), True)
             return
-        observation = event["observation"]
+        observation = dict(event["observation"], write=run["lastWrite"])
         self.flush_observations(run)
         budget = current_operation_budget()
         failure = None
@@ -642,7 +652,7 @@ class Runtime:
             await asyncio.gather(*list(run["pending"]), return_exceptions=True)
         try:
             self.flush_observations(run)
-            self.publish_output(run)
+            self.publish_output(run, complete=error is None)
         except Exception as failure:
             if error is None:
                 error = failure
@@ -773,6 +783,7 @@ class Runtime:
             output=OutputBuffer(),
             outputEntries=[],
             observationEntries=[],
+            lastWrite=None,
             publishing=False,
             observations=ObservationOutput(self.presenter),
             images=[],

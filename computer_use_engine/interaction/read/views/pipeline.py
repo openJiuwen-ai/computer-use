@@ -998,6 +998,20 @@ class InterfaceReadPipeline:
             ]
         # pylint: disable-next=protected-access
         scope = directory["application"] + (":app" if ui._anchor is None else ":window:" + ui._anchor) + ":" + view
+        transient_window = None
+        if related is not None and screenshot is not None and len(displayed_parts) == len(included_images) == 1:
+            identity = displayed_parts[0][1].identity
+            if (
+                identity in current_identities and identity.window in included_images
+                and identity.window in related.new_windows(directory)
+                and all(
+                    (target.root_window, target.surface, target.instance)
+                    == (identity.window, identity.surface, identity.instance) for target, _ in trees
+                )
+            ):
+                ref = controller.interfaces.windows.reference(directory["session"], directory["application"], identity)
+                if ref is not None:
+                    transient_window = (identity, ref)
         return publish(
             controller,
             ui,
@@ -1022,6 +1036,7 @@ class InterfaceReadPipeline:
                 or collection_gaps
             ),
             on_observation=on_observation,
+            transient_window=transient_window,
         )
 
     async def _refresh_new_native_image(self, part: WindowPart, directory: NativeDirectory) -> None:

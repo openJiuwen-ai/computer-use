@@ -163,6 +163,7 @@ def publish(
     on_observation=None,
     window_coverage=(),
     member_trees: Mapping[WindowIdentity, SemanticSnapshot] | None = None,
+    transient_window: tuple[WindowIdentity, int] | None = None,
 ) -> Observation:
     """Publish the combined interface observation and retain its source data.
 
@@ -178,6 +179,7 @@ def publish(
         directory: Current application window catalogue, when available.
         lookup_context: Exact source context for explicit subtree publication; ordinary reads capture their staged view.
         on_observation: Internal sink for deferring delivery while one optional refresh is attempted.
+        transient_window: Exact newly observed window when it supplies the whole automatic body.
     """
     document = text if isinstance(text, DisplayDocument) else DisplayDocument.join((text,))
     # Only sources actually included as tree components contribute to this
@@ -432,6 +434,7 @@ def publish(
             document=document,
             coverage=document_coverage(document),
             **({"observed": directory["observed"]} if directory else {}),
+            **({"transientWindow": transient_window} if transient_window is not None else {}),
         )
     )
     return cast("Observation", result)
