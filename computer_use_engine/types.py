@@ -63,6 +63,22 @@ class AppInfo(Protocol):
         pass
 
 
+class WindowChoice(Protocol):
+    """A visible window belonging to one exact application instance."""
+
+    app_id: int
+    window_ref: int
+    title: str | None
+    app_is_foreground: bool | None
+
+
+class WindowCatalogue(Protocol):
+    """Visible matches and any limits encountered while collecting metadata."""
+
+    windows: tuple[WindowChoice, ...]
+    stop_reasons: tuple[str, ...]
+
+
 class WindowInfo(Protocol):
     """A specific observed window, selectable with App methods' window=id parameter."""
 

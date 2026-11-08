@@ -122,6 +122,7 @@ enum NativeInspectQuery {
 
     enum ApplicationScope { case all(includeEnded: Bool), path(String), installation(String) }
     case applications(ApplicationScope)
+    case windowCatalogue(appName: String)
     case surfaceBatch(applications: [String], profile: SurfaceProfile)
     case launch
     case surfaces(application: String, profile: SurfaceProfile)
@@ -168,6 +169,9 @@ enum NativeInspectQuery {
                 }
                 self = .applications(.all(includeEnded: includeEnded))
             }
+        case "windowCatalogue":
+            let p = try object(raw, keys: ["kind", "appName"])
+            self = .windowCatalogue(appName: try string(p["appName"], label: "appName"))
         case "surfaceBatch":
             let hasProfile = (raw as? [String: Any])?.keys.contains("profile") == true
             let p = try object(raw, keys: hasProfile ? ["kind", "applications", "profile"] : ["kind", "applications"])

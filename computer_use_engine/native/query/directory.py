@@ -101,11 +101,13 @@ def select_application(directory, selector):
                 + ". Discovery scope: running windows. Installed-application discovery and launch: unavailable.",
                 "application",
             )
-        _refuse(
-            "ambiguous_target" if matches else "element_not_found",
-            "Application selector has no unique match: " + selector,
-            "application",
-        )
+        detail = "Application selector has no unique match: " + selector
+        if matches and directory.get("platform") == "macos":
+            detail += (
+                ". Use computer.list_windows(app_name=...) with the exact display name, "
+                "then read the intended app_id and window_ref."
+            )
+        _refuse("ambiguous_target" if matches else "element_not_found", detail, "application")
     return _running_match(directory, matches[0])
 
 

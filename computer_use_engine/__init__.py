@@ -25,6 +25,8 @@ from .types import (
     Point,
     TextPage,
     View,
+    WindowCatalogue,
+    WindowChoice,
     WindowInfo,
 )
 
@@ -52,6 +54,8 @@ __all__ = [
     "Target",
     "TextPage",
     "View",
+    "WindowCatalogue",
+    "WindowChoice",
     "WindowInfo",
     "__version__",
 ]

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
+from computer_use.identity import FrozenRecord
 from computer_use.interaction.query.instances.membership import ancestor, ancestry, in_scope
 from computer_use.interaction.query.instances.pipeline import ApplicationDiscoveryPipeline
 from computer_use.interaction.query.instances.scope import (
@@ -53,6 +54,7 @@ from .requests import (
     ActOnElement,
     CloseWindow,
     DiscoverApps,
+    DiscoverWindows,
     ObserveDesktop,
     ObserveElement,
     ObserveText,
@@ -70,7 +72,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import ElementSnapshot, UIHandle
     from computer_use.pipeline.core import Control, Step
     from computer_use.protocol.records import Record
-    from computer_use.types import ActionResult, AppInfo, ElementPath, Observation, Point, TextPage
+    from computer_use.types import ActionResult, AppInfo, ElementPath, Observation, Point, TextPage, WindowCatalogue
 
 
 class AgentInterfacePipeline:
@@ -125,6 +127,67 @@ class AgentInterfacePipeline:
 
     async def list_applications(self) -> list[AppInfo]:
         return await self.discovery.run()
+
+    async def list_windows(self, app_name: str) -> WindowCatalogue:
+        catalogue = await self.controller.reader.directory.window_catalogue(app_name)
+        items = catalogue["windows"]
+        refs = self._publish_window_catalogue(items, catalogue["observed"], app_name=app_name)
+        windows = []
+        for index, item in enumerate(items):
+            ref = refs.get(str(index))
+            if ref is not None:
+                app_id = self.references.publish(ApplicationEntry(catalogue["session"], item["selector"], app_name, True))
+                windows.append(FrozenRecord(dict(
+                    app_id=app_id,
+                    window_ref=ref,
+                    title=item["window"]["title"] or None,
+                    app_is_foreground=item["appIsForeground"],
+                )))
+        reasons = tuple(catalogue["stopReasons"])
+        if len(windows) != len(items):
+            reasons += ("Some matching windows no longer have a usable reference.",)
+        return FrozenRecord(dict(windows=tuple(windows), stop_reasons=reasons))
+
+    def _publish_window_catalogue(self, items, observed, *, app_name=None):
+        # Both desktop pixels and metadata-only discovery publish the same
+        # positive visible-window subset, never a complete AX directory.
+        catalogues = {}
+        names = {}
+        for item in items:
+            if "window" not in item or not item.get("selector"):
+                continue
+            selector = item["selector"]
+            if selector not in catalogues:
+                names[selector] = app_name if app_name is not None else item["app"]
+                catalogues[selector] = dict(
+                    kind="surfaces",
+                    session=self.controller.transport.session,
+                    platform=self.controller.transport.platform,
+                    application=selector,
+                    observed=observed,
+                    surfaces=[],
+                    focusedWindow=None,
+                    rootDiscoveryComplete=False,
+                    stopReasons=["desktop catalogue is a visible-window subset"],
+                    provider=dict(status="notRequested", attribute=None, writeStatus=None),
+                )
+            catalogues[selector]["surfaces"].append(item["window"])
+        by_selector = {
+            selector: {
+                window: int(ref)
+                for ref, window in self.windows.register_directory(
+                    directory, names[selector], identity_only=app_name is not None
+                ).items()
+            }
+            for selector, directory in catalogues.items()
+        }
+        refs = {}
+        for index, item in enumerate(items):
+            if "window" in item and item.get("selector") in by_selector:
+                ref = by_selector[item["selector"]].get(item["window"]["window"])
+                if ref is not None:
+                    refs[str(index)] = ref
+        return refs
 
     async def read(
         self,
@@ -181,38 +244,7 @@ class AgentInterfacePipeline:
                     applications[selector] = self.references.publish(
                         ApplicationEntry(self.controller.transport.session, selector, name, True)
                     )
-            window_refs = {}
-            catalogues = {}
-            for index, item in enumerate(desktop["windows"]):
-                if "window" not in item or not item.get("selector"):
-                    continue
-                selector = item["selector"]
-                if selector not in catalogues:
-                    catalogues[selector] = dict(
-                        kind="surfaces",
-                        session=self.controller.transport.session,
-                        platform=self.controller.transport.platform,
-                        application=selector,
-                        observed=observed["observed"],
-                        surfaces=[],
-                        focusedWindow=None,
-                        rootDiscoveryComplete=False,
-                        stopReasons=["desktop catalogue is a visible-window subset"],
-                        provider=dict(status="notRequested", attribute=None, writeStatus=None),
-                    )
-                catalogues[selector]["surfaces"].append(item["window"])
-            aliases = {
-                selector: self.windows.register_directory(
-                    directory, next(item["app"] for item in desktop["windows"] if item.get("selector") == selector)
-                )
-                for selector, directory in catalogues.items()
-            }
-            for index, item in enumerate(desktop["windows"]):
-                if "window" in item and item.get("selector") in aliases:
-                    by_window = {window: int(ref) for ref, window in aliases[item["selector"]].items()}
-                    reference = by_window.get(item["window"]["window"])
-                    if reference is not None:
-                        window_refs[str(index)] = reference
+            window_refs = self._publish_window_catalogue(desktop["windows"], observed["observed"])
             document = observed["document"]
             lines.append(
                 replace(
@@ -741,6 +773,8 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
             return await api.read_text(request.owner, request.snapshot, request.cursor, request.length)
         if isinstance(request, DiscoverApps):
             return await api.list_applications()
+        if isinstance(request, DiscoverWindows):
+            return await api.list_windows(request.app_name)
         if isinstance(request, ResolveElement):
             snapshot = await api.element(owner, request.target, request.timeout_ms, control)
             if request.window is not None and type(request.target) is int:

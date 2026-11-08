@@ -91,6 +91,13 @@ class DiscoverApps:
 
 
 @dataclass(frozen=True)
+class DiscoverWindows:
+    """Discover visible window metadata for an exact application display name."""
+
+    app_name: str
+
+
+@dataclass(frozen=True)
 class ResolveElement:
     """Locate an element within an App/window scope.
 
@@ -171,7 +178,7 @@ class UIPointer:
 
 
 READ_REQUESTS = (ObserveUI, ObserveDesktop, ObserveElement, ObserveText)
-QUERY_REQUESTS = (DiscoverApps, ResolveElement)
+QUERY_REQUESTS = (DiscoverApps, DiscoverWindows, ResolveElement)
 WRITE_REQUESTS = (ActOnElement, CloseWindow, UIKeyboard, UIPointer)
 INTERFACE_REQUESTS = READ_REQUESTS + QUERY_REQUESTS + WRITE_REQUESTS
 
@@ -184,6 +191,7 @@ if TYPE_CHECKING:
         | ObserveElement
         | ObserveText
         | DiscoverApps
+        | DiscoverWindows
         | ResolveElement
         | ActOnElement
         | CloseWindow

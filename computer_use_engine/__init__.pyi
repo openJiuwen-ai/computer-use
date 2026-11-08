@@ -62,6 +62,7 @@ class Computer:
         self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None
     ) -> None: ...
     def list_apps(self) -> list[AppInfo]: ...
+    def list_windows(self, *, app_name: str) -> WindowCatalogue: ...
     def app(self, selector: int | str) -> App: ...
     def read(self, *, view: View = "both", full: bool = False) -> Observation: ...
 
@@ -154,6 +155,16 @@ class AppInfo:
     id: int
     display_name: str
     is_running: bool
+
+class WindowChoice:
+    app_id: int
+    window_ref: int
+    title: str | None
+    app_is_foreground: bool | None
+
+class WindowCatalogue:
+    windows: tuple[WindowChoice, ...]
+    stop_reasons: tuple[str, ...]
 
 class WindowInfo:
     id: int

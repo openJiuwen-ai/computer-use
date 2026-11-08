@@ -40,6 +40,16 @@ _common = dict(
     session=identity, platform=enum("macos", "windows", "linux"), observed=_stamp, stopReasons=array(identity, max=128)
 )
 _schemas = {
+    "windowCatalogue": obj(
+        dict(
+            kind=enum("windowCatalogue"),
+            appName=identity,
+            windows=array(
+                obj(dict(selector=identity, window=surface_schema, appIsForeground=boolean().nullable())), max=256
+            ),
+            **_common,
+        )
+    ),
     "surfaceBatch": obj(
         dict(
             kind=enum("surfaceBatch"),
@@ -129,6 +139,21 @@ def decode_directory(value):
                 entry["error"] = decode_failure(entry["error"])
         if len(applications) != len(set(applications)):
             raise ValueError("protocol: duplicate batch application")
+    elif result["kind"] == "windowCatalogue":
+        windows = result["windows"]
+        identities = {item["window"]["window"] for item in windows}
+        foreground = {item["selector"] for item in windows if item["appIsForeground"] is True}
+        if result["platform"] != "macos" or len(identities) != len(windows) or len(foreground) > 1:
+            raise ValueError("protocol: invalid visible window catalogue")
+        for item in windows:
+            surface = item["window"]
+            validate_surface(surface)
+            if (
+                not item["selector"].startswith("instance:") or not surface["nativeWindow"]
+                or surface["accessibility"] or surface["parentState"] != "unknown" or surface["modal"] is not None
+                or (item["selector"] in foreground and item["appIsForeground"] is not True)
+            ):
+                raise ValueError("protocol: window catalogue requires native metadata for the exact instance")
     elif result["kind"] == "applications":
         if "path" in result or "installation" in result:
             paths = {item["path"] for item in result["applications"]}

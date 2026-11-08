@@ -121,6 +121,14 @@ The SDK is synchronous: each operation returns its result or raises before the n
 Select an application with `computer.app(id)`, observe it with `app.read(view="both")`, and resolve a control with
 `app.element(name_or_path)`. A confirmed target can be used directly, for example `app.element("Save").click()`.
 
+On macOS, when instances share a name or the task specifies a window, call
+`computer.list_windows(app_name="Google Chrome")` with the exact display name before reading window content.
+Choose a row from `catalogue.windows` by title or use `app_is_foreground` if the task specifies the foreground
+instance. Then call `computer.app(row.app_id).read(window=row.window_ref)`.
+The catalogue query does not capture pixels, query AX, or change focus. Missing title or foreground information
+is `None`. Check `catalogue.stop_reasons` for collection gaps, and allow for hidden windows to be absent.
+Unsupported backends return `unsupported_operation`.
+
 Within one tool call, every action receipt is retained while superseded automatic observations of the same scope are
 coalesced into the final state. Distinct popups and explicitly printed or full observations are preserved.
 Window coordinate actions retain visual feedback and collect available accessibility information independently.

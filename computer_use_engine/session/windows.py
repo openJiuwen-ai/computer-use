@@ -76,19 +76,19 @@ class WindowReferences:
             return None
         return self._applications.get((session, application))
 
-    def register_directory(self, directory, name=""):
-        # App reads and desktop rows feed the same lifetime authority. Visible
-        # positive evidence can restore membership after hiding; an already
-        # ended native generation can never be republished as a usable ref.
+    def register_directory(self, directory, name="", *, identity_only=False):
+        # App reads and desktop rows feed the same lifetime authority. A
+        # metadata-only catalogue publishes references without replacing it.
         state = self.application(directory["session"], directory["application"], name)
-        state.reconcile(
-            directory,
-            DirectoryMembership(
-                not directory.get("stopReasons", ()),
-                tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in directory["surfaces"]),
-                tuple(WindowIdentity.of(item) for item in directory.get("endedWindows", ())),
-            ),
-        )
+        if not identity_only:
+            state.reconcile(
+                directory,
+                DirectoryMembership(
+                    not directory.get("stopReasons", ()),
+                    tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in directory["surfaces"]),
+                    tuple(WindowIdentity.of(item) for item in directory.get("endedWindows", ())),
+                ),
+            )
         aliases = {}
         for item in directory["surfaces"]:
             entry = WindowEntry(
@@ -116,6 +116,11 @@ class WindowReferences:
                     self._physical[physical] = ref
             self._aliases[entry.key] = ref
             previous = self._variants[ref].get(entry.application)
+            if identity_only:
+                state.retain_visible_window_identity(entry.identity)
+                if previous is not None:
+                    aliases[str(ref)] = item["window"]
+                    continue
             if not name and previous is not None:
                 entry = WindowEntry(entry.session, entry.application, previous.name, entry.identity, directory)
             self._variants[ref][entry.application] = entry

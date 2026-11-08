@@ -227,6 +227,7 @@ class ConnectionPort:
             if (
                 result["kind"] != query["kind"]
                 or result["session"] != target.session
+                or query["kind"] == "windowCatalogue" and result["appName"] != query["appName"]
                 or query["kind"] in ("surfaces", "roots")
                 and result["application"] != query["application"]
                 or result["platform"] != self.platform

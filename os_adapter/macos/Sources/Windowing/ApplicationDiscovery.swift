@@ -110,7 +110,7 @@ import AppKit
                 data: try JSONSerialization.data(withJSONObject: entries, options: [.sortedKeys]), encoding: .utf8)!
             throw DriverError(
                 "multiple running instances match \(selector); candidates: \(json)", code: .ambiguousTarget,
-                next: "use computer.app(candidate.id).read() to inspect the intended instance")
+                next: "use computer.list_windows(app_name=...) with the exact display name, then read the intended app_id and window_ref")
         }
         return candidates.first
     }

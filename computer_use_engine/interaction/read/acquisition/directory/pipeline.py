@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from computer_use.diagnostics import local_failure
 from computer_use.interaction.control import NativeScopeBody
 from computer_use.interaction.read.acquisition.directory.model import DirectoryPlan
 from computer_use.interaction.read.acquisition.directory.passes.collect_directory import (
@@ -74,6 +75,13 @@ class DirectoryReadPipeline(Pipeline["DirectoryRequest", "DirectoryFacts"]):
                 query = request.query
                 if request.application_selector is not None:
                     query = applications_query(request.application_selector, capabilities=port.connection.capabilities)
+                elif query["kind"] == "windowCatalogue" and (
+                    port.connection.platform != "macos" or "nativeWindowCatalogue" not in port.connection.capabilities
+                ):
+                    raise local_failure(
+                        "this backend does not provide a metadata-only visible window catalogue",
+                        "unsupported_operation",
+                    )
                 elif query.get("includeEnded") and "nativeApplicationLifetime" not in port.connection.capabilities:
                     query = {"kind": "applications"}
                 yield DirectoryPlan(read, query)

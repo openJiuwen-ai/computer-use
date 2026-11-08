@@ -13,6 +13,21 @@ import ApplicationServices
         case .launch: return try CollectLaunchDeclarationPass.run(request, access: access)
         case .applications(let scope):
             return try CollectApplicationDirectoryPass.run(request, scope: scope, access: access)
+        case .windowCatalogue(let appName):
+            guard !op.writable, try access.scopes.directoryTarget(request.requested) != nil else {
+                throw DriverError("window catalogue requires a session read scope", code: .invalidRequest)
+            }
+            try access.sharing.checkAvailable()
+            let interval = CaptureInterval()
+            var catalogue = try access.desktop().windowCatalogue(
+                appName: appName, retainWindow: access.directory.retainDesktopWindow)
+            try op.check()
+            catalogue["kind"] = "windowCatalogue"
+            catalogue["session"] = access.session
+            catalogue["platform"] = "macos"
+            catalogue["appName"] = appName
+            catalogue["observed"] = interval.observation()
+            return catalogue
         case .surfaceBatch(let applications, let profile):
             return try NativeSurfaceBatchPipeline.collect(request, applications: applications, profile: profile, access: access)
         case .capturedText(let ref, let offset, let length):

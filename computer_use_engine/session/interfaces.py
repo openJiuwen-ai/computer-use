@@ -189,6 +189,10 @@ class InstanceState:
     _window_lifetimes: dict[str, WindowIdentity] = field(default_factory=dict, repr=False)
     owner_identities: dict[str, WindowIdentity] = field(default_factory=dict)
 
+    def retain_visible_window_identity(self, identity: WindowIdentity) -> None:
+        """Remember a selectable identity without replacing current membership or AX facts."""
+        self.evidence.setdefault(identity, WindowEvidence(identity, Knowledge.UNKNOWN))
+
     def reconcile(self, directory: NativeDirectory, facts: DirectoryMembership) -> None:
         """Replace current authorization facts while retaining unknown lifetimes.
 

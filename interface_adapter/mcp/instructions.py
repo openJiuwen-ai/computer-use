@@ -16,7 +16,14 @@ input method. A composite image uses its whole canvas, including popup placement
 Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
 list_apps() entries expose id, display_name, and is_running. app() selects a
 scope; the first app.read() starts a nonrunning installed app when needed.
-app.read() discovers numbered windows. Use app.read(window=ref) to observe one.
+On macOS, if the task names a window or there are same-name instances, use
+computer.list_windows(app_name=exact_display_name) before reading app content.
+It returns visible window metadata without screenshots. Choose the intended
+title or use app_is_foreground if the task specifies the foreground instance,
+then use computer.app(row.app_id).read(window=row.window_ref). Check
+stop_reasons for an incomplete catalogue. A missing title or foreground value
+is unknown, and hidden windows may be absent. Stay within the task's read scope.
+app.read() also discovers numbered windows within the selected app.
 App methods accept optional window=ref to select the target for that call;
 no Window object is needed. Element numbers are shared across all reads of the
 same App. app.element(number) stays bound to its original control after reading

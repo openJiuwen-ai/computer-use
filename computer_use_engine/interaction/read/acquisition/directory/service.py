@@ -39,6 +39,9 @@ class NativeDirectory:
             query["includeEnded"] = True
         return await self._query(query, timeout_ms, application_selector=selector)
 
+    async def window_catalogue(self, app_name: str) -> DirectoryFacts:
+        return await self._query(dict(kind="windowCatalogue", appName=app_name), 30000)
+
     async def surfaces(self, application: str, *, timeout_ms: int = 30000) -> DirectoryFacts:
         if not isinstance(application, str) or not application:
             raise ValueError("An observed running-application id is required")

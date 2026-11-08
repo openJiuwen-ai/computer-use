@@ -346,6 +346,7 @@ _inspect_queries = {
             "includeEnded": boolean().optional(),
         }
     ),
+    "windowCatalogue": obj(dict(kind=enum("windowCatalogue"), appName=identity)),
     "surfaceBatch": obj(
         dict(kind=enum("surfaceBatch"), applications=array(identity, min=1, max=64), profile=enum("visual").optional())
     ),
@@ -748,7 +749,7 @@ def decode_execution_result(method, value, *, retain_observation=False):
     if (
         method == "inspect"
         and isinstance(value, dict)
-        and value.get("kind") in ("applications", "surfaces", "roots", "surfaceBatch")
+        and value.get("kind") in ("applications", "surfaces", "roots", "surfaceBatch", "windowCatalogue")
     ):
         return decode_directory(value)
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "observation":

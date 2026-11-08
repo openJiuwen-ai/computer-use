@@ -12,6 +12,7 @@ from computer_use.interaction.agent.requests import (
     ActOnElement,
     CloseWindow,
     DiscoverApps,
+    DiscoverWindows,
     ObserveDesktop,
     ObserveElement,
     ObserveText,
@@ -139,6 +140,15 @@ class Computer:
     def list_apps(self):
         """Return application choices with id, display_name, and is_running fields."""
         return operation(lambda: self._controller.run(DiscoverApps()))
+
+    @synchronous
+    def list_windows(self, *, app_name):
+        """Return visible macOS window metadata for an exact application display name."""
+        try:
+            nonempty(app_name, "app_name")
+        except ValueError as error:
+            raise local_failure(str(error)) from error
+        return operation(lambda: self._controller.run(DiscoverWindows(app_name)))
 
     @synchronous
     def read(self, *, view="both", full=False):
