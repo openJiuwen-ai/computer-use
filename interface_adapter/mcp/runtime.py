@@ -604,10 +604,12 @@ class Runtime:
         return True
 
     @staticmethod
-    def reconcile_image_hints(run, acknowledged):
-        """Describe the maps that are usable in this completed tool response."""
+    def reconcile_image_hints(run, acknowledged, pending_point=None):
+        """Describe usable maps and identify an exact newly delivered point mapping."""
         images = []
         current_windows = {}
+        pending_source, pending_window = pending_point or (None, None)
+        pending_image = None
         for image in run["imageOutputs"].values():
             eligible = set()
             caption = image["caption"]
@@ -620,6 +622,8 @@ class Runtime:
                 for ref, point in zip(current.windows, current.points):
                     if point in caption.hints.points and current.owner is not None:
                         current_windows[id(current.owner), ref] = (current.generation, identifier)
+                        if delivery.source is pending_source and ref == pending_window:
+                            pending_image = identifier
             images.append((image, eligible))
 
         for image, eligible in images:
@@ -639,6 +643,9 @@ class Runtime:
             note = "".join(notes)
             image["text"]["text"] = f"Image {metadata['imageId']}\n{caption.render(eligible)}{note}"
             metadata["caption"] = label.render(eligible) + note
+        if pending_image is None:
+            return ""
+        return f"\nUse the attached image (Image {pending_image}, Window {pending_window}) in the next computer_use call."
 
     async def finish(self, error: BaseException | None = None):
         run = _runs.get()
@@ -669,7 +676,8 @@ class Runtime:
                 acknowledged.add(id(delivery))
         for state in run["deliveredObservations"]:
             observation_delivered(state)
-        self.reconcile_image_hints(run, acknowledged)
+        pending_point = error._pending_point_image if isinstance(error, ComputerUseError) else None
+        point_hint = self.reconcile_image_hints(run, acknowledged, pending_point)
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())
@@ -692,7 +700,8 @@ class Runtime:
                     f"\nA new AX menu was observed in Window {error.observed_menu_window} after the input. "
                     f"Use its menu elements in Window {error.observed_menu_window}. Exact opener unconfirmed."
                 )
-            message = message[:4096 - len(menu_hint)] + menu_hint
+            hints = menu_hint + point_hint
+            message = message[:4096 - len(hints)] + hints
             if not run.get("evaluationStarted"):
                 message += "\nCode execution: not started."
             result["content"].append(dict(type="text", text=message))

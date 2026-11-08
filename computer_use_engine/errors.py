@@ -64,6 +64,8 @@ class ComputerUseError(Exception):
         self.action_receipt = None
         self.scope_cleanup = None
         self._invoked_menu_target = None
+        # Host-only feedback may identify this PNG and public window reference.
+        self._pending_point_image = None
         if cause is not None:
             self.__cause__ = cause
 

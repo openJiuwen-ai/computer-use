@@ -260,6 +260,55 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ComputerUseError, "no current image mapping"):
             await self.click(self.app)
 
+    async def test_same_call_point_error_identifies_the_exact_newly_delivered_image(self):
+        a = ref(self.app, "a")
+        point = f"app.point((20, 30), window={a})"
+        result = await self.runtime.execute({"executionId": 1, "code": (
+            "from computer_use import ComputerUseError\n"
+            "observed = observe(window, 'a')\n"
+            "try:\n"
+            f"    {point}\n"
+            "except ComputerUseError as error:\n"
+            "    assert error.code == 'snapshot_expired' and error.effect == 'none'\n"
+            "    raise"
+        )})
+        self.assertTrue(result.get("isError"), result)
+        image = next(block for block in result["content"] if block["type"] == "image")
+        self.assertIn(f"Image point for window={a}:", image["_meta"]["computer-use"]["caption"])
+        self.assertEqual(
+            result["content"][-1]["text"],
+            "ComputerUseError: this UI has no current image mapping\nEffect: none\n"
+            f"Use the attached image (Image 1.1, Window {a}) in the next computer_use call.",
+        )
+        self.write.arun.assert_not_awaited()
+        await self.execute(f"p = {point}")
+
+    async def test_same_call_point_error_does_not_label_other_or_unpublished_pixels(self):
+        a = ref(self.app, "a")
+        point = f"app.point((20, 30), window={a})"
+        stale_after_point = (
+            "observe(window, 'a')\ntry:\n"
+            f"    {point}\n"
+            "except Exception:\n"
+            "    window._image.expired = True\n"
+            "    raise"
+        )
+        for code, has_image in (
+            (f"observe(alias, 'b')\n{point}", True),
+            (f"capture(window, 'a')\n{point}", False),
+            (stale_after_point, True),
+            (f"observe(window, 'a')\ncapture(window, 'a')\n{point}", True),
+        ):
+            with self.subTest(code=code):
+                result = await self.runtime.execute({"executionId": len(self.events) + 1, "code": code})
+                self.assertTrue(result.get("isError"), result)
+                self.assertEqual(any(block["type"] == "image" for block in result["content"]), has_image)
+                self.assertEqual(
+                    result["content"][-1]["text"],
+                    "ComputerUseError: this UI has no current image mapping\nEffect: none",
+                )
+        self.write.arun.assert_not_awaited()
+
     async def test_image_only_alias_delivery_keeps_its_exact_mcp_scale_and_native_target(self):
         result = await self.execute("large = capture(alias, 'b', (4096, 1278))\nprint_image(large.png)")
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
