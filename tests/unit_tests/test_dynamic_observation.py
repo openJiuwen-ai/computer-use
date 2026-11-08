@@ -21,6 +21,7 @@ from computer_use.interaction.query.instances.scope import adopt
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.facts.normalize import normalize_facts
+from computer_use.interaction.read.limits import DEFAULT_WINDOW_MAX_NODES
 from computer_use.interaction.read.model import AppObservation
 from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.interaction.read.presentation.document import DisplayDocument
@@ -29,7 +30,7 @@ from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, 
 from computer_use.interaction.read.views.related import RelatedRead
 from computer_use.native.scopes import WorkingWindow
 from computer_use.protocol.captures import decode_capture
-from computer_use.protocol.observation import NativeNode, NativeObservation, Relation
+from computer_use.protocol.observation import NativeNode, NativeObservation, ReadIssue, Relation
 from computer_use.session import images
 from computer_use.session.events import set_observation_handler
 from computer_use.session.interfaces import WindowIdentity
@@ -335,6 +336,74 @@ def test_member_tree_timeout_keeps_independent_pixels(monkeypatch):
     part = asyncio.run(InterfaceReadPipeline(controller).member(app, a, "both", component_budget_ms=100))
     assert part.tree is None and part.image is image
     assert "tree component expired" in part.gaps[0].detail
+
+
+@pytest.mark.parametrize("failed_component", [None, "tree", "image", "partial-tree"])
+def test_new_parentless_modal_delivers_pixels_without_waiting_for_its_tree(monkeypatch, failed_component):
+    parent = window("A", title="Original document")
+    # The accessibility directory can retain a valid root before the
+    # screenshot provider maps the same panel to a physical window.
+    panel = {**window("Panel", title="Open File"), "modal": True, "kind": "dialog", "nativeWindow": False}
+    current = directory(parent, panel, focused="Panel")
+    controller, app, state = setup(current)
+    related = RelatedRead(member_target(state, parent), (WindowIdentity.of(parent),))
+    target = member_target(state, panel)
+    snapshot, image = tree(panel, "File name field"), pixels(state, panel)
+    if failed_component == "partial-tree":
+        native = replace(snapshot.native, issues=(ReadIssue(("nodes",), "partial", "collection time budget"),))
+        snapshot = normalize_facts(native, DisplayReferences("session"))
+    image_gap = ObservationGap("image", "observation_incomplete", "Image temporarily unavailable")
+    controller.reader.read = AsyncMock(return_value=replace(
+        parent_result(state, panel, current, current), tree=snapshot, gaps=(image_gap,), scope_confirmed=True,
+    ))
+    calls = []
+
+    async def read_pixels(_pipeline, binding):
+        assert binding == target
+        calls.append("image")
+        return SimpleNamespace(
+            image=None if failed_component == "image" else image,
+            gap=image_gap if failed_component == "image" else None,
+        )
+
+    async def read_tree(binding, *, max_nodes, scope_kind, **_kwargs):
+        assert binding == target and max_nodes == DEFAULT_WINDOW_MAX_NODES and scope_kind == "window"
+        with controller.port.calls.claim(30000) as remaining:
+            assert 0 < remaining() <= 2000
+        calls.append("tree")
+        if failed_component == "tree":
+            raise TimeoutError("Tree component budget exhausted")
+        return snapshot
+
+    controller.reader.reader.read = AsyncMock(side_effect=read_tree)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.FixedWindowImagePipeline.arun", read_pixels)
+    controller.reader.directory._query = AsyncMock(return_value=current)
+    monkeypatch.setattr(images, "_delivery_required", True)
+    events = []
+    set_observation_handler(events.append)
+    try:
+        observed = asyncio.run(
+            InterfaceReadPipeline(controller).run(app, "tree", False, None, related=related)
+        )
+    finally:
+        set_observation_handler(None)
+    assert observed.screenshot is (None if failed_component == "image" else image.image)
+    assert calls == ["image", "tree"]
+    controller.reader.read.assert_not_awaited()
+    assert len(events) == 1
+    result = deliver_through_runtime([events[0]["observation"]])
+    assert not result.get("isError")
+    coverage = observation_data(observed)["window_coverage"]
+    assert len(coverage) == 1 and coverage[0]["window"] == "Panel"
+    assert set(coverage[0]["requested"]) == {"tree", "image"}
+    assert set(coverage[0]["delivered"]) == {"tree", "image"} - {failed_component}
+    assert observation_data(observed)["partial"] is (failed_component is not None)
+    if failed_component == "partial-tree":
+        assert coverage[0]["partial"] == ("tree",)
+    if failed_component != "tree":
+        assert any("File name field" in block.get("text", "") for block in result["content"])
+    if failed_component != "image":
+        assert app._image.pieces[0].window == "Panel" and app._image.pieces[0].image.target == image.target
 
 
 def test_known_window_becoming_modal_gets_content_without_new_window_id():

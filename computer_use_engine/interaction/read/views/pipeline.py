@@ -453,10 +453,18 @@ class InterfaceReadPipeline:
             key = identity.window
             item = permitted[key]
             # The App reader can follow another modal from its working root.
-            # A scoped close or exact menu evidence must use the scheduled member's own root.
+            # A scoped close and menu evidence need the scheduled member's own root.
+            # A new independent modal selected as its own root needs image-first
+            # collection. Its exact AX root can precede a visual catalogue mapping.
+            new_modal_root = (
+                related is not None and member_view == "both" and key == anchor == plan.principal
+                and directory["platform"] == "macos" and directory["session"] == related.original.session
+                and item["modal"] is True and item["parentState"] == "none" and item["node"] is not None
+                and identity not in related.known_windows
+            )
             if (
                 initial and not window_family_only and principal_error is None and ui._anchor is None
-                and identity != plan.menu_origin
+                and identity != plan.menu_origin and not new_modal_root
             ):
                 initial = False
                 selected = controller.reader._selection(
