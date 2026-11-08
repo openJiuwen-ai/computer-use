@@ -8,6 +8,7 @@ import ApplicationServices
         applicationMenuScopeIsDistinctFromWindowContent()
         menuCommandSourceSelectsAddressedPointer()
         attachedDialogReceiverNeedsCurrentParentProof()
+        foregroundMenuKeepsItsConfirmedDocument()
         try retainedMenuMembershipUsesTheCompleteProviderRelation()
         await trackedMenuWaitsForActualPopupTransitions()
         try trackedMenuRequiresThePhysicalPointerInItsOriginalLeaf()
@@ -113,6 +114,30 @@ import ApplicationServices
         precondition(!owns([30: 10], [20: 10, 30: 20]))
         precondition(!owns([20: 30, 30: 20], [:]))
         precondition(!owns([20: 10], [30: 40]))
+    }
+
+    @MainActor static func foregroundMenuKeepsItsConfirmedDocument() {
+        let target = AXUIElementCreateApplication(1_000_020)
+        let sibling = AXUIElementCreateApplication(1_000_021)
+        func receiver(_ focused: AXUIElement?, windows: [AXUIElement]) -> NativeMenuContext {
+            NativeMenuContext(application: .current, read: { _, key in
+                switch key {
+                case kAXMainWindowAttribute: .value(target)
+                case kAXFocusedWindowAttribute: focused.map { .value($0) } ?? .unavailable(.noValue)
+                case kAXWindowsAttribute: .value(windows as CFArray)
+                default: .unavailable(.noValue)
+                }
+            })
+        }
+        let selected = receiver(target, windows: [target])
+        precondition(selected.confirms(target))
+        // A menu can already have an exact foreground recipient while an
+        // unavailable sheet relationship blocks rebuilding its document graph.
+        precondition(!NativeMenuUnit.needsDocumentPreparation(foreground: true) { selected.confirms(target) })
+        for competing in [receiver(sibling, windows: [target, sibling]), receiver(nil, windows: [target, sibling])] {
+            precondition(NativeMenuUnit.needsDocumentPreparation(foreground: true) { competing.confirms(target) })
+        }
+        precondition(NativeMenuUnit.needsDocumentPreparation(foreground: false) { selected.confirms(target) })
     }
 
     @MainActor static func fixedDocumentEvidenceIsLazy() throws {
