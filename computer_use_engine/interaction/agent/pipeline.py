@@ -602,6 +602,12 @@ class AgentInterfacePipeline:
             root_identity = WindowIdentity(ui._anchor, fixed.surface, fixed.instance)
             require_identity(ui, root_identity)
             identity = ui._input_context or root_identity
+            evidence = instance.evidence.get(identity)
+            if evidence is not None and evidence.lifetime is WindowLifetime.RETIRED:
+                # A completed close can end a delivered child before the
+                # next observation is delivered. Keep the explicitly pinned
+                # root; the normal write path still proves its live receiver.
+                identity = root_identity
         else:
             identity = instance.input_context
         if identity is None:
