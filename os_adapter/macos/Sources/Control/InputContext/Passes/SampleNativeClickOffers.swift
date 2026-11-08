@@ -260,6 +260,9 @@ import ApplicationServices
                             pointer, at: geometry.point,
                             qualifyPopup: { physical in
                                 guard let hit = physical.hit else { return nil }
+                                if context.kind == .submenu,
+                                    facts.popupElementWindowID != context.ownerWindowID || facts.enabled == false
+                                { return nil }
                                 return NativePopupPointerQualification(
                                     context: context, element: unit.element, pid: unit.application.processIdentifier,
                                     sample: .init(

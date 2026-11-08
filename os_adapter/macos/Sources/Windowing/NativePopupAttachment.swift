@@ -12,6 +12,7 @@ struct NativePopupFacts<Node, Process: Equatable> {
     let children: (Node) throws -> [Node]?
     let windowID: (Node) throws -> UInt32?
     let process: () throws -> Process?
+    var window: (Node) throws -> Node? = { _ in nil }
 }
 
 /// A direct nonmodal dialog/list surface can publish choices whose reverse AX
@@ -39,7 +40,7 @@ enum NativePopupAttachment {
                     try facts.process() == process
                 else { return nil }
                 return .init(
-                    popup: popup, list: list, reverse: reverse, roles: roles, popupWindowID: popupID,
+                    popup: popup, member: list, reverse: reverse, roles: roles, popupWindowID: popupID,
                     ownerWindowID: listID, process: process)
             }
             guard !["AXSheet", "AXPopover", "AXMenuBar", "AXMenuBarItem", "AXApplication"].contains(role),
@@ -50,21 +51,54 @@ enum NativePopupAttachment {
         return nil
     }
 
+    /// Called from the original forward AXChildren registration. The reverse
+    /// branch is recorded independently because it names another native window.
+    static func observeSubmenu<Node, Process>(
+        popup: Node, leaf: Node, facts: NativePopupFacts<Node, Process>, same: (Node, Node) -> Bool
+    ) throws -> NativePopupOwnerStamp<Node, Process>? {
+        guard try facts.role(popup) == "AXWindow", try facts.subrole(popup) == "AXDialog",
+            try facts.modal(popup) == false, try facts.role(leaf) == "AXMenuItem",
+            let popupID = try facts.windowID(popup), let ownerID = try facts.windowID(leaf),
+            popupID != ownerID, let owner = try facts.window(leaf), !same(owner, popup),
+            try facts.windowID(owner) == ownerID, try facts.role(owner) == "AXWindow",
+            try facts.subrole(owner) == "AXDialog", try facts.modal(owner) == false,
+            let branch = try facts.parent(leaf), !same(branch, leaf), try facts.role(branch) == "AXMenuItem",
+            let branchParent = try facts.parent(branch), same(branchParent, owner),
+            let branchWindow = try facts.window(branch), same(branchWindow, owner),
+            let process = try facts.process()
+        else { return nil }
+        return .init(
+            popup: popup, member: leaf, reverse: [leaf, branch, owner], roles: ["AXMenuItem", "AXMenuItem", "AXWindow"],
+            popupWindowID: popupID, ownerWindowID: ownerID, process: process, kind: .submenu)
+    }
+
     static func confirms<Node, Process>(
         _ stamp: NativePopupOwnerStamp<Node, Process>, leaf: Node, ancestors: [Node], popup: Node, currentOwner: Node,
         facts: NativePopupFacts<Node, Process>, same: (Node, Node) -> Bool
     ) throws -> Bool {
-        guard same(stamp.reverse[0], stamp.list), ancestors.count == 2, same(ancestors[0], stamp.popup),
-            same(ancestors[1], stamp.list), same(popup, stamp.popup), same(currentOwner, stamp.owner),
+        guard stamp.matchesForwardPath(ancestors, same: same), same(popup, stamp.popup), same(currentOwner, stamp.owner)
+        else { return false }
+        if stamp.kind == .submenu {
+            guard same(leaf, stamp.member),
+                let current = try observeSubmenu(popup: popup, leaf: leaf, facts: facts, same: same),
+                current.matches(stamp, same: same), let popupChildren = try facts.children(popup),
+                popupChildren.contains(where: { same($0, leaf) }),
+                let branchChildren = try facts.children(stamp.reverse[1]),
+                branchChildren.contains(where: { same($0, leaf) })
+            else { return false }
+            return true
+        }
+        let list = stamp.member
+        guard same(stamp.reverse[0], list),
             try facts.process() == stamp.process, try facts.role(popup) == "AXWindow",
             try facts.subrole(popup) == "AXDialog", try facts.modal(popup) == false,
             try facts.role(leaf) == "AXStaticText", try facts.windowID(popup) == stamp.popupWindowID,
-            try facts.windowID(stamp.list) == stamp.ownerWindowID, try facts.windowID(leaf) == stamp.ownerWindowID,
+            try facts.windowID(list) == stamp.ownerWindowID, try facts.windowID(leaf) == stamp.ownerWindowID,
             try facts.windowID(currentOwner) == stamp.ownerWindowID,
             try facts.subrole(currentOwner) == "AXStandardWindow", try facts.modal(currentOwner) == false,
-            let parent = try facts.parent(leaf), same(parent, stamp.list),
-            let popupChildren = try facts.children(popup), popupChildren.count == 1, same(popupChildren[0], stamp.list),
-            let choices = try facts.children(stamp.list), choices.contains(where: { same($0, leaf) })
+            let parent = try facts.parent(leaf), same(parent, list),
+            let popupChildren = try facts.children(popup), popupChildren.count == 1, same(popupChildren[0], list),
+            let choices = try facts.children(list), choices.contains(where: { same($0, leaf) })
         else { return false }
         for index in stamp.reverse.indices {
             guard try facts.role(stamp.reverse[index]) == stamp.roles[index] else { return false }

@@ -170,7 +170,7 @@ import ApplicationServices
         let newCombo = AXUIElementCreateApplication(107)
         let process = NativeProcessIdentity(pid: 101, parent: 1, seconds: 1, microseconds: 0, executable: "fixture")
         func choice(combo: AXUIElement) -> Choice {
-            let stamp = NativePopupOwnerStamp(popup: popup, list: list, reverse: [list, combo, owner],
+            let stamp = NativePopupOwnerStamp(popup: popup, member: list, reverse: [list, combo, owner],
                 roles: ["AXList", "AXComboBox", "AXWindow"], popupWindowID: 9, ownerWindowID: 4, process: process)!
             return Choice(element: leaf, list: list, row: row, popup: popup, observedWindow: popup,
                 ancestors: [popup, list, row], pid: 101, popupID: 9, ownerID: 4, observedWindowID: 9,

@@ -163,13 +163,14 @@ import ApplicationServices
                     document: element, window: window, deadline: until)
             }
         }
-        if role == kAXListRole, let parent, parent.role == kAXWindowRole,
+        let directPopupMember = role == kAXListRole || role == kAXMenuItemRole && parent?.ancestors.isEmpty == true
+        if directPopupMember, let parent, parent.role == kAXWindowRole,
             parent.identity.attributes[kAXSubroleAttribute] == "AXDialog", let budget = diagnosticBudget,
             let observationDeadline
         {
-            // Once per original popup/list during this bounded observation,
-            // then inherited by its leaves. Query/dispatch never fills an old
-            // stamp from a current owner. Unknown evidence leaves the tree intact.
+            // Record the list or the exact submenu item during original
+            // forward observation. Input cannot fill an old stamp from a new
+            // owner. Unknown provenance leaves the ordinary tree intact.
             do {
                 // Optional provenance leaves a reserve for the ordinary tree
                 // and never resets this collection's original deadline.
@@ -182,8 +183,12 @@ import ApplicationServices
                         }
                     }
                 ).facts()
-                target.popupOwner = try NativePopupAttachment.observe(
-                    popup: parent.element, list: element, facts: facts, same: { CFEqual($0, $1) })
+                target.popupOwner =
+                    try role == kAXListRole
+                    ? NativePopupAttachment.observe(
+                        popup: parent.element, list: element, facts: facts, same: { CFEqual($0, $1) })
+                    : NativePopupAttachment.observeSubmenu(
+                        popup: parent.element, leaf: element, facts: facts, same: { CFEqual($0, $1) })
             } catch is NativePopupObservationUnavailable {}
         }
         if parent == nil, let previous, previous.identity.refining(with: identity) != nil,

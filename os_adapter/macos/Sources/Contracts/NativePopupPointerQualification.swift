@@ -23,10 +23,16 @@ struct NativePopupPointerProof<Node, Process: Equatable> {
         context: NativePopupOwnerStamp<Node, Process>, element: Node, pid: pid_t,
         sample: NativePopupPointerSample<Node>, same: (Node, Node) -> Bool
     ) {
-        guard sample.geometry.mapping.id == context.popupWindowID, sample.geometry.mapping.pid == pid,
-            Self.physicalWindow(sample.physicalHit, matches: context.popupWindowID), sample.foreground,
+        guard sample.geometry.mapping.id == context.popupWindowID, sample.geometry.mapping.pid == pid, sample.foreground,
             let hit = sample.hit, same(hit, element), Self.usable(sample.geometry)
         else { return nil }
+        // The AX window already names a different surface for a split submenu.
+        // Do not turn a fallback derived from that AX model into physical proof.
+        if context.kind == .submenu {
+            guard sample.physicalHit.windowServer == .window(context.popupWindowID),
+                sample.geometry.serviceRecipient == nil, same(element, context.member)
+            else { return nil }
+        } else if !Self.physicalWindow(sample.physicalHit, matches: context.popupWindowID) { return nil }
         self.context = context
         self.element = element
         self.pid = pid
