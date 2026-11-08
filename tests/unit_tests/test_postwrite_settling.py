@@ -44,7 +44,9 @@ def test_postwrite_snapshot_is_delivered_once_without_sleeping_for_business_chan
     controller.reader.read = AsyncMock(return_value=observed)
     controller.reader.reader.wait_for_change = AsyncMock(side_effect=AssertionError("Unchanged is not pending"))
     pipeline = InterfaceReadPipeline(controller)
-    pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())
+    pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(
+        roots=(), snapshot=SimpleNamespace(collection=None),
+    )
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
     monkeypatch.setattr(
         "computer_use.interaction.read.views.pipeline.tree_document",
