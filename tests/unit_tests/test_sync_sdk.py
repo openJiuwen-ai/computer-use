@@ -137,7 +137,9 @@ def test_operation_error_propagates_at_the_call_and_closed_handles_do_not_execut
 @pytest.mark.parametrize("key, canonical", [
     ("Backspace", "BackSpace"), ("BackSpace", "BackSpace"), ("shift+ctrl+Backspace", "shift+ctrl+BackSpace"),
     ("super+tab", "super+Tab"), ("tAb", "Tab"), ("shift+page_down", "shift+Page_Down"), ("f12", "F12"),
-    ("ctrl+a", "ctrl+a"),
+    ("ctrl+a", "ctrl+a"), ("shift+=", "shift+="),
+    ("+", "literal-plus"), ("super++", "super+literal-plus"), ("ctrl+shift++", "ctrl+shift+literal-plus"),
+    ("?", "?"), ("alt+?", "alt+?"),
 ])
 def test_public_key_methods_canonicalize_named_keys_without_changing_the_scope(key, canonical):
     class RecordingController(Controller):
@@ -151,12 +153,16 @@ def test_public_key_methods_canonicalize_named_keys_without_changing_the_scope(k
             return await super().run(request)
 
     controller = RecordingController()
+    controller.transport.platform = "macos"
     with computer_for_controller(controller) as computer:
         app = computer.app("Editor")
         field = app.element("Field")
         for target in (computer, app, field):
             target.press_key(key)
-            for invalid in ("ctrl+ctrl+Backspace", "Super+tab", "ctrl+A", "super+tabs"):
+            for invalid in (
+                "ctrl+ctrl+Backspace", "Super+tab", "ctrl+A", "super+tabs", "literal-plus", "super+literal-plus",
+                "question", "++", "super+", "super+++", "shift+shift++", "ctrl++?",
+            ):
                 with pytest.raises(ComputerUseError) as error:
                     target.press_key(invalid)
                 assert error.value.code == "invalid_request" and error.value.effect == "none"
@@ -165,6 +171,29 @@ def test_public_key_methods_canonicalize_named_keys_without_changing_the_scope(k
         (app, "press_key", {"key": canonical}),
         (controller.current, "key", {"key": canonical}),
     ]
+
+
+def test_literal_shortcut_uses_macos_platform_before_native_connection(monkeypatch):
+    monkeypatch.setattr("computer_use.client.computer.sys.platform", "darwin")
+    controller = Controller()
+    with computer_for_controller(controller) as computer:
+        field = computer.app("Editor").element("Field")
+        field.press_key("+")
+    assert controller.actions == [(controller.current, "key", {"key": "literal-plus"})]
+
+
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_literal_shortcuts_do_not_dispatch_on_other_platforms(platform):
+    controller = Controller()
+    controller.transport.platform = platform
+    with computer_for_controller(controller) as computer:
+        app = computer.app("Editor")
+        for target in (computer, app, app.element("Field")):
+            for key in ("+", "super++", "?", "alt+?", "literal-plus"):
+                with pytest.raises(ComputerUseError) as error:
+                    target.press_key(key)
+                assert error.value.code == "invalid_request" and error.value.effect == "none"
+    assert controller.actions == []
 
 
 def test_all_model_methods_are_synchronous_including_retained_details():

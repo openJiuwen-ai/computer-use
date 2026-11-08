@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import sys
 import weakref
 
 from computer_use.diagnostics import local_failure
@@ -54,9 +55,10 @@ def _text(text, paste=False):
         raise local_failure(str(error)) from error
 
 
-def _key(key):
+def _key(key, controller):
+    platform = getattr(controller.transport, "platform", None)
     try:
-        return normalize_key(key)
+        return normalize_key(key, allow_macos_glyphs=platform == "macos" or platform is None and sys.platform == "darwin")
     except Exception as error:
         raise local_failure(str(error)) from error
 
@@ -186,7 +188,7 @@ class Computer:
 
     @synchronous
     def press_key(self, key):
-        return self._global_input("key", {"key": _key(key)})
+        return self._global_input("key", {"key": _key(key, self._controller)})
 
     @synchronous
     def paste(self, text):
@@ -300,7 +302,7 @@ class App:
     @synchronous
     def press_key(self, key, *, window=None):
         _window(window)
-        key = _key(key)
+        key = _key(key, self._controller)
         return operation(lambda: self._controller.run(UIKeyboard(self, "press_key", dict(key=key), window)))
 
     @synchronous
@@ -381,7 +383,7 @@ class Element:
 
     @synchronous
     def press_key(self, key):
-        return self._act("key", {"key": _key(key)})
+        return self._act("key", {"key": _key(key, self._controller)})
 
     @synchronous
     def focus(self):

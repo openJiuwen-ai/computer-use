@@ -57,13 +57,20 @@ _CANONICAL_KEY_NAMES = {name.lower(): name for name in _NAMED_KEYS}
 _PUNCTUATION = "-=[]\\;',./`"
 
 
-def normalize_key(value):
+def normalize_key(value, *, allow_macos_glyphs=False):
     nonempty(value, "key")
-    *parts, name = value.split("+")
+    if allow_macos_glyphs and value == "+":
+        parts, name = [], "+"
+    elif allow_macos_glyphs and value.endswith("++"):
+        parts, name = value[:-2].split("+"), "+"
+    else:
+        *parts, name = value.split("+")
     key = _CANONICAL_KEY_NAMES.get(name.lower(), name)
     if (
         not (
             key in _NAMED_KEYS
+            or allow_macos_glyphs
+            and key in ("+", "?")
             or len(key) == 1
             and key in _PUNCTUATION
             or re.fullmatch("[a-z0-9]", key)
@@ -77,4 +84,5 @@ def normalize_key(value):
             f"unsupported key or modifiers: {value}. Keys: a–z, 0–9, punctuation {_PUNCTUATION}"
             f", {', '.join(_NAMED_KEYS)}; modifiers: super, ctrl, alt, shift (joined with +)"
         )
-    return "+".join((*parts, key))
+    # Keep the wire chord unambiguous for native modifier and route checks.
+    return "+".join((*parts, "literal-plus" if key == "+" else key))

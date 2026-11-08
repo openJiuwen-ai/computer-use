@@ -41,6 +41,8 @@ If native menu tracking refuses the click before dispatch and the menu closes,
 a shortcut displayed for that enabled item can be used explicitly. Send it to
 the intended window with app.press_key('super+o', window=ref), using the actual
 shortcut shown and checking that the item and window still apply.
+On macOS, displayed punctuation + and ? can be used as the final key,
+for example app.press_key('+', window=ref) or app.press_key('super++', window=ref).
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
