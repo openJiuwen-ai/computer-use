@@ -634,6 +634,17 @@ import ApplicationServices
         ]
     }
 
+    func windowCatalogue(
+        appName: String, collect: () throws -> (windows: [[String: Any]], stopReasons: [String])
+    ) rethrows -> [String: Any] {
+        let began = Int64(Date().timeIntervalSince1970 * 1000)
+        let catalogue = try collect()
+        var reply = result("windowCatalogue", began: began, reasons: catalogue.stopReasons)
+        reply["appName"] = appName
+        reply["windows"] = catalogue.windows
+        return reply
+    }
+
     func applications(scope: NativeInspectQuery.ApplicationScope = .all(includeEnded: false)) throws -> [String: Any] {
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let deadline = min((RequestDiagnostics.deadline ?? .infinity) - 0.2, ProcessInfo.processInfo.systemUptime + 3)

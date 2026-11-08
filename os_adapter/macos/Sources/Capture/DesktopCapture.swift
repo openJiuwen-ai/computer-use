@@ -142,18 +142,18 @@ import CoreGraphics
 
     func windowCatalogue(
         appName: String, retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]
-    ) throws -> [String: Any] {
+    ) throws -> (windows: [[String: Any]], stopReasons: [String]) {
         try BackgroundTarget.validateDesktop()
         let frontmost = NSWorkspace.shared.frontmostApplication
         guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]]
-        else { return ["windows": [[String: Any]](), "stopReasons": ["WindowServer catalogue unavailable"]] }
+        else { return ([], ["WindowServer catalogue unavailable"]) }
         let result = try windowRows(
             Self.visibleWindows(raw), appName: appName, frontmost: frontmost, retainWindow: retainWindow)
         var reasons = [String]()
         if result.omitted > 0 { reasons.append("\(result.omitted) matching windows exceeded the catalogue limit") }
         if result.unresolved { reasons.append("Some matching windows have no confirmed native identity") }
-        return ["windows": result.windows, "stopReasons": reasons]
+        return (result.windows, reasons)
     }
 
     func read(maxDimension: Int = 4096, retainedCaptures: Set<String> = [], retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]) async throws -> [String: Any] {

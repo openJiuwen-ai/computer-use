@@ -18,15 +18,11 @@ import ApplicationServices
                 throw DriverError("window catalogue requires a session read scope", code: .invalidRequest)
             }
             try access.sharing.checkAvailable()
-            let interval = CaptureInterval()
-            var catalogue = try access.desktop().windowCatalogue(
-                appName: appName, retainWindow: access.directory.retainDesktopWindow)
+            let catalogue = try access.directory.windowCatalogue(appName: appName) {
+                try access.desktop().windowCatalogue(
+                    appName: appName, retainWindow: access.directory.retainDesktopWindow)
+            }
             try op.check()
-            catalogue["kind"] = "windowCatalogue"
-            catalogue["session"] = access.session
-            catalogue["platform"] = "macos"
-            catalogue["appName"] = appName
-            catalogue["observed"] = interval.observation()
             return catalogue
         case .surfaceBatch(let applications, let profile):
             return try NativeSurfaceBatchPipeline.collect(request, applications: applications, profile: profile, access: access)

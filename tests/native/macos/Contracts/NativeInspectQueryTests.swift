@@ -54,6 +54,22 @@ import Foundation
         } catch let error as DriverError { precondition(error.code == .staleTarget) }
     }
 
+    @MainActor static func windowCatalogueUsesDirectoryTimestamps() throws {
+        let directory = NativeDirectory(state: NativeDesktopState(), session: "test-session")
+        let reply = directory.windowCatalogue(appName: "Google Chrome") {
+            ([], ["WindowServer catalogue unavailable"])
+        }
+        let observed = reply["observed"] as! [String: Any]
+        let startedAt = observed["startedAt"]!, completedAt = observed["completedAt"]!
+        precondition(type(of: startedAt) == Int64.self && type(of: completedAt) == Int64.self,
+            "directory timestamps must be integer milliseconds, unlike capture timestamps")
+        precondition(startedAt as! Int64 > 0 && completedAt as! Int64 >= startedAt as! Int64)
+        let wire = try JSONSerialization.data(withJSONObject: reply)
+        let parsed = try JSONSerialization.jsonObject(with: wire) as! [String: Any]
+        precondition(parsed["kind"] as? String == "windowCatalogue" && parsed["appName"] as? String == "Google Chrome")
+        precondition(parsed["stopReasons"] as? [String] == ["WindowServer catalogue unavailable"])
+    }
+
     static func exactEndedApplications() {
         let instances = ApplicationInstances<Int>()
         let original = instances.id(for: 1)
@@ -81,6 +97,7 @@ import Foundation
         let cases = try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as! [[String: Any]]
         for test in cases { precondition(accepted(test["query"]!) == test["valid"] as! Bool, test["name"] as! String) }
         try exactApplicationLookup()
+        try windowCatalogueUsesDirectoryTimestamps()
         exactEndedApplications()
         let nodes: [String: Any] = ["kind": "nodes", "fields": ["AXRole"], "maxNodes": 1, "maxDepth": 0]
         for requested in ["none", "names", "full"] {
