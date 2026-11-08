@@ -310,6 +310,34 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.write.arun.assert_not_awaited()
 
+    async def test_same_call_point_miss_names_new_fixed_window_image_without_using_it(self):
+        await self.execute("combined = compose(app, ('a', 'b'))")
+        b = ref(self.app, "b")
+        point = f"app.point((20, 30), window={b})"
+        # A fresh image of another window cannot help this fixed-window point.
+        other = await self.runtime.execute({"executionId": 2, "code": f"observe(window, 'a')\n{point}"})
+        self.assertTrue(other.get("isError"), other)
+        self.assertNotIn("Use the attached image", other["content"][-1]["text"])
+
+        hidden = await self.runtime.execute({"executionId": 3, "code": f"capture(scope({b}), 'b')\n{point}"})
+        self.assertTrue(hidden.get("isError"), hidden)
+        self.assertNotIn("Use the attached image", hidden["content"][-1]["text"])
+
+        result = await self.runtime.execute({"executionId": 4, "code": (
+            f"observed = observe(scope({b}), 'b')\n{point}"
+        )})
+        self.assertTrue(result.get("isError"), result)
+        image, = [block for block in result["content"] if block["type"] == "image"]
+        image_id = image["_meta"]["computer-use"]["imageId"]
+        error = result["content"][-1]["text"]
+        self.assertIn("Effect: none", error)
+        self.assertIn(f"Use the attached image (Image {image_id}, Window {b}) in the next computer_use call.", error)
+        self.write.arun.assert_not_awaited()
+
+        await self.execute(f"p = {point}")
+        await self.click(window_scope(self.controller, self.app, b), (20, 30))
+        self.assertEqual(self.last_target(), self.captures[-1].pieces[0].image.target)
+
     async def test_image_only_alias_delivery_keeps_its_exact_mcp_scale_and_native_target(self):
         result = await self.execute("large = capture(alias, 'b', (4096, 1278))\nprint_image(large.png)")
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")

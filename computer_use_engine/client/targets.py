@@ -5,9 +5,10 @@
 from dataclasses import InitVar, dataclass, field, replace
 
 from computer_use.diagnostics import local_failure
+from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.requests import ActOnElement, UIPointer
 from computer_use.interaction.requests import ExecuteAction
-from computer_use.interaction.write.ui.pipeline import input_image
+from computer_use.interaction.write.ui.pipeline import input_image, note_pending_point_image
 from computer_use.native.contracts import Binding, Intent
 
 
@@ -63,7 +64,12 @@ def image_target(controller, owner, point):
         controller.interfaces.windows.retain_target_capture(target, ref)
         return target
     image = replace(input_image(controller, owner, current=False))
-    piece, _ = image.hit(point, scope_required=False)
+    try:
+        piece, _ = image.hit(point, scope_required=False)
+    except ComputerUseError as error:
+        if error.code == "invalid_request":
+            note_pending_point_image(controller, owner, error, after=image.generation)
+        raise
     target = Target(controller, owner, piece.image.target, _point=point, _image=image, _internal=True)
     controller.interfaces.windows.retain_target_capture(target, piece.image.target.capture)
     return target
