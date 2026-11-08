@@ -249,9 +249,14 @@ import ApplicationServices
                         kind: kind, text: op.request.parameters["text"] as? String, replacement: selection,
                         state: facts, textPolicy: textPolicy)
                     input["selectionKnown"] = readiness.pending.contains("selection") ? "unknown" : "yes"
-                    try declare(.keyboard(kind, selection, textPolicy), supported: keyboardSupported) { prepared in
+                    // A ready scalar can own its complete text protocol even
+                    // when its AX tree also exposes a child editor.
+                    let selected = originalAddressedElement && keyboardSupported && readiness.ready
+                        && facts.receiver(element) == "yes"
+                        ? NativeReplacementUnit(element: element).structuredScalarShortcut(selection) : selection
+                    try declare(.keyboard(kind, selected, textPolicy), supported: keyboardSupported) { prepared in
                         try unit.readiness(
-                            kind: kind, text: op.request.parameters["text"] as? String, replacement: selection,
+                            kind: kind, text: op.request.parameters["text"] as? String, replacement: selected,
                             prepared: prepared, state: facts, textPolicy: textPolicy)
                     }
                 }

@@ -7,7 +7,7 @@ import ApplicationServices
 /// receiver are owned by the surrounding operation; no editor lookup occurs.
 @MainActor struct NativeReplacementUnit {
     enum Selection: Equatable {
-        case range, shortcut, markers, selectAll
+        case range, shortcut, structuredScalarShortcut, markers, selectAll
         case keyboardSelectAll(NativeKeyboardTextEntry)
 
         var keyboardEntry: NativeKeyboardTextEntry? {
@@ -15,7 +15,8 @@ import ApplicationServices
             return nil
         }
 
-        var usesWindowCommand: Bool { self == .shortcut || self == .selectAll || keyboardEntry != nil }
+        var axContract: Selection { self == .structuredScalarShortcut ? .shortcut : self }
+        var usesWindowCommand: Bool { axContract == .shortcut || self == .selectAll || keyboardEntry != nil }
     }
     let element: AXUIElement
 
@@ -130,6 +131,21 @@ import ApplicationServices
         return count == numeric.count
     }
 
+    func structuredScalarShortcut(_ selection: Selection) -> Selection {
+        guard selection == .shortcut, let before = snapshot(selection), hasScalarTextRecipe(before) else {
+            return selection
+        }
+        return .structuredScalarShortcut
+    }
+
+    private func hasScalarTextRecipe(_ before: Snapshot) -> Bool {
+        guard AXAccess.read(element, kAXRoleAttribute).value as? String == kAXIncrementorRole else { return false }
+        return Self.usesScalarTextRecipe(
+            selection: .shortcut, role: kAXIncrementorRole,
+            characterCount: AXAccess.read(element, kAXNumberOfCharactersAttribute),
+            rangeWritable: AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true, before: before)
+    }
+
     private func keyboardSelectionIsScoped() -> Bool {
         func owns(_ marker: AXTextMarker) -> Bool {
             var raw: CFTypeRef?
@@ -234,7 +250,7 @@ import ApplicationServices
             try check()
             let valid = if let entry = selection.keyboardEntry {
                 NativeKeyboardTextEntry.read(element) == entry
-            } else { contract() == selection }
+            } else { contract() == selection.axContract }
             guard valid else {
                 throw DriverError("replacement editing/selection contract changed", code: .inputUnavailable)
             }
@@ -247,6 +263,12 @@ import ApplicationServices
         try await validate()
         guard let before = snapshot(selection) else {
             throw DriverError("target text extent is unavailable; no replacement sent", code: .inputUnavailable)
+        }
+        let requiresScalarProof = selection == .structuredScalarShortcut
+        let scalarRecipe = selection.axContract == .shortcut && (!text.isEmpty || requiresScalarProof)
+            && hasScalarTextRecipe(before)
+        if requiresScalarProof && !scalarRecipe {
+            throw NativeRouteUnavailable(description: "the original scalar replacement proof is unavailable")
         }
         if before.empty && text.isEmpty { return true }
         func boundedLiteral() -> [UInt16]? {
@@ -272,13 +294,7 @@ import ApplicationServices
         // subclasses/objectNames need not expose a framework class in their
         // identifier, so the recipe uses this editor's text contract instead.
         var atomicText: Input.AtomicTextEvents?
-        if !text.isEmpty, selection == .shortcut,
-            AXAccess.read(element, kAXRoleAttribute).value as? String == kAXIncrementorRole,
-            Self.usesScalarTextRecipe(
-            selection: selection, role: kAXIncrementorRole,
-            characterCount: AXAccess.read(element, kAXNumberOfCharactersAttribute),
-            rangeWritable: AXAccess.writable(element, kAXSelectedTextRangeAttribute).value == true, before: before)
-        {
+        if !text.isEmpty, scalarRecipe {
             guard let events = try Input.prepareAtomicText(text, foreground: delivery.isGlobal) else {
                 throw DriverError(
                     "the complete scalar replacement cannot be encoded; no replacement input sent",
@@ -292,7 +308,7 @@ import ApplicationServices
         // An existing full AX range can have been set without the editor's
         // Select All command. Establish keyboard editing even in that case.
         if selection.usesWindowCommand || !before.full {
-            switch (selection, before) {
+            switch (selection.axContract, before) {
             case (.range, .numeric(let numeric)):
                 try await validate()
                 try selectRange(

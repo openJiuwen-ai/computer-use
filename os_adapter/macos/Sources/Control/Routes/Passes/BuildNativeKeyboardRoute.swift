@@ -51,9 +51,9 @@ import ApplicationServices
             throw DriverError("the selected keyboard target is disabled", code: .inputUnavailable)
         }
         if expected == .replace, replacement?.keyboardEntry == nil {
-            guard let element = unit.element, let replacement,
-                NativeReplacementUnit(element: element).contract() == replacement
-            else { throw DriverError("the selected replacement contract changed", code: .inputUnavailable) }
+            try checkReplacementContract(replacement) {
+                unit.element.flatMap { NativeReplacementUnit(element: $0).contract() }
+            }
         }
         if kind == "prepare_receiver" {
             return .prepare {
@@ -146,6 +146,15 @@ import ApplicationServices
         }
 
     }
+
+    static func checkReplacementContract(
+        _ selected: NativeReplacementUnit.Selection?, sample: () -> NativeReplacementUnit.Selection?
+    ) throws {
+        guard let selected, sample() == selected.axContract else {
+            throw DriverError("the selected replacement contract changed", code: .inputUnavailable)
+        }
+    }
+
     /// Parent composition for this selected route. Ports remain explicit at
     /// the callsite; the policy helper has no AX/full-scope API or input effects.
     static func sampleKeyboardBoundary(
