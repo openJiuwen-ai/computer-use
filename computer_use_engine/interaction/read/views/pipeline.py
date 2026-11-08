@@ -25,6 +25,7 @@ from computer_use.interaction.query.instances.scope import (
 )
 from computer_use.interaction.read.acquisition.components.support import ObservationGap, collect_component
 from computer_use.interaction.read.acquisition.images.fixed import FixedWindowImagePipeline
+from computer_use.interaction.read.acquisition.images.refresh import IMAGE_REFRESH_MINIMUM_MS
 from computer_use.interaction.read.acquisition.loading import window_content_unexposed
 from computer_use.interaction.read.limits import DEFAULT_WINDOW_MAX_NODES
 from computer_use.interaction.read.model import (
@@ -665,6 +666,15 @@ class InterfaceReadPipeline:
                 # Only automatic related reads follow member transitions.
                 recheck_pending = True
         if related is not None:
+            # Only the newly focused principal can use this one optional
+            # capture, after the related read's existing directory rechecks.
+            member = permitted.get(plan.principal)
+            if member is not None and plan.selection_error is None and plan.principal == directory.get("focusedWindow"):
+                identity = WindowIdentity.of(member)
+                if identity not in related.known_windows:
+                    part = next((item for item in parts if item.identity == identity), None)
+                    if part is not None:
+                        await self._refresh_new_native_image(part, directory)
             notes.append(related_window_summary(
                 related, directory, instance.windows,
                 refresh_incomplete=any(gap.component == "directory" for gap in collection_gaps),
@@ -1013,6 +1023,38 @@ class InterfaceReadPipeline:
             ),
             on_observation=on_observation,
         )
+
+    async def _refresh_new_native_image(self, part: WindowPart, directory: NativeDirectory) -> None:
+        """Recover a changed capture after the same member gains a native binding."""
+        image, source = part.image, part.image_directory
+        if (
+            image is None or source is None or part.source is None or part.source.scope_confirmed
+            or image.rechecked_scope is not None or not image.scope_changed or image.target.capture is None
+            or image.target.root_window != part.identity.window
+            or window_binding(image.target) != window_binding(part.target)
+        ):
+            return
+        scope = image.native_upgrade_scope(source, directory)
+        if scope is None:
+            return
+        budget = current_operation_budget()
+        available = budget.available_ms() if budget is not None else None
+        if available is not None and available < IMAGE_REFRESH_MINIMUM_MS:
+            return
+        # One native read under the caller's remaining deadline. Native
+        # capture revalidates its window and geometry before returning.
+        target = window_binding(image.target)
+        refreshed, _ = await collect_component(
+            self.controller.port, "image",
+            lambda: self.controller.reader.images.window(target, timeout_ms=600),
+        )
+        if (
+            refreshed is not None and not refreshed.scope_changed
+            and refreshed.target.capture is not None and refreshed.target.capture != image.target.capture
+            and window_binding(refreshed.target) == target
+        ):
+            part.image = replace(refreshed, rechecked_scope=scope)
+            part.image_directory = directory
 
     async def member(
         self, ui: UIHandle, item: SurfaceInfo, view: str, *, max_nodes: int = 200,

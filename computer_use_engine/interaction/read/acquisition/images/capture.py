@@ -46,14 +46,18 @@ class WindowImage:
 
     def member_scope(self, directory: NativeDirectory) -> ImageMemberScope | None:
         """Identify this native member and its known parent chain independently of peers."""
+        return self._member_scope(directory, require_native=True)
+
+    def _member_scope(self, directory: NativeDirectory, *, require_native: bool) -> ImageMemberScope | None:
         target = self.target
         if directory.get("platform") != "macos" or directory["session"] != target.session:
             return None
         members = {item["window"]: item for item in directory["surfaces"]}
         window = target.root_window
         member = members.get(window)
-        if member is None or not member["nativeWindow"] or (member["instance"], member["surface"]) != (
-            target.instance, target.surface,
+        if (
+            member is None or require_native and not member["nativeWindow"]
+            or (member["instance"], member["surface"]) != (target.instance, target.surface)
         ):
             return None
         ended = {WindowIdentity.of(item) for item in directory.get("endedWindows", ())}
@@ -72,6 +76,16 @@ class WindowImage:
                 break
             window = parent
         return None
+
+    def native_upgrade_scope(
+        self, source: NativeDirectory, current: NativeDirectory,
+    ) -> ImageMemberScope | None:
+        """Match a newly native member to its exact earlier AX-only lifetime."""
+        earlier = next((item for item in source["surfaces"] if item["window"] == self.target.root_window), None)
+        if earlier is None or earlier["nativeWindow"] is not False or not earlier["accessibility"]:
+            return None
+        confirmed = self.member_scope(current)
+        return confirmed if confirmed is not None and confirmed == self._member_scope(source, require_native=False) else None
 
 
 class NativeImages:

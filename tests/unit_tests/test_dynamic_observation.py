@@ -35,6 +35,7 @@ from computer_use.session import images
 from computer_use.session.events import set_observation_handler
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
+from computer_use.session.operations import operation_budget
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from test_d34_read_contracts import directory, setup, window
@@ -89,11 +90,11 @@ def tree(item, title, references=None):
     return normalize_facts(native, references if references is not None else DisplayReferences("session"))
 
 
-def pixels(state, item):
+def pixels(state, item, *, capture=None):
     buffer = BytesIO()
     with Image.new("RGB", (20, 10), "white") as image:
         image.save(buffer, format="PNG")
-    target = replace(member_target(state, item), node=None, capture="capture:" + item["window"])
+    target = replace(member_target(state, item), node=None, capture=capture or "capture:" + item["window"])
     png = decode_capture(
         {
             "id": target.capture,
@@ -404,6 +405,101 @@ def test_new_parentless_modal_delivers_pixels_without_waiting_for_its_tree(monke
         assert any("File name field" in block.get("text", "") for block in result["content"])
     if failed_component != "image":
         assert app._image.pieces[0].window == "Panel" and app._image.pieces[0].image.target == image.target
+
+
+@pytest.mark.parametrize(
+    "later_evidence",
+    [
+        "ready", "insufficient_budget", "capture_timeout", "capture_scope_change", "capture_rebound", "capture_reused",
+        "no_native_upgrade", "already_native", "capture_stable", "changed_parent", "ended", "different_lifetime",
+    ],
+)
+def test_related_new_window_can_replace_historical_pixels_after_exact_native_upgrade(monkeypatch, later_evidence):
+    parent = window("A", title="Original document")
+    panel = {**window("Panel", title="Track Envelopes"), "nativeWindow": later_evidence == "already_native"}
+    bound = {**panel, "nativeWindow": True}
+    current_panel = {
+        "no_native_upgrade": panel,
+        "changed_parent": {**bound, "parent": "A", "parentState": "known"},
+        "different_lifetime": {**bound, "instance": "replacement", "surface": "surface:replacement"},
+    }.get(later_evidence, bound)
+    before = directory(parent, panel, focused="Panel", reasons=("unrelated attached AX failure",))
+    after = directory(
+        parent, current_panel, focused="Panel", reasons=("unrelated attached AX failure",),
+        ended=(panel,) if later_evidence == "ended" else (),
+    )
+    controller, app, state = setup(before)
+    target = member_target(state, panel)
+    related = RelatedRead(member_target(state, parent), (WindowIdentity.of(parent),))
+    old = replace(pixels(state, panel), scope_changed=later_evidence != "capture_stable")
+    fresh = pixels(state, panel, capture="capture:Panel:refresh")
+    if later_evidence == "capture_scope_change":
+        fresh = replace(fresh, scope_changed=True)
+    if later_evidence == "capture_rebound":
+        fresh = replace(fresh, target=replace(fresh.target, instance="wrong-instance"))
+    if later_evidence == "capture_reused":
+        fresh = replace(old, scope_changed=False)
+    controller.reader.read = AsyncMock(return_value=replace(
+        parent_result(state, panel, before, after),
+        tree=tree(panel, "Envelope control"), image=old,
+    ))
+    controller.reader.images.window = (
+        AsyncMock(side_effect=TimeoutError("image budget")) if later_evidence == "capture_timeout"
+        else AsyncMock(return_value=fresh)
+    )
+    controller.reader.reader.read = AsyncMock(side_effect=AssertionError("unexpected tree collection"))
+    controller.reader.directory._query = AsyncMock(side_effect=AssertionError("unexpected directory collection"))
+    pipeline = InterfaceReadPipeline(controller)
+    if later_evidence in ("ended", "different_lifetime"):
+        pipeline.member = AsyncMock(side_effect=lambda _owner, item, _view, **_kwargs: WindowPart(
+            member_target(state, item)
+        ))
+
+        async def recheck(*_args, **_kwargs):
+            adopt(controller, app, after)
+            return after
+
+        monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", recheck)
+
+    async def collect():
+        # The public SDK gives ordinary calls an operation context with no explicit deadline.
+        timeout_ms = 200 if later_evidence == "insufficient_budget" else None
+        with operation_budget(timeout_ms):
+            return await pipeline._collect(app, "tree", False, None, before, None, None, related)
+
+    events = []
+    monkeypatch.setattr(images, "_delivery_required", True)
+    set_observation_handler(events.append)
+    try:
+        observed = asyncio.run(collect())
+    finally:
+        set_observation_handler(None)
+
+    assert controller.reader.read.await_count == 1
+    controller.reader.reader.read.assert_not_awaited()
+    controller.reader.directory._query.assert_not_awaited()
+    assert len(events) == 1
+    public = deliver_through_runtime([events[0]["observation"]])
+    delivered = [block for block in public["content"] if block["type"] == "image"]
+    identity = WindowIdentity.of(panel)
+    if later_evidence == "ready":
+        assert app._image.png is fresh.image
+        assert "Envelope control" in observed.text and "Directory partial:" in observed.text
+        assert len(delivered) == 1
+        caption = delivered[0]["_meta"]["computer-use"]["caption"]
+        assert "Image point for window=" in caption and "historical capture" not in caption
+        assert state.window_images[identity].hit((5, 5))[0].image.target == fresh.target
+    elif later_evidence not in ("ended", "different_lifetime"):
+        assert app._image.png is old.image and "historical capture" in observed.text
+        assert len(delivered) == 1
+        assert "Image point for window=" not in delivered[0]["_meta"]["computer-use"]["caption"]
+        assert identity not in state.window_images
+    retry = later_evidence in ("ready", "capture_timeout", "capture_scope_change", "capture_rebound", "capture_reused")
+    assert controller.reader.images.window.await_count == int(retry)
+    if retry:
+        binding = controller.reader.images.window.await_args.args[0]
+        assert binding == replace(target, node=None)
+        assert controller.reader.images.window.await_args.kwargs["timeout_ms"] == 600
 
 
 def test_known_window_becoming_modal_gets_content_without_new_window_id():
