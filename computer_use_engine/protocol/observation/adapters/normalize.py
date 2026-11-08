@@ -464,6 +464,7 @@ class Adapter:
             self.field_sources,
             diagnostic_fields={identity: tuple(paths) for identity, paths in self.diagnostic_fields.items()},
             text_read_fields=self.text_read_fields,
+            focused_element=self.facts.get("focusedElement"),
         )
         return DriverObservationReply(observation, metadata)
 

@@ -449,6 +449,9 @@ def relation_record(
 def query_facts(wire: DriverWire) -> dict[str, Any]:
     """Build transient field evidence for native queries and the entry adapter."""
     rows, relations, unread = [], [], []
+    roots = wire.raw["roots"]
+    focus_root = roots[0] if wire.platform == "macos" and len(roots) == 1 else None
+    focus_seeds = []
     for identity, raw in wire.nodes.items():
         if raw.get("identity") is not None:
             wire.value(raw["identity"])
@@ -464,6 +467,16 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
         actions = {"state": "unavailable", "items": [], "detail": "Action catalogue was not read"}
         for index, raw_property in enumerate(array(raw["properties"])):
             key, value, state, arguments, read = wire.property(raw_property)
+            if identity == focus_root and key == ("toolkit", "focused_read_seed"):
+                details = read["details"]
+                focus_seeds.append(
+                    value["node"]
+                    if state == "value" and not arguments and isinstance(value, Mapping)
+                    and value.get("nativeType") == "AXUIElement" and read.get("complete") is True
+                    and not read["issues"] and details.get("source") == "application"
+                    and details.get("attribute") == "AXFocusedUIElement" and details.get("state") == "confirmed"
+                    else None
+                )
             if read["details"].get("relation") is True:
                 relations.append(relation_record(wire, identity, key[1], value, state, read))
                 continue
@@ -551,12 +564,13 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
             "startedAt": wire.interval[0] // 1_000_000,
             "completedAt": wire.interval[1] // 1_000_000,
         },
-        "roots": list(wire.raw["roots"]),
+        "roots": list(roots),
         "nodes": rows,
         "relations": relations,
         "requestedRelations": list(requested_relations),
         "unread": unread,
         "stopReasons": [issue.get("detail") or issue["reason"] for issue in wire.read["issues"]],
+        **({"focusedElement": focus_seeds[0]} if len(focus_seeds) == 1 and focus_seeds[0] is not None else {}),
         **({"changeToken": wire.details["change_token"]} if "change_token" in wire.details else {}),
     }
 

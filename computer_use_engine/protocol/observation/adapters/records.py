@@ -30,6 +30,7 @@ class DriverReadMetadata:
             rather than the UI. Their original values remain in the observation graph.
         text_read_fields: Complete independent text captures selected for readText, separate
             from control values and the native selectors used by input execution.
+        focused_element: Application-reported focus confirmed inside the capture root.
     """
 
     surface: str
@@ -42,6 +43,7 @@ class DriverReadMetadata:
     input_containers: Mapping[NodeId, bool] = field(default_factory=dict)
     diagnostic_fields: Mapping[NodeId, tuple[FieldPath, ...]] = field(default_factory=dict)
     text_read_fields: Mapping[NodeId, FieldPath] = field(default_factory=dict)
+    focused_element: NodeId | None = None
 
     def __post_init__(self) -> None:
         for key in ("relation_fields", "requested_fields", "field_sources", "input_containers", "text_read_fields"):

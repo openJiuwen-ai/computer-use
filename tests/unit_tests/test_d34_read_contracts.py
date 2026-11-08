@@ -196,6 +196,76 @@ def test_application_header_preserves_all_windows_and_unknown_parent_selection()
     assert len(header.scoped) == 2
 
 
+@pytest.mark.parametrize("seed, focused", [("confirmed", True), ("unavailable", True), ("confirmed", False)])
+def test_related_diff_preserves_only_confirmed_reported_ax_focus(monkeypatch, seed, focused):
+    from computer_use.interaction.read.delivery.diff.formatting import snapshot_diff
+    from computer_use.interaction.read.facts.normalize import normalize_facts
+    from computer_use.interaction.read.model import AppObservation
+    from computer_use.interaction.read.numbering.references import DisplayReferences
+    from computer_use.interaction.read.presentation.document import DisplayDocument
+    from computer_use.protocol.observation.adapters import decode_driver_reply
+    from unit_tests.test_metadata_value_pool import payload, scalar
+
+    a = window("A")
+    current = directory(a, focused="A")
+    controller, app, state = setup(current)
+    target = member_target(state, a)
+    raw = payload()
+    raw["roots"] = [target.node]
+    raw["read"]["details"][0][1] = scalar(target.surface)
+    root = raw["nodes"][0]
+    root["id"] = target.node
+    editor = {"nativeType": "AXUIElement", "data": {"ref": "editor"}}
+    root["properties"] += [
+        {
+            "key": ["macos.ax", "AXChildren"],
+            "value": {"nativeType": "CFArray", "data": {"items": [editor]}},
+            "read": {"details": [[key, scalar(value)] for key, value in {
+                "relation": True, "certainty": "confirmed", "state": "complete", "total": 1,
+            }.items()]},
+        },
+        {
+            "key": ["toolkit", "focused_read_seed"],
+            "value": editor if seed == "confirmed" else {"nativeType": "CFNull", "data": None},
+            "read": {
+                "api": "AXUIElementCopyAttributeValue", "complete": seed == "confirmed",
+                "details": [["attribute", scalar("AXFocusedUIElement")], ["source", scalar("application")],
+                            ["state", scalar(seed)]],
+            },
+        },
+    ]
+    raw["nodes"].append({**root, "id": "editor", "properties": [
+        {"key": ["macos.ax", "AXRole"], "value": scalar("AXTextArea")},
+        {"key": ["macos.ax", "AXFocused"], "value": scalar(focused)},
+    ]})
+    reply = decode_driver_reply(raw)
+    tree = normalize_facts(reply.observation, DisplayReferences("session"), scope_kind="window")
+    tree.collection = reply.metadata
+    observed = AppObservation(
+        selection=WorkingWindow("application", "Fixture", target), target=target, applications=None,
+        source_directory=current, directory=current, tree=tree, image=None,
+        document=DisplayDocument.join(()), refs={}, windows={}, gaps=(), scope_confirmed=True,
+    )
+    controller.reader.read = AsyncMock(return_value=observed)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", AsyncMock(return_value=current))
+    monkeypatch.setattr(
+        "computer_use.interaction.read.views.pipeline.publish",
+        lambda _c, _o, document, *_a, **_kw: {"document": document, "refs": tree.refs},
+    )
+    pipeline = InterfaceReadPipeline(controller)
+    before = asyncio.run(pipeline._collect(app, "tree", False, None, current, observed, None, None))
+    related = RelatedRead(target, (WindowIdentity.of(a),))
+    after = asyncio.run(pipeline._collect(app, "tree", False, None, current, observed, None, related))
+    delivered = snapshot_diff(before, after)
+    assert "Tree: unchanged" in delivered
+    assert "Reported AX focus in window" not in before["document"].text
+    editor_ref = next(ref for ref, token in tree.refs.items() if token == "editor")
+    assert (f"Reported AX focus in window 0 at capture: element {editor_ref}" in delivered) == (
+        seed == "confirmed" and focused
+    )
+
+
 def test_related_failed_new_detail_preserves_original_image_and_catalogue(monkeypatch):
     a, child = window("A"), window("Child", title="")
     current = directory(a, child, focused="Child")

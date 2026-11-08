@@ -82,6 +82,24 @@ def related_window_summary(
     return template("After action: {0}; catalogue {1}.{2}", membership, coverage, detail)
 
 
+def related_focus_summary(
+    target: Binding, prepared: PreparedSnapshot, window_ref: int,
+) -> DisplayText | None:
+    """Present a scoped AX sample independently of unchanged tree rows."""
+    snapshot = prepared.snapshot
+    collection = snapshot.collection
+    if collection is None or collection.surface != target.surface or snapshot.scope_kind != "window":
+        return None
+    token = collection.focused_element
+    node = snapshot.native.nodes.get(token) if token is not None else None
+    if node is None or node.states.focused is False:
+        return None
+    ref = next((ref for ref in prepared.refs if snapshot.refs.get(ref) == token), None)
+    if ref is None:
+        return None
+    return template("Reported AX focus in window {0} at capture: element {1}.", window_ref, ref)
+
+
 def tree_text(
     controller: SessionController,
     target: Binding,

@@ -50,7 +50,7 @@ from .capture_companions import CapturedSharingControl, companion_capture
 from .collection import CollectionPlan, components
 from .menus import InterfaceMenuPipeline, remember_menu
 from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
-from .publication import capture_header, publish, related_window_summary, tree_document
+from .publication import capture_header, publish, related_focus_summary, related_window_summary, tree_document
 from .related import RelatedRead, original_lifecycle, window_lifecycle
 
 if TYPE_CHECKING:
@@ -922,6 +922,16 @@ class InterfaceReadPipeline:
                         ),
                         default=recovery_prefix,
                     )
+                    if (
+                        related is not None and part.target.session == related.original.session
+                        and part.identity == current_identity == related.original_window and window_context.scope_confirmed
+                        and part.identity == WindowIdentity(
+                            part.target.root_window, part.target.surface, part.target.instance
+                        )
+                        and directory.get("focusedWindow") == key
+                        and (focus := related_focus_summary(part.target, prepared, ref)) is not None
+                    ):
+                        lines.append(focus)
                     lines.append(tree_document(controller, part.target, part.tree, prepared=prepared))
             if part.menus is not None and part.snapshots_numbered:
                 lines.append("Application menu:")
