@@ -256,7 +256,7 @@ class Runtime:
         if delivery is not None and caption_bytes <= available:
             if fits and not deferred:
                 run["imageContexts"].set(delivery.source, True)
-            self.emit_image(delivery)
+            self.emit_image(delivery, captured_after_action=observation.get("capturedAfterAction"))
         if not fits:
             if delivery is not None and caption_bytes > available:
                 text += " Image caption exceeds the remaining text budget."
@@ -269,9 +269,12 @@ class Runtime:
         if run is None or not run["active"]:
             return
         self.flush_observations(run)
-        if run["lastWrite"] is not None:
-            run["lastWrite"]["dispatched"] = receipt["status"] == "dispatched"
-        self.emit(dict(type="text", text=run["actions"].render(receipt)), True)
+        number, text = run["actions"].render(receipt)
+        write = run["lastWrite"]
+        if write is not None:
+            write["dispatched"] = receipt["status"] == "dispatched"
+            write["action"] = (current_operation_budget(), number) if write["dispatched"] else None
+        self.emit({"type": "text", "text": text}, True)
 
     def text_page(self, source, page):
         if not self.executor.is_owner:
@@ -319,9 +322,14 @@ class Runtime:
                 )
             self.emit(dict(type="text", text=message), True)
             return
-        observation = dict(event["observation"], write=run["lastWrite"])
+        write = run["lastWrite"]
+        observation = dict(event["observation"], write=write)
         self.flush_observations(run)
         budget = current_operation_budget()
+        action = write.get("action") if write is not None and write["source"] is observation["source"] else None
+        if action is not None and budget is not None and action[0] is budget:
+            # An explicit read after the write has a different operation budget.
+            observation["capturedAfterAction"] = action[1]
         failure = None
         try:
             if budget is not None:
@@ -551,7 +559,7 @@ class Runtime:
             return
         self.emit_image(delivery)
 
-    def emit_image(self, delivery):
+    def emit_image(self, delivery, *, captured_after_action=None):
         run = _runs.get()
         png = delivery.source
         prepared = run["preparedDeliveries"][id(delivery)] if run is not None else None
@@ -574,6 +582,8 @@ class Runtime:
         label = caption if context_shown else image_caption(caption_source, True, delivery.coordinates)
         text = {"type": "text", "text": f"Image {identifier}\n{caption.render()}"}
         metadata = {"imageId": identifier, "caption": label.render()}
+        if captured_after_action is not None:
+            metadata["capturedAfterAction"] = captured_after_action
         block = {"type": "image", "mimeType": "image/png", "data": data, "_meta": {"computer-use": metadata}}
         if run is None or not run["active"]:
             return

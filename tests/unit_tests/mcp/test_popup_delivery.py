@@ -17,7 +17,7 @@ from mcp.client.stdio import stdio_client
 from PIL import Image
 
 
-def popup_fixture(failure=None, *, capture_parent=False, transient=False):
+def popup_fixture(failure=None, *, capture_parent=False, transient=False, image_action_chain=False):
     """Replace native I/O only; retain public SDK, read, numbering and delivery paths."""
     import base64
     from contextlib import nullcontext
@@ -91,7 +91,7 @@ def popup_fixture(failure=None, *, capture_parent=False, transient=False):
             if failure == "directory" and self.popup_read:
                 raise TimeoutError("Optional popup directory recheck failed")
             tick = 10 * len(self.trace) if transient else 1
-            partial = self.partial if transient else self.popup_visible
+            partial = self.partial if transient or image_action_chain else self.popup_visible
             popup = surface("Sheet", None if transient else "A", self.version)
             return {
                 "kind": "surfaces",
@@ -114,7 +114,7 @@ def popup_fixture(failure=None, *, capture_parent=False, transient=False):
             if key == "A":
                 # The first suffix directory still contains only the parent.
                 # The popup appears while its perfectly usable AX tree is read.
-                if not transient:
+                if not transient and not image_action_chain:
                     self.popup_visible = self.clicked
                 children = {
                     "add": NativeNode(role="button", name="Add application", actions=(Action("press", "AXPress"),)),
@@ -163,7 +163,13 @@ def popup_fixture(failure=None, *, capture_parent=False, transient=False):
             if failure in ("image", "both"):
                 raise TimeoutError("Popup screenshot unavailable")
             buffer = BytesIO()
-            with Image.new("RGB", (20, 10), "#22bb44") as image:
+            color = "#22bb44"
+            if image_action_chain:
+                if self.writes == 0:
+                    color = "#eeeeee"
+                elif self.writes > 2:
+                    color = "#aa1199"
+            with Image.new("RGB", (20, 10), color) as image:
                 image.save(buffer, format="PNG")
             png = decode_capture(
                 {
@@ -197,6 +203,11 @@ def popup_fixture(failure=None, *, capture_parent=False, transient=False):
 
     async def dispatch(intent, target, *args, **kwargs):
         port.trace.append(("write", target.root_window, target.node))
+        if image_action_chain:
+            assert target.root_window == "A"
+            port.writes += 1
+            port.partial = True
+            return {"target": "Fixture window", "status": "dispatched", "detail": "FIXTURE_DISPATCHED"}
         if transient:
             assert target.root_window == "A" and target.node == "add"
             if port.fail_next_write:

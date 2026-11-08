@@ -105,7 +105,11 @@ class ComputerUseToolkit:
             caption = metadata.get("caption", "")
             # The framework renders source_path beside each image, including
             # images forwarded in a separate multimodal message.
-            item["source_path"] = f"Image {identifier}" + (f"\n{caption}" if caption else "")
+            label = f"Image {identifier}"
+            after_action = metadata.get("capturedAfterAction")
+            if type(after_action) is int and after_action > 0:
+                label += f"\nCaptured after Action #{after_action}."
+            item["source_path"] = label + (f"\n{caption}" if caption else "")
         data = {**data, "content": render_payload_text(data) or "Execution returned no text."}
         data = {**data, "mcp_result": raw}
         return ToolOutput(success=not result.isError, data=data, error=getattr(converted, "error", None))
