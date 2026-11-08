@@ -2,6 +2,7 @@
 
 """Path queries collect only their consumed evidence without weakening matching."""
 
+from itertools import pairwise
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -192,3 +193,181 @@ def test_wire_rejects_non_profile_action_details(detail):
         decode_inspect_query(
             {"kind": "nodes", "fields": ["AXRole"], "maxNodes": 1, "maxDepth": 0, "actionDetail": detail}
         )
+
+
+class PagedPathPort:
+    """Return only the graph prefix available within each native collection depth."""
+
+    platform = "macos"
+    capabilities = ("nativeFollowRelations", "nativeQueryActionProfile", "nativeRelationPages")
+
+    def __init__(self, children, matches):
+        self.target = Binding("session", "instance", "window", "surface", "root")
+        self.children = children
+        self.matches = set(matches)
+        self.queries = []
+
+    def _scope(self, operation, target, timeout):
+        assert operation == "lease" and timeout > 0
+        assert (target.session, target.instance, target.root_window, target.surface) == (
+            self.target.session,
+            self.target.instance,
+            self.target.root_window,
+            self.target.surface,
+        )
+
+    async def query_nodes(self, operation, target, fields, max_nodes, depth, timeout, **options):
+        self._scope(operation, target, timeout)
+        assert 0 <= depth <= 40
+        page = options.get("relation_page")
+        self.queries.append((target.node, depth, page))
+        if page is not None:
+            assert page["property"] == "AXChildren" and page["cursor"] is None and depth == 1
+
+        depths = {target.node: 0}
+        pending = [target.node]
+        for token in pending:
+            if depths[token] < depth:
+                for child in self.children.get(token, ()):
+                    if child not in depths and len(depths) < max_nodes:
+                        depths[child] = depths[token] + 1
+                        pending.append(child)
+
+        nodes, relations = [], []
+        for token in pending:
+            role = "AXWindow" if token == "root" else "AXButton" if token in self.matches else "AXGroup"
+            name = "Find me" if token in self.matches else ""
+            values = {"AXRole": role, "AXTitle": name}
+            nodes.append(
+                {
+                    "node": token,
+                    "values": {field: values.get(field) for field in fields},
+                    "fieldStatus": {},
+                    "requestedFields": list(fields),
+                    "actions": {"state": "complete", "items": []},
+                }
+            )
+            children = self.children.get(token, ())
+            expanded = depths[token] < depth and all(child in depths for child in children)
+            relations.append(self._children_edge(token, expanded or not children))
+            for kind in ("AXTitleUIElement", *options.get("follow_relations", ())):
+                relations.append(
+                    {
+                        "source": token,
+                        "property": kind,
+                        "targets": [],
+                        "state": "complete",
+                        "certainty": "confirmed",
+                        "total": 0,
+                    }
+                )
+        return {
+            "session": target.session,
+            "platform": self.platform,
+            "surface": target.surface,
+            "roots": [target.node],
+            "observed": {"id": f"nodes-{len(self.queries)}"},
+            "nodes": nodes,
+            "relations": relations,
+        }
+
+    async def query_relation(self, operation, target, relation, cursor, limit, timeout):
+        self._scope(operation, target, timeout)
+        assert relation == "AXChildren" and cursor is None and limit >= len(self.children[target.node])
+        return {
+            "session": target.session,
+            "platform": self.platform,
+            "surface": target.surface,
+            "observed": {"id": "relation"},
+            "relation": self._children_edge(target.node, True),
+        }
+
+    def _children_edge(self, token, expanded):
+        children = self.children.get(token, ())
+        return {
+            "source": token,
+            "property": "AXChildren",
+            "targets": list(children) if expanded else [],
+            "state": "complete" if expanded else "partial",
+            "certainty": "confirmed",
+            "total": len(children),
+        }
+
+    def query(self, **options):
+        return TargetQuery(self, "lease", self.target, lambda: 1000, **options)
+
+
+def layout_chain(depth, leaves):
+    tokens = ["root", *(f"layout-{i}" for i in range(1, depth + 1))]
+    return {**{parent: [child] for parent, child in pairwise(tokens)}, tokens[-1]: leaves}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("levels", [40, 42])
+async def test_path_resolves_beyond_one_native_depth_batch(levels):
+    children = layout_chain(levels, ["deep-leaf"])
+    children["root"].append("target")
+    port = PagedPathPort(children, ["target"])
+
+    assert (await port.query().resolve(["Find me"])).node == "target"
+
+    assert [(token, depth) for token, depth, _ in port.queries] == [
+        ("root", 40),
+        *((f"layout-{i}", 1) for i in range(40, levels + 1)),
+    ]
+    assert all(page["property"] == "AXChildren" for _, _, page in port.queries[1:])
+
+
+@pytest.mark.anyio
+async def test_same_depth_distinct_native_matches_stay_ambiguous_after_continuation():
+    port = PagedPathPort(layout_chain(40, ["first", "second"]), ["first", "second"])
+    with pytest.raises(ComputerUseError) as failure:
+        await port.query().resolve(["Find me"])
+    assert failure.value.code == "ambiguous_target"
+    assert failure.value.effect == "none"
+
+
+@pytest.mark.anyio
+async def test_back_edge_to_active_ancestor_cannot_be_deduplicated():
+    children = {"root": ["first", "target"], "first": ["second"], "second": ["first"]}
+    with pytest.raises(ComputerUseError, match="Path containment is cyclic") as failure:
+        await PagedPathPort(children, ["target"]).query().resolve(["Find me"])
+    assert failure.value.code == "observation_incomplete"
+    assert failure.value.effect == "none"
+
+
+@pytest.mark.anyio
+async def test_shared_native_object_is_one_match_after_its_branch_has_exited():
+    children = {"root": ["first", "second"], "first": ["target"], "second": ["target"]}
+    assert (await PagedPathPort(children, ["target"]).query().resolve(["Find me"])).node == "target"
+
+
+@pytest.mark.anyio
+async def test_depth_continuation_cannot_exceed_whole_query_node_budget():
+    port = PagedPathPort(layout_chain(40, ["target"]), ["target"])
+    with pytest.raises(ComputerUseError, match="node budget") as failure:
+        await port.query(max_nodes=41).resolve(["Find me"])
+    assert failure.value.code == "observation_incomplete"
+    assert failure.value.effect == "none"
+
+
+@pytest.mark.anyio
+async def test_missing_deep_relation_page_still_prevents_a_unique_sibling_match():
+    class MissingPagePort(PagedPathPort):
+        async def query_nodes(self, *args, **options):
+            batch = await super().query_nodes(*args, **options)
+            if options.get("relation_page") is not None:
+                batch["relations"] = []
+            return batch
+
+    children = layout_chain(40, ["unobserved"])
+    children["root"].append("target")
+    with pytest.raises(ComputerUseError, match="first relation page was not collected") as failure:
+        await MissingPagePort(children, ["target"]).query().resolve(["Find me"])
+    assert failure.value.code == "observation_incomplete"
+    assert failure.value.effect == "none"
+
+
+def test_native_query_batch_depth_cannot_be_increased_above_forty():
+    with pytest.raises(ValueError, match="Invalid native query budget"):
+        PagedPathPort({}, []).query(max_depth=41)

@@ -184,12 +184,18 @@ class TargetQuery(NativeGraph):
         for step, condition in enumerate(path):
             candidates = [self.root.node] if step == 0 else await self._contents(selected)
             found, visited, incomplete = [], set(), False
-            stack = [(node, (), 0) for node in reversed(candidates)]
+            # Native depth limits each collection. The logical search shares
+            # the graph's node and time budgets across all of its collections.
+            active = set()
+            stack = [(node, True) for node in reversed(candidates)]
             while stack:
+                token, entering = stack.pop()
+                if not entering:
+                    active.remove(token)
+                    continue
                 self.remaining()
-                token, ancestors, depth = stack.pop()
-                if token in ancestors or depth > self.max_depth:
-                    self.fail("observation_incomplete", "Path containment is cyclic or exceeds its budget.")
+                if token in active:
+                    self.fail("observation_incomplete", "Path containment is cyclic.")
                 if token in visited:
                     continue  # One shared native object is still one candidate.
                 if len(visited) >= self.max_nodes:
@@ -223,7 +229,9 @@ class TargetQuery(NativeGraph):
                 incomplete |= descend is None
                 if descend is True:
                     children = await self._contents(token)
-                    stack.extend((child, (*ancestors, token), depth + 1) for child in reversed(children))
+                    active.add(token)
+                    stack.append((token, False))
+                    stack.extend((child, True) for child in reversed(children))
             if incomplete:
                 self.fail(
                     "observation_incomplete",
