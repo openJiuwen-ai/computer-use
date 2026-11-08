@@ -37,7 +37,7 @@ from computer_use.client.images import (
     require_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
-from computer_use.errors import ComputerUseError
+from computer_use.errors import ComputerUseError, confirmed_no_requested_input
 from computer_use.identity import Record, WeakIdentityMap
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
 from computer_use.json import utf8
@@ -66,17 +66,7 @@ _runs = ContextVar("computer_use_execution", default=None)
 
 def _window_closed_without_input(error: ComputerUseError) -> bool:
     """Require confirmed closure and complete evidence about the requested input."""
-    if error.window_lifecycle != "closed":
-        return False
-    attempts = (error.impact or {}).get("attempts", ())
-    return bool(attempts) and all(
-        attempt["dispatch"] == "notDispatched"
-        and (actual := attempt.get("actual")) is not None
-        and actual["coverage"] == "complete"
-        and actual["omitted_effects"] == 0
-        and all(effect["stage"] != "input" or effect["state"] == "notInvoked" for effect in actual["effects"])
-        for attempt in attempts
-    )
+    return error.window_lifecycle == "closed" and confirmed_no_requested_input(error.impact)
 
 
 class Runtime:

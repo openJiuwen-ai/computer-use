@@ -8,16 +8,46 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
+def confirmed_no_requested_input(impact: Mapping[str, Any] | None) -> bool:
+    """Require complete evidence that no attempt invoked the requested input."""
+    attempts = (impact or {}).get("attempts", ())
+    return bool(attempts) and all(
+        attempt["dispatch"] == "notDispatched"
+        and (actual := attempt.get("actual")) is not None
+        and actual["coverage"] == "complete"
+        and actual["omitted_effects"] == 0
+        and all(effect["stage"] != "input" or effect["state"] == "notInvoked" for effect in actual["effects"])
+        for attempt in attempts
+    )
+
+
 def format_failure(failure: Mapping[str, Any], method: str | None = None) -> str:
     prefix = f"{method} [{failure['target']}]: " if method else ""
-    lines = [prefix + failure["detail"], f"Effect: {failure['effect']}"]
+    impact = failure.get("impact")
+    attempts = (impact or {}).get("attempts", ())
     receipt = failure.get("action_receipt")
+    effect = failure["effect"]
+    lines = [prefix + failure["detail"]]
+    if (
+        effect == "possible"
+        and receipt is None
+        and failure.get("scope_cleanup") is None
+        and failure.get("window_lifecycle") != "closed"
+        and confirmed_no_requested_input(impact)
+        and all(attempt["cleanup"] == "complete" for attempt in attempts)
+        and any(
+            event["stage"] in ("preparation", "cleanup") and event["state"] != "notInvoked"
+            for attempt in attempts for event in attempt["actual"]["effects"]
+        )
+    ):
+        lines.append("Requested input was not dispatched.")
+        effect += " (preparation or cleanup)"
+    lines.append(f"Effect: {effect}")
     if receipt is not None:
         lines.append(f"Action [{receipt['status']}]: {receipt['target']}. {receipt['detail']}")
     if failure.get("scope_cleanup") == "unknown":
         lines.append("Scope cleanup: unknown.")
-    impact = failure.get("impact")
-    for index, attempt in enumerate(impact.get("attempts", ()) if impact else (), start=1):
+    for index, attempt in enumerate(attempts, start=1):
         lines.append(f"Attempt {index}: input={attempt['dispatch']}; cleanup={attempt['cleanup']}.")
         if attempt.get("preparation"):
             lines.append("Preparation: " + "; ".join(attempt["preparation"]))

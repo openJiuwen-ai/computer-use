@@ -164,6 +164,57 @@ class ActionReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Action [verified]", text)
         self.assertIn("Only some input may have arrived", text)
 
+    async def test_failure_distinguishes_complete_preparation_from_requested_input(self):
+        preparation = {
+            "stage": "preparation", "device": "element", "transport": "accessibility",
+            "mechanism": "AXPress", "state": "invoked",
+        }
+        cleanup = {**preparation, "stage": "cleanup", "mechanism": "AXCancel"}
+        actual = {"coverage": "complete", "omitted_effects": 0, "effects": (preparation, cleanup)}
+        attempt = {
+            "dispatch": "notDispatched", "cleanup": "complete", "actual": actual,
+            "preparation": ("refresh selected menu branch", "close prepared menu"),
+        }
+        possible = {**preparation, "stage": "input", "state": "possible"}
+        requested = "Requested input was not dispatched."
+        for case, attempts, scope_cleanup, effect, distinguished in (
+            ("confirmed", (attempt,), None, "possible", True),
+            ("no attempts", (), None, "possible", False),
+            ("previous input", (dict(attempt, dispatch="dispatched"), attempt), None, "possible", False),
+            ("partial dispatch", (dict(attempt, dispatch="partial"),), None, "possible", False),
+            ("unknown dispatch", (dict(attempt, dispatch="unknown"),), None, "possible", False),
+            ("possible input", (dict(attempt, actual=dict(actual, effects=(preparation, possible))),),
+             None, "possible", False),
+            ("missing impact", (dict(attempt, actual=None),), None, "possible", False),
+            ("partial coverage", (dict(attempt, actual=dict(actual, coverage="partial")),), None, "possible", False),
+            ("omitted effects", (dict(attempt, actual=dict(actual, omitted_effects=1)),), None, "possible", False),
+            ("unknown attempt cleanup", (dict(attempt, cleanup="unknown"),), None, "possible", False),
+            ("unknown scope cleanup", (attempt,), "unknown", "possible", False),
+            ("no preparation", (dict(attempt, actual=dict(actual, effects=())),), None, "possible", False),
+            ("partial effect", (attempt,), None, "partial", False),
+        ):
+            with self.subTest(case=case):
+                failure = ComputerUseError({
+                    "code": "input_unavailable", "target": "New Terminal", "effect": effect,
+                    "detail": "Native menu tracking requires the physical pointer.",
+                    "impact": {"attempts": attempts},
+                })
+                failure.scope_cleanup = scope_cleanup
+                self.runtime.task_namespace["failure"] = failure
+                result = await self.execute("emit_receipt(receipts[0])\nraise failure")
+
+                self.assertTrue(result["isError"], result)
+                self.assertIn("Action [dispatched]: #1 Fixture.", result["content"][0]["text"])
+                text = result["content"][-1]["text"]
+                self.assertEqual(requested in text, distinguished)
+                self.assertIn(f"Effect: {effect}", text)
+                self.assertEqual("Effect: possible (preparation or cleanup)" in text, distinguished)
+                self.assertEqual(failure.effect, effect)
+                if distinguished:
+                    self.assertLess(text.index(requested), text.index("Effect: possible"))
+                    self.assertIn("Attempt 1: input=notDispatched; cleanup=complete.", text)
+                    self.assertIn("Preparation: refresh selected menu branch; close prepared menu", text)
+
     async def test_closed_window_reports_proven_no_input_and_preserves_preparation(self):
         actual = {
             "coverage": "complete", "omitted_effects": 0,
