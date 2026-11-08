@@ -37,6 +37,10 @@ For an application menu bar that supports menu reads, use
 app.read(menu_path=['Edit'], window=ref) with exact visible menu titles in order.
 Choose an enabled item from that result and use
 app.element(item_ref).click() on the same App.
+If native menu tracking refuses the click before dispatch and the menu closes,
+a shortcut displayed for that enabled item can be used explicitly. Send it to
+the intended window with app.press_key('super+o', window=ref), using the actual
+shortcut shown and checking that the item and window still apply.
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
