@@ -43,6 +43,7 @@ from computer_use.session.observation_data import observation_data
 from computer_use.session.operations import OperationBudget
 from computer_use.session.state import AppState
 from computer_use.session.windows import WindowReferences
+from computer_use_mcp.image_delivery import prepare_image
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
@@ -372,6 +373,20 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.execute(f"click(scope({ref(self.app, 'b')}), (140, 30))")
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
 
+    async def test_composite_bounds_use_the_delivered_image_size(self):
+        with patch(
+            "computer_use_mcp.runtime.prepare_image", side_effect=lambda png: prepare_image(png, max_dimension=110)
+        ):
+            result = await self.execute("combined = compose(app, ('a', 'b'))")
+        caption, = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
+        a, b = ref(self.app, "a"), ref(self.app, "b")
+        self.assertIn("Image: window 110x40 px", caption)
+        self.assertIn(f"Window {a} bounds (0, 0) to (49, 39).", caption)
+        self.assertIn(f"Window {b} bounds (60, 0) to (109, 39).", caption)
+        await self.click(window_scope(self.controller, self.app, b), (60, 39))
+        self.assertEqual(self.last_target().root_window, "b")
+        self.assertEqual(self.write.arun.call_args.args[0].intent.parameters["x"], 0)
+
     async def test_standalone_chooser_and_parent_canvas_only_advertise_the_actual_window_point(self):
         adopt(self.controller, self.app, directory(surface("a"), surface("b", parent="a"), focus="b"))
 
@@ -431,8 +446,11 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"Image point for window={b}:", old)
         self.assertIn(f"Window {a} coordinates superseded.", old)
         self.assertNotIn(f"Window {b} coordinates superseded.", old)
+        self.assertNotIn(f"Window {a} bounds", old)
+        self.assertIn(f"Window {b} bounds (120, 0) to (219, 79).", old)
         self.assertNotIn("Coordinate target=", old)
         self.assertIn(f"Image point for window={a}:", latest)
+        self.assertNotIn(" bounds ", latest)
         await self.click(window_scope(self.controller, self.app, b), (140, 30))
         self.assertEqual(self.last_target().root_window, "b")
         await self.click(self.window)

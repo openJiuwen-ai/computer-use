@@ -447,6 +447,10 @@ class InterfaceImagePipeline:
 
         fixed_ref = next((ref for ref, key in state.windows.items() if key == ui._anchor), None)
         application_target = "computer.app(" + repr(str(state.selector)) + ")"
+        regions = ()
+        if len(canvas.pieces) > 1 and not historical:
+            boxes = {piece.window: piece.box for piece in canvas.pieces if piece.scope_confirmed}
+            regions = tuple((ref, boxes[key]) for ref, key in state.windows.items() if key in boxes)
 
         def coordinate_target() -> str | None:
             # An older popup/composite can still be valid for one Window even
@@ -482,6 +486,7 @@ class InterfaceImagePipeline:
                 coordinateOwner=application,
                 coordinateGeneration=generation,
                 coordinateTarget=coordinate_target,
+                coordinateRegions=regions,
                 context=join((template(
                     "App {}; {}",
                     # pylint: disable-next=protected-access

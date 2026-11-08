@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.delivery.image_caption import (
@@ -100,13 +101,40 @@ class ImageCaption:
     size: tuple[int, int]
     facts: dict
     hints: ImagePointHints
+    regions: tuple[tuple[int, tuple[int, int, int, int]], ...] = ()
 
     def render(self, eligible: set[str] | None = None) -> str:
         """Optionally narrow the action hints without changing the captured facts."""
         points = tuple(point for point in self.hints.points if eligible is None or point in eligible)
         target = self.hints.target if points and (eligible is None or self.hints.target in eligible) else None
         caption = render_image_caption(*self.size, dict(self.facts, coordinateTarget=target))
-        return "\n".join((caption, IMAGE_POINT_GUIDANCE, *points, *self.hints.actions)) if points else caption
+        if not points:
+            return caption
+        active = {ref for ref, point in zip(self.hints.windows, self.hints.points) if eligible is None or point in eligible}
+        regions = tuple(
+            f"Window {ref} bounds ({left}, {top}) to ({right}, {bottom})."
+            for ref, (left, top, right, bottom) in self.regions if ref in active
+        )
+        if regions:
+            regions += ("Bounds can overlap and include transparent pixels.",)
+        return "\n".join((caption, IMAGE_POINT_GUIDANCE, *regions, *points, *self.hints.actions))
+
+
+def _delivered_regions(source, coordinates, size):
+    """Inclusive integer pixel bounds using the same inverse as point mapping."""
+    delivered_width, delivered_height = size["width"], size["height"]
+    source_width, source_height = (
+        coordinates.source_size if coordinates is not None else (delivered_width, delivered_height)
+    )
+    regions = []
+    for ref, (x, y, width, height) in source.get("coordinateRegions", ()):
+        left = max(0, ceil(x * delivered_width / source_width))
+        top = max(0, ceil(y * delivered_height / source_height))
+        right = min(delivered_width, ceil((x + width) * delivered_width / source_width)) - 1
+        bottom = min(delivered_height, ceil((y + height) * delivered_height / source_height)) - 1
+        if left <= right and top <= bottom:
+            regions.append((ref, (left, top, right, bottom)))
+    return tuple(regions)
 
 
 def _point_hints(source, stale=False) -> ImagePointHints:
@@ -196,7 +224,9 @@ def image_caption(png, context_already_shown=False, coordinates: ImageCoordinate
                 visual,
                 lines=[dict(line, rect=coordinates.delivered_rect(line["rect"])) for line in visual["lines"]],
             )
-    return ImageCaption((size["width"], size["height"]), facts, _point_hints(source, facts.get("stale", False)))
+    hints = _point_hints(source, facts.get("stale", False))
+    regions = _delivered_regions(source, coordinates, size) if hints.windows else ()
+    return ImageCaption((size["width"], size["height"]), facts, hints, regions)
 
 
 def image_label(png, context_already_shown=False, coordinates: ImageCoordinates | None = None):
