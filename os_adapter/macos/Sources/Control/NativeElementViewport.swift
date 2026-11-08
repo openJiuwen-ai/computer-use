@@ -20,9 +20,32 @@ import ApplicationServices
         var point: CGPoint { inputPoint ?? CGPoint(x: viewport.midX, y: viewport.midY) }
     }
 
+    struct VerticalClip {
+        enum Edge { case top, bottom }
+        let region: AXUIElement
+        let viewport: CGRect
+        let edge: Edge
+
+        nonisolated static func edge(frame: CGRect, clipped: CGRect, viewport: CGRect) -> Edge? {
+            guard !viewport.isNull, !viewport.isInfinite, viewport.height > 1,
+                frame == clipped, frame.height > 0, frame.height <= 1, frame.width > 1,
+                frame.minX > viewport.minX, frame.maxX < viewport.maxX, viewport.contains(frame)
+            else { return nil }
+            if frame.minY == viewport.minY { return .top }
+            if frame.maxY == viewport.maxY { return .bottom }
+            return nil
+        }
+
+        nonisolated static func isExposed(frame: CGRect, clipped: CGRect, viewport: CGRect) -> Bool {
+            !viewport.isNull && !viewport.isInfinite && frame == clipped && frame.width > 1 && frame.height > 1
+                && viewport.contains(frame) && frame.minY > viewport.minY && frame.maxY < viewport.maxY
+        }
+    }
+
     let frame: CGRect
     let clipped: CGRect
     let exposure: Exposure?
+    let verticalClip: VerticalClip?
     let mapping: WindowGeometry.WindowMapping
 
     static func sample(element: AXUIElement, window: AXUIElement, mapping: WindowGeometry.WindowMapping) throws
@@ -34,7 +57,7 @@ import ApplicationServices
         guard let frame = WindowGeometry.hint(element)?.frame, frame.minX.isFinite, frame.minY.isFinite,
             frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0
         else { throw DriverError("the selected element has no usable pointer geometry", code: .inputUnavailable) }
-        var regions = [(node: AXUIElement, bounds: CGRect, clips: Bool)]()
+        var regions = [(node: AXUIElement, bounds: CGRect, clips: Bool, scrollArea: Bool)]()
         var current = AXAccess.element(element, kAXParentAttribute)
         var seen = [AXUIElement]()
         let deadline = ProcessInfo.processInfo.systemUptime + 0.15
@@ -49,7 +72,9 @@ import ApplicationServices
             {
                 let elementRole = seen.count == 1 && role == kAXTableRole
                     ? AXAccess.read(element, kAXRoleAttribute).value as? String : nil
-                regions.append((node, bounds, Self.clips(role: role, distance: seen.count, elementRole: elementRole)))
+                regions.append((
+                    node, bounds, Self.clips(role: role, distance: seen.count, elementRole: elementRole),
+                    role == kAXScrollAreaRole))
             }
             current = AXAccess.element(node, kAXParentAttribute)
         }
@@ -80,7 +105,22 @@ import ApplicationServices
                     frame: frame, window: window, mapping: mapping)
             }
         }
-        return NativeElementViewport(frame: frame, clipped: clipped, exposure: exposure, mapping: mapping)
+        var verticalClip: VerticalClip?
+        if frame.height <= 1, exposure == nil {
+            for region in regions where region.scrollArea {
+                // The provider can already report the clipped sliver. The
+                // edge must be a scroll area's own edge, not a window crop.
+                let viewport = region.bounds.intersection(mapping.frame)
+                if let edge = VerticalClip.edge(frame: frame, clipped: clipped, viewport: viewport),
+                    VerticalClip.edge(frame: frame, clipped: clipped, viewport: region.bounds) == edge
+                {
+                    verticalClip = .init(region: region.node, viewport: region.bounds, edge: edge)
+                    break
+                }
+            }
+        }
+        return NativeElementViewport(
+            frame: frame, clipped: clipped, exposure: exposure, verticalClip: verticalClip, mapping: mapping)
     }
 
     nonisolated static func clips(role: String?, distance: Int, elementRole: String?) -> Bool {

@@ -47,6 +47,7 @@ import Foundation
     }
     private var clickAuthorities = [ClickAuthority]()
     private var clickPreparationRequiresObservation = false
+    private(set) var didRevealClippedClickLeaf = false
     private var foregroundResponsibility: NativeForegroundResponsibility?
     private let cancelActive: () -> Void
     private let now: () -> TimeInterval
@@ -185,6 +186,8 @@ import Foundation
                 "foreground click requires original-scope background unavailability evidence", code: .invalidRequest)
         }
     }
+
+    func recordClippedClickLeafReveal() { didRevealClippedClickLeaf = true }
 
     func blockClickContinuation() { clickPreparationRequiresObservation = true }
 

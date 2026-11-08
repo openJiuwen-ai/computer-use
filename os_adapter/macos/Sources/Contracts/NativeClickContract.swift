@@ -17,6 +17,7 @@ struct NativeClickContract: Equatable {
     var backgroundUnavailable = false
     var popupPointer: NativePopupPointerQualification? = nil
     var qtComboChoice: NativeQtComboChoice? = nil
+    var clippedLeaf: NativeClickClippedLeaf? = nil
     var pointerRequirement: NativePointerReadiness.Requirement = .contentReceiver
     /// Original-element geometry must be confirmed in the exposed foreground
     /// window, even when addressed transport already has a background lease.
@@ -29,6 +30,7 @@ struct NativeClickContract: Equatable {
     /// A qualified popup or member keeps its separate existing admission proof.
     func permitsElementPointer(hasActuator: Bool) -> Bool {
         guard popupPointer == nil else { return false }
+        guard clippedLeaf == nil || delivery == .windowDirected && !hasActuator else { return false }
         guard !requiresExactElementHit || delivery == .windowDirected && !hasActuator else { return false }
         guard !requiresForegroundGeometry || delivery == .windowDirected && !hasActuator else { return false }
         return pointerRequirement == .contentReceiver || delivery == .windowDirected && !hasActuator
@@ -47,7 +49,7 @@ struct NativeClickContract: Equatable {
         case (let a?, let b?): comboMatches = a.matches(b)
         default: comboMatches = false
         }
-        return comboMatches && popupMatches && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
+        return comboMatches && popupMatches && lhs.clippedLeaf == rhs.clippedLeaf && lhs.routeFamily == rhs.routeFamily && lhs.delivery == rhs.delivery
             && lhs.admission == rhs.admission && lhs.reason == rhs.reason
             && lhs.preparationOptions == rhs.preparationOptions && lhs.backgroundFamily == rhs.backgroundFamily
             && lhs.backgroundUnavailable == rhs.backgroundUnavailable

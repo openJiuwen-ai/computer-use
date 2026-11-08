@@ -99,14 +99,19 @@ import ApplicationServices
             case .objectAction, .objectSelection: break
             }
         }
-        if let preparation = try SampleNativeClickPreparationPass.run(plan, boundary: boundary), preparation.needed {
-            try await prepareReceiver(preparation)
+        var exposedByWheel = false
+        if let clippedLeaf = plan.offer.clippedLeaf, case .element(let unit) = plan.target {
+            try await clippedLeaf.reveal(unit, operation: plan.operation, boundary: boundary, receipt: receipt, evidence: evidence)
+        } else {
+            if let preparation = try SampleNativeClickPreparationPass.run(plan, boundary: boundary), preparation.needed {
+                try await prepareReceiver(preparation)
+            }
+            exposedByWheel = try await NativeClickExposurePipeline.run(
+                plan, boundary: boundary, receipt: receipt, evidence: evidence)
         }
-        let exposed = try await NativeClickExposurePipeline.run(
-            plan, boundary: boundary, receipt: receipt, evidence: evidence)
         try ConfirmNativeClickPreparationPass.run(boundary)
         var current = try SampleNativeClickPreparationPass.run(plan, boundary: boundary, afterPreparation: true)
-        if exposed, let preparation = current, preparation.needed {
+        if exposedByWheel, let preparation = current, preparation.needed {
             // Scrolling can create/change a control receiver. Only now prepare
             // the actual click, retaining the original target and request.
             try await prepareReceiver(preparation)

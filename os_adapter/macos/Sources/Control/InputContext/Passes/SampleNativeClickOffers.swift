@@ -220,6 +220,14 @@ import ApplicationServices
                             }
                         }
                     }
+                    if !popupChoice, facts.popupContext == nil, plan.actuator == nil, plan.receiver == nil,
+                        !op.didRevealClippedClickLeaf, NativePopupClickPolicy.permitsIntent(op.request),
+                        let proof = try NativeClickClippedLeaf.sample(unit, hit: sampled)
+                    {
+                        declarations.declareClick(.pointer(.click), offer: proof.offer)
+                        input["pointerRoute"] = "no"
+                        return false
+                    }
                     guard sampled.dispatchGeometryReady || !popupChoice && sampled.preparation != .unavailable else {
                         throw DriverError(
                             "the current hit does not confirm the original element and has no window preparation route",

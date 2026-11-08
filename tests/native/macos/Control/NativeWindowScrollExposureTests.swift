@@ -67,8 +67,64 @@ import ApplicationServices
         precondition(NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: []))
         precondition(!NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: [kAXPressAction]))
         precondition(!NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: nil))
+        try clippedLeafReveal()
         try await hoverReplacesProbeReceiver()
         print("Window scroll exposure regressions passed")
+    }
+
+    @MainActor private static func clippedLeafReveal() throws {
+        typealias Clip = NativeElementViewport.VerticalClip
+        let viewport = CGRect(x: 22, y: 139, width: 1200, height: 690)
+        let sliver = CGRect(x: 988, y: 828, width: 27, height: 1)
+        precondition(Clip.edge(frame: sliver, clipped: sliver, viewport: viewport) == .bottom,
+                     "provider-reported one-point edge is still clipped even when frame equals intersection")
+        let top = CGRect(x: 988, y: 139, width: 27, height: 1)
+        precondition(Clip.edge(frame: top, clipped: top, viewport: viewport) == .top)
+        let unrelated = sliver.offsetBy(dx: 0, dy: -1)
+        precondition(Clip.edge(frame: unrelated, clipped: unrelated, viewport: viewport) == nil)
+        let full = CGRect(x: 988, y: 503, width: 27, height: 17)
+        precondition(Clip.edge(frame: full, clipped: full, viewport: viewport) == nil)
+        precondition(Clip.edge(frame: sliver, clipped: sliver,
+                               viewport: CGRect(x: 22, y: 52, width: 1200, height: 780)) == nil,
+                     "a window edge is not evidence of a scroll viewport clipping edge")
+        precondition(!Clip.isExposed(frame: sliver, clipped: sliver, viewport: viewport))
+        precondition(!Clip.isExposed(frame: full, clipped: sliver, viewport: viewport))
+        precondition(Clip.isExposed(frame: full, clipped: full, viewport: viewport))
+
+        let proof = NativeClickClippedLeaf(
+            region: AXUIElementCreateSystemWide(), viewport: viewport, edge: .bottom, window: 42, pid: 7)
+        let offer = proof.offer
+        precondition(offer.delivery == .windowDirected && offer.admission == .preparationRequired)
+        precondition(offer.preparationOptions == ["background"] && offer.requiresExactElementHit)
+        precondition(!offer.permitsElementPointer(hasActuator: true))
+        let operation = NativeOperation(
+            timeoutMs: 1000, writable: true, intent: try NativeIntent(["kind": "click", "parameters": [:]], mode: "write"),
+            target: [:],
+            clickContract: "v2", release: {}, cancelActive: {})
+        let evidence = NativeClickEvidence(target: [:])
+        let receipt = NativeExecutionReceipt(target: [:], onEffect: {})
+        var calls = 0
+        do {
+            try proof.performOnce(operation: operation, receipt: receipt, evidence: evidence) { onCall in
+                onCall()
+                calls += 1
+                return .cannotComplete
+            }
+            preconditionFailure("unconfirmed reveal must fail")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable)
+        }
+        precondition(operation.didRevealClippedClickLeaf && calls == 1)
+        precondition(receipt.dispatch == "notDispatched" && receipt.preparation.count == 1)
+        precondition(!evidence.permitsReselection, "no geometry progress means no blind retry")
+        do {
+            try proof.performOnce(operation: operation, receipt: receipt, evidence: evidence) { _ in
+                preconditionFailure("an admitted reveal can run at most once per public operation")
+            }
+            preconditionFailure("another reveal must be refused")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable)
+        }
     }
 
     @MainActor private static func hoverReplacesProbeReceiver() async throws {
