@@ -33,6 +33,10 @@ On macOS, app.close_window(ref) requests normal close of that exact window,
 including when screen-sharing controls cover its title-bar buttons. Use the
 returned observation to handle any confirmation; the SDK does not choose save
 or discard. A dispatched close request may be declined by the application.
+For an application menu bar that supports menu reads, use
+app.read(menu_path=['Edit'], window=ref) with exact visible menu titles in order.
+Choose an enabled item from that result and use
+app.element(item_ref).click() on the same App.
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
