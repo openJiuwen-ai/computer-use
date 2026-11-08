@@ -296,6 +296,65 @@ import ApplicationServices
                      "a changed position must not select the native setter's offset-zero route")
     }
 
+    @MainActor static func scopedWebTypingRefusalExplainsOnlyTheSoleBlockedRoute() throws {
+        let local = NativeKeyboardDeliveryProposal(interpreter: .init(kind: .localWeb, area: nil))
+        let unresolved = NativeKeyboardDeliveryProposal(interpreter: .init(kind: .observedWebOwnershipUnknown, area: nil))
+        precondition(local.refusalReason?.contains("local Web receiver") == true)
+        precondition(unresolved.refusalReason?.contains("text interpreter") == true)
+        precondition(NativeKeyboardDeliveryProposal(interpreter: local.interpreter, permitsQualifiedLocalInsertion: true)
+            .refusalReason == nil)
+        precondition(NativeKeyboardDeliveryProposal(interpreter: .init(kind: .remoteWeb, area: nil)).refusalReason == nil)
+
+        let state = NativeDesktopState()
+        func encode(
+            _ reason: String?, node: String? = nil, root: Any = "0", capture: Any = NSNull(),
+            keyboardSurface: Any = "window", blocked: [String] = [], alternate: Bool = false,
+            pending: String? = "receiver"
+        ) throws -> [String: Any] {
+            let binding: [String: Any] = [
+                "session": "s", "instance": "app", "rootWindow": root, "surface": "window",
+                "node": node as Any? ?? NSNull(), "capture": capture,
+            ]
+            let intent = try NativeIntent(["kind": "insert", "parameters": ["text": "g"]], mode: "write")
+            let operation = NativeOperation(
+                timeoutMs: 5000, writable: true, intent: intent, target: binding, release: {}, cancelActive: {})
+            defer { _ = operation.finish() }
+            let query = NativeInputQueryScope(
+                binding: (binding, blocked, node),
+                selection: NativeSelectionBasis(access: state.applications), scope: "window")
+            let plan = NativeInputContextPlan(
+                query: query, operation: operation, within: [], actuator: nil, receiver: nil, basis: [])
+            let declarations = NativePrimitiveDeclarations(
+                previous: [], op: operation, query: query, within: [], actuator: nil, receiver: nil, basis: [])
+            declarations.declare(.keyboard(.insert), supported: false, enabled: nil) { _ in
+                NativeReadiness(pending.map { [($0, "unknown")] } ?? [], preparationAllowed: false)
+            }
+            if alternate {
+                declarations.declare(.keyboard(.insert), supported: true, enabled: nil) { _ in NativeReadiness() }
+            }
+            return EncodeNativeInputContextPass.run(NativeSampledInput(
+                plan: plan, declarations: declarations, enabled: nil, foreground: true,
+                input: ["keyboardSurface": keyboardSurface], nativeRole: nil, actionsComplete: false,
+                applicationMenu: false, webTypingRefusal: reason))
+        }
+
+        for proposal in [local, unresolved] {
+            let encoded = try encode(proposal.refusalReason)
+            precondition(encoded["unavailableReason"] as? String == proposal.refusalReason,
+                         "the confirmed Web Unicode refusal must reach the caller")
+            let primitive = (encoded["primitives"] as! [[String: Any]])[0]
+            precondition(primitive["supported"] as? String == "no" && primitive["globalInput"] as? String == "no")
+        }
+        for encoded in try [
+            encode(nil), encode(local.refusalReason, node: "editor"), encode(local.refusalReason, root: NSNull()),
+            encode(local.refusalReason, capture: "point"), encode(local.refusalReason, pending: nil),
+            encode(local.refusalReason, keyboardSurface: NSNull()), encode(local.refusalReason, blocked: ["modal"]),
+            encode(local.refusalReason, alternate: true), encode(local.refusalReason, pending: "foreground"),
+        ] {
+            precondition(encoded["unavailableReason"] == nil, "a Web typing reason must not replace another diagnosis")
+        }
+    }
+
     @MainActor static func comboFocusDoesNotRequireATextContract() {
         precondition(NativePointerFocusUnit.supportsEditorPreparation(role: kAXComboBoxRole, intent: .focus))
         for intent: NativeKeyboardIntent.Kind in [.insert, .replace, .paste, .key] {
@@ -583,6 +642,7 @@ import ApplicationServices
         try selectedRangeRemainsInTheOriginalTable()
         comboFocusDoesNotRequireATextContract()
         qualifiedLocalInsertionKeepsTheOriginalSelectionAndScope()
+        try scopedWebTypingRefusalExplainsOnlyTheSoleBlockedRoute()
         try await savePanelContinuesOnlyTheProvedUnsentSuffix()
         try await cellSelectionUsesOneAddressedPreparation()
         explicitAXSelectionWritabilityDoesNotExpandDefaultReads()

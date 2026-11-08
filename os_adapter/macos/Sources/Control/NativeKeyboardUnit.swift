@@ -116,21 +116,24 @@ import ApplicationServices
         return !selection.contiguous || selection.location != 0 || selection.length != 0
     }
 
-    func textTransportSupported(
+    func textTransportSupport(
         kind: NativeKeyboardIntent.Kind, text: String?, state: State,
         textPolicy: NativeKeyboardInterpreterEvidence.Policy
-    ) throws -> Bool {
+    ) throws -> (supported: Bool, webRefusal: String?) {
         let proposal = try textProposal(kind: kind, text: text, state: state, textPolicy: textPolicy)
-        if proposal?.unavailable == true || proposal?.processTextUnavailable == true { return false }
+        if let proposal, proposal.unavailable || proposal.processTextUnavailable {
+            return (false, proposal.refusalReason)
+        }
         // Focus preparation can reveal a different editing capability or event
         // endpoint. Do not probe an unrelated current receiver before that work.
-        if kind == .focus || state.receiver(element) != "yes" { return true }
-        return try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
+        if kind == .focus || state.receiver(element) != "yes" { return (true, nil) }
+        let supported = try NativeReadiness.probeRoute(check: RequestDiagnostics.checkCancellation) {
             try BackgroundEvents.requireKeyboardRoute()
             _ = try BackgroundEvents.keyboardRecipient(
                 NativeWindowUnit(application: application, window: state.window ?? window).mapping())
             return true
         }
+        return (supported, nil)
     }
 
     /// Fresh positive mechanism evidence, not a record of an attempted input.

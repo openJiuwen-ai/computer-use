@@ -11,6 +11,12 @@ import Carbon
     var processTextUnavailable: Bool { interpreter.kind == .localWeb && !permitsQualifiedLocalInsertion }
     var unavailable: Bool { interpreter.kind == .observedWebOwnershipUnknown }
 
+    var refusalReason: String? {
+        if processTextUnavailable { return "Scoped Unicode typing is unavailable for the selected local Web receiver." }
+        if unavailable { return "Scoped Unicode typing could not verify the selected Web receiver's text interpreter." }
+        return nil
+    }
+
     static func read(
         element: AXUIElement?, window: AXUIElement, pid: pid_t,
         policy: NativeKeyboardInterpreterEvidence.Policy = .existing

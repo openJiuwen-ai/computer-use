@@ -90,8 +90,11 @@ is not grounds to blindly repeat it through a global method.
 The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.
-type_text() accepts one line. For multiline text or tabs, use element.paste(text)
-or app.paste(text, window=ref); paste inserts at the target's current selection.
+type_text() accepts one line. Use explicit paste for multiline text or tabs, or
+for single-line literal text when paste behavior fits the task. Use
+element.paste(text) on a confirmed editable control, or app.paste(text, window=ref)
+when the intended editor already receives input in that window. Paste inserts
+at the current selection.
 For double-click: from computer_use import ClickOption;
 app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
 to its Element: app.element(ref).perform_action('raise'), including a window root.

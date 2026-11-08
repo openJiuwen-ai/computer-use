@@ -48,6 +48,7 @@ import ApplicationServices
             return pointer.readiness
         }
         var nativeRole: String?, actionsComplete = false, applicationMenu = false
+        var webTypingRefusal: String?
         // An independent object edit does not need a keyboard receiver.
         // Do not sample or prepare unrelated focus to declare it.
         // Optional keyboard receiver evidence must not erase a setter
@@ -241,9 +242,9 @@ import ApplicationServices
                 {
                     let textPolicy = declarations.keyboardPolicy(
                         kind: kind, selection: selection, observed: observedInterpreter)
-                    let keyboardSupported = try unit.textTransportSupported(
+                    let keyboardSupported = try unit.textTransportSupport(
                         kind: kind, text: op.request.parameters["text"] as? String, state: facts, textPolicy: textPolicy
-                    )
+                    ).supported
                     let readiness = try unit.readiness(
                         kind: kind, text: op.request.parameters["text"] as? String, replacement: selection,
                         state: facts, textPolicy: textPolicy)
@@ -281,11 +282,14 @@ import ApplicationServices
                     }
                 }
                 let textPolicy = declarations.keyboardPolicy(kind: kind, selection: nil, observed: observedInterpreter)
-                let keyboardSupported = try unit.textTransportSupported(
+                let keyboardSupport = try unit.textTransportSupport(
                     kind: kind, text: op.request.parameters["text"] as? String, state: facts, textPolicy: textPolicy)
+                if kind == .insert, binding.node == nil, facts.focus != nil {
+                    webTypingRefusal = keyboardSupport.webRefusal
+                }
                 try declarations.declare(
                     .keyboard(kind, nil, textPolicy),
-                    supported: keyboardSupported
+                    supported: keyboardSupport.supported
                         && (op.keyboardInsertionSelection == nil || unit.keyboardInsertion != nil),
                     enabled: enabled, keyboardInsertion: unit.keyboardInsertion, geckoKeyboardInsertion: unit.geckoInsertion
                 ) { prepared in
@@ -337,6 +341,7 @@ import ApplicationServices
         }
         return NativeSampledInput(
             plan: plan, declarations: declarations, enabled: enabled, foreground: foreground, input: input,
-            nativeRole: nativeRole, actionsComplete: actionsComplete, applicationMenu: applicationMenu)
+            nativeRole: nativeRole, actionsComplete: actionsComplete, applicationMenu: applicationMenu,
+            webTypingRefusal: webTypingRefusal)
     }
 }

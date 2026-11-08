@@ -27,4 +27,5 @@ struct NativeInputQueryScope {
     let nativeRole: String?
     let actionsComplete: Bool
     let applicationMenu: Bool
+    var webTypingRefusal: String? = nil
 }
