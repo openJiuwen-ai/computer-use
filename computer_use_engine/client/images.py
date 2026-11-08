@@ -30,6 +30,8 @@ from computer_use.session.images import (
     register_image as register_session_image,
 )
 
+from .host import global_input_allowed
+
 __all__ = [
     "image_delivered",
     "image_delivery_epoch",
@@ -140,8 +142,10 @@ def _delivered_regions(source, coordinates, size):
 def _point_hints(source, stale=False) -> ImagePointHints:
     if source is None or stale or not source.get("mappingAvailable", True):
         return ImagePointHints()
+    allow_global_click = global_input_allowed()
     if source["kind"] == "desktop":
-        return ImagePointHints(("Image point: p = computer.point((x, y))",), ("Global click: computer.click(target=p)",))
+        actions = ("Global click: computer.click(target=p)",) if allow_global_click else ()
+        return ImagePointHints(("Image point: p = computer.point((x, y))",), actions)
     if source["kind"] != "window":
         return ImagePointHints()
     coordinate_windows = source.get("coordinate_windows")
@@ -156,9 +160,12 @@ def _point_hints(source, stale=False) -> ImagePointHints:
     )
     target = source.get("coordinateTarget")
     owner = source.get("coordinateOwner")
+    actions = (f"App click: {application}.click(at=p)",)
+    if allow_global_click:
+        actions += ("Global click (explicit): computer.click(target=p)",)
     return ImagePointHints(
         points,
-        (f"App click: {application}.click(at=p)", "Global click (explicit): computer.click(target=p)"),
+        actions,
         target() if callable(target) else target,
         windows=refs,
         owner=owner() if owner is not None else None,
