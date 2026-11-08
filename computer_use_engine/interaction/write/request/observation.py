@@ -63,10 +63,10 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         prior = getattr(instance, "directory", None)
         fixed = getattr(request.owner, "_window_identity", None)
         context_root = WindowIdentity(fixed.root_window, fixed.surface, fixed.instance) if fixed is not None else None
-        if context_root is None and prior is not None:
-            # An Element owns its App, not a persistent window view. Preserve
-            # the confirmed parent as read-recovery data when closing a sheet
-            # or popup; another document's focus must not erase that context.
+        window_family_only = request.intent.kind == "closeWindow"
+        if (context_root is None or window_family_only) and prior is not None:
+            # A closing child can disappear while its confirmed parent remains.
+            # Preserve that exact parent, including for a fixed close request.
             identity = WindowIdentity(request.target.root_window, request.target.surface, request.target.instance)
             original = next((item for item in prior["surfaces"] if WindowIdentity.of(item) == identity), None)
             parent = next((
@@ -101,6 +101,7 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     PostwriteChanges(None, before_tree, before_image)
                     if before_tree is not None or before_image is not None else None
                 ),
+                window_family_application=prior["application"] if window_family_only else None,
             )
             if prior is not None
             else None
@@ -243,8 +244,14 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             choices = self.window_choices(related_owner, directory)
             refresh_gap = next((gap for gap in metadata.get("gaps", ()) if gap.component == "refresh"), None)
-            if not metadata.get("content_available", True):
-                gaps = metadata.get("gaps", ())
+            gaps = metadata.get("gaps", ())
+            directory_only = (
+                related is not None and related.window_family_only and directory is not None
+                and directory["application"] == related.window_family_application
+                and directory["session"] == request.target.session
+                and not related.content_members(directory)
+            )
+            if not metadata.get("content_available", True) and not directory_only:
                 return replace(
                     outcome,
                     observation=observed,

@@ -161,3 +161,86 @@ def test_unimplemented_platform_does_not_fall_back_to_global_close_shortcut(plat
         asyncio.run(create(controller=controller)(ActionPlan(request, target=request.target), None))
     assert error.value.code == "input_unavailable" and error.value.effect == "none"
     refresh.assert_not_called()
+
+
+@pytest.mark.parametrize("transition", ["already-absent", "during-collection", "attached-confirmation"])
+def test_close_observes_exact_document_family_without_expanding_other_windows(monkeypatch, transition):
+    from contextlib import nullcontext
+
+    from computer_use.interaction.read.model import AppObservation
+    from computer_use.interaction.read.presentation.document import DisplayDocument
+    from computer_use.interaction.read.views.pipeline import WindowPart, member_target
+    from computer_use.interaction.write.request.observation import WriteWithObservation
+    from computer_use.session.observation_data import observation_data
+
+    a, b, c = (
+        {**surface("a"), "title": "Owned document"},
+        {**surface("b"), "title": "Unrelated document B"},
+        {**surface("c"), "title": "Unrelated document C"},
+    )
+    sheet = {**surface("sheet", parent="a"), "modal": True, "kind": "sheet", "title": "Save changes?"}
+    other_sheet = {**surface("other-sheet", parent="b"), "modal": True, "kind": "sheet"}
+    controller, app = setup(a, b, c)
+    owner = window_scope(controller, app, ref(app, "a"))
+    request = ExecuteAction(owner, Intent("closeWindow"), owner._window_identity)
+    controller.port.calls.limit = lambda _: nullcontext()
+    controller.transport.retain_session = lambda _: nullcontext()
+    confirmation = transition == "attached-confirmation"
+    after = directory(a, b, c, sheet, other_sheet, focus="sheet") if confirmation else directory(
+        b, c, focus="b", ended=(a,) if transition == "during-collection" else (),
+    )
+    initial = directory(a, b, c) if transition == "during-collection" else after
+    controller.reader.directory._query = AsyncMock(side_effect=[initial, after, after])
+    reads = []
+    pipeline = controller.interfaces.read_pipeline
+
+    def snapshot(item):
+        native = SimpleNamespace(id="snapshot", interval_ns=(1, 2), session="session", roots=(item["node"],))
+        return SimpleNamespace(native=native, refs={}, roots=())
+
+    async def read_member(_ui, item, _view, **_kwargs):
+        reads.append(item["window"])
+        return WindowPart(member_target(app._instance, item), tree=snapshot(item))
+
+    async def read_app(selection, *, source_directory, **_kwargs):
+        key = selection.root.root_window
+        selected = sheet if confirmation and key == "a" else app._instance.members[key]
+        part = await read_member(app, selected, "tree")
+        left = key == "a" and not confirmation
+        return AppObservation(
+            selection=selection, target=part.target, applications=None, source_directory=source_directory,
+            directory=after, tree=None if left else part.tree, image=None, document=DisplayDocument.join(()),
+            refs={}, windows={}, gaps=(), scope_confirmed=not left,
+        )
+
+    controller.reader.read = AsyncMock(side_effect=read_app)
+    pipeline.member = AsyncMock(side_effect=read_member)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
+    monkeypatch.setattr("computer_use.interaction.read.views.collection.window_content_unexposed", lambda _: False)
+    monkeypatch.setattr(
+        "computer_use.interaction.read.views.pipeline.tree_document",
+        lambda _controller, target, *_a, **_kw: DisplayDocument.join((f"Body of {target.root_window}",)),
+    )
+    pipeline.preparation.run = lambda _value, _control: SimpleNamespace(roots=())
+    receipt = {"status": "dispatched", "detail": "One close requested."}
+    body = SimpleNamespace(contract=SimpleNamespace(effects=frozenset()), arun=AsyncMock(return_value=receipt))
+    suffix = WriteWithObservation(controller, body)
+
+    result = asyncio.run(suffix.run_observed(request, Control()))
+
+    body.arun.assert_awaited_once()
+    assert result.receipt is receipt
+    assert set(reads).isdisjoint({"b", "c", "other-sheet"})
+    assert "Unrelated document B" in result.observation.text and "Unrelated document C" in result.observation.text
+    assert "Body of b" not in result.observation.text and "Body of c" not in result.observation.text
+    metadata = observation_data(result.observation)
+    assert {item["window"] for item in metadata["window_coverage"]}.isdisjoint({"b", "c", "other-sheet"})
+    if confirmation:
+        assert "sheet" in reads and "Body of sheet" in result.observation.text
+        assert result.window_lifecycle == "observed"
+    else:
+        assert not metadata["content_available"]
+        assert result.observation_status == "available"
+        assert "Other windows are listed without expansion." in result.observation.text
+        assert {choice.id for choice in result.choices} == {ref(app, "b"), ref(app, "c")}
+        assert result.window_lifecycle == ("closed" if transition == "during-collection" else "unknown")

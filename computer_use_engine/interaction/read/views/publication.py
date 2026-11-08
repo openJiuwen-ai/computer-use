@@ -26,6 +26,8 @@ from computer_use.session.interfaces import ApplicationEntry, LookupContext, Win
 from computer_use.session.observation import lazy_observation
 from computer_use.session.observation_data import component_delivered, retain_observation_data
 
+from .related import original_lifecycle
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -72,10 +74,12 @@ def related_window_summary(
         if newly_observed
         else "no newly observed window entries"
     )
-    return template(
-        "After action: {0}; catalogue {1}.",
-        membership, coverage,
-    )
+    detail = ""
+    if related.window_family_only and not related.content_members(directory):
+        lifecycle = original_lifecycle(related.original, directory, related.original_window)
+        state = "closed" if lifecycle == "closed" else "absent from this catalogue; lifetime unconfirmed"
+        detail = f" Original window: {state}. Other windows are listed without expansion."
+    return template("After action: {0}; catalogue {1}.{2}", membership, coverage, detail)
 
 
 def tree_text(

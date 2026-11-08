@@ -255,7 +255,15 @@ class InterfaceReadPipeline:
         # Stage this observation's own lookup configuration, including a
         # catalogue-only result. Previous menu samples are not its content.
         ui._lookup_scopes, ui._menu_only = (), False
-        if related is not None and ui._anchor is None and instance.anchor is None:
+        window_family_only = related is not None and related.window_family_only
+        if window_family_only:
+            ui._context = None
+
+        def content_members():
+            members = allowed(ui)
+            return related.content_members(directory, members) if window_family_only else members
+
+        if related is not None and not window_family_only and ui._anchor is None and instance.anchor is None:
             preferred = related.preferred(directory, related.original.root_window)
             if preferred in instance.members:
                 instance.anchor = controller.reader._selection(
@@ -271,7 +279,7 @@ class InterfaceReadPipeline:
 
         async def application_content():
             if (
-                ui._anchor is not None or view == "image"
+                window_family_only or ui._anchor is not None or view == "image"
                 or "nativeApplicationContent" not in controller.transport.capabilities
                 or any(surface["node"] is not None for surface in directory["surfaces"])
             ):
@@ -291,7 +299,7 @@ class InterfaceReadPipeline:
             return (target, tree, tree_document(controller, target, tree, prepared=prepared), owner), gap
 
         content_gap = None
-        if instance.anchor is None and ui._anchor is None:
+        if not window_family_only and instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
             launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
             ui._context = None
@@ -333,7 +341,7 @@ class InterfaceReadPipeline:
                         first = first.launch
                 if not directory["surfaces"] and isinstance(first, MenuAppObservation):
                     return await InterfaceMenuPipeline(controller).run(ui, (), observed=first)
-        if instance.anchor is None and ui._anchor is None:
+        if not window_family_only and instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
             launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
             choices = controller.interfaces.windows.choices(directory, state.name or str(instance.selector))
@@ -361,9 +369,9 @@ class InterfaceReadPipeline:
                 gaps=(content_gap,) if content_gap is not None else (),
                 on_observation=on_observation,
             )
-        permitted = allowed(ui)
-        # pylint: disable-next=protected-access
-        anchor = ui._anchor or instance.anchor.root.root_window
+        permitted = content_members()
+        # A fixed close must not fall through to the App's new display anchor.
+        anchor = related.original.root_window if window_family_only else ui._anchor or instance.anchor.root.root_window
         if related is not None:
             anchor = related.preferred(directory, anchor)
         plan = CollectionPlan(anchor, view, related)
@@ -401,7 +409,7 @@ class InterfaceReadPipeline:
                             )
                             if changed:
                                 directory = await refresh(controller, ui, accessibility=True)
-                                permitted = allowed(ui)
+                                permitted = content_members()
                                 plan.update(directory, permitted)
                                 if not related.new_windows(directory) and original is not None:
                                     identity = WindowIdentity(
@@ -433,7 +441,7 @@ class InterfaceReadPipeline:
                     reconciled_captures = capture_changes
                 try:
                     directory = await refresh(controller, ui, accessibility=related is not None or view != "image")
-                    permitted = allowed(ui)
+                    permitted = content_members()
                     plan.update(directory, permitted)
                 except asyncio.CancelledError:
                     raise
@@ -445,8 +453,11 @@ class InterfaceReadPipeline:
             key = identity.window
             item = permitted[key]
             # The App reader can follow another modal from its working root.
-            # This menu evidence requires the scheduled member's own AX root.
-            if initial and principal_error is None and ui._anchor is None and identity != plan.menu_origin:
+            # A scoped close or exact menu evidence must use the scheduled member's own root.
+            if (
+                initial and not window_family_only and principal_error is None and ui._anchor is None
+                and identity != plan.menu_origin
+            ):
                 initial = False
                 selected = controller.reader._selection(
                     instance.anchor.application, instance.anchor.name, directory, anchor
@@ -660,9 +671,10 @@ class InterfaceReadPipeline:
         if principal_error is not None:
             # pylint: disable-next=protected-access
             ui._context = None
-            notes.append(
-                "Current input window is not uniquely confirmed; explicit elements remain scoped to their windows."
-            )
+            if not window_family_only or permitted:
+                notes.append(
+                    "Current input window is not uniquely confirmed; explicit elements remain scoped to their windows."
+                )
         # pylint: disable-next=protected-access
         elif parts and ui._anchor is not None:
             # pylint: disable-next=protected-access
@@ -741,6 +753,8 @@ class InterfaceReadPipeline:
         tree_heading = len(lines)
         if any(part.tree is not None for _, part in displayed_parts):
             lines.append("Tree: full")
+        elif window_family_only and not permitted:
+            lines.append("Tree: not expanded; directory only.")
         elif any("tree" in requested for requested in plan.requested.values()):
             lines.append("Tree: unavailable")
         else:
@@ -941,7 +955,7 @@ class InterfaceReadPipeline:
             context_owner=related.context_owner if related is not None else None,
             content_owner=content_owner,
             partial=bool(
-                principal_error
+                principal_error and (not window_family_only or permitted)
                 or directory["stopReasons"]
                 or any(part.gaps for part in parts)
                 or collection_gaps

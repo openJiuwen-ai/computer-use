@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from weakref import ReferenceType
 
+from computer_use.interaction.query.instances.membership import ancestor
 from computer_use.native.contracts import Binding
 from computer_use.session.interfaces import WindowIdentity
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import UIHandle
+    from computer_use.protocol.records import NativeDirectory, SurfaceInfo
 
     from .changes import PostwriteChanges
 
@@ -32,23 +34,54 @@ class RelatedRead:
     context_root: WindowIdentity | None = None
     changes: PostwriteChanges | None = None
     menu_origin: WindowIdentity | None = None
+    window_family_application: str | None = None
+
+    @property
+    def window_family_only(self) -> bool:
+        return self.window_family_application is not None
 
     @property
     def original_window(self) -> WindowIdentity | None:
+        if self.window_family_only:
+            return WindowIdentity(self.original.root_window, self.original.surface, self.original.instance)
         return next((item for item in self.known_windows if item.window == self.original.root_window), None)
+
+    def content_members(
+        self, directory: NativeDirectory, members: dict[str, SurfaceInfo] | None = None,
+    ) -> dict[str, SurfaceInfo]:
+        """Separate eligible automatic content from the full discovery catalogue."""
+        if members is None:
+            members = {item["window"]: item for item in directory["surfaces"]}
+        if not self.window_family_only:
+            return members
+        if (
+            directory["session"] != self.original.session
+            or directory["application"] != self.window_family_application
+        ):
+            return {}
+        roots = {
+            identity.window for identity in (self.original_window, self.context_root)
+            if identity is not None and identity.window in members
+            and WindowIdentity.of(members[identity.window]) == identity
+        }
+        return {
+            key: item for key, item in members.items()
+            if any(ancestor(directory, key, root) for root in roots)
+        }
 
     def recovery_window(self, directory, unavailable: frozenset[str] = frozenset()) -> str | None:
         """Find a surviving original scope after collection updates its directory.
 
         A closing modal can be present during initial selection and absent by
-        the component recheck. Prefer its surviving fixed parent, then the
-        App's current window. This widens the follow-up observation only;
-        publication separately prevents rebinding the original fixed handle.
+        the component recheck. A fixed close stays within its window family.
+        Other related reads can fall back to the App's current window.
         """
         current = {WindowIdentity.of(item) for item in directory["surfaces"]}
         for identity in (self.original_window, self.context_root):
             if identity is not None and identity in current and identity.window not in unavailable:
                 return identity.window
+        if self.window_family_only:
+            return None
         windows = [
             item["window"] for item in directory["surfaces"]
             if item["kind"] != "menu" and item["window"] not in unavailable
@@ -63,11 +96,16 @@ class RelatedRead:
     def new_windows(self, directory) -> tuple[str, ...]:
         return tuple(
             item["window"]
-            for item in directory["surfaces"]
+            for item in self.content_members(directory).values()
             if item["kind"] != "menu" and WindowIdentity.of(item) not in self.known_windows
         )
 
     def preferred(self, directory, fallback: str) -> str:
+        if self.window_family_only:
+            current = {WindowIdentity.of(item) for item in directory["surfaces"]}
+            if self.original_window not in current and self.context_root in current:
+                return self.context_root.window
+            return self.original.root_window
         newly_seen = self.new_windows(directory)
         focused = directory.get("focusedWindow")
         if focused in newly_seen:
