@@ -90,7 +90,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             setter(None)
         images_state._delivery_required = self.previous_delivery
 
-    def capture(self, ui, key, size=(100, 80), color=None):
+    def capture(self, ui, key, size=(100, 80), color=None, origin=(0, 0)):
         item = ui._instance.members[key]
         identity = "capture-" + str(len(self.captures))
         buffer = BytesIO()
@@ -112,7 +112,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         )
         part = WindowPart(
             target,
-            image=WindowImage(target, png, {}, dict(nativeSpace="screen", toNative=(1, 0, 0, 1, 0, 0))),
+            image=WindowImage(target, png, {}, dict(nativeSpace="screen", toNative=(1, 0, 0, 1, *origin))),
         )
         image, _ = InterfaceImagePipeline(self.controller).run(ui, [part])
         ui._image, ui._context = image, key
@@ -322,6 +322,78 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.click(self.window, (140, 30))
         await self.execute(f"click(scope({ref(self.app, 'b')}), (140, 30))")
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
+
+    async def test_standalone_chooser_and_parent_canvas_only_advertise_the_actual_window_point(self):
+        adopt(self.controller, self.app, directory(surface("a"), surface("b", parent="a"), focus="b"))
+
+        def chooser():
+            image = self.capture(self.app, "b", (750, 610), "red", (235, 99))
+            return publish(self.controller, self.app, "Save As chooser", image.png)
+
+        def parent_canvas():
+            document = self.capture(self.window, "a", (1220, 748), "white", (0, 30)).pieces[0].image
+            panel = self.capture(self.window, "b", (750, 610), "red", (235, 99)).pieces[0].image
+            parts = [WindowPart(image.target, image=image) for image in (document, panel)]
+            canvas, _ = InterfaceImagePipeline(self.controller).run(self.window, parts)
+            return publish(self.controller, self.window, "Document and chooser", canvas.png)
+
+        self.runtime.task_namespace.update(
+            chooser=lambda: self.runtime.executor.call(chooser),
+            parent_canvas=lambda: self.runtime.executor.call(parent_canvas),
+        )
+        result = await self.execute("standalone = chooser()\ncombined = parent_canvas()")
+        captions = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
+        standalone, combined = captions
+        target = ref(self.app, "b")
+        self.assertIn("750x610", standalone)
+        self.assertIn(f"Window reference: {target}", standalone)
+        self.assertIn('Capture: "capture-0"', standalone)
+        self.assertNotIn(f"Image point for window={target}:", standalone)
+        self.assertNotIn("Coordinate target=", standalone)
+        self.assertIn("1220x748", combined)
+        self.assertIn(f"Image point for window={target}:", combined)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertEqual(text.count(f"Image point for window={target}:"), 1)
+
+        panel = window_scope(self.controller, self.app, target)
+        await self.click(panel, (430, 233))
+        request = self.write.arun.call_args.args[0]
+        self.assertEqual(request.target.capture, "capture-2")
+        self.assertEqual((request.intent.parameters["x"], request.intent.parameters["y"]), (195, 164))
+
+        streamed = [event["output"] for event in self.events if "output" in event]
+        image_captions = [block["_meta"]["computer-use"]["caption"] for block in streamed if block["type"] == "image"]
+        self.assertEqual(len(image_captions), 2)
+        self.assertTrue(all("Image point" not in caption for caption in image_captions))
+
+    async def test_same_response_keeps_distinct_window_hint_on_earlier_canvas(self):
+        result = await self.execute("combined = compose(app, ('a', 'b'))\nlatest = observe(window, 'a')")
+        captions = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
+        old, latest = captions
+        a, b = ref(self.app, "a"), ref(self.app, "b")
+        self.assertNotIn(f"Image point for window={a}:", old)
+        self.assertIn(f"Image point for window={b}:", old)
+        self.assertNotIn("Coordinate target=", old)
+        self.assertIn(f"Image point for window={a}:", latest)
+        await self.click(window_scope(self.controller, self.app, b), (140, 30))
+        self.assertEqual(self.last_target().root_window, "b")
+        await self.click(self.window)
+        self.assertEqual(self.last_target().capture, self.captures[-1].pieces[0].image.target.capture)
+
+    async def test_coordinate_hints_follow_capture_generation_even_when_printed_in_reverse(self):
+        result = await self.execute(
+            "earlier = capture(app, 'a', (100, 80), 'red')\n"
+            "later = capture(alias, 'a', (120, 90), 'white')\n"
+            "print_image(later.png)\nprint_image(earlier.png)"
+        )
+        captions = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
+        later, earlier = captions
+        self.assertIn("120x90", later)
+        self.assertIn("Image point for window=", later)
+        self.assertIn("100x80", earlier)
+        self.assertNotIn("Image point", earlier)
+        await self.click(self.window)
+        self.assertEqual(self.last_target().capture, "capture-1")
 
     async def test_delayed_composite_retains_only_members_without_a_newer_delivered_image(self):
         # Automatic observation sampled a parent and popup before a later

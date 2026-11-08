@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.delivery.image_caption import (
@@ -77,7 +78,68 @@ def image_output_scope(png):
     return known["source"].get("coordinateScope")
 
 
-def image_label(png, context_already_shown=False, coordinates: ImageCoordinates | None = None):
+@dataclass(frozen=True)
+class ImagePointHints:
+    """Point syntax and target description derived from current coordinate authority."""
+
+    points: tuple[str, ...] = ()
+    actions: tuple[str, ...] = ()
+    target: str | None = None
+
+    def keys(self) -> set[str]:
+        return set(self.points) if self.target is None else {*self.points, self.target}
+
+
+@dataclass(frozen=True)
+class ImageCaption:
+    """Captured presentation facts and the point hints eligible at emission time."""
+
+    size: tuple[int, int]
+    facts: dict
+    hints: ImagePointHints
+
+    def render(self, eligible: set[str] | None = None) -> str:
+        """Optionally narrow the action hints without changing the captured facts."""
+        points = tuple(point for point in self.hints.points if eligible is None or point in eligible)
+        target = self.hints.target if points and (eligible is None or self.hints.target in eligible) else None
+        caption = render_image_caption(*self.size, dict(self.facts, coordinateTarget=target))
+        return "\n".join((caption, IMAGE_POINT_GUIDANCE, *points, *self.hints.actions)) if points else caption
+
+
+def _point_hints(source, stale=False) -> ImagePointHints:
+    if source is None or stale or not source.get("mappingAvailable", True):
+        return ImagePointHints()
+    if source["kind"] == "desktop":
+        return ImagePointHints(("Image point: p = computer.point((x, y))",), ("Global click: computer.click(target=p)",))
+    if source["kind"] != "window":
+        return ImagePointHints()
+    coordinate_windows = source.get("coordinate_windows")
+    refs = coordinate_windows() if callable(coordinate_windows) else ()
+    if callable(coordinate_windows) and not refs:
+        return ImagePointHints()
+    application = f"computer.app({source['selector']!r})"
+    points = (
+        tuple(f"Image point for window={ref}: p = {application}.point((x, y), window={ref})" for ref in refs)
+        if refs
+        else (f"Image point: p = {application}.point((x, y))",)
+    )
+    target = source.get("coordinateTarget")
+    return ImagePointHints(
+        points, (f"App click: {application}.click(at=p)", "Global click (explicit): computer.click(target=p)"),
+        target() if callable(target) else target,
+    )
+
+
+def image_point_keys(png) -> set[str]:
+    """Return the point hints this capture can still supply after actual delivery."""
+    known = _source(png)
+    if known is None:
+        return set()
+    source = known["source"]
+    return _point_hints(source, source.get("current", lambda: True)() is False).keys()
+
+
+def image_caption(png, context_already_shown=False, coordinates: ImageCoordinates | None = None) -> ImageCaption:
     size = png_size(png)
     if coordinates is not None:
         size = {"width": coordinates.delivered_size[0], "height": coordinates.delivered_size[1]}
@@ -102,9 +164,6 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
         )
         if source.get("observed"):
             identity += "; observation=" + json_string(source["observed"]["id"])
-        coordinate_target = source.get("coordinateTarget")
-        if callable(coordinate_target):
-            coordinate_target = coordinate_target()
         facts = dict(
             kind="window",
             mappingAvailable=source.get("mappingAvailable", True),
@@ -112,7 +171,6 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
             identity=identity,
             stale=stale,
             omitContext=context_already_shown and not source.get("historical", False),
-            coordinateTarget=coordinate_target,
         )
     if source is not None and known["metadata"] is not None:
         facts["stopReasons"] = known["metadata"].get("stopReasons", ())
@@ -130,37 +188,8 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
                 visual,
                 lines=[dict(line, rect=coordinates.delivered_rect(line["rect"])) for line in visual["lines"]],
             )
-    caption = render_image_caption(size["width"], size["height"], facts)
-    actionable = (
-        facts["kind"] in ("desktop", "window") and not facts.get("stale") and facts.get("mappingAvailable", True)
-    )
-    if not actionable:
-        return caption
-    if facts["kind"] == "desktop":
-        return (
-            caption
-            + "\n"
-            + IMAGE_POINT_GUIDANCE
-            + ("\nImage point: p = computer.point((x, y))\nGlobal click: computer.click(target=p)")
-        )
-    coordinate_windows = source.get("coordinate_windows")
-    refs = coordinate_windows() if callable(coordinate_windows) else ()
-    # Delayed/composite pictures may still describe old members. Only advertise
-    # locators whose window currently retains this exact delivered canvas.
-    if callable(coordinate_windows) and not refs:
-        return caption
-    application = f"computer.app({source['selector']!r})"
-    points = (
-        [f"Image point for window={ref}: p = {application}.point((x, y), window={ref})" for ref in refs]
-        if refs
-        else [f"Image point: p = {application}.point((x, y))"]
-    )
-    return "\n".join(
-        [
-            caption,
-            IMAGE_POINT_GUIDANCE,
-            *points,
-            f"App click: {application}.click(at=p)",
-            "Global click (explicit): computer.click(target=p)",
-        ]
-    )
+    return ImageCaption((size["width"], size["height"]), facts, _point_hints(source, facts.get("stale", False)))
+
+
+def image_label(png, context_already_shown=False, coordinates: ImageCoordinates | None = None):
+    return image_caption(png, context_already_shown, coordinates).render()

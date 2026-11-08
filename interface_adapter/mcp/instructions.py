@@ -121,9 +121,9 @@ presentation mode.
 Explicit native detail geometry retains its declared screen/AX coordinate space;
 do not treat it as screenshot pixels.
 
-After reading multiple windows, use window=ref to reuse the corresponding
-image without rereading it. Composite images keep whole-image coordinates.
-Choose coordinates from a newly returned image in the following tool call.
+Use the point constructor beside the current delivered image for the chosen
+window. A newer delivered image can replace that window's default coordinate
+space. Composite images keep whole-image coordinates.
 Combine operations whose targets and steps are already known in one call.
 Return at a new menu, dialog or other state that requires a fresh decision.
 Calls execute one at a time; each SDK operation completes or raises before the

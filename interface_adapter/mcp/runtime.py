@@ -27,10 +27,12 @@ from computer_use.client.host import (
     set_text_page_handler,
 )
 from computer_use.client.images import (
+    image_caption,
     image_delivered,
     image_label,
     image_metadata,
     image_output_scope,
+    image_point_keys,
     require_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
@@ -134,9 +136,9 @@ class Runtime:
             execution_id = None
         self.send(dict(diagnostic=event, **({"executionId": execution_id} if execution_id is not None else {})))
 
-    def emit(self, block, merge_text=False):
+    def emit(self, block, merge_text=False, *, progress=None):
         if not self.executor.is_owner:
-            return self.executor.call(self.emit, block, merge_text)
+            return self.executor.call(self.emit, block, merge_text, progress=progress)
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -146,7 +148,7 @@ class Runtime:
         run["output"].append(dict(block), merge_text)
         if not run["publishing"]:
             run["outputEntries"].append({"kind": "block", "block": dict(block), "merge": merge_text})
-        self.send(dict(output=block, mergeText=merge_text, executionId=run["id"]))
+        self.send({"output": block if progress is None else progress, "mergeText": merge_text, "executionId": run["id"]})
 
     def flush_observations(self, run, *, explicit=False):
         """Retain chronological slots; render only the facts actually delivered.
@@ -548,7 +550,8 @@ class Runtime:
         if run is not None and run["active"] and output_key in run["imageOutputs"]:
             # Output reuse does not merge the native sources. Every exact
             # capture retains its own acknowledgement after actual delivery.
-            self.record_image(run, delivery, coalesced=True)
+            if self.record_image(run, delivery, coalesced=True):
+                run["imageOutputs"][output_key]["deliveries"].append(delivery)
             return
         data = prepared[2] if prepared is not None else base64.b64encode(delivery.png).decode("ascii")
         identifier = f"{run['id']}.{len(run['imageOutputs']) + 1}" if run is not None else "standalone"
@@ -556,35 +559,38 @@ class Runtime:
         # Mutated bytes cannot borrow their replacement's provenance or map.
         # The immutable encoded output still depicts the originally printed image.
         caption_source = png if source_matches else delivery.png
-        caption = image_label(caption_source, context_shown, delivery.coordinates)
-        label = caption if context_shown else image_label(caption_source, True, delivery.coordinates)
-        self.emit(
-            dict(
-                type="text",
-                text=f"Image {identifier}\n{caption}",
-            )
-        )
-        self.emit(
-            dict(
-                type="image",
-                mimeType="image/png",
-                data=data,
-                _meta={"computer-use": {"imageId": identifier, "caption": label}},
-            )
-        )
-        if run is not None and run["active"]:
-            run["imageOutputs"].add(output_key)
-            self.record_image(run, delivery, coalesced=False)
+        caption = image_caption(caption_source, context_shown, delivery.coordinates)
+        label = caption if context_shown else image_caption(caption_source, True, delivery.coordinates)
+        text = {"type": "text", "text": f"Image {identifier}\n{caption.render()}"}
+        metadata = {"imageId": identifier, "caption": label.render()}
+        block = {"type": "image", "mimeType": "image/png", "data": data, "_meta": {"computer-use": metadata}}
+        if run is None or not run["active"]:
+            return
+        # An interrupted worker can return the images already streamed, but
+        # only the completed response can say which coordinate maps survived.
+        passive_text = dict(text, text=f"Image {identifier}\n{caption.render(set())}")
+        self.emit(text, progress=passive_text)
+        text_block = run["output"].content[-1]
+        try:
+            self.emit(block, progress=dict(block, _meta={"computer-use": dict(metadata, caption=label.render(set()))}))
+        except Exception:
+            text_block.update(passive_text)
+            raise
+        run["imageOutputs"][output_key] = {
+            "caption": caption, "label": label, "text": text_block, "metadata": metadata, "deliveries": [delivery],
+        }
+        self.record_image(run, delivery, coalesced=False)
 
     def record_image(self, run, delivery, *, coalesced):
         if any(image.source is delivery.source and image.png == delivery.png for image in run["images"]):
-            return
+            return False
         run["images"].append(delivery)
         captured = run["preparedDeliveries"][id(delivery)][3]
         self.send({
             "diagnostic": {"kind": "image_output", "capture": captured, "coalesced": coalesced},
             "executionId": run["id"],
         })
+        return True
 
     async def finish(self, error: BaseException | None = None):
         run = _runs.get()
@@ -608,11 +614,23 @@ class Runtime:
         except Exception as failure:
             if error is None:
                 error = failure
+        acknowledged = set()
         for delivery in run["images"]:
             if run["preparedDeliveries"][id(delivery)][0] == hashlib.sha256(delivery.source).digest():
                 image_delivered(delivery.source, delivery.coordinates)
+                acknowledged.add(id(delivery))
         for state in run["deliveredObservations"]:
             observation_delivered(state)
+        for image in run["imageOutputs"].values():
+            eligible = set()
+            for delivery in image["deliveries"]:
+                if id(delivery) in acknowledged:
+                    eligible.update(image_point_keys(delivery.source))
+            if (image["caption"].hints.keys() | image["label"].hints.keys()) <= eligible:
+                continue
+            metadata = image["metadata"]
+            image["text"]["text"] = f"Image {metadata['imageId']}\n{image['caption'].render(eligible)}"
+            metadata["caption"] = image["label"].render(eligible)
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())
@@ -730,7 +748,7 @@ class Runtime:
             publishing=False,
             observations=ObservationOutput(self.presenter),
             images=[],
-            imageOutputs=set(),
+            imageOutputs={},
             pending=set(),
             observationLogs=deque(),
             actions=ActionPresentation(),
