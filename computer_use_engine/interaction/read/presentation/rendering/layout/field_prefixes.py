@@ -117,7 +117,8 @@ def capture_field_prefix_sources(
         for name in ("name", "description", "url"):
             value = getattr(node, name)
             failed = any(not path or path[0] == name for path in issues[token])
-            if type(value) is str and not failed:
+            value_type = type(value)
+            if value_type is str and not failed:
                 values[name] = value
         scope = (observation.session, observation.id, source_scopes[ref])
         result[ref] = NativeFieldSource(token, scope, **values)
@@ -208,7 +209,8 @@ def _fields(frame: LayoutFrame) -> tuple[int, list[_Field]] | None:
     expanded = expand_tree_chains(expand_leaf_headers(records_expanded))
     verified: dict[str, list[str]] = defaultdict(list)
     for line in expanded:
-        if match := _NODE.fullmatch(line):
+        match = _NODE.fullmatch(line)
+        if match:
             verified[match[2]].append(line.lstrip("\t"))
     root_entry = entries.get(root)
     if root_entry is None or root not in records or counts[root] != 1:
@@ -243,7 +245,8 @@ def _fields(frame: LayoutFrame) -> tuple[int, list[_Field]] | None:
             for name in ("name", "description")
             if getattr(source, name) is not None and getattr(source, name) == value
         ]
-        if type(value) is str and len(matches) == 1:
+        value_type = type(value)
+        if value_type is str and len(matches) == 1:
             fields.append(("Caption", value, (matches[0],)))
         if source.url is not None and node.get("url") == source.url:
             fields.append(("URL", source.url, ("url",)))
@@ -314,7 +317,8 @@ def expand_field_prefixes(lines: list[str]) -> list[str]:
         if re.match(r"^(?:Window [0-9]+:|Application menu[: (])", stripped):
             prefixes = {}
             started = False
-        if match := _DECLARATION.fullmatch(stripped):
+        match = _DECLARATION.fullmatch(stripped)
+        if match:
             if started:
                 prefixes = {}
                 started = False
@@ -434,9 +438,11 @@ def pack_field_prefixes(frame: LayoutFrame) -> FieldPrefixLayout:
     groups: dict[str, list[_Field]] = defaultdict(list)
     for member in members:
         groups[member.kind].append(member)
-    selected = [
-        group for kind, items in groups.items() if (group := _best_group(kind, items, frame, indent)) is not None
-    ]
+    selected = []
+    for kind, items in groups.items():
+        group = _best_group(kind, items, frame, indent)
+        if group is not None:
+            selected.append(group)
     if not selected:
         return FieldPrefixLayout(frame.lines)
 
@@ -478,6 +484,6 @@ def pack_field_prefixes(frame: LayoutFrame) -> FieldPrefixLayout:
     try:
         if expand_field_prefixes(output) != frame.lines:
             return FieldPrefixLayout(frame.lines)
-    except (ValueError, TypeError, UnicodeError):
+    except (ValueError, TypeError):
         return FieldPrefixLayout(frame.lines)
     return FieldPrefixLayout(output, tuple(replacements))

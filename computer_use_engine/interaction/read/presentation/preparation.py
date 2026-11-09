@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
 from functools import cached_property
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -207,13 +208,13 @@ class CapturedSnapshot:
         if sources is not None:
             if checkpoint is not None:
                 checkpoint()
-            values = {item.name: getattr(sources, item.name) for item in fields(sources)}
+            values = {item.name: getattr(sources, item.name) for item in dataclass_fields(sources)}
             values["roots"] = _copy_collections(snapshot.roots, immutable=True, checkpoint=checkpoint)
             values["collection"] = getattr(snapshot, "collection", None)
             return cls(**values)
         values = {
             item.name: getattr(snapshot, item.name, None) if item.name == "collection" else getattr(snapshot, item.name)
-            for item in fields(cls)
+            for item in dataclass_fields(cls)
         }
         # One memo covers aliases shared by the fact, field and tree indexes.
         return cls(**_copy_collections(values, immutable=True, checkpoint=checkpoint))
@@ -234,7 +235,7 @@ class CapturedSnapshot:
                 if read_only_sources and item.name != "roots"
                 else _copy_collections(getattr(self, item.name), immutable=False, checkpoint=checkpoint)
             )
-            for item in fields(self)
+            for item in dataclass_fields(self)
         }
         values["driver_features"] = self.driver_features
         return _MaterializedSnapshot(**values)

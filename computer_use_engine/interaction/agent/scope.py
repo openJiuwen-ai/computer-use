@@ -78,7 +78,10 @@ def window_scope(controller, app, ref):
 async def bind_window_title(controller, app):
     title = app._window_title
     applications = await controller.reader.directory._query({"kind": "applications", "windowTitle": title}, 30000)
-    matches = [(application, window) for application in applications["applications"] for window in application["windows"]]
+    matches = []
+    for application in applications["applications"]:
+        for window in application["windows"]:
+            matches.append((application, window))
     if len(matches) > 1:
         raise local_failure("several running Windows windows have this exact caption", "ambiguous_target")
     if applications.get("windowTitle") != {"title": title, "complete": True}:
@@ -98,7 +101,9 @@ async def bind_window_title(controller, app):
         raise local_failure("the matched window changed during title discovery", "stale_target")
     if app._title_window_ref is not None:
         return
-    controller.state(app).running = RunningApplication(application["id"], application["displayName"], directory["session"])
+    controller.state(app).running = RunningApplication(
+        application["id"], application["displayName"], directory["session"]
+    )
     adopt(controller, app, directory)
     ref = controller.interfaces.windows.reference(directory["session"], application["id"], WindowIdentity.of(item))
     if ref is None:

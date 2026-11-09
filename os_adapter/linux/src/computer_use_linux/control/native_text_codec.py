@@ -19,7 +19,8 @@ from computer_use_linux.contracts.protocol import Failure
 class AsciiTextCodec:
     """The UTF-8 and UTF-16 insertion lengths coincide for this payload."""
 
-    def insertion_length(self, text: str) -> int:
+    @staticmethod
+    def insertion_length(text: str) -> int:
         if not text.isascii():
             raise Failure("The native ASCII insertion contract cannot send non-ASCII text.", "input_unavailable")
         return len(text)

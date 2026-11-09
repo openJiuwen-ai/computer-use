@@ -176,16 +176,14 @@ def pack_table_entries(frame: LayoutFrame) -> TableEntriesLayout:
         matches = [i for i in range(table.line + 1, root_end) if frame.lines[i] == evidence.introduction]
         # The nearest containing object remains the original table. Repeated
         # identical introductions are resolved by their exact ordered row refs.
-        matches = [
-            i
-            for i in matches
-            if (block := _block(frame.lines, i, _GRAMMAR))
-            and block[1] == evidence.rows
-            and frame.lines[i + 1] == evidence.heading
-        ]
-        if len(matches) != 1:
+        ordered_matches = []
+        for i in matches:
+            block = _block(frame.lines, i, _GRAMMAR)
+            if block and block[1] == evidence.rows and frame.lines[i + 1] == evidence.heading:
+                ordered_matches.append(i)
+        if len(ordered_matches) != 1:
             return TableEntriesLayout(frame.lines)
-        index = matches[0]
+        index = ordered_matches[0]
         intro = _INTRO.fullmatch(evidence.introduction)
         if (
             intro is None

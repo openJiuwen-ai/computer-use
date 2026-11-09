@@ -35,27 +35,31 @@ def captured_content(
         node.backend != "macos"
         or node.values.get("AXValue") != ""
         or node.groups.get("states", {}).get("protected") is True
-        or subrole == "AXSecureTextField"
-        or not (isinstance(subrole, str) or subrole_status in ("absent", "unsupported"))
-        or any(field in node.row["fieldStatus"] for field in ("AXValue", "AXNumberOfCharacters", name))
-        or read.get("complete") is not True
-        or read.get("issues")
-        or read.get("api") != "AXUIElementCopyParameterizedAttributeValue"
-        or type(count) is not int
-        or not 0 < count <= 4096
-        or set(requested) != {"location", "length"}
-        or type(requested.get("location")) is not int
-        or requested["location"] != 0
-        or type(requested.get("length")) is not int
-        or requested["length"] != count
-        or not isinstance(value, str)
-        or len(value.encode("utf-16-le", errors="surrogatepass")) // 2 != count
-        or type(details.get("character_count_after")) is not int
-        or details["character_count_after"] != count
-        or any(
-            type(details.get(field)) is not int or details[field] != 0
-            for field in ("character_count_before_status", "character_count_after_status", "native_status")
-        )
+    ):
+        return False
+    if subrole == "AXSecureTextField" or not (
+        isinstance(subrole, str) or subrole_status in ("absent", "unsupported")
+    ):
+        return False
+    if any(field in node.row["fieldStatus"] for field in ("AXValue", "AXNumberOfCharacters", name)):
+        return False
+    if read.get("complete") is not True or read.get("issues") or read.get("api") != (
+        "AXUIElementCopyParameterizedAttributeValue"
+    ):
+        return False
+    if type(count) is not int or not 0 < count <= 4096 or set(requested) != {"location", "length"}:
+        return False
+    if type(requested.get("location")) is not int or requested["location"] != 0:
+        return False
+    if type(requested.get("length")) is not int or requested["length"] != count:
+        return False
+    if not isinstance(value, str) or len(value.encode("utf-16-le", errors="surrogatepass")) // 2 != count:
+        return False
+    if type(details.get("character_count_after")) is not int or details["character_count_after"] != count:
+        return False
+    if any(
+        type(details.get(field)) is not int or details[field] != 0
+        for field in ("character_count_before_status", "character_count_after_status", "native_status")
     ):
         return False
     info = node.text_info()

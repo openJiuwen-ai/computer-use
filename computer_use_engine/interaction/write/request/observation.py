@@ -39,11 +39,9 @@ if TYPE_CHECKING:
 def selection_target(request, before_tree, before_target) -> Binding | None:
     """Choose a proved selectable source to check after a click or copy chord."""
     target, intent = request.target, request.intent
-    if (
-        before_tree is None or before_target is None or not isinstance(target, Binding)
-        or window_binding(before_target) != window_binding(target)
-        or before_tree.native.session != target.session
-    ):
+    if before_tree is None or before_target is None or not isinstance(target, Binding):
+        return None
+    if window_binding(before_target) != window_binding(target) or before_tree.native.session != target.session:
         return None
     if intent.kind == "click" and intent.parameters == {"button": "left", "count": 1} and target.node is not None:
         nodes = before_tree.native.nodes
@@ -53,19 +51,19 @@ def selection_target(request, before_tree, before_target) -> Binding | None:
         # A file name or caption can be the clicked part of a selectable row.
         # Reobserve the one containing cell/row only through native child edges.
         if source.role in ("text_field", "text", "image"):
-            parents = [
-                ref for ref, node in nodes.items()
-                if node.role in ("cell", "row") and (children := node.relations.get("children")) is not None
-                and children.evidence != "candidate" and target.node in children.targets
-            ]
+            parents = []
+            for ref, node in nodes.items():
+                if node.role not in ("cell", "row"):
+                    continue
+                children = node.relations.get("children")
+                if children is not None and children.evidence != "candidate" and target.node in children.targets:
+                    parents.append(ref)
             if len(parents) == 1 and nodes[parents[0]].states.selected is not None:
                 return replace(target, node=parents[0]) if nodes[parents[0]].states.selected is False else None
         if source.states.selected is False:
             return target
-    if (
-        intent.kind == "key" and intent.parameters.get("key") == "super+c"
-        and before_tree.scope_kind is None and len(before_tree.native.roots) == 1
-    ):
+    is_copy = intent.kind == "key" and intent.parameters.get("key") == "super+c"
+    if is_copy and before_tree.scope_kind is None and len(before_tree.native.roots) == 1:
         (node,) = before_tree.native.roots
         source = before_tree.native.nodes.get(node)
         if source is not None and source.states.selected is True:
@@ -108,12 +106,12 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             # Preserve that exact parent, including for a fixed close request.
             identity = WindowIdentity(request.target.root_window, request.target.surface, request.target.instance)
             original = next((item for item in prior["surfaces"] if WindowIdentity.of(item) == identity), None)
-            parent = next((
-                item for item in prior["surfaces"]
-                if original is not None and item["window"] == (
+            parent = None
+            if original is not None:
+                parent_key = (
                     content_host(original) or (original["parent"] if original["parentState"] == "known" else None)
                 )
-            ), None)
+                parent = next((item for item in prior["surfaces"] if item["window"] == parent_key), None)
             context_root = WindowIdentity.of(parent) if parent is not None else None
         source_owner = getattr(instance, "owners", {}).get(getattr(request.target, "root_window", None))
         source = self.controller.state(source_owner) if source_owner is not None else None
@@ -135,12 +133,10 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             else None
         )
         menu_origin = None
-        if (
-            related is not None and prior["platform"] == "macos" and request.intent.kind == "openMenu"
-            and isinstance(request.target, Binding) and request.target.root_window is not None
-            and prior["session"] == request.target.session
-        ):
-            target = request.target
+        target = request.target
+        observe_menu = related is not None and prior["platform"] == "macos" and request.intent.kind == "openMenu"
+        window_menu = isinstance(target, Binding) and target.root_window is not None
+        if observe_menu and window_menu and prior["session"] == target.session:
             origin = WindowIdentity(target.root_window, target.surface, target.instance)
             application = prior["application"]
 
@@ -158,11 +154,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             receipt = await self.body.arun(request, control)
         except ComputerUseError as error:
             close_unavailable = request.intent.kind == "closeWindow" and error.code == "input_unavailable"
-            if (
-                error.effect not in ("partial", "possible")
-                and error.code not in TARGET_OBSERVATION_ERRORS and not close_unavailable
-                and error._observation_reason is None
-            ):
+            refresh_needed = error.code in TARGET_OBSERVATION_ERRORS or close_unavailable
+            if error.effect not in ("partial", "possible") and not refresh_needed and error._observation_reason is None:
                 raise
             # This is still the original exception, not a fabricated successful
             # receipt. Preparation/dispatch evidence and its original cause stay
@@ -178,11 +171,9 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
-            if (
-                request.intent.kind == "openMenu" and error._invoked_menu_target == request.target
-                and instance is not None and outcome.observation is not None
-                and self.session_usable(request, session_identity)
-            ):
+            invoked_menu = request.intent.kind == "openMenu" and error._invoked_menu_target == request.target
+            has_observation = instance is not None and outcome.observation is not None
+            if invoked_menu and has_observation and self.session_usable(request, session_identity):
                 error.observed_menu_window = observed_menu_window(
                     request.target, before_target, before_tree, outcome.observation, instance.windows,
                 )
@@ -228,10 +219,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         # Internal non-UI owners and unobserved launch results have no acquired
         # application scope. The suffix never launches an application.
         instance = getattr(owner, "_instance", None)
-        if (
-            owner is None or instance is None
-            or getattr(instance, "directory", None) is None
-            and getattr(instance, "anchor", None) is None
+        if instance is None or (
+            getattr(instance, "directory", None) is None and getattr(instance, "anchor", None) is None
         ):
             return replace(outcome, observation_status="not_requested")
         strict_window = getattr(owner, "_strict_window", False)
@@ -360,15 +349,13 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
     def close_confirmation_pending(self, request, outcome, error, session_identity):
         owner = request.owner
         fixed = getattr(owner, "_window_identity", None)
-        if (
-            request.intent.kind != "closeWindow"
-            or getattr(self.controller.port, "platform", None) != "windows"
-            or outcome.receipt is None
-            or outcome.receipt["status"] != "dispatched"
-            or fixed is None
-            or window_binding(fixed) != window_binding(request.target)
-            or not self.session_usable(request, session_identity)
-        ):
+        if request.intent.kind != "closeWindow" or getattr(self.controller.port, "platform", None) != "windows":
+            return False
+        if outcome.receipt is None or outcome.receipt["status"] != "dispatched":
+            return False
+        if fixed is None or window_binding(fixed) != window_binding(request.target):
+            return False
+        if not self.session_usable(request, session_identity):
             return False
         if isinstance(error, FixedWindowUnconfirmed):
             if window_binding(error.binding) != window_binding(fixed):

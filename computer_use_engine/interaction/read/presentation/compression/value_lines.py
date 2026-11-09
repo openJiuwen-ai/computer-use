@@ -15,7 +15,7 @@ from computer_use.protocol.primitives import utf16_length
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from computer_use.interaction.read.presentation.ir import ProjectionView, ViewNode
+    from computer_use.interaction.read.presentation.ir import PresentedValue, ProjectionView, ViewNode
     from computer_use.protocol.records import Record
 
 
@@ -29,7 +29,10 @@ def _owned(view: ProjectionView, owner: str, ref: str, evidence: CompressionEvid
             source is None
             or view.scopes.get(current) != view.scopes.get(owner)
             or current in evidence.contested_sources
-            or current in evidence.incomplete_children
+        ):
+            return False
+        if (
+            current in evidence.incomplete_children
             or current in evidence.incomplete_content
             or has_incomplete_children(source)
         ):
@@ -41,6 +44,14 @@ def _owned(view: ProjectionView, owner: str, ref: str, evidence: CompressionEvid
             return False
         current = parent
     return False
+
+
+def _exact_field(presented: PresentedValue | None, fact: FactKey, text: str) -> bool:
+    if presented is None or len(presented.parts) != 1:
+        return False
+    if presented.parts[0].facts != (fact,) or presented.value != text:
+        return False
+    return True
 
 
 def covered_value_lines(view: ProjectionView, owner: ViewNode, parts: Sequence[Record]) -> tuple[Record, ...] | None:
@@ -61,27 +72,20 @@ def covered_value_lines(view: ProjectionView, owner: ViewNode, parts: Sequence[R
     """
     evidence = view.context.get("compressionEvidence")
     ref = owner["ref"]
-    if (
-        owner["role"] not in ("textField", "textArea", "comboBox")
-        or not parts
-        or not isinstance(evidence, CompressionEvidence)
-        or ref not in evidence.control_value_lines
-        or (ref, "value") not in evidence.complete_text
-    ):
+    if owner["role"] not in ("textField", "textArea", "comboBox") or not parts:
+        return None
+    if not isinstance(evidence, CompressionEvidence):
+        return None
+    if ref not in evidence.control_value_lines or (ref, "value") not in evidence.complete_text:
         return None
     value = view.field_value(ref, "value")
     original = view.native_nodes[ref].get("value")
     anchor = FactKey(SourceKey(ref), "value")
-    if (
-        type(original) is not str
-        or not original
-        or utf16_length(original) > VALUE_PREVIEW_LIMIT
-        or ";base64," in original.lower()
-        or value is None
-        or len(value.parts) != 1
-        or value.parts[0].facts != (anchor,)
-        or value.value != original
-    ):
+    if type(original) is not str or not original:
+        return None
+    if utf16_length(original) > VALUE_PREVIEW_LIMIT or ";base64," in original.lower():
+        return None
+    if not _exact_field(value, anchor, original):
         return None
     lines = tuple(re.finditer(r"[^\r\n\x85\u2028\u2029]+", original))
     result, offset, seen = [], 0, set()
@@ -91,20 +95,15 @@ def covered_value_lines(view: ProjectionView, owner: ViewNode, parts: Sequence[R
             (source, field) in seen
             or (source, field) not in evidence.complete_text
             or field not in ("name", "description", "value")
-            or type(text) is not str
-            or not text
-            or view.native_nodes.get(source, {}).get(field) != text
-            or not _owned(view, ref, source, evidence)
         ):
+            return None
+        if type(text) is not str or not text:
+            return None
+        if view.native_nodes.get(source, {}).get(field) != text or not _owned(view, ref, source, evidence):
             return None
         presented = view.field_value(source, field)
         fact = FactKey(SourceKey(source), field)
-        if (
-            presented is None
-            or len(presented.parts) != 1
-            or presented.parts[0].facts != (fact,)
-            or presented.value != text
-        ):
+        if not _exact_field(presented, fact, text):
             return None
         match = next((line for line in lines if line.start() >= offset and line.group() == text), None)
         if match is None:

@@ -37,7 +37,8 @@ def content_within(items, window, root):
         item = items.get(key)
         if item is None:
             continue
-        if (host := content_host(item)) is not None:
+        host = content_host(item)
+        if host is not None:
             pending.append(host)
         if item["parentState"] == "known" and item["parent"] is not None:
             pending.append(item["parent"])

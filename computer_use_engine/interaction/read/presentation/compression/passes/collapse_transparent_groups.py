@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 def _complete_caption(view: ProjectionView, node: ViewNode, field: str, evidence: CompressionEvidence) -> str | None:
     """Read a whole displayed string backed by complete, exact source fields."""
     value = view.field_value(node["ref"], field)
-    if value is None or not value.parts or type(value.value) is not str or not value.value:
+    if value is None or not value.parts:
+        return None
+    if type(value.value) is not str or not value.value:
         return None
     for part in value.parts:
         if type(part.value) is not str or not part.facts:
@@ -33,9 +35,9 @@ def _complete_caption(view: ProjectionView, node: ViewNode, field: str, evidence
             if (
                 fact.attribute not in ("name", "description", "value")
                 or (fact.source, fact.attribute) not in evidence.complete_text
-                or type(original.get(fact.attribute)) is not str
-                or original[fact.attribute] != part.value
             ):
+                return None
+            if type(original.get(fact.attribute)) is not str or original[fact.attribute] != part.value:
                 return None
     return value.value
 
@@ -44,14 +46,11 @@ def _covered_caption_group(
     view: ProjectionView, node: ViewNode, child: ViewNode, evidence: CompressionEvidence
 ) -> bool:
     """Recognize one passive label wrapper exactly covering its sole real control."""
-    if (
-        not view.context.get("nativeFacts")
-        or node.get("linkedLabel")
-        or node.get("titleRef")
-        or node.get("incompleteLabelRelation")
-        or any(node["ref"] in targets for targets in view.targets.values())
-        or child["ref"] in evidence.incomplete_content
-    ):
+    if not view.context.get("nativeFacts"):
+        return False
+    if any(node.get(field) for field in ("linkedLabel", "titleRef", "incompleteLabelRelation")):
+        return False
+    if any(node["ref"] in targets for targets in view.targets.values()) or child["ref"] in evidence.incomplete_content:
         return False
     bounds = view.geometry.boxes
     if node["ref"] not in bounds or bounds.get(child["ref"]) != bounds[node["ref"]]:
@@ -65,11 +64,11 @@ def _covered_caption_group(
         if current == child["ref"]:
             break
         current = evidence.complete_children[current][0]
-    captions = {
-        caption
-        for field in ("name", "description", "value")
-        if (caption := _complete_caption(view, child, field, evidence)) is not None
-    }
+    captions = set()
+    for field in ("name", "description", "value"):
+        caption = _complete_caption(view, child, field, evidence)
+        if caption is not None:
+            captions.add(caption)
     original = view.native_nodes[node["ref"]]
     nonempty = False
     for field in ("name", "description"):
@@ -129,24 +128,18 @@ def collapse_transparent_groups(
         The original node, or its single child for the parent traversal to splice in.
     """
     evidence = view.context.get("compressionEvidence")
-    if (
-        not view.context.get("compact")
-        or view.context.get("subtreeRef")
-        or not node.get("_factBacked")
-        or node["role"] != "group"
-        or scope.in_table
-        or view.keep(node)
-        or len(node["children"]) != 1
-        or not isinstance(evidence, CompressionEvidence)
-        or has_incomplete_children(node)
-        or node.get("spatialPosition")
-        or node.get("labelTargets")
-        or any(
-            not empty_content(node.get(field))
-            for field in ("value", "controlValue", "documentText", "rangeValue", "url")
-        )
-        or node.get("roleDescription") not in (None, "", "group", "组", "container")
-    ):
+    if not view.context.get("compact") or view.context.get("subtreeRef") or not node.get("_factBacked"):
+        return [node]
+    if node["role"] != "group" or scope.in_table or view.keep(node):
+        return [node]
+    if len(node["children"]) != 1 or not isinstance(evidence, CompressionEvidence) or has_incomplete_children(node):
+        return [node]
+    if node.get("spatialPosition") or node.get("labelTargets"):
+        return [node]
+    business_fields = ("value", "controlValue", "documentText", "rangeValue", "url")
+    if any(not empty_content(node.get(field)) for field in business_fields):
+        return [node]
+    if node.get("roleDescription") not in (None, "", "group", "组", "container"):
         return [node]
     boundaries = display_boundary_reasons(view, node)
     if node["ref"] not in evidence.splice_conflicts:

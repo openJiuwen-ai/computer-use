@@ -71,16 +71,12 @@ def _payload_files(manifest, target):
     folded = set()
     for name, entry in files.items():
         relative = PurePosixPath(name)
-        if (
-            relative.as_posix() != name
-            or relative.is_absolute()
-            or any(char in name for char in '\\:<>"|?*')
-            or any(
-                part == ".." or part.endswith((" ", ".")) or PureWindowsPath(part).is_reserved()
-                for part in relative.parts
-            )
-            or name.casefold() in folded
-        ):
+        if relative.as_posix() != name or relative.is_absolute() or any(char in name for char in '\\:<>"|?*'):
+            raise ValueError(f"Invalid backend path: {name}")
+        if any(
+            part == ".." or part.endswith((" ", ".")) or PureWindowsPath(part).is_reserved()
+            for part in relative.parts
+        ) or name.casefold() in folded:
             raise ValueError(f"Invalid backend path: {name}")
         folded.add(name.casefold())
         if entry["mode"] not in (0o644, 0o755):

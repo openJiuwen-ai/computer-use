@@ -135,12 +135,12 @@ def decode_directory(value):
                 if not isinstance(entry["result"], dict) or entry["result"].get("kind") != "surfaces":
                     raise ValueError("protocol: batch entry must contain a surface directory")
                 item = decode_directory(entry["result"])
-                if (
+                scope_changed = (
                     item["kind"] != "surfaces"
                     or item["application"] != entry["application"]
                     or item["session"] != result["session"]
-                    or item["platform"] != result["platform"]
-                ):
+                )
+                if scope_changed or item["platform"] != result["platform"]:
                     raise ValueError("protocol: batch surface directory changed its scope")
                 entry["result"] = item
             else:
@@ -156,53 +156,52 @@ def decode_directory(value):
         for item in windows:
             surface = item["window"]
             validate_surface(surface)
-            if (
-                not item["selector"].startswith("instance:") or not surface["nativeWindow"]
-                or surface["accessibility"] or surface["parentState"] != "unknown" or surface["modal"] is not None
-                or (item["selector"] in foreground and item["appIsForeground"] is not True)
-            ):
+            exact_instance = item["selector"].startswith("instance:") and surface["nativeWindow"]
+            native_metadata = (
+                exact_instance
+                and not surface["accessibility"]
+                and surface["parentState"] == "unknown"
+                and surface["modal"] is None
+            )
+            if not native_metadata or item["selector"] in foreground and item["appIsForeground"] is not True:
                 raise ValueError("protocol: window catalogue requires native metadata for the exact instance")
     elif result["kind"] == "applications":
         if "path" in result or "installation" in result:
             paths = {item["path"] for item in result["applications"]}
-            if (
-                result["platform"] != "macos"
-                or "scope" in result
-                or "path" in result and ("installation" in result or not result["path"].startswith("/"))
-                or len(paths) > 1
-                or any(not path or not path.startswith("/") for path in paths)
-                or "installation" in result and any(not item["isRunning"] for item in result["applications"])
-            ):
-                raise ValueError("protocol: invalid exact application scope")
+            scope_error = "protocol: invalid exact application scope"
+            if result["platform"] != "macos" or "scope" in result:
+                raise ValueError(scope_error)
+            if "path" in result and ("installation" in result or not result["path"].startswith("/")):
+                raise ValueError(scope_error)
+            if len(paths) > 1 or any(not path or not path.startswith("/") for path in paths):
+                raise ValueError(scope_error)
+            if "installation" in result and any(not item["isRunning"] for item in result["applications"]):
+                raise ValueError(scope_error)
         identifiers = [item["id"] for item in result["applications"]]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("protocol: duplicate application lifetime")
         if "endedApplications" in result:
             ended = result["endedApplications"]
-            if (
-                result["platform"] != "macos" or any(key in result for key in ("path", "installation", "scope"))
-                or any(not application.startswith("instance:") for application in ended)
-                or len(set(ended)) != len(ended) or set(ended).intersection(identifiers)
-            ):
+            lifetime_scope = result["platform"] == "macos" and not any(
+                key in result for key in ("path", "installation", "scope")
+            )
+            valid_instances = lifetime_scope and all(application.startswith("instance:") for application in ended)
+            if not valid_instances or len(set(ended)) != len(ended) or set(ended).intersection(identifiers):
                 raise ValueError("protocol: conflicting ended application lifetime")
-        if "windowTitle" in result and (
-            result["platform"] != "windows"
-            or result.get("scope") != "runningWindows"
-            or any(not item["isRunning"] or not item.get("windows") for item in result["applications"])
-        ):
-            raise ValueError("protocol: invalid Windows caption catalogue")
+        if "windowTitle" in result:
+            running_windows = result["platform"] == "windows" and result.get("scope") == "runningWindows"
+            if not running_windows or any(
+                not item["isRunning"] or not item.get("windows") for item in result["applications"]
+            ):
+                raise ValueError("protocol: invalid Windows caption catalogue")
         native_names = result.get("nativeProcessNames")
         if native_names is not None:
             named = {row["application"] for row in native_names}
             native_candidates = {
                 item["id"] for item in result["applications"] if item["isRunning"] and item.get("windows")
             }
-            if (
-                result["platform"] != "windows"
-                or result.get("scope") != "runningWindows"
-                or len(native_names) != len(named)
-                or not named.issubset(native_candidates)
-            ):
+            running_windows = result["platform"] == "windows" and result.get("scope") == "runningWindows"
+            if not running_windows or len(native_names) != len(named) or not named.issubset(native_candidates):
                 raise ValueError("protocol: invalid Win32 process name catalogue")
         for item in result["applications"]:
             keys = item.get("matchKeys", [])

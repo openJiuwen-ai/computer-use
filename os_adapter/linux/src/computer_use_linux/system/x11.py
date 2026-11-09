@@ -28,7 +28,7 @@ class X11:
     _resource_version = _RESOURCE_UNQUERIED
 
     def __init__(self, retire, *, allow_global_input=False):
-        require(type(allow_global_input) is bool, "Global input permission must be a boolean.")
+        require(allow_global_input is True or allow_global_input is False, "Global input permission must be a boolean.")
         self.allow_global_input = allow_global_input
         if os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
             raise Failure(
@@ -215,7 +215,10 @@ class X11:
 
     def prepare(self, instance, ctx, pointer=False):
         if not self.can_input:
-            raise Failure("XTest is unavailable; native accessibility actions remain available.", "unsupported_operation")
+            raise Failure(
+                "XTest is unavailable; native accessibility actions remain available.",
+                "unsupported_operation",
+            )
         w = self.validate(instance)
         if not w.mapped:
             raise Failure("Window is not visible; restore it before using visual input.", "input_unavailable")

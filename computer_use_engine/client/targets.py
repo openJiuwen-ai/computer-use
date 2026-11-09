@@ -29,7 +29,8 @@ class Target:
     _image: object = field(default=None, repr=False)
     _internal: InitVar[bool] = False
 
-    def __post_init__(self, _internal):
+    @staticmethod
+    def __post_init__(_internal):
         if not _internal:
             raise TypeError("Use Element.target or Computer/App.point() to obtain a Target")
 
@@ -97,18 +98,15 @@ def target_request(controller, value, intent, parameters, *, global_input=False,
         points = (target._point,)
         if end is not None:
             last = as_target(controller, end)
-            if (
-                last._point is None
-                or last._binding != target._binding
-                or (
-                    target._image is not None
-                    and (
-                        last._image is None
-                        or last._image.png is not target._image.png
-                        or last._image.delivered_coordinates != target._image.delivered_coordinates
-                    )
+            same_capture = last._point is not None and last._binding == target._binding
+            if same_capture and target._image is not None:
+                first_image, last_image = target._image, last._image
+                same_capture = (
+                    last_image is not None
+                    and last_image.png is first_image.png
+                    and last_image.delivered_coordinates == first_image.delivered_coordinates
                 )
-            ):
+            if not same_capture:
                 raise local_failure("drag targets must use the same captured window or desktop image")
             if target._point == last._point:
                 raise local_failure("drag start and end must differ")

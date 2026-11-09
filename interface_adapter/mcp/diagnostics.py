@@ -34,35 +34,30 @@ def _trace_field(value):
 
 def dumps(value):
     event = value.get("diagnostic", value) if isinstance(value, dict) else None
-    if (
-        isinstance(event, dict)
-        and event.get("kind") == "pipeline"
-        and all(isinstance(key, str) and not key.isdecimal() and _trace_field(item) for key, item in event.items())
-        and (
+    if isinstance(event, dict) and event.get("kind") == "pipeline":
+        pipeline_fields = all(
+            isinstance(key, str) and not key.isdecimal() and _trace_field(item) for key, item in event.items()
+        )
+        if pipeline_fields and (
             event is value
             or all(
                 isinstance(key, str) and not key.isdecimal() and (key == "diagnostic" or _trace_field(item))
                 for key, item in value.items()
             )
-        )
-    ):
-        try:
-            return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-        except (TypeError, ValueError):
-            pass
-    if (
-        isinstance(event, dict)
-        and event.get("kind") == "command_end"
-        and event.get("method") == "inspect"
-        and isinstance(event.get("result"), dict)
-        and event["result"].get("kind") == "observation"
-    ):
-        try:
-            return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-        except (TypeError, ValueError):
-            # Keep the diagnostic callback tolerant of non-native/custom
-            # records rather than losing evidence to an optimization.
-            pass
+        ):
+            try:
+                return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            except (TypeError, ValueError):
+                pass
+    if isinstance(event, dict) and event.get("kind") == "command_end" and event.get("method") == "inspect":
+        result = event.get("result")
+        if isinstance(result, dict) and result.get("kind") == "observation":
+            try:
+                return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            except (TypeError, ValueError):
+                # Keep the diagnostic callback tolerant of non-native/custom
+                # records rather than losing evidence to an optimization.
+                pass
     return legacyDumps(value)
 
 

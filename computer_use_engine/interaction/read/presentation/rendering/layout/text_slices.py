@@ -117,20 +117,21 @@ def capture_text_slice_sources(
         parent_ref = inverse.get(parent)
         if source_scopes.get(parent_ref) != source_scopes[ref]:
             parent_ref = None
-        name = node.name if type(node.name) is str and complete(token, ("name",)) else None
+        name = node.name
+        name_type = type(name)
+        if name_type is not str or not complete(token, ("name",)):
+            name = None
         primary_control = (
             value_fields.get(ref) == "control_value.value"
             if value_fields is not None
             else node.text is None or node.text.content_field == ("control_value", "value")
         )
-        value = (
-            node.control_value.value
-            if primary_control
-            and node.control_value is not None
-            and type(node.control_value.value) is str
-            and complete(token, ("control_value", "value"))
-            else None
-        )
+        value = None
+        if primary_control and node.control_value is not None:
+            candidate = node.control_value.value
+            candidate_type = type(candidate)
+            if candidate_type is str and complete(token, ("control_value", "value")):
+                value = candidate
         result[ref] = TextSource(
             token, (observation.session, observation.id, source_scopes[ref]), parent_ref, name, value
         )
@@ -347,7 +348,7 @@ def _public_fields(frame: LayoutFrame) -> dict[tuple[str, str], _Field]:
             try:
                 encoded = frame.format_field(value)
                 value.encode("utf-16-le")
-            except (UnicodeError, ValueError):
+            except ValueError:
                 continue
             bare = (
                 attribute == "Value"
@@ -465,7 +466,7 @@ def pack_exact_text_slices(frame: LayoutFrame) -> TextSliceLayout:
     try:
         if expand_exact_text_slices(result, frame.format_field) != frame.lines:
             return unchanged
-    except (KeyError, ValueError, TypeError, UnicodeError):
+    except (KeyError, ValueError, TypeError):
         return unchanged
     return TextSliceLayout(result, tuple(selected))
 

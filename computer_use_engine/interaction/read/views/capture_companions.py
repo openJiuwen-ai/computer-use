@@ -44,11 +44,11 @@ def companion_capture(item: SurfaceInfo, directory: NativeDirectory, parts: Sequ
     itself. Partial unrelated App catalogue facts do not invalidate this local
     association, and observing an entry later does not prove its creation time.
     """
-    if (
-        directory.get("platform") != "macos" or item["kind"] != "dialog" or item["modal"] is not False
-        or item["parentState"] != "known" or item["parent"] is None or item.get("node") is None
-        or item.get("accessibility") is not True or directory.get("focusedWindow") == item["window"]
-    ):
+    if directory.get("platform") != "macos" or item["kind"] != "dialog" or item["modal"] is not False:
+        return None
+    if item["parentState"] != "known" or item["parent"] is None or item.get("node") is None:
+        return None
+    if item.get("accessibility") is not True or directory.get("focusedWindow") == item["window"]:
         return None
     parent = next((row for row in directory["surfaces"] if row["window"] == item["parent"]), None)
     if parent is None:
@@ -63,21 +63,23 @@ def companion_capture(item: SurfaceInfo, directory: NativeDirectory, parts: Sequ
         before = part.image_directory
         if before is None and part.source is not None:
             before = part.source.source_directory
-        if (
-            before is None or before["session"] != directory["session"]
-            or before["application"] != directory["application"]
-            or any(WindowIdentity.of(row) == WindowIdentity.of(item) for row in before["surfaces"])
-            or not any(WindowIdentity.of(row) == identity for row in before["surfaces"])
-        ):
+        if before is None or before["session"] != directory["session"]:
+            continue
+        if before["application"] != directory["application"]:
+            continue
+        if any(WindowIdentity.of(row) == WindowIdentity.of(item) for row in before["surfaces"]):
+            continue
+        if not any(WindowIdentity.of(row) == identity for row in before["surfaces"]):
             continue
         first, last = before.get("observed"), directory.get("observed")
         capture = capture_metadata(image.image)
-        if (
-            first is None or last is None or first["id"] == last["id"]
-            or capture.get("kind") != "window" or capture.get("id") != image.target.capture
-            or capture.get("scope") != image.target.surface
-            or not first["completedAt"] <= capture["startedAt"] <= capture["completedAt"] <= last["startedAt"]
-        ):
+        if first is None or last is None or first["id"] == last["id"]:
+            continue
+        if capture.get("kind") != "window" or capture.get("id") != image.target.capture:
+            continue
+        if capture.get("scope") != image.target.surface:
+            continue
+        if not first["completedAt"] <= capture["startedAt"] <= capture["completedAt"] <= last["startedAt"]:
             continue
         return CompanionCapture(identity, capture["id"], first["id"], last["id"])
     return None

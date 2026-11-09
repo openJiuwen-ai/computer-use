@@ -25,6 +25,18 @@ def apply_patterns(draft: InterfaceDraft) -> InterfaceDraft:
         return replace(draft, geometric_patterns=())
     blocks = dict(draft.blocks)
     decisions: list[str] = []
+
+    def flush(owner_block: InterfaceBlock, pending: list[str], assembled: list[str]) -> None:
+        if len(pending) >= 2:
+            key = synthetic_key("native-card-list", owner_block.key, pending)
+            blocks[key] = InterfaceBlock(
+                key, "collection", None, (), tuple(pending), layout="record-blocks", origin="visual"
+            )
+            assembled.append(key)
+        else:
+            assembled.extend(pending)
+        pending.clear()
+
     for plan in plans:
         owner = blocks[plan.owner_key]
         for path in plan.wrapper_chains:
@@ -74,24 +86,13 @@ def apply_patterns(draft: InterfaceDraft) -> InterfaceDraft:
             output: list[str] = []
             run: list[str] = []
 
-            def flush() -> None:
-                if len(run) >= 2:
-                    key = synthetic_key("native-card-list", owner.key, run)
-                    blocks[key] = InterfaceBlock(
-                        key, "collection", None, (), tuple(run), layout="record-blocks", origin="visual"
-                    )
-                    output.append(key)
-                else:
-                    output.extend(run)
-                run.clear()
-
             for child in owner.children:
                 if child in selected:
                     run.append(child)
                 else:
-                    flush()
+                    flush(owner, run, output)
                     output.append(child)
-            flush()
+            flush(owner, run, output)
             blocks[owner.key] = replace(owner, children=tuple(output))
         decisions.append("geometric-pattern:" + plan.kind + ":" + plan.owner_ref)
     result = revise(draft, blocks, *decisions)

@@ -62,11 +62,12 @@ class RelatedRead:
             or directory["application"] != self.window_family_application
         ):
             return {}
-        roots = {
-            identity.window for identity in (self.original_window, self.context_root)
-            if identity is not None and identity.window in members
-            and WindowIdentity.of(members[identity.window]) == identity
-        }
+        roots = set()
+        for identity in (self.original_window, self.context_root):
+            if identity is None or identity.window not in members:
+                continue
+            if WindowIdentity.of(members[identity.window]) == identity:
+                roots.add(identity.window)
         return {
             key: item for key, item in members.items()
             if any(ancestor(directory, key, root) for root in roots)

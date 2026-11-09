@@ -138,6 +138,20 @@ def group_visual_rows(draft: InterfaceDraft) -> InterfaceDraft:
         return draft
     blocks = dict(draft.blocks)
     decisions: list[str] = []
+
+    def flush(owner_key: str, owner: InterfaceBlock, pending: list[str], assembled: list[str]) -> None:
+        units = tuple(row_unit(key, draft, blocks) for key in pending)
+        roles = {draft.projected_nodes[unit.target_ref]["role"] for unit in units if unit is not None}
+        visual = any(blocks[key].visual_unit for key in pending)
+        if len(pending) < 2 or owner.kind != "field" and not (len(roles) > 1 or roles == {"staticText"} or visual):
+            assembled.extend(pending)
+        else:
+            key = synthetic_key("visual-row", owner_key, pending)
+            blocks[key] = InterfaceBlock(key, "content", None, (), tuple(pending), layout="visual-row", origin="visual")
+            assembled.append(key)
+            decisions.append("visual-row:" + ",".join(unit.target_ref for unit in units if unit is not None))
+        pending.clear()
+
     for parent_key, parent in draft.blocks.items():
         if not local_parent(parent, draft):
             continue
@@ -146,19 +160,6 @@ def group_visual_rows(draft: InterfaceDraft) -> InterfaceDraft:
         prepared_rows = prepared_unit_rows(parent, draft, blocks)
         candidate_rows = {key: index for index, members in enumerate(prepared_rows or ()) for key in members}
 
-        def flush() -> None:
-            units = tuple(row_unit(key, draft, blocks) for key in run)
-            roles = {draft.projected_nodes[unit.target_ref]["role"] for unit in units if unit is not None}
-            visual = any(blocks[key].visual_unit for key in run)
-            if len(run) < 2 or parent.kind != "field" and not (len(roles) > 1 or roles == {"staticText"} or visual):
-                output.extend(run)
-            else:
-                key = synthetic_key("visual-row", parent_key, run)
-                blocks[key] = InterfaceBlock(key, "content", None, (), tuple(run), layout="visual-row", origin="visual")
-                output.append(key)
-                decisions.append("visual-row:" + ",".join(unit.target_ref for unit in units if unit is not None))
-            run.clear()
-
         for key in parent.children:
             child = blocks[key]
             if (
@@ -166,15 +167,15 @@ def group_visual_rows(draft: InterfaceDraft) -> InterfaceDraft:
                 and child.primary_ref == parent.label_ref
                 or member_box(key, draft, blocks) is None
             ):
-                flush()
+                flush(parent_key, parent, run, output)
                 output.append(key)
                 continue
             if run and candidate_rows and candidate_rows[run[-1]] != candidate_rows[key]:
-                flush()
+                flush(parent_key, parent, run, output)
             if run and not row_geometry((*run, key), draft, blocks, require_source_order=False):
-                flush()
+                flush(parent_key, parent, run, output)
             run.append(key)
-        flush()
+        flush(parent_key, parent, run, output)
         if tuple(output) != parent.children:
             blocks[parent_key] = replace(parent, children=tuple(output))
     return revise(draft, blocks, *decisions)

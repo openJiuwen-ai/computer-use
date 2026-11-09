@@ -36,25 +36,22 @@ def _name_delivered(window: MemberHeading, tree: DisplayTree, rendered: Rendered
     """Require the original window Name and its actual same-scope public emission."""
     target = window.target
     prepared = tree.prepared
-    if (
-        not window.in_scope
-        or not window.expanded
-        or not window.title
-        or target is None
-        or tree.details
-        or not prepared.request.compact
-        or not prepared.request.public_api
-        or not prepared.request.share_descriptions
-        or len(tree.scope) != 5
-        or len(prepared.roots) != 1
-    ):
+    if not window.in_scope or not window.expanded or not window.title:
+        return False
+    if target is None or tree.details or not prepared.request.compact:
+        return False
+    if not prepared.request.public_api or not prepared.request.share_descriptions:
+        return False
+    if len(tree.scope) != 5 or len(prepared.roots) != 1:
         return False
     binding = tuple(target.get(key) for key in ("session", "instance", "root_window", "surface", "node"))
-    if (
-        tree.scope != binding
-        or any(type(value) is not str or not value for value in binding[:4])
-        or prepared.snapshot.native.session != binding[0]
-    ):
+    if tree.scope != binding:
+        return False
+    for identity in binding[:4]:
+        identity_type = type(identity)
+        if identity_type is not str or not identity:
+            return False
+    if prepared.snapshot.native.session != binding[0]:
         return False
     root = prepared.roots[0]
     if root.failure is not None or root.projection is None:
@@ -63,14 +60,12 @@ def _name_delivered(window: MemberHeading, tree: DisplayTree, rendered: Rendered
     snapshot = prepared.snapshot
     token = snapshot.refs.get(ref)
     native = snapshot.native.nodes.get(token)
-    if (
-        native is None
-        or native.role not in ("window", "dialog", "sheet")
-        or snapshot.native.roots != (token,)
-        or binding[4] not in (None, token)
-        or type(native.name) is not str
-        or native.name != window.title
-    ):
+    if native is None or native.role not in ("window", "dialog", "sheet"):
+        return False
+    if snapshot.native.roots != (token,) or binding[4] not in (None, token):
+        return False
+    name_type = type(native.name)
+    if name_type is not str or native.name != window.title:
         return False
     for issue in snapshot.native.issues:
         path = tuple(issue.path)
@@ -82,28 +77,25 @@ def _name_delivered(window: MemberHeading, tree: DisplayTree, rendered: Rendered
             return False
     projected = next((node for node in prepared.nodes if node.ref == ref and node.parent is None), None)
     source = rendered.get("fields", {}).get((ref, "name"))
-    if (
-        projected is None
-        or projected.fields.get("name") != native.name
-        or source is None
-        or source.get("node") != token
-        or tuple(source.get("path", ())) != ("name",)
-        or source.get("representation") != "field"
-        or type(source.get("normalized")) is not str
-        or source["normalized"] != native.name
-    ):
+    if projected is None or projected.fields.get("name") != native.name or source is None:
         return False
-    claims = [
-        claim
-        for projection in rendered.get("projections", ())
-        for claim in projection.get("fieldCoverage", ())
-        if claim.get("ref") == ref
-        and claim.get("field") == "name"
-        and claim.get("target") == ref
-        and claim.get("kind") in ("display", "equivalent")
-        and type(claim.get("value")) is str
-        and claim["value"] == native.name
-    ]
+    if source.get("node") != token or tuple(source.get("path", ())) != ("name",):
+        return False
+    if source.get("representation") != "field":
+        return False
+    normalized_type = type(source.get("normalized"))
+    if normalized_type is not str or source["normalized"] != native.name:
+        return False
+    claims = []
+    for projection in rendered.get("projections", ()):
+        for claim in projection.get("fieldCoverage", ()):
+            if not (claim.get("ref") == ref and claim.get("field") == "name" and claim.get("target") == ref):
+                continue
+            if claim.get("kind") not in ("display", "equivalent"):
+                continue
+            claim_value_type = type(claim.get("value"))
+            if claim_value_type is str and claim["value"] == native.name:
+                claims.append(claim)
     output = getattr(rendered, "document", None)
     if not claims or not isinstance(output, RenderedDocument):
         return False

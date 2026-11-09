@@ -59,22 +59,22 @@ class ActionCatalogue:
                 for issue in self.issues
             )
         ):
-            issues = [
+            projected_issues = [
                 {**asdict(issue), "path": (selected[issue.path[3]].key, *issue.path[4:])}
                 for issue in self.issues
                 if issue.path[3] in selected
             ]
             return json.dumps(
-                (self.scope, [asdict(by_name[name]) for name in self.names], self.names, self.labels, issues),
+                (self.scope, [asdict(by_name[name]) for name in self.names], self.names, self.labels, projected_issues),
                 ensure_ascii=True,
                 sort_keys=True,
                 separators=(",", ":"),
             )
         # Retain the conservative full-catalogue comparison if a source cannot
         # map every displayed name and metadata index to one native record.
-        issues = [{**asdict(issue), "path": issue.path[2:]} for issue in self.issues]
+        catalogue_issues = [{**asdict(issue), "path": issue.path[2:]} for issue in self.issues]
         return json.dumps(
-            (self.scope, [asdict(action) for action in self.actions], self.names, self.labels, issues),
+            (self.scope, [asdict(action) for action in self.actions], self.names, self.labels, catalogue_issues),
             ensure_ascii=True,
             sort_keys=True,
             separators=(",", ":"),

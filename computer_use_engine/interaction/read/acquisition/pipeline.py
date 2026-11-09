@@ -316,13 +316,13 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 )
             except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
                 directory = error.directory
-                if (
-                    directory is None
-                    or directory["session"] != components.source_directory["session"]
-                    or directory["application"] != components.source_directory["application"]
-                    or window_binding(error.binding) != window_binding(state.target)
-                    or components.tree is None and components.image is None
-                ):
+                if directory is None or directory["session"] != components.source_directory["session"]:
+                    raise
+                if directory["application"] != components.source_directory["application"]:
+                    raise
+                if window_binding(error.binding) != window_binding(state.target):
+                    raise
+                if components.tree is None and components.image is None:
                     raise
                 # A later lifetime/confirmation result does not erase what was
                 # actually captured. Keep it as history with its original clock;
@@ -343,9 +343,10 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
             except (TimeoutError, NativeRequestDeadline) as error:
                 if services.port.calls.retired or services.port.connection.session_identity != generation:
                     raise
-                if isinstance(error, NativeRequestDeadline) and (
-                    error.effect != "none" or components.tree is None and components.image is None
-                ):
+                native_deadline = isinstance(error, NativeRequestDeadline)
+                if native_deadline and error.effect != "none":
+                    raise
+                if native_deadline and components.tree is None and components.image is None:
                     raise
                 # Preserve the capture's own catalogue and fixed target. A
                 # failed newer lookup cannot establish a different current

@@ -144,7 +144,7 @@ class SessionExecutor:
             raise RuntimeError("Computer session is closed")
         self._resources[id(controller)] = controller
 
-    async def close_resource(self, controller):
+    async def _close_resource(self, controller):
         if id(controller) not in self._resources:
             return
         controller._sdk_closed = True
@@ -172,10 +172,23 @@ class SessionExecutor:
             await asyncio.gather(*tasks, return_exceptions=True)
         try:
             for controller in tuple(self._resources.values()):
-                await self.close_resource(controller)
+                await self._close_resource(controller)
             self._closed = True
         finally:
             self._closing = False
+
+    def close_client(self, controller):
+        """Close one controller, and shut down the loop if this client owns it."""
+        if self._closed:
+            return
+        try:
+            self.run(lambda: self._close_resource(controller))
+        finally:
+            self.close_if_owned()
+
+    def close_if_owned(self):
+        if not self._external:
+            self.close()
 
     def close(self):
         if self._closed:
@@ -221,5 +234,4 @@ def on_session(function):
 @atexit.register
 def _close_executors():
     for executor in tuple(_executors):
-        if not executor._external:
-            executor.close()
+        executor.close_if_owned()

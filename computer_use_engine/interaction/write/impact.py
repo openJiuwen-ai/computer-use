@@ -20,13 +20,15 @@ def invoked_ax_menu_target(state: WriteRunState):
     if not state.steps:
         return None
     command, receipt = state.steps[-1].command, state.steps[-1].receipt
-    if command.prepare or command.intent.kind != "openMenu" or receipt is None or receipt.dispatch != Dispatch.UNKNOWN:
+    if command.prepare or command.intent.kind != "openMenu":
+        return None
+    if receipt is None or receipt.dispatch != Dispatch.UNKNOWN:
         return None
     actual = receipt.impact
     expected = InputEffect("input", "element", "accessibility", "AXShowMenu", "invoked")
-    if actual is not None and actual.coverage == "complete" and actual.omitted_effects == 0 and tuple(
-        effect for effect in actual.effects if effect.stage == "input"
-    ) == (expected,):
+    if actual is None or actual.coverage != "complete" or actual.omitted_effects != 0:
+        return None
+    if tuple(effect for effect in actual.effects if effect.stage == "input") == (expected,):
         return receipt.target
     return None
 

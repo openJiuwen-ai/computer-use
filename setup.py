@@ -117,12 +117,12 @@ class BuildWithResources(build_py):
 
             resources.extend(_iter_path(iter(base.rglob("*")), base))
         manifest = {}
-        for source in sorted(set(resources)):
-            relative = source.relative_to(ROOT)
+        for resource in sorted(set(resources)):
+            relative = resource.relative_to(ROOT)
             target = output / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            manifest[relative.as_posix()] = hashlib.sha256(source.read_bytes()).hexdigest()
+            shutil.copy2(resource, target)
+            manifest[relative.as_posix()] = hashlib.sha256(resource.read_bytes()).hexdigest()
         if BACKEND_ARCHIVE:
             backend = BACKENDS["unpack_archive"](BACKEND_ARCHIVE, output, root=ROOT)
             for name in ["backend.json", *backend["files"]]:

@@ -18,7 +18,9 @@ def _caption_sources(view: ProjectionView, node: ViewNode) -> frozenset[tuple[st
     """Return exact source fields for one complete, uncombined name."""
     name = node.get("name")
     value = view.field_value(node["ref"], "name")
-    if not isinstance(name, str) or not name or value is None or len(value.parts) != 1 or value.parts[0].value != name:
+    if not isinstance(name, str) or not name:
+        return frozenset()
+    if value is None or len(value.parts) != 1 or value.parts[0].value != name:
         return frozenset()
     return frozenset((fact.source, fact.attribute, name) for fact in value.parts[0].facts)
 
@@ -40,32 +42,25 @@ def deduplicate_row_captions(view: ProjectionView, edit: ProjectionEditor) -> No
         row = pending.pop()
         pending.extend(row["children"])
         original = view.native_nodes[row["ref"]]
-        if (
-            row["role"] != "row"
-            or original.get("name") is not None
-            or len(row["children"]) != 1
-            or len(original["children"]) != 1
-            or has_incomplete_children(row)
-            or has_incomplete_children(original)
-        ):
+        if row["role"] != "row" or original.get("name") is not None:
+            continue
+        if len(row["children"]) != 1 or len(original["children"]) != 1:
+            continue
+        if has_incomplete_children(row) or has_incomplete_children(original):
             continue
         cell = row["children"][0]
-        if (
-            cell["role"] != "cell"
-            or original["children"][0]["ref"] != cell["ref"]
-            or view.parents.get(cell["ref"]) != row["ref"]
-            or view.scopes[row["ref"]] != view.scopes[cell["ref"]]
-            or has_incomplete_children(cell)
-            or row.get("name") != cell.get("name")
-        ):
+        if cell["role"] != "cell" or original["children"][0]["ref"] != cell["ref"]:
+            continue
+        if view.parents.get(cell["ref"]) != row["ref"] or view.scopes[row["ref"]] != view.scopes[cell["ref"]]:
+            continue
+        if has_incomplete_children(cell) or row.get("name") != cell.get("name"):
             continue
         sources = _caption_sources(view, row)
-        if (
-            not sources
-            or sources != _caption_sources(view, cell)
-            or any(ref == row["ref"] or view.scopes.get(ref) != view.scopes[row["ref"]] for ref, _, _ in sources)
-            or any((ref, attribute) not in evidence.complete_text for ref, attribute, _ in sources)
-        ):
+        if not sources or sources != _caption_sources(view, cell):
+            continue
+        if any(ref == row["ref"] or view.scopes.get(ref) != view.scopes[row["ref"]] for ref, _, _ in sources):
+            continue
+        if any((ref, attribute) not in evidence.complete_text for ref, attribute, _ in sources):
             continue
         edit.suppress(row, "name")
         edit.event(

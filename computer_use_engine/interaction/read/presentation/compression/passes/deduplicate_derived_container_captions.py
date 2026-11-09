@@ -35,11 +35,10 @@ def _complete_path(view: ProjectionView, owner: ViewNode, descendant: ViewNode) 
         seen.add(current)
         original = view.native_nodes.get(current)
         projected = view.nodes.get(current)
+        if original is None or projected is None or view.scopes.get(current) != view.scopes[owner["ref"]]:
+            return False
         if (
-            original is None
-            or projected is None
-            or view.scopes.get(current) != view.scopes[owner["ref"]]
-            or current in evidence.incomplete_children
+            current in evidence.incomplete_children
             or has_incomplete_children(original)
             or has_incomplete_children(projected)
         ):
@@ -62,10 +61,13 @@ def _primary_targets(view: ProjectionView, owner: ViewNode) -> tuple[str, ...]:
         if not _complete_path(view, owner, node):
             continue
         original = view.native_nodes[node["ref"]]
-        if (
+        accepts_click = (
             original.get("capabilities", {}).get("click") == "available"
             and original.get("enabled") is not False
             and not original.get("blockedBy")
+        )
+        if (
+            accepts_click
             and not original.get("actionsUnavailable")
             and any(action.get("kind") in _PRIMARY_ACTIONS for action in original.get("actions", ()))
         ):
@@ -94,36 +96,29 @@ def _retained_sources(
     result: list[Record] = []
     seen: set[FactKey] = set()
     for part in caption.parts:
-        if (
-            type(part.value) is not str
-            or not part.value
-            or not part.facts
-            or utf16_length(part.value) > VALUE_PREVIEW_LIMIT
-            or ";base64," in part.value.lower()
-        ):
+        if type(part.value) is not str or not part.value or not part.facts:
+            return None
+        if utf16_length(part.value) > VALUE_PREVIEW_LIMIT or ";base64," in part.value.lower():
             return None
         for fact in part.facts:
             source = retained.get(fact.source)
+            if source is None or source["role"] not in ("staticText", "heading") or source["children"]:
+                return None
+            if not _complete_path(view, owner, source) or fact.attribute not in ("name", "description", "value"):
+                return None
+            if (fact.source, fact.attribute) not in evidence.complete_text:
+                return None
             if (
-                source is None
-                or source["role"] not in ("staticText", "heading")
-                or source["children"]
-                or not _complete_path(view, owner, source)
-                or fact.attribute not in ("name", "description", "value")
-                or (fact.source, fact.attribute) not in evidence.complete_text
-                or source.get(fact.attribute) != part.value
+                source.get(fact.attribute) != part.value
                 or view.native_nodes[fact.source].get(fact.attribute) != part.value
-                or source.get("valueIsNumber")
-                or source.get("valueKind") == "document"
             ):
                 return None
+            if source.get("valueIsNumber") or source.get("valueKind") == "document":
+                return None
             current = view.field_value(fact.source, fact.attribute)
-            if (
-                current is None
-                or len(current.parts) != 1
-                or current.parts[0].value != part.value
-                or fact not in current.parts[0].facts
-            ):
+            if current is None or len(current.parts) != 1:
+                return None
+            if current.parts[0].value != part.value or fact not in current.parts[0].facts:
                 return None
             if fact not in seen:
                 seen.add(fact)
@@ -158,29 +153,25 @@ def _single_child_value_caption(
         return False
     child = owner["children"][0]
     ref = child["ref"]
+    if child["role"] != "staticText" or child["children"] or original["children"][0]["ref"] != ref:
+        return False
+    if view.native_nodes[ref]["role"] != "staticText" or view.native_nodes[ref]["children"]:
+        return False
     if (
-        child["role"] != "staticText"
-        or child["children"]
-        or original["children"][0]["ref"] != ref
-        or view.native_nodes[ref]["role"] != "staticText"
-        or view.native_nodes[ref]["children"]
-        or evidence.complete_children.get(owner["ref"]) != (ref,)
+        evidence.complete_children.get(owner["ref"]) != (ref,)
         or evidence.complete_children.get(ref) != ()
         or view.parents.get(ref) != owner["ref"]
-        or primary_targets != (ref,)
-        or not _complete_path(view, owner, child)
-        or any(display_boundary_reasons(view, node) != frozenset(("action",)) for node in (owner, child))
     ):
+        return False
+    if primary_targets != (ref,) or not _complete_path(view, owner, child):
+        return False
+    if any(display_boundary_reasons(view, node) != frozenset(("action",)) for node in (owner, child)):
         return False
     caption = view.field_value(owner["ref"], "name")
     value = view.field_value(ref, "value")
-    if (
-        caption is None
-        or caption.separator is None
-        or len(caption.parts) != 1
-        or value is None
-        or len(value.parts) != 1
-    ):
+    if caption is None or caption.separator is None or len(caption.parts) != 1:
+        return False
+    if value is None or len(value.parts) != 1:
         return False
     part, retained = caption.parts[0], value.parts[0]
     return (
@@ -216,20 +207,18 @@ def deduplicate_derived_container_captions(view: ProjectionView, edit: Projectio
         node = pending.pop()
         pending.extend(node["children"])
         original = view.native_nodes[node["ref"]]
-        if (
-            node["role"] != "group"
-            or not node.get("_factBacked")
-            or not node.get("name")
-            or node["ref"] not in evidence.unlabelled_groups
-            or original.get("control", {}).get("kind") != "button"
-            or any(
-                original.get(field) != "" or (node["ref"], field) not in evidence.complete_text
-                for field in ("name", "description")
-            )
-            or any(node.get(field) for field in ("linkedLabel", "titleRef", "labelTargets", "incompleteLabelRelation"))
-            or any(node["ref"] in targets for targets in view.targets.values())
-            or not _complete_path(view, node, node)
+        if node["role"] != "group" or not node.get("_factBacked") or not node.get("name"):
+            continue
+        if node["ref"] not in evidence.unlabelled_groups or original.get("control", {}).get("kind") != "button":
+            continue
+        if any(
+            original.get(field) != "" or (node["ref"], field) not in evidence.complete_text
+            for field in ("name", "description")
         ):
+            continue
+        if any(node.get(field) for field in ("linkedLabel", "titleRef", "labelTargets", "incompleteLabelRelation")):
+            continue
+        if any(node["ref"] in targets for targets in view.targets.values()) or not _complete_path(view, node, node):
             continue
         primary_targets = _primary_targets(view, node)
         single_child = len(primary_targets) < 2 and _single_child_value_caption(view, node, evidence, primary_targets)

@@ -112,7 +112,10 @@ class ImageCaption:
         caption = render_image_caption(*self.size, dict(self.facts, coordinateTarget=target))
         if not points:
             return caption
-        active = {ref for ref, point in zip(self.hints.windows, self.hints.points) if eligible is None or point in eligible}
+        active = {
+            ref for ref, point in zip(self.hints.windows, self.hints.points)
+            if eligible is None or point in eligible
+        }
         regions = tuple(
             f"Window {ref} bounds ({left}, {top}) to ({right}, {bottom})."
             for ref, (left, top, right, bottom) in self.regions if ref in active

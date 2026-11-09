@@ -55,26 +55,21 @@ def fingerprint(root, target):
     files = [root / name for name in ("scripts/native.py", "scripts/backend_artifacts.py", "scripts/distribution.py")]
     directories = [root / f"os_adapter/{system}"]
     if system != "linux":
-        files.extend(
-            root / name
-            for name in (
-                "scripts/pointer.py",
-                "computer_use_engine/json.py",
-                "computer_use_engine/interaction/read/presentation/formatting.py",
-            )
-        )
+        files.extend((
+            root / "scripts/pointer.py",
+            root / "computer_use_engine/json.py",
+            root / "computer_use_engine/interaction/read/presentation/formatting.py",
+        ))
         directories.append(root / "os_adapter/assets/agent-pointer")
     for directory in directories:
-        files.extend(
-            path
-            for path in directory.rglob("*")
-            if path.is_file()
-            and path.name not in GENERATED
-            and not any(
+        for path in directory.rglob("*"):
+            if not path.is_file() or path.name in GENERATED:
+                continue
+            if not any(
                 part.startswith(".") or part in ("__pycache__", "build", "dist") or part.endswith(".egg-info")
                 for part in path.relative_to(directory).parts
-            )
-        )
+            ):
+                files.append(path)
     inputs = {
         path.relative_to(root).as_posix(): sha256(path.read_bytes().replace(b"\r\n", b"\n"))
         for path in sorted(set(files))
@@ -144,15 +139,11 @@ def inspect_archive(path, *, root=None, target=None):
         for name, details in manifest["files"].items():
             path = PurePosixPath(name)
             info = archive.getinfo(name)
-            if (
-                path.is_absolute()
-                or ".." in path.parts
-                or "\\" in name
-                or not payload_allowed(name, actual_target)
-                or stat.S_ISLNK(info.external_attr >> 16)
-                or details["mode"] not in (0o644, 0o755)
-                or sha256(archive.read(name)) != details["sha256"]
-            ):
+            if path.is_absolute() or ".." in path.parts or "\\" in name:
+                raise ValueError(f"Invalid backend artifact file: {name}")
+            if not payload_allowed(name, actual_target) or stat.S_ISLNK(info.external_attr >> 16):
+                raise ValueError(f"Invalid backend artifact file: {name}")
+            if details["mode"] not in (0o644, 0o755) or sha256(archive.read(name)) != details["sha256"]:
                 raise ValueError(f"Invalid backend artifact file: {name}")
         required = {
             "darwin": "os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver",

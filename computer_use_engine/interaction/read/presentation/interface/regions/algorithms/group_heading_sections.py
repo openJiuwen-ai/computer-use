@@ -19,6 +19,28 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
         return draft
     blocks = dict(draft.blocks)
     decisions = []
+
+    def materialize(section: str | HeadingSection, owner: str, siblings: tuple[str, ...]) -> tuple[str, ...]:
+        if isinstance(section, str):
+            return (section,)
+        descendants = []
+        pending = list(section.children)
+        while pending:
+            member = pending.pop()
+            if isinstance(member, str):
+                descendants.append(member)
+            else:
+                pending.extend(member.children)
+        sources = (source for key in descendants for source in block_sources(key, blocks))
+        if not same_scope(draft, (owner, *sources)):
+            return tuple(member for member in siblings if member in descendants)
+        members = tuple(key for child in section.children for key in materialize(child, owner, siblings))
+        key = synthetic_key("section", owner, members)
+        blocks[key] = InterfaceBlock(
+            key, "region", None, (), members, label_ref=blocks[section.heading].primary_ref, region_role="region"
+        )
+        return (key,)
+
     for ref in draft.order:
         node = draft.projected_nodes[ref]
         if node.get("layoutGroups"):
@@ -34,30 +56,9 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
         if draft.evidence[ref].hidden or not any(unit.get("role") == "heading" for unit in unit_nodes.values()):
             continue
 
-        def materialize(
-            section: str | HeadingSection, owner: str = ref, siblings: tuple[str, ...] = children
-        ) -> tuple[str, ...]:
-            if isinstance(section, str):
-                return (section,)
-            descendants = []
-            pending = list(section.children)
-            while pending:
-                member = pending.pop()
-                if isinstance(member, str):
-                    descendants.append(member)
-                else:
-                    pending.extend(member.children)
-            sources = (source for key in descendants for source in block_sources(key, blocks))
-            if not same_scope(draft, (owner, *sources)):
-                return tuple(member for member in siblings if member in descendants)
-            members = tuple(key for child in section.children for key in materialize(child))
-            key = synthetic_key("section", owner, members)
-            blocks[key] = InterfaceBlock(
-                key, "region", None, (), members, label_ref=blocks[section.heading].primary_ref, region_role="region"
-            )
-            return (key,)
-
-        new_children = tuple(key for section in heading_sections(children, unit_nodes) for key in materialize(section))
+        new_children = tuple(
+            key for section in heading_sections(children, unit_nodes) for key in materialize(section, ref, children)
+        )
         if new_children != parent.children:
             blocks[parent.key] = replace(parent, children=new_children)
             decisions.append("heading-sections:" + ref)

@@ -82,8 +82,8 @@ class WindowReferences:
         from computer_use.session.lookup_continuation import discard_lookup_continuation
 
         for state in self._applications.values():
-            for source in tuple(state.lookup_captures):
-                source.release()
+            for capture in tuple(state.lookup_captures):
+                capture.release()
             state.lookup_captures.clear()
             state.lookup_observations.clear()
             state.lookup_results.clear()
@@ -169,7 +169,8 @@ class WindowReferences:
                 raise local_failure("window does not belong to this App's confirmed application", "stale_target")
         return entry
 
-    def retain_image(self, state, image, generation=0):
+    @staticmethod
+    def retain_image(state, image, generation=0):
         """Retain exact delivered pixels independently for every fixed window.
 
         A member view uses the same canvas coordinates as the model saw. It
@@ -198,6 +199,7 @@ class WindowReferences:
                 continue
             state.window_images[identity] = retained
             state.window_image_generations[identity] = generation
+
     @staticmethod
     def delivered_image(state, view):
         """Pending sampling does not replace a fixed window's delivered view."""
@@ -216,13 +218,14 @@ class WindowReferences:
             for state in self._applications.values()
             for image in (*state.window_images.values(), *state.sampled_window_images.values())
         ]
-        return frozenset(
-            piece.image.target.capture
-            for image in images
-            if not image.expired
-            for piece in image.pieces
-            if piece.scope_confirmed and piece.image.target.capture is not None
-        ) | frozenset(self._target_captures.values())
+        captures = set()
+        for image in images:
+            if not image.expired:
+                captures.update(
+                    piece.image.target.capture for piece in image.pieces
+                    if piece.scope_confirmed and piece.image.target.capture is not None
+                )
+        return frozenset(captures) | frozenset(self._target_captures.values())
 
     def retain_target_capture(self, target, capture):
         """Keep native capture mappings while a public spatial target is live."""

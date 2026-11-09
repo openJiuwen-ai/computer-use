@@ -157,6 +157,11 @@ def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
         decisions.append(("geometric-columns:" if record else "geometric-grid:") + parent.key)
         return key
 
+    def flush(owner: InterfaceBlock, pending_rows: list[str], assembled: list[str]) -> None:
+        projected = project_run(owner, tuple(pending_rows))
+        assembled.extend((projected,) if projected is not None else pending_rows)
+        pending_rows.clear()
+
     for parent_key, parent in draft.blocks.items():
         if parent.kind in ("field", "table", "record") or parent.layout not in ("tree", "records"):
             continue
@@ -164,11 +169,6 @@ def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
             project_run(parent, parent.children)
             continue
         output, run = [], []
-
-        def flush() -> None:
-            projected = project_run(parent, tuple(run))
-            output.extend((projected,) if projected is not None else run)
-            run.clear()
 
         for child in parent.children:
             row = blocks[child]
@@ -179,12 +179,12 @@ def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
                 and row.children
             ):
                 if run and not same_region(draft, (ref for key in (*run, child) for ref in block_sources(key, blocks))):
-                    flush()
+                    flush(parent, run, output)
                 run.append(child)
             else:
-                flush()
+                flush(parent, run, output)
                 output.append(child)
-        flush()
+        flush(parent, run, output)
         if tuple(output) != parent.children:
             blocks[parent_key] = replace(parent, children=tuple(output))
     return revise(draft, blocks, *decisions)

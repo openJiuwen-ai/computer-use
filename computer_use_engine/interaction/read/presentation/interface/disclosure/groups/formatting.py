@@ -21,7 +21,8 @@ class CapturedDocument(Protocol):
     """A frozen text view rendered by the normal terminal formatting boundary."""
 
     @property
-    def text(self) -> str: ...
+    def text(self) -> str:
+        ...
 
 
 def format_group_overview(group: GroupOverview) -> tuple[str, ...]:

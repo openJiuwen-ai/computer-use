@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from .model import SharedActionGroup, SharedFieldGroup
 
 
+_EMPTY_GROUPS = MappingProxyType({})
+
+
 def canonical(value: object) -> tuple[object, ...]:
     """Compare exact values including type, with stable mapping-key order."""
     if isinstance(value, Mapping):
@@ -205,8 +208,8 @@ def empty_value_groups(
 def append_groups(
     draft: SharingDraft,
     *,
-    actions: Mapping[str, Sequence[SharedActionGroup]] = {},
-    fields: Mapping[str, Sequence[SharedFieldGroup]] = {},
+    actions: Mapping[str, Sequence[SharedActionGroup]] = _EMPTY_GROUPS,
+    fields: Mapping[str, Sequence[SharedFieldGroup]] = _EMPTY_GROUPS,
 ) -> SharingDraft:
     """Publish new declarations and their exact per-source exclusions immutably."""
     blocks = dict(draft.plan.by_block)

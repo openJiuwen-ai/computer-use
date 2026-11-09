@@ -198,7 +198,13 @@ class WorkerResources(NamedTuple):
 
 
 async def start_windows_worker(
-    env, *, module="computer_use_mcp.runtime", module_args=(), stderr=asyncio.subprocess.DEVNULL, on_spawned=None, timeout=15
+    env,
+    *,
+    module="computer_use_mcp.runtime",
+    module_args=(),
+    stderr=asyncio.subprocess.DEVNULL,
+    on_spawned=None,
+    timeout=15,
 ) -> WorkerResources:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + min(15, timeout)

@@ -106,7 +106,8 @@ def numbered_entries(lines: list[str]) -> list[NumberedEntry]:
     tables = _table_lines(lines)
     heading: re.Match[str] | None = None
     for index, line in enumerate(lines):
-        if found := _HEADER.fullmatch(line):
+        found = _HEADER.fullmatch(line)
+        if found:
             heading = found
             continue
         parts: list[tuple[int, str, str, bool]] = []
@@ -123,7 +124,11 @@ def numbered_entries(lines: list[str]) -> list[NumberedEntry]:
                     for part, (at, body) in enumerate(_split_children(column, offset))
                 )
                 offset += len(column) + 3
-        elif match := _NODE.fullmatch(line):
+        else:
+            match = _NODE.fullmatch(line)
+            if match is None:
+                heading = None
+                continue
             if heading and match[1] == heading[1] + "\t":
                 parts.append((len(match[1]), line[len(match[1]):], heading[2], False))
             else:
@@ -132,8 +137,6 @@ def numbered_entries(lines: list[str]) -> list[NumberedEntry]:
                 for body in split_chain(line[start:]):
                     parts.append((start, body, "", True))
                     start += len(body) + 3
-        else:
-            heading = None
         for start, body, shared, role_explicit in parts:
             match = re.fullmatch(r"([0-9]+) (.+)", body)
             if match is None or match[2].startswith("|"):

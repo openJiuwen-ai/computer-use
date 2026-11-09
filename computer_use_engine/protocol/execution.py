@@ -169,7 +169,9 @@ primitive = obj(
         backgroundPreparation=knowledge,
         globalInput=knowledge.optional(),
         keyboardEditing=enum("insert", "replace").optional(),
-        preparationImpact=obj(dict(mouse=knowledge, keyboard=knowledge, activation=knowledge, clipboard=knowledge)).optional(),
+        preparationImpact=obj(
+            dict(mouse=knowledge, keyboard=knowledge, activation=knowledge, clipboard=knowledge)
+        ).optional(),
         action=obj(dict(name=identity, description=string().optional())).optional(),
         click=click_offer.optional(),
     )
@@ -183,7 +185,9 @@ input_impact = obj(
             obj(dict(
                 stage=enum("preparation", "input", "cleanup"),
                 device=enum("mouse", "keyboard", "focus", "element", "clipboard", "application"),
-                transport=enum("globalHID", "process", "accessibility", "activation", "windowServer", "clipboard", "launch"),
+                transport=enum(
+                    "globalHID", "process", "accessibility", "activation", "windowServer", "clipboard", "launch"
+                ),
                 mechanism=string(min=1, max=512),
                 state=enum("invoked", "possible", "notInvoked"),
             )),
@@ -225,7 +229,9 @@ _begin = obj(
     )
 )
 _unit_command = obj(
-    dict(kind=enum(*unit_contracts, "global_input"), primitiveId=identity, target=operation_target, foreground=boolean())
+    dict(
+        kind=enum(*unit_contracts, "global_input"), primitiveId=identity, target=operation_target, foreground=boolean()
+    )
 )
 _capture_request = obj(
     dict(
@@ -253,14 +259,16 @@ def decode_begin(value):
     """Bind the original payload once, before observing or preparing a route."""
     result = _begin.parse(value)
     intent, mode = result["intent"], result["mode"]
-    if "global" in result["target"] and (
-        result["target"]["global"] is not True
-        or mode != "write"
-        or intent.get("globalInput") is not True
-        or intent["kind"] not in ("click", "scroll", "drag", "insert", "paste", "key")
-        or "clickContract" in result
-    ):
-        raise ValueError("protocol: global scope requires an explicit primitive input")
+    if "global" in result["target"]:
+        explicit_global_write = (
+            result["target"]["global"] is True and mode == "write" and intent.get("globalInput") is True
+        )
+        if (
+            not explicit_global_write
+            or intent["kind"] not in ("click", "scroll", "drag", "insert", "paste", "key")
+            or "clickContract" in result
+        ):
+            raise ValueError("protocol: global scope requires an explicit primitive input")
     if intent.get("globalInput") and result["target"].get("global") is not True:
         raise ValueError("protocol: explicit global input requires the global session scope")
     if "clickContract" in result and (mode != "write" or intent["kind"] != "click"):
@@ -288,12 +296,8 @@ def decode_unit_command(value):
     """
     result = _unit_command.parse(value)
     if "global" in result["target"] or result["kind"] == "global_input":
-        if (
-            result["target"].get("global") is not True
-            or result["kind"] != "global_input"
-            or result["primitiveId"] != "global"
-            or result["foreground"]
-        ):
+        direct_global_input = result["target"].get("global") is True and result["kind"] == "global_input"
+        if not direct_global_input or result["primitiveId"] != "global" or result["foreground"]:
             raise ValueError("protocol: global input has no object selection or foreground preparation")
         return result
     installation = "application" in result["target"]
@@ -419,14 +423,13 @@ def decode_inspect_query(value):
     if not isinstance(value, dict) or not isinstance(value.get("kind"), str) or value["kind"] not in _inspect_queries:
         raise ValueError("protocol: unknown native inspection query")
     result = _inspect_queries[value["kind"]].parse(value)
-    if result["kind"] == "applications" and "path" in result and (
-        "installation" in result or not result["path"].startswith("/")
-    ):
+    exact_application_path = result["kind"] == "applications" and "path" in result
+    if exact_application_path and ("installation" in result or not result["path"].startswith("/")):
         raise ValueError("protocol: invalid exact application query")
-    if "includeEnded" in result and (
-        result["includeEnded"] is not True or "path" in result or "installation" in result
-    ):
-        raise ValueError("protocol: ended lifetimes require a full application query")
+    if "includeEnded" in result:
+        include_ended = result["includeEnded"] is True
+        if not include_ended or "path" in result or "installation" in result:
+            raise ValueError("protocol: ended lifetimes require a full application query")
     if "windowTitle" in result and any(key in result for key in ("path", "installation", "includeEnded")):
         raise ValueError("protocol: window caption and application scope queries cannot be combined")
     if "profile" in result and "includeAccessibility" in result:
@@ -498,10 +501,10 @@ def validate_primitive_contract(unit, channel, supported, readiness, pending, ac
 
 def _validate_primitive(p):
     validate_primitive_contract(p["unit"], p["channel"], p["supported"], p["readiness"], p["pending"], p.get("action"))
-    if "keyboardEditing" in p and (
-        p["unit"] != "key_sequence" or p["channel"] != "keyboard" or p.get("globalInput") != "no"
-    ):
-        raise ValueError("protocol: keyboard editing evidence requires an addressed keyboard primitive")
+    if "keyboardEditing" in p:
+        keyboard_primitive = p["unit"] == "key_sequence" and p["channel"] == "keyboard"
+        if not keyboard_primitive or p.get("globalInput") != "no":
+            raise ValueError("protocol: keyboard editing evidence requires an addressed keyboard primitive")
     if p["unit"] == "native_selection" and "click" not in p:
         raise ValueError("protocol: native selection requires an integrated click offer")
     if "click" in p:
@@ -782,11 +785,12 @@ def decode_execution_result(method, value, *, retain_observation=False):
     if invalid_bound:
         raise ValueError("protocol: unbound discovery cannot contain window or element identities")
     baseline = result.get("appChangeBaseline") if method == "begin" else result.get("appChangeInputBaseline")
-    if baseline is not None and (
-        baseline["session"] != bound["session"]
-        or "application" in bound and baseline["application"] != bound["application"]
-    ):
-        raise ValueError("protocol: application change baseline changed the operation scope")
+    if baseline is not None:
+        session_changed = baseline["session"] != bound["session"]
+        if session_changed or (
+            "application" in bound and baseline["application"] != bound["application"]
+        ):
+            raise ValueError("protocol: application change baseline changed the operation scope")
     if method == "execute" and "application" in result:
         if "application" not in bound or not result["application"]["isRunning"]:
             raise ValueError("protocol: only an installation operation can return a running application")

@@ -22,7 +22,10 @@ def numeric_aliases(
     """
     values, paths, statuses = source["values"], source["fieldPaths"], source["fieldStatus"]
     value = values.get(primary)
-    if type(value) not in (int, float) or primary in statuses or type(value) is float and not math.isfinite(value):
+    value_type = type(value)
+    if value_type not in (int, float) or primary in statuses:
+        return ()
+    if value_type is float and not math.isfinite(value):
         return ()
     selector = selectors.get((source["node"], paths[primary]))
     if not selector:
@@ -30,15 +33,11 @@ def numeric_aliases(
     result = []
     for name in ("control_value.value", "numeric_value.value"):
         other = values.get(name)
-        if (
-            name == primary
-            or name in statuses
-            or type(other) is not type(value)
-            or other != value
-            or selectors.get((source["node"], paths[name])) != selector
-        ):
+        if name == primary or name in statuses or type(other) is not value_type:
             continue
-        if type(value) is float and value == 0 and math.copysign(1, value) != math.copysign(1, other):
+        if other != value or selectors.get((source["node"], paths[name])) != selector:
+            continue
+        if value_type is float and value == 0 and math.copysign(1, value) != math.copysign(1, other):
             continue
         result.append(name)
     return tuple(result)

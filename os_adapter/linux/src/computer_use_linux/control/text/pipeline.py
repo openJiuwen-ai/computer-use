@@ -30,9 +30,9 @@ class NativeTextPipeline:
             # Once deletion or insertion has started, preserve this local
             # recipe. Unknown metadata does not invalidate its unit; a
             # positive contradictory hint stops the remaining mutation.
+            insertion_started = kind == "insert" and dispatch != "notDispatched"
             if (
-                kind == "insert"
-                and dispatch != "notDispatched"
+                insertion_started
                 and not isinstance(codec, AsciiTextCodec)
                 and text_codec(self.ax, obj, fallback=codec) != codec
             ):

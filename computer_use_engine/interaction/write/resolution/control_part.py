@@ -205,7 +205,8 @@ class ControlPartQuery(NativeGraph):
             """Search the bounded child path and retain dependencies only for an accepted member."""
             for child in children:
                 previous = deepcopy(self.dependencies)
-                if selected := await visit(child, ancestors, alternate=alternate):
+                selected = await visit(child, ancestors, alternate=alternate)
+                if selected:
                     return selected
                 # The identity of the supplied hit is already fixed. An
                 # unrelated sibling's role/action state is not a dependency.
@@ -215,12 +216,14 @@ class ControlPartQuery(NativeGraph):
         children = await self._relation(owner, "children")
         owner_basis = deepcopy(self.dependencies)
         selected = await descend(children, (owner,), alternate=False)
-        if (
+        passive_menu_candidate = (
             allow_passive_candidate
             and text_context_owner
             and self.intent.parameters.get("count", 1) == 1
             and "AXShowMenu" in support_actions
-            and (selected is None or role_name(self.platform, await self._field(selected, "role")) in LAYOUT_ROLES)
+        )
+        if passive_menu_candidate and (
+            selected is None or role_name(self.platform, await self._field(selected, "role")) in LAYOUT_ROLES
         ):
             hit_basis = self.dependencies
             self.dependencies = owner_basis

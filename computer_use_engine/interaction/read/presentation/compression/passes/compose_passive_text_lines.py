@@ -35,13 +35,9 @@ def _caption(view: ProjectionView, node: ViewNode, evidence: CompressionEvidence
             continue
         presented = view.field_value(node["ref"], field)
         fact = FactKey(SourceKey(node["ref"]), field)
-        if (
-            presented is not None
-            and len(presented.parts) == 1
-            and presented.parts[0].facts == (fact,)
-            and presented.value == value
-            and view.native_nodes[node["ref"]].get(field) == value
-        ):
+        if presented is None or len(presented.parts) != 1 or presented.parts[0].facts != (fact,):
+            continue
+        if presented.value == value and view.native_nodes[node["ref"]].get(field) == value:
             return dict(sourceRef=node["ref"], attribute=field, field="name", text=value)
     return None
 
@@ -102,35 +98,29 @@ def compose_passive_text_lines(view: ProjectionView, edit: ProjectionEditor) -> 
         edit: Local display editor recording ordered caption parts and source folds.
     """
     evidence = view.context.get("compressionEvidence")
-    if (
-        not view.context.get("compact")
-        or not view.context.get("nativeFacts")
-        or view.context.get("subtreeRef")
-        or not isinstance(evidence, CompressionEvidence)
-    ):
+    if not view.context.get("compact") or not view.context.get("nativeFacts") or view.context.get("subtreeRef"):
+        return
+    if not isinstance(evidence, CompressionEvidence):
         return
     pending = list(reversed(view.roots))
     while pending:
         owner = pending.pop()
         pending.extend(reversed(owner["children"]))
         children = tuple(owner["children"])
-        if (
-            owner["ref"] in view.folded_into
-            or owner["role"] != "group"
-            or not owner.get("_factBacked")
-            or view.keep(owner)
-            or len(children) < 2
-            or (display_boundary_reasons(view, owner) and not _help_only_owner_region(view, owner))
-            or has_incomplete_children(owner)
-            or owner.get("layoutGroups")
-            or owner.get("labelTargets")
-            or owner.get("incompleteLabelRelation")
-            or any(
-                owner.get(field) not in (None, "")
-                for field in ("name", "description", "value", "url", "controlValue", "rangeValue", "documentText")
-            )
-            or evidence.complete_children.get(owner["ref"]) != tuple(child["ref"] for child in children)
-        ):
+        if owner["ref"] in view.folded_into or owner["role"] != "group" or not owner.get("_factBacked"):
+            continue
+        if view.keep(owner) or len(children) < 2:
+            continue
+        if display_boundary_reasons(view, owner) and not _help_only_owner_region(view, owner):
+            continue
+        if has_incomplete_children(owner) or owner.get("layoutGroups"):
+            continue
+        if owner.get("labelTargets") or owner.get("incompleteLabelRelation"):
+            continue
+        fields = ("name", "description", "value", "url", "controlValue", "rangeValue", "documentText")
+        if any(owner.get(field) not in (None, "") for field in fields):
+            continue
+        if evidence.complete_children.get(owner["ref"]) != tuple(child["ref"] for child in children):
             continue
         parts: list[Record] = []
         boxes: list[Box] = []
@@ -140,24 +130,21 @@ def compose_passive_text_lines(view: ProjectionView, edit: ProjectionEditor) -> 
         for child in children:
             box = view.geometry.boxes.get(child["ref"])
             part = _caption(view, child, evidence)
+            if child["role"] != "staticText" or child["children"] or view.keep(child):
+                break
+            if display_boundary_reasons(view, child) or has_incomplete_children(child):
+                break
+            if any(child.get(field) for field in ("valueIsNumber", "labelTargets", "incompleteLabelRelation")):
+                break
+            if child.get("url") or any(field in child for field in ("documentText", "controlValue", "rangeValue")):
+                break
             if (
-                child["role"] != "staticText"
-                or child["children"]
-                or view.keep(child)
-                or display_boundary_reasons(view, child)
-                or has_incomplete_children(child)
-                or child.get("valueIsNumber")
-                or child.get("labelTargets")
-                or child.get("incompleteLabelRelation")
-                or child.get("url")
-                or any(field in child for field in ("documentText", "controlValue", "rangeValue"))
-                or view.parents.get(child["ref"]) != owner["ref"]
+                view.parents.get(child["ref"]) != owner["ref"]
                 or view.scopes.get(child["ref"]) != view.scopes.get(owner["ref"])
                 or not same_blocking(owner, child)
-                or part is None
-                or box is None
-                or evidence.complete_children.get(child["ref"]) != ()
             ):
+                break
+            if part is None or box is None or evidence.complete_children.get(child["ref"]) != ():
                 break
             parts.append(part)
             boxes.append(box)

@@ -23,6 +23,7 @@ from computer_use.interaction.read.presentation.interface.helpers import revise,
 from computer_use.interaction.read.presentation.interface.model import InterfaceBlock, InterfaceDraft
 from computer_use.interaction.read.presentation.interface.regions.constraints import stable_order
 from computer_use.interaction.read.presentation.interface.regions.scope import block_sources
+from computer_use.interaction.read.presentation.spatial.alignment import LayoutItem
 
 
 def _relation_plan(draft: InterfaceDraft, key: str, plan: GeometricScopePlan) -> GeometricScopePlan:
@@ -78,9 +79,9 @@ def canonicalize_scopes(draft: InterfaceDraft) -> InterfaceDraft:
             if local is not None:
                 for original, replacement in zip(segment, local):
                     ordered[positions[original]] = replacement
-        ordered = tuple(ordered)
-        if ordered != parent.children:
-            blocks[key] = replace(parent, children=ordered)
+        ordered_children = tuple(ordered)
+        if ordered_children != parent.children:
+            blocks[key] = replace(parent, children=ordered_children)
             decisions.append("geometric-source-order:" + key)
     return revise(draft, blocks, *decisions)
 
@@ -94,6 +95,24 @@ def arrange_regions(draft: InterfaceDraft) -> InterfaceDraft:
     """
     blocks, decisions = dict(draft.blocks), []
     scopes = dict(draft.geometric_regions.scopes) if draft.geometric_regions is not None else {}
+
+    def materialize(region: RegionPlan, owner: str, measurements: dict[str, LayoutItem]) -> tuple[str, ...]:
+        if not region.children:
+            return region.keys
+        if region.axis == "horizontal":
+            return tuple(member for child in region.children for member in materialize(child, owner, measurements))
+        children = []
+        physical = sorted(region.children, key=lambda child: min(measurements[member].box.x for member in child.keys))
+        for child in region.children:
+            child_key = synthetic_key("geometric-region", owner, child.keys)
+            members = materialize(child, child_key, measurements)
+            position = "left" if child is physical[0] else "right" if child is physical[-1] else "middle"
+            blocks[child_key] = InterfaceBlock(
+                child_key, "region", None, (), members, origin="visual", position=position, region_role="region"
+            )
+            children.append(child_key)
+        return tuple(children)
+
     for key, parent in tuple(draft.blocks.items()):
         if parent.kind == "field" or key in scopes:
             continue
@@ -103,23 +122,6 @@ def arrange_regions(draft: InterfaceDraft) -> InterfaceDraft:
         prepared = _relation_plan(draft, key, prepared)
         measured = {item.key: item for item in prepared.items}
         unit_sources = {child: block_sources(child, blocks) for child in parent.children}
-
-        def materialize(region: RegionPlan, owner: str) -> tuple[str, ...]:
-            if not region.children:
-                return region.keys
-            if region.axis == "horizontal":
-                return tuple(member for child in region.children for member in materialize(child, owner))
-            children = []
-            physical = sorted(region.children, key=lambda child: min(measured[member].box.x for member in child.keys))
-            for child in region.children:
-                child_key = synthetic_key("geometric-region", owner, child.keys)
-                members = materialize(child, child_key)
-                position = "left" if child is physical[0] else "right" if child is physical[-1] else "middle"
-                blocks[child_key] = InterfaceBlock(
-                    child_key, "region", None, (), members, origin="visual", position=position, region_role="region"
-                )
-                children.append(child_key)
-            return tuple(children)
 
         replacements: dict[str, tuple[str, ...]] = {}
         consumed: set[str] = set()
@@ -142,7 +144,7 @@ def arrange_regions(draft: InterfaceDraft) -> InterfaceDraft:
                 independent=pane_members(segment, draft, blocks),
             )
             segment_trees[segment[0]] = plan
-            replacements[segment[0]] = materialize(plan, key)
+            replacements[segment[0]] = materialize(plan, key, measured)
             consumed.update(segment)
         forest = tuple(
             segment_trees[child] if child in segment_trees else RegionPlan((child,))

@@ -117,11 +117,8 @@ class GlobalInput(Node):
                     and step.dispatch == Dispatch.NOT_DISPATCHED
                     and step.confirmation == Confirmation.CONFIRMED
                 )
-                if (
-                    (step.dispatch != Dispatch.DISPATCHED and not empty_text)
-                    or step.error_code is not None
-                    or step.cleanup != Cleanup.COMPLETE
-                ):
+                input_missing = step.dispatch != Dispatch.DISPATCHED and not empty_text
+                if input_missing or step.error_code is not None or step.cleanup != Cleanup.COMPLETE:
                     raise failure(
                         step.error_code or "execution_unknown",
                         "Computer",
@@ -149,10 +146,11 @@ class GlobalInput(Node):
                     step.dispatch if step is not None else Dispatch.UNKNOWN if entered else Dispatch.NOT_DISPATCHED,
                     step.preparation if step is not None else (),
                 )
-                error.__cause__ = caught
             error.impact = global_impact(port, step, error, entered=entered)
             error._method = intent.kind
-            raise error
+            if error is caught:
+                raise caught
+            raise error from caught
         receipt = {
             "status": "verified" if step.confirmation == Confirmation.CONFIRMED else "dispatched",
             "detail": step.detail,

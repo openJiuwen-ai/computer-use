@@ -30,7 +30,11 @@ from computer_use.interaction.read.presentation.rendering.output import Rendered
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.presentation.interface.composition.content.model import FieldPresentation
-    from computer_use.interaction.read.presentation.interface.collections.model import CollectionPrefixPlan, TablePlan
+    from computer_use.interaction.read.presentation.interface.collections.model import (
+        CollectionPrefixPlan,
+        TableCellPlan,
+        TablePlan,
+    )
 
 
 def field(value: str) -> str:
@@ -449,6 +453,28 @@ class InterfaceWriter:
         if deferred:
             self.lines.append(indent + "Captured structure details: indices and cell extents")
         row_context = (*context, ("table:" + table.ref, heading))
+
+        def cell_branch(ref: str, child_depth: int, current_cell: TableCellPlan, row_trailing: list[str]) -> str:
+            self.remember(ref, child_depth, row_context)
+            column_prefix = table.column_prefixes[table.column_indices.index(current_cell.column)]
+            own, tail = packed_atom(
+                self.atom_lines(
+                    ref,
+                    shared=True,
+                    slots=visible_slots(ref),
+                    collection_prefix=column_prefix if ref == current_cell.ref else None,
+                ),
+                ref,
+                depth + 2,
+                readable=self.request.readable is not None,
+            )
+            row_trailing.extend(tail)
+            children = self.atoms[ref].children
+            if not children:
+                return own
+            members = [cell_branch(child, child_depth + 1, current_cell, row_trailing) for child in children]
+            return own + " > " + (members[0] if len(members) == 1 else "{" + "; ".join(members) + "}")
+
         for row in table.rows:
             if table.layout == "rows":
                 self.write_atom(row.ref, depth + 2, row_context)
@@ -466,29 +492,7 @@ class InterfaceWriter:
             cells = [row_text]
             trailing = list(row_tail)
             for cell in row.cells:
-
-                def cell_branch(ref: str, child_depth: int) -> str:
-                    self.remember(ref, child_depth, row_context)
-                    column_prefix = table.column_prefixes[table.column_indices.index(cell.column)]
-                    own, tail = packed_atom(
-                        self.atom_lines(
-                            ref,
-                            shared=True,
-                            slots=visible_slots(ref),
-                            collection_prefix=column_prefix if ref == cell.ref else None,
-                        ),
-                        ref,
-                        depth + 2,
-                        readable=self.request.readable is not None,
-                    )
-                    trailing.extend(tail)
-                    children = self.atoms[ref].children
-                    if not children:
-                        return own
-                    members = [cell_branch(child, child_depth + 1) for child in children]
-                    return own + " > " + (members[0] if len(members) == 1 else "{" + "; ".join(members) + "}")
-
-                cells.append(cell_branch(cell.ref, depth + 2))
+                cells.append(cell_branch(cell.ref, depth + 2, cell, trailing))
             self.lines.append(indent + "\t" + separator.join(cells))
             self.lines.extend(trailing)
             pending = [self.document.ref_locations[row.ref]]

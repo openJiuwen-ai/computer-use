@@ -162,9 +162,10 @@ class ReceiverQuery(NativeGraph):
                 and self.platform == "windows"
                 and role == "staticText"
                 and values["textReadOnly"] is False
-                and isinstance(patterns := values["interfaces"], tuple)
-                and "TextPatternIdentifiers.Pattern" in patterns
             )
+            if focused_text_range:
+                patterns = values["interfaces"]
+                focused_text_range = isinstance(patterns, tuple) and "TextPatternIdentifiers.Pattern" in patterns
             if require_editable and direct is not True and not focused_text_range:
                 self.fail("input_unavailable", "The requested control has no confirmed direct text-editing capability.")
             return ReceiverResolution()
@@ -174,11 +175,10 @@ class ReceiverQuery(NativeGraph):
         # Rich documents retain their own boundary; their nested inputs are
         # independent controls, not the document's internal editor.
         reverse = None
-        if (
-            direct_editor(role, values, platform=self.platform)
-            or keyboard_input and role in ("textField", "textArea") and direct is True
-            or role == "unknown" and focused == owner and direct is True
-        ):
+        native_editor = direct_editor(role, values, platform=self.platform)
+        known_keyboard_editor = keyboard_input and role in ("textField", "textArea") and direct is True
+        focused_unknown_editor = role == "unknown" and focused == owner and direct is True
+        if native_editor or known_keyboard_editor or focused_unknown_editor:
             if role in SCALAR_EDITORS:
                 reverse = await self._focused_receiver(focused, keyboard_input=keyboard_input)
             else:
@@ -186,7 +186,9 @@ class ReceiverQuery(NativeGraph):
         can_prepare = (
             require_editable
             and allow_preparation
-            and (preparable_editor(role, values, platform=self.platform) or role == "cell" and declared_cell_preparation)
+            and (
+                preparable_editor(role, values, platform=self.platform) or role == "cell" and declared_cell_preparation
+            )
         )
         if role not in COMPOSITE_OWNERS:
             if require_editable and direct is not True:
@@ -268,7 +270,9 @@ class ReceiverQuery(NativeGraph):
             self.fail("input_unavailable", "No confirmed text editor belongs to the requested control.")
         return ReceiverResolution()
 
-    async def _focused_receiver(self, focused: str | None, *, keyboard_input: bool = False) -> ReceiverResolution | None:
+    async def _focused_receiver(
+        self, focused: str | None, *, keyboard_input: bool = False
+    ) -> ReceiverResolution | None:
         """Prove ownership of the reported editor through its parent chain.
 
         Only a successfully established relation contributes dependencies to the

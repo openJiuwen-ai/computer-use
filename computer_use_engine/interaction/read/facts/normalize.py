@@ -234,7 +234,8 @@ def _project_facts(
         decisions = decision_fields(source)
         if primary is not None:
             value_fields[ref] = primary
-        if aliases_of_value := numeric_aliases(source, primary, field_sources or {}):
+        aliases_of_value = numeric_aliases(source, primary, field_sources or {})
+        if aliases_of_value:
             node["_numericValueAliases"] = [_VALUE_FIELDS[name] for name in aliases_of_value]
         for key, item in raw.items():
             field = None
@@ -444,12 +445,8 @@ def _project_facts(
             # Unsupported children are normal on leaves, but do not establish
             # that a content region is empty. Preserve this local gap unless a
             # separately reported children view already accounts for coverage.
-            if (
-                kind == "children"
-                and relation["state"] == "unsupported"
-                and value.nodes[token].role in _CHILD_CONTENT_ROLES
-                and not child_views.get(token)
-            ):
+            unsupported_children = kind == "children" and relation["state"] == "unsupported"
+            if unsupported_children and value.nodes[token].role in _CHILD_CONTENT_ROLES and not child_views.get(token):
                 source["partialReason"] = "child enumeration unsupported; contents unknown"
                 source["childEnumerationUnsupported"] = True
                 source["preserveGroup"] = True

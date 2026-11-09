@@ -142,10 +142,12 @@ class TargetQuery(NativeGraph):
 
     async def _next_relation(self, token, relation_property, cursor, limit):
         page, batch = await super()._next_relation(token, relation_property, cursor, limit)
-        if (
-            self.platform != "macos" or relation_property != self.relations["children"] or cursor is not None
-            or batch is None or page["relation"]["state"] != "complete" or page["relation"]["certainty"] != "confirmed"
-        ):
+        first_children_page = (
+            self.platform == "macos" and relation_property == self.relations["children"] and cursor is None
+        )
+        if not first_children_page or batch is None:
+            return page, batch
+        if page["relation"]["state"] != "complete" or page["relation"]["certainty"] != "confirmed":
             return page, batch
         # A first Children page also follows its source's requested content
         # relations. Accept only complete same-source rows for relations whose
@@ -155,19 +157,20 @@ class TargetQuery(NativeGraph):
             prop = edge["property"]
             key = token, prop
             previous = self.edges.get(key)
-            if (
-                edge["source"] != token or prop not in self.follow_relations or key in self.completed_edges
-                or previous is None or previous["state"] != "partial" or previous["certainty"] != "confirmed"
-                or previous["targets"] or previous.get("offset", 0) or previous.get("cursor") is not None
-                or previous.get("unavailablePositions") or previous.get("membershipObservedAt")
-            ):
+            if edge["source"] != token or prop not in self.follow_relations or key in self.completed_edges:
                 continue
-            if (
-                edge["state"] != "complete" or edge["certainty"] != "confirmed"
-                or not edge["targets"] or len(edge["targets"]) != previous.get("total")
-                or edge.get("total") != previous.get("total")
-                or any(ref not in self.nodes and ref not in collected for ref in edge["targets"])
-            ):
+            if previous is None or previous["state"] != "partial" or previous["certainty"] != "confirmed":
+                continue
+            has_consumed_identities = (
+                previous["targets"] or previous.get("offset", 0) or previous.get("cursor") is not None
+            )
+            if has_consumed_identities or previous.get("unavailablePositions") or previous.get("membershipObservedAt"):
+                continue
+            if edge["state"] != "complete" or edge["certainty"] != "confirmed" or not edge["targets"]:
+                continue
+            if len(edge["targets"]) != previous.get("total") or edge.get("total") != previous.get("total"):
+                continue
+            if any(ref not in self.nodes and ref not in collected for ref in edge["targets"]):
                 continue
             self.edges[key] = edge
             self.edge_sources[key].append(batch["observed"]["id"])

@@ -175,7 +175,11 @@ async def main(argv=None):
                 style="cyan",
             )
             journal.record(
-                "start", {"model": settings["model"], "allow_global_input": config.allow_global_input if config.mcp is None else None}
+                "start",
+                {
+                    "model": settings["model"],
+                    "allow_global_input": config.allow_global_input if config.mcp is None else None,
+                },
             )
             current = asyncio.current_task()
             loop = asyncio.get_running_loop()

@@ -33,8 +33,9 @@ def share_empty_descriptions(view: ProjectionView, edit: ProjectionEditor) -> No
         not view.context.get("compact")
         or not view.context.get("shareDescriptions", True)
         or view.context.get("subtreeRef")
-        or not isinstance(evidence, CompressionEvidence)
     ):
+        return
+    if not isinstance(evidence, CompressionEvidence):
         return
     groups: dict[tuple[str, str], list[FactKey]] = defaultdict(list)
     for ref in view.order:

@@ -70,8 +70,8 @@ def captured_lookup_scopes(instance, trees, shown, generation, capabilities, win
         if not any(source is tree.native for source in shown):
             continue
         snapshots = {}
-        for ref, token in tree.refs.items():
-            snapshot = instance.refs.get(ref)
+        for element_ref, token in tree.refs.items():
+            snapshot = instance.refs.get(element_ref)
             if snapshot is not None and scope_key(snapshot["binding"])[:4] == scope_key(target)[:4]:
                 snapshots[token] = snapshot
         scopes.append(
@@ -98,19 +98,19 @@ def captured_lookup_scopes(instance, trees, shown, generation, capabilities, win
 def merge_lookup_scopes(previous, sources):
     """Replace only the captured scope, without merging old gaps into new facts."""
     result = OrderedDict(previous)
-    for source in sources:
-        if source.released:
+    for lookup_scope in sources:
+        if lookup_scope.released:
             continue
-        key = scope_key(source.target)
+        key = scope_key(lookup_scope.target)
         related = tuple((prior_key, value) for prior_key, value in result.items() if prior_key[:4] == key[:4])
-        if any(value.generation > source.generation for _, value in related):
+        if any(value.generation > lookup_scope.generation for _, value in related):
             continue
         for prior_key, value in related:
-            if value.generation < source.generation:
+            if value.generation < lookup_scope.generation:
                 result.pop(prior_key)
         existing = result.get(key)
-        if existing is None or source.generation >= existing.generation:
-            result[key] = source
+        if existing is None or lookup_scope.generation >= existing.generation:
+            result[key] = lookup_scope
             result.move_to_end(key)
     while len(result) > 128:
         result.popitem(last=False)
@@ -170,23 +170,23 @@ def invalidate_lookup_result(controller, instance, owners, path, continuation=No
     the optional index budget discards that source, not its numbered bindings.
     """
     path_key = _path_key(path)
-    groups = {
-        scope_key(target)[:4]
-        for owner in dict.fromkeys(owners)
-        if (target := controller.state(owner).query_target) is not None
-    }
+    groups = set()
+    for owner in dict.fromkeys(owners):
+        target = controller.state(owner).query_target
+        if target is not None:
+            groups.add(scope_key(target)[:4])
     discard_lookup_results(instance, groups, path_key)
     # Include pending delivery sources as well as visible/continuation facts.
     # The weak registry grants no query access and owns no captured payload;
     # it only prevents later delivery from reviving already-disproved facts.
-    for source in tuple(instance.lookup_captures):
-        if scope_key(source.target)[:4] in groups:
-            source.matches.pop(path_key, None)
-            source.invalidated.add(path_key)
-            if len(source.invalidated) > 128:
-                source.facts = None
-                source.matches.clear()
-                source.invalidated.clear()
+    for capture in tuple(instance.lookup_captures):
+        if scope_key(capture.target)[:4] in groups:
+            capture.matches.pop(path_key, None)
+            capture.invalidated.add(path_key)
+            if len(capture.invalidated) > 128:
+                capture.facts = None
+                capture.matches.clear()
+                capture.invalidated.clear()
 
 
 async def resolve_observed(controller, instance, owners, path, remaining, continuation=None):

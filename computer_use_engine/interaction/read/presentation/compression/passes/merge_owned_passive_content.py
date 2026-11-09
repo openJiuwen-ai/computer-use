@@ -28,13 +28,11 @@ def _complete_path(view: ProjectionView, owner: ViewNode, node: ViewNode, eviden
     while current not in seen:
         seen.add(current)
         original = view.native_nodes.get(current)
-        if (
-            original is None
-            or view.scopes.get(current) != view.scopes.get(owner["ref"])
-            or current in evidence.incomplete_children
-            or has_incomplete_children(original)
-            or current in evidence.contested_sources
-        ):
+        if original is None or view.scopes.get(current) != view.scopes.get(owner["ref"]):
+            return False
+        if current in evidence.incomplete_children or has_incomplete_children(original):
+            return False
+        if current in evidence.contested_sources:
             return False
         if current == owner["ref"]:
             return True
@@ -58,12 +56,9 @@ def _field_parts(
             return None
         for fact in part.facts:
             original = view.native_nodes.get(fact.source, {})
-            if (
-                (fact.source, fact.attribute) not in evidence.complete_text
-                or fact.attribute not in _TEXT_FIELDS
-                or type(original.get(fact.attribute)) is not str
-                or original[fact.attribute] != part.value
-            ):
+            if (fact.source, fact.attribute) not in evidence.complete_text or fact.attribute not in _TEXT_FIELDS:
+                return None
+            if type(original.get(fact.attribute)) is not str or original[fact.attribute] != part.value:
                 return None
             result.append(dict(sourceRef=fact.source, attribute=fact.attribute, field=field, text=part.value))
     return result
@@ -95,21 +90,19 @@ def _branch(
     nodes: list[ViewNode] = []
 
     def visit(node: ViewNode) -> list[Record] | None:
-        if (
-            node["ref"] in visual_labels
-            or node["role"] not in _CONTENT_ROLES
-            or view.keep(node)
-            or display_boundary_reasons(view, node)
-            or not same_blocking(node, owner)
-            or not _complete_path(view, owner, node, evidence)
-            or has_incomplete_children(node)
-            or node.get("valueIsNumber")
-            or node.get("incompleteLabelRelation")
-            or any(target != owner["ref"] for target in node.get("labelTargets", ()))
-            or node.get("url")
-            and node["role"] != "image"
-            or any(field in node for field in ("documentText", "controlValue", "rangeValue"))
-        ):
+        if node["ref"] in visual_labels or node["role"] not in _CONTENT_ROLES or view.keep(node):
+            return None
+        if display_boundary_reasons(view, node) or not same_blocking(node, owner):
+            return None
+        if not _complete_path(view, owner, node, evidence) or has_incomplete_children(node):
+            return None
+        if node.get("valueIsNumber") or node.get("incompleteLabelRelation"):
+            return None
+        if any(target != owner["ref"] for target in node.get("labelTargets", ())):
+            return None
+        if node.get("url") and node["role"] != "image":
+            return None
+        if any(field in node for field in ("documentText", "controlValue", "rangeValue")):
             return None
         own = _text_parts(view, node, evidence)
         if own is None:
@@ -174,18 +167,18 @@ def merge_owned_passive_content(view: ProjectionView, edit: ProjectionEditor) ->
     while pending:
         owner = pending.pop()
         pending.extend(reversed(owner["children"]))
-        if (
-            owner["ref"] in view.folded_into
-            or not ordinary_control(owner)
-            or not owner["children"]
-            or owner["role"] in ("row", "cell")
-            or has_incomplete_children(owner)
-            or owner["ref"] in evidence.incomplete_content
-        ):
+        if owner["ref"] in view.folded_into or not ordinary_control(owner):
+            continue
+        if not owner["children"] or owner["role"] in ("row", "cell"):
+            continue
+        if has_incomplete_children(owner) or owner["ref"] in evidence.incomplete_content:
             continue
         candidates = [(child, _branch(view, owner, child, evidence, visual_labels)) for child in owner["children"]]
         whole, represented = _captions(view, owner, evidence)
-        text = [part for _, branch in candidates if branch is not None for part in branch[1]]
+        text = []
+        for _, branch in candidates:
+            if branch is not None:
+                text.extend(branch[1])
         # Use one occurrence per source fact, retaining duplicate values as a
         # boundary when a new name would otherwise collapse their multiplicity.
         ordered, seen = [], set()
@@ -208,12 +201,9 @@ def merge_owned_passive_content(view: ProjectionView, edit: ProjectionEditor) ->
             if not values or len(values) != len(set(values)) or any(branch is None for _, branch in candidates):
                 continue
             proposed = " ".join(values)
-            if any(
-                node.get(field) not in (None, "", proposed, *values)
-                for _, branch in candidates
-                for node in branch[0]
-                for field in _TEXT_FIELDS
-            ):
+            allowed_captions = (None, "", proposed, *values)
+            nodes = (node for _, branch in candidates for node in branch[0])
+            if any(any(node.get(field) not in allowed_captions for field in _TEXT_FIELDS) for node in nodes):
                 continue
             edit.adopt(owner, ordered, "name", " ")
             whole, represented = _captions(view, owner, evidence)
@@ -237,12 +227,10 @@ def merge_owned_passive_content(view: ProjectionView, edit: ProjectionEditor) ->
         complete_control = all(mergeable)
         folded, retained, positions = [], [], []
         for (child, branch), covered in zip(candidates, mergeable):
-            if (
-                branch is None
-                or not covered
-                or not complete_control
-                and any(node.get("spatialPosition") for node in branch[0])
-            ):
+            if branch is None or not covered:
+                retained.append(child)
+                continue
+            if not complete_control and any(node.get("spatialPosition") for node in branch[0]):
                 retained.append(child)
                 continue
             for node in branch[0]:

@@ -37,7 +37,9 @@ class Observation(Protocol):
 
     def read_details(
         self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
-    ) -> "TextPage": ...
+    ) -> "TextPage":
+        ...
+
     @property
     def text(self) -> str:
         pass

@@ -220,11 +220,15 @@ class ConnectionPort:
             self.platform != "windows"
             or not {"nativeWindowTitleSelection", "nativeStrictWindowRead"} <= set(self.capabilities)
         ):
-            raise local_failure("exact window title selection requires a supporting Windows driver", "unsupported_operation")
+            raise local_failure(
+                "exact window title selection requires a supporting Windows driver", "unsupported_operation"
+            )
         if "rootWindow" in query and (
             self.platform != "windows" or "nativeStrictWindowRead" not in self.capabilities
         ):
-            raise local_failure("strict window collection requires a supporting Windows driver", "unsupported_operation")
+            raise local_failure(
+                "strict window collection requires a supporting Windows driver", "unsupported_operation"
+            )
         self._check(operation)
         result = await self.connection.request(
             "inspect",
@@ -569,15 +573,18 @@ class ConnectionPort:
     ) -> tuple[Record, Record]:
         self._check(operation)
         query = dict(kind="nodes", fields=list(request.fields), maxNodes=request.max_nodes, maxDepth=request.max_depth)
-        if request.focused_element is not None:
+        focused_element = request.focused_element
+        if focused_element is not None:
             if self.platform != "macos" or "nativeFocusedReadV1" not in self.connection.capabilities:
                 raise ValueError("This driver cannot collect a supplementary focused element")
-            if type(request.focused_element) is not bool:
+            if focused_element is not True and focused_element is not False:
                 raise ValueError("focused_element must be a boolean")
-            query["focusedElement"] = request.focused_element
+            query["focusedElement"] = focused_element
         if request.strict_window:
             if self.platform != "windows" or "nativeStrictWindowRead" not in self.capabilities:
-                raise local_failure("strict window collection requires a supporting Windows driver", "unsupported_operation")
+                raise local_failure(
+                    "strict window collection requires a supporting Windows driver", "unsupported_operation"
+                )
             query["strictWindow"] = True
         if request.action_detail is not None:
             if self.platform != "macos" or "nativeQueryActionProfile" not in self.connection.capabilities:
@@ -585,12 +592,13 @@ class ConnectionPort:
             if request.action_detail not in ("none", "names", "full"):
                 raise ValueError("Invalid action evidence profile")
             query["actionDetail"] = request.action_detail
-        if request.text_content is not None:
+        text_content = request.text_content
+        if text_content is not None:
             if self.platform != "macos" or "nativeParameterizedText" not in self.connection.capabilities:
                 raise ValueError("This driver cannot capture parameterized native text")
-            if type(request.text_content) is not bool:
+            if text_content is not True and text_content is not False:
                 raise ValueError("text_content must be a boolean")
-            query["textContent"] = request.text_content
+            query["textContent"] = text_content
         if request.primary_fields is not None:
             if "nativeUiaTextLines" not in self.connection.capabilities:
                 raise ValueError("This driver cannot limit line probing to primary text objects")
@@ -607,10 +615,11 @@ class ConnectionPort:
             if "nativeAdvertisedFields" not in self.connection.capabilities:
                 raise ValueError("This driver cannot query advertised native fields")
             query["advertisedFields"] = list(request.advertised_fields)
-        if (
+        shares_attribute_catalogues = (
             self.platform == "macos" and "nativeAttributeCataloguePool" in self.connection.capabilities
             and (request.advertised_fields or request.follow_relations or request.text_content)
-        ):
+        )
+        if shares_attribute_catalogues:
             query["shareAttributeCatalogues"] = True
         if request.children_page is not None and request.relation_page is not None:
             raise ValueError("Exactly one root relation page is required")
@@ -745,7 +754,8 @@ class ConnectionPort:
             raise ValueError("Application changes require a session discovery scope")
         query = dict(kind="appChanges", application=application)
         if after is not None:
-            if not isinstance(after, str) or not after or type(delay_ms) is not int or not 1 <= delay_ms <= 400:
+            valid_token = isinstance(after, str) and bool(after)
+            if not valid_token or type(delay_ms) is not int or not 1 <= delay_ms <= 400:
                 raise ValueError("Invalid application change token or event-wait limit")
             query = dict(kind="waitAppChange", application=application, after=after, timeoutMs=delay_ms)
         result = await self.connection.request(

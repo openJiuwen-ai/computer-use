@@ -124,7 +124,8 @@ def expand_row_records(lines: list[str]) -> list[str]:
             expanded.extend(restored)
             members += 1
             end += 1
-        refs = [match[2] for line in expanded if (match := _NODE.fullmatch(line))]
+        matches = (_NODE.fullmatch(line) for line in expanded)
+        refs = [match[2] for match in matches if match]
         if members >= 3 and len(refs) == len(set(refs)):
             result.extend(expanded)
             index = end
@@ -236,7 +237,10 @@ def pack_row_records(frame: LayoutFrame) -> list[str]:
             index += 1
             continue
         members = [first]
-        while current := candidates.get(members[-1].end):
+        while True:
+            current = candidates.get(members[-1].end)
+            if not current:
+                break
             if (
                 current.parent != first.parent
                 or current.position != first.position + len(members)

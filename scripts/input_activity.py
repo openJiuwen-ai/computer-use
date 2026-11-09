@@ -86,7 +86,11 @@ def _valid_event(event):
             and isinstance(resources, list)
             and all(r in ("mouse", "keyboard", "focus") for r in resources)
             and (event["phase"] != "didReturn" or "nativeInvoked" in event)
-            and (event.get("nativeInvoked") is None or type(event["nativeInvoked"]) is bool)
+            and (
+                event.get("nativeInvoked") is None
+                or event["nativeInvoked"] is True
+                or event["nativeInvoked"] is False
+            )
         )
     return True
 

@@ -27,13 +27,9 @@ def catalogue_fields(properties: Sequence[Mapping[str, Any]], row: Mapping[str, 
         key = raw["key"]
         name = f"{key[0]}::{key[1]}#{index}"
         value = row["values"].get(name)
-        if (
-            raw.get("arguments")
-            or name in row["fieldStatus"]
-            or (raw.get("read") or {}).get("issues")
-            or not isinstance(value, list)
-            or any(not isinstance(item, str) or not item for item in value)
-        ):
+        if raw.get("arguments") or name in row["fieldStatus"] or (raw.get("read") or {}).get("issues"):
+            continue
+        if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
             continue
         result.add(name)
     return frozenset(result)

@@ -696,7 +696,8 @@ def render_projection_lines(
             )
             if not summarized:
                 fields.append(
-                    f"Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}"
+                    f"Selection: {number_string(selection_range['location'])}:"
+                    f"{number_string(selection_range['length'])}"
                 )
             record(node, "selectionRange", kind="text-selection-summary" if summarized else "display")
         if "shortcut" in node:

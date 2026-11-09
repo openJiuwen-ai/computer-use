@@ -106,16 +106,18 @@ class InterfaceImagePipeline:
                 if directory is not None and (
                     directory["session"], directory["application"]
                 ) == (part.target.session, ui._instance.selector):
-                    original = next((item for item in directory["surfaces"] if (
-                        item["window"], item["surface"], item["instance"]
-                    ) == (identity.window, identity.surface, identity.instance)), None)
+                    original = next(
+                        (item for item in directory["surfaces"] if WindowIdentity.of(item) == identity), None,
+                    )
                     if original is not None:
                         # This is presentation evidence only. It never restores
                         # omitted/ended objects to the current instance catalogue.
                         members.setdefault(key, original)
                         source_directories.append(directory)
             aliases[identity] = (
-                next((ref for ref, window in ui._instance.windows.items() if window == display_host(members, key)), None)
+                next(
+                    (ref for ref, window in ui._instance.windows.items() if window == display_host(members, key)), None,
+                )
                 if confirmed[identity] else self.controller.interfaces.windows.reference(
                     part.target.session, ui._instance.selector, identity
                 )
@@ -268,12 +270,15 @@ class InterfaceImagePipeline:
             selected = collected[0]
             fixed = getattr(ui, "_window_identity", None)
             if fixed is not None:
-                selected = next((
-                    (key, image) for key, image in collected
-                    if key.window == fixed.root_window
-                    and (image.target.session, image.target.root_window, image.target.surface, image.target.instance)
-                    == (fixed.session, fixed.root_window, fixed.surface, fixed.instance)
-                ), selected)
+                for key, image in collected:
+                    if key.window != fixed.root_window:
+                        continue
+                    captured = image.target
+                    if (captured.session, captured.root_window, captured.surface, captured.instance) == (
+                        fixed.session, fixed.root_window, fixed.surface, fixed.instance,
+                    ):
+                        selected = key, image
+                        break
             key, image = selected
             canvas = self.single(key, image, members, scope_confirmed=confirmed[key])
             displayed, kind = (key,), "single"
@@ -396,8 +401,6 @@ class InterfaceImagePipeline:
         state.image_generation += 1
         generation = state.image_generation
         canvas.generation = generation
-        from computer_use.session.interfaces import WindowIdentity
-
         for piece in canvas.pieces:
             if not piece.scope_confirmed:
                 continue
@@ -463,9 +466,9 @@ class InterfaceImagePipeline:
                 host = display_host(captured_hosts, key)
                 original = captured.get(host)
                 member = state.members.get(host)
-                if host != key and original is not None and member is not None and (
-                    WindowIdentity.of(member) == original and image.for_window(host) is not None
-                ):
+                if host == key or original is None or member is None:
+                    continue
+                if WindowIdentity.of(member) == original and image.for_window(host) is not None:
                     identities[host] = (original.surface, original.instance)
                     identities.pop(key)
             available = []
@@ -478,9 +481,9 @@ class InterfaceImagePipeline:
                 member = state.members.get(window)
                 retained = evidence is not None and evidence.lifetime is not WindowLifetime.RETIRED
                 captured_member = member is not None and WindowIdentity.of(member) == identity
-                if (retained or (evidence is None and captured_member)) and (
-                    generation >= state.window_image_generations.get(identity, -1)
-                ):
+                if not retained and not (evidence is None and captured_member):
+                    continue
+                if generation >= state.window_image_generations.get(identity, -1):
                     available.append(ref)
             return tuple(available)
 

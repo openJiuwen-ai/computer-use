@@ -174,8 +174,8 @@ def _form_rows(items: Sequence[LayoutItem]) -> tuple[RowBand, ...]:
             # chooses between two independently compatible candidate bands.
             selected = min(
                 candidates,
-                key=lambda index: (
-                    abs(item.box.center[1] - median(member.box.center[1] for member in groups[index])),
+                key=lambda index, current_item=item: (
+                    abs(current_item.box.center[1] - median(member.box.center[1] for member in groups[index])),
                     tuple(member.key for member in _horizontal(groups[index])),
                 ),
             )
@@ -262,6 +262,19 @@ def _anchors(items: Sequence[LayoutItem], rows: tuple[RowBand, ...], scale: floa
     """Retain supported local runs while leaving obstructed and isolated units intact."""
     row_of = {key: index for index, row in enumerate(rows) for key in row.members}
     result: list[AlignmentAnchor] = []
+
+    def flush(current_run: list[LayoutItem], anchor_kind: AlignmentKind) -> None:
+        if len(current_run) >= 2:
+            result.append(
+                AlignmentAnchor(
+                    anchor_kind,
+                    median(anchor_coordinate(item.box, anchor_kind) for item in current_run),
+                    tuple(item.key for item in current_run),
+                    tuple(row_of[item.key] for item in current_run),
+                )
+            )
+        current_run.clear()
+
     for kind in ("left", "right", "center"):
         for group in _anchor_groups(items, kind, scale):
             # Two measurements in one row leave that row's column membership
@@ -273,18 +286,6 @@ def _anchors(items: Sequence[LayoutItem], rows: tuple[RowBand, ...], scale: floa
             starts, ends = _vertical_intervals(items, position, frozenset(row_of[item.key] for item in members), row_of)
             run: list[LayoutItem] = []
 
-            def flush() -> None:
-                if len(run) >= 2:
-                    result.append(
-                        AlignmentAnchor(
-                            kind,
-                            median(anchor_coordinate(item.box, kind) for item in run),
-                            tuple(item.key for item in run),
-                            tuple(row_of[item.key] for item in run),
-                        )
-                    )
-                run.clear()
-
             for item in members:
                 if run:
                     previous = run[-1]
@@ -292,9 +293,9 @@ def _anchors(items: Sequence[LayoutItem], rows: tuple[RowBand, ...], scale: floa
                     if overlap > 0.25 * min(previous.box.height, item.box.height) or _blocked(
                         previous, item, starts, ends
                     ):
-                        flush()
+                        flush(run, kind)
                 run.append(item)
-            flush()
+            flush(run, kind)
     return tuple(result)
 
 

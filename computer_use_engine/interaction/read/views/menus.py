@@ -61,8 +61,8 @@ def remember_menu(
         controller._remember(state, part.target, tree)
         # Menu references retain the exact source window independently of a
         # later menu read that may reuse the same application-menu surface.
-        for ref in tree.refs:
-            state.refs[ref]["menu_window_identity"] = state.menu_window_identity
+        for element_ref in tree.refs:
+            state.refs[element_ref]["menu_window_identity"] = state.menu_window_identity
         owners.append(owner)
         trees.append((part.target, tree))
     return tuple(owners), tuple(trees)

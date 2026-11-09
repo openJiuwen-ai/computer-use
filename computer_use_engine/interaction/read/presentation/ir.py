@@ -11,7 +11,8 @@ contract once after all rules have completed.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, NewType
 
@@ -193,7 +194,7 @@ class ProjectionInput:
     order: tuple[str, ...]
     root: SourceKey
     context: Mapping[str, Any]
-    geometry: GeometryIndex = field(default_factory=lambda: GeometryIndex({}))
+    geometry: GeometryIndex = dataclass_field(default_factory=lambda: GeometryIndex({}))
     outside_window_fields: frozenset[str] = frozenset()
 
     @classmethod
@@ -300,12 +301,12 @@ class _Node:
     source: SourceKey
     fields: dict[str, PresentedValue]
     children: list[str]
-    annotations: Record = field(default_factory=dict)
-    text_sources: list[Record] = field(default_factory=list)
-    source_refs: list[str] = field(default_factory=list)
-    shared_descriptions: list[SharedDescription] = field(default_factory=list)
-    source_roles: list[SourceRoleDeclaration] = field(default_factory=list)
-    shared_description_fields: dict[str, SharedDescriptionDestination] = field(default_factory=dict)
+    annotations: Record = dataclass_field(default_factory=dict)
+    text_sources: list[Record] = dataclass_field(default_factory=list)
+    source_refs: list[str] = dataclass_field(default_factory=list)
+    shared_descriptions: list[SharedDescription] = dataclass_field(default_factory=list)
+    source_roles: list[SourceRoleDeclaration] = dataclass_field(default_factory=list)
+    shared_description_fields: dict[str, SharedDescriptionDestination] = dataclass_field(default_factory=dict)
 
 
 @dataclass
@@ -332,16 +333,16 @@ class PresentationIR:
     source: ProjectionInput
     roots: list[str]
     nodes: dict[str, _Node]
-    elisions: dict[str, Elision] = field(default_factory=dict)
-    changes: list[Record] = field(default_factory=list)
-    folded_into: dict[str, str] = field(default_factory=dict)
-    targets: dict[str, Record] = field(default_factory=dict)
-    stages: dict[str, Record] = field(default_factory=dict)
-    resolved_elisions: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    elisions: dict[str, Elision] = dataclass_field(default_factory=dict)
+    changes: list[Record] = dataclass_field(default_factory=list)
+    folded_into: dict[str, str] = dataclass_field(default_factory=dict)
+    targets: dict[str, Record] = dataclass_field(default_factory=dict)
+    stages: dict[str, Record] = dataclass_field(default_factory=dict)
+    resolved_elisions: dict[str, tuple[str, ...]] = dataclass_field(default_factory=dict)
     active_stage: Record | None = None
     active_rule: str = ""
-    views: dict[str, ViewNode] = field(default_factory=dict)
-    caption_equivalences: list[CaptionEquivalence] = field(default_factory=list)
+    views: dict[str, ViewNode] = dataclass_field(default_factory=dict)
+    caption_equivalences: list[CaptionEquivalence] = dataclass_field(default_factory=list)
 
     @classmethod
     def build(cls, source: ProjectionInput) -> PresentationIR:

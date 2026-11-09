@@ -151,7 +151,10 @@ class Server:
                 require(self.backend is None and raw["method"] == "hello", "Expected one hello.")
                 fields(raw["params"], ("globalInputAllowed",))
                 allow_global_input = raw["params"]["globalInputAllowed"]
-                require(type(allow_global_input) is bool, "Global input permission must be a boolean.")
+                require(
+                    allow_global_input is True or allow_global_input is False,
+                    "Global input permission must be a boolean.",
+                )
                 ctx.check()
                 self.version = raw["version"]
                 self.backend = self.factory(allow_global_input, self.stopped)

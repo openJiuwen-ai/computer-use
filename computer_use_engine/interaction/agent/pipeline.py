@@ -138,7 +138,8 @@ class AgentInterfacePipeline:
         for index, item in enumerate(items):
             ref = refs.get(str(index))
             if ref is not None:
-                app_id = self.references.publish(ApplicationEntry(catalogue["session"], item["selector"], app_name, True))
+                app_entry = ApplicationEntry(catalogue["session"], item["selector"], app_name, True)
+                app_id = self.references.publish(app_entry)
                 windows.append(FrozenRecord(dict(
                     app_id=app_id,
                     window_ref=ref,
@@ -174,15 +175,10 @@ class AgentInterfacePipeline:
                     provider=dict(status="notRequested", attribute=None, writeStatus=None),
                 )
             catalogues[selector]["surfaces"].append(item["window"])
-        by_selector = {
-            selector: {
-                window: int(ref)
-                for ref, window in self.windows.register_directory(
-                    directory, names[selector], identity_only=app_name is not None
-                ).items()
-            }
-            for selector, directory in catalogues.items()
-        }
+        by_selector = {}
+        for selector, directory in catalogues.items():
+            registered = self.windows.register_directory(directory, names[selector], identity_only=app_name is not None)
+            by_selector[selector] = {window: int(ref) for ref, window in registered.items()}
         refs = {}
         for index, item in enumerate(items):
             if "window" in item and item.get("selector") in by_selector:
@@ -443,10 +439,11 @@ class AgentInterfacePipeline:
             remaining = getattr(control, "remaining", None)
             if remaining is not None:
                 available = remaining()
-            elif (budget := current_operation_budget()) is not None:
-                available = budget.remaining()
             else:
-                return None
+                budget = current_operation_budget()
+                if budget is None:
+                    return None
+                available = budget.remaining()
             if available is not None and available < 1:
                 raise OperationDeadlineExceeded("Element lookup exhausted its original operation budget")
             return available
@@ -468,10 +465,12 @@ class AgentInterfacePipeline:
             if ui._anchor is None and not menu_only:
                 reselected = False
                 old = instance.members.get(context)
-                if (
-                    lookup_context.window is None or old is None
-                    or WindowIdentity.of(old) != lookup_context.window or not observed_query(old)
-                ):
+                previous_matches = (
+                    lookup_context.window is not None
+                    and old is not None
+                    and WindowIdentity.of(old) == lookup_context.window
+                )
+                if not previous_matches or not observed_query(old):
                     # A delivered popup image/old child is not the App's lifetime.
                     # Use a current display root only if its semantic query scope
                     # was actually delivered, never an unseen pending observation.
@@ -550,11 +549,12 @@ class AgentInterfacePipeline:
                     )
                 except QueryRootUnavailable as error:
                     failed = self.controller.state(owner).query_target
-                    if (
-                        reconciled or ui._anchor is not None or menu_only or failed != error.binding
-                        or instance.owners.get(error.binding.root_window) is not owner
-                        or error.binding.session != instance.session
-                    ):
+                    if reconciled or ui._anchor is not None or menu_only:
+                        raise
+                    failed_binding = error.binding
+                    if failed != failed_binding or instance.owners.get(failed_binding.root_window) is not owner:
+                        raise
+                    if failed_binding.session != instance.session:
                         raise
                     recovery = owner, error
                     break
@@ -574,19 +574,18 @@ class AgentInterfacePipeline:
                 lookup_remaining()
                 await refresh(self.controller, ui, accessibility=True)
                 current = instance.members.get(error.binding.root_window)
-                if (
-                    current is not None and current.get("node") is not None
-                    and current["node"] != error.binding.node
-                    and (current["instance"], current["surface"])
-                    == (error.binding.instance, error.binding.surface)
-                    and WindowIdentity.of(current) in lookup_windows
-                ):
-                    self.controller.state(owner).query_target = member_target(instance, current)
+                if current is not None and current.get("node") is not None and current["node"] != error.binding.node:
+                    same_surface = (current["instance"], current["surface"]) == (
+                        error.binding.instance, error.binding.surface,
+                    )
+                    if same_surface and WindowIdentity.of(current) in lookup_windows:
+                        self.controller.state(owner).query_target = member_target(instance, current)
                 owners, incomplete = lookup_sources()
                 if not owners or incomplete:
                     raise error
                 continue
-            if matched or incomplete or not owners or monotonic() >= end:
+            stop_search = bool(matched or incomplete) or not owners
+            if stop_search or monotonic() >= end:
                 break
             delay = min(0.025, max(0, end - monotonic()))
             remaining = lookup_remaining()
@@ -666,31 +665,40 @@ class AgentInterfacePipeline:
 
     def _application_command_target(self, ui: UIHandle, key: object) -> Binding | None:
         """Use the delivered menu scope for a windowless Command-letter shortcut."""
+        if "nativeApplicationCommand" not in self.controller.transport.capabilities:
+            return None
+        if not isinstance(key, str) or len(key) != 7 or not key.startswith("super+"):
+            return None
         if (
-            "nativeApplicationCommand" not in self.controller.transport.capabilities
-            or not isinstance(key, str) or len(key) != 7 or not key.startswith("super+") or key[-1] not in ascii_lowercase
-            or ui._anchor is not None or getattr(ui, "_window_identity", None) is not None
+            key[-1] not in ascii_lowercase
+            or ui._anchor is not None
+            or getattr(ui, "_window_identity", None) is not None
         ):
             return None
         instance = ui._instance
         state = self.controller.state(ui)
         running, lookup = state.running, instance.lookup_context
-        if (
-            type(running) is not RunningApplication or running.session != instance.session
-            or state.selection is not None or instance.anchor is not None
-            or instance.input_context is not None or instance.members or instance.evidence
-            or instance.delivered_lookup_windows
-            or lookup is None or lookup.window is not None or not lookup.menu_only or len(lookup.menus) != 1
-        ):
+        # StartingApplication and SelectedApplicationWindow represent other
+        # lifecycle states and cannot admit a windowless command.
+        if type(running) is not RunningApplication or running.session != instance.session:
+            return None
+        if state.selection is not None or instance.anchor is not None or instance.input_context is not None:
+            return None
+        if instance.members or instance.evidence or instance.delivered_lookup_windows:
+            return None
+        if lookup is None or lookup.window is not None:
+            return None
+        if not lookup.menu_only or len(lookup.menus) != 1:
             return None
         source = self.controller.state(lookup.menus[0])
         target = source.query_target
-        if (
-            source.running != running or source.query_scope_kind != "applicationMenu"
-            or source.menu_window_identity is not None or target is None
-            or target.session != running.session or target.instance is None or target.surface is None
-            or target.root_window is not None or target.capture is not None
-        ):
+        if source.running != running or source.query_scope_kind != "applicationMenu":
+            return None
+        if source.menu_window_identity is not None or target is None or target.session != running.session:
+            return None
+        if target.instance is None or target.surface is None:
+            return None
+        if target.root_window is not None or target.capture is not None:
             return None
         return replace(target, node=None)
 
@@ -698,22 +706,23 @@ class AgentInterfacePipeline:
     def _refreshed_key_root(ui: UIHandle, selected: WindowIdentity, directory: DirectoryFacts) -> Binding | None:
         """Use positive root focus when a delivered child no longer has a current window entry."""
         fixed = getattr(ui, "_window_identity", None)
-        if (
-            directory["platform"] != "macos" or fixed is None or fixed.root_window == selected.window
-            or directory.get("focusedWindow") != fixed.root_window
-        ):
+        if directory["platform"] != "macos" or fixed is None:
+            return None
+        if fixed.root_window == selected.window or directory.get("focusedWindow") != fixed.root_window:
             return None
         evidence = ui._instance.evidence.get(selected)
         if (
             evidence is None or evidence.lifetime is not WindowLifetime.RETAINED
             or evidence.membership is not Knowledge.UNKNOWN
-            or any(item["window"] == selected.window for item in directory["surfaces"])
         ):
             return None
+        if any(item["window"] == selected.window for item in directory["surfaces"]):
+            return None
         root = ui._instance.members.get(fixed.root_window)
-        if (
-            root is not None and root["nativeWindow"] and root["accessibility"] and root["parentState"] == "none"
-            and WindowIdentity.of(root) == WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)
+        if root is None or not root["nativeWindow"] or not root["accessibility"]:
+            return None
+        if root["parentState"] == "none" and WindowIdentity.of(root) == WindowIdentity(
+            fixed.root_window, fixed.surface, fixed.instance,
         ):
             return fixed
         return None
@@ -735,9 +744,11 @@ class AgentInterfacePipeline:
         target = target or self.keyboard_context(ui, require_observed=ui._anchor is None)
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
         directory = await refresh(self.controller, ui)
-        if select_key_context and (root := self._refreshed_key_root(ui, identity, directory)) is not None:
-            target = root
-            identity = WindowIdentity(root.root_window, root.surface, root.instance)
+        if select_key_context:
+            root = self._refreshed_key_root(ui, identity, directory)
+            if root is not None:
+                target = root
+                identity = WindowIdentity(root.root_window, root.surface, root.instance)
         require_identity(ui, identity, current=True)
         if ui._anchor is not None and not ancestor(ui._instance.directory, identity.window, ui._anchor):
             raise local_failure(

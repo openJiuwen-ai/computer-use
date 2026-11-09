@@ -55,7 +55,8 @@ def _known(observation: NativeObservation, key: str, path: tuple[str, ...]) -> b
 
 
 def _different(left, right) -> bool:
-    if isinstance(left, float) and isinstance(right, float) and isnan(left) and isnan(right):
+    comparable_nan = isinstance(left, float) and isinstance(right, float)
+    if comparable_nan and isnan(left) and isnan(right):
         return False
     return type(left) is not type(right) or left != right
 
@@ -123,14 +124,10 @@ def has_content_progress(before: SemanticSnapshot | None, after: SemanticSnapsho
                 or relation.view != old_relation.view
             ):
                 continue
-            if any(
-                child not in left.nodes
-                and child not in old_relation.targets
-                and child in right.nodes
-                and _meaningful(right, child)
-                for child in relation.targets
-            ):
-                return True
+            for child in relation.targets:
+                previously_unknown = child not in left.nodes and child not in old_relation.targets
+                if previously_unknown and child in right.nodes and _meaningful(right, child):
+                    return True
             if _complete_children(right, key, name, relation) and any(
                 child in left.nodes and child not in relation.targets and _meaningful(left, child)
                 for child in old_relation.targets
@@ -149,8 +146,9 @@ def prefer_earlier_budget_capture(before: SemanticSnapshot | None, after: Semant
         for issue in right.issues
     ):
         return False
-    return bool(left.nodes.keys() - right.nodes.keys()) or any(
-        _known(left, key, path) and not _known(right, key, path)
-        for key in left.nodes.keys() & right.nodes.keys()
-        for path in _CONTENT_PATHS
-    )
+    if left.nodes.keys() - right.nodes.keys():
+        return True
+    for key in left.nodes.keys() & right.nodes.keys():
+        if any(_known(left, key, path) and not _known(right, key, path) for path in _CONTENT_PATHS):
+            return True
+    return False

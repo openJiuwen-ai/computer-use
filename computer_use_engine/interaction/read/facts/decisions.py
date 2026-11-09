@@ -60,7 +60,7 @@ def decision_fields(source: Mapping[str, Any]) -> dict[str, tuple[str, Any]]:
                 for item in value
             )
         else:
-            valid = finite(value) if key.startswith("numeric_value.") else type(value) is bool
+            valid = finite(value) if key.startswith("numeric_value.") else value is True or value is False
         if valid:
             selected[key] = (attribute, value)
     if selected:
@@ -82,12 +82,14 @@ def decision_fields(source: Mapping[str, Any]) -> dict[str, tuple[str, Any]]:
         actionable = role in _ACTION_ROLES or any(
             action.get("key") is not None and action["kind"] not in _SUPPORT_ACTIONS for action in actions
         )
-        selected = {
-            key: item
-            for key, item in selected.items()
-            if (numeric or not key.startswith("numeric_value."))
-            and (actionable or key not in _FALSE_STATE or item[1] is not False)
-        }
+        retained = {}
+        for key, item in selected.items():
+            if not numeric and key.startswith("numeric_value."):
+                continue
+            if not actionable and key in _FALSE_STATE and item[1] is False:
+                continue
+            retained[key] = item
+        selected = retained
     statuses = {
         key: report
         for key, report in values.items()

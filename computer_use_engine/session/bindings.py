@@ -55,9 +55,9 @@ class SessionBindings:
         if content is None:
             content = OrderedDict()
             self._content.set(state.refs, content)
-        for ref in snapshots:
-            content[ref] = None
-            content.move_to_end(ref)
+        for element_ref in snapshots:
+            content[element_ref] = None
+            content.move_to_end(element_ref)
         while len(content) > 8192:
             ref, _ = content.popitem(last=False)
             if ref in state.refs:

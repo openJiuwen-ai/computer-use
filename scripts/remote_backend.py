@@ -4,8 +4,10 @@
 
 import argparse
 import base64
+import errno
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,7 +45,8 @@ def main(argv=None):
     host = os.environ.get("BUILDER_HOST", "")
     key = os.environ.get("BUILDER_SSH_KEY", "")
     known_hosts = os.environ.get("BUILDER_KNOWN_HOSTS", "")
-    if not re.fullmatch(r"[\w@.\[\]:-]+", host) or host.startswith("-") or not key or not known_hosts:
+    valid_host = re.fullmatch(r"[\w@.\[\]:-]+", host) and not host.startswith("-")
+    if not valid_host or not key or not known_hosts:
         parser.error("Configure BUILDER_HOST, BUILDER_SSH_KEY and BUILDER_KNOWN_HOSTS in pipeline secrets.")
     python = os.environ.get("BUILDER_PYTHON") or ("python" if args.target.startswith("windows-") else "python3")
     if not re.fullmatch(r"[\w./:-]+", python):
@@ -61,9 +64,12 @@ def main(argv=None):
         hosts.write_text(known_hosts.rstrip() + "\n", encoding="utf-8")
         identity.chmod(0o600)
         hosts.chmod(0o600)
+        ssh = shutil.which("ssh")
+        if ssh is None:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), "ssh")
         result = subprocess.run(
             [
-                "ssh",
+                os.path.abspath(ssh),
                 "-T",
                 "-o",
                 "BatchMode=yes",

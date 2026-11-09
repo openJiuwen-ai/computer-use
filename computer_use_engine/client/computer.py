@@ -59,7 +59,8 @@ def _text(text, paste=False):
 def _key(key, controller):
     platform = getattr(controller.transport, "platform", None)
     try:
-        return normalize_key(key, allow_macos_glyphs=platform == "macos" or platform is None and sys.platform == "darwin")
+        allow_macos_glyphs = platform == "macos" or (platform is None and sys.platform == "darwin")
+        return normalize_key(key, allow_macos_glyphs=allow_macos_glyphs)
     except Exception as error:
         raise local_failure(str(error)) from error
 
@@ -74,7 +75,7 @@ class Computer:
         """Create a session. On macOS only direct Computer input methods use global events."""
         from .factory import session_controller
 
-        if type(allow_global_input) is not bool:
+        if allow_global_input is not True and allow_global_input is not False:
             raise TypeError("allow_global_input must be a boolean")
         self._executor = session_executor()
 
@@ -87,19 +88,12 @@ class Computer:
         try:
             self._controller = self._executor.call(create)
         except BaseException:
-            if not self._executor._external:
-                self._executor.close()
+            self._executor.close_if_owned()
             raise
         self._apps = weakref.WeakValueDictionary()
 
     def close(self):
-        if self._executor._closed:
-            return
-        try:
-            self._executor.run(lambda: self._executor.close_resource(self._controller))
-        finally:
-            if not self._executor._external:
-                self._executor.close()
+        self._executor.close_client(self._controller)
 
     def __enter__(self):
         return self
@@ -261,11 +255,12 @@ class App:
         # pylint: disable-next=unidiomatic-typecheck
         if type(target) is int:
             parameters.reference(target, "element reference")
-        if type(fresh) is not bool:
+        if fresh is not True and fresh is not False:
             raise local_failure("fresh must be a boolean")
 
         async def resolve():
-            snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms, window, fresh)))
+            request = ResolveElement(self, target, timeout_ms, window, fresh)
+            snapshot = await operation(lambda: self._controller.run(request))
             return Element(self._controller, self, snapshot, _internal=True)
 
         return resolve()
@@ -274,7 +269,7 @@ class App:
     def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False, window=None):
         _window(window)
         parameters.view(view, full, menu_path)
-        if type(allow_foreground) is not bool:
+        if allow_foreground is not True and allow_foreground is not False:
             raise local_failure("allow_foreground must be a boolean")
         if self._window_title is not None and menu_path is not None:
             raise local_failure("menu_path can expand beyond the exact titled window")
@@ -284,7 +279,7 @@ class App:
     def click(self, options=None, *, at, window=None, force_pointer=False):
         """Click an image location; force_pointer keeps this call on mouse delivery."""
         _window(window)
-        if type(force_pointer) is not bool:
+        if force_pointer is not True and force_pointer is not False:
             raise local_failure("force_pointer must be a boolean")
         click = parameters.click(options)
         if force_pointer:
@@ -301,9 +296,8 @@ class App:
         if isinstance(at, Target):
             return self._point_action(at, "scroll", {"direction": direction, "pages": pages}, window=window)
         at = parameters.point(at)
-        return operation(
-            lambda: self._controller.run(UIPointer(self, "scroll", (at,), dict(direction=direction, pages=pages), window))
-        )
+        request = UIPointer(self, "scroll", (at,), {"direction": direction, "pages": pages}, window)
+        return operation(lambda: self._controller.run(request))
 
     @synchronous
     def drag(self, start, end, *, window=None):

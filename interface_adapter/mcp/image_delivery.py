@@ -64,7 +64,8 @@ def prepare_image(
     png: bytes | bytearray | memoryview, *, max_dimension: int = 2048, max_pixels: int = 1536 * 1536
 ) -> ImageDelivery:
     """Resize once before publication; never derive a map from a nominal ratio."""
-    if type(max_dimension) is not int or max_dimension <= 0 or type(max_pixels) is not int or max_pixels <= 0:
+    valid_dimension = type(max_dimension) is int and max_dimension > 0
+    if not valid_dimension or type(max_pixels) is not int or max_pixels <= 0:
         raise ValueError("Image delivery limits must be positive integers.")
     decode_png(base64.b64encode(png).decode("ascii"))
     size = png_size(png)

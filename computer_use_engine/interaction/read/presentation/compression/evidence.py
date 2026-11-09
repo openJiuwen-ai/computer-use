@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from collections import Counter
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from dataclasses import fields as dataclass_fields
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -57,9 +59,9 @@ class CompressionEvidence:
     provider_wrappers: frozenset[str] = frozenset()
     complete_descriptions: frozenset[tuple[str, str]] = frozenset()
     unlabelled_groups: frozenset[str] = frozenset()
-    complete_children: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    complete_children: Mapping[str, tuple[str, ...]] = dataclass_field(default_factory=dict)
     incomplete_children: frozenset[str] = frozenset()
-    caption_sources: Mapping[str, PassiveCaptionSource] = field(default_factory=dict)
+    caption_sources: Mapping[str, PassiveCaptionSource] = dataclass_field(default_factory=dict)
     concrete_inputs: frozenset[str] = frozenset()
     semantic_regions: frozenset[str] = frozenset()
     contested_sources: frozenset[str] = frozenset()
@@ -420,7 +422,7 @@ def _provider_wrapper(node: NativeNode, issues: tuple[ReadIssue, ...], diagnosti
         or any(geometry.valid is False for geometry in node.geometry.values())
     ):
         return False
-    for part in fields(node.states):
+    for part in dataclass_fields(node.states):
         value = getattr(node.states, part.name)
         if value is not None and not (
             part.name == "focused" and value is False or part.name == "enabled" and value is True

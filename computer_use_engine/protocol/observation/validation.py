@@ -333,13 +333,16 @@ def validate_query_observation(observation: NativeObservation) -> None:
                 start, total = value.offset, value.total
                 # Exact integer types keep booleans and arbitrary page ranges out.
                 # Count agreement bounds the subsequent range by existing data.
+                exact_range = type(start) is int and type(total) is int and type(inspected) is int
+                if not exact_range or not gaps or inspected != len(value.targets) + len(gaps):
+                    raise _type_error(path, "invalid relationship slot progress")
                 if (
-                    type(start) is not int or type(total) is not int or type(inspected) is not int or not gaps
-                    or inspected != len(value.targets) + len(gaps) or start + inspected > total
+                    start + inspected > total
                     or value.enumeration != "sampled"
                     or any(type(slot) is not int or not start <= slot < start + inspected for slot in gaps)
-                    or gaps != tuple(sorted(set(gaps)))
                 ):
+                    raise _type_error(path, "invalid relationship slot progress")
+                if gaps != tuple(sorted(set(gaps))):
                     raise _type_error(path, "invalid relationship slot progress")
                 missing = set(gaps)
                 if (

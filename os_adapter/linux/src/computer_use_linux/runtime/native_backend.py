@@ -11,7 +11,7 @@ from computer_use_linux.windowing.desktop import connect_desktop, coordination_i
 
 class NativeBackend:
     def __init__(self, allow_global_input, stopped):
-        require(type(allow_global_input) is bool, "Global input permission must be a boolean.")
+        require(allow_global_input is True or allow_global_input is False, "Global input permission must be a boolean.")
         self.allow_global_input, self.stopped = allow_global_input, stopped
         self.registry = Registry()
         self.clipboard = None

@@ -97,7 +97,8 @@ def display_selection(controller, instance, directory):
         # A menu-only/status-item application still has observable content.
         # Its heading remains a menu; choosing it does not promote a document.
         entries = {key: item for key, item in sources.items() if content_host(item) not in sources}
-    if working := {key: item for key, item in entries.items() if content_kind(item) != "application"}:
+    working = {key: item for key, item in entries.items() if content_kind(item) != "application"}
+    if working:
         entries = working
     classified = {key: item for key, item in entries.items() if content_kind(item) == "window"}
     if classified:
@@ -107,35 +108,32 @@ def display_selection(controller, instance, directory):
         key = focused
     elif len(entries) == 1:
         key = next(iter(entries))
-    elif len(roots := [key for key, item in entries.items() if item.get("parentState") == "none"]) == 1 and all(
-        ancestor(directory, key, roots[0]) for key in entries
-    ):
-        # An attached panel does not turn its sole confirmed document family
-        # into several independent App observation choices.
-        key = roots[0]
-    elif len(readable := {key: item for key, item in entries.items() if item.get("node") is not None}) == 1 and (
-        instance.anchor is None
-        or entries.get(instance.anchor.root.root_window, {}).get("node") is None
-    ):
-        # An App observation may discover a new usable form while the hidden
-        # launcher remains a native-only row. Historical display preference is
-        # not a fixed Window binding and must not force that obsolete root.
-        key = next(iter(readable))
-    elif instance.anchor is not None and instance.anchor.root.root_window in entries:
-        previous = entries[instance.anchor.root.root_window]
-        key = (
-            previous["window"]
-            if WindowIdentity.of(previous)
-            == WindowIdentity(
-                instance.anchor.root.root_window, instance.anchor.root.surface, instance.anchor.root.instance
-            )
-            else None
-        )
     else:
-        key = None
+        roots = [key for key, item in entries.items() if item.get("parentState") == "none"]
+        if len(roots) == 1 and all(ancestor(directory, key, roots[0]) for key in entries):
+            # An attached panel does not turn its sole confirmed document family
+            # into several independent App observation choices.
+            key = roots[0]
+        else:
+            key = _retained_or_readable_window(instance, entries)
     if key is None:
         return None
     return controller.reader._selection(directory["application"], instance.name, directory, key)
+
+
+def _retained_or_readable_window(instance, entries):
+    root = instance.anchor.root if instance.anchor is not None else None
+    previous = entries.get(root.root_window) if root is not None else None
+    readable = [key for key, item in entries.items() if item.get("node") is not None]
+    if len(readable) == 1 and (previous is None or previous.get("node") is None):
+        # A new readable form can replace a hidden launcher. The previous
+        # display choice does not pin an App to the old root.
+        return readable[0]
+    if previous is not None:
+        identity = WindowIdentity(root.root_window, root.surface, root.instance)
+        if WindowIdentity.of(previous) == identity:
+            return previous["window"]
+    return None
 
 
 def adopt(controller, ui, directory, selection=None):

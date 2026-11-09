@@ -43,11 +43,9 @@ def read_refresh_gate(
         )
     if classified.refresh is Refresh.KEEP:
         image = components.image
-        if (
-            not attempt.scope_confirmed and attempt.current == attempt.target
-            and image is not None and image.target.capture is not None and not image.scope_changed
-            and window_binding(image.target) == window_binding(attempt.target)
-        ):
+        recheck_image = not attempt.scope_confirmed and attempt.current == attempt.target and image is not None
+        stable_capture = recheck_image and image.target.capture is not None and not image.scope_changed
+        if stable_capture and window_binding(image.target) == window_binding(attempt.target):
             # A successful recheck can confirm this exact image member even
             # when the application catalogue still has unresolved relationships.
             scope = image.member_scope(attempt.directory)

@@ -23,7 +23,7 @@ def _source(package: Path) -> dict:
 
     def git(*args):
         return subprocess.run(
-            ["git", "-C", str(package), *args],
+            [git_path, "-C", str(package), *args],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -32,6 +32,7 @@ def _source(package: Path) -> dict:
 
     result = {"status": "unavailable", "head": None, "dirty": None, "dirtyContentSha256": None}
     try:
+        git_path = resolve_executable("git")
         root, head = git("rev-parse", "--show-toplevel", "HEAD").decode().splitlines()
         module = package / "__init__.py"
         covered = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--full-name", "--", str(module))
@@ -67,7 +68,7 @@ def _source(package: Path) -> dict:
                 file_hash = hashlib.sha256()
                 with path.open("rb") as source:
                     before = os.fstat(source.fileno())
-                    while block := source.read(1024 * 1024):
+                    for block in iter(lambda: source.read(1024 * 1024), b""):
                         file_hash.update(block)
                         if time.monotonic() >= deadline:
                             raise TimeoutError("source provenance budget exhausted")
@@ -79,7 +80,7 @@ def _source(package: Path) -> dict:
             digest.update(relative)
             digest.update(content)
         result.update(status="complete", dirtyContentSha256=digest.hexdigest() if status else None)
-    except (OSError, subprocess.SubprocessError, ValueError, StopIteration, TimeoutError) as error:
+    except (OSError, subprocess.SubprocessError, ValueError, StopIteration) as error:
         result["error"] = type(error).__name__
     return result
 

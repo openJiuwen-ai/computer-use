@@ -36,7 +36,7 @@ def completed(value):
 
 class ExecutionSession:
     def __init__(self, timeout_ms=45000, on_preview=None, demo_foreground=False, *, allow_global_input=True):
-        if type(allow_global_input) is not bool:
+        if allow_global_input is not True and allow_global_input is not False:
             raise TypeError("allow_global_input must be a boolean")
         self.allow_global_input = allow_global_input
         self.demo_foreground = demo_foreground
@@ -109,14 +109,12 @@ class ExecutionSession:
         try:
             await asyncio.shield(starting)
             worker = self._worker
-            if (
-                generation == self._generation
-                and worker is not None
-                and (worker.failed or self._writer is None or self._writer.is_closing())
-            ):
-                worker.failed = True
-                await worker.settle(min(EXIT_SETTLE_SECONDS, worker.remaining()))
-                raise WorkerStartupFailure(worker.failure("The worker channel closed before this call was sent."))
+            if generation == self._generation and worker is not None:
+                worker_unavailable = worker.failed or self._writer is None or self._writer.is_closing()
+                if worker_unavailable:
+                    worker.failed = True
+                    await worker.settle(min(EXIT_SETTLE_SECONDS, worker.remaining()))
+                    raise WorkerStartupFailure(worker.failure("The worker channel closed before this call was sent."))
         except asyncio.CancelledError:
             await asyncio.shield(self.reset("Call cancelled."))
             raise

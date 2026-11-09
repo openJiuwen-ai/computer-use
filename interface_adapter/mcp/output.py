@@ -88,7 +88,8 @@ class ObservationPresenter:
         """Keep distinct requested views pending, including explicit image output."""
         return dumps([self.source_id(observation), observation["scope"]])
 
-    def trees(self, observation):
+    @staticmethod
+    def trees(observation):
         document = observation.get("document")
         if isinstance(document, DisplayDocument):
             trees = [part for part in document.parts if isinstance(part, DisplayTree)]
@@ -103,7 +104,9 @@ class ObservationPresenter:
     def invalidate(self, source=None):
         if source is None:
             self._baselines.invalidate()
-        elif (source_id := self._sources.get(source)) is not None:
+            return
+        source_id = self._sources.get(source)
+        if source_id is not None:
             self._baselines.invalidate(source_id)
 
     def close(self):
@@ -253,30 +256,33 @@ class ObservationOutput:
 
     def superseded(self, previous, observation, incoming):
         trees = self.presenter.trees(previous)
-        if (
-            previous.get("explicitRead") or previous.get("full") or previous["state"].get("preparation")
-            or previous.get("presentationGap") or observation.get("presentationGap")
-        ):
+        if previous.get("explicitRead") or previous.get("full") or previous["state"].get("preparation"):
+            return False
+        if previous.get("presentationGap") or observation.get("presentationGap"):
             return False
         data = observation_data(previous.get("sourceState", previous["state"]))
         current = observation_data(observation.get("sourceState", observation["state"]))
-        ended = {
-            (item["id"][0], source["instance"], source["window"], source["surface"])
-            for item in (current or {}).get("presentations", ()) if item["state"] == "ended"
-            for source in item["sources"] if source["window"] != item["host"]
-        }
+        ended = set()
+        for item in (current or {}).get("presentations", ()):
+            if item["state"] == "ended":
+                ended.update(
+                    (item["id"][0], source["instance"], source["window"], source["surface"])
+                    for source in item["sources"] if source["window"] != item["host"]
+                )
         # A repeated auxiliary gap need not preserve every intermediate
         # screenshot. Keep that exact gap in the replacement, and require
         # all prior content to remain covered or positively removed.
-        if data is not None and (data["partial"] or data["gaps"]) and (
-            current is None or any(gap not in current["gaps"] for gap in data["gaps"])
-        ):
-            return False
+        if data is not None and (data["partial"] or data["gaps"]):
+            missing_gaps = current is None or any(gap not in current["gaps"] for gap in data["gaps"])
+            if missing_gaps:
+                return False
         if any(item is not None and (item["partial"] or item["gaps"]) for item in (data, current)):
             # A later partial capture can omit previously complete content too.
             # Same tree identity is not proof that an unread child disappeared.
-            ended_refs = {ref for tree in trees if len(tree.scope) >= 4 and tuple(tree.scope[:4]) in ended
-                          for ref in tree.prepared.snapshot.refs}
+            ended_refs = set()
+            for tree in trees:
+                if len(tree.scope) >= 4 and tuple(tree.scope[:4]) in ended:
+                    ended_refs.update(tree.prepared.snapshot.refs)
             if any(ref not in observation["refs"] and ref not in ended_refs and not confirms_removal(
                 previous.get("coverage"), observation.get("coverage"), ref,
             ) for ref in previous["refs"]):
@@ -303,7 +309,9 @@ class ObservationOutput:
         )
         if replacement is not None and scope is not None and replacement_scope == scope:
             return True
-        if not ended or replacement is None or scope is None or replacement_scope is None:
+        if not ended or replacement is None:
+            return False
+        if scope is None or replacement_scope is None:
             return False
         # An ended attached menu can disappear from the current canvas. Keep
         # all still-relevant sources; a missing/unknown menu is never removal.
@@ -319,10 +327,10 @@ class ObservationOutput:
             return {}
         last = entries[-1]
         latest = last["observation"]
-        if (
-            last["superseded"] or latest["write"] is not last_write
-            or latest["source"] is not last_write["source"] or latest.get("presentationGap")
-            or not any(entry["observation"].get("transientWindow") for entry in entries[:-1])
+        if last["superseded"] or latest["write"] is not last_write or latest["source"] is not last_write["source"]:
+            return {}
+        if latest.get("presentationGap") or not any(
+            entry["observation"].get("transientWindow") for entry in entries[:-1]
         ):
             return {}
 
@@ -330,11 +338,13 @@ class ObservationOutput:
             data = observation_data(observation.get("sourceState", observation["state"]))
             directory = data["directory"] if data and data["content_available"] and not data["partial"] else None
             if (
-                directory is not None and directory.get("kind") == "surfaces"
-                and directory.get("rootDiscoveryComplete") is True and not directory["stopReasons"]
-                and not data["gaps"]
-                and any(record["included"] and record["lifecycle"] == "observed" for record in data["window_coverage"])
+                directory is None or directory.get("kind") != "surfaces"
+                or directory.get("rootDiscoveryComplete") is not True
             ):
+                return None
+            if directory["stopReasons"] or data["gaps"]:
+                return None
+            if any(record["included"] and record["lifecycle"] == "observed" for record in data["window_coverage"]):
                 return directory
             return None
 
@@ -347,20 +357,22 @@ class ObservationOutput:
             observation = entry["observation"]
             transient = observation.get("transientWindow")
             write = observation["write"]
-            if (
-                transient is None or entry["pinned"] or entry["superseded"] or observation.get("presentationGap")
-                or observation["state"].get("preparation")
-                or observation["source"] is not latest["source"] or write is last_write
-                or write is None or not write["dispatched"] or write["source"] is not observation["source"]
-            ):
+            if transient is None or entry["pinned"] or entry["superseded"]:
+                continue
+            if observation.get("presentationGap") or observation["state"].get("preparation"):
+                continue
+            if observation["source"] is not latest["source"] or write is last_write or write is None:
+                continue
+            if not write["dispatched"] or write["source"] is not observation["source"]:
                 continue
             directory = complete(observation)
             identity, ref = transient
-            if (
-                directory is not None and identity.window not in present
-                and (directory["session"], directory["application"]) == (current["session"], current["application"])
-                and directory["observed"]["completedAt"] < current["observed"]["startedAt"]
-                and any(WindowIdentity.of(item) == identity for item in directory["surfaces"])
+            if directory is None or identity.window in present:
+                continue
+            if (directory["session"], directory["application"]) != (current["session"], current["application"]):
+                continue
+            if directory["observed"]["completedAt"] < current["observed"]["startedAt"] and any(
+                WindowIdentity.of(item) == identity for item in directory["surfaces"]
             ):
                 absent[id(entry)] = ref
         return absent

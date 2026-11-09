@@ -195,14 +195,12 @@ def compact_label(
     # Detailed output emits residual source fields as supplements. Compact
     # output needs the cell itself to expose its focus and structural position;
     # the row's coincident values belong to a different native object.
-    if (
-        state.context.get("compact")
-        and node.get("_factBacked")
-        and node["role"] == "cell"
-        and target["role"] == "row"
-        and (node.get("focused") is True or any(field in node for field in ("rowRange", "columnRange", "index")))
-    ):
-        return [node]
+    if state.context.get("compact") and node.get("_factBacked"):
+        row_cell = node["role"] == "cell" and target["role"] == "row"
+        if row_cell and (
+            node.get("focused") is True or any(key in node for key in ("rowRange", "columnRange", "index"))
+        ):
+            return [node]
     if member_layout(state, edit, node, target, internal_focus, repeated_selection) and (
         node["ref"] != state.context.get("focusedRef") or internal_focus
     ):
@@ -251,7 +249,10 @@ def compact_input(
             for k, v in node.get("capabilities", {}).items()
         )
         or any(node.get(k) for k in ("actions", "actionsUnavailable", "help", "url"))
-        or any(k in node and not shared_description(node, k) for k in ("valueDescription", "rangeDescription"))
+    ):
+        return [node]
+    if (
+        any(k in node and not shared_description(node, k) for k in ("valueDescription", "rangeDescription"))
         or any(node.get(k) for k in ("headingLevel", "landmarkType", "localizedLandmarkType", "fullDescription"))
     ):
         return [node]

@@ -54,7 +54,10 @@ class Cleanup(str, Enum):
 
 
 INTENTS = frozenset(
-    ("click", "focus", "insert", "replace", "paste", "key", "openMenu", "action", "scroll", "drag", "launch", "closeWindow")
+    (
+        "click", "focus", "insert", "replace", "paste", "key", "openMenu", "action", "scroll", "drag", "launch",
+        "closeWindow",
+    )
 )
 
 
@@ -69,7 +72,8 @@ class Intent:
     def __post_init__(self):
         if self.kind not in INTENTS:
             raise ValueError(f"Unknown execution intent: {self.kind}")
-        if type(self.global_input) is not bool:
+        global_input = self.global_input
+        if global_input is not True and global_input is not False:
             raise TypeError("global_input must be a boolean")
         object.__setattr__(self, "parameters", MappingProxyType(dict(self.parameters)))
 
@@ -524,13 +528,14 @@ class Primitive:
         if self.unit not in unit_contracts or not self.id:
             raise ValueError("Invalid native primitive contract")
         validate_primitive_contract(self.unit, self.channel, self.supported, self.readiness, self.pending, self.action)
-        if self.keyboard_editing is not None and (
-            self.keyboard_editing not in ("insert", "replace")
-            or self.unit != "key_sequence"
-            or self.channel != Channel.KEYBOARD
-            or self.global_input != Knowledge.NO
-        ):
-            raise ValueError("Keyboard editing evidence requires an addressed keyboard primitive")
+        if self.keyboard_editing is not None:
+            keyboard_primitive = (
+                self.keyboard_editing in ("insert", "replace")
+                and self.unit == "key_sequence"
+                and self.channel == Channel.KEYBOARD
+            )
+            if not keyboard_primitive or self.global_input != Knowledge.NO:
+                raise ValueError("Keyboard editing evidence requires an addressed keyboard primitive")
         if self.unit == "native_selection" and self.click is None:
             raise ValueError("Native selection requires an integrated click offer")
         if self.click is not None:
@@ -576,7 +581,8 @@ class HostPolicy:
     allow_global_input: bool = True
 
     def __post_init__(self):
-        if type(self.allow_global_input) is not bool:
+        allow_global_input = self.allow_global_input
+        if allow_global_input is not True and allow_global_input is not False:
             raise TypeError("allow_global_input must be a bool")
 
 

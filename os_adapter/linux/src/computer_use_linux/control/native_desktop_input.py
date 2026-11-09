@@ -23,7 +23,9 @@ class NativeDesktopInput:
     def guard(self, operation, target, ctx):
         ctx.check()
         require(
-            getattr(self.desktop, "can_input", False), "This desktop has no native keyboard route.", "unsupported_operation"
+            getattr(self.desktop, "can_input", False),
+            "This desktop has no native keyboard route.",
+            "unsupported_operation",
         )
         require(
             operation.intent["kind"] in ("key", "insert")

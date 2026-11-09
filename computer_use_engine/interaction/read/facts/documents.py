@@ -51,12 +51,12 @@ def document_projection(source: Mapping[str, Any], supplements: Sequence[Supplem
     if not reports:
         return None
     paths = [source["fieldPaths"][key] for key in reports]
-    incomplete = any(
-        path[: len(status_path)] == status_path or status_path[: len(path)] == path
-        for key in source["fieldStatus"]
-        for status_path in (source["fieldPaths"][key],)
-        for path in paths
-    )
+    incomplete = False
+    for key in source["fieldStatus"]:
+        status_path = source["fieldPaths"][key]
+        if any(path[: len(status_path)] == status_path or status_path[: len(path)] == path for path in paths):
+            incomplete = True
+            break
     values = [record["value"] for record in reports.values()]
     complete = (
         not incomplete

@@ -66,7 +66,8 @@ class DeliveredBaselineStore:
         previous = self.memory.pop(key, None)
         self.memory[key] = baseline
         self.bytes += size - (previous["bytes"] if previous is not None else 0)
-        if path := self.spilled.pop(key, None):
+        path = self.spilled.pop(key, None)
+        if path:
             path.unlink()
 
     def invalidate(self, source_id=None):
@@ -77,7 +78,8 @@ class DeliveredBaselineStore:
             previous = self.memory.pop(key, None)
             if previous is not None:
                 self.bytes -= previous["bytes"]
-            if path := self.spilled.pop(key, None):
+            path = self.spilled.pop(key, None)
+            if path:
                 path.unlink()
         if not self.spilled and self.directory is not None:
             self.directory.cleanup()

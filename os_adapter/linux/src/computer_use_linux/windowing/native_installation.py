@@ -286,7 +286,11 @@ class NativeInstallation:
         """Return the retained Gio recipe after rechecking its native inputs."""
         _check(ctx)
         if not self.available:
-            raise Failure(self.reason or "This installation cannot be launched.", "unsupported_operation", self.identifier)
+            raise Failure(
+                self.reason or "This installation cannot be launched.",
+                "unsupported_operation",
+                self.identifier,
+            )
         try:
             current = _desktop_file(self.filename, ctx)
         except Failure as error:

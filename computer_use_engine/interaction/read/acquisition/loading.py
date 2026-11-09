@@ -105,14 +105,11 @@ def _window_shell(observation: NativeObservation) -> bool:
     label_fields = {"name", "description", "help", "placeholder", "url", "control_value", "text"}
     for issue in observation.issues:
         path = issue.path
-        if len(path) >= 4 and path[0] == "nodes" and path[2] == "relations" and issue.state != "absent":
+        if len(path) < 3 or path[0] != "nodes":
+            continue
+        if len(path) >= 4 and path[2] == "relations" and issue.state != "absent":
             limited_relations.add(path[:4])
-        if (
-            len(path) > 2
-            and path[0] == "nodes"
-            and path[2] in label_fields
-            and issue.state not in ("absent", "unsupported")
-        ):
+        if path[2] in label_fields and issue.state not in ("absent", "unsupported"):
             unavailable_labels.add(path[1])
     children, titles, external = {}, set(), set()
     for key, node in nodes.items():

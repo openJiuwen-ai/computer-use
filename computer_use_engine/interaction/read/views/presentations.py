@@ -54,9 +54,12 @@ def collect_presentations(previous, directory, parts):
     """
     found = {}
     current = {WindowIdentity.of(item) for item in directory["surfaces"]}
-    parts = [part for part in parts if WindowIdentity(
-        part.target.root_window, part.target.surface, part.target.instance
-    ) in current and (part.source is None or part.source.scope_confirmed)]
+    confirmed_parts = []
+    for part in parts:
+        identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+        if identity in current and (part.source is None or part.source.scope_confirmed):
+            confirmed_parts.append(part)
+    parts = confirmed_parts
     trees = {part.target.surface: part for part in parts
              if part.target.root_window is not None and part.tree is not None}
     sampled_windows = {part.target.root_window for part in parts}
@@ -76,7 +79,8 @@ def collect_presentations(previous, directory, parts):
                 identity = (part.target.session, part.target.surface, key)
                 found[identity] = {
                     "id": identity, "host": part.target.root_window, "node": key, "opener": opener,
-                    "state": "observed", "kind": "menu", "evidence": "openerChildren", "sources": (source(part.target),),
+                    "state": "observed", "kind": "menu", "evidence": "openerChildren",
+                    "sources": (source(part.target),),
                 }
     for item in members.values():
         if content_kind(item) not in ("menu", "popup"):
@@ -90,9 +94,12 @@ def collect_presentations(previous, directory, parts):
         if key in found:
             found[key]["sources"] += (own_source,)
             continue
-        part = next((part for part in parts if WindowIdentity(
-            part.target.root_window, part.target.surface, part.target.instance
-        ) == WindowIdentity.of(item)), None)
+        for part in parts:
+            identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+            if identity == WindowIdentity.of(item):
+                break
+        else:
+            part = None
         if part is None or part.tree is None and part.image is None:
             continue
         found[key] = {

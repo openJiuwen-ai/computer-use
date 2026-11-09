@@ -65,7 +65,10 @@ class WorkerLifecycle:
         if self.child.stderr is None:
             self._complete = True
             return
-        while chunk := await self.child.stderr.read(4096):
+        while True:
+            chunk = await self.child.stderr.read(4096)
+            if not chunk:
+                break
             self._bytes += len(chunk)
             self._tail.extend(chunk)
             if len(self._tail) > STDERR_BYTES:
@@ -125,7 +128,8 @@ class WorkerLifecycle:
         # exception messages, account paths or raw stderr (which may be input).
         frames = []
         for line in value.splitlines():
-            if match := _frame.fullmatch(line):
+            match = _frame.fullmatch(line)
+            if match:
                 frames.append(dict(file=match[1], line=int(match[2]), function=match[3]))
         return dict(stderrSummary=summary, stderrFrames=frames[-32:])
 

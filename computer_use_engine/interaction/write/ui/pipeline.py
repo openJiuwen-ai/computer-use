@@ -36,7 +36,9 @@ def note_pending_point_image(controller, ui, error, *, after=None):
     state = ui._instance
     identity = WindowIdentity(binding.root_window, binding.surface, binding.instance)
     pending = state.sampled_window_images.get(identity)
-    if pending is None or pending.delivered is not None or (after is not None and pending.generation <= after):
+    if pending is None or pending.delivered is not None:
+        return
+    if after is not None and pending.generation <= after:
         return
     ref = next((ref for ref, window in state.windows.items() if window == identity.window), None)
     if ref is not None:
@@ -54,7 +56,10 @@ def input_image(controller, ui, image=None, *, current=True):
             else ui._instance.delivered_image
         )
     adapters = controller.adapters
-    if image is None or current and (image.expired or hashlib.sha256(image.png).digest() != image.digest):
+    image_invalid = image is not None and current and (
+        image.expired or hashlib.sha256(image.png).digest() != image.digest
+    )
+    if image is None or image_invalid:
         error = local_failure("this UI has no current image mapping", "snapshot_expired")
         if image is None and not current:
             note_pending_point_image(controller, ui, error)

@@ -62,7 +62,8 @@ def generated_lines(
                 positions[child["ref"]] = (ref, position)
     records = {record.ref: record for record in frame.rendered_nodes}
     counts = Counter(record.ref for record in frame.rendered_nodes)
-    line_counts = Counter(match[2] for line in frame.lines if (match := _NODE.fullmatch(line)))
+    matches = (_NODE.fullmatch(line) for line in frame.lines)
+    line_counts = Counter(match[2] for match in matches if match)
     result: dict[str, GeneratedLine] = {}
     for index, line in enumerate(frame.lines):
         match = _NODE.fullmatch(line)

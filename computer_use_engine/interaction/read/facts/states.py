@@ -32,20 +32,19 @@ def supplement_states(source: Mapping[str, Any]) -> dict[str, tuple[str, object]
             if key.startswith("supplements[") and value["key"] == name
         }
         if not reports or any(
-            set(value) != {"key", "value"} or type(value["value"]) is not bool for value in reports.values()
+            set(value) != {"key", "value"} or value["value"] is not True and value["value"] is not False
+            for value in reports.values()
         ):
             continue
         if len({value["value"] for value in reports.values()}) != 1:
             continue
         paths = tuple(source["fieldPaths"][key] for key in reports)
-        if any(
-            path[: len(status)] == status or status[: len(path)] == path
-            for key in source["fieldStatus"]
-            for status in (source["fieldPaths"][key],)
-            for path in paths
-        ):
-            continue
-        result.update((key, (name, value["value"])) for key, value in reports.items())
+        for key in source["fieldStatus"]:
+            status = source["fieldPaths"][key]
+            if any(path[: len(status)] == status or status[: len(path)] == path for path in paths):
+                break
+        else:
+            result.update((key, (name, value["value"])) for key, value in reports.items())
     return result
 
 

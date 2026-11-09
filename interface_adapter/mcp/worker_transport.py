@@ -46,39 +46,34 @@ class EncodedObservationDiagnostic:
 
 def _validate_observation_header(event):
     required = {"timestamp", "kind", "method", "status", "traceId", "id", "executionId"}
-    if (
-        not isinstance(event, dict)
-        or not required <= event.keys()
-        or "result" in event
-        or "error" in event
-        or "failure" in event
-        or event["kind"] != "command_end"
-        or event["method"] != "inspect"
-        or event["status"] != "ok"
-        or not isinstance(event["timestamp"], str)
-        or not event["timestamp"]
-        or not isinstance(event["traceId"], str)
-        or not event["traceId"]
-        or type(event["id"]) is not int
-        or event["id"] <= 0
-        or event["executionId"] is not None
-        and (type(event["executionId"]) is not int or event["executionId"] <= 0)
-    ):
-        raise ValueError("Invalid encoded native-observation diagnostic header.")
+    invalid = "Invalid encoded native-observation diagnostic header."
+    if not isinstance(event, dict) or not required <= event.keys():
+        raise ValueError(invalid)
+    if "result" in event or "error" in event or "failure" in event:
+        raise ValueError(invalid)
+    if event["kind"] != "command_end" or event["method"] != "inspect" or event["status"] != "ok":
+        raise ValueError(invalid)
+    for key in ("timestamp", "traceId"):
+        if not isinstance(event[key], str) or not event[key]:
+            raise ValueError(invalid)
+    if type(event["id"]) is not int or event["id"] <= 0:
+        raise ValueError(invalid)
+    execution_id = event["executionId"]
+    if execution_id is not None and (type(execution_id) is not int or execution_id <= 0):
+        raise ValueError(invalid)
 
 
 def _observation_payload(message):
     """Encode complete native facts once, separately from small routing fields."""
     event = message.get("diagnostic") if isinstance(message, dict) else None
-    if (
-        not isinstance(event, dict)
-        or event.get("kind") != "command_end"
-        or event.get("method") != "inspect"
-        or event.get("status") != "ok"
-        or not isinstance(event.get("result"), dict)
-        or event["result"].get("kind") != "observation"
-        or message.keys() - {"diagnostic", "executionId"}
-    ):
+    if not isinstance(event, dict) or event.get("kind") != "command_end" or event.get("method") != "inspect":
+        return None
+    if event.get("status") != "ok":
+        return None
+    result = event.get("result")
+    if not isinstance(result, dict) or result.get("kind") != "observation":
+        return None
+    if message.keys() - {"diagnostic", "executionId"}:
         return None
     header = {key: value for key, value in event.items() if key != "result"}
     header["executionId"] = message.get("executionId")
@@ -89,7 +84,7 @@ def _observation_payload(message):
         )
         if len(header_json) > _MAX_DIAGNOSTIC_HEADER_BYTES:
             return None
-        result_json = json.dumps(event["result"], ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
+        result_json = json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
             "utf-8", "backslashreplace"
         )
     except (TypeError, ValueError):

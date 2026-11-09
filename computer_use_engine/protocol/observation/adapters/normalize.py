@@ -840,17 +840,17 @@ class Adapter:
                     ("structure",), "error", "Provider cell position is not a complete valid row/column/span record."
                 )
                 return True
-            for source, target in (
+            for provider_field, target in (
                 ("row", "row_index"),
                 ("column", "column_index"),
                 ("rowSpan", "row_span"),
                 ("columnSpan", "column_span"),
             ):
-                if source in value:
+                if provider_field in value:
                     node.put(
                         name,
                         ("structure", target),
-                        value[source],
+                        value[provider_field],
                         # pylint: disable-next=unidiomatic-typecheck
                         lambda x, *, target=target: type(x) is int and x >= (1 if target.endswith("_span") else 0),
                     )
@@ -1132,9 +1132,9 @@ class Adapter:
         """Retain provider-unit and coverage limitations outside proven spans."""
 
         def _iter_source(_source_items: Iterator[Any]) -> Iterator[Any]:
-            for source, target in _source_items:
-                if source in value:
-                    yield (target, value[source])
+            for provider_field, target in _source_items:
+                if provider_field in value:
+                    yield (target, value[provider_field])
 
         semantic = dict(
             _iter_source(

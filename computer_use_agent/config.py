@@ -24,7 +24,7 @@ class AgentConfig:
     workspace: str | None = None
 
     def __post_init__(self):
-        if type(self.allow_global_input) is not bool:
+        if self.allow_global_input is not True and self.allow_global_input is not False:
             raise TypeError("allow_global_input must be a boolean")
         if self.max_iterations < 1 or self.context_window < 1:
             raise ValueError("max_iterations and context_window must be positive")
@@ -32,5 +32,9 @@ class AgentConfig:
     def mcp_config(self) -> McpConfig:
         return self.mcp or McpConfig(
             command=sys.executable,
-            args=("-m", "computer_use_mcp", "--allow-global-input" if self.allow_global_input else "--no-allow-global-input"),
+            args=(
+                "-m",
+                "computer_use_mcp",
+                "--allow-global-input" if self.allow_global_input else "--no-allow-global-input",
+            ),
         )

@@ -102,7 +102,8 @@ def _scalar(body: str, start: int) -> tuple[str, int]:
     """Read one literal JSON or plain scalar, without evaluating expressions."""
     if body[start: start + 1] == '"':
         value, size = json.JSONDecoder().raw_decode(body[start:])
-        if type(value) is not str:
+        value_type = type(value)
+        if value_type is not str:
             raise ValueError("local description must be a string")
         return value, start + size
     end = body.find(", ", start)
@@ -149,7 +150,8 @@ def expand_local_field_suffixes(
         end += len(" + Description")
         if end != len(body) and not body[end:].startswith(", "):
             raise ValueError("local URL expression has an ambiguous end")
-        if type(prefix) is not str or not _plain(prefix):
+        prefix_type = type(prefix)
+        if prefix_type is not str or not _plain(prefix):
             raise ValueError("local URL prefix must be a nonempty literal string")
         descriptions = _field_starts(body, "Description", len(entry.ref) + 1, first_field=True)
         if len(descriptions) != 1:
@@ -254,7 +256,8 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
         if not _plain(prefix_value):
             continue
         current_role = role_prefix
-        if spelling := spellings.get(ref):
+        spelling = spellings.get(ref)
+        if spelling:
             if (
                 spelling_counts[ref] != 1
                 or spelling.source != source.source
@@ -300,6 +303,6 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
     try:
         if expand_local_field_suffixes(result, frame.format_field) != frame.lines:
             return unchanged
-    except (ValueError, TypeError, KeyError, UnicodeError):
+    except (ValueError, TypeError, KeyError):
         return unchanged
     return LocalFieldSuffixLayout(result, tuple(replacements))

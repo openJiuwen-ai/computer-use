@@ -42,16 +42,13 @@ class CaptureCompanion:
 def _bounds(node: NativeNode) -> Geometry | None:
     """Require a complete finite native frame in its original coordinate space."""
     value = node.geometry.get("bounds")
-    if (
-        value is None
-        or value.valid is not True
-        or any(
-            type(item) not in (int, float) or not math.isfinite(item)
-            for item in (value.x, value.y, value.width, value.height)
-        )
-        or value.width <= 0
-        or value.height <= 0
-    ):
+    if value is None or value.valid is not True:
+        return None
+    for component in (value.x, value.y, value.width, value.height):
+        component_type = type(component)
+        if component_type not in (int, float) or not math.isfinite(component):
+            return None
+    if value.width <= 0 or value.height <= 0:
         return None
     return value
 
@@ -67,15 +64,11 @@ def _body(document: DisplayDocument, position: int, window: MemberHeading) -> Di
             (window.target or {}).get(key) for key in ("session", "instance", "root_window", "surface", "node")
         )
         request = part.prepared.request
-        if (
-            part.scope == binding
-            and len(binding) == 5
-            and all(binding[:4])
-            and not part.details
-            and request.public_api
-            and request.compact
-            and request.share_descriptions
-        ):
+        if not (part.scope == binding and len(binding) == 5 and all(binding[:4])):
+            break
+        if part.details or not request.public_api or not request.compact:
+            break
+        if request.share_descriptions:
             return part
         break
     return None
@@ -84,35 +77,35 @@ def _body(document: DisplayDocument, position: int, window: MemberHeading) -> Di
 def _observation(directory: Mapping[str, object] | None) -> tuple[str, float, float] | None:
     """Read complete directory timing without treating missing metadata as evidence."""
     value = directory.get("observed") if directory is not None else None
-    if not isinstance(value, Mapping) or type(value.get("id")) is not str or not value["id"]:
+    if not isinstance(value, Mapping):
+        return None
+    identity_type = type(value.get("id"))
+    if identity_type is not str or not value["id"]:
         return None
     start, end = value.get("startedAt"), value.get("completedAt")
-    if (
-        type(start) not in (int, float)
-        or type(end) not in (int, float)
-        or not math.isfinite(start)
-        or not math.isfinite(end)
-        or start > end
-    ):
+    start_type, end_type = type(start), type(end)
+    if start_type not in (int, float) or end_type not in (int, float):
+        return None
+    if not math.isfinite(start) or not math.isfinite(end) or start > end:
         return None
     return value["id"], start, end
 
 
 def _directory_members(directory: Mapping[str, object] | None) -> tuple[Mapping[str, object], ...] | None:
     """Use only complete macOS surface directories with independently typed entries."""
-    if (
-        directory is None
-        or directory.get("platform") != "macos"
-        or directory.get("kind") != "surfaces"
-        or directory.get("stopReasons") != ()
-        and directory.get("stopReasons") != []
-    ):
+    if directory is None or directory.get("platform") != "macos" or directory.get("kind") != "surfaces":
+        return None
+    if directory.get("stopReasons") != () and directory.get("stopReasons") != []:
         return None
     members = directory.get("surfaces")
     if not isinstance(members, (tuple, list)) or any(not isinstance(item, Mapping) for item in members):
         return None
     windows = tuple(item.get("window") for item in members)
-    if any(type(item) is not str or not item for item in windows) or len(set(windows)) != len(windows):
+    for identity in windows:
+        identity_type = type(identity)
+        if identity_type is not str or not identity:
+            return None
+    if len(set(windows)) != len(windows):
         return None
     return tuple(members)
 
@@ -141,17 +134,13 @@ def _signature(tree: DisplayTree, window: MemberHeading) -> tuple[str, str] | No
         if not relative or relative[0] in ("name", "geometry", "actions"):
             return None
     frame, hit = _bounds(root), _bounds(button)
-    if (
-        frame is None
-        or hit is None
-        or frame.space != hit.space
-        or not 20 <= frame.width <= 180
-        or not 12 <= frame.height <= 48
-        or any(
-            abs(a - b) > 3
-            for a, b in zip((frame.x, frame.y, frame.width, frame.height), (hit.x, hit.y, hit.width, hit.height))
-        )
-    ):
+    if frame is None or hit is None or frame.space != hit.space:
+        return None
+    if not 20 <= frame.width <= 180 or not 12 <= frame.height <= 48:
+        return None
+    frame_values = (frame.x, frame.y, frame.width, frame.height)
+    hit_values = (hit.x, hit.y, hit.width, hit.height)
+    if any(abs(a - b) > 3 for a, b in zip(frame_values, hit_values)):
         return None
     aliases = {value: ref for ref, value in snapshot.refs.items()}
     if token not in aliases or button_token not in aliases:
@@ -168,18 +157,13 @@ def _evidence(
     positions: Mapping[int, int],
 ) -> CaptureCompanion | None:
     """Correlate original directories, exact bindings, image pieces and native facts."""
-    if (
-        window.main
-        or window.current
-        or window.reported_input
-        or window.modal is not False
-        or window.parent_state != "known"
-        or window.parent is None
-        or not window.in_scope
-        or not window.expanded
-        or image.kind != "composite"
-        or not image.mapping_available
-    ):
+    if window.main or window.current or window.reported_input:
+        return None
+    if window.modal is not False or window.parent_state != "known" or window.parent is None:
+        return None
+    if not window.in_scope or not window.expanded:
+        return None
+    if image.kind != "composite" or not image.mapping_available:
         return None
     parents = tuple(item for item in header.windows if item.ref == window.parent)
     if len(parents) != 1:
@@ -190,30 +174,27 @@ def _evidence(
     before, after = parent.source_directory, parent.rechecked_directory
     left, right = _directory_members(before), _directory_members(after)
     earlier, later = _observation(before), _observation(after)
-    if (
-        left is None
-        or right is None
-        or earlier is None
-        or later is None
-        or before.get("session") != after.get("session")
-        or before.get("application") != after.get("application")
-        or before.get("session") != (window.target or {}).get("session")
-        or any(item["window"] == window.native_window for item in left)
-    ):
+    if left is None or right is None:
+        return None
+    if earlier is None or later is None:
+        return None
+    if before.get("session") != after.get("session") or before.get("application") != after.get("application"):
+        return None
+    if before.get("session") != (window.target or {}).get("session"):
+        return None
+    if any(item["window"] == window.native_window for item in left):
         return None
     matches = tuple(item for item in right if item["window"] == window.native_window)
     if len(matches) != 1:
         return None
     (member,) = matches
-    if (
-        member.get("parent") != parent.native_window
-        or member.get("parentState") != "known"
-        or member.get("modal") is not False
-        or member.get("kind") != "dialog"
-        or member.get("nativeWindow") is not True
-        or member.get("accessibility") is not True
-        or any(member.get(key) != (window.target or {}).get(key) for key in ("surface", "node"))
-    ):
+    if member.get("parent") != parent.native_window or member.get("parentState") != "known":
+        return None
+    if member.get("modal") is not False or member.get("kind") != "dialog":
+        return None
+    if member.get("nativeWindow") is not True or member.get("accessibility") is not True:
+        return None
+    if any(member.get(key) != (window.target or {}).get(key) for key in ("surface", "node")):
         return None
     parent_captures = tuple(
         item
@@ -233,10 +214,10 @@ def _evidence(
         return None
     for entry, owner in ((parent_captures[0], parent), (child_captures[0], window)):
         target, content = entry.get("target"), entry.get("capture")
+        if not isinstance(target, Mapping) or not isinstance(content, Mapping):
+            return None
         if (
-            not isinstance(target, Mapping)
-            or not isinstance(content, Mapping)
-            or any(
+            any(
                 target.get(key) != (owner.target or {}).get(key)
                 for key in ("session", "instance", "root_window", "surface")
             )
@@ -253,15 +234,16 @@ def _evidence(
     ):
         return None
     capture = parent_captures[0].get("capture")
-    if not isinstance(capture, Mapping) or capture.get("kind") != "window" or type(capture.get("id")) is not str:
+    if not isinstance(capture, Mapping) or capture.get("kind") != "window":
+        return None
+    capture_id_type = type(capture.get("id"))
+    if capture_id_type is not str:
         return None
     start, end = capture.get("startedAt"), capture.get("completedAt")
-    if (
-        type(start) not in (int, float)
-        or type(end) not in (int, float)
-        or not earlier[2] <= start <= end <= later[1]
-        or earlier[0] == later[0]
-    ):
+    start_type, end_type = type(start), type(end)
+    if start_type not in (int, float) or end_type not in (int, float):
+        return None
+    if not earlier[2] <= start <= end <= later[1] or earlier[0] == later[0]:
         return None
     tree = _body(document, position, window)
     parent_position = positions.get(parent.ref)
@@ -275,13 +257,12 @@ def _evidence(
     parent_node = native.nodes.get(native.roots[0])
     child_node = tree.prepared.snapshot.native.nodes[tree.prepared.snapshot.native.roots[0]]
     frame, enclosing = _bounds(child_node), _bounds(parent_node) if parent_node is not None else None
+    if frame is None or enclosing is None or frame.space != enclosing.space:
+        return None
+    if not 0 <= frame.x - enclosing.x <= min(180, enclosing.width / 2) or not 0 <= frame.y - enclosing.y <= 48:
+        return None
     if (
-        frame is None
-        or enclosing is None
-        or frame.space != enclosing.space
-        or not 0 <= frame.x - enclosing.x <= min(180, enclosing.width / 2)
-        or not 0 <= frame.y - enclosing.y <= 48
-        or frame.x + frame.width > enclosing.x + enclosing.width
+        frame.x + frame.width > enclosing.x + enclosing.width
         or frame.y + frame.height > enclosing.y + enclosing.height
     ):
         return None
@@ -311,14 +292,13 @@ def capture_companions(document: DisplayDocument) -> Mapping[int, CaptureCompani
             window = part.values[0]
             if not isinstance(window, MemberHeading) or window not in header.windows:
                 continue
-            positions = {
-                item.values[0].ref: position
-                for position, item in enumerate(document.parts[start:], start)
-                if isinstance(item, DisplayText)
-                and item.kind == "member_heading"
-                and isinstance(item.values[0], MemberHeading)
-                and item.values[0] in header.windows
-            }
+            positions = {}
+            for position, item in enumerate(document.parts[start:], start):
+                if not isinstance(item, DisplayText) or item.kind != "member_heading":
+                    continue
+                heading = item.values[0]
+                if isinstance(heading, MemberHeading) and heading in header.windows:
+                    positions[heading.ref] = position
             evidence = _evidence(document, header, image, index, window, positions)
             if evidence is not None:
                 result[index] = evidence

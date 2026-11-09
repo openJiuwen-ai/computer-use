@@ -338,10 +338,8 @@ class DriverWire:
         if state not in _STATES or (state == "value") != (value is not None):
             raise ValueError("driver observation: invalid property state or payload")
         if value is not None:
-            if (
-                self.platform == "macos" and len(prop) == 2 and key == ["toolkit", "attribute_names"]
-                and isinstance(value, dict) and "metadataValue" in value
-            ):
+            attribute_catalogue = self.platform == "macos" and len(prop) == 2 and key == ["toolkit", "attribute_names"]
+            if attribute_catalogue and isinstance(value, dict) and "metadataValue" in value:
                 value = self._attribute_catalogue(value)
             else:
                 value = self.value(value)
@@ -407,15 +405,19 @@ def relation_record(
     if "inspectedCount" in details or "unavailablePositions" in details:
         inspected, gaps = details.get("inspectedCount"), details.get("unavailablePositions")
         detail = details.get("detail")
+        slot_error = "driver observation: invalid relation slot progress"
+        if type(inspected) is not int or not isinstance(gaps, (list, tuple)) or not gaps:
+            raise ValueError(slot_error)
         if (
-            type(inspected) is not int or not isinstance(gaps, (list, tuple)) or not gaps
-            or inspected != len(items) + len(gaps)
+            inspected != len(items) + len(gaps)
             or any(type(position) is not int or not offset <= position < offset + inspected for position in gaps)
             or list(gaps) != sorted(set(gaps))
-            or "offset" not in details or total is None or state != "partial"
-            or not isinstance(detail, str) or not detail
         ):
-            raise ValueError("driver observation: invalid relation slot progress")
+            raise ValueError(slot_error)
+        if "offset" not in details or total is None or state != "partial":
+            raise ValueError(slot_error)
+        if not isinstance(detail, str) or not detail:
+            raise ValueError(slot_error)
         slots = {"inspectedCount": inspected, "unavailablePositions": list(gaps)}
     end = offset + inspected
     if total is not None and end > total:
@@ -440,19 +442,23 @@ def relation_record(
         raise ValueError("driver observation: invalid relation continuation")
     membership = details.get("membershipObservedAt")
     if membership is not None:
+        interval_error = "driver observation: captured relation membership interval is invalid"
         if (
             not isinstance(membership, Mapping)
             or set(membership) != {"id", "startedAt", "completedAt"}
             or not isinstance(membership["id"], str)
-            or not membership["id"]
-            or any(
-                type(membership[name]) is not int or not 0 <= membership[name] <= 2**53 - 1
-                for name in ("startedAt", "completedAt")
-            )
-            or membership["completedAt"] < membership["startedAt"]
+        ):
+            raise ValueError(interval_error)
+        if not membership["id"] or any(
+            type(membership[name]) is not int or not 0 <= membership[name] <= 2**53 - 1
+            for name in ("startedAt", "completedAt")
+        ):
+            raise ValueError(interval_error)
+        if (
+            membership["completedAt"] < membership["startedAt"]
             or membership["completedAt"] > wire.interval[1] // 1_000_000
         ):
-            raise ValueError("driver observation: captured relation membership interval is invalid")
+            raise ValueError(interval_error)
         if state != "partial" or total is None or not details.get("detail"):
             raise ValueError(
                 "driver observation: captured relation membership needs partial coverage, count and explanation"

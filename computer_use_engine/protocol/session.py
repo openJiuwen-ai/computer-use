@@ -45,7 +45,7 @@ def failure_error(method, failure):
 
 
 def decode_hello(value, allow_global_input, version=NATIVE_PROTOCOL_VERSION):
-    if type(allow_global_input) is not bool:
+    if allow_global_input is not True and allow_global_input is not False:
         raise TypeError("allow_global_input must be a bool")
     if version != NATIVE_PROTOCOL_VERSION:
         raise ValueError("Unsupported native protocol version")
@@ -63,7 +63,7 @@ def decode_hello(value, allow_global_input, version=NATIVE_PROTOCOL_VERSION):
         raise failure_error("hello", decode_failure(reply["error"]))
     result = record(reply["result"], ["platform", "globalInputAllowed", "maxTimeoutMs", "capabilities"])
     nonempty(result["platform"], "protocol platform")
-    if type(result["globalInputAllowed"]) is not bool or result["globalInputAllowed"] != allow_global_input:
+    if result["globalInputAllowed"] is not allow_global_input:
         raise ValueError("protocol: backend global input permission does not match the requested permission")
     if not safe_integer(result["maxTimeoutMs"]) or not 1 <= result["maxTimeoutMs"] <= 120_000:
         raise ValueError("protocol: invalid maximum request timeout")

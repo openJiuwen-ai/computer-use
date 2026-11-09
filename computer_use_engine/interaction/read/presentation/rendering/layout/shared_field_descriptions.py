@@ -129,7 +129,8 @@ def _url_start(body: str, ref: str) -> tuple[int, str]:
     if body[scalar_start: scalar_start + 1] == '"':
         value, size = json.JSONDecoder().raw_decode(body[scalar_start:])
         end = scalar_start + size
-        if type(value) is not str or (end != len(body) and not body[end:].startswith(", ")):
+        value_type = type(value)
+        if value_type is not str or (end != len(body) and not body[end:].startswith(", ")):
             raise ValueError("shared Description requires a literal URL scalar")
     else:
         end = body.find(", ", scalar_start)
@@ -195,7 +196,10 @@ def expand_shared_descriptions(
         )
         refs = tuple(match[2].split(", "))
         value = json.loads(match[3])
-        if len(refs) < 2 or len(set(refs)) != len(refs) or type(value) is not str or not _plain(value):
+        value_type = type(value)
+        if len(refs) < 2 or len(set(refs)) != len(refs):
+            raise ValueError("shared Description requires unique members and one complete string")
+        if value_type is not str or not _plain(value):
             raise ValueError("shared Description requires unique members and one complete string")
         entries = unique_numbered_entries(lines[root.line + 1: end])
         original = "Description: " + format_field(value) + ", "
@@ -314,7 +318,8 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
         ):
             continue
         current_prefix = prefix
-        if spelling := spellings.get(ref):
+        spelling = spellings.get(ref)
+        if spelling:
             if (
                 spelling_counts[ref] != 1
                 or spelling.source != source.source
@@ -325,7 +330,8 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
             current_prefix = spelling.alias + prefix[len(spelling.display_label):]
         original_url = "URL: " + frame.format_field(url)
         current_url = original_url
-        if shared_url := urls.get(ref):
+        shared_url = urls.get(ref)
+        if shared_url:
             if (
                 url_counts[ref] != 1
                 or shared_url.field != "URL"
@@ -391,6 +397,6 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
     try:
         if expand_shared_descriptions(result, frame.format_field) != frame.lines:
             return unchanged
-    except (ValueError, TypeError, KeyError, UnicodeError):
+    except (ValueError, TypeError, KeyError):
         return unchanged
     return SharedDescriptionLayout(result, tuple(replacements))

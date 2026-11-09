@@ -70,29 +70,23 @@ def sharing_control_signature(native: NativeObservation, root_token: str) -> tup
     if native.backend != "macos" or native.roots != (root_token,):
         return None
     root = native.nodes.get(root_token)
-    if (
-        root is None
-        or root.role != "dialog"
-        or root.states.modal is not False
-        or root.states.focused is not False
-        or not _empty_payload(native, root_token, root)
-        or not _complete_children(root.relations.get("children"), 1)
-    ):
+    if root is None or root.role != "dialog":
+        return None
+    if root.states.modal is not False or root.states.focused is not False:
+        return None
+    if not _empty_payload(native, root_token, root) or not _complete_children(root.relations.get("children"), 1):
         return None
     (button_token,) = root.relations["children"].targets
     button = native.nodes.get(button_token)
-    if (
-        button is None
-        or button.role != "button"
-        or button.name != "WindowSharingSessionButton"
-        or button.states.enabled is not True
-        or button.states.focused is not False
-        or not _empty_payload(native, button_token, button)
-        or not _complete_children(button.relations.get("children"), 0)
-        or not any(
-            action.kind == "invoke" and action.key == "AXPress" and action.available is not False
-            for action in button.actions or ()
-        )
+    if button is None or button.role != "button" or button.name != "WindowSharingSessionButton":
+        return None
+    if button.states.enabled is not True or button.states.focused is not False:
+        return None
+    if not _empty_payload(native, button_token, button) or not _complete_children(button.relations.get("children"), 0):
+        return None
+    if not any(
+        action.kind == "invoke" and action.key == "AXPress" and action.available is not False
+        for action in button.actions or ()
     ):
         return None
     required = {

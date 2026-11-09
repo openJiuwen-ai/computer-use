@@ -67,7 +67,7 @@ class Connection:
         if type(protocol_version) is not int or protocol_version != NATIVE_PROTOCOL_VERSION:
             raise ValueError("Unsupported native protocol version")
         self.protocol_version = protocol_version
-        if type(allow_global_input) is not bool:
+        if allow_global_input is not True and allow_global_input is not False:
             raise TypeError("allow_global_input must be a bool")
         self.allow_global_input = allow_global_input
         self.invalidate, self.driver = invalidate, driver
@@ -345,7 +345,9 @@ class Connection:
         await future
 
     async def _request(self, method, params, budget):
-        if method not in (None, "begin", "inspect", "execute", "finish", "capture", "prepareObservation", "locatePoint"):
+        if method not in (
+            None, "begin", "inspect", "execute", "finish", "capture", "prepareObservation", "locatePoint"
+        ):
             raise local_failure("unsupported native protocol-6 method", "invalid_request", method)
         if self._pending is not None or self._waiting_for_exit:
             raise local_failure("another system call is in progress")
@@ -573,23 +575,15 @@ class Connection:
                 "unsupported_operation",
                 method,
             )
-        if (
-            method == "begin"
-            and params.get("intent", {}).get("kind") in ("focus", "key")
-            and "nativeKeyboardIntents" not in self._hello["capabilities"]
-            and not raw_global
-        ):
+        keyboard_intent = method == "begin" and params.get("intent", {}).get("kind") in ("focus", "key")
+        if keyboard_intent and "nativeKeyboardIntents" not in self._hello["capabilities"] and not raw_global:
             raise local_failure(
                 "backend does not provide nativeKeyboardIntents",
                 "unsupported_operation",
                 method,
             )
-        if (
-            method == "begin"
-            and params.get("intent", {}).get("kind") in ("insert", "paste")
-            and "nativeTextInput" not in self._hello["capabilities"]
-            and not raw_global
-        ):
+        text_intent = method == "begin" and params.get("intent", {}).get("kind") in ("insert", "paste")
+        if text_intent and "nativeTextInput" not in self._hello["capabilities"] and not raw_global:
             raise local_failure(
                 "backend does not provide nativeTextInput",
                 "unsupported_operation",

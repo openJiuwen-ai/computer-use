@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Mapping
 from contextlib import nullcontext
@@ -98,7 +97,9 @@ class WindowPart:
     @property
     def identity(self) -> WindowIdentity:
         """The display member does not change the native binding."""
-        return self.display_identity or WindowIdentity(self.target.root_window, self.target.surface, self.target.instance)
+        return self.display_identity or WindowIdentity(
+            self.target.root_window, self.target.surface, self.target.instance,
+        )
 
 
 def _matches_observed_member(directory: NativeDirectory, item: SurfaceInfo, target: Binding) -> bool:
@@ -107,10 +108,9 @@ def _matches_observed_member(directory: NativeDirectory, item: SurfaceInfo, targ
         return False
     if WindowIdentity.of(item) == WindowIdentity(target.root_window, target.surface, target.instance):
         return True
-    if (
-        directory["platform"] != "macos" or target.root_window is None or target.root_window == item["window"]
-        or item["modal"] is not True or not ancestor(directory, item["window"], target.root_window)
-    ):
+    if directory["platform"] != "macos" or target.root_window is None or target.root_window == item["window"]:
+        return False
+    if item["modal"] is not True or not ancestor(directory, item["window"], target.root_window):
         return False
     try:
         selected = select_surface(directory, target.root_window)
@@ -177,8 +177,8 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     if part.tree is not None and part.snapshots_numbered:
         # pylint: disable-next=protected-access
         controller._remember(state, part.target, part.tree)
-        for ref in part.tree.refs:
-            instance.refs[ref]["window_identity"] = identity
+        for element_ref in part.tree.refs:
+            instance.refs[element_ref]["window_identity"] = identity
     # An explicit bounded window read observes its identity even if AX and
     # pixels are unavailable. Native keyboard routing still proves the current
     # receiver at dispatch; image input separately requires delivered pixels.
@@ -245,7 +245,9 @@ class InterfaceReadPipeline:
                 # original instance and refresh before any pixels are collected.
                 directory, _ = await resolve(controller, ui, view)
                 first = None
-            return await self._collect(ui, view, full, menu_path, directory, first, preparation, related, on_observation)
+            return await self._collect(
+                ui, view, full, menu_path, directory, first, preparation, related, on_observation,
+            )
         except BaseException as error:
             if preparation is not None:
                 annotated = annotate_preparation_failure(error, preparation)
@@ -481,8 +483,6 @@ class InterfaceReadPipeline:
                                     )
                                     plan.changed(identity, components(view))
                                 continue
-                        except asyncio.CancelledError:
-                            raise
                         except Exception as error:  # noqa: BLE001 - the first capture remains available
                             collection_gaps.append(_collection_gap("changes", error))
                 capture_changes = (
@@ -507,8 +507,6 @@ class InterfaceReadPipeline:
                     directory = await refresh(controller, ui, accessibility=related is not None or view != "image")
                     permitted = content_members()
                     plan.update(directory, permitted)
-                except asyncio.CancelledError:
-                    raise
                 except Exception as error:  # noqa: BLE001 - optional recheck cannot erase captured content
                     await self._reconcile_close_application(related, directory, error)
                     collection_gaps.append(_collection_gap("directory", error))
@@ -1009,16 +1007,19 @@ class InterfaceReadPipeline:
                         ),
                         default=recovery_prefix,
                     )
-                    if (
+                    same_action_window = (
                         related is not None and part.target.session == related.original.session
-                        and part.identity == current_identity == related.original_window and window_context.scope_confirmed
-                        and part.identity == WindowIdentity(
+                        and part.identity == current_identity == related.original_window
+                    )
+                    exact_scope = (
+                        same_action_window and window_context.scope_confirmed and part.identity == WindowIdentity(
                             part.target.root_window, part.target.surface, part.target.instance
                         )
-                        and directory.get("focusedWindow") == key
-                        and (focus := related_focus_summary(part.target, prepared, ref)) is not None
-                    ):
-                        lines.append(focus)
+                    )
+                    if exact_scope and directory.get("focusedWindow") == key:
+                        focus = related_focus_summary(part.target, prepared, ref)
+                        if focus is not None:
+                            lines.append(focus)
                     lines.append(tree_document(controller, part.target, part.tree, prepared=prepared))
             if part.menus is not None and part.snapshots_numbered:
                 lines.append("Application menu:")
@@ -1203,7 +1204,9 @@ class InterfaceReadPipeline:
             return None
         part = await self.member(
             ui, item, "tree", max_nodes=4, max_depth=1, component_budget_ms=500,
-            fields=["AXRole", "AXTitle", "AXDescription", "AXIdentifier", "AXValue", "AXURL", "AXSelected", "AXExpanded"],
+            fields=[
+                "AXRole", "AXTitle", "AXDescription", "AXIdentifier", "AXValue", "AXURL", "AXSelected", "AXExpanded",
+            ],
             detail=target,
         )
         if part.tree is None or not part.snapshots_numbered or part.tree.native.roots != (target.node,):
@@ -1221,12 +1224,14 @@ class InterfaceReadPipeline:
         host = permitted.get(plan.principal)
         if host is None or WindowIdentity.of(host) != plan.related.original_window:
             return None
-        candidates = [
-            item for item in permitted.values()
-            if WindowIdentity.of(item) not in plan.related.known_windows
-            and item["node"] is not None and content_kind(item) == "unknown"
-            and item["modal"] is not True and interaction_contains(directory, item["window"], host["window"])
-        ]
+        candidates = []
+        for item in permitted.values():
+            if WindowIdentity.of(item) in plan.related.known_windows:
+                continue
+            if item["node"] is None or content_kind(item) != "unknown" or item["modal"] is True:
+                continue
+            if interaction_contains(directory, item["window"], host["window"]):
+                candidates.append(item)
         if len(candidates) != 1:
             return None
         (item,) = candidates
@@ -1235,15 +1240,16 @@ class InterfaceReadPipeline:
         part = await self.member(ui, item, "tree", max_nodes=4, max_depth=3, component_budget_ms=500)
         if part.tree is None or not part.snapshots_numbered:
             return None
-        if not any(
-            node.role in ("text_field", "text_area") and node.states.focused is True
-            and (node.states.editable is True or any(
+        for root in part.tree.native.roots:
+            node = part.tree.native.nodes.get(root)
+            if node is None or node.role not in ("text_field", "text_area") or node.states.focused is not True:
+                continue
+            if node.states.editable is True or any(
                 action.available is True and action.kind in ("replace_selection", "insert_text", "set_value")
                 for action in node.actions or ()
-            ))
-            for ref in part.tree.native.roots
-            if (node := part.tree.native.nodes.get(ref)) is not None
-        ):
+            ):
+                break
+        else:
             return None
         plan.focused_editor = (WindowIdentity.of(host), part.identity)
         plan.update(directory, permitted)
@@ -1329,7 +1335,7 @@ class InterfaceReadPipeline:
                             "Captured window facts retained with their original scope and times; display numbering "
                             "did not complete within the original operation budget.",
                         ))
-            except Exception as error:  # noqa: BLE001 - independent optional component, preserving pixels and other windows
+            except Exception as error:  # noqa: BLE001 - preserve pixels and independently collected windows
                 tree = None
                 failed("tree", error)
             if tree is not None and component_budget_ms is not None:

@@ -55,10 +55,9 @@ class WindowImage:
         members = {item["window"]: item for item in directory["surfaces"]}
         window = target.root_window
         member = members.get(window)
-        if (
-            member is None or require_native and not member["nativeWindow"]
-            or (member["instance"], member["surface"]) != (target.instance, target.surface)
-        ):
+        if member is None or require_native and not member["nativeWindow"]:
+            return None
+        if (member["instance"], member["surface"]) != (target.instance, target.surface):
             return None
         ended = {WindowIdentity.of(item) for item in directory.get("endedWindows", ())}
         path, seen = [], set()
@@ -85,7 +84,9 @@ class WindowImage:
         if earlier is None or earlier["nativeWindow"] is not False or not earlier["accessibility"]:
             return None
         confirmed = self.member_scope(current)
-        return confirmed if confirmed is not None and confirmed == self._member_scope(source, require_native=False) else None
+        if confirmed is not None and confirmed == self._member_scope(source, require_native=False):
+            return confirmed
+        return None
 
 
 class NativeImages:

@@ -278,17 +278,17 @@ class InstanceState:
         """
         if not identities:
             return
-        for source in tuple(self.lookup_captures):
-            target = source.target
+        for capture in tuple(self.lookup_captures):
+            target = capture.target
             if WindowIdentity(target.root_window, target.surface, target.instance) in identities or any(
-                snapshot.get("menu_window_identity") in identities for snapshot in source.snapshots.values()
+                snapshot.get("menu_window_identity") in identities for snapshot in capture.snapshots.values()
             ):
-                source.release()
-        for key, source in tuple(self.lookup_observations.items()):
-            target = source.target
+                capture.release()
+        for key, lookup_scope in tuple(self.lookup_observations.items()):
+            target = lookup_scope.target
             identity = WindowIdentity(target.root_window, target.surface, target.instance)
-            if source.released or identity in identities or any(
-                snapshot.get("menu_window_identity") in identities for snapshot in source.snapshots.values()
+            if lookup_scope.released or identity in identities or any(
+                snapshot.get("menu_window_identity") in identities for snapshot in lookup_scope.snapshots.values()
             ):
                 self.lookup_observations.pop(key, None)
         for key, snapshot in tuple(self.lookup_results.items()):
@@ -297,13 +297,13 @@ class InstanceState:
                 for target, _generation in key[0]
             ) or snapshot.get("menu_window_identity") in identities:
                 self.lookup_results.pop(key, None)
-        for ref, snapshot in self.refs.items():
+        for element_ref, snapshot in self.refs.items():
             binding = snapshot.get("binding")
             identity = snapshot.get("window_identity")
             if identity is None and binding is not None:
                 identity = WindowIdentity(binding.root_window, binding.surface, binding.instance)
             if identity in identities or snapshot.get("menu_window_identity") in identities:
-                self.refs[ref] = dict(snapshot, text=None, children=None)
+                self.refs[element_ref] = dict(snapshot, text=None, children=None)
         for identity in identities:
             self.delivered_lookup_windows.discard(identity)
             self.window_contexts.pop(identity, None)

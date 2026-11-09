@@ -47,7 +47,7 @@ def _supports(client_capabilities, key, version):
 
 class ComputerUseServer:
     def __init__(self, *, allow_global_input=True):
-        if type(allow_global_input) is not bool:
+        if allow_global_input is not True and allow_global_input is not False:
             raise TypeError("allow_global_input must be a boolean")
         self.allow_global_input = allow_global_input
         self.server = Server("computer-use", version=SDK_VERSION)

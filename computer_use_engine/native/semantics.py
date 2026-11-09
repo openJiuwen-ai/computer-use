@@ -561,7 +561,8 @@ def action_for_intent(
             return None
         if "AXPress" in actions:
             return "AXPress"
-        if complete and role == "AXMenuItem" and not has_submenu and sum(action == "AXPick" for action in actions) == 1:
+        leaf_menu_item = complete and role == "AXMenuItem" and not has_submenu
+        if leaf_menu_item and sum(action == "AXPick" for action in actions) == 1:
             return "AXPick"
         # Absence of Press must be known, not inferred from a partial catalogue.
         if complete and role in ("AXPopUpButton", "AXMenuButton", "AXComboBox") and "AXShowMenu" in actions:
@@ -686,15 +687,15 @@ def keyboard_input_evidence(role, values, *, platform=None):
     This does not authorize whole-buffer replacement or a generic focused view.
     """
     editing = editing_evidence(role, values, platform=platform)
-    if (
-        platform == "macos"
-        and role in ("textField", "textArea")
-        and values.get("focusWritable") is True
+    focusable_text_field = (
+        platform == "macos" and role in ("textField", "textArea") and values.get("focusWritable") is True
+    )
+    accepts_input = (
+        focusable_text_field
         and values.get("enabled") is not False
         and values.get("editable") is not False
-        and values.get("readOnly") is not True
-        and values.get("textReadOnly") is not True
-    ):
+    )
+    if accepts_input and values.get("readOnly") is not True and values.get("textReadOnly") is not True:
         return True
     return editing
 
@@ -923,7 +924,7 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
         caps["click"] = "available"
     if "nativeKeyboardIntents" in driver_features and values["focusWritable"] is True:
         caps["focus"] = "available"
-    if (
+    can_type_text = (
         "nativeTextInput" in driver_features
         and "nativeActuators" in driver_features
         and (
@@ -931,6 +932,7 @@ def control_capabilities(platform, node, driver_features=(), *, scope_kind=None)
             or role in ("textField", "textArea")
             and keyboard_input_evidence(role, values, platform=platform) is True
         )
-    ):
+    )
+    if can_type_text:
         caps["typeText"] = "available"
     return caps

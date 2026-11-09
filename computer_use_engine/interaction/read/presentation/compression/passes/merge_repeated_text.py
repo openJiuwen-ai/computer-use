@@ -28,12 +28,11 @@ def merge_repeated_text(state: ProjectionView, edit: ProjectionEditor, node: Vie
     """
     if not node.get("_factBacked") or scope.in_table or editing(node):
         return [node]
-    if (
-        node["role"] not in REGIONS | CONTROLS | {"heading", "staticText"}
-        or node.get("preserveGroup")
-        and not state.context.get("compact")
-        or has_incomplete_children(node)
-    ):
+    if node["role"] not in REGIONS | CONTROLS | {"heading", "staticText"}:
+        return [node]
+    if node.get("preserveGroup") and not state.context.get("compact"):
+        return [node]
+    if has_incomplete_children(node):
         return [node]
 
     # Adopt only whole, already displayed fields, not substrings or combined

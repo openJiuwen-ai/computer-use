@@ -62,7 +62,9 @@ def related_window_summary(
         if WindowIdentity.of(item) not in related.known_windows
     }
     members = {item["window"]: item for item in directory["surfaces"]}
-    attached = {key for key in newly_observed if transient_content(members[key]) and content_host(members[key]) in members}
+    attached = {
+        key for key in newly_observed if transient_content(members[key]) and content_host(members[key]) in members
+    }
     hosts = {content_host(members[key]) for key in attached}
     menus = [f"window={ref}" for ref, key in aliases.items() if key in hosts]
     sections = []
@@ -219,11 +221,12 @@ def publish(
     # publication. A native collection cutoff is independent of whether its
     # one remaining root happens to be present or an image is also available.
     shown = tuple(part.prepared.snapshot.native for part in document.parts if isinstance(part, DisplayTree))
-    incomplete = tuple(
-        (target, snapshot, issues)
-        for target, snapshot in trees
-        if any(source is snapshot.native for source in shown) and (issues := tree_collection_issues(snapshot))
-    )
+    incomplete = []
+    for target, snapshot in trees:
+        if any(source is snapshot.native for source in shown):
+            issues = tree_collection_issues(snapshot)
+            if issues:
+                incomplete.append((target, snapshot, issues))
     if incomplete:
         partial = True
         collection_gaps = tuple(
@@ -246,21 +249,23 @@ def publish(
             WindowIdentity(target.root_window, target.surface, target.instance): snapshot
             for target, snapshot, _ in incomplete
         }
-        window_coverage = tuple(
-            {
-                **record,
-                "partial": tuple(sorted(set(record.get("partial", ())) | {"tree"})),
-                "treeCollection": {
-                    "session": snapshot.native.session,
-                    "observation": snapshot.native.id,
-                    "intervalNs": snapshot.native.interval_ns,
-                },
-            }
-            if "tree" in record["included"]
-            and (snapshot := by_window.get(WindowIdentity(record["window"], record["surface"], record["instance"]))) is not None
-            else record
-            for record in window_coverage
-        )
+        coverage_with_gaps = []
+        for record in window_coverage:
+            if "tree" in record["included"]:
+                identity = WindowIdentity(record["window"], record["surface"], record["instance"])
+                snapshot = by_window.get(identity)
+                if snapshot is not None:
+                    record = {
+                        **record,
+                        "partial": tuple(sorted(set(record.get("partial", ())) | {"tree"})),
+                        "treeCollection": {
+                            "session": snapshot.native.session,
+                            "observation": snapshot.native.id,
+                            "intervalNs": snapshot.native.interval_ns,
+                        },
+                    }
+            coverage_with_gaps.append(record)
+        window_coverage = tuple(coverage_with_gaps)
     roots = [root for _, snapshot in trees for root in snapshot.roots]
     refs = {ref: node for _, snapshot in trees for ref, node in snapshot.refs.items()}
     windows, instance, identity = {}, None, None
@@ -282,9 +287,9 @@ def publish(
             alias = {key: ref for ref, key in windows.items()}
             current = lookup_context.window.window if lookup_context.window is not None else None
             identity = {"current": alias.get(current), "windows": []}
-            for ref, key in windows.items():
+            for window_ref, key in windows.items():
                 window_data = dict(
-                    ref=ref,
+                    ref=window_ref,
                     title=permitted[key]["title"],
                     **{
                         name: permitted[key][name]
@@ -410,18 +415,18 @@ def publish(
         contexts = {}
         for root_identity in candidates:
             root = instance_state.members.get(root_identity.window)
-            if (
-                captured is None or root is None or WindowIdentity.of(root) != root_identity
-                or not interaction_contains(directory or instance_state.directory, captured.window, root_identity.window)
-            ):
+            if captured is None or root is None or WindowIdentity.of(root) != root_identity:
+                continue
+            if not interaction_contains(directory or instance_state.directory, captured.window, root_identity.window):
                 continue
             menus = []
             for menu_owner in captured_lookup.menus:
                 menu_identity = controller.state(menu_owner).menu_window_identity
                 menu_window = instance_state.members.get(menu_identity.window) if menu_identity is not None else None
-                if (
-                    menu_window is not None and WindowIdentity.of(menu_window) == menu_identity
-                    and interaction_contains(directory or instance_state.directory, menu_identity.window, root_identity.window)
+                if menu_window is None or WindowIdentity.of(menu_window) != menu_identity:
+                    continue
+                if interaction_contains(
+                    directory or instance_state.directory, menu_identity.window, root_identity.window,
                 ):
                     menus.append(menu_owner)
             contexts[root_identity] = LookupContext(captured, captured_lookup.menu_only, tuple(menus))
@@ -447,10 +452,9 @@ def publish(
             for identity, lookup in contexts.items():
                 evidence = state.evidence.get(identity)
                 previous = state.window_contexts.get(identity)
-                if (
-                    evidence is not None and evidence.lifetime is WindowLifetime.RETAINED
-                    and (previous is None or generation > previous.generation)
-                ):
+                if evidence is None or evidence.lifetime is not WindowLifetime.RETAINED:
+                    continue
+                if previous is None or generation > previous.generation:
                     state.window_contexts[identity] = DeliveredWindowContext(captured, lookup, generation)
             if captured_image is not None and not runtime.adapters.image_delivery_required():
                 # Direct SDK return includes the PNG. MCP acknowledges image
@@ -517,7 +521,9 @@ def strict_public_applications(directory: DirectoryFacts | None, application: st
         ],
     }
     if "nativeProcessNames" in projected:
-        projected["nativeProcessNames"] = [row for row in projected["nativeProcessNames"] if row["application"] == application]
+        projected["nativeProcessNames"] = [
+            row for row in projected["nativeProcessNames"] if row["application"] == application
+        ]
     return projected
 
 
@@ -557,7 +563,7 @@ def capture_header(
         ), None)
         if ref is not None and item is not None and ref not in entries:
             entries[ref] = (key, item)
-    for ref, (key, item) in entries.items():
+    for window_ref, (key, item) in entries.items():
         part = next((part for _, part in parts if part.identity == WindowIdentity.of(item)), None)
         source = part.source if part is not None else None
         source_apps = source.applications if source is not None else None
@@ -579,7 +585,7 @@ def capture_header(
             ) if parent is not None else None
         windows.append(
             MemberHeading(
-                ref,
+                window_ref,
                 item["title"],
                 key,
                 key == ui._anchor,
@@ -603,13 +609,12 @@ def capture_header(
                 aliases.get(content_host(item)),
             )
         )
-    covered_reasons = {
-        gap.detail
-        for original, gaps in delivered_gaps
-        if original is directory
-        for gap in gaps
-        if gap.component == "directory" and gap.code == "observation_incomplete"
-    }
+    covered_reasons = set()
+    for original, gaps in delivered_gaps:
+        if original is directory:
+            covered_reasons.update(
+                gap.detail for gap in gaps if gap.component == "directory" and gap.code == "observation_incomplete"
+            )
     return InterfaceHeader(
         controller.state(ui).name or (anchor.name if anchor is not None else str(instance.selector)),
         "application" if ui._anchor is None else "window",

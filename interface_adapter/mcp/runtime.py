@@ -113,7 +113,8 @@ class Runtime:
 
     def diagnostic(self, event):
         if not self.executor.is_owner:
-            return self.executor.call(self.diagnostic, event)
+            self.executor.call(self.diagnostic, event)
+            return
         run = _runs.get()
         execution_id = run["id"] if run is not None else None
         trace = event.get("traceId")
@@ -130,7 +131,8 @@ class Runtime:
 
     def emit(self, block, merge_text=False, *, progress=None):
         if not self.executor.is_owner:
-            return self.executor.call(self.emit, block, merge_text, progress=progress)
+            self.executor.call(self.emit, block, merge_text, progress=progress)
+            return
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -140,7 +142,8 @@ class Runtime:
         run["output"].append(dict(block), merge_text)
         if not run["publishing"]:
             run["outputEntries"].append({"kind": "block", "block": dict(block), "merge": merge_text})
-        self.send({"output": block if progress is None else progress, "mergeText": merge_text, "executionId": run["id"]})
+        output = block if progress is None else progress
+        self.send({"output": output, "mergeText": merge_text, "executionId": run["id"]})
 
     def flush_observations(self, run, *, explicit=False):
         """Retain chronological slots; render only the facts actually delivered.
@@ -188,14 +191,17 @@ class Runtime:
                     run["output"].append(dict(entry["block"]), entry["merge"])
                 elif entry["kind"] == "image":
                     self.emit_image(entry["delivery"])
-                elif (ref := absent.get(id(entry))) is not None:
-                    note = (
-                        f"Window {ref} was observed earlier and is absent from the latest complete application observation."
-                    )
-                    if len(utf8(note)) <= run["output"].remaining_text_bytes - reserved:
-                        self.emit({"type": "text", "text": note})
-                elif not entry["superseded"]:
-                    self.publish_observation(run, entry["observation"], reserved)
+                else:
+                    absent_ref = absent.get(id(entry))
+                    if absent_ref is not None:
+                        note = (
+                            f"Window {absent_ref} was observed earlier and is absent from the latest "
+                            "complete application observation."
+                        )
+                        if len(utf8(note)) <= run["output"].remaining_text_bytes - reserved:
+                            self.emit({"type": "text", "text": note})
+                    elif not entry["superseded"]:
+                        self.publish_observation(run, entry["observation"], reserved)
             except Exception as error:  # noqa: BLE001 - retain later receipts, then rethrow the rendering failure
                 # Rendering an earlier capture must not erase receipts for
                 # later inputs which already completed in the script.
@@ -255,7 +261,8 @@ class Runtime:
 
     def action(self, receipt):
         if not self.executor.is_owner:
-            return self.executor.call(self.action, receipt)
+            self.executor.call(self.action, receipt)
+            return
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -269,7 +276,8 @@ class Runtime:
 
     def text_page(self, source, page):
         if not self.executor.is_owner:
-            return self.executor.call(self.text_page, source, page)
+            self.executor.call(self.text_page, source, page)
+            return
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -279,7 +287,8 @@ class Runtime:
 
     def observation(self, event):
         if not self.executor.is_owner:
-            return self.executor.call(self.observation, event)
+            self.executor.call(self.observation, event)
+            return
         run = _runs.get()
         if event["kind"] == "invalidate":
             self.presenter.invalidate(event["source"])
@@ -468,7 +477,8 @@ class Runtime:
 
     def print(self, *values, sep=" ", end="\n", file=None, flush=False):
         if not self.executor.is_owner:
-            return self.executor.call(self.print, *values, sep=sep, end=end, file=file, flush=flush)
+            self.executor.call(self.print, *values, sep=sep, end=end, file=file, flush=flush)
+            return
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -537,7 +547,8 @@ class Runtime:
 
     def print_image(self, png):
         if not self.executor.is_owner:
-            return self.executor.call(self.print_image, png)
+            self.executor.call(self.print_image, png)
+            return
         if not isinstance(png, (bytes, bytearray, memoryview)):
             raise TypeError("print_image() expects PNG bytes, such as state.screenshot.")
         run = _runs.get()
@@ -620,10 +631,10 @@ class Runtime:
                     continue
                 current = image_point_hints(delivery.source)
                 eligible.update(current.keys())
-                for ref, point in zip(current.windows, current.points):
+                for window_ref, point in zip(current.windows, current.points):
                     if point in caption.hints.points and current.owner is not None:
-                        current_windows[id(current.owner), ref] = (current.generation, identifier)
-                        if delivery.source is pending_source and ref == pending_window:
+                        current_windows[id(current.owner), window_ref] = (current.generation, identifier)
+                        if delivery.source is pending_source and window_ref == pending_window:
                             pending_image = identifier
             images.append((image, eligible))
 
@@ -633,11 +644,11 @@ class Runtime:
                 continue
             hints = caption.hints
             notes = []
-            for ref, point in zip(hints.windows, hints.points):
-                replacement = current_windows.get((id(hints.owner), ref))
+            for window_ref, point in zip(hints.windows, hints.points):
+                replacement = current_windows.get((id(hints.owner), window_ref))
                 if point in eligible or replacement is None or replacement[0] <= hints.generation:
                     continue
-                note = f"Window {ref} coordinates superseded. Use Image {replacement[1]} pixels."
+                note = f"Window {window_ref} coordinates superseded. Use Image {replacement[1]} pixels."
                 if len(note) <= len(point):
                     # The final caption must fit the budget reserved for its original hints.
                     notes.append("\n" + note)
@@ -646,7 +657,10 @@ class Runtime:
             metadata["caption"] = label.render(eligible) + note
         if pending_image is None:
             return ""
-        return f"\nUse the attached image (Image {pending_image}, Window {pending_window}) in the next computer_use call."
+        return (
+            f"\nUse the attached image (Image {pending_image}, Window {pending_window}) "
+            "in the next computer_use call."
+        )
 
     async def finish(self, error: BaseException | None = None):
         run = _runs.get()

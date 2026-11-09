@@ -112,13 +112,10 @@ def plan_fact_profile(scope: FactScope, capabilities: NativeReadCapabilities) ->
         relations = () if request.scope_kind == "applicationContent" else followed_relations(platform, features)
         if relations:
             options["follow_relations"] = list(relations)
-        if (
-            platform == "macos"
-            and request.scope_kind == "window"
-            and "nativeFocusedReadV1" in features
-            and children_page is None
-            and relation_page is None
-        ):
+        supports_focused_read = (
+            platform == "macos" and request.scope_kind == "window" and "nativeFocusedReadV1" in features
+        )
+        if supports_focused_read and children_page is None and relation_page is None:
             options["focused_element"] = True
         # Query popup state only where the provider declares it. It is an
         # observation fact; resolving the actual popup receiver is separate.
