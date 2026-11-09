@@ -196,6 +196,7 @@ def _evidence(
         return None
     if any(member.get(key) != (window.target or {}).get(key) for key in ("surface", "node")):
         return None
+
     def displayed_captures(owner: MemberHeading) -> list[Mapping[str, object]]:
         captures = []
         for item in image.captures:
