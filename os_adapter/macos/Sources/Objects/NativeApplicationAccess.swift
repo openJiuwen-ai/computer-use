@@ -105,16 +105,13 @@ import ApplicationServices
             modalHints: modalHints, reportIssue: reportIssue)
     }
 
-    func keyboardBoundary(_ app: NSRunningApplication, contentRoot: AXUIElement) throws
-        -> NativeKeyboardBoundaryProjection<AXUIElement>
-    { try reader.keyboardBoundary(app, contentRoot: contentRoot) }
-
     func inputBoundary(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window], contentRoot: AXUIElement?,
-        required: [AXUIElement], modalHints: [NativeApplicationReader.ModalHint] = []
+        required: [AXUIElement], modalHints: [NativeApplicationReader.ModalHint] = [],
+        expandMissingRequired: Bool = true
     ) throws -> NativeApplicationReader.InputBoundary {
         try reader.inputBoundary(app, nativeWindows: nativeWindows, contentRoot: contentRoot, required: required,
-                                 modalHints: modalHints)
+                                 modalHints: modalHints, expandMissingRequired: expandMissingRequired)
     }
 
     func knownWindowReference(_ element: AXUIElement, app: NSRunningApplication, process: NativeProcessIdentity)

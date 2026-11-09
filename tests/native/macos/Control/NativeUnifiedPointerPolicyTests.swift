@@ -11,17 +11,33 @@ import ApplicationServices
                      "a menu's owning document ID must not invalidate its proven rendering popup")
         precondition(Readiness.nativeWindowMatches(reported: 1729, expected: 1801, presentedMenu: false) == false)
         precondition(Readiness.nativeWindowMatches(reported: nil, expected: 1801, presentedMenu: false) == nil)
+        var menuSamples = 0
+        func sampleMenu(_ matched: Bool) -> Bool {
+            menuSamples += 1
+            return matched
+        }
         precondition(Readiness.ready(
             kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
-            backgroundPrepared: false, presentedMenuReceiver: true),
+            backgroundPrepared: false, presentedMenuReceiver: sampleMenu(true)),
             "an exact live popup menu receiver must not activate its application before raw mouse dispatch")
         precondition(!Readiness.ready(
             kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
-            backgroundPrepared: false), "ordinary declared surfaces keep their preparation requirement")
+            backgroundPrepared: false, presentedMenuReceiver: sampleMenu(false)),
+            "ordinary declared surfaces keep their preparation requirement")
         precondition(!Readiness.ready(
             kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
-            backgroundPrepared: false, requirement: .foregroundWindowPoint, presentedMenuReceiver: true),
+            backgroundPrepared: false, requirement: .foregroundWindowPoint, presentedMenuReceiver: sampleMenu(true)),
             "a menu hint cannot discharge a separately selected foreground-point contract")
+        precondition(Readiness.ready(
+            kind: .click, foreground: true, windowKind: .otherDeclared, focus: .notRequired,
+            backgroundPrepared: false, presentedMenuReceiver: sampleMenu(true)))
+        precondition(Readiness.ready(
+            kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
+            backgroundPrepared: true, presentedMenuReceiver: sampleMenu(true)))
+        precondition(!Readiness.ready(
+            kind: .click, foreground: false, windowKind: .keyRequiring, focus: .target,
+            backgroundPrepared: false, presentedMenuReceiver: sampleMenu(true)))
+        precondition(menuSamples == 2, "only an unprepared background click on a declared auxiliary surface needs menu evidence")
         receiverSampling()
         qtComboChoice()
         try await physicalInputDependencies()

@@ -15,6 +15,9 @@ import ApplicationServices
     var cellEditor: NativeCellEditorHandoff? = nil
     /// Original App/Window scope, independent of a current-forward actuator.
     var windowCommandScope = false
+    /// A window projection is useful only when this unit's full scope
+    /// resolved without a known coverage gap.
+    var boundaryCoverageComplete = false
     /// Only the qualified dispatch copy compares this immutable original ID.
     var dispatchExpectedNativeID: CGWindowID? = nil
     var keyboardInsertion: NativeKeyboardTextEntry? = nil
@@ -186,12 +189,12 @@ import ApplicationServices
     func selectedDelivery(
         _ request: NativeKeyboardIntent, textPolicy: NativeKeyboardInterpreterEvidence.Policy, state: State? = nil
     ) throws -> NativeKeyboardDelivery {
-        try selectedDelivery(request, textPolicy: textPolicy, state: state, onSelection: { _ in })
+        try selectedDelivery(request, textPolicy: textPolicy, state: state, onSelection: nil)
     }
 
     func selectedDelivery(
         _ request: NativeKeyboardIntent, textPolicy: NativeKeyboardInterpreterEvidence.Policy, state: State? = nil,
-        onSelection: (NativeKeyboardBoundaryRouteFacts) -> Void
+        onSelection: ((NativeKeyboardBoundaryRouteFacts) -> Void)?
     ) throws -> NativeKeyboardDelivery {
         let state = try state ?? sample()
         let proposal = try textProposal(kind: request.kind, text: request.value, state: state, textPolicy: textPolicy)
@@ -230,13 +233,33 @@ import ApplicationServices
                 "window": recipient.window as Any? ?? NSNull(),
                 "qualifiedLocalInsertion": proposal?.permitsQualifiedLocalInsertion == true
             ] as [String: Any])
-        onSelection(
-            .init(
-                localProcess: recipient.pid == application.processIdentifier
-                    && recipient.presenter == application.processIdentifier && recipient.remoteElement == nil
-                    && recipient.remoteRoute == nil, noObservedWeb: proposal?.interpreter.kind == .noObservedWeb,
-                sameKeyboardSurface: CFEqual(state.window ?? window, window), nativeID: recipient.window))
+        let local = recipient.pid == application.processIdentifier && recipient.presenter == application.processIdentifier
+            && recipient.remoteElement == nil && recipient.remoteRoute == nil
+        let sameSurface = CFEqual(state.window ?? window, window)
+        if let onSelection, boundaryCoverageComplete {
+            let localBoundaryEvidence = try proposal.map { $0.interpreter.kind == .noObservedWeb }
+                ?? (local && sameSurface && ordinaryKeyBoundaryEvidence(request, state: state, textPolicy: textPolicy))
+            onSelection(.init(
+                localProcess: local, localBoundaryEvidence: localBoundaryEvidence,
+                sameKeyboardSurface: sameSurface, nativeID: recipient.window))
+        }
         return .process(recipient)
+    }
+
+    func ordinaryKeyBoundaryEvidence(
+        _ request: NativeKeyboardIntent, state: State? = nil, textPolicy: NativeKeyboardInterpreterEvidence.Policy
+    ) throws -> Bool {
+        guard request.kind == .key, windowCommandScope, element == nil, receiverRelation == nil,
+            boundaryCoverageComplete, textPolicy == .existing
+        else { return false }
+        let state = try state ?? sample()
+        guard state.localReceiverConfirmed, let focus = state.focus,
+            state.window.map({ CFEqual($0, window) }) == true
+        else { return false }
+        let ancestry = try NativeKeyboardDeliveryProposal.read(
+            element: focus, window: window, pid: application.processIdentifier).interpreter
+        return NativeKeyboardBoundaryPolicy.ordinaryKeyEvidence(
+            confirmedLocalFocus: state.localReceiverConfirmed, ancestry: ancestry)
     }
 
     func readiness(
@@ -361,7 +384,14 @@ import ApplicationServices
         textPolicy: NativeKeyboardInterpreterEvidence.Policy, check boundary: @escaping @MainActor () throws -> Void,
         onPreparation: @escaping @MainActor (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
-        try boundary()
+        let ordinaryWindowKey = request.kind == .key && windowCommandScope && element == nil && receiverRelation == nil
+        if ordinaryWindowKey {
+            // Read-only receiver discovery precedes the check below. No
+            // preparation or input intervenes between these initial queries.
+            try RequestDiagnostics.checkCancellation()
+        } else {
+            try boundary()
+        }
         let activateCell = try request.kind == .replace && requiresCellEditorActivation()
         let originalKeyboardWindow = try WindowGeometry.keyboardWindow(window, pid: application.processIdentifier)
         // Window input preserves an already confirmed attached text-root
@@ -411,7 +441,8 @@ import ApplicationServices
                 "local-Web process text isolation is unavailable; use explicit Computer input for the current desktop recipient")
         }
         if try readiness(
-            kind: request.kind, key: request.key, text: request.value, replacement: replacement, textPolicy: textPolicy
+            kind: request.kind, key: request.key, text: request.value, replacement: replacement,
+            state: ordinaryWindowKey ? start : nil, textPolicy: textPolicy
         ).ready {
             return
         }

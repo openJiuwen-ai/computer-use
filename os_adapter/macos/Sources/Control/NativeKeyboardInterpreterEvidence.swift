@@ -103,7 +103,7 @@ enum NativeKeyboardInterpreterEvidence {
                 ownershipKnown = false
             }
             if same(current, window) {
-                guard let area else { return .init(kind: .noObservedWeb, area: nil, complete: true) }
+                guard let area else { return .init(kind: .noObservedWeb, area: nil, complete: ownershipKnown) }
                 guard ownershipKnown, let actual, actual > 0 else {
                     return .init(
                         kind: .observedWebOwnershipUnknown, area: area,

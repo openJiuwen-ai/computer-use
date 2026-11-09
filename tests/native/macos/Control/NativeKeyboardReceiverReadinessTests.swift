@@ -33,6 +33,45 @@ import ApplicationServices
         }
     }
 
+    @MainActor static func ordinaryKeyUsesLocalProofAndResamplesModalBoundary() throws {
+        typealias Interpreter = NativeKeyboardInterpreterEvidence.Observation<Int>
+        let local = Interpreter(kind: .noObservedWeb, area: nil, complete: true)
+        precondition(NativeKeyboardBoundaryPolicy.ordinaryKeyEvidence(confirmedLocalFocus: true, ancestry: local))
+        precondition(!NativeKeyboardBoundaryPolicy.ordinaryKeyEvidence(confirmedLocalFocus: false, ancestry: local))
+        for ancestry in [
+            Interpreter(kind: .noObservedWeb, area: nil),
+            Interpreter(kind: .localWeb, area: 3, complete: true),
+            Interpreter(kind: .remoteWeb, area: 3, complete: true)
+        ] {
+            precondition(!NativeKeyboardBoundaryPolicy.ordinaryKeyEvidence(confirmedLocalFocus: true, ancestry: ancestry))
+        }
+
+        var policy = NativeKeyboardBoundaryPolicy(eligible: true)
+        typealias Projection = NativeKeyboardBoundaryProjection<Int>
+        let root = Projection.Window(key: "root", element: 1, role: "AXWindow", modal: false,
+                                     parent: nil, parentKnown: true)
+        let sheet = Projection.Window(key: "sheet", element: 2, role: "AXSheet", modal: nil,
+                                      parent: "root", parentKnown: true)
+        var windows = [root]
+        var fallbackCount = 0
+        func check() throws -> [String] {
+            try BuildNativeKeyboardRoutePass.sampleKeyboardBoundary(&policy, projection: {
+                NativeKeyboardBoundaryPolicy.decide(original: 1, projection: .init(windows: windows, issue: nil), same: ==)
+            }, legacy: {
+                fallbackCount += 1
+                return ["sheet"]
+            })
+        }
+        let before = try check()
+        precondition(before.isEmpty && policy.projectionHits == 1 && fallbackCount == 0)
+        windows.append(sheet)
+        let after = try check()
+        precondition(after == ["sheet"] && policy.mode == .legacy && fallbackCount == 1)
+        windows.removeLast()
+        _ = try check()
+        precondition(policy.projectionHits == 1 && fallbackCount == 2, "a changed boundary stays on the full check")
+    }
+
     @MainActor static func windowCommandsKeepTheirPreparation() throws {
         let window = AXUIElementCreateApplication(91071)
         let editor = AXUIElementCreateApplication(91072)
@@ -646,6 +685,7 @@ import ApplicationServices
     @MainActor static func main() async throws {
         try compoundTextReturnRequiresExactLiveOwner()
         onlyConfirmedLocalReceiverQualifies()
+        try ordinaryKeyUsesLocalProofAndResamplesModalBoundary()
         try windowCommandsKeepTheirPreparation()
         try commandPreparationNeedsPositiveEvidence()
         try clipboardRetainsOnlyItsOwnKeyWindowRequirement()

@@ -41,6 +41,7 @@ from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.protocol.element_path import element_path
 from computer_use.session.cursors import TextCursors
+from computer_use.session.events import explicit_observation_completed
 from computer_use.session.interfaces import (
     ApplicationEntry,
     ApplicationReferences,
@@ -198,10 +199,12 @@ class AgentInterfacePipeline:
         allow_foreground: bool = False,
         *,
         related=None,
+        explicit_read: bool = False,
     ) -> Observation:
         try:
             return await self.read_pipeline.run(
-                ui, view, full, menu_path, allow_foreground=allow_foreground, related=related
+                ui, view, full, menu_path, allow_foreground=allow_foreground, related=related,
+                on_observation=explicit_observation_completed if explicit_read else None,
             )
         except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
             # A principal read performs its own later directory collection;
@@ -271,7 +274,10 @@ class AgentInterfacePipeline:
             )
             if not apps:
                 lines.append("No applications were discovered in the completed native directory.")
-        return publish(self.controller, None, DisplayDocument.join(lines), screenshot, full=full, view="desktop")
+        return publish(
+            self.controller, None, DisplayDocument.join(lines), screenshot, full=full, view="desktop",
+            on_observation=explicit_observation_completed,
+        )
 
     def validate_snapshot(self, ui: UIHandle, snapshot: ElementSnapshot, *, allow_unknown: bool = False) -> None:
         """Check that a retained element still belongs to the handle's scope.
@@ -829,7 +835,7 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
             owner = await request_scope(api.controller, request.owner, request.window)
         if isinstance(request, ObserveUI):
             return await api.read(
-                owner, request.view, request.full, request.menu_path, request.allow_foreground
+                owner, request.view, request.full, request.menu_path, request.allow_foreground, explicit_read=True,
             )
         if isinstance(request, ObserveDesktop):
             return await api.read_desktop(request.view, request.full)

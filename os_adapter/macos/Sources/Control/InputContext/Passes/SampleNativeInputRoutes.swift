@@ -6,6 +6,19 @@ import ApplicationServices
 /// QUERY/RESOURCE: sample existing route facts and register observed native parts
 /// in the original registry; no preparation.
 @MainActor enum SampleNativeInputRoutesPass {
+    static func keyboardUnit(_ plan: NativeInputContextPlan, units: any NativeInputUnitAccess) throws
+        -> NativeKeyboardUnit
+    {
+        if let scope = plan.query.windowKeyboardScope {
+            // The fixed window was resolved by this query. The caller still
+            // samples its current focus and input readiness below.
+            return NativeKeyboardUnit(
+                application: scope.application, window: try scope.requireWindow(), element: nil, windowCommandScope: true,
+                boundaryCoverageComplete: scope.windowEvidence?.coverageComplete == true)
+        }
+        return try units.keyboardUnit(plan.query.binding.wire, actuator: plan.actuator, receiver: plan.receiver)
+    }
+
     static func run(
         _ plan: NativeInputContextPlan, declarations: NativePrimitiveDeclarations, access: NativeQueryAccess
     ) throws -> NativeSampledInput {
@@ -119,7 +132,7 @@ import ApplicationServices
                 try declare(.applicationCommand(command), supported: true)
             }
         } else if let kind = NativeKeyboardIntent.Kind(rawValue: op.intent) {
-            var unit = try access.units.keyboardUnit(binding.wire, actuator: actuator, receiver: receiver)
+            var unit = try keyboardUnit(plan, units: access.units)
             unit.originalAddressedElement = originalAddressedElement
             let facts = try unit.sample(includeAncestors: true)
             let cellActivation = try kind == .replace && unit.requiresCellEditorActivation()

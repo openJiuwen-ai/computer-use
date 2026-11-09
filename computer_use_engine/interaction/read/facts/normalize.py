@@ -201,6 +201,7 @@ def _project_facts(
     aliases = {token: ref for ref, token in refs.items()}
     nodes, sources, text_refs, value_fields, grouped = {}, {}, {}, {}, {}
     annotations = []
+    supplement_annotations = {}
 
     for source in batch["nodes"]:
         token, raw = source["node"], source["values"]
@@ -300,6 +301,7 @@ def _project_facts(
                     node["preserveGroup"] = True
             else:
                 structural = key in _STRUCTURAL_FIELDS
+                supplement = key.startswith("supplements[")
                 sources[(ref, key)] = dict(
                     node=token,
                     path=source["fieldPaths"][key],
@@ -307,17 +309,20 @@ def _project_facts(
                     representation="raw" if structural else "annotation",
                 )
                 if not structural:
-                    grouped.setdefault((key, literal(item)), []).append(ref)
+                    if supplement:
+                        # The immutable fact rows own these values throughout projection.
+                        # Reuse the formatted value, keeping each field's own annotation.
+                        identity = id(item)
+                        label = supplement_annotations.get(identity)
+                        if label is None:
+                            supplement_annotations[identity] = label = literal(item)
+                    else:
+                        label = literal(item)
+                    grouped.setdefault((key, label), []).append(ref)
                 provider_fact = (
-                    key.startswith("supplements[")
-                    and item["key"].startswith("provider.")
-                    and source["fieldPaths"][key] not in diagnostics
+                    supplement and item["key"].startswith("provider.") and source["fieldPaths"][key] not in diagnostics
                 )
-                meaningful_extra = (
-                    key.startswith("supplements[")
-                    and item["key"] in ("item_status", "item_type")
-                    and bool(item["value"])
-                )
+                meaningful_extra = supplement and item["key"] in ("item_status", "item_type") and bool(item["value"])
                 invalid_geometry = (
                     key.startswith("geometry.") and isinstance(item, Mapping) and item.get("valid") is False
                 )

@@ -254,14 +254,19 @@ import ApplicationServices
                         ? parent : nil
                 })
         }
+        var coverageComplete = true
+        let noteIssue: (NativeApplicationReader.WindowIssue) -> Void = { _ in coverageComplete = false }
         var windows = try applications.windows(
-            entry.owner, nativeWindows: native, contentRoot: contentRoot, purpose: .inputValidation)
+            entry.owner, nativeWindows: native, contentRoot: contentRoot, purpose: .inputValidation,
+            reportIssue: noteIssue)
         // The hint cannot replace proof that the original App root is live.
         // It may itself be a deep popover omitted by the narrower scan.
         if popupOwner == nil, let original = workingRoot, let contentRoot, !CFEqual(original, contentRoot),
             !windows.contains(where: { $0.ref == root })
         {
-            windows = try applications.windows(entry.owner, nativeWindows: native, purpose: .inputValidation)
+            coverageComplete = true
+            windows = try applications.windows(
+                entry.owner, nativeWindows: native, purpose: .inputValidation, reportIssue: noteIssue)
         }
         guard windows.contains(where: { $0.ref == root }), windows.contains(where: { $0.ref == discovered.window })
         else { throw DriverError("the original working window or surface closed", code: .staleTarget) }
@@ -318,7 +323,7 @@ import ApplicationServices
         }
         return NativeInputScope(
             wire: value.wire, application: entry.owner, window: nativeWindow, menuRoot: nil, blocked: blocked,
-            windowEvidence: .init(windows: windows))
+            windowEvidence: .init(windows: windows, coverageComplete: coverageComplete))
     }
 
     /// QUERY admission for an already selected, unconstrained local dispatch.
@@ -360,18 +365,25 @@ import ApplicationServices
             applications.knownWindowReference(anchor.window, app: anchor.application, process: anchor.process)
                 == anchor.rootReference
         else { return .needsLegacy("original AX alias is no longer known") }
-        let projection = try applications.keyboardBoundary(anchor.application, contentRoot: anchor.window)
-        let decision = NativeKeyboardBoundaryPolicy.decide(
+        guard let native = NativeWindows.listIfAvailable(anchor.application),
+            native.contains(where: { $0.mapping.id == anchor.nativeID && $0.process == anchor.process })
+        else { return .needsLegacy("original keyboard WindowServer identity needs full scope") }
+        let hints = try directory.retainedModalHints(owner: anchor.application, native: native)
+        let boundary = try applications.inputBoundary(
+            anchor.application, nativeWindows: native, contentRoot: anchor.window, required: [anchor.window],
+            modalHints: hints, expandMissingRequired: false)
+        let nativeIDs = Set(boundary.windows.compactMap(\.nativeID))
+        guard boundary.windows.contains(where: { CFEqual($0.element, anchor.window) && $0.nativeID == anchor.nativeID }),
+            native.allSatisfy({ nativeIDs.contains($0.mapping.id) }), boundary.unresolvedModalHints.isEmpty
+        else { return .needsLegacy("native window or retained modal needs full scope") }
+        let projection = NativeKeyboardBoundaryProjection(
+            windows: boundary.windows.map {
+                .init(key: $0.ref, element: $0.element, role: $0.kind == "sheet" ? kAXSheetRole : $0.kind,
+                      modal: $0.modal, parent: $0.parent, parentKnown: !$0.parentUnknown)
+            },
+            issue: boundary.issue)
+        return NativeKeyboardBoundaryPolicy.decide(
             original: anchor.window, projection: projection, same: { CFEqual($0, $1) })
-        if decision == .confirmed, let root = projection.windows.first(where: { CFEqual($0.element, anchor.window) }) {
-            // Same boundary algorithm, with sample-private keys. No modal can
-            // enter this branch: all known modal results require the original Gate.
-            let blocked = try NativeWindowBoundary.blocked(
-                root: root.key, target: root.key,
-                windows: projection.windows.map { .init(ref: $0.key, parent: $0.parent, modal: $0.modal == true) })
-            if !blocked.isEmpty { return .needsLegacy("live modal requires full scope") }
-        }
-        return decision
     }
 
     /// Explicit full-query port, selected only by the parent keyboard Gate.
@@ -566,6 +578,10 @@ import ApplicationServices
                 })
         }
         return (value, scope.blocked, node)
+    }
+
+    func windowKeyboardQueryScope(_ raw: Any?) throws -> NativeInputScope? {
+        try inputScope(raw)
     }
 
     func inputBinding(_ raw: Any?, input: Bool = false, attachedMenuAction: Bool = false) throws -> (
@@ -783,7 +799,8 @@ import ApplicationServices
             element: owned?.element ?? read?.element,
             receiverRelation: try receiverRelation(binding, actuator: actuator, receiver: receiver),
             cellEditorState: read?.cellEditorState, cellEditor: owned?.proof,
-            windowCommandScope: binding["node"] is NSNull)
+            windowCommandScope: binding["node"] is NSNull,
+            boundaryCoverageComplete: scope.windowEvidence?.coverageComplete == true)
     }
 
     func selectedTextUnit(

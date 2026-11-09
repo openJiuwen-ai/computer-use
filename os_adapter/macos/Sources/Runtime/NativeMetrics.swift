@@ -20,7 +20,7 @@ import Foundation
         case captureJoin
         case capturePermissionPreflight, captureStartupScope, captureTargetResolution, captureDocumentIdentity
         case captureWindowHint, captureRetryScope
-        case readCatalogue, readAttributes, readIdentityFallback
+        case readCatalogue, readAttributes, readIdentityFallback, readSubtreePrefetch
         case inputQueryResolution, inputRouteSampling, inputContractRegistration, inputContextEncoding
     }
     enum Counter: String {
@@ -28,6 +28,7 @@ import Foundation
         case observationRetry
         case sharingStreamReuse
         case editorForwardOnlyLink, editorHandoff, collectionEditorHandoff, capabilityQuery
+        case readPrefetchedRow, readBatchedSingleRelations
     }
     struct Interval {
         let owner: NativeMetrics

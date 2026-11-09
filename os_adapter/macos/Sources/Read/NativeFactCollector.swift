@@ -29,6 +29,7 @@ import ApplicationServices
     private let relationReader: AXRelationReader
     private let attributes: AXAttributeReader.API
     private let readIdentity: (AXUIElement) -> AXRead<ElementIdentity.Facts>
+    private let captureSubtree: AXSubtreePrefetch.Capture?
     private let clock: @Sendable () -> TimeInterval
     private let nativeResources = AXNativeValueResources()
     private struct Acquisition {
@@ -36,6 +37,7 @@ import ApplicationServices
         let sampleFields: [String]
         let batchFields: [String]
         let batch: AXAttributeReader.Result
+        let prefetched: [AXAttributeReader.Field]
         let identity: AXRead<ElementIdentity.Facts>?
         let identityConflict: Bool
     }
@@ -44,13 +46,15 @@ import ApplicationServices
         attributes: AXAttributeReader.API = AXAttributeReader.API(),
         relations: AXRelationReader.API = AXRelationReader.API(),
         readIdentity: @escaping (AXUIElement) -> AXRead<ElementIdentity.Facts> = { AXIdentity.read($0) },
-        clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+        clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        captureSubtree: AXSubtreePrefetch.Capture? = AXSubtreePrefetch.live
     ) {
         self.registry = registry
         self.inspection = inspection
         self.attributes = attributes
         self.relationReader = AXRelationReader(api: relations)
         self.readIdentity = readIdentity
+        self.captureSubtree = captureSubtree
         self.clock = clock
     }
 
@@ -324,6 +328,27 @@ import ApplicationServices
             try Task.checkCancellation()
             return budget.canCollect()
         }
+        let displayFields = requested.filter(AXSubtreePrefetch.displayFields.contains)
+        let subtree: AXSubtreePrefetch?
+        if let captureSubtree, rootPage == nil,
+            root.role == kAXWindowRole, root.identity.attributes["AXSubrole"] == "AXStandardWindow",
+            root.provider?.pid == nil || root.provider?.pid == root.application.processIdentifier,
+            maxNodes >= 128, maxDepth >= 4, !displayFields.isEmpty, try reading(), deadline - clock() >= 1
+        {
+            // Optional work leaves most of the original collection time for
+            // public reads. The provider can return fewer rows than requested.
+            let metric = RequestDiagnostics.metrics?.start(.readSubtreePrefetch)
+            subtree = captureSubtree(
+                root.element, displayFields + ElementIdentity.keys, min(maxDepth, 32),
+                min(0.5, (deadline - clock()) / 4))
+            metric?.end()
+        } else {
+            subtree = nil
+        }
+        let batchedRelations = subtree == nil ? [] : ["AXParent", "AXTitleUIElement", "AXWindow"].filter {
+            !followed.contains($0)
+        }
+        var liveRelations = [String: [String: AXUIElement]]()
         func key(_ element: AXUIElement) -> Identity {
             Identity(
                 pid: root.application.processIdentifier, launched: root.launched, element: element, scope: root.scope)
@@ -388,14 +413,57 @@ import ApplicationServices
             if let identity = identityFields {
                 fields += identity.keys.filter { !fields.contains($0) }
             }
+            // These single-object links are read from the same live object as
+            // its geometry. Child order, arrays and continuations stay on the
+            // public relation reader. Prefetch never supplies an owner link.
+            if withinBudget == nil {
+                fields += batchedRelations.filter { !fields.contains($0) }
+            }
+            var prefetched = [AXAttributeReader.Field]()
+            if withinBudget == nil, let subtree {
+                var pid: pid_t = 0
+                if AXUIElementGetPid(element, &pid) == .success, pid == root.application.processIdentifier,
+                    subtree.row(element, "AXRole") != nil
+                {
+                    for field in displayFields where sampleFields.contains(field) {
+                        guard let value = subtree.row(element, field), CFGetTypeID(value) == CFStringGetTypeID()
+                        else { continue }
+                        prefetched.append(.init(name: field, value: value, status: .success, batchIndex: nil,
+                                                timedOut: false))
+                    }
+                }
+            }
             let metric = RequestDiagnostics.metrics?.start(.readAttributes)
-            let batch = try AXAttributeReader.read(element, fields: fields, api: attributes, withinBudget: canRead)
-            metric?.end()
+            defer { metric?.end() }
+            let prefetchedNames = Set(prefetched.map(\.name))
+            var liveFields = fields.filter { !prefetchedNames.contains($0) }
+            // The live role ties a descriptive row to the same native object.
+            if !prefetched.isEmpty, !liveFields.contains("AXRole") { liveFields.append("AXRole") }
+            var batch = try AXAttributeReader.read(element, fields: liveFields, api: attributes, withinBudget: canRead)
+            if !prefetched.isEmpty, let subtree {
+                let identity = Self.sampledIdentity(batch).value
+                let role = identity?.values["AXRole"]
+                func capturedIdentity(_ field: String) -> String? {
+                    subtree.row(element, field).flatMap {
+                        AXIdentity.decode(.success, [$0] as CFArray, keys: [field]).value?.values[field]
+                    }
+                }
+                let consistent = role != nil && role == subtree.row(element, "AXRole") as? String
+                    && identity?.values.allSatisfy { field, value in capturedIdentity(field) == value } == true
+                    && identity?.absent.allSatisfy { (capturedIdentity($0) ?? "").isEmpty } == true
+                if !consistent {
+                    prefetched = []
+                    liveFields = fields
+                    batch = try AXAttributeReader.read(element, fields: liveFields, api: attributes, withinBudget: canRead)
+                } else {
+                    RequestDiagnostics.metrics?.count(.readPrefetchedRow)
+                }
+            }
             var identity: AXRead<ElementIdentity.Facts>?
             var identityConflict = false
             if let identityFields, let catalogue {
                 identity = AXIdentity.fromObservationBatch(
-                    status: batch.status, raw: batch.raw, fields: fields,
+                    status: batch.status, raw: batch.raw, fields: liveFields,
                     catalogueStatus: catalogue.status, catalogue: catalogue.names)
                 if identity == nil {
                     let sampled = Self.sampledIdentity(
@@ -412,7 +480,8 @@ import ApplicationServices
                 }
             }
             return Acquisition(
-                catalogue: catalogue, sampleFields: sampleFields, batchFields: fields, batch: batch, identity: identity,
+                catalogue: catalogue, sampleFields: sampleFields, batchFields: liveFields, batch: batch,
+                prefetched: prefetched, identity: identity,
                 identityConflict: identityConflict)
         }
         func sample(
@@ -485,11 +554,25 @@ import ApplicationServices
                     ]
                 ])
             }
-            for field in batch.fields {
+            if withinBudget == nil, !batchedRelations.isEmpty {
+                let links = batch.fields.compactMap { field -> (String, AXUIElement)? in
+                    guard batchedRelations.contains(field.name), field.batchIndex != nil,
+                        field.status == .success, let value = field.value, CFGetTypeID(value) == AXUIElementGetTypeID()
+                    else { return nil }
+                    return (field.name, unsafeDowncast(value, to: AXUIElement.self))
+                }
+                if !links.isEmpty {
+                    liveRelations[nodeID] = Dictionary(uniqueKeysWithValues: links)
+                    RequestDiagnostics.metrics?.count(.readBatchedSingleRelations)
+                }
+            }
+            for field in batch.fields + acquisition.prefetched {
                 let name = field.name
                 guard acquisition.sampleFields.contains(name) else { continue }
                 if let position = field.batchIndex {
                     nativeReads[name] = NativeObservationEncoding.batchPropertyRead(owner: nodeID, index: position)
+                } else if acquisition.prefetched.contains(where: { $0.name == name }) {
+                    nativeReads[name] = ["api": AXSubtreePrefetch.nativeAPI]
                 } else {
                     nativeReads[name] = [
                         "api": "AXUIElementCopyAttributeValue",
@@ -761,6 +844,7 @@ import ApplicationServices
                 do {
                     relation = try relationReader.read(
                         target.element, source: nodeID, property: property, limit: limit, cursor: page?.cursor,
+                        liveBatchValue: liveRelations[nodeID]?[property],
                         withinBudget: reading)
                 } catch let error as DriverError where error.code == .snapshotExpired {
                     // A changing branch is a local observation gap, not loss of

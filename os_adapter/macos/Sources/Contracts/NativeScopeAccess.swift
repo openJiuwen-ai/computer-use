@@ -26,6 +26,7 @@ import ApplicationServices
     func inputBinding(_ raw: Any?, input: Bool, attachedMenuAction: Bool) throws -> (
         wire: [String: Any], blocked: [String], node: String?
     )
+    func windowKeyboardQueryScope(_ raw: Any?) throws -> NativeInputScope?
     func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String]
     func qtComboChoiceBoundary(_ raw: Any?, qualification: NativeQtComboChoice) throws -> [String]
     func savePanelPathBoundary(_ raw: Any?, proof: NativeSavePanelPathContinuation.Proof) throws -> [String]
@@ -44,6 +45,7 @@ import ApplicationServices
 extension NativeScopeAccess {
     func retainedForegroundSource(_ binding: [String: Any]) -> (application: NSRunningApplication, element: AXUIElement?)? { nil }
     func fixedInputWindow(_ binding: [String: Any]) throws -> NativeFixedInputWindow? { nil }
+    func windowKeyboardQueryScope(_ raw: Any?) throws -> NativeInputScope? { nil }
     func qtComboChoiceBoundary(_ raw: Any?, qualification: NativeQtComboChoice) throws -> [String] {
         throw DriverError("qualified Qt choice boundary unavailable", code: .inputUnavailable)
     }

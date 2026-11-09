@@ -123,16 +123,6 @@ import ApplicationServices
         return windows
     }
 
-    func keyboardBoundary(_ app: NSRunningApplication, contentRoot: AXUIElement) throws
-        -> NativeKeyboardBoundaryProjection<AXUIElement>
-    {
-        guard
-            case .boundary(let result) = try collectWindows(
-                app, contentRoot: contentRoot, purpose: .inputValidation, projection: .keyboardDispatch)
-        else { preconditionFailure("boundary adapter received a catalogue") }
-        return result
-    }
-
     /// Physical window input needs current surface boundaries, not a rendered
     /// directory or all controls below a file browser. Rows retain uncertainty;
     /// this projection alone never grants permission to post an event.
@@ -164,19 +154,19 @@ import ApplicationServices
 
     func inputBoundary(
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window], contentRoot: AXUIElement?,
-        required: [AXUIElement], modalHints: [ModalHint]
+        required: [AXUIElement], modalHints: [ModalHint], expandMissingRequired: Bool = true
     ) throws -> InputBoundary {
         guard case .inputBoundary(let result) = try collectWindows(
             app, nativeWindows: nativeWindows, contentRoot: contentRoot, purpose: .inputValidation,
-            projection: .inputBoundary, required: required, modalHints: modalHints)
+            projection: .inputBoundary, required: required, modalHints: modalHints,
+            expandMissingRequired: expandMissingRequired)
         else { preconditionFailure("input boundary adapter received another projection") }
         return result
     }
 
-    private enum Projection: Equatable { case catalogue, visualCatalogue, keyboardDispatch, inputBoundary }
+    private enum Projection: Equatable { case catalogue, visualCatalogue, inputBoundary }
     private enum Collection {
         case catalogue([Window])
-        case boundary(NativeKeyboardBoundaryProjection<AXUIElement>)
         case inputBoundary(InputBoundary)
     }
 
@@ -184,7 +174,7 @@ import ApplicationServices
         _ app: NSRunningApplication, nativeWindows: [NativeWindows.Window] = [], contentRoot: AXUIElement? = nil,
         purpose: NativeWindowQueryPurpose, projection: Projection, reportIssue: ((WindowIssue) -> Void)? = nil,
         parentQuery: String? = nil, required: [AXUIElement] = [], modalHints: [ModalHint] = [],
-        discoverRequired: Bool = false
+        discoverRequired: Bool = false, expandMissingRequired: Bool = true
     ) throws -> Collection {
         let timing = NativeWindowQueryTiming.start(metadata: {
             ["pid": app.processIdentifier, "purpose": purpose == .inputValidation ? "inputValidation" : "observation",
@@ -222,8 +212,7 @@ import ApplicationServices
                 return .inputBoundary(.init(windows: [], issue: "AX trust unavailable", expandedRequiredSurface: false,
                     unresolvedModalHints: Set(modalHints.filter { $0.nativePresence != .ended }.map { $0.identity.window })))
             }
-            return projection == .catalogue || projection == .visualCatalogue
-                ? .catalogue([]) : .boundary(.init(windows: [], issue: "AX trust unavailable"))
+            return .catalogue([])
         }
         let process =
             nativeWindows.first { $0.process.pid == app.processIdentifier }?.process
@@ -286,8 +275,8 @@ import ApplicationServices
         var candidates = sources.candidates
         var result = [Window]()
         var owners = [(child: AXUIElement, parent: AXUIElement)]()
-        var unknownBoundaryParents = [AXUIElement]()
         let surfaceRoles = [kAXWindowRole, kAXSheetRole, "AXPopover"]
+        let keyboardBoundary = projection == .inputBoundary && !expandMissingRequired
         var focus = projection == .visualCatalogue ? nil : linkedElement(root, kAXFocusedUIElementAttribute)
         var focusPath = [AXUIElement]()
         var focusedSurface: AXUIElement?
@@ -305,6 +294,9 @@ import ApplicationServices
             focus = linkedElement(node, kAXParentAttribute)
         }
         if focus != nil { issue("focused surface ancestry incomplete") }
+        if keyboardBoundary, let contentRoot, !focusPath.contains(where: { CFEqual($0, contentRoot) }) {
+            issue("focused ancestry no longer confirms the original keyboard window")
+        }
         // AppKit attaches popovers to their anchor control, not necessarily to
         // AXWindows or a window's immediate children. Discover surface roots
         // through actual child edges; never infer ownership from screen overlap.
@@ -373,6 +365,7 @@ import ApplicationServices
                             break
                         }
                         let role = attribute(child, kAXRoleAttribute, stage: "getter.surface.role", root: parent) as? String ?? ""
+                        if keyboardBoundary && role.isEmpty { surfaceIssue("keyboard surface role unavailable") }
                         contentRoles.append((child, role))
                         if returnedRoles != nil { returnedRoles![role, default: 0] += 1 }
                         if surfaceRoles.contains(role) {
@@ -486,7 +479,8 @@ import ApplicationServices
                 var found = [AXUIElement]()
                 for child in page.targets {
                     try RequestDiagnostics.checkCancellation()
-                    if surfaceRoles.contains(attribute(child, kAXRoleAttribute, stage: "getter.frontier.role", root: parent) as? String ?? "") {
+                    let role = attribute(child, kAXRoleAttribute, stage: "getter.frontier.role", root: parent) as? String
+                    if let role, surfaceRoles.contains(role) {
                         found.append(child)
                     }
                 }
@@ -534,13 +528,34 @@ import ApplicationServices
             return .unknown
         }
         var cursor = 0
+        func exploreScope(of element: AXUIElement) throws -> Bool {
+            try timed("phase.recursiveAncestry", root: element) {
+                try contentRoot.map { selected in
+                    try NativeWindowBoundary.exploreContents(
+                        of: element, root: selected, same: { CFEqual($0, $1) },
+                        parent: { node in
+                            try RequestDiagnostics.checkCancellation()
+                            return linkedElement(node, kAXParentAttribute)
+                        },
+                        isApplication: { node in
+                            let (status, pid) = query.pid(node)
+                            return status == .success && pid == app.processIdentifier
+                                && attribute(node, kAXRoleAttribute) as? String == kAXApplicationRole
+                        })
+                } ?? true
+            }
+        }
         while cursor < candidates.count || frontierCursor < inputFrontiers.count || modalHintCursor < modalHints.count {
             if cursor == candidates.count, frontierCursor < inputFrontiers.count {
                 let parent = inputFrontiers[frontierCursor]
                 frontierCursor += 1
                 let children: [AXUIElement]
                 if discoverRequired { children = try nestedSurfaces(parent, recursive: true) }
-                else { children = try immediateSurfaces(parent) }
+                else if keyboardBoundary {
+                    // Deep AX-only modals can block keyboard input even while
+                    // the old field retains focus and CG has no new window.
+                    children = try nestedSurfaces(parent, recursive: exploreScope(of: parent))
+                } else { children = try immediateSurfaces(parent) }
                 for child in children {
                     owners.append((child, parent))
                     candidates.append(child)
@@ -607,10 +622,11 @@ import ApplicationServices
             cursor += 1
             let (pidStatus, pid) = query.pid(element)
             guard pidStatus == .success, pid == app.processIdentifier else {
-                if projection == .keyboardDispatch { issue("surface candidate identity or role unavailable") }
+                if keyboardBoundary { issue("keyboard surface candidate owner unavailable") }
                 continue
             }
             let reportedRole = attribute(element, kAXRoleAttribute) as? String
+            if keyboardBoundary && reportedRole == nil { issue("keyboard surface candidate role unavailable") }
             // Input candidates already come from native declarations/hints or
             // confirmed surface edges. A failed optional role must not erase a
             // positive AXModal or AXSheets fact on that exact candidate.
@@ -621,31 +637,23 @@ import ApplicationServices
                     || declaredRoots.contains { CFEqual($0, element) }))),
                 !result.contains(where: { CFEqual($0.element, element) })
             else {
-                if projection == .keyboardDispatch && !result.contains(where: { CFEqual($0.element, element) }) {
-                    issue("surface candidate identity or role unavailable")
-                }
                 continue
             }
             timing?.root(element, role: reportedRole, selected: contentRoot.map { CFEqual($0, element) })
-            if projection != .catalogue && projection != .visualCatalogue {
-                let modal: Bool?
-                if projection == .inputBoundary {
-                    let read = queryRead(element, kAXModalAttribute)
-                    // Invalid proxies can remain in a provider's declaration.
-                    // Drop that row, not the separate retained CG identity.
-                    if case .invalid = read { continue }
-                    modal = read.value as? Bool
-                } else {
-                    modal = attribute(element, kAXModalAttribute) as? Bool
+            if projection == .inputBoundary {
+                let read = queryRead(element, kAXModalAttribute)
+                // Invalid proxies can remain in a provider's declaration.
+                // Drop that row, not the separate retained CG identity.
+                if case .invalid = read {
+                    if keyboardBoundary { issue("keyboard surface candidate invalidated") }
+                    continue
                 }
-                // Boundary projections do not read presentation fields. The
-                // input projection uses the original alias registry; private
-                // keyboard keys retain their existing no-alias contract.
-                let ref = projection == .keyboardDispatch ? "boundary:\(result.count)" : registry.reference(
+                if keyboardBoundary, case .unavailable(let error) = read, error != .noValue {
+                    issue("keyboard surface modality unavailable")
+                }
+                let modal = read.value as? Bool
+                let ref = registry.reference(
                     for: Identity(pid: pid, launched: app.launchDate, element: element, incarnation: incarnation))
-                // Private per-collection keys never allocate or rewrite public aliases.
-                // Unread presentation fields stay inside this collector and are
-                // removed by the typed boundary adapter before returning.
                 result.append(
                     Window(
                         ref: ref, title: "", element: element,
@@ -737,21 +745,7 @@ import ApplicationServices
             // children are always live. In particular, this keeps global
             // modals and all ancestor sheets without walking their file lists
             // again before each character sent to a nested Go To sheet.
-            let recursive = try timed("phase.recursiveAncestry", root: element) {
-                try contentRoot.map { selected in
-                    try NativeWindowBoundary.exploreContents(
-                        of: element, root: selected, same: { CFEqual($0, $1) },
-                        parent: { node in
-                            try RequestDiagnostics.checkCancellation()
-                            return linkedElement(node, kAXParentAttribute)
-                        },
-                        isApplication: { node in
-                            let (status, pid) = query.pid(node)
-                            return status == .success && pid == app.processIdentifier
-                                && attribute(node, kAXRoleAttribute) as? String == kAXApplicationRole
-                        })
-                } ?? true
-            }
+            let recursive = try exploreScope(of: element)
             for child in try nestedSurfaces(element, recursive: recursive) {
                 owners.append((child, element))
                 candidates.append(child)
@@ -761,7 +755,7 @@ import ApplicationServices
         // reachable solely through an anchor inside an excluded ancestor.
         // Rediscover it through live child edges before declaring it closed;
         // never authorize input from the retained object alone.
-        if projection == .inputBoundary, !discoverRequired,
+        if projection == .inputBoundary, expandMissingRequired, !discoverRequired,
             (required + (contentRoot.map { [$0] } ?? [])).contains(where: { expected in
                 !result.contains(where: { CFEqual($0.element, expected) })
             })
@@ -815,13 +809,6 @@ import ApplicationServices
             {
                 parent = unsafeDowncast(raw, to: AXUIElement.self)
             }
-            if projection == .keyboardDispatch,
-                !NativeKeyboardBoundaryPolicy.parentKnown(
-                    child: item.element, parent: parent, application: root, windows: result.map(\.element),
-                    same: { CFEqual($0, $1) })
-            {
-                unknownBoundaryParents.append(item.element)
-            }
             if let parent,
                 let owner = result.first(where: { !CFEqual($0.element, item.element) && CFEqual($0.element, parent) })
             {
@@ -832,19 +819,6 @@ import ApplicationServices
             } else if (projection == .inputBoundary || projection == .visualCatalogue), parent != nil {
                 result[index].parentUnknown = true
             }
-        }
-        if projection == .keyboardDispatch {
-            // Native parents were not queried. Only the flat/no-modal policy
-            // may accept this graph; any required unknown goes to the parent Gate.
-            let rows = result.map { item in
-                NativeKeyboardBoundaryProjection<AXUIElement>.Window(
-                    key: item.ref, element: item.element,
-                    role: item.kind == "sheet" ? kAXSheetRole : item.kind == "popover" ? "AXPopover" : item.kind,
-                    modal: item.modal, parent: item.parent,
-                    parentKnown: !unknownBoundaryParents.contains(where: { CFEqual($0, item.element) }))
-            }
-            outcome = "returned"
-            return .boundary(.init(windows: rows, issue: boundaryIssue))
         }
         if projection == .inputBoundary {
             // Native parent supplementation needs exact IDs, not titles,

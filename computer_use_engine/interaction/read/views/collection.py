@@ -104,6 +104,7 @@ class CollectionPlan:
     reused_content: dict[WindowIdentity, dict] = field(default_factory=dict)
     reused_images: dict[WindowIdentity, dict] = field(default_factory=dict)
     menu_origin: WindowIdentity | None = None
+    focused_editor: tuple[WindowIdentity, WindowIdentity] | None = None
 
     def update(self, directory: NativeDirectory, permitted: dict[str, SurfaceInfo]) -> None:
         anchor = self.related.preferred(directory, self.anchor) if self.related is not None else self.anchor
@@ -129,6 +130,17 @@ class CollectionPlan:
         attached.sort(key=lambda key: permitted[key].get("modal") is not True)
         presented = [key for key, item in permitted.items() if transient_content(item)]
         keys = dict.fromkeys((self.principal, *attached, *newly_seen, *presented))
+        if self.focused_editor is not None:
+            host, editor = self.focused_editor
+            if (
+                self.principal == host.window and host.window in permitted and editor.window in permitted
+                and WindowIdentity.of(permitted[host.window]) == host
+                and WindowIdentity.of(permitted[editor.window]) == editor
+                and interaction_contains(directory, editor.window, host.window)
+                and directory.get("focusedWindow") in (None, host.window, editor.window)
+            ):
+                keys.pop(host.window, None)
+                self.requested.pop(host, None)
         self.menu_origin = None
         origin = self.related.menu_origin if self.related is not None else None
         original = permitted.get(origin.window) if origin is not None else None
@@ -158,7 +170,7 @@ class CollectionPlan:
                 self.tree_upgrades.add(identity)
                 self.pending_upgrades.add(identity)
             requested = components(self.view)
-            if self.related is not None and (
+            if self.view != "tree" and self.related is not None and (
                 identity not in self.related.known_windows
                 or item["modal"] is True and identity.window == self.principal
                 and identity != self.related.original_window
@@ -238,7 +250,7 @@ class CollectionPlan:
         captured = frozenset(name for name in ("tree", "image") if getattr(part, name) is not None)
         self.attempted[identity] = self.attempted.get(identity, frozenset()) | captured
         self.captured_components[identity] = self.captured_components.get(identity, frozenset()) | captured
-        if self.related is not None and "tree" in self.attempted[identity] and (
+        if self.view != "tree" and self.related is not None and "tree" in self.attempted[identity] and (
             part.tree is None or window_content_unexposed(part.tree)
         ):
             # A fresh automatic tree can lose its body after a key or click.

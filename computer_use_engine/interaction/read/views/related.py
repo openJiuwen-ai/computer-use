@@ -36,6 +36,8 @@ class RelatedRead:
     changes: PostwriteChanges | None = None
     menu_origin: WindowIdentity | None = None
     window_family_application: str | None = None
+    selection_target: Binding | None = None
+    seek_editor: bool = False
 
     @property
     def window_family_only(self) -> bool:

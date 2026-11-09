@@ -23,14 +23,15 @@ import ApplicationServices
             pointer = try unit.resolvingCaptureTranslation()
             point = try pointer.point(plan.pointer!.start!)
         case .element(let unit):
-            if !afterPreparation, let exposure = try unit.exposure() {
+            let viewport = try afterPreparation ? nil : unit.viewport()
+            if let exposure = viewport?.exposure {
                 pointer = unit.exposurePointerUnit(exposure)
                 point = exposure.point
                 // Exposure addresses a passive wheel receiver. A click/key
                 // receiver is prepared only after the target becomes visible.
                 kind = .scroll
             } else {
-                let geometry = try afterPreparation ? unit.geometry() : unit.preparationGeometry()
+                let geometry = try viewport.map { try unit.preparationGeometry(in: $0) } ?? unit.geometry()
                 pointer = unit.pointerUnit(mapping: geometry.mapping)
                 point = geometry.point
                 elementGeometry = geometry

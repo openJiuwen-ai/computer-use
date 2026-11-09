@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.query.instances.membership import ancestor, interaction_contains
 from computer_use.interaction.query.instances.scope import (
     adopt,
     allowed,
@@ -44,6 +44,7 @@ from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconf
 from computer_use.pipeline.core import Control
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
+from computer_use.session.surface_content import content_kind, transient_content
 
 from .application_content import collect_application_content, remember_application_content
 from .capture_companions import CapturedSharingControl, companion_capture
@@ -79,6 +80,7 @@ class WindowPart:
         gaps: Explicit collection failures or omissions retained in the observation.
         source: Full application observation used to construct this window part, when available.
         snapshots_numbered: Whether tree and menu refs may be registered and publicly presented.
+        local_detail: A bounded element capture whose query root remains the window.
     """
 
     target: Binding
@@ -91,6 +93,7 @@ class WindowPart:
     capture_companion: CapturedSharingControl | None = None
     snapshots_numbered: bool = True
     display_identity: WindowIdentity | None = None
+    local_detail: bool = False
 
     @property
     def identity(self) -> WindowIdentity:
@@ -164,7 +167,7 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     # does not invalidate an already observed query binding for this exact
     # native window; lookup still validates its node when it is used.
     if part.target.node is not None or not same_window:
-        state.query_target = part.target
+        state.query_target = member_target(instance, item) if part.local_detail else part.target
     if part.tree is not None or not same_window:
         state.query_snapshot = part.tree
     state.query_scope_kind = "window"
@@ -207,6 +210,7 @@ class InterfaceReadPipeline:
         *,
         allow_foreground: bool = False,
         related: RelatedRead | None = None,
+        on_observation=None,
     ) -> Observation:
         """Read the handle's interface scope and publish its combined observation.
 
@@ -240,7 +244,7 @@ class InterfaceReadPipeline:
                 # original instance and refresh before any pixels are collected.
                 directory, _ = await resolve(controller, ui, view)
                 first = None
-            return await self._collect(ui, view, full, menu_path, directory, first, preparation, related)
+            return await self._collect(ui, view, full, menu_path, directory, first, preparation, related, on_observation)
         except BaseException as error:
             if preparation is not None:
                 annotated = annotate_preparation_failure(error, preparation)
@@ -320,6 +324,7 @@ class InterfaceReadPipeline:
                 observed=first if isinstance(first, MenuAppObservation) else None,
                 preparation=preparation,
                 full=full,
+                on_observation=on_observation,
             )
 
         async def application_content():
@@ -385,7 +390,9 @@ class InterfaceReadPipeline:
                     ):
                         first = first.launch
                 if not directory["surfaces"] and isinstance(first, MenuAppObservation):
-                    return await InterfaceMenuPipeline(controller).run(ui, (), observed=first, full=full)
+                    return await InterfaceMenuPipeline(controller).run(
+                        ui, (), observed=first, full=full, on_observation=on_observation,
+                    )
         if not window_family_only and instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
             launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
@@ -428,6 +435,14 @@ class InterfaceReadPipeline:
         recheck_pending = False
         reconciled_captures = None
         change_waited = False
+        if related is not None and related.seek_editor and principal_error is None:
+            editor = await self._related_editor(ui, plan, directory, permitted)
+            if editor is not None:
+                item = permitted[editor.identity.window]
+                parts.append(editor)
+                plan.captured(item, editor)
+                remember(controller, ui, editor)
+                initial, recheck_pending, change_waited = False, True, True
         # Only an epoch sampled before this component batch proves which
         # notifications its capture may cover. A later catalogue reconciliation
         # can see an event whose tree/pixels we have not acquired yet.
@@ -499,6 +514,23 @@ class InterfaceReadPipeline:
             identity, member_view = work
             key = identity.window
             item = permitted[key]
+            if (
+                related is not None and related.selection_target is not None and initial
+                and principal_error is None and identity == related.original_window
+                and not related.new_windows(directory)
+                and directory.get("focusedWindow") in (None, key)
+                and not any(
+                    other["window"] != key and (other["modal"] is True or transient_content(other))
+                    for other in permitted.values()
+                )
+            ):
+                selected = await self._selected_item(ui, item, related.selection_target)
+                if selected is not None:
+                    parts.append(selected)
+                    plan.captured(item, selected)
+                    remember(controller, ui, selected)
+                    initial, recheck_pending, change_waited = False, True, True
+                    continue
             # The App reader can follow another modal from its working root.
             # A scoped close and menu evidence need the scheduled member's own root.
             # A new independent modal selected as its own root needs image-first
@@ -728,7 +760,7 @@ class InterfaceReadPipeline:
             unavailable = frozenset(part.identity.window for part in parts)
             old = permitted.get(related.recovery_window(directory, unavailable))
             if old is not None and WindowIdentity.of(old) not in captured and len(parts) < 6:
-                fallback_view = "both" if related.new_windows(directory) else view
+                fallback_view = "both" if view != "tree" and related.new_windows(directory) else view
                 fallback = await self.member(ui, old, fallback_view, component_budget_ms=2000)
                 identity = WindowIdentity.of(old)
                 plan.requested[identity] = components(fallback_view)
@@ -1065,11 +1097,15 @@ class InterfaceReadPipeline:
             ]
         # pylint: disable-next=protected-access
         scope = directory["application"] + (":app" if ui._anchor is None else ":window:" + ui._anchor) + ":" + view
+        if any(part.local_detail for _, part in displayed_parts):
+            scope += ":selection"
+        elif plan.focused_editor is not None and plan.focused_editor[0] not in member_trees:
+            scope += ":editor"
         transient_window = None
-        if related is not None and screenshot is not None and len(displayed_parts) == len(included_images) == 1:
+        if related is not None and len(displayed_parts) == 1:
             identity = displayed_parts[0][1].identity
             if (
-                identity in current_identities and identity.window in included_images
+                identity in current_identities and (identity in member_trees or identity.window in included_images)
                 and identity.window in related.new_windows(directory)
                 and all(
                     (target.root_window, target.surface, target.instance)
@@ -1139,10 +1175,65 @@ class InterfaceReadPipeline:
             part.image = replace(refreshed, rechecked_scope=scope)
             part.image_directory = directory
 
+    async def _selected_item(self, ui, item, target: Binding) -> WindowPart | None:
+        """Prove the exact selected control using the existing node collector."""
+        if window_binding(member_target(ui._instance, item)) != window_binding(target):
+            return None
+        part = await self.member(
+            ui, item, "tree", max_nodes=4, max_depth=1, component_budget_ms=500,
+            fields=["AXRole", "AXTitle", "AXDescription", "AXIdentifier", "AXValue", "AXURL", "AXSelected", "AXExpanded"],
+            detail=target,
+        )
+        if part.tree is None or not part.snapshots_numbered or part.tree.native.roots != (target.node,):
+            return None
+        node = part.tree.native.nodes.get(target.node)
+        if node is None or node.states.selected is not True or node.states.expanded == "expanded":
+            return None
+        part.gaps += (ObservationGap(
+            "tree", "observation_incomplete", "Selected item observed. Other window content was not expanded.",
+        ),)
+        return part
+
+    async def _related_editor(self, ui, plan, directory, permitted) -> WindowPart | None:
+        """Collect a newly surfaced, exactly attached editor ahead of its host."""
+        host = permitted.get(plan.principal)
+        if host is None or WindowIdentity.of(host) != plan.related.original_window:
+            return None
+        candidates = [
+            item for item in permitted.values()
+            if WindowIdentity.of(item) not in plan.related.known_windows
+            and item["node"] is not None and content_kind(item) == "unknown"
+            and item["modal"] is not True and interaction_contains(directory, item["window"], host["window"])
+        ]
+        if len(candidates) != 1:
+            return None
+        (item,) = candidates
+        if directory.get("focusedWindow") not in (None, host["window"], item["window"]):
+            return None
+        part = await self.member(ui, item, "tree", max_nodes=4, max_depth=3, component_budget_ms=500)
+        if part.tree is None or not part.snapshots_numbered:
+            return None
+        if not any(
+            node.role in ("text_field", "text_area") and node.states.focused is True
+            and (node.states.editable is True or any(
+                action.available is True and action.kind in ("replace_selection", "insert_text", "set_value")
+                for action in node.actions or ()
+            ))
+            for ref in part.tree.native.roots
+            if (node := part.tree.native.nodes.get(ref)) is not None
+        ):
+            return None
+        plan.focused_editor = (WindowIdentity.of(host), part.identity)
+        plan.update(directory, permitted)
+        part.gaps += (ObservationGap(
+            "tree", "observation_incomplete", "Focused editor observed. Other window content was not expanded.",
+        ),)
+        return part
+
     async def member(
         self, ui: UIHandle, item: SurfaceInfo, view: str, *, max_nodes: int = 200,
         component_budget_ms: int | None = None,
-        fields: list[str] | None = None, max_depth: int | None = None,
+        fields: list[str] | None = None, max_depth: int | None = None, detail: Binding | None = None,
     ) -> WindowPart:
         """Collect one confirmed window member of the interface scope.
 
@@ -1154,7 +1245,7 @@ class InterfaceReadPipeline:
         """
         controller = self.controller
         # pylint: disable-next=protected-access
-        target = member_target(ui._instance, item)
+        target = detail or member_target(ui._instance, item)
         source_directory = ui._instance.directory
         tree = image = None
         snapshots_numbered = True
@@ -1189,7 +1280,8 @@ class InterfaceReadPipeline:
                     tree, gap = await collect_component(
                         controller.port, "tree",
                         lambda: controller.reader.reader.read(
-                            target, max_nodes=max_nodes, scope_kind="window", fields=fields, max_depth=max_depth,
+                            target, max_nodes=max_nodes, scope_kind="window" if detail is None else None,
+                            fields=fields, max_depth=max_depth,
                         ),
                     )
                 if gap:
@@ -1228,5 +1320,5 @@ class InterfaceReadPipeline:
             await capture_image()
         return WindowPart(
             target, tree, image, gaps=tuple(gaps), image_directory=source_directory if image is not None else None,
-            snapshots_numbered=snapshots_numbered,
+            snapshots_numbered=snapshots_numbered, local_detail=detail is not None,
         )

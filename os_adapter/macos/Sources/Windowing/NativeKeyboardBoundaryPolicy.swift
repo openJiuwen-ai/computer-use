@@ -23,17 +23,16 @@ struct NativeKeyboardBoundaryPolicy {
 
     static func eligible(
         windowCommand: Bool, unconstrained: Bool, sameRoot: Bool, exactNativeID: Bool, localProcess: Bool,
-        noObservedWeb: Bool, sameKeyboardSurface: Bool
+        localBoundaryEvidence: Bool, sameKeyboardSurface: Bool
     ) -> Bool {
-        windowCommand && unconstrained && sameRoot && exactNativeID && localProcess && noObservedWeb
+        windowCommand && unconstrained && sameRoot && exactNativeID && localProcess && localBoundaryEvidence
             && sameKeyboardSurface
     }
 
-    static func parentKnown<Element>(
-        child: Element, parent: Element?, application: Element, windows: [Element], same: (Element, Element) -> Bool
+    static func ordinaryKeyEvidence<Element>(
+        confirmedLocalFocus: Bool, ancestry: NativeKeyboardInterpreterEvidence.Observation<Element>
     ) -> Bool {
-        guard let parent, !same(parent, child) else { return false }
-        return same(parent, application) || windows.contains { same($0, parent) }
+        confirmedLocalFocus && ancestry.kind == .noObservedWeb && ancestry.complete
     }
 
     static func decide<Element>(
@@ -41,8 +40,8 @@ struct NativeKeyboardBoundaryPolicy {
     ) -> Decision {
         if let issue = projection.issue { return .needsLegacy(issue) }
         let bound = projection.windows.filter { same($0.element, original) }
-        guard bound.count == 1 else { return bound.isEmpty ? .changed : .needsLegacy("ambiguous original AX window") }
-        guard bound[0].role == "AXWindow", bound[0].parent == nil, bound[0].parentKnown else {
+        guard bound.count == 1 else { return .needsLegacy("original AX window needs full scope") }
+        guard bound[0].role == "AXWindow", bound[0].modal == false, bound[0].parent == nil, bound[0].parentKnown else {
             return .needsLegacy("original surface is no longer a flat AXWindow")
         }
         // Preserve the original optional modality. A missing AXModal on an

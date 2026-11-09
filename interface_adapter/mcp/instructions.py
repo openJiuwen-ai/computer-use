@@ -112,13 +112,14 @@ at the current selection.
 For double-click: from computer_use import ClickOption;
 app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
 to its Element: app.element(ref).perform_action('raise'), including a window root.
-Use an action's attached observation first. A new form with only an image can
-benefit from one scoped tree/both read when several semantic fields are needed.
+Use an action's attached observation first. Request one scoped read if more
+context is needed. Request an image explicitly when visual evidence is needed.
 
 App.read() defaults to tree; view='image' and view='both' include images.
-Reads and action observations automatically present text and images; action
+Reads and action observations automatically present captured content; action
 receipts also appear automatically. Combined calls keep each receipt and the
-latest automatic observation per scope; explicitly printed views are retained.
+latest automatic observation per scope. Each explicit app.read() samples at
+its own call site and keeps its result in order.
 print() is for other values; print_image()
 is for custom images. A subtree or element.read_text() bounds text content. The first
 observation presents collected content; later observations use diff by default.

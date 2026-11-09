@@ -143,6 +143,26 @@ def test_derived_issue_identity_remains_shared_across_status_and_global_sources(
     assert_immutable(index)
 
 
+def test_scalar_supplement_value_reuse_keeps_occurrence_status_and_exact_type():
+    key = "provider.failed_payload"
+    first = NativeNode(role="window", supplements=(Supplement(key, 1),))
+    second = NativeNode(role="button", supplements=(Supplement(key, 1), Supplement(key, True)))
+    issue = ReadIssue(("nodes", "window", "supplements", 0, "value"), "unsupported")
+    observation = NativeObservation(
+        "macos", "session", "capture", (1, 2), ("window",), {"window": first, "child": second}, issues=(issue,)
+    )
+    index = observation_index(observation)
+    window, child = index["nodes"]
+    shared = window["values"]["supplements[0]"]
+    assert shared is child["values"]["supplements[0]"]
+    assert type(shared["value"]) is int
+    assert type(child["values"]["supplements[1]"]["value"]) is bool
+    assert window["fieldStatus"]["supplements[0].value"]["issues"][0]["path"] == issue.path
+    assert "supplements[0].value" not in child["fieldStatus"]
+    assert observation_index(observation)["nodes"][0]["values"]["supplements[0]"] is not shared
+    assert_immutable(index)
+
+
 @pytest.mark.parametrize(
     "node",
     [

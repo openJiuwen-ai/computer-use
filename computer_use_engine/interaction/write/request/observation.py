@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord
-from computer_use.interaction.read.acquisition.loading import window_content_unexposed
 from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
@@ -33,6 +32,43 @@ if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
     from computer_use.pipeline.core import Control, Step
     from computer_use.protocol.records import Record
+
+
+def selection_target(request, before_tree, before_target) -> Binding | None:
+    """Choose a proved selectable source to check after a click or copy chord."""
+    target, intent = request.target, request.intent
+    if (
+        before_tree is None or before_target is None or not isinstance(target, Binding)
+        or window_binding(before_target) != window_binding(target)
+        or before_tree.native.session != target.session
+    ):
+        return None
+    if intent.kind == "click" and intent.parameters == {"button": "left", "count": 1} and target.node is not None:
+        nodes = before_tree.native.nodes
+        source = nodes.get(target.node)
+        if source is None or source.states.has_popup is True:
+            return None
+        # A file name or caption can be the clicked part of a selectable row.
+        # Reobserve the one containing cell/row only through native child edges.
+        if source.role in ("text_field", "text", "image"):
+            parents = [
+                ref for ref, node in nodes.items()
+                if node.role in ("cell", "row") and (children := node.relations.get("children")) is not None
+                and children.evidence != "candidate" and target.node in children.targets
+            ]
+            if len(parents) == 1 and nodes[parents[0]].states.selected is not None:
+                return replace(target, node=parents[0]) if nodes[parents[0]].states.selected is False else None
+        if source.states.selected is False:
+            return target
+    if (
+        intent.kind == "key" and intent.parameters.get("key") == "super+c"
+        and before_tree.scope_kind is None and len(before_tree.native.roots) == 1
+    ):
+        (node,) = before_tree.native.roots
+        source = before_tree.native.nodes.get(node)
+        if source is not None and source.states.selected is True:
+            return replace(target, node=node)
+    return None
 
 
 class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
@@ -81,19 +117,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         source = self.controller.state(source_owner) if source_owner is not None else None
         before_tree = source.query_snapshot if source is not None else None
         before_target = source.query_target if source is not None else None
-        image_identity = WindowIdentity(
-            getattr(request.target, "root_window", None), getattr(request.target, "surface", None),
-            getattr(request.target, "instance", None),
-        )
-        canvas = getattr(instance, "sampled_window_images", {}).get(image_identity)
-        if canvas is None:
-            canvas = getattr(instance, "delivered_image", None)
-        before_image = next((
-            getattr(piece.image, "image", None) for piece in getattr(canvas, "pieces", ())
-            if piece.window == getattr(request.target, "root_window", None)
-            and (piece.image.target.session, piece.image.target.surface, piece.image.target.instance)
-            == (request.target.session, request.target.surface, request.target.instance)
-        ), None) if "nativeAppChangeEvents" in self.controller.transport.capabilities else None
         related = (
             RelatedRead(
                 request.target,
@@ -101,8 +124,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 weakref.ref(request.owner) if fixed is not None else None,
                 context_root,
                 changes=(
-                    PostwriteChanges(None, before_tree, before_image)
-                    if before_tree is not None or before_image is not None else None
+                    PostwriteChanges(None, before_tree)
+                    if before_tree is not None else None
                 ),
                 window_family_application=prior["application"] if window_family_only else None,
             )
@@ -150,7 +173,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 f"Action effect remains {error.effect}: {error.detail}",
                 session_identity,
                 related,
-                prefer_image=error._observation_reason is not None,
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
@@ -171,8 +193,14 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         input_baseline = receipt.pop("appChangeInputBaseline", None)
         if related is not None and baseline is not None and receipt["status"] == "dispatched":
             related = replace(related, changes=PostwriteChanges(
-                input_baseline or baseline, before_tree, before_image, input_sampled=input_baseline is not None,
+                input_baseline or baseline, before_tree, input_sampled=input_baseline is not None,
             ))
+        if related is not None and prior["platform"] == "macos" and not request.intent.global_input:
+            related = replace(
+                related,
+                selection_target=selection_target(request, before_tree, before_target),
+                seek_editor=request.intent.kind == "key" and request.intent.parameters.get("key") == "Return",
+            )
         return await self.observe(
             request,
             ObservedAction(receipt),
@@ -188,8 +216,6 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         progress: str,
         session_identity: tuple[int, str] | None,
         related: RelatedRead | None = None,
-        *,
-        prefer_image: bool = False,
     ) -> ObservedAction:
         """Publish a bounded related read for a completed or uncertain write.
 
@@ -200,8 +226,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         # Internal non-UI owners and unobserved launch results have no acquired
         # application scope. The suffix never launches an application.
         instance = getattr(owner, "_instance", None)
-        if owner is not None and (
-            instance is None
+        if (
+            owner is None or instance is None
             or getattr(instance, "directory", None) is None
             and getattr(instance, "anchor", None) is None
         ):
@@ -223,26 +249,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 self.controller.transport.retain_session(session_identity),
                 self.controller.port.calls.limit(POSTWRITE_OBSERVATION_MS),
             ):
-                if owner is None:
-                    observed = await self.controller.interfaces.read_desktop("image", False)
-                else:
-                    prior_tree = (
-                        related.changes.before_tree if related is not None and related.changes is not None else None
-                    )
-                    visual = prefer_image or request.target.capture is not None or (
-                        request.target.node is None and getattr(owner, "_image", None) is not None
-                        and (prior_tree is None or window_content_unexposed(prior_tree))
-                    )
-                    options = dict(related=related) if related is not None else {}
-                    # A pointer target explains how input was addressed, not
-                    # which observation capabilities the application has. Keep
-                    # visual feedback and acquire the independent semantic
-                    # component so the next intent can use AX references/diff.
-                    # Component gaps remain local: unavailable AX must not
-                    # discard pixels or make the completed write fail.
-                    observed = await self.controller.interfaces.read(
-                        related_owner, "both" if visual else "tree", False, None, **options
-                    )
+                options = {"related": related} if related is not None else {}
+                observed = await self.controller.interfaces.read(related_owner, "tree", False, None, **options)
             metadata = observation_data(observed) or {}
             partial = metadata.get("partial", False)
             directory = metadata.get("directory")

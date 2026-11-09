@@ -2,19 +2,16 @@
 
 """One public click must deliver a late popup through the real MCP worker."""
 
-import base64
 import inspect
 import os
 import re
 import sys
 from datetime import timedelta
-from io import BytesIO
 from pathlib import Path
 
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from PIL import Image
 
 
 def popup_fixture(failure=None, *, capture_parent=False, transient=False, image_action_chain=False):
@@ -271,12 +268,7 @@ async def test_one_public_click_delivers_late_popup_without_model_reread(tmp_pat
         if failure == "directory":
             assert "Optional popup directory recheck failed" in text
         assert ("Search applications" in text) == (failure not in ("tree", "both")), text
-        images = [block for block in result.content if block.type == "image"]
-        assert len(images) == (0 if failure in ("image", "both") else 1)
-        if images:
-            with Image.open(BytesIO(base64.b64decode(images[0].data))) as image:
-                assert image.size == (20, 10)
-                assert image.getpixel((10, 5))[:3] == (34, 187, 68)
+        assert all(block.type != "image" for block in result.content)
 
         # Inspect acknowledgements only after the previous tool result reached
         # the client. Capturing a component must not itself count as delivery.
@@ -284,7 +276,7 @@ async def test_one_public_click_delivers_late_popup_without_model_reread(tmp_pat
             "assert [entry for entry in port.trace if entry[0] == 'write'] == [('write', 'A', 'add')], port.trace\n"
             "assert port.trace.count(('tree', 'A')) == 1, port.trace\n"
             "assert port.trace.count(('tree', 'Sheet')) == 1, port.trace\n"
-            "assert port.trace.index(('image', 'Sheet')) < port.trace.index(('tree', 'Sheet')), port.trace\n"
+            "assert not any(entry[0] == 'image' for entry in port.trace), port.trace\n"
             "assert ('directory', False) in port.trace and ('directory', True) in port.trace, port.trace\n"
             "assert port.opened == port.finished, (port.opened, port.finished)\n"
             "assert all(0 < ms <= 5000 for _, ms in port.suffix_budgets), port.suffix_budgets\n"
@@ -292,8 +284,8 @@ async def test_one_public_click_delivers_late_popup_without_model_reread(tmp_pat
             "assert clicked.status == 'dispatched', clicked\n"
             "assert clicked.observation_status == 'partial', clicked.observation_status\n"
             "coverage = {item['window']: item for item in observation_data(clicked.observation)['window_coverage']}\n"
-            "assert coverage['Sheet']['requested'] == ('image', 'tree'), coverage\n"
-            f"assert coverage['Sheet']['delivered'] == {tuple(c for c in ('image', 'tree') if failure not in (c, 'both'))!r}, coverage\n"
+            "assert coverage['Sheet']['requested'] == ('tree',), coverage\n"
+            f"assert coverage['Sheet']['delivered'] == {() if failure in ('tree', 'both') else ('tree',)!r}, coverage\n"
             "assert set(coverage['Sheet']['included']) == set(coverage['Sheet']['delivered']), coverage\n"
             "assert coverage['A']['delivered'] == ('tree',), coverage\n"
         )
@@ -365,7 +357,7 @@ async def test_same_call_transient_window_delivery(tmp_path, case):
         before_close = {
             "partial": "port.partial = True",
             "printed": "print(opened.observation)",
-            "image": "print_image(opened.observation.screenshot)",
+            "image": "print_image(app.read(view='both', window=popup).screenshot)",
             "explicit": "app.read(view='both', window=popup)",
             "full": "app.read(view='both', window=popup, full=True)",
         }.get(case, "")
@@ -396,12 +388,12 @@ async def test_same_call_transient_window_delivery(tmp_path, case):
                 "from computer_use.session.interfaces import WindowLifetime\n"
                 "coverage = observation_data(opened.observation)['window_coverage']\n"
                 "assert [row['delivered'] for row in coverage] == [()], coverage\n"
-                "assert opened.observation.screenshot is not None\n"
+                "assert opened.observation.screenshot is None\n"
                 "assert 'Search applications' in opened.observation.text\n"
                 "assert any(item.identity.window == 'Sheet' and item.lifetime is WindowLifetime.RETAINED "
                 "for item in app._instance.evidence.values())"
             )
         else:
-            assert images, text
+            assert bool(images) == (case in ("image", "explicit", "full")), text
             assert "Search applications" in text
             assert "absent from the latest complete application observation" not in text

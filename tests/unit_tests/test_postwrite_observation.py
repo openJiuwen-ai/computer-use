@@ -247,9 +247,9 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.assertIs(result.observation, self.observation)
         self.execute.assert_awaited_once()
 
-    async def test_image_input_keeps_visual_and_accessibility_observation_available(self):
+    async def test_image_input_keeps_accessibility_observation_without_automatic_capture(self):
         await self.run_action(target=replace(self.target, node=None, capture="capture"))
-        self.assertEqual(self.read.call_args.args[1], "both")
+        self.assertEqual(self.read.call_args.args[1], "tree")
         self.assertEqual(self.read.call_args.kwargs, {})  # default read never activates
 
     async def test_window_key_does_not_repeat_cached_image_when_tree_body_is_available(self):
@@ -257,18 +257,8 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         request = ExecuteAction(self.ui, Intent("key", {}), replace(self.target, node=None))
         related = RelatedRead(self.target, (), changes=PostwriteChanges(None, object()))
         suffix = WriteWithObservation(self.controller, SimpleNamespace(contract=SimpleNamespace(effects=frozenset())))
-        with patch("computer_use.interaction.write.request.observation.window_content_unexposed", return_value=False):
-            await suffix.observe(request, ObservedAction(self.receipt), "dispatched", (1, "test"), related)
+        await suffix.observe(request, ObservedAction(self.receipt), "dispatched", (1, "test"), related)
         self.assertEqual(self.read.call_args.args[1], "tree")
-
-    async def test_window_key_keeps_pixels_when_prior_tree_is_only_a_shell(self):
-        self.ui._image = object()
-        request = ExecuteAction(self.ui, Intent("key", {}), replace(self.target, node=None))
-        related = RelatedRead(self.target, (), changes=PostwriteChanges(None, object()))
-        suffix = WriteWithObservation(self.controller, SimpleNamespace(contract=SimpleNamespace(effects=frozenset())))
-        with patch("computer_use.interaction.write.request.observation.window_content_unexposed", return_value=True):
-            await suffix.observe(request, ObservedAction(self.receipt), "dispatched", (1, "test"), related)
-        self.assertEqual(self.read.call_args.args[1], "both")
 
     async def test_prior_window_content_stays_available_without_native_event_support(self):
         prior = object()
@@ -277,21 +267,17 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.ui._instance.owners = {self.target.root_window: self.ui}
         self.controller.state(self.ui).query_snapshot = prior
         request = ExecuteAction(self.ui, Intent("key", {}), replace(self.target, node=None))
-        for shell in (False, True):
-            with self.subTest(shell=shell), patch(
-                "computer_use.interaction.write.request.observation.window_content_unexposed", return_value=shell,
-            ):
-                self.read.reset_mock()
-                await self.controller.run(request)
-                related = self.read.call_args.kwargs["related"]
-                self.assertIs(related.changes.before_tree, prior)
-                self.assertIsNone(related.changes.baseline)
-                self.assertFalse(related.changes.input_sampled)
-                self.assertEqual(self.read.call_args.args[1], "both" if shell else "tree")
+        await self.controller.run(request)
+        related = self.read.call_args.kwargs["related"]
+        self.assertIs(related.changes.before_tree, prior)
+        self.assertIsNone(related.changes.baseline)
+        self.assertFalse(related.changes.input_sampled)
+        self.assertEqual(self.read.call_args.args[1], "tree")
 
-    async def test_desktop_input_keeps_desktop_observation(self):
-        await self.run_action(owner=False, target=Binding("test", None, None, None, capture="image"))
-        self.controller.interfaces.read_desktop.assert_awaited_once_with("image", False)
+    async def test_desktop_input_does_not_take_an_automatic_screenshot(self):
+        result = await self.run_action(owner=False, target=Binding("test", None, None, None, capture="image"))
+        self.assertEqual(result.observation_status, "not_requested")
+        self.controller.interfaces.read_desktop.assert_not_awaited()
         self.read.assert_not_awaited()
 
     async def test_read_timeout_does_not_erase_or_repeat_write(self):
@@ -362,7 +348,7 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
             self.assertEqual(failure.effect, "none")
             self.execute.assert_awaited_once()
             self.read.assert_awaited_once()
-            self.assertEqual(self.read.call_args.args[1], "both")
+            self.assertEqual(self.read.call_args.args[1], "tree")
 
     async def test_uncertain_write_retains_same_error_effect_context_and_cause_after_read(self):
         for effect in ("partial", "possible"):

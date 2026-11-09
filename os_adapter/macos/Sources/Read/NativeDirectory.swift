@@ -570,7 +570,7 @@ import ApplicationServices
         }
     }
 
-    private func retainedModalHints(owner: NSRunningApplication, native: [NativeWindows.Window]) throws
+    func retainedModalHints(owner: NSRunningApplication, native: [NativeWindows.Window]) throws
         -> [NativeApplicationReader.ModalHint]
     {
         var hints: [NativeApplicationReader.ModalHint] = try surfaces.values.filter { $0.owner.isEqual(owner) }.compactMap { surface in

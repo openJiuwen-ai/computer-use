@@ -14,6 +14,7 @@ import ApplicationServices
         try trackedMenuRequiresThePhysicalPointerInItsOriginalLeaf()
         try fixedDocumentEvidenceIsLazy()
         try fixedWindowQuerySeparatesAXAbsenceFromEndedLifetime()
+        try fixedKeyboardQueryReusesItsResolvedWindow()
         for explicit in [false, true] {
             for mode in [
                 "selectable", "background", "initialTarget", "restoreOther", "fallback", "unavailable", "switched",
@@ -52,6 +53,40 @@ import ApplicationServices
         try await skipsPreparedDocument()
         try await documentPreparationBoundary()
         print("PASS original-window action receiver preparation, retained evidence and no-replay boundaries")
+    }
+
+    @MainActor static func fixedKeyboardQueryReusesItsResolvedWindow() throws {
+        let probe = DocumentProbe(mode: "windowKeyboard")
+        probe.binding["node"] = NSNull()
+        let original = AXUIElementCreateApplication(1_000_027)
+        probe.windowKeyboardScope = NativeInputScope(
+            wire: probe.binding, application: .current, window: original, menuRoot: nil, blocked: ["modal"],
+            windowEvidence: .init(windows: [], coverageComplete: true))
+        let directory = NativeDirectory(state: probe.state, session: "s")
+        let access = NativeQueryAccess(
+            session: "s", scopes: probe, units: probe,
+            captures: NativeCapture(directory: directory, sharing: probe.state.sharing),
+            desktop: { preconditionFailure("desktop is not selected") }, objects: probe, directory: directory,
+            sharing: probe.state.sharing, contracts: probe)
+        let intent = try NativeIntent(["kind": "key", "parameters": ["key": "Super_L+g"]], mode: "write")
+        let op = NativeOperation(
+            timeoutMs: 5000, writable: true, intent: intent, target: probe.binding, release: {}, cancelActive: {})
+        defer { _ = op.finish() }
+        let query = try ResolveNativeInputQueryScopePass.run(
+            p: ["target": probe.binding], op: op, within: [], actuator: nil, receiver: nil, basis: [], access: access)
+        let plan = NativeInputContextPlan(query: query, operation: op, within: [], actuator: nil, receiver: nil, basis: [])
+        let unit = try SampleNativeInputRoutesPass.keyboardUnit(plan, units: probe)
+        precondition(CFEqual(unit.window, original) && unit.windowCommandScope && unit.element == nil)
+        precondition(unit.boundaryCoverageComplete)
+        precondition(query.binding.blocked == ["modal"] && probe.windowKeyboardScopeReads == 1)
+        precondition(probe.inputBindingReads == 0, "the fixed window query needs no second scope lookup")
+
+        probe.binding["node"] = "original"
+        let elementQuery = try ResolveNativeInputQueryScopePass.run(
+            p: ["target": probe.binding], op: op, within: [], actuator: nil, receiver: nil, basis: [], access: access)
+        precondition(elementQuery.binding.node == "original" && elementQuery.windowKeyboardScope == nil)
+        precondition(probe.windowKeyboardScopeReads == 1 && probe.inputBindingReads == 1,
+                     "an addressed element retains its own lookup")
     }
 
     @MainActor static func applicationMenuScopeIsDistinctFromWindowContent() {
@@ -514,6 +549,9 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
     ]
     var presses = 0, localPrepared = false, uncertain = false, enteringDispatch = false
     var beforeSelectionChecks = 0, afterSelectionChecks = 0, finalEnabledChecks = 0, completedPreparations = 0
+    var windowKeyboardScope: NativeInputScope?
+    var windowKeyboardScopeReads = 0
+    var inputBindingReads = 0
     var localPreparationCalls = 0
     var trace = [String]()
     var actionName: String { ["custom", "customDisabled"].contains(mode) ? "AXShowMenu" : "AXPress" }
@@ -796,8 +834,13 @@ private final class DocumentProbe: NativeControlObjectAccess, NativeInputUnitAcc
     func inputBinding(_ raw: Any?, input: Bool, attachedMenuAction: Bool) throws -> (
         wire: [String: Any], blocked: [String], node: String?
     ) {
+        inputBindingReads += 1
         try boundaryCheck()
         return (binding, [], "original")
+    }
+    func windowKeyboardQueryScope(_ raw: Any?) throws -> NativeInputScope? {
+        windowKeyboardScopeReads += 1
+        return windowKeyboardScope
     }
     func checkContainment(_ binding: [String: Any], within: [String], op: NativeOperation) throws {
         try boundaryCheck()

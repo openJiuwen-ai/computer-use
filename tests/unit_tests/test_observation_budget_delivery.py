@@ -23,6 +23,7 @@ from computer_use.native.lifecycle import CallLifecycle
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, WorkingWindow
 from computer_use.protocol.observation import NativeNode, NativeObservation, ReadIssue, Relation
 from computer_use.protocol.observation.adapters.records import DriverObservationReply, DriverReadMetadata
+from computer_use.protocol.session import failure_error
 from test_bounded_image_composition import captured_part
 from test_d34_read_contracts import directory, setup, window
 
@@ -194,6 +195,59 @@ def test_directory_identity_failure_retains_its_new_catalogue(monkeypatch):
     assert len(port.queries) == 1 and not port.calls.retired
 
 
+@pytest.mark.parametrize("failure", ["deadline", "other", "possible_effect", "retired", "changed_session"])
+def test_acknowledged_native_recheck_deadline_preserves_capture_with_unconfirmed_scope(monkeypatch, failure):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr("computer_use.native.lifecycle.time.monotonic", lambda: clock.now)
+    port = Port(clock, expired_at="none")
+    reader = NativeAppReader(port)
+    binding = Binding("session", "instance:A", "A", "surface:A")
+    selected = WorkingWindow("application", "Fixture", binding)
+    original = directory(window("A"))
+    port.connect = AsyncMock(return_value=Binding("session", None, None, None))
+    error = failure_error(
+        "inspect",
+        {
+            "code": "execution_failed" if failure == "other" else "deadline_exceeded",
+            "effect": "possible" if failure == "possible_effect" else "none",
+            "detail": "request deadline exceeded",
+            "target": "native request",
+        },
+    )
+
+    async def recheck(*_args):
+        clock.now += 5.1
+        if failure == "retired":
+            port.calls.retired = True
+        elif failure == "changed_session":
+            port.connection.session_identity = (2, "replacement")
+        raise error
+
+    port.directory = AsyncMock(side_effect=recheck)
+
+    async def read():
+        with port.calls.limit(5000):
+            return await reader.read(
+                selected, view="tree", overview=False, include_menus=False, source_directory=original, scope_managed=True,
+            )
+
+    assert error.code == "execution_failed"
+    if failure == "deadline":
+        observed = asyncio.run(read())
+        assert observed.source_directory is original and observed.directory is original
+        assert observed.target.root_window == "A" and observed.target.surface == "surface:A"
+        assert observed.tree.native.interval_ns == (1, 2)
+        assert any(node.name == "Search" for node in observed.tree.native.nodes.values())
+        assert not observed.scope_confirmed
+        assert any(gap.component == "directory" and "request deadline exceeded" in gap.detail for gap in observed.gaps)
+        assert not port.calls.retired
+    else:
+        with pytest.raises(type(error)) as caught:
+            asyncio.run(read())
+        assert caught.value is error
+    assert len(port.queries) == port.directory.await_count == 1 and port.finished == ["1", "2"]
+
+
 @pytest.mark.parametrize("scope_managed", [False, True])
 def test_postcapture_unconfirmed_window_keeps_its_exact_facts_pixels_and_intervals(monkeypatch, scope_managed):
     clock = SimpleNamespace(now=100.0)
@@ -228,7 +282,8 @@ def test_postcapture_unconfirmed_window_keeps_its_exact_facts_pixels_and_interva
 
 
 @pytest.mark.parametrize("later_evidence", [
-    "same", "replaced", "ended", "unknown_parent", "timeout", "capture_scope_changed", "final_parent_changed",
+    "same", "replaced", "ended", "unknown_parent", "timeout", "native_timeout", "capture_scope_changed",
+    "final_parent_changed",
 ])
 def test_exact_window_pixels_do_not_require_a_complete_directory(monkeypatch, later_evidence):
     clock = SimpleNamespace(now=100.0)
@@ -255,10 +310,16 @@ def test_exact_window_pixels_do_not_require_a_complete_directory(monkeypatch, la
         scope_changed=later_evidence == "capture_scope_changed",
     )
     reader.images.collect = AsyncMock(return_value=image)
-    reader._discover = (
-        AsyncMock(side_effect=TimeoutError("recheck deadline")) if later_evidence == "timeout"
-        else AsyncMock(return_value=(selected, incomplete))
-    )
+    if later_evidence == "timeout":
+        reader._discover = AsyncMock(side_effect=TimeoutError("recheck deadline"))
+    elif later_evidence == "native_timeout":
+        reader._discover = AsyncMock(side_effect=failure_error(
+            "inspect", {
+                "code": "deadline_exceeded", "effect": "none", "detail": "recheck deadline", "target": "native request",
+            },
+        ))
+    else:
+        reader._discover = AsyncMock(return_value=(selected, incomplete))
 
     observed = asyncio.run(reader.read(
         selected, view="both", overview=False, include_menus=False, source_directory=initial, scope_managed=True,

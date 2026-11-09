@@ -205,7 +205,8 @@ import ApplicationServices
                         declarations.declareClick(.pointer(.click), offer: NativeClickClippedLeaf.continuationOffer(ready: ready))
                         return false
                     }
-                    if let exposure = try unit.exposure() {
+                    let viewport = try unit.viewport()
+                    if let exposure = viewport.exposure {
                         if popupChoice {
                             throw DriverError(
                                 "the original popup choice must already be visible", code: .inputUnavailable)
@@ -227,7 +228,7 @@ import ApplicationServices
                             at: exposure.point, exposure: true, addressedReceiver: receiver, qtComboChoice: unit.qtComboChoice)
                         return false
                     }
-                    let sampled = try unit.observedGeometry()
+                    let sampled = try unit.observedGeometry(in: viewport)
                     if plan.actuator?.relation == "controlPart", sampled.basis != .exactHit {
                         throw DriverError("the current point does not hit the selected control part", code: .inputUnavailable)
                     }

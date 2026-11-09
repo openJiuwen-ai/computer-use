@@ -82,15 +82,11 @@ enum NativePointerReadiness {
         kind: NativePointerIntent.Kind, foreground: Bool, windowKind: WindowKind, focus: WindowFocus,
         initialFocus: WindowFocus? = nil, backgroundPrepared: Bool,
         backgroundReportedActive: Bool? = nil, requirement: Requirement = .contentReceiver,
-        presentedMenuReceiver: Bool = false
+        presentedMenuReceiver: @autoclosure () -> Bool = false
     ) -> Bool {
         // Foreground here already includes the exact original window hit.
         // A prior synthetic focus receipt cannot discharge this requirement.
         guard requirement != .foregroundWindowPoint || foreground else { return false }
-        // An already presented, exactly associated menu owns its tracking
-        // receiver. Activating its document would instead cancel that receiver.
-        if presentedMenuReceiver, kind == .click, requirement == .contentReceiver,
-            windowKind == .otherDeclared { return true }
         if foreground {
             if kind == .scroll { return true }
             switch windowKind {
@@ -107,7 +103,12 @@ enum NativePointerReadiness {
             case .identityConflict: return false
             }
         }
-        guard backgroundPrepared else { return false }
+        if !backgroundPrepared {
+            // An already presented, exactly associated menu owns its tracking
+            // receiver. Activating its document would cancel that receiver.
+            return kind == .click && requirement == .contentReceiver && windowKind == .otherDeclared
+                && presentedMenuReceiver()
+        }
         switch windowKind {
         case .identityConflict: return false
         case .keyRequiring:
@@ -291,13 +292,12 @@ enum NativePointerDeliveryPolicy {
             requirement: effectiveRequirement,
             cached: BackgroundEvents.pointerPreparationIsCurrent(target, window: window, needsKeyWindow: kind != .scroll))
         let active = !foreground && declared == .keyRequiring ? reportedActive() : nil
-        let menuReceiver = kind == .click && effectiveRequirement == .contentReceiver && presentedMenu(at: point)
         return Readiness(
             ready: NativePointerReadiness.ready(
                 kind: kind, foreground: foreground, windowKind: declared, focus: focus, initialFocus: initialFocus,
                 backgroundPrepared: prepared,
                 backgroundReportedActive: active, requirement: effectiveRequirement,
-                presentedMenuReceiver: menuReceiver),
+                presentedMenuReceiver: presentedMenu(at: point)),
             foreground: foreground, focus: focus, windowKind: declared,
             backgroundPrepared: foreground ? nil : prepared, backgroundReportedActive: active)
     }

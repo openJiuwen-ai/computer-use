@@ -68,7 +68,6 @@ def test_queued_new_window_arrives_without_a_second_old_window_read(monkeypatch,
         return_value=WindowPart(
             member_target(state, form),
             tree=tree(form, "Meeting title"),
-            image=pixels(state, form),
         )
     )
 
@@ -83,12 +82,12 @@ def test_queued_new_window_arrives_without_a_second_old_window_read(monkeypatch,
     assert controller.reader.read.await_count == 1
     assert wait.await_count == 1
     if event:
-        assert "Meeting title" in result.text and result.screenshot is not None
+        assert "Meeting title" in result.text and result.screenshot is None
         assert pipeline.member.await_count == 1
         assert pipeline.member.call_args.args[1]["window"] == "Form"
-        assert pipeline.member.call_args.args[2] == "both"
+        assert pipeline.member.call_args.args[2] == "tree"
         coverage = {item["window"]: item for item in observation_data(result)["window_coverage"]}
-        assert set(coverage["Form"]["included"]) == {"tree", "image"}
+        assert coverage["Form"]["included"] == ("tree",)
     else:
         assert ("Parent content" if before_key is None else "Open schedule") in result.text
         pipeline.member.assert_not_awaited()
@@ -286,7 +285,6 @@ def test_missing_original_capture_can_receive_window_created_and_deliver_new_for
         return_value=WindowPart(
             member_target(state, form),
             tree=tree(form, "Meeting title"),
-            image=pixels(state, form),
         )
     )
 
@@ -307,9 +305,10 @@ def test_missing_original_capture_can_receive_window_created_and_deliver_new_for
     controller.port.app_changes.assert_awaited_once()
     assert pipeline.member.await_count == 1
     assert pipeline.member.call_args.args[1]["window"] == "Form"
-    assert "Meeting title" in result.text and result.screenshot is not None
+    assert pipeline.member.call_args.args[2] == "tree"
+    assert "Meeting title" in result.text and result.screenshot is None
     coverage = {item["window"]: item for item in observation_data(result)["window_coverage"]}
-    assert set(coverage["Form"]["included"]) == {"tree", "image"}
+    assert coverage["Form"]["included"] == ("tree",)
     assert coverage["A"]["captured"] == ()
 
 
@@ -337,7 +336,7 @@ def test_later_unconfirmed_popup_keeps_its_capture_and_observes_the_current_pare
     )
     related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),))
 
-    result = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
+    result = asyncio.run(pipeline._collect(app, "both", False, None, before, None, None, related))
 
     assert "Current parent content" in result.text and result.screenshot is not None
     assert "outside current read scope, tree not expanded" in result.text
@@ -348,7 +347,7 @@ def test_later_unconfirmed_popup_keeps_its_capture_and_observes_the_current_pare
     controller.reader.read.assert_awaited_once()
     pipeline.member.assert_awaited_once()
     assert pipeline.member.call_args.args[1]["window"] == "A"
-    assert pipeline.member.call_args.args[2] == "tree"
+    assert pipeline.member.call_args.args[2] == "both"
     metadata = observation_data(result)
     coverage = {item["window"]: item for item in metadata["window_coverage"]}
     assert metadata["partial"] and coverage["Popup"]["lifecycle"] == "unknown"

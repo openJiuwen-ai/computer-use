@@ -148,7 +148,7 @@ class Runtime:
         The SDK's before-write boundary still records where earlier facts were
         captured. A successful later capture may supersede the same view, while
         a refused write leaves the preceding facts in their original position.
-        Explicit prints and full reads keep their requested historical view.
+        Explicit reads and prints keep their requested historical view.
         """
         for observation in run["observations"].take():
             incoming = {self.presenter.tree_key(observation, tree) for tree in self.presenter.trees(observation)}
@@ -159,7 +159,7 @@ class Runtime:
                     previous["superseded"] = True
             entry = {
                 "kind": "observation", "observation": observation,
-                "pinned": explicit or bool(observation.get("full")),
+                "pinned": explicit or bool(observation.get("explicitRead") or observation.get("full")),
                 "superseded": False,
             }
             run["observationEntries"].append(entry)

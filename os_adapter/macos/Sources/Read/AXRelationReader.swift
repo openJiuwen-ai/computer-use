@@ -85,6 +85,7 @@ import ApplicationServices
 
     func read(
         _ element: AXUIElement, source: String, property: String, limit: Int, cursor: String? = nil,
+        liveBatchValue: AXUIElement? = nil,
         withinBudget: () throws -> Bool = { true }
     ) throws -> Result {
         let selected = try pages.select(cursor, source: source, property: property)
@@ -128,6 +129,11 @@ import ApplicationServices
                 nativeAPI: "AXUIElementCopyAttributeValue", note: note)
         }
         guard try withinBudget() else { return timedOut() }
+        if let liveBatchValue, cursor == nil, Self.singleProperties.contains(property) {
+            return try page(
+                limit > 0 ? [liveBatchValue] : [], total: 1, array: false,
+                nativeAPI: "AXUIElementCopyMultipleAttributeValues")
+        }
         if Self.singleProperties.contains(property) { return try valuePage(arrayExpected: false) }
         let (status, total) = api.count(element, property)
         guard status == .success, total >= 0 else {

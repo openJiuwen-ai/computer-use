@@ -26,7 +26,7 @@ def test_new_menu_without_native_parent_is_collected_without_replacing_working_w
     plan.update(after, {item["window"]: item for item in after["surfaces"]})
     assert plan.principal == "Form"
     assert plan.next() == (WindowIdentity.of(parent), "tree")
-    assert plan.next() == (WindowIdentity.of(menu), "both")
+    assert plan.next() == (WindowIdentity.of(menu), "tree")
     assert plan.next() is None
 
 
@@ -73,7 +73,7 @@ def test_related_menu_reuses_delivered_host_body_and_only_collects_its_pixels(mo
     related = RelatedRead(member_target(state, parent), (WindowIdentity.of(parent),))
     events = []
     observed = asyncio.run(pipeline._collect(
-        app, "tree", False, None, before, None, None, related, on_observation=events.append,
+        app, "both", False, None, before, None, None, related, on_observation=events.append,
     ))
     assert pipeline.member.call_args.args[2] == "image"
     delivered = deliver_through_runtime(events)
@@ -85,7 +85,7 @@ def test_related_menu_reuses_delivered_host_body_and_only_collects_its_pixels(mo
     assert set(coverage["delivered"]) == {"tree", "image"}
 
 
-def test_late_menu_body_and_pixels_reach_model_in_original_object_call(monkeypatch):
+def test_late_menu_body_reaches_model_in_original_object_call_without_automatic_pixels(monkeypatch):
     parent = window("Form")
     menu = {**window("Options"), "kind": "menu", "parentState": "unknown"}
     before, after = directory(parent), directory(parent, menu)
@@ -93,7 +93,7 @@ def test_late_menu_body_and_pixels_reach_model_in_original_object_call(monkeypat
     controller.reader.read = AsyncMock(return_value=parent_result(state, parent, before, after))
     pipeline = InterfaceReadPipeline(controller)
     pipeline.member = AsyncMock(return_value=WindowPart(
-        member_target(state, menu), tree=tree(menu, "10:00"), image=pixels(state, menu),
+        member_target(state, menu), tree=tree(menu, "10:00"),
     ))
 
     async def refresh(*args, **kwargs):
@@ -109,11 +109,12 @@ def test_late_menu_body_and_pixels_reach_model_in_original_object_call(monkeypat
     delivered = deliver_through_runtime(events)
     text = "\n".join(block["text"] for block in delivered["content"] if block["type"] == "text")
     assert "10:00" in text
-    assert any(block["type"] == "image" for block in delivered["content"])
+    assert all(block["type"] != "image" for block in delivered["content"])
     coverage = {item["window"]: item for item in observation_data(result)["window_coverage"]}
-    assert set(coverage["Options"]["delivered"]) == {"tree", "image"}
+    assert coverage["Options"]["delivered"] == ("tree",)
     assert controller.reader.read.await_count == 1
     assert pipeline.member.await_count == 1
+    assert pipeline.member.call_args.args[2] == "tree"
 
 
 def test_distinct_ax_sources_share_only_their_confirmed_physical_pixels():

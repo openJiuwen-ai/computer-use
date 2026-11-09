@@ -213,11 +213,10 @@ import ApplicationServices
             }, hitFrame: { try check() ? controlFrame($0) : nil })
     }
 
-    private func sample(frozen: Geometry? = nil) throws -> Sample {
+    private func sample(frozen: Geometry? = nil, in sampledViewport: NativeElementViewport? = nil) throws -> Sample {
         try RequestDiagnostics.checkCancellation()
-        try validatePhysicalWindow()
-        let mapping = try NativeWindowUnit(application: application, window: window).mapping()
-        let viewport = try NativeElementViewport.sample(element: element, window: window, mapping: mapping)
+        let viewport = try sampledViewport ?? self.viewport()
+        let mapping = viewport.mapping
         let frame = viewport.frame
         let deadline = ProcessInfo.processInfo.systemUptime + 0.15
         // Scroll's element is the selected wheel region, not the requested
@@ -473,16 +472,17 @@ import ApplicationServices
     /// Query projection keeps a mismatching native hit visible so the public
     /// resolver can prove an existing control-part relationship. It grants no
     /// permission to dispatch to that hit or to the owner's rectangle.
-    func observedGeometry() throws -> Observation {
-        let value = try sample()
+    /// Reuse a viewport only within the same synchronous query on this unit.
+    func observedGeometry(in viewport: NativeElementViewport? = nil) throws -> Observation {
+        let value = try sample(in: viewport)
         return Observation(
             geometry: value.geometry, hit: value.hit, basis: value.selection.basis, preparation: value.preparation)
     }
 
     /// The original window may first need to be uncovered. This query never
     /// accepts another control in that window, and dispatch still uses geometry().
-    func preparationGeometry() throws -> Geometry {
-        let observed = try observedGeometry()
+    func preparationGeometry(in viewport: NativeElementViewport) throws -> Geometry {
+        let observed = try observedGeometry(in: viewport)
         guard observed.preparation != .unavailable, !requiresExactElementHit || observed.basis == .exactHit else {
             throw DriverError(
                 "no sampled pointer point belongs to this native target or its available window route",

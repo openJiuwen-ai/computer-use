@@ -129,7 +129,7 @@ def parent_result(state, a, before, after):
     )
 
 
-@pytest.mark.parametrize("failure", [None, "tree", "image", "directory", "both"])
+@pytest.mark.parametrize("failure", [None, "tree", "directory"])
 def test_late_sheet_is_delivered_in_same_observation_with_partial_catalogue(monkeypatch, failure):
     a = window("A")
     sheet = {**window("Sheet", parent="A"), "modal": True, "kind": "sheet"}
@@ -147,9 +147,8 @@ def test_late_sheet_is_delivered_in_same_observation_with_partial_catalogue(monk
         assert item["window"] == "Sheet"
         return WindowPart(
             member_target(state, item),
-            tree=None if failure in ("tree", "both") else tree(item, "Use Touch ID or enter password"),
-            image=None if failure in ("image", "both") else pixels(state, item),
-            gaps=(gap,) if failure in ("tree", "both") else (),
+            tree=None if failure == "tree" else tree(item, "Use Touch ID or enter password"),
+            gaps=(gap,) if failure == "tree" else (),
         )
 
     async def recheck(*args, **kwargs):
@@ -167,31 +166,30 @@ def test_late_sheet_is_delivered_in_same_observation_with_partial_catalogue(monk
         observed = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
     finally:
         set_observation_handler(None)
-    assert calls == [("Sheet", "both")]
+    assert calls == [("Sheet", "tree")]
     assert controller.reader.read.await_count == 1
     assert len(events) == 1
     coverage = {record["window"]: record for record in observation_data(observed)["window_coverage"]}
     assert coverage["Sheet"]["delivered"] == ()
-    assert coverage["Sheet"]["requested"] == ("image", "tree")
+    assert coverage["Sheet"]["requested"] == ("tree",)
     assert "Parent content" in observed.text
     assert observation_data(observed)["partial"]  # unrelated directory error is retained
-    if failure not in ("tree", "both"):
+    assert observed.screenshot is None
+    if failure != "tree":
         assert "Use Touch ID or enter password" in observed.text
         assert observed.text.index("Use Touch ID") < observed.text.index("Parent content")
-    if failure not in ("image", "both"):
-        assert observed.screenshot is not None
-        assert app._image.pieces[0].window == "Sheet"
-    if failure == "both":
-        assert coverage["Sheet"]["missing"] == ("image", "tree")
+    else:
+        assert coverage["Sheet"]["missing"] == ("tree",)
         assert "content was not included" in observed.text
     if failure == "directory":
         assert "optional recheck expired" in observed.text
     result = deliver_through_runtime([event["observation"] for event in events])
     assert not result.get("isError"), result
+    assert all(block["type"] != "image" for block in result["content"])
     received = [block["text"] for block in result["content"] if block["type"] == "text"]
     coverage = {record["window"]: record for record in observation_data(observed)["window_coverage"]}
     assert set(coverage["Sheet"]["delivered"]) == set(coverage["Sheet"]["included"])
-    if failure not in ("tree", "both"):
+    if failure != "tree":
         assert "Use Touch ID or enter password" in received[0]
 
 
@@ -240,7 +238,7 @@ def test_related_read_accounts_for_parent_bound_sheet_by_its_own_window(monkeypa
     events = []
     set_observation_handler(events.append)
     try:
-        observation = asyncio.run(pipeline._collect(app, "tree", False, None, source, None, None, related))
+        observation = asyncio.run(pipeline._collect(app, "both", False, None, source, None, None, related))
     finally:
         set_observation_handler(None)
     coverage = {record["window"]: record for record in observation_data(observation)["window_coverage"]}
@@ -296,7 +294,8 @@ def test_replacement_sheet_is_collected_without_rebinding_captured_old_identity(
 
     async def member(owner, item, view, **kwargs):
         captured.append(member_target(state, item))
-        return WindowPart(captured[-1], tree=tree(item, item["window"] + " body"), image=pixels(state, item))
+        assert view == "tree"
+        return WindowPart(captured[-1], tree=tree(item, item["window"] + " body"))
 
     async def recheck(*args, **kwargs):
         adopt(controller, app, last)
@@ -311,7 +310,7 @@ def test_replacement_sheet_is_collected_without_rebinding_captured_old_identity(
     assert "Two body" in result.text and "One body" not in result.text
     records = {record["window"]: record for record in observation_data(result)["window_coverage"]}
     assert records["One"]["lifecycle"] == "closed" and records["One"]["included"] == ()
-    assert records["Two"]["included"] == ("tree", "image")
+    assert records["Two"]["included"] == ("tree",)
 
 
 def test_ambiguous_modal_selection_does_not_block_independently_bound_reads():
@@ -384,7 +383,7 @@ def test_new_parentless_modal_delivers_pixels_without_waiting_for_its_tree(monke
     set_observation_handler(events.append)
     try:
         observed = asyncio.run(
-            InterfaceReadPipeline(controller).run(app, "tree", False, None, related=related)
+            InterfaceReadPipeline(controller).run(app, "both", False, None, related=related)
         )
     finally:
         set_observation_handler(None)
@@ -465,7 +464,7 @@ def test_related_new_window_can_replace_historical_pixels_after_exact_native_upg
         # The public SDK gives ordinary calls an operation context with no explicit deadline.
         timeout_ms = 200 if later_evidence == "insufficient_budget" else None
         with operation_budget(timeout_ms):
-            return await pipeline._collect(app, "tree", False, None, before, None, None, related)
+            return await pipeline._collect(app, "both", False, None, before, None, None, related)
 
     events = []
     monkeypatch.setattr(images, "_delivery_required", True)
@@ -511,7 +510,7 @@ def test_known_window_becoming_modal_gets_content_without_new_window_id():
     assert related.new_windows(current) == ()
     plan = CollectionPlan("A", "tree", related)
     plan.update(current, {item["window"]: item for item in current["surfaces"]})
-    assert plan.next() == (WindowIdentity.of(child), "both")
+    assert plan.next() == (WindowIdentity.of(child), "tree")
 
 
 def test_failed_optional_recheck_keeps_collecting_already_known_peers(monkeypatch):
@@ -570,15 +569,14 @@ def test_ordinary_read_does_not_add_directory_polling_or_image_acquisition(monke
 
 
 @pytest.mark.parametrize("automatic", [True, False])
-def test_lost_tree_body_adds_pixels_only_to_automatic_observation(monkeypatch, automatic):
+def test_tree_view_does_not_add_pixels_when_tree_body_is_unavailable(monkeypatch, automatic):
     a = window("A")
     current = directory(a)
     controller, app, state = setup(current)
     observed = replace(parent_result(state, a, current, current), tree=None)
     controller.reader.read = AsyncMock(return_value=observed)
     pipeline = InterfaceReadPipeline(controller)
-    image = pixels(state, a)
-    pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, a), image=image))
+    pipeline.member = AsyncMock()
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", AsyncMock(return_value=current))
     from computer_use.interaction.read.views.changes import PostwriteChanges
 
@@ -593,16 +591,11 @@ def test_lost_tree_body_adds_pixels_only_to_automatic_observation(monkeypatch, a
         ))
     finally:
         set_observation_handler(None)
-    if automatic:
-        pipeline.member.assert_awaited_once()
-        assert pipeline.member.call_args.args[2] == "image"
-        assert result.screenshot is not None
-        blocks = deliver_through_runtime([event["observation"] for event in events])
-        assert not blocks.get("isError"), blocks
-        assert sum(block["type"] == "image" for block in blocks["content"]) == 1
-    else:
-        pipeline.member.assert_not_awaited()
-        assert result.screenshot is None
+    pipeline.member.assert_not_awaited()
+    assert result.screenshot is None
+    blocks = deliver_through_runtime([event["observation"] for event in events])
+    assert not blocks.get("isError"), blocks
+    assert all(block["type"] != "image" for block in blocks["content"])
 
 
 def test_completeness_check_failure_keeps_captured_tree_and_image(monkeypatch):
@@ -644,7 +637,7 @@ def test_final_accounting_failure_does_not_veto_ordinary_observation(monkeypatch
     assert observation_data(result)["partial"]
 
 
-def test_attached_menu_keeps_its_surface_kind_and_gets_visual_fallback():
+def test_attached_menu_keeps_its_surface_kind_and_stays_tree_only():
     a = window("A")
     menu = {**window("Menu", parent="A"), "kind": "menu"}
     _, _, state = setup(directory(a))
@@ -654,7 +647,7 @@ def test_attached_menu_keeps_its_surface_kind_and_gets_visual_fallback():
     plan = CollectionPlan("A", "tree", related)
     plan.update(current, {item["window"]: item for item in current["surfaces"]})
     assert plan.next() == (WindowIdentity.of(a), "tree")
-    assert plan.next() == (WindowIdentity.of(menu), "both")
+    assert plan.next() == (WindowIdentity.of(menu), "tree")
 
 
 def test_explicit_member_read_does_not_run_automatic_suffix_completeness_check(monkeypatch):
@@ -690,7 +683,7 @@ def test_image_composition_failure_does_not_claim_popup_body_was_included(monkey
         failed_composition,
     )
     related = RelatedRead(member_target(state, a), (WindowIdentity.of(a),))
-    observed = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
+    observed = asyncio.run(pipeline._collect(app, "both", False, None, before, None, None, related))
     assert "Parent content" in observed.text and "Image composition failed" in observed.text
     assert observed.screenshot is None and observation_data(observed)["partial"]
     assert any('"Popup"' in line and "not expanded" in line for line in observed.text.splitlines())

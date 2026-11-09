@@ -14,6 +14,7 @@ from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
 from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
 from computer_use.interaction.read.views.publication import publish, tree_document
+from computer_use.session.events import explicit_observation_completed
 from computer_use.session.interfaces import LookupContext, SurfaceOwner
 from computer_use.session.state import AppState
 
@@ -141,6 +142,7 @@ class AgentElementReadPipeline:
             scope="element:" + repr(snapshot["binding"]),
             view="element",
             lookup_context=lookup_context,
+            on_observation=explicit_observation_completed if cursor is None else None,
         )
 
 

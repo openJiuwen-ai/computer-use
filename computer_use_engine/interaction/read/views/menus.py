@@ -92,6 +92,7 @@ class InterfaceMenuPipeline:
         observed: MenuAppObservation | None = None,
         preparation: dict | None = None,
         full: bool = False,
+        on_observation=None,
     ) -> Observation:
         """Collect and publish menus within the handle's established interface scope.
 
@@ -181,6 +182,7 @@ class InterfaceMenuPipeline:
             view="menu",
             directory=instance.directory,
             preparation=preparation,
+            on_observation=on_observation,
         )
 
 

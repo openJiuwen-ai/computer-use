@@ -10,6 +10,10 @@ from .primitives import finite, nonempty, record, safe_integer
 NATIVE_PROTOCOL_VERSION = 6  # Public Computer and host setup use the same protocol.
 
 
+class NativeRequestDeadline(ComputerUseError):
+    """The native driver acknowledged expiry of this request."""
+
+
 def remember_failure_context(error, context=None):
     if context is not None:
         # The pipeline shares retained bindings with their owning service.
@@ -34,7 +38,8 @@ def decode_failure(value):
 
 
 def failure_error(method, failure):
-    error = ComputerUseError({**failure, "code": public_error_code(failure["code"])}, method=method)
+    error_type = NativeRequestDeadline if failure["code"] == "deadline_exceeded" else ComputerUseError
+    error = error_type({**failure, "code": public_error_code(failure["code"])}, method=method)
     remember_failure_context(error, failure.get("context"))
     return error
 

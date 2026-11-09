@@ -65,7 +65,12 @@ On macOS, confirmed dropdowns and menus are delivered as attached content of the
 native capture or input receiver does not automatically become a new working window. Related content
 is returned with object actions; unknown relationships remain explicitly labelled sources, without
 widening the original window's input scope. Observations and same-source menu reads prefer diffs;
-the first delivered source or explicit `full=True` produces complete content. Image coordinates are
+the first delivered source or explicit `full=True` produces complete content. Each explicit read
+samples separately, including consecutive reads in one tool call. Automatic post-action
+observations return scoped text and receipts. Request an image explicitly when needed.
+On macOS, set `COMPUTER_USE_AX_SUBTREE_PREFETCH=1` before launching the SDK or MCP server to
+enable bulk attribute prefetch for eligible window trees. Child order, geometry and identity are
+read live. Missing or unavailable prefetch data uses ordinary AX collection. Image coordinates are
 pixels from the top-left of the delivered PNG, and one missing capture does not invalidate other usable pieces.
 On macOS, an ordinary single-left App coordinate click that precisely hits a selectable item in an
 open menu may use that item's Press action. Other coordinates retain their directed mouse route.

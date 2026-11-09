@@ -26,11 +26,13 @@ class ReadIssueIndex:
 
     def applicable(self, path: FieldPath) -> list[ReadIssue]:
         """Resolve exact and ancestor facts; collection gaps do not erase members."""
-        if len(path) < 2:
-            return [issue for _, issue in self.paths.get(path, ())]
-        matching = [item for length in range(2, len(path) + 1) for item in self.paths.get(path[:length], ())]
-        matching.sort(key=lambda item: item[0])
-        return [issue for _, issue in matching]
+        exact = self.paths.get(path, ())
+        ancestors = [item for length in range(2, len(path)) for item in self.paths.get(path[:length], ())]
+        if ancestors:
+            ancestors.extend(exact)
+            ancestors.sort(key=lambda item: item[0])
+            return [issue for _, issue in ancestors]
+        return [issue for _, issue in exact]
 
     def for_node(self, token: str) -> tuple[ReadIssue, ...]:
         """Return only restrictions explicitly attached to this original node."""

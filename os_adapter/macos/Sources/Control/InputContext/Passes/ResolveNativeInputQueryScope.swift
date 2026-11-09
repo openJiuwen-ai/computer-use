@@ -10,7 +10,17 @@ import ApplicationServices
         receiver: NativeInspectQuery.Receiver?, basis: [NativeInspectQuery.Dependency], access: NativeQueryAccess
     ) throws -> NativeInputQueryScope {
         try access.sharing.checkAvailable()
-        let binding = try access.scopes.inputBinding(p["target"])
+        let windowKeyboardScope: NativeInputScope?
+        if op.intent == "key", within.isEmpty, actuator == nil, receiver == nil, basis.isEmpty,
+            let target = p["target"] as? [String: Any], target["rootWindow"] is String,
+            target["node"] is NSNull, target["capture"] is NSNull
+        {
+            windowKeyboardScope = try access.scopes.windowKeyboardQueryScope(target)
+        } else {
+            windowKeyboardScope = nil
+        }
+        let binding = try windowKeyboardScope.map { (wire: $0.wire, blocked: $0.blocked, node: nil as String?) }
+            ?? access.scopes.inputBinding(p["target"])
         guard !within.contains(binding.node ?? "") else {
             throw DriverError("within must contain proper ancestors", code: .invalidRequest)
         }
@@ -40,7 +50,8 @@ import ApplicationServices
         let selection = access.contracts.selectionBasis(op.token)
         let scope = try string(binding.wire["surface"], label: "surface")
         try selection.validate(basis, scope: scope)
-        return NativeInputQueryScope(binding: binding, selection: selection, scope: scope)
+        return NativeInputQueryScope(
+            binding: binding, selection: selection, scope: scope, windowKeyboardScope: windowKeyboardScope)
 
     }
 }

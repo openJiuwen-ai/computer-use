@@ -17,13 +17,13 @@ import ApplicationServices
 /// Typed evidence emitted at the original delivery selection; never a log parse.
 struct NativeKeyboardBoundaryRouteFacts {
     let localProcess: Bool
-    let noObservedWeb: Bool
+    let localBoundaryEvidence: Bool
     let sameKeyboardSurface: Bool
     let nativeID: CGWindowID?
 }
 
 /// Query decision consumed by the parent Gate, independent of strategy state.
-enum NativeKeyboardBoundaryDecision: Equatable { case confirmed, changed, needsLegacy(String) }
+enum NativeKeyboardBoundaryDecision: Equatable { case confirmed, needsLegacy(String) }
 
 struct NativeKeyboardBoundaryProjection<Element> {
     struct Window {

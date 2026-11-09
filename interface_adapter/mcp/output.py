@@ -254,7 +254,7 @@ class ObservationOutput:
     def superseded(self, previous, observation, incoming):
         trees = self.presenter.trees(previous)
         if (
-            previous.get("full") or previous["state"].get("preparation")
+            previous.get("explicitRead") or previous.get("full") or previous["state"].get("preparation")
             or previous.get("presentationGap") or observation.get("presentationGap")
         ):
             return False

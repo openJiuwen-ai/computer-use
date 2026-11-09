@@ -42,6 +42,7 @@ import ApplicationServices
         _ = try sparseRelationSlots()
         try expiredRequestDoesNotCollect()
         try closeButtonUsesSingleObjectGetter()
+        try subtreePrefetchUsesFreshValuesAndLiveRelations()
         try await cancelledRequestDoesNotCollect()
         print("PASS short observation budgets collect real root/relation facts and preserve expired/cancelled boundaries")
     }
@@ -223,12 +224,16 @@ import ApplicationServices
         return [NativeObservationEncoding.encode(first), NativeObservationEncoding.encode(later)]
     }
 
-    @MainActor private static func root(_ registry: ApplicationElements, role: String = "AXButton")
+    @MainActor private static func root(
+        _ registry: ApplicationElements, role: String = "AXButton", subrole: String? = nil
+    )
         -> (String, AXUIElement)
     {
         let owner = NSRunningApplication.current
         let element = AXUIElementCreateApplication(owner.processIdentifier)
-        let identity = ElementIdentity(facts: .init(values: ["AXRole": role]))
+        var values = ["AXRole": role]
+        values["AXSubrole"] = subrole
+        let identity = ElementIdentity(facts: .init(values: values))
         let target = ApplicationElements.Target(application: owner, launched: owner.launchDate,
             element: element, scope: "budget-window", role: role, identity: identity)
         let ref = registry.observe(.init(pid: owner.processIdentifier, launched: owner.launchDate,
@@ -486,6 +491,103 @@ import ApplicationServices
         precondition(title["nativeType"] as? String == "CFString" && title["data"] as? String == "Small budget title",
                      "short acquisition preserves full native field evidence through publication")
         precondition(clock.value < deadline, "the collector cannot refill the original request budget")
+    }
+
+    @MainActor private static func subtreePrefetchUsesFreshValuesAndLiveRelations() throws {
+        let registry = ApplicationElements(), clock = Clock()
+        let (ref, element) = root(registry, role: kAXWindowRole, subrole: "AXStandardWindow")
+        var captures = 0, childReads = 0, parentReads = 0, labelReads = 0
+        var returnsSubtree = true, changesRole = false, removesIdentifier = false
+        var fieldsByBatch = [[String]]()
+        var attributes = AXAttributeReader.API()
+        attributes.batch = { _, fields in
+            fieldsByBatch.append(fields)
+            return (.success, fields.map { field -> Any in
+                switch field {
+                case "AXRole": return kAXWindowRole
+                case "AXTitle": return "Live title"
+                case "AXHelp": return "Live help"
+                case "AXIdentifier" where removesIdentifier:
+                    var error = AXError.noValue
+                    return AXValueCreate(.axError, &error)!
+                case "AXPosition":
+                    var point = CGPoint(x: 40, y: -20)
+                    return AXValueCreate(.cgPoint, &point)!
+                case "AXParent": return element
+                default: return NSNull()
+                }
+            } as CFArray)
+        }
+        var relations = AXRelationReader.API()
+        relations.count = { _, property in
+            if property == "AXChildren" { childReads += 1 }
+            return (.success, 0)
+        }
+        relations.single = { _, property in
+            if property == "AXParent" { parentReads += 1; return (.success, element) }
+            if property == "AXTitleUIElement" { labelReads += 1 }
+            return (.noValue, nil)
+        }
+        let collector = NativeFactCollector(
+            registry: registry, inspection: .init(registry: registry), attributes: attributes, relations: relations,
+            clock: { clock.value }, captureSubtree: { root, fields, depth, timeout in
+                precondition(CFEqual(root, element) && fields.contains("AXTitle"))
+                precondition(!fields.contains("AXPosition") && !fields.contains("AXParent"))
+                precondition(depth == 5 && timeout > 0 && timeout <= 0.5)
+                captures += 1
+                guard returnsSubtree else { return nil }
+                let title = "Capture \(captures)"
+                return AXSubtreePrefetch { candidate, field in
+                    guard CFEqual(candidate, element) else { return nil }
+                    switch field {
+                    case "AXRole": return (changesRole ? "AXButton" : kAXWindowRole) as CFString
+                    case "AXTitle": return title as CFString
+                    case "AXIdentifier" where removesIdentifier: return "Old identity" as CFString
+                    // Missing Help must still be requested on the live batch.
+                    default: return nil
+                    }
+                }
+            })
+        func read(milliseconds: Int = 5000) throws -> [String: Any] {
+            try RequestDiagnostics.$deadline.withValue(clock.value + Double(milliseconds) / 1000) {
+                try collector.collect(ref, session: "budget-session",
+                    fields: ["AXRole", "AXTitle", "AXHelp", "AXPosition", "AXIdentifier"],
+                    maxNodes: 200, maxDepth: 5, actionDetail: .none)
+            }
+        }
+        func title(_ result: [String: Any]) -> String? {
+            let node = (result["nodes"] as! [[String: Any]])[0]
+            return (node["values"] as! [String: Any])["AXTitle"] as? String
+        }
+        let first = try read(), second = try read()
+        precondition(title(first) == "Capture 1" && title(second) == "Capture 2")
+        precondition(captures == 2 && childReads == 2 && parentReads == 0 && labelReads == 2)
+        precondition(fieldsByBatch.count == 2 && fieldsByBatch.allSatisfy {
+            !$0.contains("AXTitle") && $0.contains("AXHelp") && $0.contains("AXPosition") && $0.contains("AXParent")
+        })
+        let firstNode = (first["nodes"] as! [[String: Any]])[0]
+        let firstValues = firstNode["values"] as! [String: Any]
+        precondition(firstValues["AXHelp"] as? String == "Live help")
+        precondition(firstValues["AXPosition"] as? [String: Double] == ["x": 40, "y": -20])
+        let links = first["relations"] as! [[String: Any]]
+        let parent = links.first { $0["property"] as? String == "AXParent" }
+        precondition(parent?["targets"] as? [String] == [ref])
+        precondition(parent?["nativeAPI"] as? String == "AXUIElementCopyMultipleAttributeValues")
+        let reads = firstNode["nativeReads"] as! [String: [String: Any]]
+        precondition(reads["AXTitle"]?["api"] as? String == "AXUIElementCopyHierarchy")
+
+        changesRole = true
+        let mismatched = try read()
+        precondition(title(mismatched) == "Live title" && fieldsByBatch.last?.contains("AXTitle") == true)
+        changesRole = false
+        removesIdentifier = true
+        let missingIdentity = try read()
+        precondition(title(missingIdentity) == "Live title" && fieldsByBatch.last?.contains("AXTitle") == true)
+        returnsSubtree = false
+        let unavailable = try read()
+        precondition(title(unavailable) == "Live title" && parentReads == 1)
+        let short = try read(milliseconds: 200)
+        precondition(title(short) == "Live title" && captures == 5 && parentReads == 2)
     }
 
     @MainActor private static func preservesSmallRelation(_ milliseconds: Int) throws {

@@ -65,9 +65,11 @@ def test_model_receives_scoped_popup_content_and_factual_gap(model_server, tmp_p
         "add_ref = int(re.search(r'(\\d+) button Add application', str(initial.text)).group(1))\n"
         "result = app.element(add_ref).click()"
     )
-    server = model_server([tool_call(setup), tool_call(click), answer("Observed popup")])
+    server = model_server([
+        tool_call(setup), tool_call(click), tool_call('app.read(view="image", window=1)'), answer("Observed popup")
+    ])
     request = run_script(server, tmp_path)
-    first, second = tool_messages(request)
+    first, second, _ = tool_messages(request)
     assert "Unchanged parent control" in first
     assert "Unchanged parent control" not in second
     assert "Window 0 / Element 1 / click" in second
@@ -78,7 +80,7 @@ def test_model_receives_scoped_popup_content_and_factual_gap(model_server, tmp_p
     assert "Click: unknown" not in first + second
     assert "Input: unknown" not in first + second
     if failure:
-        assert "AX: unavailable; Image: collected" in second
+        assert "AX: unavailable; Image: not requested" in second
         assert "Popup AX is not ready" in second
         assert "Search applications" not in second
     else:
@@ -88,7 +90,7 @@ def test_model_receives_scoped_popup_content_and_factual_gap(model_server, tmp_p
     pairs = image_pairs(request)
     assert len(pairs) == 1
     caption, url = pairs[0]
-    assert "Image 2.1" in caption
+    assert "Image 3.1" in caption
     assert "Window reference: 1" in caption
     assert "20x10 px" in caption and "coordinate target=" in caption.lower()
     assert "Coordinate space: displayed image pixels." in caption
@@ -186,7 +188,7 @@ def test_model_keeps_each_image_label_and_partial_output_on_failure(model_server
 
 
 @pytest.mark.parametrize("repeat_click", [False, True])
-def test_model_image_labels_only_the_automatic_same_action_capture(model_server, tmp_path, repeat_click):
+def test_model_gets_only_the_requested_images_after_a_write_chain(model_server, tmp_path, repeat_click):
     setup = (
         inspect.getsource(popup_fixture)
         + "\nglobals().update(vars(popup_fixture(capture_parent=True, image_action_chain=True)))"
@@ -207,17 +209,16 @@ def test_model_image_labels_only_the_automatic_same_action_capture(model_server,
     _, text = tool_messages(request)
     assert all(f"#{i} Window 0" in text for i in range(1, 5 + repeat_click))
     assert "Captured after Action" not in text
-    assert f"fixture image acquisitions {3 + repeat_click}" in text
+    assert "fixture image acquisitions 2" in text
     pairs = image_pairs(request)
-    assert len(pairs) == 4
-    expected_colors = ((238, 238, 238), (34, 187, 68), (238, 238, 238), (170, 17, 153))
+    assert len(pairs) == 3
+    expected_colors = ((238, 238, 238), (238, 238, 238), (170, 17, 153))
     for (_, url), color in zip(pairs, expected_colors, strict=True):
         with Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1]))) as image:
             assert image.getpixel((4, 4))[:3] == color
-    assert "Captured after Action #1." in pairs[1][0]
-    assert all("Captured after Action" not in caption for index, (caption, _) in enumerate(pairs) if index != 1)
+    assert all("Captured after Action" not in caption for caption, _ in pairs)
     assert "Image 2.1" in pairs[1][0] and "Window reference: 0" in pairs[1][0]
-    assert "Window 0 coordinates superseded. Use Image 2.3 pixels." in pairs[1][0]
+    assert "Window 0 coordinates superseded. Use Image 2.2 pixels." in pairs[1][0]
     results = json.loads((tmp_path / "mcp-results.json").read_text())
     result = next(
         event["result"]
@@ -225,4 +226,4 @@ def test_model_image_labels_only_the_automatic_same_action_capture(model_server,
         if event["result"].get("_meta", {}).get("computer-use", {}).get("executionId") == 2
     )
     images = [block["_meta"]["computer-use"] for block in result["content"] if block["type"] == "image"]
-    assert [image.get("capturedAfterAction") for image in images] == [1, None, None]
+    assert [image.get("capturedAfterAction") for image in images] == [None, None]

@@ -304,7 +304,7 @@ def test_related_failed_new_detail_preserves_original_image_and_catalogue(monkey
         "computer_use.interaction.read.views.pipeline.publish",
         lambda _c, _o, text, screenshot=None, **kw: (text.text, screenshot, kw),
     )
-    text, image, metadata = asyncio.run(pipeline._collect(app, "tree", False, None, current, None, None, related))
+    text, image, metadata = asyncio.run(pipeline._collect(app, "both", False, None, current, None, None, related))
     assert image == b"old pixels" and metadata["content_available"]
     assert "window=0" in text and "window=1" in text
     assert "original window is shown" in text and metadata["partial"]
@@ -702,8 +702,7 @@ def test_rootless_fixed_popup_observes_current_app_window_without_rebinding_popu
     result = asyncio.run(pipeline._collect(app, "tree", False, None, before, None, None, related))
     assert "Parent form content" in result.text
     assert any(call.args[1]["window"] == "B" for call in pipeline.member.call_args_list)
-    assert sum(call.args[1]["window"] == "Popup" and call.args[2] == "image"
-               for call in pipeline.member.call_args_list) == 1
+    assert all(call.args[2] == "tree" for call in pipeline.member.call_args_list)
     assert fixed._window_identity is original
     assert fixed._input_context == WindowIdentity.of(popup)
     assert state.input_context == WindowIdentity.of(b)

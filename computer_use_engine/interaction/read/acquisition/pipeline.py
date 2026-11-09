@@ -56,6 +56,7 @@ from computer_use.interaction.read.acquisition.passes.wait_content_change import
 from computer_use.interaction.read.acquisition.scope.pipeline import WorkingScopeServiceNode
 from computer_use.pipeline import Contract, Pipeline, Repeat, Select, Sequence
 from computer_use.pipeline.core import Node
+from computer_use.protocol.session import NativeRequestDeadline
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.model import AcquiredObservation
@@ -339,8 +340,12 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 return RecheckedAttempt(
                     value, directory, state.target, None, False, state.gaps + (gap,),
                 )
-            except TimeoutError as error:
+            except (TimeoutError, NativeRequestDeadline) as error:
                 if services.port.calls.retired or services.port.connection.session_identity != generation:
+                    raise
+                if isinstance(error, NativeRequestDeadline) and (
+                    error.effect != "none" or components.tree is None and components.image is None
+                ):
                     raise
                 # Preserve the capture's own catalogue and fixed target. A
                 # failed newer lookup cannot establish a different current
@@ -349,7 +354,8 @@ class AcquisitionPipeline(Pipeline["ReadPlan", "AcquiredObservation"]):
                 gap = ObservationGap(
                     "directory",
                     "observation_incomplete",
-                    f"Window directory recheck budget exhausted: {error}",
+                    "Window directory recheck budget exhausted: "
+                    + (error.detail if isinstance(error, NativeRequestDeadline) else str(error)),
                 )
                 return RecheckedAttempt(
                     value,

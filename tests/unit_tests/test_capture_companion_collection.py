@@ -1,6 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Only a proved sharing companion may omit its automatic second screenshot."""
+"""A proved sharing companion can reuse requested parent pixels."""
 
 import asyncio
 import json
@@ -53,7 +53,7 @@ def scenario(
     before["observed"] = {"id": "before-image", "startedAt": 0, "completedAt": 0.5}
     after["observed"] = {"id": "after-image", "startedAt": 3, "completedAt": 4}
     controller, app, state = setup(before)
-    image = pixels(state, a) if parent_image else None
+    image = pixels(state, a) if parent_image and view != "tree" else None
     initial = replace(parent_result(state, a, before, after), image=image)
     controller.reader.read = AsyncMock(return_value=initial)
     pipeline = InterfaceReadPipeline(controller)
@@ -65,7 +65,7 @@ def scenario(
             return WindowPart(member_target(state, item), tree=snapshot)
         return WindowPart(
             member_target(state, item), tree=None if rootless else tree(child, "Ordinary dialog"),
-            image=pixels(state, item),
+            image=pixels(state, item) if view != "tree" else None,
         )
 
     pipeline.member = AsyncMock(side_effect=member)
@@ -80,14 +80,13 @@ def scenario(
     return controller, app, state, child, pipeline, result, calls
 
 
-@pytest.mark.parametrize(("related_read", "view"), [(True, "tree"), (False, "both")],
-                         ids=["related-read", "initial-app-both"])
-def test_recorded_sharing_status_uses_one_small_tree_and_retains_parent_pixels(monkeypatch, related_read, view):
+@pytest.mark.parametrize("related_read", [True, False], ids=["related-both", "initial-app-both"])
+def test_recorded_sharing_status_uses_one_small_tree_and_retains_parent_pixels(monkeypatch, related_read):
     controller, _app, state, child, _pipeline, result, calls = scenario(
-        monkeypatch, related_read=related_read, view=view
+        monkeypatch, related_read=related_read, view="both"
     )
 
-    assert controller.reader.read.await_args.kwargs["view"] == view
+    assert controller.reader.read.await_args.kwargs["view"] == "both"
     assert len(calls) == 1 and calls[0][0] == "tree"
     assert calls[0][1]["fields"] == list(SHARING_CONTROL_FIELDS)
     assert calls[0][1]["max_nodes"] == 8 and calls[0][1]["max_depth"] == 2
@@ -115,13 +114,13 @@ def test_unknown_ordinary_and_explicit_requests_keep_normal_window_capabilities(
         related_read=related_read, view=view,
     )
 
-    assert calls[-1][0] == "both" and "fields" not in calls[-1][1]
-    assert len(calls) == (2 if case in ("ordinary", "incomplete") else 1)
-    assert result.screenshot is not None
+    assert calls[-1][0] == view and "fields" not in calls[-1][1]
+    assert len(calls) == (2 if view == "both" and case in ("ordinary", "incomplete") else 1)
+    assert (result.screenshot is None) is (view == "tree")
     assert "Capture status (system sharing indicator" not in result.text
     coverage = {row["window"]: row for row in observation_data(result)["window_coverage"]}
-    assert set(coverage["C"]["requested"]) == {"tree", "image"}
-    assert "image" in coverage["C"]["included"]
+    assert set(coverage["C"]["requested"]) == ({"tree", "image"} if view == "both" else {"tree"})
+    assert ("image" in coverage["C"]["included"]) is (view == "both")
     assert child["window"] in state.members
 
 

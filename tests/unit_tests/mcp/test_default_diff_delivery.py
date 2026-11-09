@@ -43,6 +43,7 @@ def fixture():
         view="window",
         partial=False,
         incomplete=False,
+        explicit_read=False,
     ):
         children = ("field",) if short else ("field", "other")
         if reverse:
@@ -98,6 +99,7 @@ def fixture():
                 "document": document,
                 "refs": refs,
                 "full": full,
+                "explicitRead": explicit_read,
                 "publicApi": True,
                 "coverage": document_coverage(document),
             }
@@ -229,6 +231,25 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 # both action receipts remain in chronological order.
                 self.assertLess(combined.index("First write"), combined.index("Second write"))
                 self.assertIn("Tree: unchanged", await call("observe('Second write')"))
+                explicit = await call(
+                    "observe('First explicit read', explicit_read=True)\n"
+                    "observe('Second explicit read', explicit_read=True)"
+                )
+                self.assertEqual(explicit.count("Tree: diff"), 2)
+                self.assertLess(explicit.index("First explicit read"), explicit.index("Second explicit read"))
+                unchanged_reads = await call(
+                    "observe('Second explicit read', explicit_read=True)\n"
+                    "observe('Second explicit read', explicit_read=True)"
+                )
+                self.assertEqual(unchanged_reads.count("Tree: unchanged"), 2)
+                interleaved = await call(
+                    "observe('Before input', explicit_read=True)\n"
+                    "write('Sent input')\n"
+                    "observe('After input', explicit_read=True)"
+                )
+                self.assertEqual(interleaved.count("Tree: diff"), 2)
+                self.assertLess(interleaved.index("Before input"), interleaved.index("Action [dispatched]"))
+                self.assertLess(interleaved.index("Action [dispatched]"), interleaved.index("After input"))
                 pinned = await call("observe('Requested full', full=True)\nwrite('After full')")
                 self.assertIn("Requested full", pinned)
                 self.assertIn("After full", pinned)

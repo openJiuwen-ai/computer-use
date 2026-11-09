@@ -64,6 +64,11 @@ def observation_completed(observation):
         observation_delivered(observation["state"])
 
 
+def explicit_observation_completed(observation):
+    """Preserve the capture position requested by one explicit read."""
+    observation_completed({**observation, "explicitRead": True})
+
+
 def action_observation_completed(result):
     """Deliver a read-suffix gap without replacing the original result or error."""
     try:

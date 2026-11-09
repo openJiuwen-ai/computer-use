@@ -244,6 +244,7 @@ import ApplicationServices
         expect(fixed.dispatch == "dispatched" && fixed.events == completeEventCount && fixed.endpoint)
         expect(fixed.deep == 0 && old.deep > 10000)
         try frontierAndModalChanges()
+        try keyboardBoundaryChecksDeepModalWithUnchangedFocus()
         try requiredSurfaceAndOwnership()
         try originalOwnerBoundaries()
         try uncertainFacts()
@@ -269,6 +270,30 @@ import ApplicationServices
             expect(stopped.dispatch == "partial" && stopped.events == 4 && !stopped.endpoint)
         }
         print("PASS production inputWindowScope + real collector/event/receipt/ledger: old partial, full drag endpoint; fresh sheets/modals/identity and noReplay")
+    }
+
+    @MainActor static func keyboardBoundaryChecksDeepModalWithUnchangedFocus() throws {
+        let s = Scene()
+        s.put(s.open, kAXModalAttribute, kCFBooleanFalse)
+        let group = s.node("AXGroup", parent: s.open)
+        let field = s.node(kAXTextFieldRole, parent: group)
+        s.children[CFHash(s.open)] = [group]
+        s.children[CFHash(group)] = [field]
+        s.focused = field
+        func keyboardBoundary() throws -> NativeApplicationReader.InputBoundary {
+            try s.access.inputBoundary(
+                s.app, nativeWindows: s.windows(), contentRoot: s.open, required: [s.open], expandMissingRequired: false)
+        }
+        let before = try keyboardBoundary()
+        expect(before.issue == nil && !before.windows.contains(where: { $0.modal == true }))
+        let modal = s.node("AXPopover", parent: group)
+        s.put(modal, kAXModalAttribute, kCFBooleanTrue)
+        s.children[CFHash(group)] = [field, modal]
+        let after = try keyboardBoundary()
+        let original = after.windows.first { CFEqual($0.element, s.open) }!
+        let blocker = after.windows.first { CFEqual($0.element, modal) }!
+        let graph = after.windows.map { AppSelection.Window(ref: $0.ref, parent: $0.parent, modal: $0.modal == true) }
+        expect(try NativeWindowBoundary.blocked(root: original.ref, target: original.ref, windows: graph) == [blocker.ref])
     }
 
     @MainActor static func visualDirectoryBoundaryCombinations() throws {
