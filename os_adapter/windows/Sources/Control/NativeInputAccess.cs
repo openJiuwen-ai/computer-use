@@ -1,6 +1,7 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace ComputerUse.Windows
@@ -84,6 +85,23 @@ namespace ComputerUse.Windows
             RequireWindow(Native.GetForegroundWindow(), "foreground window");
         }
 
+        internal static object Permissions()
+        {
+            int session;
+            using (var process = Process.GetCurrentProcess())
+                session = process.SessionId;
+            string state = "sessionZero";
+            bool ready = session != 0 && Native.Interactive(out state);
+            var own = Read(GetCurrentProcess());
+            return Wire.Obj(
+                "platform", "windows", "ready", ready, "sessionId", session, "desktopState", state,
+                "integrityRid", own == null ? (object)null : own.Level,
+                "uiAccess", own == null ? (object)null : own.UiAccess,
+                "detail", ready
+                    ? "Interactive desktop detected. Capture, UI Automation and input to individual targets are checked during use."
+                    : "Run in the signed-in, unlocked target desktop. Finish any Windows security prompt before continuing.");
+        }
+
         internal static void RequireWindow(IntPtr window, string description = "input target")
         {
             if (window == IntPtr.Zero)
@@ -106,7 +124,9 @@ namespace ComputerUse.Windows
             }
 
             if (target != null && target.Level > own.Level)
-                throw new Failure("input_unavailable", description + " (PID " + pid + ") runs at a higher integrity level than the input driver; Windows UIPI input restriction.");
+                throw new Failure(
+                    "input_unavailable", description + " (PID " + pid + ") runs at a higher integrity level than the input driver; Windows UIPI input restriction.",
+                    "for an administrator target, start an explicitly elevated SDK or MCP host in this desktop and observe the target again");
         }
     }
 }

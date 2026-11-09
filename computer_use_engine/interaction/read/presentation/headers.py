@@ -168,16 +168,19 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
     if single is not None:
         suffix = " (window scope)" if header.scope == "window" else ""
         title = "" if name_in_body else ": " + _quoted(single.title)
-        lines.append(
-            f"Window {single.ref}{title}, App: {_quoted(header.application)}{suffix}; computer.app({header.directory['application']!r}).read(window={single.ref})."
-        )
+        heading = f"Window {single.ref}{title}, App: {_quoted(header.application)}{suffix}"
+        if header.directory.get("strictWindow"):
+            lines.append(heading + ". Reuse the existing App handle for this exact window.")
+        else:
+            lines.append(heading + f"; computer.app({header.directory['application']!r}).read(window={single.ref}).")
         relations = [flag for flag in _flags(single) if flag not in ("main", "current", "reports input")]
         if relations:
             lines.append("Window relation: " + ", ".join(relations))
     else:
         lines.append(f"App: {_quoted(header.application)}.")
         if header.scope == "window":
-            lines.append(f"Scope: Window {header.scope_root} and confirmed descendants")
+            scope = "" if header.directory.get("strictWindow") else " and confirmed descendants"
+            lines.append(f"Scope: Window {header.scope_root}{scope}")
     if header.current is None:
         lines.append("Current window: unknown")
     elif single is not None and header.current != single.ref:

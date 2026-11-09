@@ -27,6 +27,14 @@ then use computer.app(row.app_id).read(window=row.window_ref). Check
 stop_reasons for an incomplete catalogue. A missing title or foreground value
 is unknown, and hidden windows may be absent. Stay within the task's read scope.
 app.read() also discovers numbered windows within the selected app.
+On Windows, if the task specifies a full window title, use
+computer.app(window_title=title).read(). The first read binds a unique,
+case-sensitive match among visible native top-level windows. Reuse the App
+handle after a title change. Its reads, details and action follow-up cover only
+the bound window. A title-bound App rejects read(menu_path=...).
+On Windows, use app.read(window=ref, view='both', allow_foreground=True)
+when observation requires restoring or activating the selected window.
+The observation reports preparation and the observed foreground state.
 App methods accept optional window=ref to select the target for that call;
 no Window object is needed. Element numbers are shared across all reads of the
 same App. app.element(number) stays bound to its original control after reading
@@ -42,6 +50,11 @@ On macOS, app.close_window(ref) requests normal close of that exact window,
 including when screen-sharing controls cover its title-bar buttons. Use the
 returned observation to handle any confirmation; the SDK does not choose save
 or discard. A dispatched close request may be declined by the application.
+On Windows, app.close_window(ref) requests normal close through the window's
+native UI Automation Window.Close action. After a title-bound close, the
+observation covers the original window and choices is empty. Observe a
+separate confirmation window when the task authorizes that scope. A receipt
+confirms closure when window_lifecycle is "closed".
 For an application menu bar that supports menu reads, use
 app.read(menu_path=['Edit'], window=ref) with exact visible menu titles in order.
 Choose an enabled item from that result and use
@@ -88,10 +101,17 @@ input, including preparation and recovery. They may activate/focus their target.
 Computer direct input explicitly uses global events; it does not grant later
 object calls global authority. Windows/Linux currently retain their existing
 ability to use global input for object operations. A host restriction can still
-forbid global input. Windows/Linux Computer inputs currently retain their
-captured-desktop adapters; direct device-level input is implemented on macOS.
-Computer.paste(text) is currently macOS-only; App/Element.paste remain available
-on Windows/Linux.
+forbid global input. Windows pointer input uses the existing screenshot
+coordinate mapping. A Windows capture fallback labeled as a desktop image uses
+computer.point((x, y)). Within a tool call, computer.point() retains the desktop
+image the model has received until a newer image is delivered.
+On Windows, computer.type_text(text), computer.press_key(key), and
+computer.paste(text) send input directly to the current system recipient.
+Establish focus when needed and read the relevant UI to confirm the effect.
+Windows paste leaves the text on the system clipboard. Confirm the paste effect
+before publishing the next payload.
+Linux Computer inputs use their captured-desktop adapter. Use App or Element
+methods for paste on Linux.
 Element.target retains the exact element binding.
 app.point((x, y), window=ref) retains that window's delivered image mapping.
 Retained points also work in app.click(at=p, window=ref) for scoped input.

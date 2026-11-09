@@ -53,6 +53,7 @@ class NativeGraph:
         if invalid_max_nodes:
             raise ValueError("Invalid native query budget")
         self.nodes, self.edges, self.completed_edges = {}, {}, {}
+        self.outside_window_nodes = set()
         self.node_sources, self.edge_sources, self.dependencies = {}, {}, {}
 
     def _use(self, observed, node, *, fields=(), actions=False, relations=()):
@@ -164,6 +165,8 @@ class NativeGraph:
         return batch
 
     def _remember_nodes(self, batch):
+        if self.query_options.get("strict_window"):
+            self.outside_window_nodes.update(batch.get("outsideWindowNodes", ()))
         # Earlier facts keep their collection identity. Supplementary reads
         # do not quietly overwrite a branch already used for matching.
         new = {n["node"] for n in batch["nodes"]} - self.nodes.keys()

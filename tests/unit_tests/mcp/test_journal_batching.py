@@ -32,7 +32,7 @@ class JournalBatchingTests(IsolatedAsyncioTestCase):
                 for i in range(1000):
                     journal.record(dict(kind="pipeline", attempt=i, path=["中文🙂", "\ud800", "\ud83d\ude42"]))
                 journal.record(dict(kind="execution_end", executionId=1))
-            lines = [loads(line) for line in journal.path.read_text().splitlines()]
+            lines = [loads(line) for line in journal.path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual([e["attempt"] for e in lines[1:-1]], list(range(1000)))
             self.assertEqual(lines[-1]["kind"], "execution_end")
             self.assertEqual(lines[1]["path"], ["中文🙂", "\ud800", "🙂"])
@@ -45,10 +45,10 @@ class JournalBatchingTests(IsolatedAsyncioTestCase):
             journal = Journal()
             journal.record(dict(kind="pipeline", attempt=1))
             await asyncio.sleep(0)
-            self.assertIn('"attempt":1', journal.path.read_text())
+            self.assertIn('"attempt":1', journal.path.read_text(encoding="utf-8"))
             journal.record(dict(kind="pipeline", attempt=2))
             journal.metadata()
-            self.assertIn('"attempt":2', journal.path.read_text())
+            self.assertIn('"attempt":2', journal.path.read_text(encoding="utf-8"))
 
     def test_fast_trace_encoding_preserves_scalar_values_and_custom_fallback(self):
         for event in (

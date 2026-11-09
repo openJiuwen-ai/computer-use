@@ -343,7 +343,7 @@ _inspect_queries = {
     "applications": obj(
         {
             "kind": enum("applications"), "path": identity.optional(), "installation": identity.optional(),
-            "includeEnded": boolean().optional(),
+            "includeEnded": boolean().optional(), "windowTitle": identity.optional(),
         }
     ),
     "windowCatalogue": obj(dict(kind=enum("windowCatalogue"), appName=identity)),
@@ -356,6 +356,7 @@ _inspect_queries = {
             application=identity,
             includeAccessibility=boolean().optional(),
             profile=enum("visual").optional(),
+            rootWindow=identity.optional(),
         )
     ),
     "roots": obj(dict(kind=enum("roots"), application=identity, applicationContent=boolean().optional())),
@@ -390,6 +391,7 @@ _inspect_queries = {
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),
             primaryFields=array(enum("Text.LineRanges"), min=1, max=1).optional(),
+            strictWindow=boolean().optional(),
             maxNodes=number(integer=True, min=1, max=2000),
             maxDepth=number(integer=True, min=0, max=2000),
             childrenPage=obj(dict(cursor=nullable_id, limit=number(integer=True, min=1, max=1999))).optional(),
@@ -425,6 +427,8 @@ def decode_inspect_query(value):
         result["includeEnded"] is not True or "path" in result or "installation" in result
     ):
         raise ValueError("protocol: ended lifetimes require a full application query")
+    if "windowTitle" in result and any(key in result for key in ("path", "installation", "includeEnded")):
+        raise ValueError("protocol: window caption and application scope queries cannot be combined")
     if "profile" in result and "includeAccessibility" in result:
         raise ValueError("protocol: surface profile and legacy accessibility flag cannot be combined")
     if "currentReceiver" in result and (

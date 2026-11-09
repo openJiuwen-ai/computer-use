@@ -16,6 +16,7 @@ class DesktopImageAccess:
     register_image: Callable
     image_delivery_epoch: Callable
     image_delivery_required: Callable
+    retain_delivered_point: Callable[[], bool] | None = None
 
 
 class DesktopStore:
@@ -30,7 +31,9 @@ class DesktopStore:
         self._delivered = None
 
     def record(self, state):
-        self._view, self._delivered = state, None
+        self._view = state
+        if not self._retains_delivered_point():
+            self._delivered = None
         png = state.get("screenshot")
         if png is not None:
             # Registry callbacks must not retain their own image or owner.
@@ -60,6 +63,29 @@ class DesktopStore:
     def delivered(self, png, coordinates=None):
         if self.current(png):
             self._delivered = dict(state=self._view, epoch=self.images.image_delivery_epoch(), coordinates=coordinates)
+
+    def _retains_delivered_point(self):
+        return (
+            self.images.retain_delivered_point is not None
+            and self.images.retain_delivered_point()
+            and self.images.image_delivery_required()
+        )
+
+    def point(self, x, y):
+        delivery = self._delivered
+        if (
+            delivery is not None
+            and self._retains_delivered_point()
+            and delivery["epoch"] == self.images.image_delivery_epoch()
+        ):
+            # A Windows write may buffer a newer capture inside one MCP call.
+            # The caller's point still belongs to the last returned pixels.
+            state = delivery["state"]
+        else:
+            self.target(True, current=False)
+            state = self._view
+        coordinates = delivery["coordinates"] if delivery is not None else None
+        return state, self._check_point(state, coordinates, x, y)
 
     def map_parameters(self, operation, parameters, *, current=True):
         self.target(True, current=current)
@@ -102,6 +128,10 @@ class DesktopStore:
     def check_coordinates(self, x, y, *, current=True):
         self.target(True, current=current)
         coordinates = self._delivered.get("coordinates") if self._delivered is not None else None
+        self._check_point(self._view, coordinates, x, y)
+
+    @staticmethod
+    def _check_point(state, coordinates, x, y):
         if coordinates is not None:
             x, y = coordinates.source_point((x, y))
         invalid_x = True if not finite(x) or not finite(y) or x < 0 or y < 0 else False
@@ -116,8 +146,9 @@ class DesktopStore:
                 ):
                     yield d
 
-        matches = list(_iter_d(iter(self._view["observation"]["displays"])))
+        matches = list(_iter_d(iter(state["observation"]["displays"])))
         if len(matches) != 1 or not matches[0]["captured"]:
             raise local_failure(
                 "coordinates are outside a captured display or in a display gap/overlap",
             )
+        return x, y

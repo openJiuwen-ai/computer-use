@@ -73,13 +73,13 @@ def select_application(directory, selector):
         return dict(windows[0])
     # Exact native identifiers/paths outrank names. Declared alternate names
     # only broaden discovery; they never bind or merge application lifetimes.
+    name = selector.strip().casefold()
     matches = (
         list(entries)
         if directory.get("path") == selector
         else [item for item in entries if selector in (item["identifier"], item["path"])]
     )
     if not matches and not selector.startswith("/"):
-        name = selector.strip().casefold()
         matches = []
         for item in entries:
             if any(value.casefold() == name for value in [item["displayName"], *item.get("aliases", [])]):
@@ -87,11 +87,21 @@ def select_application(directory, selector):
     active = [item for item in matches if item["isRunning"]]
     matches = active or matches
     if directory["stopReasons"]:
-        _refuse(
-            "observation_incomplete",
-            "Application discovery is partial; application identity is unresolved.",
-            "application",
+        exact_windows_process = (
+            directory.get("platform") == "windows"
+            and directory.get("scope") == "runningWindows"
+            and len(matches) == 1
+            and matches[0]["isRunning"]
+            and [
+                row["application"] for row in directory.get("nativeProcessNames", ()) if row["name"].casefold() == name
+            ] == [matches[0]["id"]]
         )
+        if not exact_windows_process:
+            _refuse(
+                "observation_incomplete",
+                "Application discovery is partial; application identity is unresolved.",
+                "application",
+            )
     if len(matches) != 1:
         if not matches and directory.get("scope") == "runningWindows":
             _refuse(
@@ -186,11 +196,13 @@ class SurfaceReadProfile(Enum):
     VISUAL = "visual"
 
 
-def surfaces_query(application, *, profile=SurfaceReadProfile.ACCESSIBILITY, capabilities=()):
+def surfaces_query(application, *, profile=SurfaceReadProfile.ACCESSIBILITY, capabilities=(), root_window=None):
     """Optional read-isolation flags require the driver's declared contract."""
     if not isinstance(profile, SurfaceReadProfile):
         raise ValueError("A typed surface read profile is required")
     query = dict(kind="surfaces", application=application)
+    if root_window is not None:
+        query["rootWindow"] = root_window
     if profile is SurfaceReadProfile.VISUAL:
         if "nativeVisualSurfaceQuery" in capabilities:
             query["profile"] = "visual"

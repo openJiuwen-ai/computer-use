@@ -20,6 +20,8 @@ namespace ComputerUse.Windows
             var token = scope.Token;
             if (state.Operation == null || state.Operation != token)
                 throw new Failure("stale_target", "native operation is unknown or expired");
+            if (NativeBinding.IsGlobal(state.Original))
+                throw new Failure("invalid_request", "global input cannot be used to observe another scope");
             if (NativeBinding.Keys.Any(key => key != "node" && !Equals(state.Original[key], requested[key])))
                 throw new Failure("stale_target", "native observation cannot change its original scope");
             bool directory = new[]

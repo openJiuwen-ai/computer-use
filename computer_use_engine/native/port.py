@@ -100,6 +100,7 @@ class NativePort(Protocol):
         primary_fields: list[str] | None = None,
         text_content: bool | None = None,
         focused_element: bool | None = None,
+        strict_window: bool = False,
     ) -> "DriverObservationReply":
         pass
 

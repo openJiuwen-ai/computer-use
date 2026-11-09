@@ -121,6 +121,7 @@ namespace ComputerUse.Windows
 
             window = boundary.Validate(target, within, r);
             ((Target)state.Native).Window = window;
+            state.InteractionWindow = window;
             UiaElement focused = null;
             try
             {
@@ -225,7 +226,15 @@ namespace ComputerUse.Windows
             // authorized foreground preparation, before requested input. Use
             // the existing bounded Win32/UIA window activation helper.
             Native.Foreground(target.Window.Native, true, r, true, () => ValidateTarget(target, r));
-            ValidateTarget(target, r);
+            try
+            {
+                ValidateTarget(target, r);
+            }
+            catch (NativeOwnedModalBlock block)
+            {
+                block.AfterActivation = ReferenceEquals(target.Window, block.Original);
+                throw;
+            }
         }
 
         public void Focus(NativeKeyboardState state, Request r)

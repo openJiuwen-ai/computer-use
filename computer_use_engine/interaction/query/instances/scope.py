@@ -189,7 +189,7 @@ def adopt(controller, ui, directory, selection=None):
 
 
 async def refresh(controller, ui, *, accessibility=True):
-    """Refresh application facts without changing the delivered input context."""
+    """Refresh facts within the retained scope without changing the delivered input context."""
     validate_session(controller, ui)
     state = controller.state(ui)
     instance = ui._instance
@@ -203,6 +203,7 @@ async def refresh(controller, ui, *, accessibility=True):
             running.application,
             profile=SurfaceReadProfile.ACCESSIBILITY if accessibility else SurfaceReadProfile.VISUAL,
             capabilities=controller.transport.capabilities,
+            root_window=ui._anchor if accessibility and getattr(ui, "_strict_window", False) else None,
         ),
         30000,
     )
@@ -266,6 +267,9 @@ async def observe_application(controller, ui, selector, view, *, source_applicat
 def allowed(ui):
     """Application catalogue, or one fixed Window and confirmed descendants."""
     instance = ui._instance
+    if getattr(ui, "_strict_window", False):
+        item = instance.members.get(ui._anchor)
+        return {ui._anchor: item} if item is not None else {}
     return {
         key: item
         for key, item in instance.members.items()

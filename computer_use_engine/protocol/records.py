@@ -204,11 +204,14 @@ NativeDirectory: TypeAlias = Record
 
 All variants retain session/platform/observed/stopReasons. The selected kind
 adds applications, surfaces, or roots; a surface/root directory's application
-field is an identity string. Surface directories also publish
+field is an identity string. Windows running-window directories may publish
+nativeProcessNames when primary Win32 enumeration and identity retention
+completed. Each pair associates a process name with a native application ID.
+Surface directories also publish
 rootDiscoveryComplete: whether independent-root discovery and relationships
 are complete, independently of attached-content discovery. stopReasons retain
 diagnostic details and full-catalogue gaps; their wording does not select a root.
-macOS endedWindows carries positive native/process end evidence independently
+macOS and Windows endedWindows carries positive native/process end evidence independently
 of visible catalogue completeness; a hidden window's absence is not its end.
 The existing query/schema determines the variant.
 """

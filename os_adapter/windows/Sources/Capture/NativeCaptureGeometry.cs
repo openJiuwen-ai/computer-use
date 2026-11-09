@@ -29,6 +29,23 @@ namespace ComputerUse.Windows
             return Wire.Obj("space", "window-pixels", "origin", "top-left", "nativeSpace", "screen-pixels", "toNative", new double[] { (double)NativeWidth / Width, 0, 0, (double)NativeHeight / Height, X, Y });
         }
 
+        internal int[] Checkpoint()
+        {
+            return new[] { X, Y, NativeWidth, NativeHeight, Width, Height };
+        }
+
+        internal static NativeCaptureGeometry Restore(object raw)
+        {
+            var values = Wire.Array(raw);
+            if (values.Length != 6)
+                throw new Failure("invalid_request", "invalid capture geometry checkpoint");
+            var geometry = new NativeCaptureGeometry((int)values[0], (int)values[1], (int)values[2], (int)values[3],
+                                                     Math.Max((int)values[4], (int)values[5]));
+            if (geometry.Width != (int)values[4] || geometry.Height != (int)values[5])
+                throw new Failure("invalid_request", "capture geometry checkpoint changed its image size");
+            return geometry;
+        }
+
         internal Dictionary<string, object> Clip(int x, int y, int width, int height)
         {
             double left = Math.Max(X, (double)x), top = Math.Max(Y, (double)y);

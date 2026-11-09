@@ -36,6 +36,7 @@ class FindElement:
     path: LookupPath
     timeout_ms: int
     enabled: bool
+    strict_window: bool = False
 
 
 @dataclass(frozen=True)

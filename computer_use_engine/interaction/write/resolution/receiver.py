@@ -102,6 +102,7 @@ class ReceiverQuery(NativeGraph):
         allow_internal: bool = True,
         keyboard_input: bool = False,
         declared_cell_preparation: bool = False,
+        exact_ready_keyboard: bool = False,
     ) -> ReceiverResolution | None:
         """Resolve an editor within the requested control's semantic boundary.
 
@@ -114,6 +115,7 @@ class ReceiverQuery(NativeGraph):
             allow_internal: Allow a confirmed descendant editor to become the actuator.
             keyboard_input: Resolve insertion/paste recipients without requiring a writable AX buffer.
             declared_cell_preparation: A typed native preparation can select the original cell before reinspection.
+            exact_ready_keyboard: An existing Windows keyboard contract for this focused target is ready.
 
         Returns:
             The internal editor, when needed, and whether native editing evidence
@@ -152,7 +154,18 @@ class ReceiverQuery(NativeGraph):
             # dispatch. Do not replace it with a structural child that the
             # driver cannot bind. This still requires editing declarations on
             # the owner itself; an arbitrary container cannot inherit them.
-            if require_editable and direct is not True:
+            # Some Windows text peers declare a writable TextPattern range
+            # rather than an Edit role. Honor the proven keyboard receiver
+            # without classifying the peer as an editor or preparing new focus.
+            focused_text_range = (
+                exact_ready_keyboard
+                and self.platform == "windows"
+                and role == "staticText"
+                and values["textReadOnly"] is False
+                and isinstance(patterns := values["interfaces"], tuple)
+                and "TextPatternIdentifiers.Pattern" in patterns
+            )
+            if require_editable and direct is not True and not focused_text_range:
                 self.fail("input_unavailable", "The requested control has no confirmed direct text-editing capability.")
             return ReceiverResolution()
         # Value/focus declarations do not establish that a scalar control is

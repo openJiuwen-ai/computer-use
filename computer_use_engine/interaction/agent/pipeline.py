@@ -27,7 +27,7 @@ from computer_use.interaction.read.presentation.content import DisplayText, temp
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.ir import freeze
 from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, member_target
-from computer_use.interaction.read.views.publication import publish
+from computer_use.interaction.read.views.publication import publish, strict_public_directory
 from computer_use.interaction.requests import ExecuteAction, FindElement
 from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
 from computer_use.native.contracts import Binding, Intent, Knowledge
@@ -36,6 +36,7 @@ from computer_use.native.scopes import (
     FixedWindowUnconfirmed,
     QueryRootUnavailable,
     RunningApplication,
+    window_binding,
 )
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
@@ -291,6 +292,10 @@ class AgentInterfacePipeline:
         validate_session(self.controller, ui)
         target = snapshot["binding"]
         self.controller.validate_element(target)
+        if getattr(ui, "_strict_window", False) and (
+            window_binding(target) != ui._window_identity or snapshot.get("native_window_outside", False)
+        ):
+            raise local_failure("this element is outside the exact titled window", "stale_target")
         identity = snapshot.get("window_identity")
         # pylint: disable-next=protected-access
         evidence = ui._instance.surface_evidence(target.surface, identity)
@@ -540,7 +545,9 @@ class AgentInterfacePipeline:
             for owner in dict.fromkeys(owners):
                 lookup_remaining()
                 try:
-                    snapshot = await self.lookup.arun(FindElement(owner, path, 0, False), control)
+                    snapshot = await self.lookup.arun(
+                        FindElement(owner, path, 0, False, strict_window=getattr(ui, "_strict_window", False)), control
+                    )
                 except QueryRootUnavailable as error:
                     failed = self.controller.state(owner).query_target
                     if (
@@ -829,10 +836,25 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
 
     async def _arun(self, request: InterfaceRequest, control: Control) -> AgentResult:
         api = self.interfaces
-        if isinstance(request, (ObserveUI, ResolveElement, CloseWindow, UIKeyboard, UIPointer)):
+        owner = getattr(request, "owner", None)
+        if (
+            isinstance(request, (ObserveUI, ResolveElement, CloseWindow, UIKeyboard, UIPointer))
+            or getattr(owner, "_window_title", None) is not None
+        ):
             from .scope import request_scope
 
-            owner = await request_scope(api.controller, request.owner, request.window)
+            owner = await request_scope(
+                api.controller, owner, getattr(request, "window", None), discover_title=isinstance(request, ObserveUI),
+            )
+        try:
+            return await self._dispatch(request, control, owner)
+        except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
+            if getattr(owner, "_strict_window", False) and error.directory is not None:
+                error.directory = strict_public_directory(error.directory, owner.identity)
+            raise
+
+    async def _dispatch(self, request: InterfaceRequest, control: Control, owner: UIHandle | None) -> AgentResult:
+        api = self.interfaces
         if isinstance(request, ObserveUI):
             return await api.read(
                 owner, request.view, request.full, request.menu_path, request.allow_foreground, explicit_read=True,
@@ -840,21 +862,21 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
         if isinstance(request, ObserveDesktop):
             return await api.read_desktop(request.view, request.full)
         if isinstance(request, ObserveElement):
-            return await api.read_element(request.owner, request.snapshot, request.cursor)
+            return await api.read_element(owner, request.snapshot, request.cursor)
         if isinstance(request, ObserveText):
-            return await api.read_text(request.owner, request.snapshot, request.cursor, request.length)
+            return await api.read_text(owner, request.snapshot, request.cursor, request.length)
         if isinstance(request, DiscoverApps):
             return await api.list_applications()
         if isinstance(request, DiscoverWindows):
             return await api.list_windows(request.app_name)
         if isinstance(request, ResolveElement):
             snapshot = await api.element(owner, request.target, request.timeout_ms, control, fresh=request.fresh)
-            if request.window is not None and type(request.target) is int:
+            if (request.window is not None or getattr(owner, "_strict_window", False)) and type(request.target) is int:
                 api.validate_snapshot(owner, snapshot, allow_unknown=True)
             return snapshot
         if isinstance(request, ActOnElement):
             return await api.act_element(
-                request.owner, request.snapshot, request.intent, request.parameters, control,
+                owner, request.snapshot, request.intent, request.parameters, control,
                 global_input=request.global_input,
             )
         if isinstance(request, CloseWindow):

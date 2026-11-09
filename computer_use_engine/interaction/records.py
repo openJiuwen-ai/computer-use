@@ -44,6 +44,7 @@ class ElementSnapshot(TypedDict):
     children: ChildContinuation | None
     window_identity: NotRequired[WindowIdentity]
     menu_window_identity: NotRequired[WindowIdentity | None]
+    native_window_outside: NotRequired[bool]
 
 
 class UIHandle(Protocol):

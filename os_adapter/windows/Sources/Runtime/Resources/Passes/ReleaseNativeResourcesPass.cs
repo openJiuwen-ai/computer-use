@@ -17,7 +17,8 @@ namespace ComputerUse.Windows
         {
             try
             {
-                reader.Release();
+                if (reader != null)
+                    reader.Release();
             }
             catch
             {

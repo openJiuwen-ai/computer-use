@@ -110,6 +110,7 @@ class ComputerUseError(Exception):
 def public_error_code(code: str) -> str:
     if code in {
         "stale_target",
+        "outside_window_scope",
         "snapshot_expired",
         "ambiguous_target",
         "blocked_by_modal",

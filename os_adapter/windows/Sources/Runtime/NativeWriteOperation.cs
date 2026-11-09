@@ -39,6 +39,7 @@ namespace ComputerUse.Windows
             appInsertRecipient = recipient;
         }
         bool legacyDispatched;
+        internal bool SelectionPreparationStarted;
         internal readonly bool ClickV1;
         internal readonly NativeClickProgress Click;
         // Legacy units retain their original terminal flag. Negotiated clicks
@@ -57,7 +58,7 @@ namespace ComputerUse.Windows
         internal bool InputTerminated
         {
             get {
-                return WorkerRetirementReason != null || Dispatched ||
+                return WorkerRetirementReason != null || Dispatched || SelectionPreparationStarted ||
                        Click != null && (Click.CallInFlight || !Click.ContinuationCompatible) || Cleanup != "complete";
             }
         }

@@ -7,6 +7,9 @@ namespace ComputerUse.Windows
 {
     internal static class NativeSelectionInsertWin32
     {
+        const uint GetTextLength = 0x000E, GetSelection = 0x00B0, SetSelection = 0x00B1, ReplaceSelection = 0x00C2;
+        const uint AbortIfHungOrExited = 2 | 32;
+
         [DllImport("kernel32.dll")]
         static extern void SetLastError(uint error);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", ExactSpelling = true, SetLastError = true)]
@@ -17,14 +20,19 @@ namespace ComputerUse.Windows
         [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", ExactSpelling = true, SetLastError = true)]
         static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags,
                                                 uint timeout, out UIntPtr result);
-        internal static long Style(IntPtr window)
+        internal static long? ObserveStyle(IntPtr window)
         {
             SetLastError(0);
             long style = WindowStyle(window, -16).ToInt64();
             int error = Marshal.GetLastWin32Error();
-            if (style == 0 && error != 0)
+            return style == 0 && error != 0 ? (long?)null : style;
+        }
+        internal static long Style(IntPtr window)
+        {
+            long? style = ObserveStyle(window);
+            if (!style.HasValue)
                 throw new Failure("input_unavailable", "the original native edit style is unknown");
-            return style;
+            return style.Value;
         }
         internal static NativeSelectionInsertSelection Selection(IntPtr window, Request request)
         {
@@ -33,13 +41,36 @@ namespace ComputerUse.Windows
             UIntPtr ignored;
             SetLastError(0);
             uint timeout = (uint)Math.Max(1, Math.Min(100, request.Deadline - Wire.Now));
-            IntPtr completed = ReadSelection(window, 0xB0, out start, out end, 2 | 32, timeout, out ignored);
+            IntPtr completed = ReadSelection(window, GetSelection, out start, out end, AbortIfHungOrExited, timeout, out ignored);
             int error = Marshal.GetLastWin32Error();
             request.Check();
             if (completed == IntPtr.Zero || start > Int32.MaxValue || end > Int32.MaxValue || end < start)
                 throw new Failure("input_unavailable", "the original edit selection could not be read (code " + error +
                                                            "); no selection edit sent");
             return new NativeSelectionInsertSelection { Start = (int)start, End = (int)end };
+        }
+        internal static int TextLength(IntPtr window, Request request)
+        {
+            request.Check();
+            UIntPtr length;
+            uint timeout = (uint)Math.Max(1, Math.Min(100, request.Deadline - Wire.Now));
+            var completed = SendMessageTimeout(window, GetTextLength, IntPtr.Zero, IntPtr.Zero, AbortIfHungOrExited,
+                                               timeout, out length);
+            request.Check();
+            if (completed == IntPtr.Zero || length.ToUInt64() > Int32.MaxValue)
+                throw new Failure("input_unavailable", "the original edit's text length could not be read");
+            return (int)length.ToUInt64();
+        }
+        internal static NativeSelectionInsertSendResult SelectAll(IntPtr window, int timeoutMs)
+        {
+            UIntPtr ignored;
+            SetLastError(0);
+            var completed = SendMessageTimeout(window, SetSelection, IntPtr.Zero, new IntPtr(-1), AbortIfHungOrExited,
+                                               (uint)timeoutMs, out ignored);
+            int error = Marshal.GetLastWin32Error();
+            Native.NoteVisualInput();
+            return new NativeSelectionInsertSendResult(completed != IntPtr.Zero,
+                completed == IntPtr.Zero ? "native selection preparation may have executed (code " + error + ")" : null);
         }
         sealed class Buffer : IDisposable
         {
@@ -70,7 +101,8 @@ namespace ComputerUse.Windows
             // EM_REPLACESEL is a system message (<WM_USER): no remote-process
             // allocation, clipboard transaction, posted pointer or input loop.
             IntPtr sent =
-                SendMessageTimeout(original, 0xC2, new IntPtr(1), buffer.Address, 2 | 32, (uint)timeoutMs, out ignored);
+                SendMessageTimeout(original, ReplaceSelection, new IntPtr(1), buffer.Address, AbortIfHungOrExited,
+                                   (uint)timeoutMs, out ignored);
             int error = Marshal.GetLastWin32Error();
             Native.NoteVisualInput();
             return new NativeSelectionInsertSendResult(

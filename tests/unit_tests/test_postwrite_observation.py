@@ -248,9 +248,12 @@ class PostwriteObservationTests(IsolatedAsyncioTestCase):
         self.execute.assert_awaited_once()
 
     async def test_image_input_keeps_accessibility_observation_without_automatic_capture(self):
-        await self.run_action(target=replace(self.target, node=None, capture="capture"))
-        self.assertEqual(self.read.call_args.args[1], "tree")
-        self.assertEqual(self.read.call_args.kwargs, {})  # default read never activates
+        for platform in ("macos", "windows"):
+            with self.subTest(platform=platform):
+                self.controller.port.platform = platform
+                self.read.reset_mock()
+                await self.run_action(target=replace(self.target, node=None, capture="capture"))
+                self.read.assert_awaited_once_with(self.ui, "tree", False, None)
 
     async def test_window_key_does_not_repeat_cached_image_when_tree_body_is_available(self):
         self.ui._image = object()

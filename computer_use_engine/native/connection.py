@@ -478,8 +478,11 @@ class Connection:
             else "nativeOperations"
         )
         if capability is not None and capability not in self._hello["capabilities"]:
+            detail = f"backend does not provide {capability} in this desktop session"
+            if capability == "nativeGlobalInput" and self._hello["platform"] == "windows":
+                detail += ". Rebuild the Windows driver with uv run --no-dev computer-use-build"
             raise local_failure(
-                f"backend does not provide {capability} in this desktop session",
+                detail,
                 "unsupported_operation",
                 method,
             )

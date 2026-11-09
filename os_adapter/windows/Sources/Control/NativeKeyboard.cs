@@ -239,7 +239,8 @@ namespace ComputerUse.Windows
                     var state =
                         ReadInsertState(contract.AppInsertPin, contract.Target, contract.Within, r, contract.Text);
                     r.Check();
-                    NativeKeyboardStateChecks.Validate(contract, state, preparing);
+                    if (!NativeBinding.IsGlobal(contract.Target))
+                        NativeKeyboardStateChecks.Validate(contract, state, preparing);
                     return state;
                 });
         }
@@ -256,30 +257,51 @@ namespace ComputerUse.Windows
         {
             provider.RequireIdle(events, r);
             guard();
+            bool priorInput = operation.Dispatched, priorEffect = r.Effect, priorRequestInput = r.Dispatched;
             r.Sending();
             operation.Dispatched = true;
             result["dispatch"] = "unknown";
-            bool complete = false;
+            int? accepted = null;
             try
             {
                 int sent = provider.Send(events);
+                if (sent >= 0 && sent <= events.Length)
+                    accepted = sent;
+                if (sent == 0)
+                {
+                    operation.Dispatched = priorInput;
+                    r.Effect = priorEffect;
+                    r.Dispatched = priorRequestInput;
+                    result["dispatch"] = priorInput ? "partial" : "notDispatched";
+                }
+                else if (sent > 0 && sent < events.Length)
+                    result["dispatch"] = "partial";
                 if (sent != events.Length)
-                    throw new Failure("execution_unknown", "SendInput accepted " + sent + "/" + events.Length +
-                                                               " events; input was not replayed");
-                complete = true;
+                    throw new Failure(sent == 0 && !priorInput ? "input_unavailable" : "execution_unknown",
+                                      "SendInput accepted " + sent + "/" + events.Length +
+                                          " events; input was not replayed");
                 result["dispatch"] = "dispatched";
             }
             finally
             {
-                if (!complete)
+                if (accepted != events.Length)
                 {
-                    var releases = events.Where(e => !e.Up)
-                                       .Reverse()
-                                       .Select(e => new NativeKeyEvent(e.Code, true, e.Unicode))
-                                       .ToArray();
+                    var held = new List<NativeKeyEvent>();
+                    foreach (var e in events.Take(accepted ?? events.Length))
+                    {
+                        if (!e.Up)
+                            held.Add(e);
+                        else if (accepted.HasValue)
+                        {
+                            int index = held.FindLastIndex(key => key.Code == e.Code && key.Unicode == e.Unicode);
+                            if (index >= 0)
+                                held.RemoveAt(index);
+                        }
+                    }
+                    var releases = held.AsEnumerable().Reverse().Select(e => { e.Up = true; return e; }).ToArray();
                     try
                     {
-                        if (provider.Send(releases) != releases.Length)
+                        if (releases.Length != 0 && provider.Send(releases) != releases.Length)
                             operation.Cleanup = "failed";
                     }
                     catch
@@ -298,25 +320,34 @@ namespace ComputerUse.Windows
                 Wire.Obj("target", new Dictionary<string, object>(target), "dispatch", "notDispatched", "detail",
                          "No requested keyboard input dispatched.", "preparation", preparation, "confirmation",
                          "unavailable", "cleanup", "complete", "errorCode", null, "retryReason", null, "context", null);
+            bool global = NativeBinding.IsGlobal(target);
             try
             {
                 NativeInputContract contract;
-                if (!operation.Contracts.TryGetValue((string)command["primitiveId"], out contract) ||
-                    !contract.Supported || contract.Unit != Unit(operation) ||
-                    !NativeWriteOperation.Same(contract.Target, target))
+                if (global)
+                {
+                    // Global input binds the session and intent at begin. It has no
+                    // object offer; the live desktop is sampled only at dispatch.
+                    contract = new NativeInputContract { Unit = Unit(operation), Target = target, Within = new string[0],
+                                                         Text = (string)operation.Intent["kind"] != "key" };
+                }
+                else if (!operation.Contracts.TryGetValue((string)command["primitiveId"], out contract) ||
+                         !contract.Supported || contract.Unit != Unit(operation) ||
+                         !NativeWriteOperation.Same(contract.Target, target))
                     throw new Failure("stale_target", "the keyboard contract expired or belongs to another target");
                 bool preparing = (string)command["kind"] == "prepare_receiver";
-                if (!preparing && ((string)command["kind"] != contract.Unit || contract.Unit == "prepare_receiver" ||
+                if (!global && !preparing && ((string)command["kind"] != contract.Unit || contract.Unit == "prepare_receiver" ||
                                    (bool)command["foreground"]))
                     throw new Failure("invalid_request",
                                       "keyboard dispatch cannot activate a window or change its unit");
                 ValidateIntent(operation.Intent);
-                if (contract.Unit == "clipboard_paste" &&
+                if ((contract.Unit == "clipboard_paste" || global && contract.Text) &&
                     ((string)Wire.Object(operation.Intent["parameters"])["text"]).Length == 0)
                 {
-                    Guard(contract, r);
+                    if (!global)
+                        Guard(contract, r);
                     result["confirmation"] = "confirmed";
-                    result["detail"] = "Empty paste; no input, clipboard change or focus preparation was needed.";
+                    result["detail"] = "Empty text; no input, clipboard change or focus preparation was needed.";
                 }
                 else if (preparing)
                 {
@@ -342,7 +373,16 @@ namespace ComputerUse.Windows
                 }
                 else
                 {
-                    if (contract.Unit == "clipboard_paste")
+                    if (contract.Unit == "clipboard_paste" && global)
+                    {
+                        var state = Guard(contract, r);
+                        if (!state.Ready)
+                            throw new Failure("input_unavailable", "the foreground paste recipient is not ready");
+                        var sequence = textProvider.BeginSequence(state, r);
+                        NativePaste.SendGlobal(this, clipboard, operation, r, result, preparation,
+                                               () => sequence.Validate(r));
+                    }
+                    else if (contract.Unit == "clipboard_paste")
                         NativePaste.Send(this, textProvider, clipboard, operation, contract, r, result, preparation);
                     else if (contract.Text)
                         NativeTypedText.Send(this, textProvider, operation, contract, r, result, preparation);
@@ -377,7 +417,8 @@ namespace ComputerUse.Windows
                                                              : "input_unavailable";
                 result["detail"] =
                     String.IsNullOrWhiteSpace(error.Message) ? "Native keyboard operation failed." : error.Message;
-                if (!(error is NativeAppInsertRecipientFailure) && !operation.Dispatched &&
+                if (!global && !(error is NativeAppInsertRecipientFailure) && !operation.Dispatched &&
+                    !preparation.Contains("clipboard") &&
                     (string)result["errorCode"] == "input_unavailable")
                     result["retryReason"] =
                         (string)command["kind"] == "prepare_receiver" ? "preparationUnavailable" : "routeUnavailable";

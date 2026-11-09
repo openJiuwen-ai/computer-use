@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
 namespace ComputerUse.Windows
@@ -13,6 +14,18 @@ namespace ComputerUse.Windows
         internal bool? ObservedModal;
         internal Window Native;
         internal string Application, RootNode;
+        internal string ApplicationIdentifier, ApplicationName;
+        internal string DisplayName
+        {
+            get { return ApplicationName ?? ApplicationIdentifier ?? Native.Name; }
+        }
+    }
+
+    internal sealed class NativeWindowCatalogue
+    {
+        internal readonly List<NativeWindowRecord> Windows = new List<NativeWindowRecord>();
+        // Present only when Win32 enumeration and retention covered the full primary catalogue.
+        internal Dictionary<string, object>[] NativeProcessNames;
     }
 
     internal sealed class NativeNodeRecord
@@ -83,8 +96,10 @@ namespace ComputerUse.Windows
         }
         readonly Dictionary<IntPtr, NativeWindowRecord> windows = new Dictionary<IntPtr, NativeWindowRecord>();
         readonly Dictionary<string, NativeWindowRecord> surfaces = new Dictionary<string, NativeWindowRecord>();
+        readonly Queue<NativeWindowRecord> endedWindows = new Queue<NativeWindowRecord>();
         readonly Dictionary<string, string> applications = new Dictionary<string, string>();
         readonly Queue<string> applicationOrder = new Queue<string>();
+        readonly NativeApplicationNames applicationNames = new NativeApplicationNames();
         readonly Dictionary<string, NativeNodeRecord> nodes = new Dictionary<string, NativeNodeRecord>();
         readonly Dictionary<string, string> identities = new Dictionary<string, string>();
         readonly Dictionary<UiaElement, Dictionary<string, string>> anonymous =
@@ -100,7 +115,9 @@ namespace ComputerUse.Windows
                             return (object)Wire.Obj("handle", w.Handle.ToInt64(), "pid", w.Pid, "started",
                                                     w.Started.ToString(), "window", w.Ref, "surface", w.Scope,
                                                     "instance", w.Selector, "name", w.Name, "application",
-                                                    item.Application, "modal", item.ObservedModal);
+                                                    item.Application, "modal", item.ObservedModal,
+                                                    "applicationIdentifier", item.ApplicationIdentifier,
+                                                    "applicationName", item.ApplicationName);
                         })
                 .ToArray();
         }
@@ -130,11 +147,15 @@ namespace ComputerUse.Windows
 
                 var entry = new NativeWindowRecord { Native = w, Application = (string)item["application"],
                                                      ObservedModal = item["modal"] as bool ? };
+                object optional;
+                if (item.TryGetValue("applicationIdentifier", out optional))
+                    entry.ApplicationIdentifier = optional as string;
+                if (item.TryGetValue("applicationName", out optional))
+                    entry.ApplicationName = optional as string;
                 windows[handle] = entry;
                 surfaces[w.Scope] = entry;
-                string key = w.Pid + ":" + w.Started;
-                applications[key] = entry.Application;
-                applicationOrder.Enqueue(key);
+                RememberApplication(ApplicationKey(w, entry.ApplicationIdentifier), entry.Application);
+                applicationNames.Restore(entry.ApplicationIdentifier, entry.ApplicationName);
             }
         }
 
@@ -180,7 +201,54 @@ namespace ComputerUse.Windows
                     "native window lifetime event tracking is unavailable; persistent window identity cannot be established");
         }
 
-        internal NativeWindowRecord RetainWindow(IntPtr handle, Request r)
+        static string ApplicationKey(Window window, string identifier)
+        {
+            return window.Pid + ":" + window.Started + ":" + identifier;
+        }
+
+        void RememberApplication(string key, string application)
+        {
+            if (!applications.ContainsKey(key))
+                applicationOrder.Enqueue(key);
+            applications[key] = application;
+            while (applicationOrder.Count > 4096)
+                applications.Remove(applicationOrder.Dequeue());
+        }
+
+        string ApplicationToken(Window window, string identifier)
+        {
+            string key = ApplicationKey(window, identifier), token;
+            if (!applications.TryGetValue(key, out token))
+            {
+                token = Token("application");
+                RememberApplication(key, token);
+            }
+            return token;
+        }
+
+        void RefreshApplication(NativeWindowRecord entry, Request r)
+        {
+            string identifier;
+            try
+            {
+                identifier = NativeWindowApplication.Id(entry.Native.Handle);
+            }
+            catch (COMException)
+            {
+                identifier = null;
+            }
+            r.Check();
+            if (identifier == null || identifier == entry.ApplicationIdentifier)
+                return;
+            // A successful Shell read can reclassify an existing HWND. A
+            // missing property adds no new identity evidence to that lifetime.
+            entry.Native.Validate();
+            entry.Application = ApplicationToken(entry.Native, identifier);
+            entry.ApplicationIdentifier = identifier;
+            entry.ApplicationName = null;
+        }
+
+        internal NativeWindowRecord RetainWindow(IntPtr handle, Request r, bool identifyApplication = true)
         {
             r.Check();
             RequireTracking();
@@ -190,11 +258,13 @@ namespace ComputerUse.Windows
                 try
                 {
                     entry.Native.Validate();
+                    if (identifyApplication)
+                        RefreshApplication(entry, r);
                     return entry;
                 }
-                catch (Failure)
+                catch (NativeWindowEnded)
                 {
-                    Retire(handle);
+                    RetireEnded(entry);
                 }
             }
 
@@ -205,16 +275,6 @@ namespace ComputerUse.Windows
             using (var process = Process.GetProcessById((int)pid))
             {
                 long birth = process.StartTime.ToUniversalTime().Ticks;
-                string processKey = pid + ":" + birth, app;
-                if (!applications.TryGetValue(processKey, out app))
-                {
-                    app = Token("application");
-                    applications[processKey] = app;
-                    applicationOrder.Enqueue(processKey);
-                    while (applicationOrder.Count > 4096)
-                        applications.Remove(applicationOrder.Dequeue());
-                }
-
                 var window = new Window { Handle = handle,
                                           Pid = pid,
                                           Started = birth,
@@ -225,7 +285,11 @@ namespace ComputerUse.Windows
                                           Name = process.ProcessName };
                 window.Validate();
                 r.Check();
-                entry = new NativeWindowRecord { Native = window, Application = app };
+                entry = new NativeWindowRecord { Native = window };
+                if (identifyApplication)
+                    RefreshApplication(entry, r);
+                if (entry.Application == null)
+                    entry.Application = ApplicationToken(window, null);
                 windows[handle] = entry;
                 surfaces[window.Scope] = entry;
             }
@@ -233,11 +297,15 @@ namespace ComputerUse.Windows
             return entry;
         }
 
-        internal List<NativeWindowRecord> Catalog(Request r, List<string> notes, bool accessibility = true)
+        internal NativeWindowCatalogue Catalog(Request r, List<string> notes, bool accessibility = true,
+                                               double? captureDeadline = null)
         {
             r.Check();
             RequireTracking();
-            var current = NativeWindowDiscovery.Collect(r, notes, accessibility);
+            int primaryCount;
+            bool primaryComplete;
+            var current = NativeWindowDiscovery.Collect(r, notes, out primaryCount, out primaryComplete,
+                                                        accessibility, captureDeadline);
             // Absence from the visible directory does not end a window's life.
             // Preserve its selector through hide/show and discovery failures;
             // retire only when the native identity actually becomes invalid.
@@ -247,49 +315,85 @@ namespace ComputerUse.Windows
                 {
                     windows[h].Native.Validate();
                 }
+                catch (NativeWindowEnded)
+                {
+                    RetireEnded(windows[h]);
+                }
                 catch (Failure)
                 {
-                    Retire(h);
+                    // A process/handle query gap does not end the retained lifetime.
+                    // RetainWindow will still reject unverifiable visible entries.
                 }
             }
 
-            var result = new List<NativeWindowRecord>();
-            foreach (var h in current)
+            var result = new NativeWindowCatalogue();
+            var primaryApplications = new Dictionary<string, string>();
+            for (int i = 0; i < current.Count; i++)
             {
                 r.Check();
-                if (result.Count >= 512)
+                bool primary = i < primaryCount;
+                if (result.Windows.Count >= 512)
                 {
+                    if (primary)
+                        primaryComplete = false;
                     Note(notes, "Window directory limited to 512 entries.");
                     break;
                 }
 
                 try
                 {
-                    result.Add(RetainWindow(h, r));
+                    var item = RetainWindow(current[i], r, !captureDeadline.HasValue || Wire.Now < captureDeadline.Value - 200);
+                    result.Windows.Add(item);
+                    if (primary)
+                        primaryApplications[item.Application] = item.Native.Name;
                 }
                 catch (Failure error)
                 {
                     if (error.Code == "cancelled" || error.Code == "deadline_exceeded")
                         throw;
+                    if (primary)
+                        primaryComplete = false;
                     Note(notes, "Window changed during discovery: " + error.Message);
                 }
                 catch (Exception error)
                 {
                     r.Check();
+                    if (primary)
+                        primaryComplete = false;
                     Note(notes, "Native window metadata unavailable: " + error.Message);
                 }
             }
 
+            if (primaryComplete)
+                result.NativeProcessNames = primaryApplications.Select(item =>
+                    Wire.Obj("application", item.Key, "name", Text(item.Value))).ToArray();
+            applicationNames.Enrich(result.Windows, r, captureDeadline);
             return result;
         }
 
-        void Retire(IntPtr handle)
+        internal void CloseApplicationNames()
         {
-            NativeWindowRecord old;
-            if (!windows.TryGetValue(handle, out old))
+            applicationNames.Dispose();
+        }
+
+        internal object[] EndedWindows(string application)
+        {
+            return endedWindows.Where(item => item.Application == application)
+                .Select(item => (object)Wire.Obj("window", item.Native.Ref, "surface", item.Native.Scope,
+                                               "instance", item.Native.Selector)).ToArray();
+        }
+
+        internal void RetireEnded(NativeWindowRecord old)
+        {
+            var handle = old.Native.Handle;
+            NativeWindowRecord current;
+            if (!windows.TryGetValue(handle, out current) || !ReferenceEquals(old, current))
                 return;
             windows.Remove(handle);
             surfaces.Remove(old.Native.Scope);
+            endedWindows.Enqueue(old);
+            while (endedWindows.Count > 4096)
+                endedWindows.Dequeue();
             foreach (var id in nodes.Where(p => p.Value.Surface == old.Native.Scope).Select(p => p.Key).ToArray())
                 Remove(id);
         }

@@ -213,8 +213,12 @@ internal static class NativeValueReplacementTests
               "Value confirmation must reflect actual observed text rather than the setter return code: " + scenario);
         if (scenario == "password" || scenario == "privacy_unknown" || scenario == "privacy_getter")
             Check(provider.ValueReads == 0, "Unknown/private values must not be read for confirmation");
-        if (scenario == "noop") Check(((string)result["detail"]).Contains("remains unchanged"), "A no-op must remain explicit");
-        if (scenario == "formatted") Check(((string)result["detail"]).Contains("could not be confirmed"), "Formatted values must not become literal confirmation");
+        if (scenario == "noop")
+            Check(provider.Value == "old" && ((string)result["detail"]).Contains("Control value: unchanged"),
+                  "A no-op must preserve the control's original value and report it");
+        if (scenario == "formatted")
+            Check(provider.Value == "formatted-new" && ((string)result["detail"]).Contains("Requested literal value: unconfirmed"),
+                  "A formatted control value must not be reported as the requested literal text");
     }
     static void Negative(string scenario)
     {

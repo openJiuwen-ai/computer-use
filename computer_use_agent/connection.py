@@ -51,9 +51,14 @@ class McpConnection:
             raise RuntimeError("Computer Use connection ended.")
 
     async def _serve(self):
+        desktop_keys = _DESKTOP_ENV
+        if os.name == "nt" and not any(key.upper() == "PROGRAMDATA" for key in self.config.env):
+            # Windows environment names are case-insensitive. An explicit
+            # override owns this key regardless of its spelling.
+            desktop_keys += ("ProgramData",)
         environment = {
             **get_default_environment(),
-            **{key: os.environ[key] for key in _DESKTOP_ENV if key in os.environ},
+            **{key: os.environ[key] for key in desktop_keys if key in os.environ},
             **self.config.env,
         }
         params = StdioServerParameters(

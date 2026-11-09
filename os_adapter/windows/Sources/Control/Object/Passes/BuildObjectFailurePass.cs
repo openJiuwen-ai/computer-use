@@ -26,7 +26,9 @@ namespace ComputerUse.Windows
                                   : operation.Dispatched ? "execution_unknown"
                                                          : "input_unavailable";
             result["detail"] = error.Message.Length == 0 ? "Native object operation failed." : error.Message;
-            if (!(error is NativeAppInsertRecipientFailure) && !operation.Dispatched &&
+            if (operation.SelectionPreparationStarted && !operation.Dispatched)
+                result["detail"] += " Replacement text was not sent; native selection preparation may have changed the selection.";
+            if (!(error is NativeAppInsertRecipientFailure) && !operation.Dispatched && !operation.SelectionPreparationStarted &&
                 (string)result["errorCode"] == "input_unavailable")
                 result["retryReason"] = "routeUnavailable";
         }

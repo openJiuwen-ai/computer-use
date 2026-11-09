@@ -34,6 +34,7 @@ class NativeNodeQuery:
         text_content: Optional negotiated, read-only capture of independent native text.
         action_detail: Negotiated action evidence demand for internal matching; None retains full observation.
         focused_element: Optional same-scope focus sample supplementing the ordinary native children.
+        strict_window: Windows-only collection restricted to the bound native window.
     """
 
     fields: Iterable[str]
@@ -48,3 +49,4 @@ class NativeNodeQuery:
     text_content: bool | None = None
     action_detail: str | None = None
     focused_element: bool | None = None
+    strict_window: bool = False

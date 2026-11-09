@@ -23,6 +23,7 @@ namespace ComputerUse.Windows
         readonly Func<object> checkpoint;
         readonly Func<bool> recycle;
         readonly Func<object> pointerCheckpoint;
+        readonly Func<string, object> captureCheckpoint;
         readonly Action stopDisplay;
         object latestCheckpoint;
         INativeRuntime native;
@@ -33,7 +34,8 @@ namespace ComputerUse.Windows
         CancellationTokenSource cancellation;
         internal Driver(Func<string, bool, INativeRuntime> createRuntime, string session = null,
                         Func<object> checkpoint = null, Func<bool> recycle = null,
-                        Func<object> pointerCheckpoint = null, Action stopDisplay = null)
+                        Func<object> pointerCheckpoint = null, Action stopDisplay = null,
+                        Func<string, object> captureCheckpoint = null)
         {
             if (createRuntime == null)
                 throw new ArgumentNullException("createRuntime");
@@ -42,6 +44,7 @@ namespace ComputerUse.Windows
             this.checkpoint = checkpoint;
             this.recycle = recycle;
             this.pointerCheckpoint = pointerCheckpoint;
+            this.captureCheckpoint = captureCheckpoint;
             this.stopDisplay = stopDisplay;
         }
 
@@ -66,7 +69,6 @@ namespace ComputerUse.Windows
             response["version"] = version;
             response["session"] = session;
             response["id"] = id;
-            string line = Wire.Json(response);
             if (checkpoint != null)
             {
                 var health = native as INativeWorkerHealthStatus;
@@ -75,20 +77,16 @@ namespace ComputerUse.Windows
                 {
                     // Private child envelope only; no provider callbacks are safe.
                     response["workerRetirement"] = Wire.Obj("reason", retirement, "cleanup", "failed");
-                    line = Wire.Json(response);
                 }
                 else
                 {
                     response["windowCheckpoint"] = latestCheckpoint ?? new object[0];
                     response["recycleReadWorker"] = recycle != null && recycle();
-                    line = Wire.Json(response);
                     if (pointerCheckpoint != null)
-                    {
                         response["pointerCheckpoint"] = pointerCheckpoint();
-                        line = Wire.Json(response);
-                    }
                 }
             }
+            string line = Wire.Json(response);
 
             lock (gate)
             {
@@ -276,12 +274,20 @@ namespace ComputerUse.Windows
             try
             {
                 r.Check();
-                if (!new[] { "begin", "inspect", "capture", "execute", "finish" }.Contains(method))
-                    throw new Failure("invalid_request", "method '" + method + "' is not supported by protocol v5");
+                if (!new[] { "begin", "inspect", "capture", "prepareObservation", "execute", "finish" }.Contains(method))
+                    throw new Failure("invalid_request", "method '" + method + "' is not supported by protocol 6");
                 var result = native.Perform(method, p, r);
                 // Units journal cancellation after possible dispatch in their
                 // receipt. Do not replace that receipt with a generic error.
-                response = Wire.Obj("result", result);
+                var completed = Wire.Obj("result", result);
+                if (method == "capture" && captureCheckpoint != null)
+                {
+                    var captured = Wire.Object(result);
+                    string captureId = Equals(captured["kind"], "desktopCapture") ? (string)captured["desktopRef"]
+                                       : (string)Wire.Object(captured["image"])["id"];
+                    completed["captureCheckpoint"] = captureCheckpoint(captureId);
+                }
+                response = completed;
             }
             catch (Exception error)
             {

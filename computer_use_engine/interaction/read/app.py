@@ -408,6 +408,7 @@ class NativeAppReader:
             The existing working scope, or a scope anchored to the resolved root.
         """
         if root_id is not None and not any(item["window"] == root_id for item in directory["surfaces"]):
+            absence_is_unknown = directory["stopReasons"] or directory["platform"] in ("macos", "windows")
             if previous is not None:
                 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed
 
@@ -416,7 +417,7 @@ class NativeAppReader:
                     == (previous.root.root_window, previous.root.surface, previous.root.instance)
                     for item in directory.get("endedWindows", ())
                 )
-                if not explicitly_ended and (directory["stopReasons"] or directory["platform"] == "macos"):
+                if not explicitly_ended and absence_is_unknown:
                     raise FixedWindowUnconfirmed(previous.root, directory=directory)
                 raise FixedWindowInvalidated(
                     previous.root,
@@ -425,7 +426,7 @@ class NativeAppReader:
                 )
             raise failure(
                 "observation_incomplete"
-                if directory["stopReasons"] or directory["platform"] == "macos"
+                if absence_is_unknown
                 else "stale_target",
                 "The fixed working window is missing from the current directory; another document was not selected.",
             )

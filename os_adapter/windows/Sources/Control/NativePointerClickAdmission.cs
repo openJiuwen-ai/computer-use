@@ -10,10 +10,10 @@ namespace ComputerUse.Windows
     internal static class NativePointerClickAdmission
     {
         internal static bool NaturalActivation(NativePointerGestureIntent gesture, bool physicalReady,
-                                               bool originalRootHit, bool inputIdle)
+                                               bool originalRootHit, bool inputIdle, bool competingForegroundHidden = false)
         {
             return gesture != null && gesture.CanActivateWindow && physicalReady &&
-                   originalRootHit && inputIdle;
+                   originalRootHit && inputIdle && !competingForegroundHidden;
         }
         internal static bool ElementScopeAllowsNatural(string[] within)
         {

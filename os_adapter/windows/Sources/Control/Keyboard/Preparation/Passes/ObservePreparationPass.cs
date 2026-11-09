@@ -13,9 +13,8 @@ namespace ComputerUse.Windows
     internal static class ObservePreparationPass
     {
         internal const string Effects = "QUERY";
-        internal static NativeKeyboardState Run(NativeInputContract contract, NativeKeyboardState state, Request r, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard)
+        internal static NativeKeyboardState Run(NativeInputContract contract, NativeKeyboardState state, Request r, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard, double deadline)
         {
-            double deadline = Math.Min(r.Deadline, Wire.Now + 400);
             while (true)
             {
                 state = guard(contract, r, true);

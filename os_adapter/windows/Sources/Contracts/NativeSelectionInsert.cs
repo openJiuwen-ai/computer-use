@@ -14,6 +14,7 @@ namespace ComputerUse.Windows
         internal string Role;
         internal bool? Enabled, Writable;
         internal NativeSelectionInsertSelection Selection;
+        internal int? TextLength;
         internal bool Eligible, Ready;
     }
     internal sealed class NativeSelectionInsertSendResult
@@ -37,6 +38,11 @@ namespace ComputerUse.Windows
         void ValidateFinal(NativeSelectionInsertState state, Request request);
         IDisposable CreateBuffer(string text);
         NativeSelectionInsertSendResult Send(IDisposable buffer, int timeoutMs);
+    }
+    internal interface INativeSelectionReplacementSequence : INativeSelectionInsertSequence
+    {
+        void ValidateSelectionTarget(Request request);
+        NativeSelectionInsertSendResult SelectAll(int timeoutMs);
     }
     internal sealed class NativeSelectionInsertOffer
     {

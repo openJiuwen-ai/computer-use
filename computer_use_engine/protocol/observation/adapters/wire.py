@@ -478,16 +478,21 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
     roots = wire.raw["roots"]
     focus_root = roots[0] if wire.platform == "macos" and len(roots) == 1 else None
     focus_seeds = []
+    outside = [] if wire.platform == "windows" else None
     for identity, raw in wire.nodes.items():
         if raw.get("identity") is not None:
             wire.value(raw["identity"])
-        wire.read_info(raw.get("read"))
+        node_read = wire.read_info(raw.get("read"))
         if raw["kind"] != "element":
             for prop in array(raw["properties"]) if raw["properties"] is not None else ():
                 wire.property(prop)
             continue
         if raw["properties"] is None:
             unread.append(identity)
+            if outside is not None and any(
+                issue["reason"] == "outside_window_scope" for issue in node_read["issues"]
+            ):
+                outside.append(identity)
             continue
         values, statuses, requested = {}, {}, []
         actions = {"state": "unavailable", "items": [], "detail": "Action catalogue was not read"}
@@ -597,6 +602,7 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
         "unread": unread,
         "stopReasons": [issue.get("detail") or issue["reason"] for issue in wire.read["issues"]],
         **({"focusedElement": focus_seeds[0]} if len(focus_seeds) == 1 and focus_seeds[0] is not None else {}),
+        **({"outsideWindowNodes": outside} if outside else {}),
         **({"changeToken": wire.details["change_token"]} if "change_token" in wire.details else {}),
     }
 

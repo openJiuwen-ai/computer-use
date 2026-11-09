@@ -4,6 +4,7 @@ using System;
 using UIA = NativeUIA;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Automation;
@@ -44,6 +45,11 @@ namespace ComputerUse.Windows
             internal UiaElement Element;
             internal bool? Modal;
             internal string Error;
+        }
+
+        internal static NativeWindowRecord[] Candidates(NativeWindowRecord[] windows, string rootWindow)
+        {
+            return rootWindow == null ? windows : windows.Where(window => window.Native.Ref == rootWindow).ToArray();
         }
 
         internal Dictionary<IntPtr, Root> Read(NativeWindowRecord[] windows, Request request)

@@ -82,7 +82,7 @@ def global_impact(port, step=None, error=None, *, entered=False):
 
 
 class GlobalInput(Node):
-    """Use macOS raw input while preserving other platforms' existing adapters."""
+    """Dispatch raw primitives where supported, otherwise use captured coordinates."""
 
     def __init__(self, controller):
         self.controller, self.children = controller, ()
@@ -95,11 +95,13 @@ class GlobalInput(Node):
         observations_before_write(controller)
         with port.calls.claim(30000) as remaining:
             session = await port.connect(remaining())
-            if port.platform == "macos":
-                return await self._macos(request, GlobalTarget(session.session), remaining)
-        return await self._other_platform(request)
+            if port.platform == "macos" or (
+                port.platform == "windows" and request.intent.kind in ("key", "insert", "paste")
+            ):
+                return await self._primitive(request, GlobalTarget(session.session), remaining)
+        return await self._captured_input(request)
 
-    async def _macos(self, request, scope, remaining):
+    async def _primitive(self, request, scope, remaining):
         port = self.controller.port
         points = tuple([await locate_point(port, point, remaining) for point in request.points])
         intent = Intent(request.intent.kind, input_parameters(request, points), global_input=True)
@@ -108,8 +110,15 @@ class GlobalInput(Node):
             async with port.calls.operation(scope, remaining, intent=intent) as operation:
                 entered = True
                 step = await port.execute_global(operation.token, scope, intent, remaining())
+                empty_text = (
+                    port.platform == "windows"
+                    and intent.kind in ("insert", "paste")
+                    and intent.parameters["text"] == ""
+                    and step.dispatch == Dispatch.NOT_DISPATCHED
+                    and step.confirmation == Confirmation.CONFIRMED
+                )
                 if (
-                    step.dispatch != Dispatch.DISPATCHED
+                    (step.dispatch != Dispatch.DISPATCHED and not empty_text)
                     or step.error_code is not None
                     or step.cleanup != Cleanup.COMPLETE
                 ):
@@ -157,15 +166,14 @@ class GlobalInput(Node):
             observation=ObservedAction(receipt, observation_status="not_requested", window_lifecycle="not_applicable"),
         )
 
-    async def _other_platform(self, request):
-        # Windows/Linux keep their existing captured desktop/input support.
-        # Their native raw global contract will migrate independently.
+    async def _captured_input(self, request):
+        # Windows pointer and Linux desktop input still use captured coordinates/scope.
         from computer_use.client.targets import Target, target_request
 
         points, intent = request.points, request.intent
         if intent.kind == "paste":
             raise local_failure(
-                "Computer.paste is implemented on macOS; use App/Element.paste for current Windows/Linux support.",
+                "Computer.paste is unavailable on Linux; use App/Element.paste.",
                 "unsupported_operation",
                 "Computer",
             )

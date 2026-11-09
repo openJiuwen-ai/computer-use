@@ -78,6 +78,17 @@ Use `app.click(at=p, force_pointer=True)` when the mouse-event sequence itself i
 option never grants global input or changes Computer/Element semantics. Windows/Linux keep their
 existing coordinate mouse routes.
 
+On Windows, ordinary reads observe the window in its current state. Use
+`app.read(window=ref, view="both", allow_foreground=True)` to explicitly permit restoration or activation
+of that window and receive a preparation receipt with the observed foreground state. A desktop image
+returned after window capture fails is labeled with its desktop scope. Use `computer.point((x, y))` to
+select a point from that image.
+
+When a Windows task specifies a full window title, `computer.app(window_title=title).read()`
+binds a unique, case-sensitive match in the visible native window catalogue. Reuse the App after
+the title changes. Its observations and action follow-up cover only the bound window. See the
+[SDK reference](docs/mcp.en.md#python-sdk) for menu paths and separate confirmation windows.
+
 On macOS, object input preparation conditionally returns foreground control changed temporarily
 by the SDK while retaining the target's internal input context. This is not an unconditional restore
 after every operation: explicit activation and subsequent user choices are preserved. Workspace

@@ -16,7 +16,7 @@ from computer_use.native.semantics import RELATIONS, followed_relations, role_na
 from computer_use.protocol.element_path import element_path
 
 
-async def resolve_path(port, operation, root, remaining, path, *, timeout_ms=0):
+async def resolve_path(port, operation, root, remaining, path, *, timeout_ms=0, strict_window=False):
     """Wait only for absence, within the same lease and total call deadline.
 
     A zero timeout means one lookup, not zero time for native IPC. Each retry
@@ -29,7 +29,7 @@ async def resolve_path(port, operation, root, remaining, path, *, timeout_ms=0):
         raise ValueError("Path wait must be an integer in 0..10000 milliseconds")
     deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
     while True:
-        query = TargetQuery(port, operation, root, remaining)
+        query = TargetQuery(port, operation, root, remaining, strict_window=strict_window)
         try:
             return await query.resolve(path), query.within
         except ComputerUseError as error:
@@ -45,7 +45,7 @@ class TargetQuery(NativeGraph):
         "role", "name", "description", "identifier", "subrole", "focused", "modal", "value", "nativeWindowHandle",
     )
 
-    def __init__(self, port, operation, root, remaining, *, max_nodes=4096, max_depth=40):
+    def __init__(self, port, operation, root, remaining, *, max_nodes=4096, max_depth=40, strict_window=False):
         contents = followed_relations(port.platform, getattr(port, "capabilities", ()), content_only=True)
         super().__init__(
             port,
@@ -59,6 +59,8 @@ class TargetQuery(NativeGraph):
             follow_relations=contents,
         )
         self.content_kinds = tuple(RELATIONS[self.platform][name] for name in contents)
+        if strict_window:
+            self.query_options["strict_window"] = True
         self.within = ()
 
     async def _name(self, token):
@@ -133,7 +135,10 @@ class TargetQuery(NativeGraph):
             children.extend(await self._relation(token, kind, read_missing=True, optional=True))
         # Rows/cells can be shared by several content relations or span several
         # coordinates. They are one native candidate, not repeated matches.
-        return tuple(dict.fromkeys(children))
+        unique = dict.fromkeys(children)
+        if not self.outside_window_nodes:
+            return tuple(unique)
+        return tuple(child for child in unique if child not in self.outside_window_nodes)
 
     async def _next_relation(self, token, relation_property, cursor, limit):
         page, batch = await super()._next_relation(token, relation_property, cursor, limit)
@@ -227,7 +232,14 @@ class TargetQuery(NativeGraph):
                 if len(visited) >= self.max_nodes:
                     self.fail("observation_incomplete", "Path containment exceeds its node budget.")
                 visited.add(token)
-                raw_role = await self._field(token, "role")
+                if token in self.outside_window_nodes:
+                    continue
+                try:
+                    raw_role = await self._field(token, "role")
+                except ComputerUseError as error:
+                    if self.query_options.get("strict_window") and error.code == "outside_window_scope":
+                        continue
+                    raise
                 role = role_name(self.platform, raw_role) if raw_role is not UNKNOWN else "unknown"
                 if token != self.root.node and role in ("window", "sheet"):
                     inline = await self._inline_window(token, role)

@@ -138,7 +138,7 @@ class RelatedRead:
 
 
 def window_lifecycle(identity: WindowIdentity, directory) -> str:
-    """Describe native lifetime facts without treating hidden macOS windows as ended."""
+    """Describe the original lifetime from platform directory evidence."""
     if any(WindowIdentity.of(item) == identity for item in directory.get("endedWindows", ())):
         return "closed"
     item = next((item for item in directory["surfaces"] if item["window"] == identity.window), None)
@@ -146,7 +146,7 @@ def window_lifecycle(identity: WindowIdentity, directory) -> str:
         return "observed" if WindowIdentity.of(item) == identity else "closed"
     return (
         "closed"
-        if not directory["stopReasons"] and directory.get("platform") in ("windows", "linux")
+        if not directory["stopReasons"] and directory.get("platform") == "linux"
         else "unknown"
     )
 

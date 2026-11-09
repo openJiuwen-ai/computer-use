@@ -12,6 +12,7 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.scope import adopt, display_selection, validate_session
 from computer_use.interaction.read.views.publication import publish
+from computer_use.interaction.read.views.related import original_lifecycle
 from computer_use.native.contracts import Binding, Knowledge
 from computer_use.native.scopes import RunningApplication
 from computer_use.session.events import observation_delivered, set_observation_handler
@@ -78,6 +79,31 @@ def setup(*items):
 
 def ref(app, key):
     return next(number for number, window in app._instance.windows.items() if window == key)
+
+
+def test_windows_catalogue_absence_keeps_original_lifetime_until_native_end_evidence():
+    controller, app = setup()
+    a_ref = ref(app, "a")
+    original = window_scope(controller, app, a_ref)
+    a, b = surface("a"), surface("b")
+    hidden = {**directory(b, focus="b"), "platform": "windows"}
+    adopt(controller, app, hidden)
+    assert original_lifecycle(original._window_identity, hidden) == "unknown"
+    assert app._instance.evidence[original.identity].lifetime is WindowLifetime.RETAINED
+    assert app._instance.evidence[original.identity].membership is Knowledge.UNKNOWN
+
+    visible = {**directory(a, b, focus="a"), "platform": "windows"}
+    adopt(controller, app, visible)
+    assert ref(app, "a") == a_ref
+    assert window_scope(controller, app, a_ref)._window_identity == original._window_identity
+
+    ended = {**directory(b, focus="b", partial=True, ended=(a,)), "platform": "windows"}
+    adopt(controller, app, ended)
+    assert original_lifecycle(original._window_identity, ended) == "closed"
+    assert app._instance.evidence[original.identity].lifetime is WindowLifetime.RETIRED
+    with pytest.raises(ComputerUseError) as raised:
+        window_scope(controller, app, a_ref)
+    assert raised.value.code == "stale_target"
 
 
 def test_global_and_application_window_use_same_fixed_handle_without_focus_query():

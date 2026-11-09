@@ -17,9 +17,23 @@ namespace ComputerUse.Windows
             "node",
             "capture"
         };
-        internal static Dictionary<string, object> Resolve(object raw, string session)
+        internal static bool IsGlobal(Dictionary<string, object> target)
+        {
+            return target.ContainsKey("global");
+        }
+
+        internal static Dictionary<string, object> Resolve(object raw, string session, bool allowGlobal = false)
         {
             var value = Wire.Object(raw);
+            if (allowGlobal && IsGlobal(value))
+            {
+                Wire.Keys(value, "session,global");
+                if (!Wire.Bool(value, "global"))
+                    throw new Failure("invalid_request", "global input requires the global session scope");
+                if (Wire.Str(value, "session") != session)
+                    throw new Failure("stale_target", "global input belongs to another native session");
+                return new Dictionary<string, object>(value);
+            }
             Wire.Keys(value, String.Join(",", Keys));
             foreach (var key in Keys)
                 if (value[key] != null)

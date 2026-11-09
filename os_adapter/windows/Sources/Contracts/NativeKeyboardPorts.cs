@@ -22,6 +22,7 @@ namespace ComputerUse.Windows
     internal sealed class NativeKeyboardState
     {
         internal object Native;
+        internal NativeWindowRecord InteractionWindow;
         internal string Role, Label, EditorRole, FocusedNode, EditorNode, EditorOwner;
         internal bool? Enabled, Focusable, TextWritable;
         internal bool TextSelection, SelectionPreparable;

@@ -2,6 +2,7 @@
 
 using System;
 using System.Text.RegularExpressions;
+using System.Windows.Automation;
 
 namespace ComputerUse.Windows
 {
@@ -29,17 +30,35 @@ namespace ComputerUse.Windows
                 !String.IsNullOrEmpty(uiaClass) &&
                     uiaClass.IndexOf("MaskedTextBox", StringComparison.OrdinalIgnoreCase) >= 0)
                 return null;
-            bool system = String.Equals(nativeClass, "Edit", StringComparison.OrdinalIgnoreCase) &&
-                          String.Equals(realClass, "Edit", StringComparison.OrdinalIgnoreCase) && framework == "Win32";
-            bool forms =
-                WinFormsEdit.IsMatch(nativeClass) && framework == "WinForm" &&
-                (String.Equals(realClass, "Edit", StringComparison.OrdinalIgnoreCase) || realClass == nativeClass);
-            return system || forms ? new NativeSelectionInsertMechanism(nativeClass, realClass, framework) : null;
+            return framework != null && framework == NativeFramework(nativeClass, realClass)
+                       ? new NativeSelectionInsertMechanism(nativeClass, realClass, framework)
+                       : null;
+        }
+        internal static string NativeFramework(string nativeClass, string realClass)
+        {
+            bool realEdit = String.Equals(realClass, "Edit", StringComparison.OrdinalIgnoreCase);
+            if (realEdit && String.Equals(nativeClass, "Edit", StringComparison.OrdinalIgnoreCase))
+                return "Win32";
+            return nativeClass != null && WinFormsEdit.IsMatch(nativeClass) && (realEdit || realClass == nativeClass)
+                       ? "WinForm"
+                       : null;
         }
         internal bool Same(NativeSelectionInsertMechanism current)
         {
             return current != null && NativeClass == current.NativeClass && RealClass == current.RealClass &&
                    Framework == current.Framework;
+        }
+        internal static NativeSelectionInsertMechanism ResolveReplacement(string nativeClass, string realClass,
+                                                                          string framework, bool unicode, long style,
+                                                                          string uiaClass)
+        {
+            const long multiline = 0x4;
+            return (style & multiline) == 0 ? null
+                                            : Resolve(nativeClass, realClass, framework, unicode, style & ~multiline, uiaClass);
+        }
+        internal static bool IsReplacementRole(ControlType role)
+        {
+            return role == ControlType.Edit || role == ControlType.Document;
         }
     }
 }

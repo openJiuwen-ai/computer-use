@@ -50,15 +50,13 @@ def element_target(element):
 
 def image_target(controller, owner, point):
     if owner is None:
-        controller.desktop.check_coordinates(*point, current=False)
-        ref = controller.desktop.target(True, current=False)
-        state = controller.desktop.observed(ref)
-        mapped = controller.desktop.map_parameters("click", {"x": point[0], "y": point[1]}, current=False)
+        state, mapped = controller.desktop.point(*point)
+        ref = state["desktopRef"]
         target = Target(
             controller,
             None,
             Binding(state["binding"]["session"], None, None, None, capture=ref),
-            _point=(mapped["x"], mapped["y"]),
+            _point=mapped,
             _internal=True,
         )
         controller.interfaces.windows.retain_target_capture(target, ref)

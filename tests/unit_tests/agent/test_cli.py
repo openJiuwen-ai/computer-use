@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from computer_use_agent.cli.config import initialize, load
 from computer_use_agent.cli.input import MessageInput
@@ -77,10 +78,23 @@ def test_journal_saves_images_and_redacts_secrets(tmp_path):
         },
     )
     journal.close()
-    text = (journal.directory / "events.jsonl").read_text()
+    text = (journal.directory / "events.jsonl").read_text(encoding="utf-8")
     assert "configured-secret" not in text
     assert "other-secret" not in text
     assert (journal.directory / "image-0001.png").read_bytes() == b"image-bytes"
+
+
+def test_journal_preserves_tool_result_utf16_values_and_following_events(tmp_path):
+    journal = Journal(tmp_path)
+    try:
+        journal.record("tool_result", {"content": ["中文🙂", "\ud800", "\ud83d\ude42"]})
+        journal.record("agent", {"content": "Complete"})
+    finally:
+        journal.close()
+    path = journal.directory / "events.jsonl"
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [line["kind"] for line in lines] == ["tool_result", "agent"]
+    assert lines[0]["data"]["content"] == ["中文🙂", "\ud800", "🙂"]
 
 
 def test_terminal_titles_and_debug_do_not_duplicate_final_answer():
@@ -114,14 +128,14 @@ def test_cli_single_task(model_server, tmp_path, monkeypatch, capsys):
             {"model": "test-model", "api_key": "test-only", "api_base": server.model().model_client_config.api_base}
         )
     )
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.delenv("API_BASE", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     assert asyncio.run(main(["--config", str(path), "Run the CLI test"])) == 0
     assert "CLI task complete" in capsys.readouterr().out
     records = list((tmp_path / ".computer-use/agent/runs").glob("*/events.jsonl"))
     assert len(records) == 1
-    assert "cli evidence" in records[0].read_text()
+    assert "cli evidence" in records[0].read_text(encoding="utf-8")
 
 
 def test_interactive_commands_preserve_execution_session(model_server, tmp_path, monkeypatch):
@@ -144,12 +158,13 @@ def test_interactive_commands_preserve_execution_session(model_server, tmp_path,
         )
     )
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
     for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL"):
         monkeypatch.delenv(key, raising=False)
     result = subprocess.run(
         [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path)],
         input="/debug\nInitialize counter\n/normal\nIncrement counter\n/compact\n/new\n/exit\n",
-        text=True,
+        encoding="utf-8",
         capture_output=True,
         timeout=40,
         check=False,

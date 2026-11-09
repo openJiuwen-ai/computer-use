@@ -42,7 +42,7 @@ from computer_use.native.contracts import Binding
 from computer_use.native.query.directory import select_surface
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
 from computer_use.pipeline.core import Control
-from computer_use.session.interfaces import WindowIdentity
+from computer_use.session.interfaces import LookupContext, WindowIdentity
 from computer_use.session.operations import OperationDeadlineExceeded, current_operation_budget
 from computer_use.session.surface_content import content_kind, transient_content
 
@@ -233,7 +233,8 @@ class InterfaceReadPipeline:
         if allow_foreground and (ui._anchor is not None or instance.anchor is not None):
             permitted = allowed(ui)
             anchor = ui._anchor or instance.anchor.root.root_window
-            current = select_surface(directory, anchor)
+            options = {"follow_modal": False} if getattr(ui, "_strict_window", False) else {}
+            current = select_surface(directory, anchor, **options)
             item = next((item for item in permitted.values() if item["surface"] == current.surface), None)
             if item is None:
                 raise local_failure("the observation window is not confirmed in this instance")
@@ -307,6 +308,8 @@ class InterfaceReadPipeline:
             ui._context = None
 
         def content_members():
+            if getattr(ui, "_strict_window", False):
+                return allowed(ui)
             if window_family_only:
                 return related.content_members(directory, allowed(ui))
             return observation_members(ui, related)
@@ -426,7 +429,7 @@ class InterfaceReadPipeline:
         anchor = related.original.root_window if window_family_only else ui._anchor or instance.anchor.root.root_window
         if related is not None:
             anchor = related.preferred(directory, anchor)
-        plan = CollectionPlan(anchor, view, related)
+        plan = CollectionPlan(anchor, view, related, strict_window=getattr(ui, "_strict_window", False))
         plan.update(directory, permitted)
         principal, principal_error = plan.principal, plan.selection_error
         parts, notes, collection_gaps = [], [], []
@@ -850,6 +853,8 @@ class InterfaceReadPipeline:
         )
         lines: list[str | DisplayText | DisplayDocument] = []
         screenshot, included_images = None, ()
+        image_notes = []
+        desktop_image = False
         image_parts = [
             part for _, part in displayed_parts
             if part.image is not None or "image" in plan.requested.get(part.identity, ())
@@ -869,9 +874,25 @@ class InterfaceReadPipeline:
                             part.identity.window for part in image_parts
                             if part.image is not None and image.png is part.image.image
                         )
-                lines += image_notes
             except Exception as error:  # noqa: BLE001 - image composition must not discard independent text content
                 collection_gaps.append(_collection_gap("image", error))
+        if (
+            screenshot is None and image_parts and related is None and directory.get("platform") == "windows"
+            and not getattr(ui, "_strict_window", False)
+        ):
+            # Reuse the desktop capture and its delivery-owned coordinate map.
+            # Pixels of the visible desktop do not satisfy window image coverage.
+            controller.port.capture_references = controller.interfaces.windows.capture_references()
+            desktop, gap = await collect_component(controller.port, "desktop image", controller.desktop_reader.read)
+            if gap is not None:
+                collection_gaps.append(gap)
+            if desktop is not None and desktop["screenshot"] is not None:
+                controller.desktop.record(desktop)
+                ui._image, screenshot = None, desktop["screenshot"]
+                desktop_image = True
+                lines.extend(("Window image unavailable. Showing the visible desktop.", desktop["document"]))
+        if not desktop_image:
+            lines.extend(image_notes)
         header = capture_header(
             controller, ui, directory, parts=displayed_parts, delivered_gaps=delivered_gaps,
             image_windows=included_images,
@@ -1131,6 +1152,7 @@ class InterfaceReadPipeline:
             window_coverage=coverage,
             presentations=presentations,
             member_trees=member_trees,
+            lookup_context=LookupContext(None) if desktop_image and not trees else None,
             context_owner=related.context_owner if related is not None else None,
             content_owner=content_owner,
             partial=bool(
@@ -1266,11 +1288,17 @@ class InterfaceReadPipeline:
                     gaps.append(captured.gap)
             except Exception as error:  # noqa: BLE001 - preserve the independently acquired tree
                 failed("image", error)
-        image_first = component_budget_ms is not None and view == "both"
+        # An isolated provider timeout retires the worker that owns capture
+        # coordinates. Acquire this member's pixels after the capped tree lease.
+        image_first = (
+            component_budget_ms is not None and view == "both"
+            and "nativeReadIsolation" not in controller.port.connection.capabilities
+        )
         if image_first:
             await capture_image()
         if view != "image":
             try:
+                options = {"strict_window": True} if getattr(ui, "_strict_window", False) else {}
                 # This exact-member component must leave room for pixels and
                 # directory reconciliation within the enclosing call deadline.
                 with (
@@ -1281,7 +1309,7 @@ class InterfaceReadPipeline:
                         controller.port, "tree",
                         lambda: controller.reader.reader.read(
                             target, max_nodes=max_nodes, scope_kind="window" if detail is None else None,
-                            fields=fields, max_depth=max_depth,
+                            fields=fields, max_depth=max_depth, **options,
                         ),
                     )
                 if gap:

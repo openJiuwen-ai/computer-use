@@ -1,6 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Lower normal window close to its declared control, inside the write boundary."""
+"""Lower normal window close to its native mechanism inside the write boundary."""
 
 from dataclasses import replace
 
@@ -19,8 +19,9 @@ def create(*, controller):
         if plan.request.intent.kind != "closeWindow":
             return plan
         native, owner = controller.port, plan.request.owner
-        if native.platform != "macos":
-            raise local_failure("normal window close is currently implemented on macOS only", "input_unavailable")
+        platform = native.platform
+        if platform not in ("macos", "windows"):
+            raise local_failure("normal window close is unavailable on this platform", "input_unavailable")
         target = plan.request.target
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
         # Refresh only technical facts, retaining the original exact identity.
@@ -30,10 +31,12 @@ def create(*, controller):
         root = member_target(owner._instance, owner._instance.members[identity.window])
         if root.node is None:
             raise local_failure("the selected window has no accessible close control source", "input_unavailable")
+        # Keep the requested window and intent for receipts and related observation.
+        # The native action path checks WindowPattern on this exact root at dispatch.
+        if platform == "windows":
+            return replace(plan, target=root, mechanism=Intent("action", {"action": "Window.Close"}))
         async with native.calls.open(root, 30000) as lease:
             button = await close_control(native, lease.token, root, lease.remaining)
-        # Keep the requested window/intent for receipts and related observation;
-        # existing click preparation, final native checks and effect tracking apply.
         return replace(plan, target=button, mechanism=Intent("click"))
 
     return resolve

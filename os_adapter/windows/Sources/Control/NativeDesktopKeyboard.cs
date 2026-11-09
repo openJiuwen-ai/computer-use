@@ -11,10 +11,8 @@ namespace ComputerUse.Windows
     // does not infer an Element, activate a window, or query an application's
     // UIA provider. Addressed App/Element operations retain their own contracts.
     internal sealed class NativeDesktopKeyboard : INativeKeyboardProvider, INativeGlobalKeyboardAuthority,
-                                                  INativeKeyboardTextProvider,
-                                                  INativePasteConsumerProvider
+                                                  INativeKeyboardTextProvider
     {
-        readonly NativePointerCaptures captures;
         readonly bool globalInputAllowed;
         sealed class Receiver
         {
@@ -23,9 +21,8 @@ namespace ComputerUse.Windows
             internal long Generation;
         }
 
-        internal NativeDesktopKeyboard(NativePointerCaptures captures, bool allowGlobalInput = false)
+        internal NativeDesktopKeyboard(bool allowGlobalInput = false)
         {
-            this.captures = captures;
             globalInputAllowed = allowGlobalInput;
         }
 
@@ -34,10 +31,6 @@ namespace ComputerUse.Windows
             r.Check();
             if (!Native.Interactive())
                 throw new Failure("desktop_unavailable", "desktop input requires the unlocked interactive desktop");
-            if (Native.GetForegroundWindow() == IntPtr.Zero)
-                throw new Failure("input_unavailable",
-                                  "Windows currently has no foreground window; no desktop keyboard input sent",
-                                  "read the desktop and choose the intended visible recipient before keyboard input");
             NativeDesktopState.RequireInput();
         }
 
@@ -46,14 +39,11 @@ namespace ComputerUse.Windows
         {
             NativeGlobalInput.Require(globalInputAllowed);
             Check(r);
-            if (target["surface"] != null || target["node"] != null || within.Length != 0)
+            if (!NativeBinding.IsGlobal(target) || within.Length != 0)
                 throw new Failure("invalid_request", "desktop keyboard cannot address a window or element");
-            var image = captures.Get(target);
-            if (new NativePointerLayout().Signature != image.Layout)
-                throw new Failure("snapshot_expired", "display layout changed");
             var window = Native.GetForegroundWindow();
             NativeInputAccess.RequireWindow(window, "foreground window");
-            var focus = window == IntPtr.Zero ? IntPtr.Zero : Native.Focus(window);
+            var focus = text && window != IntPtr.Zero ? Native.Focus(window) : IntPtr.Zero;
             var receiver =
                 new Receiver { Window = window, Focus = focus, Pid = focus == IntPtr.Zero ? 0 : Native.PID(focus),
                                Generation = focus == IntPtr.Zero ? 0 : Native.Generation(focus) };
@@ -126,12 +116,6 @@ namespace ComputerUse.Windows
         {
             return new Sequence((Receiver)state.Native, r);
         }
-        public NativePasteConsumer PasteConsumer(NativeKeyboardState state, Request r)
-        {
-            var receiver = (Receiver)state.Native;
-            return NativePasteConsumers.Capture(receiver.Window, receiver.Focus, r);
-        }
-
         public NativeTextSelection Selection(NativeKeyboardState state, Request r)
         {
             throw new Failure("invalid_request", "desktop typing inserts text; replacement requires an Element");

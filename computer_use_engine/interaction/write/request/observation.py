@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord
+from computer_use.interaction.query.instances.scope import require_identity
 from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
@@ -22,6 +23,7 @@ from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
+from computer_use.session.operations import current_operation_budget
 from computer_use.session.surface_content import content_host
 
 POSTWRITE_OBSERVATION_MS = 5000
@@ -232,7 +234,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             and getattr(instance, "anchor", None) is None
         ):
             return replace(outcome, observation_status="not_requested")
-        related_owner = getattr(owner, "_app", owner)
+        strict_window = getattr(owner, "_strict_window", False)
+        related_owner = owner if strict_window else getattr(owner, "_app", owner)
         if not self.session_usable(request, session_identity):
             return replace(
                 outcome,
@@ -249,8 +252,19 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 self.controller.transport.retain_session(session_identity),
                 self.controller.port.calls.limit(POSTWRITE_OBSERVATION_MS),
             ):
-                options = {"related": related} if related is not None else {}
-                observed = await self.controller.interfaces.read(related_owner, "tree", False, None, **options)
+                options = {"related": related} if related is not None and not strict_window else {}
+                try:
+                    observed = await self.controller.interfaces.read(related_owner, "tree", False, None, **options)
+                except ComputerUseError as error:
+                    if not self.close_confirmation_pending(request, outcome, error, session_identity):
+                        raise
+                    budget = current_operation_budget()
+                    if budget is not None:
+                        budget.checkpoint()
+                    # A Windows close can remove the window from discovery
+                    # before its retained native lifetime is proved ended.
+                    # Recheck the exact binding in the same budget.
+                    observed = await self.controller.interfaces.read(owner, "tree", False, None)
             metadata = observation_data(observed) or {}
             partial = metadata.get("partial", False)
             directory = metadata.get("directory")
@@ -343,8 +357,34 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                 choices=choices,
             )
 
+    def close_confirmation_pending(self, request, outcome, error, session_identity):
+        owner = request.owner
+        fixed = getattr(owner, "_window_identity", None)
+        if (
+            request.intent.kind != "closeWindow"
+            or getattr(self.controller.port, "platform", None) != "windows"
+            or outcome.receipt is None
+            or outcome.receipt["status"] != "dispatched"
+            or fixed is None
+            or window_binding(fixed) != window_binding(request.target)
+            or not self.session_usable(request, session_identity)
+        ):
+            return False
+        if isinstance(error, FixedWindowUnconfirmed):
+            if window_binding(error.binding) != window_binding(fixed):
+                return False
+        elif (error.code, error.effect, error.target) != ("stale_target", "none", "request"):
+            # The Windows directory can report request-scoped staleness
+            # before it has positive lifetime evidence for any window.
+            return False
+        try:
+            require_identity(owner, WindowIdentity(fixed.root_window, fixed.surface, fixed.instance))
+        except ComputerUseError:
+            return False
+        return True
+
     def window_choices(self, owner, directory):
-        if directory is None or owner is None:
+        if directory is None or owner is None or getattr(owner, "_strict_window", False):
             return ()
         name = self.controller.state(owner).name or str(owner._instance.selector)
         return tuple(self.controller.interfaces.windows.choices(directory, name))

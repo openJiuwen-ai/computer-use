@@ -15,6 +15,8 @@ namespace ComputerUse.Windows
                                                       "requestDedup",
                                                       "nativeOperations",
                                                       "nativeDirectory",
+                                                      "nativeWindowTitleSelection",
+                                                      "nativeStrictWindowRead",
                                                       "nativeRelations",
                                                       "nativeNodePages",
                                                       "nativeNodeDepthBudget",
@@ -36,11 +38,13 @@ namespace ComputerUse.Windows
             get {
                 return ReadCapabilities.Concat(writer == null ? new string[0] : writer.Capabilities)
                     .Concat(reader is INativeReadEventBackend ? new[] { "nativeReadEvents" } : new string[0])
+                    .Concat(reader is INativeReadPreparation ? new[] { "nativeObservationPreparation" } : new string[0])
                     .Concat(capture == null ? new string[0] : new[] { "nativeCapture", "nativeCaptureKinds" })
                     .ToArray();
             }
         }
 
+        readonly string session;
         readonly Func<object, Dictionary<string, object>> binding;
         readonly INativeReadBackend reader;
         readonly NativeQueryPipeline queries;
@@ -92,12 +96,13 @@ namespace ComputerUse.Windows
             INativeCaptureBackend capture = null,
             Action<string, Dictionary<string, object>, NativePointerPoint, bool, int, bool> displayPointer = null)
         {
+            this.session = session;
             binding = raw => NativeBinding.Resolve(raw, session);
             this.reader = reader;
             this.writer = writer;
             this.capture = capture;
             this.displayPointer = displayPointer;
-            captures = new NativeCapturePipeline(reader, capture, binding, FinishCurrent, Expire);
+            captures = new NativeCapturePipeline(capture, binding, FinishCurrent, Expire);
             queries = new NativeQueryPipeline(
                 reader, binding,
                 writer == null ? null
@@ -115,6 +120,7 @@ namespace ComputerUse.Windows
                 return;
             PromoteWorkerRetirement();
             string closed = operation, cleanup = write == null ? "complete" : write.Cleanup;
+            var readScope = NativeBinding.IsGlobal(original) ? null : reader;
             if (cleanup != "complete")
                 retired = true;
             operation = null;
@@ -125,7 +131,7 @@ namespace ComputerUse.Windows
             // Do not enter COM/provider/lease cleanup after unsafe thread state.
             // The outer process owner must confirm exit before accepting more work.
             if (WorkerRetirementReason == null)
-                cleanup = NativeResourcePipeline.Release(cleanup, reader, ref lease, ref retired);
+                cleanup = NativeResourcePipeline.Release(cleanup, readScope, ref lease, ref retired);
             else
             {
                 cleanup = "failed";
@@ -208,12 +214,17 @@ namespace ComputerUse.Windows
                 Wire.Keys(p, "mode,target,intent", "clickContract");
                 string mode = Wire.Str(p, "mode");
                 var intent = Wire.Object(p["intent"]);
-                Wire.Keys(intent, "kind,parameters");
+                var target = NativeBinding.Resolve(p["target"], session, allowGlobal: true);
+                bool global = NativeBinding.IsGlobal(target);
+                Wire.Keys(intent, global ? "kind,parameters,globalInput" : "kind,parameters");
                 string kind = Wire.Str(intent, "kind");
                 var parameters = Wire.Object(intent["parameters"]);
-                var target = binding(p["target"]);
                 bool writable = mode == "write";
                 bool clickV1 = p.ContainsKey("clickContract");
+                if (global && (!writable || !Wire.Bool(intent, "globalInput") || clickV1))
+                    throw new Failure("invalid_request", "global input requires an explicit primitive write intent");
+                if (global)
+                    NativeGlobalInput.Require(r.GlobalInputAllowed);
                 if (clickV1 && (Wire.Str(p, "clickContract") != "v1" || !writable || kind != "click"))
                     throw new Failure("invalid_request", "clickContract v1 requires a write click operation");
                 if (writable)
@@ -232,7 +243,7 @@ namespace ComputerUse.Windows
                 if (operation != null)
                     throw new Failure("busy", "another native operation is active");
                 r.Check();
-                NativeResourcePipeline.Acquire(writable, target, r, reader,
+                NativeResourcePipeline.Acquire(writable, target, r, global ? null : reader,
                                                writer == null ? null : new Func<Request, IDisposable>(writer.Acquire),
                                                ref lease, ref retired);
                 operation = Guid.NewGuid().ToString("N");
@@ -259,9 +270,19 @@ namespace ComputerUse.Windows
                 return Execute(p, r);
             if (method == "capture")
                 return captures.Run(p, r, new NativeOperationView(operation, original, write, deadline));
+            if (method == "prepareObservation")
+                return NativeObservationPreparationPipeline.Run(
+                    p, r, new NativeOperationView(operation, original, write, deadline), binding,
+                    reader as INativeReadPreparation, AcquireObservationPreparation);
             if (method != "inspect")
                 throw new Failure("invalid_request", "v5 never dispatches legacy read or input commands");
             return queries.Run(p, r, new NativeOperationView(operation, original, write, deadline));
+        }
+
+        void AcquireObservationPreparation(Dictionary<string, object> target, Request r)
+        {
+            if (lease == null && writer != null)
+                NativeResourcePipeline.Acquire(true, target, r, reader, writer.Acquire, ref lease, ref retired);
         }
 
         object Execute(Dictionary<string, object> p, Request r)
@@ -276,9 +297,11 @@ namespace ComputerUse.Windows
             Wire.Str(command, "kind");
             Wire.Str(command, "primitiveId");
             Wire.Bool(command, "foreground");
-            var target = binding(command["target"]);
+            var target = NativeBinding.Resolve(command["target"], session, allowGlobal: true);
             if (operation == null || id != operation || write == null)
                 throw new Failure("stale_target", "native write operation is unknown or expired");
+            if (NativeBinding.IsGlobal(original) && step != 1)
+                throw new Failure("invalid_request", "a global operation dispatches one primitive");
             Step prior;
             if (steps.TryGetValue(step, out prior))
             {
