@@ -41,6 +41,9 @@ async def resolve_path(port, operation, root, remaining, path, *, timeout_ms=0):
 
 class TargetQuery(NativeGraph):
     failure_target = "element path"
+    fields_for_path = (
+        "role", "name", "description", "identifier", "subrole", "focused", "modal", "value", "nativeWindowHandle",
+    )
 
     def __init__(self, port, operation, root, remaining, *, max_nodes=4096, max_depth=40):
         contents = followed_relations(port.platform, getattr(port, "capabilities", ()), content_only=True)
@@ -51,17 +54,7 @@ class TargetQuery(NativeGraph):
             remaining,
             max_nodes=max_nodes,
             max_depth=max_depth,
-            fields=(
-                "role",
-                "name",
-                "description",
-                "identifier",
-                "subrole",
-                "focused",
-                "modal",
-                "value",
-                "nativeWindowHandle",
-            )
+            fields=self.fields_for_path
             + (("windowContentScope",) if "nativeWindowContent" in getattr(port, "capabilities", ()) else ()),
             follow_relations=contents,
         )

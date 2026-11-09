@@ -86,6 +86,11 @@ Windows/Linux 对应的临时前台归还与菜单连续性改进列为后续实
 - **跨平台原生驱动**：macOS、Windows、Linux 各一套，协议一致。
 - **可观测**：每次执行写入 `~/.computer-use/logs` 的 JSONL 日志，含代码、观测与回执。
 
+名称和路径定位优先复用最近已返回的语义观察，包括操作返回的写后观察；信息不足、未匹配或已知失效时，SDK 在同次调用内按原规则现场查询。
+需要明确查询当前界面时使用 `app.element("保存", fresh=True)`。`fresh` 只控制名称／路径；编号与已保存的 Element 始终保留原对象绑定，不会自动改绑同名新对象。
+定位复用不省略后续写入的现场判断、准备或恢复，也不保证观察之外发生的对象重建已被发现。
+查看刚返回的捕获内容可使用 `result.observation.read_details(element=ref)`；显式 `app.read()`、`element.read()` 和 `element.read_text()` 仍会获取新观察，`full=True` 只控制全文展示。
+
 ## 项目结构
 
 四层代码与配套文件的目录组织如下：

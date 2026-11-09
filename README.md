@@ -95,6 +95,15 @@ implemented first on macOS; Windows/Linux require separate implementation and va
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.
 
+Name and path lookup first reuse the latest returned semantic observation, including an action's
+observation. Missing, incomplete or known-invalid evidence falls back to the existing live query in
+the same call. Use `app.element("Save", fresh=True)` to explicitly query current facts. `fresh` only
+controls names and paths: numbers and saved Elements keep their original binding, including after
+an application replaces a control with another of the same name. Cached lookup preserves all live
+write checks, preparation and restoration; it does not detect unobserved external object replacement.
+Use `result.observation.read_details(element=ref)` for already captured details. Explicit `app.read()`,
+`element.read()` and `element.read_text()` still acquire fresh observations; `full=True` controls presentation.
+
 ## Project Structure
 
 The four layers and supporting files are organized as follows:

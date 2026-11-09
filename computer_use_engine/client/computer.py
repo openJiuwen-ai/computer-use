@@ -215,7 +215,12 @@ class App:
         return operation(lambda: self._controller.run(CloseWindow(self, window)))
 
     @synchronous
-    def element(self, target, *, timeout_ms=3000, window=None):
+    def element(self, target, *, timeout_ms=3000, window=None, fresh=False):
+        """Locate a name/path in the latest observation, or explicitly query fresh facts.
+
+        Numbers always retain their original binding; fresh only controls
+        name/path lookup. Reads and subsequent input still use their own rules.
+        """
         _window(window)
         # pylint: disable-next=unidiomatic-typecheck
         if type(timeout_ms) is not int or not 0 <= timeout_ms <= 10000:
@@ -223,9 +228,11 @@ class App:
         # pylint: disable-next=unidiomatic-typecheck
         if type(target) is int:
             parameters.reference(target, "element reference")
+        if type(fresh) is not bool:
+            raise local_failure("fresh must be a boolean")
 
         async def resolve():
-            snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms, window)))
+            snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms, window, fresh)))
             return Element(self._controller, self, snapshot, _internal=True)
 
         return resolve()

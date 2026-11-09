@@ -358,6 +358,11 @@ def publish(
         native_session = (directory or instance_state.directory or {}).get("session")
         instance_state.observation_generation += 1
         generation = instance_state.observation_generation
+        from computer_use.session.observed_lookup import captured_lookup_scopes, publish_lookup_scopes
+
+        captured_name_sources = captured_lookup_scopes(
+            instance_state, trees, shown, generation, controller.transport.capabilities, window_coverage,
+        )
         retained_state, retained_controller = weakref.ref(instance_state), weakref.ref(controller)
         fixed_owner = context_owner() if context_owner is not None else owner
         fixed = getattr(fixed_owner, "_window_identity", None)
@@ -399,6 +404,7 @@ def publish(
             state, runtime = retained_state(), retained_controller()
             if state is None or runtime is None or runtime.transport.session != native_session:
                 return
+            publish_lookup_scopes(state, captured_name_sources)
             state.delivered_lookup_windows.update(
                 identity for identity in captured_query_windows
                 if identity in state.evidence and state.evidence[identity].lifetime is WindowLifetime.RETAINED
@@ -449,6 +455,7 @@ def publish(
 
         retain_lookup_continuation(
             instance_state, captured_lookup, captured_query_windows, generation, native_session,
+            sources=captured_name_sources,
         )
     return cast("Observation", result)
 

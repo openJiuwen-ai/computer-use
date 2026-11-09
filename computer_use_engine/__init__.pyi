@@ -103,7 +103,9 @@ class App:
     # 正常请求关闭指定窗口，不自动确认保存、丢弃或关闭其他窗口。
     def close_window(self, window: int) -> ActionResult: ...
     # 应用范围；window= 可选地限定本次调用，同一应用共用元素编号。
-    def element(self, target: ElementSelector, *, timeout_ms: int = 3000, window: int | None = None) -> Element: ...
+    def element(
+        self, target: ElementSelector, *, timeout_ms: int = 3000, window: int | None = None, fresh: bool = False
+    ) -> Element: ...
     def read(
         self, *, view: View = "tree", full: bool = False, menu_path: list[str] | None = None,
         allow_foreground: bool = False, window: int | None = None

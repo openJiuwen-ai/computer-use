@@ -297,7 +297,7 @@ class AgentInterfacePipeline:
         )
 
     async def element(
-        self, ui: UIHandle, target: int | str | ElementPath, timeout_ms: int, control: Control
+        self, ui: UIHandle, target: int | str | ElementPath, timeout_ms: int, control: Control, *, fresh: bool = False
     ) -> ElementSnapshot:
         """Resolve an observed number, exact name, or path within this UI view.
 
@@ -465,6 +465,17 @@ class AgentInterfacePipeline:
 
         lookup_remaining()
         owners, incomplete = lookup_sources()
+        if not fresh and owners and not incomplete:
+            from computer_use.session.observed_lookup import resolve_observed
+
+            cached = await resolve_observed(
+                self.controller, instance, owners, path, lookup_remaining, current_lookup_continuation(instance),
+            )
+            if cached is not None:
+                self.validate_snapshot(ui, cached)
+                return cached
+        from computer_use.session.observed_lookup import invalidate_lookup_result
+
         matched = {}
         end = monotonic() + timeout_ms / 1000
         # Waiting belongs to the complete lookup, not its first member. A
@@ -473,6 +484,7 @@ class AgentInterfacePipeline:
         reconciled = False
         while True:
             lookup_remaining()
+            invalidate_lookup_result(self.controller, instance, owners, path, current_lookup_continuation(instance))
             matched.clear()
             recovery = None
             for owner in dict.fromkeys(owners):
@@ -541,6 +553,11 @@ class AgentInterfacePipeline:
             )
         snapshot = next(iter(matched.values()))
         self.validate_snapshot(ui, snapshot)
+        from computer_use.session.observed_lookup import remember_lookup_result
+
+        remember_lookup_result(
+            self.controller, instance, owners, path, snapshot, current_lookup_continuation(instance),
+        )
         return snapshot
 
     def validate_reference_owner(self, ui: UIHandle, snapshot: ElementSnapshot) -> None:
@@ -711,7 +728,7 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
         if isinstance(request, DiscoverApps):
             return await api.list_applications()
         if isinstance(request, ResolveElement):
-            snapshot = await api.element(owner, request.target, request.timeout_ms, control)
+            snapshot = await api.element(owner, request.target, request.timeout_ms, control, fresh=request.fresh)
             if request.window is not None and type(request.target) is int:
                 api.validate_snapshot(owner, snapshot, allow_unknown=True)
             return snapshot

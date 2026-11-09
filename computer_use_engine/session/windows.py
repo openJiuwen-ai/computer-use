@@ -54,6 +54,18 @@ class WindowReferences:
             state.name = name
         return state
 
+    def clear_lookup_caches(self):
+        """Release optional name facts when this driver's session is invalidated."""
+        from computer_use.session.lookup_continuation import discard_lookup_continuation
+
+        for state in self._applications.values():
+            for source in tuple(state.lookup_captures):
+                source.release()
+            state.lookup_captures.clear()
+            state.lookup_observations.clear()
+            state.lookup_results.clear()
+            discard_lookup_continuation(state)
+
     def register_directory(self, directory, name=""):
         # App reads and desktop rows feed the same lifetime authority. Visible
         # positive evidence can restore membership after hiding; an already

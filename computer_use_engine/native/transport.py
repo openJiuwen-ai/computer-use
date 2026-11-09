@@ -520,6 +520,8 @@ class ConnectionPort:
         )
         payload, facts = await self._nodes_payload(operation, target, request, timeout_ms)
         reply = decode_driver_reply(payload)
+        from computer_use.native.query.observed import capture_lookup_facts
+
         hints = {
             node["node"]: control_capabilities(self.platform, node, self.capabilities, scope_kind=scope_kind)
             for node in facts["nodes"]
@@ -530,6 +532,7 @@ class ConnectionPort:
                 reply.metadata,
                 operation_capabilities=hints,
                 input_containers={node["node"]: input_container(self.platform, node) for node in facts["nodes"]},
+                lookup_facts=capture_lookup_facts(facts),
             ),
         )
 

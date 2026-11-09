@@ -198,6 +198,8 @@ class SessionController:
 
     def invalidate(self) -> None:
         self.desktop.reset()
+        if hasattr(self, "interfaces"):
+            self.interfaces.windows.clear_lookup_caches()
         observations_invalidated(self)
         # Handles retain their prior session identity so subsequent validation
         # detects expiration.

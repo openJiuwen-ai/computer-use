@@ -98,12 +98,14 @@ class ResolveElement:
         owner: App/window handle defining the lookup scope.
         target: Observed integer reference, exact name, or semantic path.
         timeout_ms: Lookup wait limit in milliseconds within the call budget.
+        fresh: Bypass captured name/path facts; numbered bindings remain fixed.
     """
 
     owner: UIHandle
     target: int | str | ElementPath
     timeout_ms: int
     window: int | None = None
+    fresh: bool = False
 
 
 @dataclass(frozen=True)
