@@ -61,8 +61,9 @@ _runs = ContextVar("computer_use_execution", default=None)
 
 
 class Runtime:
-    def __init__(self, send, computer_factory=Computer):
+    def __init__(self, send, computer_factory=None, *, allow_global_input=True):
         self.send, self.computer_factory = send, computer_factory
+        self.allow_global_input = allow_global_input
         self.executor = SessionExecutor(loop=asyncio.get_running_loop())
         self.presenter = ObservationPresenter()
         self.presentation_images = PresentationImages()
@@ -487,8 +488,12 @@ class Runtime:
         # Mutated bytes cannot borrow their replacement's provenance or map.
         # The immutable encoded output still depicts the originally printed image.
         caption_source = png if source_matches else delivery.png
-        caption = image_label(caption_source, context_shown, delivery.coordinates)
-        label = caption if context_shown else image_label(caption_source, True, delivery.coordinates)
+        caption = image_label(
+            caption_source, context_shown, delivery.coordinates, allow_global_input=self.allow_global_input,
+        )
+        label = caption if context_shown else image_label(
+            caption_source, True, delivery.coordinates, allow_global_input=self.allow_global_input,
+        )
         self.emit(
             dict(
                 type="text",
@@ -565,7 +570,11 @@ class Runtime:
         return result
 
     def namespace(self):
-        computer = self.computer_factory()
+        computer = (
+            Computer(allow_global_input=self.allow_global_input)
+            if self.computer_factory is None
+            else self.computer_factory()
+        )
         return dict(
             __name__="__computer_use__",
             __builtins__=builtins,
@@ -722,7 +731,7 @@ async def main(argv=None):
     reader, writer = await worker_connection()
 
     messages = WorkerMessageWriter(writer, protocol=protocol)
-    runtime = Runtime(messages.send, computer_factory=lambda: Computer(allow_global_input=args.allow_global_input))
+    runtime = Runtime(messages.send, allow_global_input=args.allow_global_input)
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
     if ready_requested:

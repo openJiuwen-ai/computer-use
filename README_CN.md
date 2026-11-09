@@ -66,6 +66,10 @@ macOS 的对象输入准备会在条件允许时归还由 SDK 临时改变的前
 Windows/Linux 对应的临时前台归还与菜单连续性改进列为后续实现，不能据 macOS 验证推定已支持。
 操作回执的实际影响可用于区分前台变化、归还结果和全局输入；恢复结果不代表应用业务完成。
 
+Windows 普通读取使用窗口的当前状态。`app.read(window=ref, view="both", allow_foreground=True)` 明确允许恢复或激活该窗口，返回准备回执和实际前台状态。如果请求窗口图片而只能取得桌面图，结果会明确标注桌面范围，使用 `computer.point((x, y))` 获取该图上的点。
+
+Windows 任务给出完整窗口标题时，使用 `computer.app(window_title=title).read()`。首次读取在可见原生窗口目录中按区分大小写的标题匹配唯一窗口。标题变化后继续使用同一 App，读取和写后观察只覆盖已绑定窗口。菜单路径与独立确认窗口的行为见 [SDK 参考](docs/mcp.md#python-sdk)。
+
 - **DeepAgent 接入**：支持 openJiuwen 标准调用、流式输出和 Runner 接入，电脑操作工具可复用于已有 DeepAgent 应用。
 - **单工具代码执行**：模型写 Python，变量跨调用保留，一次调用完成多步工作流。
 - **无障碍树优先**：元素按十进制 ref 编号，支持 `element(path)` 路径查询、文本分页读取、菜单读取。

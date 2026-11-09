@@ -35,6 +35,7 @@ def create(*, port: NativePort) -> Callable[[FindLease, Control], Awaitable[Find
             read.remaining,
             [dict(segment) for segment in request.path],
             timeout_ms=request.timeout_ms,
+            strict_window=request.strict_window,
         )
         return replace(value, selected=selected)
 

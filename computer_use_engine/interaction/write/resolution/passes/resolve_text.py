@@ -37,25 +37,36 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
         if not facts.binding.same_target(target):
             raise ValueError("Native receiver inspection returned a different target")
         validate_target(facts, native.policy)
-        if intent.kind in ("key", "focus") and facts.actuator is None and facts.receiver is None:
-            unit = "key_sequence" if intent.kind == "key" else "prepare_receiver"
-            if any(
+
+        def ready_direct_unit(unit: str) -> bool:
+            return facts.actuator is None and facts.receiver is None and any(
                 primitive.unit == unit
                 and primitive.supported == Knowledge.YES
                 and primitive.readiness == Knowledge.YES
                 and not primitive.pending
                 and route_key(UnitCommand(primitive, target, intent)) not in frame.request.history.unavailable
                 for primitive in facts.primitives
-            ):
-                # The native contract already addresses this exact recipient.
-                # Unrelated child-tree completeness is not a prerequisite for
-                # keys or focus confirmation. Text input still resolves editors.
-                return replace(frame, facts=facts)
+            )
+
+        if intent.kind in ("key", "focus") and ready_direct_unit(
+            "key_sequence" if intent.kind == "key" else "prepare_receiver"
+        ):
+            # Unrelated child-tree completeness is not a prerequisite for
+            # a key or focus contract already bound to the exact recipient.
+            return replace(frame, facts=facts)
         # Native insertion may address the object and its own known selection
         # directly. Do not require an unrelated keyboard/editor tree for that
         # contract. Candidate filtering preserves paste/key/focus semantics.
         if has_independent_text_route(facts, intent, frame.request.history):
             return replace(frame, facts=facts)
+        exact_ready_keyboard = (
+            facts.platform == "windows"
+            and intent.kind in ("insert", "paste")
+            and facts.native_role == "ControlType.Text"
+            and facts.input.focused_node == target.node
+            and facts.input.keyboard_surface == target.surface
+            and ready_direct_unit("key_sequence" if intent.kind == "insert" else "clipboard_paste")
+        )
         query = ReceiverQuery(native, operation, target, remaining)
         receiver = await query.resolve(
             require_editable=intent.kind in ("insert", "paste"),
@@ -63,6 +74,7 @@ def create(*, native: NativePort) -> Callable[[ResolutionFrame, Control], Awaita
             focused=facts.input.focused_node if "nativeActuators" in capabilities else None,
             allow_internal="nativeActuators" in capabilities,
             keyboard_input=intent.kind in ("insert", "paste"),
+            exact_ready_keyboard=exact_ready_keyboard,
         )
         frame = replace(frame, facts=facts, needs_editing_evidence=receiver.needs_editing_evidence)
         if receiver.actuator is not None:

@@ -433,17 +433,21 @@ def relation_record(
 
 def query_facts(wire: DriverWire) -> dict[str, Any]:
     """Build transient field evidence for native queries and the entry adapter."""
-    rows, relations, unread = [], [], []
+    rows, relations, unread, outside = [], [], [], []
     for identity, raw in wire.nodes.items():
         if raw.get("identity") is not None:
             wire.value(raw["identity"])
-        wire.read_info(raw.get("read"))
+        node_read = wire.read_info(raw.get("read"))
         if raw["kind"] != "element":
             for prop in array(raw["properties"]) if raw["properties"] is not None else ():
                 wire.property(prop)
             continue
         if raw["properties"] is None:
             unread.append(identity)
+            if wire.platform == "windows" and any(
+                issue["reason"] == "outside_window_scope" for issue in node_read["issues"]
+            ):
+                outside.append(identity)
             continue
         values, statuses, requested = {}, {}, []
         actions = {"state": "unavailable", "items": [], "detail": "Action catalogue was not read"}
@@ -542,6 +546,7 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
         "requestedRelations": list(requested_relations),
         "unread": unread,
         "stopReasons": [issue.get("detail") or issue["reason"] for issue in wire.read["issues"]],
+        **({"outsideWindowNodes": outside} if outside else {}),
         **({"changeToken": wire.details["change_token"]} if "change_token" in wire.details else {}),
     }
 

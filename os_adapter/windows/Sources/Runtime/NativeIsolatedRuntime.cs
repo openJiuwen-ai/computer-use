@@ -8,8 +8,8 @@ using System.Threading;
 namespace ComputerUse.Windows
 {
     // Public request journaling lives in Driver. A replaceable worker owns all
-    // UIA objects. Only verified Win32 window identities survive a read timeout;
-    // element, text, image and operation tokens are never silently reconstructed.
+    // UIA objects. Verified Win32 window identities and immutable capture maps
+    // survive a read timeout. UIA elements, text and operations do not.
     internal sealed class NativeIsolatedRuntime : INativeRuntime, INativeWorkerHealthStatus
     {
         readonly string session;
@@ -25,6 +25,7 @@ namespace ComputerUse.Windows
         readonly Dictionary<string, Dictionary<string, object>> windows =
             new Dictionary<string, Dictionary<string, object>>();
         readonly Dictionary<string, long> generations = new Dictionary<string, long>();
+        readonly NativePointerCaptures captures = new NativePointerCaptures();
         readonly HashSet<string> completedReads = new HashSet<string>();
         readonly Queue<string> completedOrder = new Queue<string>();
         string operation;
@@ -85,7 +86,8 @@ namespace ComputerUse.Windows
             sequence = 0;
             try
             {
-                child.Send(Wire.Obj("session", session, "windows", windows.Values.ToArray()));
+                child.Send(Wire.Obj("session", session, "windows", windows.Values.ToArray(),
+                                    "captures", captures.Checkpoints(CaptureScopeRetained)));
                 var ready = Receive(request, Wire.Now + 5000);
                 if (!ready.ContainsKey("ready") || !Equals(ready["ready"], true))
                     throw new InvalidOperationException("native worker bootstrap failed");
@@ -101,6 +103,27 @@ namespace ComputerUse.Windows
                 RetireWorker();
                 throw;
             }
+        }
+
+        bool CaptureScopeRetained(NativePointerCapture capture)
+        {
+            var binding = capture.Binding;
+            string surface = binding["surface"] as string;
+            return surface == null || windows.ContainsKey(surface) && windows.Values.Any(
+                item => Equals(item["window"], binding["rootWindow"]) && Equals(item["instance"], binding["instance"]));
+        }
+
+        void CheckpointCapture(object raw, Dictionary<string, object> parameters, object result)
+        {
+            var captured = Wire.Object(result);
+            var capture = NativePointerCapture.Restore(raw, session);
+            string id = Equals(captured["kind"], "desktopCapture") ? (string)captured["desktopRef"]
+                        : (string)Wire.Object(captured["image"])["id"];
+            var expected = NativeBinding.Resolve(parameters["target"], session);
+            expected["capture"] = id;
+            if (!NativeWriteOperation.Same(capture.Binding, expected))
+                throw new Failure("invalid_request", "capture checkpoint does not match the delivered image");
+            captures.Retain(capture);
         }
 
         Dictionary<string, object> Receive(Request request, double limit)
@@ -308,6 +331,8 @@ namespace ComputerUse.Windows
 
             Start(request);
             bool writeRequest = writing || method == "begin" && Equals(parameters["mode"], "write");
+            if (method == "prepareObservation")
+                request.Effect = true; // Lost reply may hide a foreground change, never a content dispatch.
             long id = ++sequence;
             var before = Native.GenerationSnapshot();
             child.Send(Wire.Obj("version", 6, "session", session, "id", id, "method", method, "params", parameters,
@@ -353,7 +378,7 @@ namespace ComputerUse.Windows
                     throw;
                 throw new Failure(
                     "observation_unavailable",
-                    "read worker was stopped after a blocked or failed provider call; the selected window is retained, old element/text/image references require a fresh read. " +
+                    "read worker was stopped after a blocked or failed provider call; the selected window is retained, old element and text references require a fresh read. " +
                         error.Message);
             }
 
@@ -414,6 +439,14 @@ namespace ComputerUse.Windows
             }
 
             var result = response["result"];
+            if (!retired && method == "capture" && response.TryGetValue("captureCheckpoint", out raw) && raw != null)
+                CheckpointCapture(raw, parameters, result);
+            if (method == "prepareObservation")
+            {
+                var receipt = Wire.Object(result);
+                request.Effect = !Equals(receipt["activation"], "notRequested") ||
+                                 Equals(receipt["raiseStatus"], "requested") || Equals(receipt["raiseStatus"], "unknown");
+            }
             if (method == "begin")
             {
                 operation = (string)Wire.Object(result)["operation"];

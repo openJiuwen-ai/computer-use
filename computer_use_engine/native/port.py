@@ -99,6 +99,7 @@ class NativePort(Protocol):
         focused_fields: list[str] | None = None,
         primary_fields: list[str] | None = None,
         text_content: bool | None = None,
+        strict_window: bool = False,
     ) -> "DriverObservationReply":
         pass
 

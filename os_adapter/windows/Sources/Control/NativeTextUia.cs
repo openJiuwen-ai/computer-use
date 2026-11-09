@@ -9,7 +9,7 @@ namespace ComputerUse.Windows
 {
     internal sealed partial class NativeUiaKeyboard
     {
-        static bool? ReadOnly(UiaElement element, AutomationPattern kind, Request r)
+        internal static bool? ReadOnly(UiaElement element, AutomationPattern kind, Request r)
         {
             try
             {

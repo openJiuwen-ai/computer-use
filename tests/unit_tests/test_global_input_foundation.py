@@ -14,6 +14,7 @@ from computer_use.interaction.requests import ComputerInput
 from computer_use.native.connection import Connection
 from computer_use.native.contracts import Binding, HostPolicy, Intent
 from computer_use.native.transport import ConnectionPort
+from computer_use.session.desktop_store import DesktopStore
 from computer_use.session.image_coordinates import ImageCoordinates
 from computer_use.session.results import action_result
 from computer_use.session.windows import WindowReferences
@@ -24,13 +25,14 @@ from unit_tests.test_sync_sdk import Controller
 class PrimitiveConnection(Connection):
     """Exercise the actual wire decoder/capability checks without starting a UI."""
 
-    def __init__(self, *, dispatch="dispatched", cleanup="complete"):
+    def __init__(self, *, platform="macos", dispatch="dispatched", cleanup="complete", confirmation="notRequested"):
         super().__init__(lambda: None)
         self.requests = []
         self.dispatch, self.cleanup = dispatch, cleanup
+        self.confirmation = confirmation
         self._hello = {
             "session": "session",
-            "platform": "macos",
+            "platform": platform,
             "globalInputAllowed": True,
             "maxTimeoutMs": 30000,
             "capabilities": ("cancel", "requestDedup", "nativeOperations", "nativeGlobalInput", "nativePointLocation"),
@@ -50,10 +52,12 @@ class PrimitiveConnection(Connection):
                 "dispatch": self.dispatch,
                 "detail": "Input delivered",
                 "preparation": [],
-                "confirmation": "notRequested",
+                "confirmation": self.confirmation,
                 "cleanup": "complete",
                 "context": None,
-                "errorCode": None if self.dispatch == "dispatched" else "execution_unknown",
+                "errorCode": (
+                    None if self.dispatch == "dispatched" or self.confirmation == "confirmed" else "execution_unknown"
+                ),
                 "retryReason": None,
             }
         elif method == "finish":
@@ -102,6 +106,52 @@ def test_raw_global_needs_no_read_or_object_contracts(kind, parameters, points):
     assert result["observation"] is None
     assert result["impact"]["attempts"][0]["declared_global_input"] == "yes"
     assert not controller.port.calls.busy
+
+
+@pytest.mark.parametrize(
+    ("kind", "parameters"),
+    [
+        ("key", {"key": "ctrl+shift+Escape"}),
+        ("insert", {"text": "输入😀"}),
+        ("paste", {"text": "first\nsecond"}),
+    ],
+)
+def test_windows_global_keyboard_does_not_require_a_desktop_capture(kind, parameters):
+    connection = PrimitiveConnection(platform="windows")
+    controller = controller_for_connection(connection)
+    controller.desktop = DesktopStore(None)
+    result = asyncio.run(GlobalInput(controller).arun(ComputerInput(Intent(kind, parameters, True))))
+    assert [method for method, _ in connection.requests] == ["begin", "execute", "finish"]
+    begin, execute = connection.requests[0][1], connection.requests[1][1]
+    assert begin["target"] == {"session": "session", "global": True}
+    assert begin["intent"] == {"kind": kind, "parameters": parameters, "globalInput": True}
+    assert execute["command"] == {
+        "kind": "global_input",
+        "primitiveId": "global",
+        "target": begin["target"],
+        "foreground": False,
+    }
+    assert result["status"] == "dispatched" and result["observation_status"] == "not_requested"
+    assert not controller.port.calls.busy
+
+
+def test_old_windows_driver_fails_before_native_begin():
+    connection = PrimitiveConnection(platform="windows")
+    connection._hello["capabilities"] = ("cancel", "requestDedup", "nativeOperations")
+    controller = controller_for_connection(connection)
+    with pytest.raises(ComputerUseError, match="Rebuild the Windows driver") as caught:
+        asyncio.run(GlobalInput(controller).arun(ComputerInput(Intent("key", {"key": "Return"}, True))))
+    assert caught.value.code == "unsupported_operation" and caught.value.effect == "none"
+    assert connection.requests == []
+
+
+@pytest.mark.parametrize("kind", ["insert", "paste"])
+def test_windows_empty_global_text_is_a_confirmed_noop(kind):
+    connection = PrimitiveConnection(platform="windows", dispatch="notDispatched", confirmation="confirmed")
+    controller = controller_for_connection(connection)
+    result = asyncio.run(GlobalInput(controller).arun(ComputerInput(Intent(kind, {"text": ""}, True))))
+    assert result["status"] == "verified"
+    assert result["impact"]["attempts"][0]["dispatch"] == "notDispatched"
 
 
 def test_raw_public_coordinates_ignore_previous_image_and_keyboard_has_no_target():
@@ -164,9 +214,9 @@ def test_retained_image_locator_uses_delivered_scaling_even_if_scope_is_unconfir
 
 
 @pytest.mark.parametrize("dispatch", ["partial", "unknown", "notDispatched"])
-@pytest.mark.parametrize("kind", ["key", "click"])
-def test_failed_global_input_keeps_progress_and_never_replays(dispatch, kind):
-    connection = PrimitiveConnection(dispatch=dispatch)
+@pytest.mark.parametrize(("platform", "kind"), [("macos", "key"), ("macos", "click"), ("windows", "key")])
+def test_failed_global_input_keeps_progress_and_never_replays(dispatch, platform, kind):
+    connection = PrimitiveConnection(platform=platform, dispatch=dispatch)
     controller = controller_for_connection(connection)
     with pytest.raises(ComputerUseError) as caught:
         request = (
@@ -191,19 +241,18 @@ def test_cleanup_failure_keeps_dispatched_input_and_retires_session():
     assert controller.port.calls.retired
 
 
-@pytest.mark.parametrize("platform", ["windows", "linux"])
-def test_nonmac_global_paste_is_explicitly_unimplemented_without_object_preparation(platform):
-    connection = PrimitiveConnection()
-    connection._hello["platform"] = platform
+def test_linux_global_paste_is_explicitly_unimplemented_without_object_preparation():
+    connection = PrimitiveConnection(platform="linux")
     controller = controller_for_connection(connection)
-    with pytest.raises(ComputerUseError, match="implemented on macOS") as caught:
+    with pytest.raises(ComputerUseError, match="Computer.paste") as caught:
         asyncio.run(GlobalInput(controller).arun(ComputerInput(Intent("paste", {"text": "a\nb"}, True))))
     assert caught.value.code == "unsupported_operation"
     assert connection.requests == []
 
 
-def test_cancelled_input_finishes_once_without_replay_and_keeps_unknown_progress():
-    connection = PrimitiveConnection()
+@pytest.mark.parametrize("platform", ["macos", "windows"])
+def test_cancelled_input_finishes_once_without_replay_and_keeps_unknown_progress(platform):
+    connection = PrimitiveConnection(platform=platform)
     controller = controller_for_connection(connection)
 
     async def interrupted(*args):

@@ -90,6 +90,7 @@ class FindFacts(Node["FindLease", "FindLease"]):
             value.read,
             node=cast("Binding", value.selected).node,
             scope_kind=value.plan.state.query_scope_kind,
+            strict_window=value.plan.request.strict_window,
             _control=control,
         )
         return replace(value, tree=tree)

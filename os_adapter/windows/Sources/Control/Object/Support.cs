@@ -50,6 +50,8 @@ namespace ComputerUse.Windows
         {
             if (evidence == NativeObjectEvidenceRequirement.ValueReplacement)
             {
+                if (state.SelectionReplacement != null)
+                    throw new Failure("input_unavailable", "the target now requires a native selection replacement");
                 if (contract.Unit != "native_text_edit" || contract.SelectionInsert != null ||
                     state.Enabled != true || state.Replaceable != true)
                     throw new Failure("input_unavailable", "the original ValuePattern is not confirmed enabled and writable");

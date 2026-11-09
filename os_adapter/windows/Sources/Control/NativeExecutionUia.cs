@@ -87,7 +87,7 @@ namespace ComputerUse.Windows
 
         NativeWindowRecord Modal(IntPtr handle, Request r)
         {
-            var window = store.RetainWindow(handle, r);
+            var window = store.RetainWindow(handle, r, identifyApplication: false);
             object modal = null;
             try
             {
@@ -102,6 +102,42 @@ namespace ComputerUse.Windows
                 return null;
             window.Native.Validate();
             return window;
+        }
+
+        static NativeOwnedModalState SampleOwnedBlocker(NativeWindowRecord original, NativeWindowRecord blocker,
+                                                       Request r, bool alreadyConfirmed)
+        {
+            original.Native.Validate();
+            if (original.Native.Pid != blocker.Native.Pid)
+                return NativeOwnedModalState.Changed;
+            bool alive = true;
+            try
+            {
+                blocker.Native.Validate();
+            }
+            catch (NativeWindowEnded)
+            {
+                alive = false;
+            }
+            r.Check();
+            var owner = original.Native.Handle;
+            var dialog = blocker.Native.Handle;
+            var foreground = Native.GetForegroundWindow();
+            bool enabled = Native.IsWindowEnabled(owner);
+            bool visible = alive && Native.IsWindowVisible(dialog);
+            if (foreground != dialog && foreground != owner && foreground != IntPtr.Zero)
+                return NativeOwnedModalState.Changed;
+            if (!visible)
+            {
+                if (foreground == owner && enabled)
+                    return NativeOwnedModalState.Cleared;
+                return alreadyConfirmed ? NativeOwnedModalState.Pending : NativeOwnedModalState.Changed;
+            }
+            if (!alreadyConfirmed && (foreground != dialog || enabled))
+                return NativeOwnedModalState.Changed;
+            return !Native.IsIconic(dialog) && Native.IsWindowEnabled(dialog) && OwnedBy(dialog, owner, r)
+                       ? NativeOwnedModalState.Pending
+                       : NativeOwnedModalState.Changed;
         }
 
         static void RequireInteraction(NativeWindowRecord observed, NativeWindowRecord interaction, Request r)
@@ -144,8 +180,11 @@ namespace ComputerUse.Windows
                 var native = Modal(candidate, r);
                 if (native == null)
                     continue;
-                if (node == null || !store.Within(node.Element, native, r))
+                if (node == null)
                     throw new Failure("blocked_by_modal", "an owned native modal window blocks the selected control");
+                if (!store.Within(node.Element, native, r))
+                    throw new NativeOwnedModalBlock(window,
+                        (check, confirmed) => SampleOwnedBlocker(window, native, check, confirmed));
                 // All blocking modals must contain this exact live element and
                 // form one native owner chain. PID or tree order is not proof.
                 if (OwnedBy(candidate, interaction.Native.Handle, r))
@@ -256,7 +295,8 @@ namespace ComputerUse.Windows
             bool held;
             internal Lease(Request r)
             {
-                mutex = new Mutex(false, "Local\\ComputerUse-" + WindowsIdentity.GetCurrent().User.Value);
+                using (var identity = WindowsIdentity.GetCurrent())
+                    mutex = new Mutex(false, "Local\\ComputerUse-" + identity.User.Value);
                 try
                 {
                     while (!held)
@@ -332,7 +372,8 @@ namespace ComputerUse.Windows
             var window = store.Validate(target, r);
             if (window == null || target["node"] == null)
                 throw new Failure("invalid_request", "object replacement needs an observed native element");
-            var element = store.Node((string)target["node"], (string)target["surface"], r).Element;
+            var node = store.Node((string)target["node"], (string)target["surface"], r);
+            var element = node.Element;
             var state = new NativeObjectState {
                 Native = element,
                 Enabled = NativeObjectValueObservation.Property(
@@ -352,7 +393,10 @@ namespace ComputerUse.Windows
             }
             // Capability and optional-value getters may execute provider code.
             // They cannot renew or replace the retained object/window/scope.
-            boundary.Validate(target, within, r);
+            var interaction = boundary.Validate(target, within, r);
+            if (state.Enabled == true && (state.Replaceable == true || available == false))
+                state.SelectionReplacement = OfferMultilineReplacement(target, within, node, interaction,
+                                                                         available == true, r);
             return state;
         }
 

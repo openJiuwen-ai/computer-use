@@ -13,7 +13,7 @@ namespace ComputerUse.Windows
     internal static class PrepareForegroundPass
     {
         internal const string Effects = "PREPARE/QUERY";
-        internal static NativeKeyboardState Run(NativeInputContract contract, bool foreground, NativeKeyboardState state, Request r, List<string> preparation, INativeKeyboardProvider provider, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard)
+        internal static NativeKeyboardState Run(NativeInputContract contract, bool foreground, NativeKeyboardState state, Request r, List<string> preparation, INativeKeyboardProvider provider, Func<NativeInputContract, Request, bool, NativeKeyboardState> guard, ref bool activationCompleted)
         {
             if (!state.Foreground)
             {
@@ -24,6 +24,7 @@ namespace ComputerUse.Windows
                 preparation.Add("foreground");
                 r.Effect = true;
                 provider.Activate(state, r);
+                activationCompleted = true;
                 var until = Math.Min(r.Deadline, Wire.Now + 400);
                 while (!(state = guard(contract, r, true)).Foreground && Wire.Now < until)
                     r.Wait(20);

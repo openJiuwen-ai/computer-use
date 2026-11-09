@@ -428,6 +428,37 @@ def publish(
     return cast("Observation", result)
 
 
+def strict_public_directory(directory: DirectoryFacts | None, identity: WindowIdentity) -> DirectoryFacts | None:
+    """Project window metadata for delivery while retaining the internal catalogue."""
+    if directory is None:
+        return None
+    surfaces = [
+        {**item, "parent": None, "parentState": "unknown"} if item["parent"] is not None else item
+        for item in directory["surfaces"] if WindowIdentity.of(item) == identity
+    ]
+    projected = {**directory, "surfaces": surfaces, "strictWindow": True}
+    if not surfaces or projected.get("focusedWindow") != identity.window:
+        projected.pop("focusedWindow", None)
+    if "endedWindows" in projected:
+        projected["endedWindows"] = [item for item in projected["endedWindows"] if WindowIdentity.of(item) == identity]
+    return projected
+
+
+def strict_public_applications(directory: DirectoryFacts | None, application: str, window: str):
+    if directory is None:
+        return None
+    projected = {
+        **directory,
+        "applications": [
+            {**item, "windows": [entry for entry in item.get("windows", ()) if entry["window"] == window]}
+            for item in directory["applications"] if item.get("id") == application
+        ],
+    }
+    if "nativeProcessNames" in projected:
+        projected["nativeProcessNames"] = [row for row in projected["nativeProcessNames"] if row["application"] == application]
+    return projected
+
+
 def capture_header(
     controller: SessionController,
     ui: UIHandle,
@@ -444,11 +475,15 @@ def capture_header(
     """
     instance = ui._instance
     anchor = instance.anchor
-    aliases = {key: ref for ref, key in instance.windows.items()}
+    strict = getattr(ui, "_strict_window", False)
+    aliases = {key: ref for ref, key in instance.windows.items() if not strict or key == ui._anchor}
     permitted = allowed(ui)
     focus = directory.get("focusedWindow")
     windows = []
-    entries = {ref: (key, instance.members[key]) for ref, key in instance.windows.items()}
+    entries = {
+        ref: (key, instance.members[key]) for ref, key in instance.windows.items()
+        if not strict or key == ui._anchor
+    }
     for key, part in parts:
         if part.source is None:
             continue
@@ -465,10 +500,17 @@ def capture_header(
             part.target.root_window, part.target.surface, part.target.instance
         ) == WindowIdentity.of(item)), None)
         source = part.source if part is not None else None
+        source_apps = source.applications if source is not None else None
+        source_directory = source.source_directory if source is not None else None
+        rechecked_directory = source.directory if source is not None else None
+        if strict:
+            source_apps = strict_public_applications(source_apps, directory["application"], key)
+            source_directory = strict_public_directory(source_directory, ui.identity)
+            rechecked_directory = strict_public_directory(rechecked_directory, ui.identity)
         current_member = permitted.get(key)
         current_member = current_member is not None and WindowIdentity.of(current_member) == WindowIdentity.of(item)
         parent_ref = aliases.get(item["parent"])
-        if not current_member and source is not None:
+        if not strict and not current_member and source is not None:
             parent = next((
                 member for member in source.source_directory["surfaces"] if member["window"] == item["parent"]
             ), None)
@@ -484,7 +526,7 @@ def capture_header(
                 current_member and key == getattr(ui, "_context", None),
                 current_member and key == focus,
                 parent_ref,
-                item["parentState"],
+                "unknown" if strict and item["parent"] is not None else item["parentState"],
                 item["modal"],
                 current_member,
                 part is not None and (
@@ -493,9 +535,9 @@ def capture_header(
                 ),
                 asdict(part.target) if part is not None else None,
                 asdict(source.target) if source is not None else None,
-                source.applications if source is not None else None,
-                source.source_directory if source is not None else None,
-                source.directory if source is not None else None,
+                source_apps,
+                source_directory,
+                rechecked_directory,
                 source.scope_confirmed if source is not None else None,
             )
         )
@@ -515,7 +557,7 @@ def capture_header(
         "unknown" if focus is None else "member" if focus in permitted else "outside",
         tuple(windows),
         tuple(reason for reason in directory["stopReasons"] if reason not in covered_reasons),
-        directory,
+        strict_public_directory(directory, ui.identity) if strict else directory,
     )
 
 

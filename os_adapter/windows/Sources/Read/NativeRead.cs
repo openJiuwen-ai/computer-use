@@ -96,7 +96,6 @@ namespace ComputerUse.Windows
             new Dictionary<string, Dictionary<string, object>>();
         readonly HashSet<string> focusedFields = new HashSet<string>();
         readonly HashSet<string> primaryFields = new HashSet<string>();
-        readonly List<string> preparationNotes = new List<string>();
         readonly List<object> cachedFailures = new List<object>();
         readonly NativeReadEvents events = new NativeReadEvents();
         List<string> observationNotes;
@@ -109,74 +108,71 @@ namespace ComputerUse.Windows
             store = retainedStore ?? new NativeReadStore();
         }
 
-        public bool NeedsPreparation(Dictionary<string, object> target)
+        public object PrepareObservation(Dictionary<string, object> target, Request r)
         {
-            return target["surface"] != null;
-        }
-
-        public void PrepareRead(Dictionary<string, object> target, Request r, bool activate)
-        {
-            if (!NeedsPreparation(target))
-                return;
             var selected = store.Validate(target, r, true);
-            if (!Native.IsWindowVisible(selected.Native.Handle))
+            Window window = selected.Native;
+            IntPtr handle = window.Handle;
+            if (!Native.Interactive())
+                throw new Failure("desktop_unavailable", "observation preparation requires the unlocked interactive desktop");
+            if (!Native.IsWindowVisible(handle))
                 throw new Failure("observation_unavailable",
                                   "the selected window is hidden; it was not replaced with another window",
                                   "show the intended window and read it again");
-            // Pixel-only overviews need not activate every normal window.
-            // Minimized windows must be restored before either observation;
-            // a selected UIA read additionally prepares the foreground.
-            bool noActivate = Native.NoActivate(selected.Native.Handle);
-            if (noActivate && Native.IsIconic(selected.Native.Handle))
+            string activation = "notRequested", raise = "notRequested";
+            if (Native.NoActivate(handle))
             {
-                r.Check();
-                selected.Native.Validate();
-                r.Effect = true;
-                Native.ShowWindowAsync(selected.Native.Handle, 4); // SW_SHOWNOACTIVATE
+                if (Native.IsIconic(handle))
+                {
+                    r.Check();
+                    window.Validate();
+                    r.Effect = true;
+                    raise = Native.ShowWindowAsync(handle, 4) ? "requested" : "unknown"; // SW_SHOWNOACTIVATE
+                }
+                else if (Native.GetForegroundWindow() != handle)
+                    raise = "unsupported";
             }
-
-            if (!noActivate && (activate || Native.IsIconic(selected.Native.Handle)))
+            else if (Native.GetForegroundWindow() != handle || Native.IsIconic(handle))
             {
                 try
                 {
-                    Native.Foreground(selected.Native, true, r, activate,
-                                      () => store.Validate(target, r, true));
+                    // Explicit observation may restore/activate the selected HWND.
+                    // The input-only shell/escape recovery cannot run in this scope.
+                    Native.Foreground(window, true, r);
                 }
                 catch (Failure error)
                 {
-                    // Foreground is useful for hydration, not an authority
-                    // requirement for reading an already restored window.
-                    // Keep the failure visible and never grant input readiness.
                     r.Check();
                     store.Validate(target, r, true);
-                    if (!activate || error.Code != "input_unavailable" || Native.IsIconic(selected.Native.Handle) ||
-                        !Native.IsWindowVisible(selected.Native.Handle))
+                    // A denied activation can still leave a readable window.
+                    if (error.Code != "input_unavailable" || Native.IsIconic(handle) || !Native.IsWindowVisible(handle))
                         throw;
                     if (r.Effect)
                         Native.NoteVisualInput();
-                    NativeReadStore.Note(
-                        preparationNotes,
-                        "Foreground preparation was unavailable; reading the same restored window in background. Input readiness is not established: " +
-                            error.Message);
+                }
+                if (r.Effect)
+                {
+                    activation = "requested";
+                    raise = Native.GetForegroundWindow() == handle ? "requested" : "unknown";
                 }
             }
 
-            // Restore/activation can recreate provider objects and change
-            // geometry. Wait for native restoration, then collect fresh UIA
-            // fields/pixels; never turn a successful API call into readiness.
             double until = Math.Min(r.Deadline, Wire.Now + 1000);
-            while (Native.IsIconic(selected.Native.Handle) && Wire.Now < until)
+            while (Native.IsIconic(handle) && Wire.Now < until)
             {
                 r.Wait(20);
-                selected.Native.Validate();
+                window.Validate();
             }
 
             store.Validate(target, r, true);
-            if (Native.IsIconic(selected.Native.Handle) || !Native.IsWindowVisible(selected.Native.Handle))
+            if (Native.IsIconic(handle) || !Native.IsWindowVisible(handle))
                 throw new Failure(
                     "observation_unavailable",
                     "the selected window did not finish restoring; its content was not read as an empty window",
                     "read the intended window again after it becomes visible");
+            return Wire.Obj("kind", "observationPreparation", "binding", target, "activation", activation,
+                            "raiseStatus", raise, "foreground", Native.GetForegroundWindow() == handle,
+                            "redraw", "unknown");
         }
 
         void Trace(string value)
@@ -212,7 +208,6 @@ namespace ComputerUse.Windows
         {
             cache = null;
             textReaders.Clear();
-            preparationNotes.Clear();
             cachedFailures.Clear();
             nativeValues.Clear();
             rangeIds.Clear();
@@ -230,7 +225,14 @@ namespace ComputerUse.Windows
             }
             finally
             {
-                NativeWindowDiscovery.Close();
+                try
+                {
+                    store.CloseApplicationNames();
+                }
+                finally
+                {
+                    NativeWindowDiscovery.Close();
+                }
             }
         }
 
@@ -1112,7 +1114,10 @@ namespace ComputerUse.Windows
             var fields = Wire.Array(query["fields"]).Cast<string>().ToArray();
             int maximum = (int)Wire.Num(query, "maxNodes", 1, 2000, true),
                 depthLimit = (int)Wire.Num(query, "maxDepth", 0, 2000, true);
+            bool strictWindow = query.ContainsKey("strictWindow") && Wire.Bool(query, "strictWindow");
             var root = store.ReadNode((string)target["node"], (string)target["surface"], request);
+            if (!NativeObservationTraversal.IncludesBody(root, strictWindow))
+                throw new Failure("outside_window_scope", "the selected native node belongs to another window");
             var followed = query.ContainsKey("followRelations")
                                ? Wire.Array(query["followRelations"]).Cast<string>().ToArray()
                                : new string[0];
@@ -1155,13 +1160,8 @@ namespace ComputerUse.Windows
                                         RecordCachedFailure);
             if (rootPage != null)
                 properties = new[] { pageProperty }.Concat(properties.Where(p => p != pageProperty)).ToArray();
-            if (maximum > 16384 / properties.Length)
-            {
-                maximum = 16384 / properties.Length;
-                NativeReadStore.Note(
-                    observationNotes,
-                    "Node budget reduced to keep every requested relation status inside the wire graph budget.");
-            }
+            var traversal = new NativeObservationTraversal(maximum, properties.Length);
+            maximum = traversal.MaxNodes;
 
             var pending = new Queue<Tuple<string, int>>();
             pending.Enqueue(Tuple.Create(root.Id, 0));
@@ -1172,7 +1172,7 @@ namespace ComputerUse.Windows
             var textRelations = properties.Except(ordinaryRelations).ToArray();
             var textBudget = texts.BeginBatch();
             var seen = new HashSet<string>();
-            var referenced = new HashSet<string>();
+            var outside = new HashSet<string>();
             var nodes = new List<object>();
             var edges = new List<object>();
             var notes = observationNotes;
@@ -1210,11 +1210,12 @@ namespace ComputerUse.Windows
                     wireBytes += Encoding.UTF8.GetByteCount(Wire.Json(edge));
                     foreach (string child in children)
                     {
-                        referenced.Add(child);
-                        bool follow = property == "RawViewChildren" || property == "LabeledBy" ||
-                                      followed.Contains(property) ||
-                                      rootPage != null && row.Node.Id == root.Id && property == pageProperty;
-                        if (follow && row.Depth < depthLimit)
+                        bool expand = row.Depth < depthLimit &&
+                                      (property == "RawViewChildren" || property == "LabeledBy" ||
+                                       followed.Contains(property) ||
+                                       rootPage != null && row.Node.Id == root.Id && property == pageProperty);
+                        traversal.Reference(child, expand);
+                        if (expand)
                             pending.Enqueue(Tuple.Create(child, row.Depth + 1));
                     }
                 }
@@ -1311,7 +1312,7 @@ namespace ComputerUse.Windows
 
                 request.Check();
                 var item = pending.Dequeue();
-                if (seen.Contains(item.Item1))
+                if (seen.Contains(item.Item1) || outside.Contains(item.Item1))
                     continue;
                 NativeNodeRecord node;
                 try
@@ -1328,6 +1329,11 @@ namespace ComputerUse.Windows
                     continue;
                 }
 
+                if (!NativeObservationTraversal.IncludesBody(node, strictWindow))
+                {
+                    outside.Add(node.Id);
+                    continue;
+                }
                 seen.Add(item.Item1);
                 structureBatch++;
                 var values = new Dictionary<string, object>();
@@ -1367,47 +1373,114 @@ namespace ComputerUse.Windows
                 }
             }
 
-            if (pending.Count > 0 || referenced.Except(seen).Any())
-                NativeReadStore.Note(notes,
-                                     "Some related nodes remain unread due to collection scope, depth or node budget.");
             return NativeObservationGraph.Encode(
-                session, root.Surface, Stamp(start), new[] { root.Id }, nodes, edges, referenced.Except(seen), notes,
+                session, root.Surface, Stamp(start), new[] { root.Id }, nodes, edges,
+                traversal.Unread(seen, notes, outside), notes,
                 properties, changeToken, nativeValues, rangeNodes.Values,
                 id =>
                 {
                     var identity = store.ObservedRuntime(id);
                     return identity == null ? null : new NativeObservationValue("UIA.RuntimeId", identity);
                 },
-                RetainOpaque, cachedFailures);
+                RetainOpaque, cachedFailures, outside);
+        }
+
+        static object[] ApplicationRows(IEnumerable<NativeWindowRecord> windows)
+        {
+            return windows.GroupBy(x => x.Application).Select(g =>
+            {
+                var item = g.First();
+                var row = Wire.Obj("id", g.Key, "displayName", NativeReadStore.Text(item.DisplayName),
+                                   "isRunning", true, "path", null, "identifier", item.ApplicationIdentifier,
+                                   "windows", g.Select(w => Wire.Obj("selector", w.Native.Selector,
+                                                                      "window", w.Native.Ref)).ToArray());
+                if (item.DisplayName != item.Native.Name)
+                    row["aliases"] = new[] { NativeReadStore.Text(item.Native.Name) };
+                return row;
+            }).ToArray();
+        }
+
+        object TitleDirectory(string title, double start, List<string> notes)
+        {
+            int count;
+            bool complete;
+            var handles = NativeWindowDiscovery.Collect(request, notes, out count, out complete, false);
+            var matched = new List<NativeWindowRecord>();
+            foreach (var handle in handles)
+            {
+                request.Check();
+                string caption;
+                if (!Native.TryCaption(handle, out caption))
+                {
+                    if (NativeWindowDiscovery.Visible(handle))
+                        complete = false;
+                    continue;
+                }
+                // The request is shorter than the buffer, so even a truncated
+                // longer caption cannot accidentally compare equal.
+                if (!String.Equals(caption, title, StringComparison.Ordinal))
+                    continue;
+                try
+                {
+                    var window = store.RetainWindow(handle, request);
+                    if (!Native.TryCaption(handle, out caption) || !String.Equals(caption, title, StringComparison.Ordinal))
+                    {
+                        complete = false;
+                        continue;
+                    }
+                    window.Native.Validate();
+                    matched.Add(window);
+                }
+                catch (Failure error)
+                {
+                    if (error.Code == "cancelled" || error.Code == "deadline_exceeded")
+                        throw;
+                    complete = false;
+                }
+                catch (Exception)
+                {
+                    request.Check();
+                    complete = false;
+                }
+                if (matched.Count == 2)
+                {
+                    // Two live exact matches are sufficient to prove ambiguity.
+                    complete = false;
+                    break;
+                }
+            }
+            if (!complete && matched.Count < 2)
+                NativeReadStore.Note(notes, "The Win32 caption query did not confirm the complete visible window scope.");
+            return Wire.Obj("kind", "applications", "session", session, "platform", "windows", "observed", Stamp(start),
+                            "stopReasons", notes, "scope", "runningWindows", "applications", ApplicationRows(matched),
+                            "windowTitle", Wire.Obj("title", title, "complete", complete));
         }
 
         object Directory(Dictionary<string, object> query)
         {
             double start = Wire.Now;
             var notes = new List<string>();
+            if (query.ContainsKey("windowTitle"))
+                return TitleDirectory(Wire.Str(query, "windowTitle"), start, notes);
+            string rootWindow = query.ContainsKey("rootWindow") ? Wire.Str(query, "rootWindow") : null;
             bool accessibility =
                 !NeedsRestart && (!query.ContainsKey("includeAccessibility") || (bool)query["includeAccessibility"]);
-            var all = store.Catalog(request, notes, accessibility);
+            var catalogue = store.Catalog(request, notes, accessibility && rootWindow == null);
+            var all = catalogue.Windows;
             string kind = Wire.Str(query, "kind");
             if (kind == "applications")
             {
-                return Wire.Obj(
+                var result = Wire.Obj(
                     "kind", kind, "session", session, "platform", "windows", "observed", Stamp(start), "stopReasons",
-                    notes, "scope", "runningWindows", "applications",
-                    all.GroupBy(x => x.Application)
-                        .Select(
-                            g => Wire.Obj("id", g.Key, "displayName", NativeReadStore.Text(g.First().Native.Name),
-                                          "isRunning", true, "path", null, "identifier", null, "windows",
-                                          g.Select(w => Wire.Obj("selector", w.Native.Selector, "window", w.Native.Ref))
-                                              .ToArray()))
-                        .ToArray());
+                    notes, "scope", "runningWindows", "applications", ApplicationRows(all));
+                if (catalogue.NativeProcessNames != null)
+                    result["nativeProcessNames"] = catalogue.NativeProcessNames;
+                return result;
             }
 
             string application = Wire.Str(query, "application");
             var selected =
                 new HashSet<IntPtr>(all.Where(x => x.Application == application).Select(x => x.Native.Handle));
-            if (selected.Count == 0)
-                throw new Failure("stale_target", "the observed running application no longer has an available window");
             for (int n = 0; n < all.Count; n++)
             {
                 var children = all.Where(x => !selected.Contains(x.Native.Handle) &&
@@ -1420,7 +1493,8 @@ namespace ComputerUse.Windows
             }
 
             var entries = all.Where(x => selected.Contains(x.Native.Handle)).ToArray();
-            var roots = accessibility && !NeedsRestart ? rootProbe.Read(entries, request) : null;
+            var probes = NativeRootProbe.Candidates(entries, rootWindow);
+            var roots = probes.Length != 0 && accessibility && !NeedsRestart ? rootProbe.Read(probes, request) : null;
             if (NeedsRestart)
             {
                 NativeReadStore.Note(
@@ -1444,12 +1518,15 @@ namespace ComputerUse.Windows
                 {
                     if (error.Code != "stale_target")
                         throw;
+                    if (error is NativeWindowEnded)
+                        store.RetireEnded(entry);
                     NativeReadStore.Note(
-                        notes, "A window closed or was replaced during directory collection; its entry was omitted.");
+                        notes, "A window could not be confirmed during directory collection; its entry was omitted.");
                     continue;
                 }
 
-                string node = accessibility || NeedsRestart ? null : entry.RootNode;
+                bool probed = accessibility && (rootWindow == null || entry.Native.Ref == rootWindow);
+                string node = probed || NeedsRestart ? null : entry.RootNode;
                 NativeRootProbe.Root root = null;
                 if (roots != null)
                     roots.TryGetValue(entry.Native.Handle, out root);
@@ -1470,15 +1547,15 @@ namespace ComputerUse.Windows
                     }
                 }
 
-                if (accessibility)
+                if (probed)
                     entry.RootNode = node;
                 IntPtr owner = Native.GetWindow(entry.Native.Handle, 4);
                 var parent = all.FirstOrDefault(x => x.Native.Handle == owner);
                 object modal = NeedsRestart    ? null
-                               : accessibility ? (root == null ? null : root.Modal)
-                                               : entry.ObservedModal;
+                               : probed ? (root == null ? null : root.Modal)
+                                        : entry.ObservedModal;
                 string title = Native.Title(entry.Native.Handle);
-                if (accessibility && modal is bool)
+                if (probed && modal is bool)
                     entry.ObservedModal = (bool)modal;
                 if (title.Length >= 4095)
                     NativeReadStore.Note(
@@ -1492,6 +1569,9 @@ namespace ComputerUse.Windows
                                   "modal", modal, "nativeWindow", true, "accessibility", node != null));
             }
 
+            var ended = store.EndedWindows(application);
+            if (selected.Count == 0 && ended.Length == 0)
+                throw new Failure("stale_target", "the observed running application no longer has an available window");
             return Wire.Obj("kind", kind, "session", session, "platform", "windows", "observed", Stamp(start),
                             "rootDiscoveryComplete", notes.Count == 0 && rows.Cast<Dictionary<string, object>>()
                                 .All(x => (string)x["parentState"] != "unknown"),
@@ -1503,7 +1583,7 @@ namespace ComputerUse.Windows
                                          ? "available"
                                          : "unavailable",
                                      "attribute", null, "writeStatus", null),
-                            "surfaces", rows);
+                            "surfaces", rows, "endedWindows", ended);
         }
 
         public object Inspect(Dictionary<string, object> target, Dictionary<string, object> query, Request r)
@@ -1513,9 +1593,9 @@ namespace ComputerUse.Windows
             string kind = Wire.Str(query, "kind");
             if (kind == "nodes" && Wire.Now >= until)
                 throw new Failure("observation_unavailable",
-                                  "foreground preparation used the shared observation budget before root collection",
-                                  "read the same restored target again; no content input was replayed");
-            observationNotes = new List<string>(preparationNotes);
+                                  "the observation budget ended before root collection",
+                                  "read the same target again");
+            observationNotes = new List<string>();
             textReaders.Clear();
             cachedFailures.Clear();
             rangeNodes.Clear();

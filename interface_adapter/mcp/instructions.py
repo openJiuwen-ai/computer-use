@@ -17,15 +17,24 @@ Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
 list_apps() entries expose id, display_name, and is_running. app() selects a
 scope; the first app.read() starts a nonrunning installed app when needed.
 app.read() discovers numbered windows. Use app.read(window=ref) to observe one.
+On Windows, if the task specifies a full window title, use
+computer.app(window_title=title).read(). The first read binds a unique,
+case-sensitive match among visible native top-level windows. Reuse the App
+handle after a title change. Its reads, details and action follow-up cover only
+the bound window. A title-bound App rejects read(menu_path=...).
 App methods accept optional window=ref to select the target for that call;
 no Window object is needed. Element numbers are shared across all reads of the
 same App. app.element(number) stays bound to its original control after reading
 another window. app.element(name, window=ref) searches the specified window;
 it does not require an extra read merely to switch contexts.
-On macOS, app.close_window(ref) requests normal close of that exact window,
-including when screen-sharing controls cover its title-bar buttons. Use the
-returned observation to handle any confirmation; the SDK does not choose save
-or discard. A dispatched close request may be declined by the application.
+On macOS and Windows, app.close_window(ref) requests normal close of that exact
+window through its native close mechanism. On macOS this also works when
+screen-sharing controls cover its title-bar buttons. In an ordinary App scope,
+use the returned observation to handle any confirmation. The SDK does not choose
+save or discard. The application may decline a dispatched close request.
+After a title-bound close, the observation covers the original window and choices
+is empty. Observe a separate confirmation window only when the task authorizes
+that scope. A receipt confirms closure when window_lifecycle is "closed".
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
@@ -37,7 +46,7 @@ Choose the interaction method for each operation using this preference:
    image's point constructor: p = app.point((x, y), window=ref).
    Use app.click(at=p) or the appropriate keyboard method, such as
    app.press_key('Return', window=ref).
-3. When global input is needed on macOS, select a direct Computer input method.
+3. When global pointer input is needed on macOS, select a direct Computer method.
    Reuse p from the App image, or use p = computer.point((x, y)) for a desktop
    image, then call computer.click(target=p). The image coordinates stay the
    same when choosing App or Computer input. Do not pass screenshot pixel tuples
@@ -48,11 +57,13 @@ Choose the interaction method for each operation using this preference:
    whatever is actually at that screen location.
    computer.scroll('down', target=p) and computer.drag(start_point, end_point)
    use the same retained points; drag endpoints may come from different images.
-   computer.type_text(text), computer.press_key('Return'), and computer.paste(text)
-   go directly to the OS's current receiver. They have no target or replace
-   option: use explicit clicks/keys when a global operation needs preparation.
-   Global inputs return dispatch/effect receipts, without forced observations;
-   request an App/Computer read when the next decision needs observation.
+   Windows pointer input uses the existing screenshot coordinate mapping.
+   On macOS and Windows, computer.type_text(text), computer.press_key('Return'),
+   and computer.paste(text) go directly to the current system recipient without
+   a prior read. They take only the key or text. Establish focus explicitly if needed. These methods return
+   dispatch receipts. Read the relevant UI to confirm its response.
+   Windows paste leaves the published text on the system clipboard. Verify
+   the effect before publishing the next paste payload.
 Apply this preference anew to every subsequent operation, including after
 desktop input. Reuse established behavior for the corresponding control and
 context; prefer usable elements for the next target. Choose another method
@@ -62,10 +73,8 @@ input, including preparation and recovery. They may activate/focus their target.
 Computer direct input explicitly uses global events; it does not grant later
 object calls global authority. Windows/Linux currently retain their existing
 ability to use global input for object operations. A host restriction can still
-forbid global input. Windows/Linux Computer inputs currently retain their
-captured-desktop adapters; direct device-level input is implemented on macOS.
-Computer.paste(text) is currently macOS-only; App/Element.paste remain available
-on Windows/Linux.
+forbid global input. Linux Computer inputs retain their captured-desktop
+adapter. Use App or Element methods for paste on Linux.
 Element.target retains the exact element binding.
 app.point((x, y), window=ref) retains that window's delivered image mapping.
 Retained points also work in app.click(at=p, window=ref) for scoped input.

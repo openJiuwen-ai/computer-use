@@ -205,6 +205,7 @@ class NativeReader:
         children_page: RelationPage | None = None,
         relation_page: RelationPage | None = None,
         scope_kind: str | None = None,
+        strict_window: bool = False,
         _control: Control | None = None,
     ) -> SemanticSnapshot:
         self.validate(target, max_nodes, max_depth)
@@ -217,6 +218,7 @@ class NativeReader:
                 children_page=children_page,
                 relation_page=relation_page,
                 scope_kind=scope_kind,
+                strict_window=strict_window,
                 _control=_control,
             )
 
@@ -236,6 +238,7 @@ class NativeReader:
         relation_page: RelationPage | None = None,
         scope_kind: str | None = None,
         query_remaining: Remaining | None = None,
+        strict_window: bool = False,
         _control: Control | None = None,
     ) -> SemanticSnapshot:
         """Collect inside an existing node or window read operation.
@@ -245,7 +248,8 @@ class NativeReader:
         original deadline.
         """
         request = FactReadRequest(
-            read, node, fields, max_nodes, max_depth, children_page, relation_page, scope_kind, query_remaining
+            read, node, fields, max_nodes, max_depth, children_page, relation_page, scope_kind, query_remaining,
+            strict_window,
         )
         control = scope_control(self.port, read.remaining, _control or Control())
         return await FactCollectionPipeline(self).arun(request, control)

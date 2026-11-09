@@ -18,5 +18,6 @@ namespace ComputerUse.Windows
         internal bool ActionsComplete;
         internal string[] Actions = new string[0];
         internal NativeExactActionEvidence ExactAction;
+        internal NativeSelectionInsertOffer SelectionReplacement;
     }
 }

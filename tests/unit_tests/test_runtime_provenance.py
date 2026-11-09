@@ -8,12 +8,15 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from computer_use.native import driver_exec
 from computer_use.native.connection import Connection
 from computer_use.runtime_provenance import startup_provenance
+
+DRIVER_NAME = "driver.exe" if os.name == "nt" else "driver"
 
 
 def checkout(tmp_path):
@@ -28,7 +31,7 @@ def checkout(tmp_path):
         ["-c", "user.name=Provenance Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"],
     ):
         subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
-    driver = tmp_path / "driver"
+    driver = tmp_path / DRIVER_NAME
     driver.write_bytes(b"driver version one\n")
     driver.chmod(0o700)
     return module, driver
@@ -36,7 +39,20 @@ def checkout(tmp_path):
 
 def test_startup_fingerprints_dirty_contents_even_when_size_and_mtime_stay_the_same(tmp_path):
     module, driver = checkout(tmp_path)
-    with patch.object(sys.modules["computer_use"], "__file__", str(module)):
+    run = subprocess.run
+
+    def run_git(command, **options):
+        return run(command, **(options | {"timeout": 10}))
+
+    # Keep real Git and file reads while isolating this hash test from startup timing.
+    git = SimpleNamespace(
+        run=run_git, PIPE=subprocess.PIPE, DEVNULL=subprocess.DEVNULL, SubprocessError=subprocess.SubprocessError,
+    )
+    with (
+        patch.object(sys.modules["computer_use"], "__file__", str(module)),
+        patch("computer_use.runtime_provenance.time", SimpleNamespace(monotonic=lambda: 0.0)),
+        patch("computer_use.runtime_provenance.subprocess", git),
+    ):
         clean = startup_provenance(str(driver))
         assert clean["sdkModulePath"] == str(module)
         assert clean["source"]["status"] == "complete" and clean["source"]["dirty"] is False
@@ -58,7 +74,7 @@ def test_driver_hash_is_a_startup_snapshot_and_missing_git_does_not_block_it(tmp
     module = tmp_path / "computer_use" / "__init__.py"
     module.parent.mkdir()
     module.write_text("# installed package without Git metadata\n")
-    driver = tmp_path / "driver"
+    driver = tmp_path / DRIVER_NAME
     original = b"original executable\n"
     driver.write_bytes(original)
     driver.chmod(0o700)

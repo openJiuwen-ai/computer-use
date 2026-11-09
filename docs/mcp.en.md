@@ -137,17 +137,19 @@ for an App image. Composite images use their whole displayed canvas. Use `app.cl
 for scoped input or `computer.click(target=p)` for explicit global input, reusing the same p when switching routes.
 Choose points from an image already received, and retain p before later reads if the location will be reused.
 Images with unknown sources or expired mappings do not advertise executable point constructors.
+Within one Windows MCP call, `computer.point()` continues to use the last desktop image delivered
+to the model until a newer image is delivered. Dispatch still checks the capture and current display layout.
 In MCP, printing an observation, its `.text`, or a direct text slice reuses automatic presentation instead of adding
 another full view. SDK string values, slices, and file output remain unchanged. Use a subtree or `read_text` to bound
 the observation scope.
 
-Reads do not activate or raise windows to refresh pixels by default. On macOS,
+Reads do not activate or raise windows to refresh pixels by default. On macOS and Windows,
 `app.read(view="both", allow_foreground=True)` explicitly allows preparation of the confirmed original window;
 use `app.read(window=ref, allow_foreground=True)` to select a specific window.
 This may change focus and stacking, but sends no global mouse/keyboard input and does not switch back afterward.
 The observation's `preparation` record and text retain the requests made; images retain their capture provenance.
 An unresolved observation target still returns window choices instead of using this permission to guess a target.
-Other platforms do not yet implement this preparation capability.
+Linux does not yet implement this preparation capability.
 
 Object writes include a bounded related observation independently of their execution result.
 Inspect `result.observation`, `result.observation_status`, and `result.observation_error`.
@@ -156,9 +158,8 @@ A `ComputerUseError` for an expired target,
 temporarily incomplete target evidence, a modal blocker, or `effect="partial"` / `"possible"` also retains
 these fields when the original session can still be observed. Use the attached current observation to
 decide the next action. The original error and effect remain unchanged; the SDK does not replay uncertain input.
-On macOS, Computer global input does not force a post-action observation and returns
-`observation_status="not_requested"`. Read explicitly when needed; a failed read does not
-block subsequent global input.
+Computer global input on macOS and Computer key, typing and paste on Windows return
+`observation_status="not_requested"`. Read explicitly to verify the UI effect.
 
 MCP and the reference Agent share one static tool contract. Results present UI content, object identities,
 execution progress and specific gaps. Each image retains its ID, source, dimensions and coordinate target through
@@ -236,10 +237,14 @@ Global keyboard methods do not accept `target=` or an implicit `replace=True`;
 click and select explicitly before typing when needed. Global input returns its dispatch
 receipt; read explicitly for observation. A failed read does not block subsequent global
 input. Cursor position and foreground remain as the operation leaves them. See `result.impact`.
-These direct global and locator semantics are implemented first on macOS; Windows/Linux
-desktop input retains its existing screenshot context pending platform migration.
-`Computer.paste(text)` is currently implemented on macOS; use the existing object
-paste methods on Windows/Linux until their global paste primitive is implemented.
+On Windows, `computer.press_key(key)`, `computer.type_text(text)` and
+`computer.paste(text)` send input to the current system recipient without a prior screenshot
+or accessibility read. Establish focus explicitly when needed. Mouse operations still use the
+existing screenshot coordinate mapping.
+Windows paste leaves the published text on the system clipboard until another write replaces it.
+A dispatch receipt means the paste chord was sent. Verify the target's paste effect before
+publishing the next payload so a slow application can read the intended text.
+Linux desktop input retains its existing screenshot context and uses App or Element methods for paste.
 
 `App` identifies an application scope; `list_apps()` lists applications. App and
 desktop observations publish window references. Use `app.read(window=ref)` for a
@@ -247,6 +252,19 @@ specific window. `element`, `point`, `click`, `scroll`, `drag`, `type_text`, `pa
 `press_key` accept the same optional `window=` parameter. Selecting a window and
 ordinary reads do not activate it. Titles and positions describe windows; native
 identity defines their lifetime.
+
+On Windows, use `app = computer.app(window_title=title)` when a task gives a
+full window title. The first `app.read()` binds a unique, case-sensitive match
+from the current desktop's visible top-level native windows. Multiple matches
+return `ambiguous_target`. A catalogue gap that prevents a unique match returns
+`observation_incomplete`. Reuse the handle after title changes. Closing the
+bound window makes the handle stale.
+
+Reads, `read_details()` and action follow-up from this handle cover only the
+bound window. An ordinary `app.read(window=ref)` may also include confirmed
+owned windows. The title-bound App rejects `read(menu_path=...)` with
+`invalid_request`. Menu paths are available through ordinary App scopes on
+supporting platforms.
 
 The public object model is `Computer → App → Element`; there is no public Window
 class or window factory. Element numbers are shared across read scopes, and
@@ -256,13 +274,20 @@ it does not require a preceding public read to switch windows. Omitting `window=
 uses the latest actually delivered, unambiguous lookup or input context rather
 than the current system focus.
 
-On macOS, `app.close_window(ref)` requests normal close of that exact window,
-including when screen-sharing controls cover its title-bar buttons. It resolves
-the window's declared close control and uses the existing input/observation flow.
+On macOS and Windows, `app.close_window(ref)` requests normal close of that exact
+window. macOS resolves the declared close control, including when screen-sharing
+controls cover its title-bar buttons. Windows uses the window's UI Automation
+`Window.Close` action when the window exposes it. Both routes use the existing
+input and observation flow.
 The application may decline the request or show a confirmation; the SDK does not
 choose save or discard. The receipt uses `intent="closeWindow"`; `dispatched`
 means the request was sent, while `window_lifecycle` and the attached observation
-report the available state. Windows/Linux support remains follow-up work.
+report the available state. Linux support remains follow-up work.
+
+After `close_window` on a title-bound App, the attached observation is limited
+to the original window and `choices` is empty. Observe a separate confirmation
+window through its own scope when the task authorizes it. A receipt confirms
+closure when `window_lifecycle` is `closed`.
 
 Each window retains its current delivered image independently. After reading A
 and B, `app.click(at=(x, y), window=a)` can reuse A's displayed image. Composite

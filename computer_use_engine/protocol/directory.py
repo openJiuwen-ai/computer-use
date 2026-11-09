@@ -54,6 +54,8 @@ _schemas = {
             kind=enum("applications"),
             applications=array(_application, max=4096),
             scope=enum("runningWindows").optional(),
+            nativeProcessNames=array(obj({"application": identity, "name": identity}), max=512).optional(),
+            windowTitle=obj({"title": identity, "complete": boolean()}).optional(),
             **_common,
         )
     ),
@@ -130,6 +132,25 @@ def decode_directory(value):
         identifiers = [item["id"] for item in result["applications"]]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("protocol: duplicate application lifetime")
+        if "windowTitle" in result and (
+            result["platform"] != "windows"
+            or result.get("scope") != "runningWindows"
+            or any(not item["isRunning"] or not item.get("windows") for item in result["applications"])
+        ):
+            raise ValueError("protocol: invalid Windows caption catalogue")
+        native_names = result.get("nativeProcessNames")
+        if native_names is not None:
+            named = {row["application"] for row in native_names}
+            native_candidates = {
+                item["id"] for item in result["applications"] if item["isRunning"] and item.get("windows")
+            }
+            if (
+                result["platform"] != "windows"
+                or result.get("scope") != "runningWindows"
+                or len(native_names) != len(named)
+                or not named.issubset(native_candidates)
+            ):
+                raise ValueError("protocol: invalid Win32 process name catalogue")
         for item in result["applications"]:
             keys = item.get("matchKeys", [])
             if len(set(keys)) != len(keys):

@@ -1,11 +1,13 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""A text receiver's read-only AX buffer is not a read-only keyboard stream."""
+"""Keyboard streams retain their own admission and exact recipient contract."""
+
+from dataclasses import replace
 
 import pytest
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.write.engine import Engine
-from computer_use.native.contracts import Intent, Knowledge
+from computer_use.native.contracts import Dispatch, Intent, Knowledge, StepResult
 from computer_use.native.semantics import control_capabilities, keyboard_input_evidence
 from unit_tests.test_confirmed_text_receiver_evidence import SCOPE, TARGET, TextEvidencePort
 
@@ -115,3 +117,100 @@ def test_observation_advertises_text_input_separately_from_replacement():
 def test_explicit_read_only_declarations_do_not_qualify_a_text_stream(declaration):
     values = {"focusWritable": True, "valueWritable": False, "textWritable": False, declaration: True}
     assert keyboard_input_evidence("textArea", values, platform="macos") is not True
+
+
+class WindowsTextStreamPort(TextEvidencePort):
+    """A Windows text peer with a native keyboard offer and separate text-range facts."""
+
+    capabilities = ("nativeTextInput", "nativeTextReplacement")
+
+    def __init__(self):
+        super().__init__("windows")
+        self.keyboard_surface = TARGET.surface
+        self.declarations = {
+            "enabled": True,
+            "focusWritable": True,
+            "interfaces": ["TextPatternIdentifiers.Pattern"],
+            "textReadOnly": False,
+        }
+
+    def raw_role(self):
+        return "ControlType.Text"
+
+    def editing_values(self):
+        return self.declarations
+
+    async def inspect(self, operation, target, timeout_ms, **options):
+        facts = await super().inspect(operation, target, timeout_ms, **options)
+        return replace(facts, input=replace(facts.input, keyboard_surface=self.keyboard_surface))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["insert", "paste"])
+async def test_windows_focused_text_range_reuses_the_exact_ready_keyboard_offer(kind):
+    port = WindowsTextStreamPort()
+    result = await Engine(port).execute(Intent(kind, {"text": "X"}), TARGET)
+    assert result["status"] == "dispatched" and port.contents == "originalX"
+    assert len(port.commands) == 1 and port.commands[0].target == TARGET
+    assert not port.commands[0].prepare and not port.commands[0].foreground
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("enabled", False),
+        ("readOnly", True),
+        ("textReadOnly", True),
+        ("textReadOnly", None),
+        ("interfaces", ["ValuePatternIdentifiers.Pattern"]),
+        ("focus", "other-node"),
+        ("queue", "other-surface"),
+        ("readiness", "preparable"),
+    ],
+)
+async def test_windows_text_stream_retains_semantic_and_native_receiver_boundaries(field, value):
+    port = WindowsTextStreamPort()
+    if field == "focus":
+        port.focused = value
+    elif field == "queue":
+        port.keyboard_surface = value
+    elif field == "readiness":
+        port.key_state = value
+    else:
+        port.declarations[field] = value
+    with pytest.raises(ComputerUseError):
+        await Engine(port).execute(Intent("insert", {"text": "X"}), TARGET)
+    assert port.commands == [] and port.contents == "original"
+
+
+@pytest.mark.anyio
+async def test_windows_focused_text_stream_does_not_gain_a_replace_route():
+    port = WindowsTextStreamPort()
+    with pytest.raises(ComputerUseError):
+        await Engine(port).execute(Intent("replace", {"text": "X"}), TARGET)
+    assert port.commands == [] and port.contents == "original"
+
+
+@pytest.mark.anyio
+async def test_windows_text_stream_does_not_reprepare_after_the_exact_route_loses_focus():
+    port = WindowsTextStreamPort()
+
+    async def lose_focus(operation, step, command, timeout_ms):
+        port.commands.append(command)
+        port.key_state = "preparable"
+        port.focused = "other-node"
+        return StepResult(
+            TARGET,
+            Dispatch.NOT_DISPATCHED,
+            "The original receiver lost focus.",
+            error_code="input_unavailable",
+            retry_reason="routeUnavailable",
+        )
+
+    port.execute = lose_focus
+    with pytest.raises(ComputerUseError):
+        await Engine(port).execute(Intent("insert", {"text": "X"}), TARGET)
+    assert len(port.inspections) == 2
+    assert len(port.commands) == 1 and not port.commands[0].prepare
+    assert port.contents == "original"

@@ -151,6 +151,16 @@ def build_wheels(root, targets, directory, *, backend_directory=None, repository
     if backend_directory is None and not repository:
         raise ValueError("Supply --backend-dir or --repository owner/repo (or GITCODE_REPOSITORY).")
     directory.mkdir(parents=True, exist_ok=True)
+    excluded = {
+        ".git", ".venv", ".build", "build", "dist", "__pycache__", ".artifacts",
+        ".pytest_cache", ".ruff_cache", "outputs", "logs", "report",
+    }
+
+    def skip_local_artifacts(_directory, names):
+        # Windows glob filtering folds case and would drop the real Build
+        # sources under os_adapter/windows along with generated build output.
+        return {name for name in names if name in excluded or name.endswith(".egg-info")}
+
     with tempfile.TemporaryDirectory(prefix="computer-use-package-") as temporary:
         temporary = Path(temporary)
         client = GitCodeArtifacts(repository, token) if backend_directory is None else None
@@ -163,25 +173,7 @@ def build_wheels(root, targets, directory, *, backend_directory=None, repository
             inspect_archive(backend, root=root, target=target)
             # Separate build trees prevent another target's binary leaking into a wheel.
             source = temporary / target
-            shutil.copytree(
-                root,
-                source,
-                ignore=shutil.ignore_patterns(
-                    ".git",
-                    ".venv",
-                    ".build",
-                    "build",
-                    "dist",
-                    "*.egg-info",
-                    "__pycache__",
-                    ".artifacts",
-                    ".pytest_cache",
-                    ".ruff_cache",
-                    "outputs",
-                    "logs",
-                    "report",
-                ),
-            )
+            shutil.copytree(root, source, ignore=skip_local_artifacts)
             environment = {**os.environ, "COMPUTER_USE_BACKEND_ARCHIVE": str(backend.resolve())}
             subprocess.run(
                 [sys.executable, "-m", "build", "--wheel", "--outdir", str(directory), str(source)],

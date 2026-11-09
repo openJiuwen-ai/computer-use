@@ -18,7 +18,8 @@ class Journal:
         self.directory.mkdir(parents=True, mode=0o700)
         self._secrets = tuple(secret for secret in secrets if secret)
         self._image = 0
-        self._stream = (self.directory / "events.jsonl").open("x", encoding="utf-8")
+        # Escape isolated UTF-16 units from native text in the JSON record.
+        self._stream = (self.directory / "events.jsonl").open("x", encoding="utf-8", errors="backslashreplace")
         (self.directory / "events.jsonl").chmod(0o600)
 
     def redact(self, text):

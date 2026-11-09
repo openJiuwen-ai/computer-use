@@ -198,7 +198,7 @@ class InstanceState:
         current = {item.identity: item for item in facts.windows}
         by_window = {item.identity.window: item.identity for item in facts.windows}
         ended = set(facts.ended)
-        absence_ends_lifetime = facts.complete and directory.get("platform") in ("windows", "linux")
+        absence_ends_lifetime = facts.complete and directory.get("platform") == "linux"
         changed = set(current) | ended | {WindowIdentity.of(item) for item in self.members.values()}
         changed.update(self._window_lifetimes[key] for key in by_window if key in self._window_lifetimes)
         if absence_ends_lifetime:

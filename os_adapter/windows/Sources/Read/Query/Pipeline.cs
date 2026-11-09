@@ -6,8 +6,7 @@ using System.Linq;
 
 namespace ComputerUse.Windows
 {
-    // Native scope checks and observation preparation preserve their original
-    // order. This pipeline cannot access NativeRuntime fields or its step log.
+    // Native scope checks and fact collection do not change foreground state.
     internal sealed class NativeQueryPipeline
     {
         readonly INativeReadBackend reader;
@@ -32,7 +31,7 @@ namespace ComputerUse.Windows
         internal object Run(Dictionary<string, object> p, Request r, NativeOperationView state)
         {
             var scope = ResolveQueryScopePass.Run(p, binding);
-            bool directory = CheckQueryBoundaryPass.Run(scope, state);
+            CheckQueryBoundaryPass.Run(scope, state);
             r.Deadline = Math.Min(r.Deadline, state.Deadline);
             bool cleanupFailure = false;
             try
@@ -40,8 +39,6 @@ namespace ComputerUse.Windows
                 r.ObservationDeadline = Math.Min(r.Deadline, Wire.Now + Request.ObservationMs);
                 ValidateQueryTargetPass.Run(scope, r, reader);
                 CheckQueryOperationPass.Run(scope, state.Write, inspectInput != null);
-                if ((string)scope.Query["kind"] != "inputContext")
-                    PrepareReadSurfacePass.Run(scope, directory, r, state.Write, reader);
                 var result = (string)scope.Query["kind"] == "inputContext"
                                  ? scope.Query.ContainsKey("currentReceiver")
                                        ? CollectCurrentReceiverPass.Run(scope, r, state.Write, inspectCurrentReceiver)

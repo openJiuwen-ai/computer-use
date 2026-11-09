@@ -4,6 +4,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace ComputerUse.Windows
 {
@@ -42,8 +43,50 @@ namespace ComputerUse.Windows
         }
     }
 
+    internal sealed class NativeObservationTraversal
+    {
+        readonly HashSet<string> required = new HashSet<string>();
+        readonly bool capped;
+        internal readonly int MaxNodes;
+
+        internal NativeObservationTraversal(int maximum, int relations)
+        {
+            MaxNodes = Math.Min(maximum, 16384 / relations);
+            capped = MaxNodes < maximum;
+        }
+
+        internal void Reference(string id, bool expand)
+        {
+            if (expand)
+                required.Add(id);
+        }
+
+        internal static bool IncludesBody(NativeNodeRecord node, bool strictWindow)
+        {
+            return !strictWindow || !node.Outside;
+        }
+
+        internal string[] Unread(HashSet<string> seen, List<string> notes, HashSet<string> outside = null)
+        {
+            // A complete edge can name a declaration beyond the requested traversal.
+            // The graph keeps all such edge targets without claiming an omitted body.
+            var unread = required.Where(id => !seen.Contains(id) && (outside == null || !outside.Contains(id))).ToArray();
+            if (unread.Length != 0)
+            {
+                if (capped && seen.Count >= MaxNodes)
+                    NativeReadStore.Note(notes, "The requested traversal reached its relation-status node limit.");
+                NativeReadStore.Note(notes, "Some requested related nodes remain unread.");
+            }
+            return unread;
+        }
+    }
+
     internal static class NativeObservationGraph
     {
+        // A cap on the actual typed graph, before it is encoded by both
+        // worker and supervisor. The collector's raw-row budget is separate.
+        const int WireBudget = 4 * 1024 * 1024;
+
         internal static object[] Pair(string key, object value)
         {
             return new object[] { key, Value(value) };
@@ -205,6 +248,30 @@ namespace ComputerUse.Windows
                        : "error";
         }
 
+        static object StatusEvidence(Dictionary<string, object> status, string state, string detail)
+        {
+            if (status == null)
+                return null;
+            var distinct = new Dictionary<string, object>(status);
+            object value;
+            if (distinct.TryGetValue("state", out value) && Equals(value, state))
+                distinct.Remove("state");
+            if (distinct.TryGetValue("detail", out value) && Equals(value, detail))
+                distinct.Remove("detail");
+            // Ordinary pattern absence is an explicit state, not a failed
+            // native transaction. Its managed sentinel's HRESULT is synthetic.
+            if ((state == "unsupported" || state == "absent") &&
+                distinct.TryGetValue("nativeError", out value))
+            {
+                var error = value as Dictionary<string, object>;
+                object type;
+                if (error != null && error.TryGetValue("type", out type) &&
+                    Equals(type, typeof(NativeFieldUnavailable).FullName))
+                    distinct.Remove("nativeError");
+            }
+            return distinct.Count == 0 ? null : distinct;
+        }
+
         internal static Dictionary<string, object> Property(string name, object payload, bool hasPayload,
                                                             object status = null, string space = "windows.uia",
                                                             Func<object, NativeObservationReference> opaque = null)
@@ -226,7 +293,10 @@ namespace ComputerUse.Windows
                     continuation = nativeStatus;
                 string detail = nativeStatus.ContainsKey("detail") ? nativeStatus["detail"] as string : null;
                 result["read"] =
-                    Read(api, false, null, new[] { Issue(state, detail, nativeStatus, continuation, opaque) });
+                    Read(api, false, null, new[] {
+                        Issue(state, detail, StatusEvidence(nativeStatus, hasPayload ? "truncated" : State(state), detail),
+                              continuation, opaque)
+                    });
             }
             else if (annotated != null && annotated.Api != null)
                 result["read"] = Read(api, hasPayload);
@@ -258,7 +328,9 @@ namespace ComputerUse.Windows
                      state == "complete" || state == "absent"
                          ? null
                          : new[] { Issue(state, edge.ContainsKey("detail") ? edge["detail"] as string : null,
-                                         edge.ContainsKey("nativeStatus") ? edge["nativeStatus"] : edge,
+                                         edge.ContainsKey("nativeStatus") ? StatusEvidence(
+                                             edge["nativeStatus"] as Dictionary<string, object>, state,
+                                             edge.ContainsKey("detail") ? edge["detail"] as string : null) : null,
                                          edge.ContainsKey("cursor") ? edge : null, opaque) });
             return result;
         }
@@ -285,13 +357,131 @@ namespace ComputerUse.Windows
                     References(item, declare);
         }
 
+        static int WireBytes(object value)
+        {
+            return Encoding.UTF8.GetByteCount(Wire.Json(value));
+        }
+
+        // A complete node and its reference declarations are admitted as a
+        // unit. Unexpanded referenced elements retain identity, never a false
+        // empty body. No admitted field, action or relation is cut mid-value.
+        sealed class BoundedNodes
+        {
+            readonly Dictionary<string, Dictionary<string, object>> source;
+            readonly Dictionary<string, Dictionary<string, object>> kept =
+                new Dictionary<string, Dictionary<string, object>>();
+            int bytes;
+
+            internal BoundedNodes(Dictionary<string, Dictionary<string, object>> source, int bytes)
+            {
+                this.source = source;
+                this.bytes = bytes;
+            }
+
+            internal object[] Nodes { get { return kept.Values.ToArray(); } }
+
+            internal Dictionary<string, object> Declaration(string id)
+            {
+                var row = source[id];
+                if (!Equals(row["kind"], "element") || row["properties"] == null)
+                    return row;
+                var stub = new Dictionary<string, object>(row);
+                stub["properties"] = null;
+                stub.Remove("read");
+                return stub;
+            }
+
+            internal bool Admit(object value, Dictionary<string, object> row = null, int limit = WireBudget)
+            {
+                var staged = new Dictionary<string, Dictionary<string, object>>();
+                var pending = new Queue<Dictionary<string, object>>();
+                if (row != null)
+                    staged.Add((string)row["id"], row);
+                Action<string> dependency = id =>
+                {
+                    if (kept.ContainsKey(id) || staged.ContainsKey(id))
+                        return;
+                    var stub = Declaration(id);
+                    staged.Add(id, stub);
+                    pending.Enqueue(stub);
+                };
+                References(value, dependency);
+                while (pending.Count != 0)
+                    References(pending.Dequeue(), dependency);
+
+                int added = row == null ? WireBytes(value) + 1 : 0;
+                foreach (var entry in staged)
+                {
+                    Dictionary<string, object> prior;
+                    added += WireBytes(entry.Value) + 1;
+                    if (kept.TryGetValue(entry.Key, out prior))
+                        added -= WireBytes(prior) + 1;
+                    if (bytes + added > limit)
+                        return false;
+                }
+                if (bytes + added > limit)
+                    return false;
+                foreach (var entry in staged)
+                    kept[entry.Key] = entry.Value;
+                bytes += added;
+                return true;
+            }
+        }
+
+        static Dictionary<string, object> Bound(
+            Dictionary<string, object> graph, Dictionary<string, Dictionary<string, object>> declarations,
+            IEnumerable<string> roots, IEnumerable<string> ordered, Dictionary<string, object> read)
+        {
+            var issues = Wire.Array(read["issues"]);
+            read["issues"] = new object[0];
+            var cutoff = Issue("observation_wire_budget_exhausted",
+                               "The delivered native graph reached its byte budget. Some captured facts were omitted.");
+            var budget = new BoundedNodes(declarations, WireBytes(graph) + WireBytes(cutoff) + 4);
+            foreach (string root in roots)
+            {
+                var stub = budget.Declaration(root);
+                if (!budget.Admit(stub, stub))
+                    throw new Failure("observation_unavailable", "root declaration exceeds the observation byte budget");
+            }
+            var includedIssues = new List<object>();
+            bool truncated = false;
+            foreach (object issue in issues)
+            {
+                if (!budget.Admit(issue, limit: WireBudget / 8))
+                {
+                    truncated = true;
+                    break;
+                }
+                includedIssues.Add(issue);
+            }
+            bool omittedNodes = false;
+            foreach (string id in ordered.Distinct())
+            {
+                var row = declarations[id];
+                if (!budget.Admit(row, row))
+                {
+                    omittedNodes = true;
+                    break;
+                }
+            }
+            if (truncated || omittedNodes)
+            {
+                includedIssues.Add(cutoff);
+                read["complete"] = false;
+            }
+            read["issues"] = includedIssues.ToArray();
+            graph["nodes"] = budget.Nodes;
+            return graph;
+        }
+
         internal static Dictionary<string, object> Encode(
             string session, string surface, Dictionary<string, object> observed, IEnumerable<string> roots,
             IEnumerable<object> records, IEnumerable<object> edges, IEnumerable<string> unread,
             IEnumerable<string> notes, IEnumerable<string> requestedRelations, string changeToken = null,
             IDictionary<string, Dictionary<string, object>> nativeValues = null,
             IEnumerable<Dictionary<string, object>> resources = null, Func<string, object> identity = null,
-            Func<object, NativeObservationReference> opaque = null, IEnumerable<object> cachedFailures = null)
+            Func<object, NativeObservationReference> opaque = null, IEnumerable<object> cachedFailures = null,
+            IEnumerable<string> outside = null)
         {
             var declarations = new Dictionary<string, Dictionary<string, object>>();
             Action<string> declare = id =>
@@ -308,6 +498,13 @@ namespace ComputerUse.Windows
                 declare(root);
             foreach (string id in unread)
                 declare(id);
+            if (outside != null)
+                foreach (string id in outside)
+                {
+                    declare(id);
+                    declarations[id]["read"] = Read("IUIAutomation.RawView", false, null,
+                        new[] { Issue("outside_window_scope", "The native object belongs to another window.") });
+                }
             foreach (object raw in records)
             {
                 var row = Wire.Object(raw);
@@ -383,8 +580,13 @@ namespace ComputerUse.Windows
             foreach (var row in declarations.Values.ToArray())
                 References(row, declare);
             References(read, declare);
-            return Wire.Obj("kind", "observation", "session", session, "platform", "windows", "roots", roots.ToArray(),
-                            "nodes", declarations.Values.ToArray(), "read", read);
+            var rootIds = roots.ToArray();
+            var graph = Wire.Obj("kind", "observation", "session", session, "platform", "windows", "roots", rootIds,
+                                 "nodes", new object[0], "read", read);
+            return Bound(graph, declarations, rootIds, rootIds
+                .Concat(records.Select(row => (string)Wire.Object(row)["node"]))
+                .Concat(edges.Select(edge => (string)Wire.Object(edge)["source"]))
+                .Concat(declarations.Keys), read);
         }
     }
 }

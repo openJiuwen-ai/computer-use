@@ -18,11 +18,10 @@ namespace ComputerUse.Windows
         {
             try
             {
-                var preparation = !writable ? reader as INativeReadPreparation : null;
-                bool preparing = preparation != null && preparation.NeedsPreparation(target);
-                if (writable || preparing && acquire != null)
+                if (writable)
                     lease = acquire(r);
-                reader.Validate(target, r);
+                if (reader != null)
+                    reader.Validate(target, r);
                 r.Check();
             }
             catch (NativeDesktopCleanupFailure)
@@ -38,7 +37,8 @@ namespace ComputerUse.Windows
             {
                 try
                 {
-                    reader.Release();
+                    if (reader != null)
+                        reader.Release();
                 }
                 catch
                 {

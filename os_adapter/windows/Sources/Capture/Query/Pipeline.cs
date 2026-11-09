@@ -8,14 +8,12 @@ namespace ComputerUse.Windows
 {
     internal sealed class NativeCapturePipeline
     {
-        readonly INativeReadBackend reader;
         readonly INativeCaptureBackend capture;
         readonly Func<object, Dictionary<string, object>> binding;
         readonly Action finish, expire;
-        internal NativeCapturePipeline(INativeReadBackend reader, INativeCaptureBackend capture,
+        internal NativeCapturePipeline(INativeCaptureBackend capture,
                                        Func<object, Dictionary<string, object>> binding, Action finish, Action expire)
         {
-            this.reader = reader;
             this.capture = capture;
             this.binding = binding;
             this.finish = finish;
@@ -32,7 +30,6 @@ namespace ComputerUse.Windows
             try
             {
                 r.Check();
-                PrepareCaptureSurfacePass.Run(scope, r, reader);
                 return CollectPixelsPass.Run(scope, r, capture);
             }
             catch (NativeDesktopCleanupFailure)

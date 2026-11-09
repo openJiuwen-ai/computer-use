@@ -11,6 +11,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from computer_use.json import loads as jsonLoads
@@ -198,21 +199,23 @@ def build_windows(root=None):
     sources = sorted((native / "Sources").rglob("*.cs"))
     if not sources:
         raise RuntimeError("Windows backend sources are missing; reinstall the toolkit.")
-    run(
-        compiler,
-        [
-            "/nologo",
-            "/target:exe",
-            "/platform:x64",
-            "/optimize+",
-            "/warnaserror+",
-            f"/out:{output}",
-            *(f"/reference:{framework / name}" for name in references),
-            f"/reference:{interop}",
-            *sources,
-        ],
-        native,
-    )
+    arguments = [
+        "/nologo",
+        "/target:exe",
+        "/platform:x64",
+        "/optimize+",
+        "/warnaserror+",
+        f"/out:{output}",
+        *(f"/reference:{framework / name}" for name in references),
+        f"/reference:{interop}",
+        *sources,
+    ]
+    # Deep checkouts can exceed the Win32 command-line limit once every source
+    # path is expanded. The BOM lets Framework csc read Unicode paths reliably.
+    with TemporaryDirectory(prefix="computer-use-csc-") as folder:
+        response = Path(folder) / "driver.rsp"
+        response.write_text("".join(f'"{argument}"\n' for argument in arguments), encoding="utf-8-sig")
+        run(compiler, [f"@{response}"], native)
     # Compile the WinRT pixel helper against metadata shipped with Windows.
     # UIA objects and the public driver do not depend on WinRT projections.
     metadata = framework.parents[2] / "System32/WinMetadata"
@@ -285,6 +288,8 @@ def read_permissions(request=False, root=None, timeout=None, *, protocol_version
 
 def permission_state(status, platform=None):
     platform = platform or sys.platform
+    if platform == "win32" and "ready" in status:
+        return (True, []) if status["ready"] is True else (False, ["interactiveDesktop"])
     missing = [name for name in ("accessibility", "screenCapture", "input") if status.get(name) is not True]
     ready = status["ready"] is True if platform == "linux" and "ready" in status else not missing
     return ready, missing
@@ -292,7 +297,8 @@ def permission_state(status, platform=None):
 
 def permissions(argv=None):
     parser = argparse.ArgumentParser(
-        description="检查目标桌面权限；--request 在 macOS 发起系统授权提示，Linux 仅报告状态。请使用与 SDK 相同的终端或宿主连接。"
+        description="检查目标桌面权限；--request 在 macOS 发起系统授权提示，Windows 和 Linux 报告状态。"
+        "请使用与 SDK 相同的终端或宿主连接。"
     )
     parser.add_argument("--request", action="store_true")
     parser.add_argument(
@@ -311,6 +317,11 @@ def permissions(argv=None):
     report(json.dumps(status, ensure_ascii=False, separators=(",", ":")))
     ready, missing = permission_state(status)
     if not ready:
+        if sys.platform == "win32":
+            raise RuntimeError(
+                f"Windows 桌面未就绪（{status.get('desktopState', 'unknown')}）。"
+                "请在目标用户已解锁的桌面启动宿主，并处理正在显示的 Windows 安全提示。"
+            )
         if sys.platform == "linux":
             raise RuntimeError(
                 (

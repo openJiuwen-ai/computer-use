@@ -97,8 +97,10 @@ namespace ComputerUse.Windows
         internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")]
         internal static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         internal static extern int GetWindowText(IntPtr h, StringBuilder text, int length);
+        [DllImport("kernel32.dll")]
+        static extern void SetLastError(uint error);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         internal static extern int GetClassName(IntPtr h, StringBuilder text, int length);
         [DllImport("user32.dll")]
@@ -259,9 +261,18 @@ namespace ComputerUse.Windows
 
         internal static bool Interactive(bool requireForeground = true)
         {
+            string reason;
+            return Interactive(out reason, requireForeground);
+        }
+
+        internal static bool Interactive(out string reason, bool requireForeground = true)
+        {
             var input = OpenInputDesktop(0, false, 1);
             if (input == IntPtr.Zero)
+            {
+                reason = "inputDesktopUnavailable";
                 return false;
+            }
             bool verifyCleanup = false;
             Exception primary = null;
             try
@@ -270,16 +281,28 @@ namespace ComputerUse.Windows
                 var b = new StringBuilder(256);
                 uint size;
                 if (!GetUserObjectInformation(input, 2, a, 512, out size) ||
-                    !GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()), 2, b, 512, out size) ||
-                    a.ToString() != b.ToString())
+                    !GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()), 2, b, 512, out size))
+                {
+                    reason = "desktopIdentityUnavailable";
                     return false;
+                }
+                if (a.ToString() != b.ToString())
+                {
+                    reason = "differentInputDesktop";
+                    return false;
+                }
                 // Preserve the original nonzero-foreground and explicit false
                 // paths, including their query sequence. Only FG0 needs the
                 // stronger own-session and same-desktop-object evidence.
                 if (!requireForeground || GetForegroundWindow() != IntPtr.Zero)
+                {
+                    reason = "interactive";
                     return true;
+                }
                 verifyCleanup = true;
-                return NativeNullForegroundDesktop.Query(input, new NativeNullForegroundDesktopWin32());
+                bool ready = NativeNullForegroundDesktop.Query(input, new NativeNullForegroundDesktopWin32());
+                reason = ready ? "interactive" : "desktopNotConfirmed";
+                return ready;
             }
             catch (Exception error)
             {
@@ -316,6 +339,16 @@ namespace ComputerUse.Windows
             var b = new StringBuilder(4096);
             GetWindowText(h, b, b.Capacity);
             return b.ToString();
+        }
+
+        internal static bool TryCaption(IntPtr h, out string caption)
+        {
+            var buffer = new StringBuilder(4096);
+            SetLastError(0);
+            int length = GetWindowText(h, buffer, buffer.Capacity);
+            int error = Marshal.GetLastWin32Error();
+            caption = buffer.ToString();
+            return length != 0 || error == 0;
         }
 
         internal static string Class(IntPtr h)

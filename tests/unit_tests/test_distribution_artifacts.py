@@ -5,6 +5,7 @@ import json
 import os
 import runpy
 import shutil
+import stat
 import subprocess
 import sys
 import urllib.request
@@ -52,12 +53,37 @@ def checkout(tmp_path):
 
 
 def backend(root, directory):
+    target = "macos-arm64"
+    fingerprint = artifacts.fingerprint(root, target)
+    output = directory / f"backend-{target}-{fingerprint}.zip"
+    payload = b"test native executable\n"
+    if os.name == "nt":
+        # Model the downloaded native macOS archive on a host whose chmod
+        # cannot set POSIX execute bits. The archive preserves both sources
+        # of mode metadata that a real macOS build supplies.
+        output.parent.mkdir(parents=True, exist_ok=True)
+        entry = zipfile.ZipInfo(DRIVER)
+        entry.create_system = 3
+        entry.external_attr = (stat.S_IFREG | 0o755) << 16
+        manifest = {
+            "format": artifacts.FORMAT,
+            "target": target,
+            "fingerprint": fingerprint,
+            "protocol": artifacts.protocol_version(root),
+            "source_commit": "test-commit",
+            "builder": {"system": "Darwin fixture", "python": "3.12"},
+            "files": {DRIVER: {"sha256": artifacts.sha256(payload), "mode": 0o755}},
+        }
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("backend.json", artifacts.canonical(manifest))
+            archive.writestr(entry, payload)
+        artifacts.inspect_archive(output, root=root, target=target)
+        return output
     executable = root / DRIVER
     executable.parent.mkdir(parents=True, exist_ok=True)
-    executable.write_bytes(b"test native executable\n")
+    executable.write_bytes(payload)
     executable.chmod(0o755)
-    output = directory / (artifacts.artifact_name(root, "macos-arm64") + ".zip")
-    artifacts.write_archive(root, "macos-arm64", [executable], output, source_commit="test-commit")
+    artifacts.write_archive(root, target, [executable], output, source_commit="test-commit")
     return output
 
 
@@ -80,6 +106,31 @@ def test_protocol_change_rejects_previous_backend(checkout, tmp_path):
     session.write_text(session.read_text().replace("NATIVE_PROTOCOL_VERSION = 6", "NATIVE_PROTOCOL_VERSION = 7"))
     with pytest.raises(ValueError, match="sources/protocol"):
         artifacts.inspect_archive(archive, root=checkout)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows glob filtering folds the case of build directories")
+def test_windows_wheel_preserves_native_build_sources(checkout, tmp_path, distribution, monkeypatch):
+    target = "windows-x86_64"
+    shutil.copytree(ROOT / "os_adapter/windows/Build", checkout / "os_adapter/windows/Build")
+    (checkout / "build").mkdir()
+    output = checkout / "os_adapter/windows/.build"
+    output.mkdir()
+    files = [output / name for name in ("computer-use-driver.exe", "computer-use-capture.exe", "Interop.NativeUIA.dll")]
+    for path in files:
+        path.write_bytes(b"test binary")
+    archive = tmp_path / (artifacts.artifact_name(checkout, target) + ".zip")
+    artifacts.write_archive(checkout, target, files, archive, source_commit="test-commit")
+    stages = []
+
+    def check_staged_source(command, **kwargs):
+        stage = Path(command[-1])
+        stages.append(stage)
+        assert not (stage / "build").exists()
+        artifacts.inspect_archive(kwargs["env"]["COMPUTER_USE_BACKEND_ARCHIVE"], root=stage, target=target)
+
+    monkeypatch.setattr(subprocess, "run", check_staged_source)
+    distribution["build_wheels"](checkout, [target], tmp_path / "wheels", backend_directory=tmp_path)
+    assert len(stages) == 1
 
 
 @pytest.mark.parametrize("corruption", ["hash", "traversal", "target", "executable"])
@@ -204,7 +255,8 @@ def test_cross_platform_wheel_installs_backend_and_restores_executable(checkout,
     )
     packaged = installed / "computer_use/_resources"
     assert (packaged / DRIVER).read_bytes() == b"test native executable\n"
-    (packaged / DRIVER).chmod(0o644)  # Simulate an installer dropping executable bits.
+    if os.name != "nt":
+        (packaged / DRIVER).chmod(0o644)  # Simulate an installer dropping executable bits.
     script = """
 import json, os
 from pathlib import Path
@@ -213,8 +265,11 @@ Path.home = classmethod(lambda cls: Path('home').resolve())
 root = paths.repository_root()
 driver = Path(paths.native_driver('darwin', root)['command'])
 assert driver.read_bytes() == b'test native executable\\n'
-assert os.access(driver, os.X_OK)
-assert json.loads((root / 'backend.json').read_text())['source_commit'] == 'test-commit'
+if os.name != 'nt':
+    assert os.access(driver, os.X_OK)
+manifest = json.loads((root / 'backend.json').read_text())
+assert manifest['source_commit'] == 'test-commit'
+assert manifest['files'][driver.relative_to(root).as_posix()]['mode'] == 0o755
 assert not (root / 'os_adapter/windows/.build').exists()
 """
     subprocess.run(

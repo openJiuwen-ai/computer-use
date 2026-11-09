@@ -339,7 +339,7 @@ def decode_selection_basis(value):
 
 _inspect_queries = {
     "launch": obj(dict(kind=enum("launch"))),
-    "applications": obj(dict(kind=enum("applications"))),
+    "applications": obj(dict(kind=enum("applications"), windowTitle=identity.optional())),
     "surfaceBatch": obj(
         dict(kind=enum("surfaceBatch"), applications=array(identity, min=1, max=64), profile=enum("visual").optional())
     ),
@@ -349,6 +349,7 @@ _inspect_queries = {
             application=identity,
             includeAccessibility=boolean().optional(),
             profile=enum("visual").optional(),
+            rootWindow=identity.optional(),
         )
     ),
     "roots": obj(dict(kind=enum("roots"), application=identity)),
@@ -381,6 +382,7 @@ _inspect_queries = {
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),
             primaryFields=array(enum("Text.LineRanges"), min=1, max=1).optional(),
+            strictWindow=boolean().optional(),
             maxNodes=number(integer=True, min=1, max=2000),
             maxDepth=number(integer=True, min=0, max=2000),
             childrenPage=obj(dict(cursor=nullable_id, limit=number(integer=True, min=1, max=1999))).optional(),

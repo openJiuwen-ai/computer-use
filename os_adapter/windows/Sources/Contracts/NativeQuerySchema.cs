@@ -39,17 +39,23 @@ namespace ComputerUse.Windows
             switch (kind)
             {
             case "applications":
-                Wire.Keys(query, "kind");
+                Wire.Keys(query, "kind", "windowTitle");
+                if (query.ContainsKey("windowTitle") && Wire.Str(query, "windowTitle").Length > 4094)
+                    throw new Failure("invalid_request", "windowTitle exceeds the Win32 caption query limit");
                 break;
             case "surfaces":
-                Wire.Keys(query, "kind,application", "includeAccessibility");
+                Wire.Keys(query, "kind,application", "includeAccessibility,rootWindow");
                 Wire.Str(query, "application");
                 if (query.ContainsKey("includeAccessibility"))
                     Wire.Bool(query, "includeAccessibility");
+                if (query.ContainsKey("rootWindow"))
+                    Wire.Str(query, "rootWindow");
                 break;
             case "nodes":
                 Wire.Keys(query, "kind,fields,maxNodes,maxDepth",
-                          "childrenPage,relationPage,advertisedFields,followRelations,focusedFields,primaryFields");
+                          "childrenPage,relationPage,advertisedFields,followRelations,focusedFields,primaryFields,strictWindow");
+                if (query.ContainsKey("strictWindow"))
+                    Wire.Bool(query, "strictWindow");
                 var fields = Names(query, "fields", 128);
                 if (query.ContainsKey("advertisedFields") && Names(query, "advertisedFields", 128).Except(fields).Any())
                     throw new Failure("invalid_request", "advertised properties must belong to the requested fields");

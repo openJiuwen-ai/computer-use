@@ -48,6 +48,7 @@ class FactReadRequest:
     relation_page: RelationPage | None = None
     scope_kind: str | None = None
     query_remaining: Remaining | None = None
+    strict_window: bool = False
 
 
 @dataclass(frozen=True)

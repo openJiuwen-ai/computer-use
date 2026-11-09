@@ -22,6 +22,7 @@ internal static class NativeCapturedPointerTests
         internal readonly NativePointerCapture Image;
         internal NativeCapturedWindowFrame Current;
         internal bool Foreground = true, Identity = true, Layout = true, Modal = false, OwnedGrab;
+        internal bool SampleNaturalActivation, CompetingForegroundHidden;
         internal int Activations, FrozenReads;
         internal int FirstAccepted = -1;
         internal Action Activated = null, BeforeFrozenRead = null;
@@ -63,11 +64,13 @@ internal static class NativeCapturedPointerTests
             }
             Image.RequirePoint(point);
             Hits.Add(point);
-            return State(point);
+            return State(point, gesture);
         }
-        NativePointerState State(NativePointerPoint point)
+        NativePointerState State(NativePointerPoint point, NativePointerGestureIntent gesture)
         {
-            return new NativePointerState { Ready = Foreground, Foreground = Foreground,
+            bool natural = !Foreground && SampleNaturalActivation && Image.Binding["surface"] != null &&
+                NativePointerClickAdmission.NaturalActivation(gesture, true, true, true, CompetingForegroundHidden);
+            return new NativePointerState { Ready = Foreground || natural, NaturalActivation = natural, Foreground = Foreground,
                 ForegroundReady = Foreground, PhysicalReady = true, Recipient = "original-hwnd",
                 ProjectedPoint = point, CurrentWindowBounds = Image.Binding["surface"] == null ? null : Current };
         }
@@ -221,6 +224,44 @@ internal static class NativeCapturedPointerTests
         Check(result["errorCode"] == null && provider.Activations == 1 && provider.Sends.Count == 1,
               "Foreground preparation may move the same window before the dispatch frame is frozen");
         CheckFirstMove(provider, new NativePointerPoint(528, 248));
+    }
+
+    static void HiddenCompetingForegroundRequiresPreparation()
+    {
+        var hidden = new Provider(Image()) {
+            Foreground = false, SampleNaturalActivation = true, CompetingForegroundHidden = true
+        };
+        var operation = new Operation(hidden);
+        operation.Inspect();
+        var offer = Wire.Object(operation.Primitive["click"]);
+        Check(Equals(operation.Primitive["readiness"], "no") &&
+              Equals(offer["admission"], "preparationRequired") &&
+              Wire.Array(offer["preparationOptions"]).Length == 1 &&
+              Equals(Wire.Array(offer["preparationOptions"])[0], "foreground") && hidden.Sends.Count == 0,
+              "A reachable captured window with a known hidden competing foreground must offer preparation before input");
+        hidden.AfterSend = sent => Check(hidden.Foreground && hidden.Activations == 1,
+                                          "The captured click cannot enter dispatch before original foreground preparation");
+        var result = operation.Execute(true);
+        Check(result["errorCode"] == null && hidden.Activations == 1 && hidden.Sends.Count == 1 && hidden.Sends[0].Length == 3,
+              "One prepared captured click must dispatch one move/down/up batch");
+
+        var visible = new Provider(Image()) { Foreground = false, SampleNaturalActivation = true };
+        operation = new Operation(visible);
+        operation.Inspect();
+        Check(Equals(operation.Primitive["readiness"], "yes") &&
+              Equals(Wire.Object(operation.Primitive["click"])["admission"], "ready"),
+              "A reachable inactive captured window with a visible competitor keeps natural activation");
+        result = operation.Execute();
+        Check(result["errorCode"] == null && visible.Activations == 0 && visible.Sends.Count == 1,
+              "A visible competitor must not cause an extra activation");
+
+        var changed = new Provider(Image()) { Foreground = false, SampleNaturalActivation = true };
+        operation = new Operation(changed);
+        operation.Inspect();
+        changed.CompetingForegroundHidden = true;
+        result = operation.Execute();
+        Check(result["errorCode"] != null && changed.Activations == 0 && changed.Sends.Count == 0,
+              "A fresh hidden foreground cannot dispatch under the previously ready contract or activate without authority");
     }
 
     static void ChangedFrameAfterFreezeCannotBeFollowed()
@@ -433,6 +474,7 @@ internal static class NativeCapturedPointerTests
 
     static void Main()
     {
+        HiddenCompetingForegroundRequiresPreparation();
         OriginallyOffscreenImagePointsCanTranslateOntoDisplays();
         TranslationPreservesInsetAndScaling();
         PreparationMovesBeforeTheSingleFreeze();

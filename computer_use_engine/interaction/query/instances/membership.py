@@ -50,6 +50,8 @@ def in_scope(ui: UIHandle, surface: str | None) -> bool:
     # pylint: disable-next=protected-access
     instance = ui._instance
     item = next((item for item in instance.members.values() if item["surface"] == surface), None)
+    if getattr(ui, "_strict_window", False):
+        return item is not None and item["window"] == ui._anchor
     return item is not None and (
         # pylint: disable-next=protected-access
         ui._anchor is None or ancestor(cast("DirectoryFacts", instance.directory), item["window"], ui._anchor)

@@ -9,7 +9,7 @@ them. Elements returned by scoped lookup continue to belong to the public App.
 
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.query.instances.scope import adopt, require_identity, validate_session
-from computer_use.native.query.directory import select_application, select_surface
+from computer_use.native.query.directory import SurfaceReadProfile, select_application, select_surface, surfaces_query
 from computer_use.native.scopes import RunningApplication
 from computer_use.session.interfaces import LookupContext, WindowIdentity
 from computer_use.session.state import AppState
@@ -21,6 +21,7 @@ class RequestScope:
     def __init__(self, controller, app, entry):
         self._app = app
         self._instance = app._instance
+        self._strict_window = getattr(app, "_window_title", None) is not None
         self._anchor = entry.identity.window
         self._context, self._image = None, None
         self._lookup_scopes, self._menu_only = (), False
@@ -45,11 +46,15 @@ class RequestScope:
 
     @property
     def _input_context(self):
+        if self._strict_window:
+            return self.identity
         context = self._instance.window_contexts.get(self.identity)
         return context.input if context is not None else None
 
     @property
     def _lookup_context(self):
+        if self._strict_window:
+            return LookupContext(self.identity)
         context = self._instance.window_contexts.get(self.identity)
         return context.lookup if context is not None else LookupContext(self.identity)
 
@@ -68,7 +73,46 @@ def window_scope(controller, app, ref):
     return RequestScope(controller, app, entry)
 
 
-async def request_scope(controller, app, ref):
+async def bind_window_title(controller, app):
+    title = app._window_title
+    applications = await controller.reader.directory._query({"kind": "applications", "windowTitle": title}, 30000)
+    matches = [(application, window) for application in applications["applications"] for window in application["windows"]]
+    if len(matches) > 1:
+        raise local_failure("several running Windows windows have this exact caption", "ambiguous_target")
+    if applications.get("windowTitle") != {"title": title, "complete": True}:
+        raise local_failure("the Win32 window caption catalogue is incomplete", "observation_incomplete")
+    if not matches:
+        raise local_failure("no running Windows window has this exact caption", "element_not_found")
+    application, window = matches[0]
+    directory = await controller.reader.directory._query(
+        surfaces_query(application["id"], profile=SurfaceReadProfile.VISUAL,
+                       capabilities=controller.transport.capabilities),
+        30000,
+    )
+    item = next((item for item in directory["surfaces"] if (
+        item["window"] == window["window"] and item["instance"] == window["selector"] and item["title"] == title
+    )), None)
+    if item is None or directory["session"] != applications["session"]:
+        raise local_failure("the matched window changed during title discovery", "stale_target")
+    if app._title_window_ref is not None:
+        return
+    controller.state(app).running = RunningApplication(application["id"], application["displayName"], directory["session"])
+    adopt(controller, app, directory)
+    ref = controller.interfaces.windows.reference(directory["session"], application["id"], WindowIdentity.of(item))
+    if ref is None:
+        raise local_failure("the matched window identity is no longer available", "stale_target")
+    app._title_window_ref = ref
+
+
+async def request_scope(controller, app, ref, *, discover_title=False):
+    if getattr(app, "_window_title", None) is not None:
+        if app._title_window_ref is None:
+            if not discover_title or ref is not None:
+                raise local_failure("read the exact titled window before using its references", "stale_target")
+            await bind_window_title(controller, app)
+        if ref is not None and ref != app._title_window_ref:
+            raise local_failure("the window reference is outside this exact titled window", "stale_target")
+        return window_scope(controller, app, app._title_window_ref)
     if ref is None:
         return app
     validate_session(controller, app)

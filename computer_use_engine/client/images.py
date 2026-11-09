@@ -77,7 +77,7 @@ def image_output_scope(png):
     return known["source"].get("coordinateScope")
 
 
-def image_label(png, context_already_shown=False, coordinates: ImageCoordinates | None = None):
+def image_label(png, context_already_shown=False, coordinates: ImageCoordinates | None = None, *, allow_global_input=True):
     size = png_size(png)
     if coordinates is not None:
         size = {"width": coordinates.delivered_size[0], "height": coordinates.delivered_size[1]}
@@ -134,12 +134,10 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
     if not actionable:
         return caption
     if facts["kind"] == "desktop":
-        return (
-            caption
-            + "\n"
-            + IMAGE_POINT_GUIDANCE
-            + ("\nImage point: p = computer.point((x, y))\nGlobal click: computer.click(target=p)")
-        )
+        caption += f"\n{IMAGE_POINT_GUIDANCE}\nImage point: p = computer.point((x, y))"
+        if allow_global_input:
+            caption += "\nGlobal click: computer.click(target=p)"
+        return caption
     coordinate_windows = source.get("coordinate_windows")
     refs = coordinate_windows() if callable(coordinate_windows) else ()
     # Delayed/composite pictures may still describe old members. Only advertise
@@ -152,12 +150,7 @@ def image_label(png, context_already_shown=False, coordinates: ImageCoordinates 
         if refs
         else [f"Image point: p = {application}.point((x, y))"]
     )
-    return "\n".join(
-        [
-            caption,
-            IMAGE_POINT_GUIDANCE,
-            *points,
-            f"App click: {application}.click(at=p)",
-            "Global click (explicit): computer.click(target=p)",
-        ]
-    )
+    lines = [caption, IMAGE_POINT_GUIDANCE, *points, f"App click: {application}.click(at=p)"]
+    if allow_global_input:
+        lines.append("Global click (explicit): computer.click(target=p)")
+    return "\n".join(lines)

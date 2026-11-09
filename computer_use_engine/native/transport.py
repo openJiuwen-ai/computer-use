@@ -215,6 +215,15 @@ class ConnectionPort:
     async def directory(self, operation, target, query, timeout_ms):
         if "nativeDirectory" not in self.capabilities:
             raise RuntimeError("This driver does not provide the native discovery contract")
+        if "windowTitle" in query and (
+            self.platform != "windows"
+            or not {"nativeWindowTitleSelection", "nativeStrictWindowRead"} <= set(self.capabilities)
+        ):
+            raise local_failure("exact window title selection requires a supporting Windows driver", "unsupported_operation")
+        if "rootWindow" in query and (
+            self.platform != "windows" or "nativeStrictWindowRead" not in self.capabilities
+        ):
+            raise local_failure("strict window collection requires a supporting Windows driver", "unsupported_operation")
         self._check(operation)
         result = await self.connection.request(
             "inspect",
@@ -234,6 +243,8 @@ class ConnectionPort:
         )
         if invalid_result:
             raise ValueError("Native discovery changed the requested session or application")
+        if "windowTitle" in query and result.get("windowTitle", {}).get("title") != query["windowTitle"]:
+            raise ValueError("Native discovery changed the requested window caption")
         if (
             query["kind"] == "surfaceBatch"
             and [entry["application"] for entry in result["entries"]] != query["applications"]
@@ -242,11 +253,11 @@ class ConnectionPort:
         return result
 
     async def begin(self, intent, target, timeout_ms):
-        return await self._begin(self._intent_payload(intent), "write", target, timeout_ms)
+        return await self._begin(self._intent_payload(intent, target), "write", target, timeout_ms)
 
-    def _intent_payload(self, intent):
+    def _intent_payload(self, intent, target=None):
         value = dict(kind=intent.kind, parameters=dict(intent.parameters))
-        if self.platform == "macos":
+        if self.platform == "macos" or isinstance(target, GlobalTarget):
             value["globalInput"] = intent.global_input
         return value
 
@@ -292,7 +303,7 @@ class ConnectionPort:
         return value["point"]["x"], value["point"]["y"]
 
     async def execute_global(self, operation, target, intent, timeout_ms):
-        if self._check(operation) != intent_key(self._intent_payload(intent)):
+        if self._check(operation) != intent_key(self._intent_payload(intent, target)):
             raise local_failure("The global input intent is already bound", "invalid_request", "execute")
         value = await self.connection.request(
             "execute",
@@ -502,6 +513,7 @@ class ConnectionPort:
         focused_fields=None,
         primary_fields=None,
         text_content=None,
+        strict_window=False,
     ):
         """Collect unified observation facts with their separate query scope."""
         from computer_use.protocol.observation.adapters import decode_driver_reply
@@ -517,6 +529,7 @@ class ConnectionPort:
             focused_fields=focused_fields,
             primary_fields=primary_fields,
             text_content=text_content,
+            strict_window=strict_window,
         )
         payload, facts = await self._nodes_payload(operation, target, request, timeout_ms)
         reply = decode_driver_reply(payload)
@@ -544,6 +557,10 @@ class ConnectionPort:
     ) -> tuple[Record, Record]:
         self._check(operation)
         query = dict(kind="nodes", fields=list(request.fields), maxNodes=request.max_nodes, maxDepth=request.max_depth)
+        if request.strict_window:
+            if self.platform != "windows" or "nativeStrictWindowRead" not in self.capabilities:
+                raise local_failure("strict window collection requires a supporting Windows driver", "unsupported_operation")
+            query["strictWindow"] = True
         if request.action_detail is not None:
             if self.platform != "macos" or "nativeQueryActionProfile" not in self.connection.capabilities:
                 raise ValueError("This driver cannot select an action evidence profile")

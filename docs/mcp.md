@@ -123,22 +123,25 @@ SDK 返回的 `state.text` 始终是本次读取范围的完整文字，展示 d
 组合图始终使用整张展示图片的坐标。应用内点击用 `app.click(at=p)`，显式全局点击用
 `computer.click(target=p)`，切换输入路线时直接复用同一个 p。坐标需取自此前已经收到的图片；
 如需跨后续读取复用，应先保留 p。图片来源不明或映射失效时，不提供可执行定位示例。
+在 Windows MCP 的一次调用内，`computer.point()` 仍按模型已收到的桌面图取点，直到更新的图片交付。
+派发时仍检查对应捕获与当前显示布局。
 MCP 中打印观察、观察的 `.text` 或直接文字切片，都复用自动展示，不额外输出全文；
 SDK 内切片值及文件输出仍保持原意。需要限制读取范围时使用子树或 `read_text`。
 
-读取默认不为刷新画面而激活或提升窗口。在 macOS 上，调用方可显式使用
+读取默认不为刷新画面而激活或提升窗口。在 macOS 和 Windows 上，调用方可显式使用
 `app.read(view="both", allow_foreground=True)`，允许 SDK 在已确认的原窗口范围内准备观察；
 指定窗口时使用 `app.read(window=ref, allow_foreground=True)`。
 这可能改变焦点和窗口层次，但不注入全局鼠标或键盘、不自动切回其他应用。
 结果的 `preparation` 和文字说明保留实际请求，图像保留本次采样来源。
-观察目标尚未明确时仍返回窗口选择信息，不以此许可猜选目标。其他平台暂不支持该准备能力。
+观察目标尚未明确时仍返回窗口选择信息。Linux 暂不支持该准备能力。
 
 对象写入在执行结果之外附带有界的相关观察，可读取 `result.observation`、`result.observation_status`
 和 `result.observation_error`。`result.target`、`result.intent` 和 `result.status` 保留操作目标、意图及派发／验证结果。
 目标失效、目标信息暂时无法确认、模态阻挡，
 以及 `effect="partial"` 或 `"possible"` 的 `ComputerUseError`，在原会话仍可观察时也附带这些字段。
 可直接使用错误附带的当前观察决定下一步；原错误与效果保持不变，SDK 不会重放不确定的输入。
-macOS 的 Computer 全局输入不强制写后观察，`observation_status="not_requested"`；需要界面结果时显式读取，读取失败不阻止下一次全局输入。
+macOS 的 Computer 全局输入及 Windows 的 Computer 按键、键入和粘贴返回
+`observation_status="not_requested"`。需要确认界面效果时显式读取。
 
 ### Python SDK
 
@@ -202,13 +205,26 @@ computer.click(target=p)
 全局键盘方法不接受 `target=` 或隐式 `replace=True`；需要时先显式点击、选择，再输入。
 全局输入返回派发回执；需要界面结果时显式读取，读取失败不影响下一次全局输入。
 鼠标位置和系统焦点保留操作产生的结果，不自动归还。实际输入影响见 `result.impact`。
-这些原始全局与定位语义先在 macOS 实现；Windows／Linux 桌面输入仍使用既有截图上下文，后续迁移。
-`Computer.paste(text)` 当前仅在 macOS 实现；Windows／Linux 继续使用既有对象粘贴方法，原始全局粘贴列为后续实现。
+在 Windows 上，`computer.press_key(key)`、`computer.type_text(text)` 和
+`computer.paste(text)` 直接交给系统当前接收者，无须先截图或获取无障碍树。
+调用前按需要显式准备焦点。鼠标操作仍使用已有的截图坐标映射。
+Windows 粘贴将本次文本留在系统剪贴板，直到后续写入覆盖。派发回执只说明粘贴按键已发送。
+如果还需粘贴下一段，先观察目标并确认上一次粘贴已生效，避免覆盖慢应用尚未读取的内容。
+Linux 保留原有桌面截图上下文，粘贴使用 App 或 Element 方法。
 
 `App` 表示应用范围，`list_apps()` 始终列出应用。App 和桌面观察发布窗口编号。
 通过 `app.read(window=ref)` 观察指定窗口；`element`、`point`、`click`、`scroll`、`drag`、
 `type_text`、`paste` 和 `press_key` 同样接受可选 `window=`。窗口选择和普通读取不激活窗口。
-窗口编号在桌面、App 和写后观察间共用；标题和位置只作描述，不作为绑定依据。
+窗口编号在桌面、App 和写后观察间共用。窗口绑定以原生身份为准。
+
+Windows 上，如果任务给出了完整窗口标题，可使用 `app = computer.app(window_title=title)`。
+第一次 `app.read()` 从当前桌面的可见原生顶层窗口中按区分大小写的标题匹配并绑定唯一窗口。
+多个匹配返回 `ambiguous_target`，目录缺口导致无法确认唯一匹配时返回 `observation_incomplete`。
+标题变化后继续使用同一 App，原窗口关闭后句柄失效。
+
+该 App 的读取、`read_details()` 和写后观察只覆盖已绑定窗口。普通 `app.read(window=ref)`
+也可能包含归属已确认的窗口。标题绑定的 App 使用 `read(menu_path=...)` 会返回 `invalid_request`。
+菜单路径由支持该能力的平台通过普通 App 范围提供。
 
 ```python
 app = computer.app("com.apple.TextEdit")
@@ -222,10 +238,16 @@ app.press_key("Return", window=a)
 ```
 
 公开对象只有 `Computer`、`App`、`Element`，没有公开 `Window` 或窗口工厂。
-macOS 可通过 `app.close_window(ref)` 正常请求关闭指定窗口，即使共享标识遮住标题栏按钮。
-它根据窗口声明定位关闭控件，复用已有输入和写后观察；不自动保存、丢弃或关闭其他窗口。
+macOS 和 Windows 可通过 `app.close_window(ref)` 正常请求关闭指定窗口。macOS 使用窗口声明的关闭控件，
+即使共享标识遮住标题栏按钮也可操作。Windows 使用该窗口提供的 UI Automation `Window.Close` 动作。
+两条路线复用已有输入和写后观察，由调用方根据观察处理保存确认。
 应用可拒绝关闭或弹出确认框；回执的 `intent` 为 `closeWindow`，`dispatched` 表示已派发请求，
-`window_lifecycle` 与附带观察说明已取得的窗口状态。Windows／Linux 的该能力后续实现。
+`window_lifecycle` 与附带观察说明已取得的窗口状态。Linux 的该能力后续实现。
+
+标题绑定的 App 调用 `close_window` 后，附带观察只覆盖原窗口，`choices` 为空。
+只有任务范围包含独立的确认窗口时，才在该窗口范围内另行观察。回执中的 `window_lifecycle`
+为 `closed` 时可确认窗口已关闭。
+
 同一应用的元素编号跨读取范围保持一致；`app.element(ref)` 保持原控件绑定，读取其他窗口不改绑它。
 数字元素引用附带 `window=` 时检查其范围是否相符。指定窗口的名称查询在本次调用内准备定位事实，
 不要求先公开读取该窗口。省略 `window=` 的名称查询和键盘输入使用最近实际交付的明确上下文，

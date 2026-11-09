@@ -145,13 +145,18 @@ namespace ComputerUse.Windows
             bool active = foregroundWindow == handle;
             bool foregroundReady = kind == "scroll" ? active : Native.PointerForeground(handle, foregroundWindow);
             bool physicalReady = route;
+            // A hidden foreground can leave even an idle, reachable window
+            // without the submitted click. Prepare the original HWND first.
+            bool competingForegroundHidden = !foregroundReady && gesture.CanActivateWindow &&
+                foregroundWindow != IntPtr.Zero && !Native.IsWindowVisible(foregroundWindow) &&
+                Native.IsWindow(foregroundWindow) && Native.GetForegroundWindow() == foregroundWindow;
             bool natural =
                 !foregroundReady &&
                 NativePointerClickAdmission.NaturalActivation(
                     gesture, physicalReady, hit,
                     NativePointerClickAdmission.QueueIdle(foregroundKnown, foreground.Capture, foreground.Flags) &&
-                        NativePointerClickAdmission.QueueIdle(targetThread != 0 && threadKnown, gui.Capture,
-                                                              gui.Flags));
+                        NativePointerClickAdmission.QueueIdle(targetThread != 0 && threadKnown, gui.Capture, gui.Flags),
+                    competingForegroundHidden);
             // A single requested physical click may itself activate its live,
             // reachable original window. Windows may consume that click; the
             // existing receipt records submission only and never replays it.

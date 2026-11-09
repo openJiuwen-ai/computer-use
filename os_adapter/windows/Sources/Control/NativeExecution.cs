@@ -23,9 +23,8 @@ namespace ComputerUse.Windows
                     .Concat(pointer == null ? new string[0] : new[] { "nativePointer" })
                     .Concat(pointer != null && pointer.SupportsElements ? new[] { "nativeElementPointer" }
                                                                         : new string[0])
-                    .Concat(desktopKeyboard != null && pointer != null && pointer.SupportsDesktop
-                                ? new[] { "nativeDesktopInput" }
-                                : new string[0])
+                    .Concat(pointer != null && pointer.SupportsDesktop ? new[] { "nativeDesktopInput" } : new string[0])
+                    .Concat(SupportsGlobalKeyboard ? new[] { "nativeGlobalInput" } : new string[0])
                     .Concat(currentReceiver == null ? new string[0] : new[] { "nativeCurrentReceiver" })
                     .Concat(scroll == null ? new string[0] : new[] { "nativeScrollPattern" })
                     .ToArray();
@@ -40,6 +39,12 @@ namespace ComputerUse.Windows
         readonly NativePointer pointer;
         readonly NativeScroll scroll;
         readonly INativeCurrentReceiverProvider currentReceiver;
+        bool SupportsGlobalKeyboard
+        {
+            get {
+                return desktopKeyboard != null && desktopKeyboard.SupportsPaste;
+            }
+        }
         internal NativeExecution(INativeObjectProvider provider, NativeKeyboard keyboard = null,
                                  NativePointer pointer = null, NativeScroll scroll = null,
                                  NativeKeyboard desktopKeyboard = null,
@@ -62,19 +67,16 @@ namespace ComputerUse.Windows
 
         internal void Validate(Dictionary<string, object> intent, Dictionary<string, object> target)
         {
-            if (pointer != null && (NativePointer.Intent(intent, target) || pointer.ElementIntent(intent, target)))
-                pointer.Validate(intent, target);
-            else if (target["surface"] == null)
+            if (NativeBinding.IsGlobal(target))
             {
-                if (target["capture"] == null)
-                    throw new Failure("invalid_request", "desktop input requires an observed desktop capture");
-                if (desktopKeyboard == null)
-                    throw new Failure("unsupported_operation",
-                                      "desktop input requires a desktop keyboard provider");
-                if (!new[] { "key", "insert" }.Contains((string)intent["kind"]))
-                    throw new Failure("invalid_request", "desktop keyboard supports key and insert intents");
+                if (!SupportsGlobalKeyboard || !new[] { "key", "insert", "paste" }.Contains((string)intent["kind"]))
+                    throw new Failure("unsupported_operation", "Windows raw global input supports key, insert and paste");
                 desktopKeyboard.ValidateIntent(intent);
             }
+            else if (pointer != null && (NativePointer.Intent(intent, target) || pointer.ElementIntent(intent, target)))
+                pointer.Validate(intent, target);
+            else if (target["surface"] == null)
+                throw new Failure("unsupported_operation", "captured desktop input supports pointer intents");
             else if (target["capture"] != null)
                 throw new Failure("unsupported_operation", "this native unit does not implement the captured-image intent");
             else if ((string)intent["kind"] == "scroll" && scroll != null)
@@ -155,8 +157,6 @@ namespace ComputerUse.Windows
             operation.Contracts.Clear();
             if (NativePointer.Intent(operation.Intent, target) && pointer != null)
                 return pointer.Inspect(operation, target, within, r);
-            if (target["surface"] == null && desktopKeyboard != null)
-                return desktopKeyboard.Inspect(operation, target, within, r);
             if ((string)operation.Intent["kind"] == "scroll" && scroll != null)
                 return scroll.Inspect(operation, target, within, r);
             if (KeyboardIntent(operation.Intent) && keyboard != null)
@@ -303,6 +303,7 @@ namespace ComputerUse.Windows
                                                          Unit = unit,
                                                          Action = action,
                                                          Role = state.Role,
+                                                         SelectionInsert = kind == "replace" ? state.SelectionReplacement : null,
                                                          ExplicitAction = kind == "action" };
                 contract.FixedClickChoice =
                     operation.ClickV1 && semanticOcclusion &&
@@ -340,8 +341,9 @@ namespace ComputerUse.Windows
 
                 primitives.Add(item);
             };
+            bool? replacementSupported = state.SelectionReplacement != null ? (bool?)true : state.Replaceable;
             if (kind == "replace")
-                declare("native_text_edit", null, state.Replaceable);
+                declare("native_text_edit", null, replacementSupported);
             else if (exactProvider != null)
             {
                 if (state.ExactAction == null || state.ExactAction.Name != explicitAction)
@@ -376,10 +378,10 @@ namespace ComputerUse.Windows
                 {
                     r.Check();
                     // A QUERY failure in the optional keyboard route cannot
-                    // erase an independently declared ValuePattern edit.
+                    // erase an independently declared native object edit.
                     // Identity, modality and cancellation still propagate;
                     // object execution performs its usual final native guards.
-                    if (state.Replaceable != true || r.Effect || r.Dispatched ||
+                    if (replacementSupported != true || r.Effect || r.Dispatched ||
                         !new[] { "input_unavailable", "unsupported_operation", "observation_incomplete", "ambiguous_target" }
                              .Contains(error.Code))
                         throw;
@@ -388,7 +390,7 @@ namespace ComputerUse.Windows
                 catch (COMException)
                 {
                     r.Check();
-                    if (state.Replaceable != true || r.Effect || r.Dispatched)
+                    if (replacementSupported != true || r.Effect || r.Dispatched)
                         throw;
                     result["unavailableReason"] =
                         "The optional keyboard provider query failed; the independent object replacement remains available.";
@@ -411,6 +413,16 @@ namespace ComputerUse.Windows
         internal object Execute(NativeWriteOperation operation, Dictionary<string, object> command, Request r,
                                 string operationId = null, long? step = null)
         {
+            var target = Wire.Object(command["target"]);
+            string kind = (string)command["kind"];
+            if (NativeBinding.IsGlobal(operation.Original) || NativeBinding.IsGlobal(target) || kind == "global_input")
+            {
+                if (!NativeBinding.IsGlobal(target) || !NativeWriteOperation.Same(operation.Original, target))
+                    throw new Failure("stale_target", "global input cannot change the original session scope");
+                if (kind != "global_input" || !Equals(command["primitiveId"], "global") || (bool)command["foreground"])
+                    throw new Failure("invalid_request", "global input has no object contract or foreground preparation");
+                return desktopKeyboard.Execute(operation, command, r);
+            }
             if (operation.ClickV1)
                 return clicks.Execute(operation, command, r, operationId, step);
             NativeInputContract selected;
@@ -419,10 +431,9 @@ namespace ComputerUse.Windows
                 return pointer.Execute(operation, command, r);
             if (scroll != null && (string)command["kind"] == "native_scroll")
                 return scroll.Execute(operation, command, r);
-            var keyboardUnit = Wire.Object(command["target"])["surface"] == null ? desktopKeyboard : keyboard;
-            if (keyboardUnit != null &&
-                new[] { "key_sequence", "prepare_receiver", "clipboard_paste" }.Contains((string)command["kind"]))
-                return keyboardUnit.Execute(operation, command, r);
+            if (keyboard != null && target["surface"] != null &&
+                new[] { "key_sequence", "prepare_receiver", "clipboard_paste" }.Contains(kind))
+                return keyboard.Execute(operation, command, r);
             return objects.Execute(operation, command, r);
         }
     }

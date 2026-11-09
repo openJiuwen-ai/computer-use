@@ -60,6 +60,26 @@ namespace ComputerUse.Windows
             return Wire.Obj("id", NativeReadStore.Token("capture"), "kind", kind, "scope", scope, "startedAt", Math.Floor(start), "completedAt", Math.Ceiling(Wire.Now), "width", geometry.Width, "height", geometry.Height, "png", png);
         }
 
+        internal static Dictionary<string, object> DesktopWindowRow(NativeWindowRecord item, string title,
+                                                                    object rectangle, bool hasOwner,
+                                                                    NativeWindowRecord owner)
+        {
+            var window = item.Native;
+            title = NativeReadStore.Text(title);
+            var surface = Wire.Obj("window", window.Ref, "instance", window.Selector, "surface", window.Scope,
+                                   "node", null, "title", title, "kind", "window",
+                                   "parent", owner == null ? null : owner.Native.Ref,
+                                   "parentState", owner != null ? "known" : hasOwner ? "unknown" : "none",
+                                   "modal", null, "nativeWindow", true, "accessibility", false);
+            return Wire.Obj("app", NativeReadStore.Text(item.DisplayName), "title", title, "selector", item.Application,
+                            "rect", rectangle, "window", surface);
+        }
+
+        internal static Dictionary<string, object> DesktopForegroundRow(NativeWindowRecord item)
+        {
+            return Wire.Obj("name", NativeReadStore.Text(item.DisplayName), "selector", item.Application);
+        }
+
         public object Capture(Dictionary<string, object> target, string kind, int maxDimension, Request r)
         {
             Check(r);
@@ -72,6 +92,9 @@ namespace ComputerUse.Windows
                 if (selected == null || target["node"] != null || target["capture"] != null)
                     throw new Failure("invalid_request", "window capture requires a window read binding");
                 Window window = selected.Native;
+                if (!Native.IsWindowVisible(window.Handle) || Native.IsIconic(window.Handle))
+                    throw new Failure("observation_unavailable", "the selected window is hidden or minimized",
+                                      "show the same window, or read it with allow_foreground=True if minimized");
                 var layout = captures == null ? null : new NativePointerLayout();
                 Rectangle physical = Native.Bounds(window.Handle);
                 var windowPixels = NativeWindowPixels.Read(window, maxDimension, r);
@@ -113,7 +136,10 @@ namespace ComputerUse.Windows
             try
             {
                 IntPtr front = Native.GetForegroundWindow();
-                foreach (var item in store.Catalog(r, notes))
+                var catalogue = store.Catalog(r, notes,
+                    captureDeadline: Math.Min(r.Deadline, start + Request.ObservationMs)).Windows;
+                var byHandle = catalogue.ToDictionary(entry => entry.Native.Handle);
+                foreach (var item in catalogue)
                 {
                     r.Check();
                     try
@@ -126,9 +152,13 @@ namespace ComputerUse.Windows
                         var rect = shape.Clip(bounds.X, bounds.Y, bounds.Width, bounds.Height);
                         if (rect == null)
                             continue;
-                        windows.Add(Wire.Obj("app", NativeReadStore.Text(window.Name), "title", NativeReadStore.Text(Native.Title(window.Handle)), "selector", window.Selector, "rect", rect));
+                        var ownerHandle = Native.GetWindow(window.Handle, 4);
+                        NativeWindowRecord owner;
+                        byHandle.TryGetValue(ownerHandle, out owner);
+                        windows.Add(DesktopWindowRow(item, Native.Title(window.Handle), rect,
+                                                     ownerHandle != IntPtr.Zero, owner));
                         if (window.Handle == front)
-                            frontmost = Wire.Obj("name", NativeReadStore.Text(window.Name), "selector", window.Selector);
+                            frontmost = DesktopForegroundRow(item);
                     }
                     catch (Failure error)
                     {

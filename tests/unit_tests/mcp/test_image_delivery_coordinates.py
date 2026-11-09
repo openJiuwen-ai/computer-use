@@ -6,7 +6,7 @@
 import base64
 import unittest
 from io import BytesIO, StringIO
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from computer_use.client.computer import computer_for_controller
 from computer_use.client.execution import execution_scope
@@ -22,9 +22,12 @@ from computer_use.client.host import (
 from computer_use.client.images import image_delivery_epoch, image_delivery_required, register_image
 from computer_use.errors import ComputerUseError
 from computer_use.identity import Record
+from computer_use.interaction.query.instances.scope import adopt
+from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.presentation.content import DisplayText
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, WindowPart, member_target
 from computer_use.native.contracts import HostPolicy
 from computer_use.native.transport import ConnectionPort
 from computer_use.protocol.png import PNG, png_size
@@ -40,6 +43,7 @@ from computer_use.session.observation import (
 from computer_use_mcp.image_delivery import prepare_image, project_document
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
+from unit_tests.test_d34_read_contracts import directory, setup, window
 from unit_tests.test_global_input_foundation import PrimitiveConnection
 
 
@@ -103,7 +107,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
             setter(None)
         images_state._delivery_required = self.previous_delivery
 
-    def capture(self, size=(4096, 1278), *, screenshot=True, full=False, details_document=None):
+    def capture(self, size=(4096, 1278), *, screenshot=True, full=False, details_document=None, ref="desktop:fixture"):
         facts, document = desktop_document(size, captured=screenshot)
         png = encoded_image(size) if screenshot else None
         state = lazy_observation(document, png, details_document=details_document)
@@ -111,7 +115,7 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         def publish():
             self.store.record(
                 dict(
-                    desktopRef="desktop:fixture",
+                    desktopRef=ref,
                     binding={"session": "session"},
                     observation=facts,
                     screenshot=png,
@@ -223,6 +227,78 @@ class ImageDeliveryCoordinateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.get("isError"), result)
         self.assertEqual([method for method, _ in connection.requests], ["begin", "execute", "finish"])
         self.assertEqual(connection.requests[0][1]["intent"]["parameters"]["x"], -200)
+
+    async def test_windows_window_image_failure_delivers_a_desktop_point(self):
+        member = window("A")
+        catalog = {**directory(member), "platform": "windows"}
+        with execution_scope(self.runtime.executor):
+            controller, ui, state = setup(catalog)
+            controller.port.connection.platform = "windows"
+            adopt(controller, ui, catalog)
+            ui._anchor = member["window"]
+            computer = computer_for_controller(controller)
+        pipeline = InterfaceReadPipeline(controller)
+        pipeline.member = AsyncMock(return_value=WindowPart(
+            member_target(state, member),
+            gaps=(ObservationGap("image", "observation_unavailable", "window capture failed"),),
+        ))
+        size = (4096, 1278)
+        desktop, document = desktop_document(size)
+        controller.desktop_reader.read = AsyncMock(return_value={
+            "desktopRef": "desktop-capture",
+            "binding": {"session": "session"},
+            "observation": desktop,
+            "screenshot": encoded_image(size),
+            "document": document,
+        })
+        points = []
+        self.runtime.task_namespace.update(
+            computer=computer,
+            read_window=lambda: self.runtime.executor.run(
+                lambda: pipeline._collect(ui, "both", False, None, catalog, None, None, None)
+            ),
+            retain_point=points.append,
+        )
+
+        result = await self.execute("obs = read_window()")
+        text = self.assert_delivery(result)
+        self.assertIn("window capture failed", text)
+        image = next(block for block in result["content"] if block["type"] == "image")
+        caption = image["_meta"]["computer-use"]["caption"]
+        constructor = next(line for line in caption.splitlines() if line.startswith("Image point: "))
+        command = constructor.removeprefix("Image point: ").replace("(x, y)", "(515, 125)")
+        result = await self.execute(command + "\nretain_point(p)")
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(points[0]._binding.capture, "desktop-capture")
+        self.assertIsNone(points[0]._binding.surface)
+        self.assertEqual(points[0]._point, (1030, 250))
+
+    async def test_windows_point_uses_last_delivered_frame_until_buffered_capture_is_returned(self):
+        connection = PrimitiveConnection(platform="windows")
+        with execution_scope(self.runtime.executor):
+            controller = session_controller(ConnectionPort(connection, HostPolicy()))
+            computer = computer_for_controller(controller)
+        self.store = controller.desktop
+        points = []
+        self.runtime.task_namespace.update(computer=computer, retain_point=points.append)
+        self.capture(ref="old-frame")
+        self.assert_delivery(await self.execute("obs = read()"))
+
+        # A click may collect a new screenshot for its attached observation.
+        # The model still has the preceding frame throughout this tool call.
+        self.capture((100, 80), ref="buffered-frame")
+        result = await self.execute(
+            "retain_point(computer.point((515, 125)))\n"
+            "new = read()\n"
+            "retain_point(computer.point((515, 125)))"
+        )
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual([point._binding.capture for point in points], ["old-frame", "old-frame"])
+        self.assertEqual([point._point for point in points], [(1030, 250), (1030, 250)])
+        result = await self.execute("retain_point(computer.point((20, 10)))")
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(points[-1]._binding.capture, "buffered-frame")
+        self.assertEqual(points[-1]._point, (20, 10))
 
     async def test_ordinary_string_operations_keep_the_actual_delivered_pixel_space(self):
         for expression in (

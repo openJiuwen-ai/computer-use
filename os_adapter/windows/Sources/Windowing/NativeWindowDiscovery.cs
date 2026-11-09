@@ -26,7 +26,8 @@ namespace ComputerUse.Windows
         }
 
         static readonly object gate = new object ();
-        static NativeChildProcess supplement;
+        const int SupplementMs = 1200, CapturePublicationMs = 200;
+        static INativeWorkerProcess supplement;
         static long sequence;
         static bool unavailableForLease;
         internal static bool RequiresRestart { get; private set; }
@@ -183,7 +184,8 @@ namespace ComputerUse.Windows
             }
         }
 
-        static Snapshot Supplement(Request request, List<string> notes)
+        internal static Snapshot Supplement(Request request, List<string> notes, double? captureDeadline = null,
+                                            Func<INativeWorkerProcess> createWorker = null)
         {
             lock (gate)
             {
@@ -193,19 +195,31 @@ namespace ComputerUse.Windows
                     return null;
                 }
 
-                var before = Native.GenerationSnapshot();
-                double until = Math.Min(request.Deadline, Wire.Now + 1200);
                 try
                 {
                     request.Check();
+                    double until = Math.Min(request.Deadline, Wire.Now + SupplementMs);
+                    if (captureDeadline.HasValue)
+                    {
+                        // Leave time for confirmed helper exit, Win32 rows, and delivery of the pixels.
+                        until = Math.Min(until, captureDeadline.Value - NativeChildProcess.StopConfirmationMs - CapturePublicationMs);
+                        if (until <= Wire.Now)
+                        {
+                            NativeReadStore.Note(notes, "UIA desktop metadata supplement skipped to preserve the captured pixels and native window catalogue.");
+                            return null;
+                        }
+                    }
+
+                    var before = Native.GenerationSnapshot();
                     if (supplement == null)
-                        supplement = new NativeChildProcess("--window-directory-worker");
+                        supplement = createWorker == null ? new NativeChildProcess("--window-directory-worker") : createWorker();
                     long id = ++sequence;
                     supplement.Send(Wire.Obj("id", id));
                     while (Wire.Now < until)
                     {
                         request.Check();
-                        string line = supplement.Poll(20);
+                        int wait = (int)Math.Ceiling(Math.Max(0, Math.Min(20, until - Wire.Now)));
+                        string line = supplement.Poll(wait);
                         if (line != null)
                         {
                             request.Check();
@@ -213,7 +227,9 @@ namespace ComputerUse.Windows
                         }
                     }
 
-                    throw new NativeFieldUnavailable("timeout", "UIA desktop enumeration exceeded its isolated 1200 ms budget");
+                    throw new NativeFieldUnavailable("timeout", captureDeadline.HasValue
+                        ? "UIA desktop enumeration exceeded its capture metadata budget"
+                        : "UIA desktop enumeration exceeded its isolated 1200 ms budget");
                 }
                 catch (Exception error)
                 {
@@ -226,16 +242,19 @@ namespace ComputerUse.Windows
             }
         }
 
-        internal static List<IntPtr> Collect(Request request, List<string> notes, bool accessibility = true)
+        internal static List<IntPtr> Collect(Request request, List<string> notes, out int primaryCount,
+                                             out bool primaryComplete, bool accessibility = true,
+                                             double? captureDeadline = null)
         {
             request.Check();
             var handles = new List<IntPtr>();
-            if (!Native.EnumWindows((h, p) =>
+            primaryComplete = Native.EnumWindows((h, p) =>
             {
                 if (Visible(h))
                     handles.Add(h);
                 return true;
-            }, IntPtr.Zero))
+            }, IntPtr.Zero);
+            if (!primaryComplete)
                 NativeReadStore.Note(notes, "Win32 window enumeration failed; directory coverage is incomplete.");
             var seen = new HashSet<IntPtr>(handles);
             // Foreground is an independent discovery entry; it
@@ -244,7 +263,8 @@ namespace ComputerUse.Windows
             IntPtr root = front == IntPtr.Zero ? IntPtr.Zero : Native.GetAncestor(front, 2);
             if (Visible(root) && seen.Add(root))
                 handles.Insert(0, root);
-            var extra = accessibility ? Supplement(request, notes) : null;
+            primaryCount = handles.Count;
+            var extra = accessibility ? Supplement(request, notes, captureDeadline) : null;
             if (extra != null)
             {
                 foreach (string note in extra.Notes)

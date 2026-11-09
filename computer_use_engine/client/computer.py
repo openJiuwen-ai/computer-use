@@ -104,7 +104,17 @@ class Computer:
         self.close()
 
     @on_session
-    def app(self, selector):
+    def app(self, selector=None, *, window_title=None):
+        if window_title is not None:
+            if selector is not None:
+                raise local_failure("select either an application or an exact window title")
+            try:
+                nonempty(window_title, "window_title")
+            except ValueError as error:
+                raise local_failure(str(error)) from error
+            if len(window_title.encode("utf-16-le", errors="surrogatepass")) > 8188:
+                raise local_failure("window_title exceeds 4094 UTF-16 units")
+            return App(self._controller, {"selector": window_title}, _internal=True, window_title=window_title)
         # Exact types preserve scalar validation and identity contracts.
         # pylint: disable-next=unidiomatic-typecheck
         if type(selector) is int:
@@ -188,7 +198,7 @@ class Computer:
 
 
 class App:
-    def __init__(self, controller=None, scope=None, *, _internal=False):
+    def __init__(self, controller=None, scope=None, *, _internal=False, window_title=None):
         if not _internal:
             raise TypeError("App requires an application binding")
         self._controller = controller
@@ -196,6 +206,8 @@ class App:
         self._lookup_scopes = ()
         self._menu_only = False
         self._context = None
+        self._window_title = window_title
+        self._title_window_ref = None
         controller.register(self, scope)
         from computer_use.session.interfaces import InstanceState
 
@@ -236,6 +248,8 @@ class App:
         parameters.view(view, full, menu_path)
         if type(allow_foreground) is not bool:
             raise local_failure("allow_foreground must be a boolean")
+        if self._window_title is not None and menu_path is not None:
+            raise local_failure("menu_path can expand beyond the exact titled window")
         return operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground, window)))
 
     @synchronous

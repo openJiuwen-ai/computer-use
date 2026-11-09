@@ -1,12 +1,14 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Compile the complete Windows driver and run portable write-mechanism tests.
+"""Compile the complete Windows driver and run portable native mechanism tests.
 
 On Windows the Framework compiler and references are discovered automatically.
+The hosted App identity test uses its own hidden windows without input.
 Other hosts can supply a Roslyn compiler, Framework references and a UIA COM
 interop assembly exported on Windows. These tests replace OS ports; they do not
-claim to validate a Windows desktop session.
+claim to validate a Windows desktop session. On Windows, --desktop-lease also
+checks native admission and cleanup against the real session mutex without input.
 """
 
 import argparse
@@ -38,8 +40,14 @@ def main():
     parser.add_argument("--interop", type=Path, default=native / ".build/Interop.NativeUIA.dll")
     parser.add_argument("--dotnet", type=Path)
     parser.add_argument("--runtime-version", default="8.0.0")
+    parser.add_argument("--desktop-lease", action="store_true", help="Exercise the real Windows session mutex")
+    parser.add_argument("--repeat", type=int, default=1, help="Repeat each built test executable without rebuilding")
     parser.add_argument("--output", type=Path, default=root / ".artifacts/windows-unified-write-tests")
     args = parser.parse_args()
+    if args.desktop_lease and os.name != "nt":
+        parser.error("The desktop lease test requires Windows")
+    if args.repeat < 1:
+        parser.error("--repeat must be positive")
     args.output.mkdir(parents=True, exist_ok=True)
     refs = []
     for name in REFERENCES:
@@ -69,14 +77,24 @@ def main():
         return output
 
     compile_target("computer-use-driver", ["/target:exe", "/platform:x64"])
-    for group in (
+    control_groups = (
         "UnifiedWriteTests", "NativeScrollTests", "NativeExplicitActionTests", "NativeCapturedPointerTests",
-        "NativeValueReplacementTests", "NativeGlobalInputTests",
-    ):
+        "NativeValueReplacementTests", "NativeMultilineReplacementTests", "NativeGlobalInputTests",
+        "NativeKeyboardModalPreparationTests",
+    )
+    groups = [("Control", group) for group in control_groups] + [
+        ("Read", "NativeObservationPreparationTests"), ("Read", "NativeCaptureRecoveryTests"),
+        ("Read", "NativeObservationWireBudgetTests"),
+    ]
+    if os.name == "nt" and not args.dotnet:
+        groups.append(("Read", "NativeHostedApplicationIdentityTests"))
+    if args.desktop_lease:
+        groups.append(("Runtime", "NativeResourceLeaseTests"))
+    for folder, group in groups:
         tests = compile_target(
             group,
             ["/target:exe", "/platform:anycpu", f"/main:ComputerUse.Windows.{group}"],
-            [Path(__file__).parent / f"Control/{group}.cs"],
+            [Path(__file__).parent / folder / f"{group}.cs"],
         )
         if args.dotnet:
             tests.with_suffix(".runtimeconfig.json").write_text(
@@ -90,7 +108,8 @@ def main():
                 ),
                 encoding="utf-8",
             )
-        subprocess.run(([str(args.dotnet)] if args.dotnet else []) + [str(tests)], check=True)
+        for _ in range(args.repeat):
+            subprocess.run(([str(args.dotnet)] if args.dotnet else []) + [str(tests)], check=True)
 
 
 if __name__ == "__main__":

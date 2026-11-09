@@ -13,6 +13,8 @@ namespace ComputerUse.Windows
     // the supervising process. Closing the job also contains capture helpers.
     internal sealed class NativeChildProcess : INativeWorkerProcess
     {
+        internal const int StopConfirmationMs = 1000;
+
         [StructLayout(LayoutKind.Sequential)]
         struct BasicLimits
         {
@@ -175,7 +177,7 @@ namespace ComputerUse.Windows
             {
                 return ConfirmExit();
             }
-            return ConfirmExit(1000);
+            return ConfirmExit(StopConfirmationMs);
         }
 
         public void Dispose()
@@ -191,7 +193,7 @@ namespace ComputerUse.Windows
                 if (job != IntPtr.Zero)
                     CloseHandle(job);
                 // Job close is containment, not evidence: wait for this process.
-                ConfirmExit(1000);
+                ConfirmExit(StopConfirmationMs);
                 process.Dispose();
                 disposed = true;
             }

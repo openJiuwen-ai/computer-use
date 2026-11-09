@@ -46,3 +46,4 @@ class NativeNodeQuery:
     primary_fields: Iterable[str] | None = None
     text_content: bool | None = None
     action_detail: str | None = None
+    strict_window: bool = False

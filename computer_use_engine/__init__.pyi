@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Literal, Mapping, TypedDict
+from typing import Literal, Mapping, TypedDict, overload
 
 __all__ = [
     "ActionResult",
@@ -62,7 +62,10 @@ class Computer:
         self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None
     ) -> None: ...
     def list_apps(self) -> list[AppInfo]: ...
+    @overload
     def app(self, selector: int | str) -> App: ...
+    @overload
+    def app(self, *, window_title: str) -> App: ...
     def read(self, *, view: View = "both", full: bool = False) -> Observation: ...
 
     # 所有截图取点均使用显示图片像素，左上角为原点，无需换算：

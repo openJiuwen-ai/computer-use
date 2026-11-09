@@ -65,7 +65,7 @@ namespace ComputerUse.Windows
                 if (error == 5)
                 {
                     if (query.LegacyStarted(pid) != started)
-                        throw new InvalidOperationException("process creation time changed");
+                        throw new NativeWindowEnded("the selected application process identity changed");
                     return;
                 }
                 throw new InvalidOperationException("process identity could not be queried");
@@ -78,9 +78,12 @@ namespace ComputerUse.Windows
                 // Match Process.StartTime.ToUniversalTime().Ticks exactly,
                 // including Framework's FILETIME -> local -> UTC conversion.
                 if (DateTime.FromFileTime(created).ToUniversalTime().Ticks != started)
-                    throw new InvalidOperationException("process creation time changed");
-                if (query.Wait(process) != 258)
-                    throw new InvalidOperationException("process ended or liveness is unavailable");
+                    throw new NativeWindowEnded("the selected application process identity changed");
+                uint state = query.Wait(process);
+                if (state == 0)
+                    throw new NativeWindowEnded("the selected application process ended");
+                if (state != 258)
+                    throw new InvalidOperationException("process liveness is unavailable");
             }
             finally
             {

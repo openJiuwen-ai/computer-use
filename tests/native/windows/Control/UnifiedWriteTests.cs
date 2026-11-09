@@ -61,7 +61,7 @@ internal static class UnifiedWriteTests
     sealed class UnusedClipboard : INativeClipboardProvider
     {
         internal int Saves;
-        public NativeClipboardTransaction Save(Request request)
+        public INativeClipboardPublication Create()
         {
             Saves++;
             throw new Exception("Receiver preparation must not change the clipboard");

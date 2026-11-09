@@ -80,6 +80,8 @@ class AgentElementReadPipeline:
                 if max_nodes > 1 and "nativeNodePages" in controller.transport.capabilities
                 else {}
             )
+        if getattr(ui, "_strict_window", False):
+            options["strict_window"] = True
         tree = await controller.reader.reader.read(
             target, scope_kind=snapshot.get("scope_kind"), max_nodes=max_nodes, **options
         )

@@ -16,7 +16,6 @@ namespace ComputerUse.Windows
         const int RunWork = 0x8000 + 127, StopOwner = RunWork + 1, WorkTimeoutMs = 5000;
         readonly Queue<Action> work = new Queue<Action>();
         readonly object invokeGate = new object();
-        readonly Action<int, IntPtr> callback;
         readonly Action release;
         readonly TaskCompletionSource<bool> ready = new TaskCompletionSource<bool>();
         readonly Thread thread;
@@ -54,20 +53,11 @@ namespace ComputerUse.Windows
                         next();
                     return;
                 }
-                try
-                {
-                    owner.callback(m.Msg, m.WParam);
-                }
-                catch
-                {
-                    owner.poisoned = true;
-                }
                 base.WndProc(ref m);
             }
         }
-        internal NativeClipboardOwner(Action<int, IntPtr> callback, Action release)
+        internal NativeClipboardOwner(Action release)
         {
-            this.callback = callback;
             this.release = release;
             thread = new Thread(() =>
                                 {

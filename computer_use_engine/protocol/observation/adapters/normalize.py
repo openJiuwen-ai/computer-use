@@ -437,10 +437,13 @@ class Adapter:
         for edge in self.facts["relations"]:
             self.relation(builders[edge["source"]], edge)
         nodes = {NodeId(identity): node.build() for identity, node in builders.items()}
+        outside = set(self.facts.get("outsideWindowNodes", ()))
         for identity, raw in self.wire.nodes.items():
             if raw["kind"] == "element" and identity not in nodes:
                 nodes[NodeId(identity)] = NativeNode()
-                self.issues.append(ReadIssue(("nodes", identity), "not_read", "Referenced element was not expanded."))
+                detail = ("Referenced element belongs to another window." if identity in outside
+                          else "Referenced element was not expanded.")
+                self.issues.append(ReadIssue(("nodes", identity), "not_read", detail))
         for reason in self.facts["stopReasons"]:
             self.issues.append(ReadIssue(("nodes",), "partial", reason))
         observation = NativeObservation(

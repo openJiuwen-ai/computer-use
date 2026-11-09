@@ -24,8 +24,7 @@ namespace ComputerUse.Windows
 
     internal interface INativeReadPreparation
     {
-        bool NeedsPreparation(Dictionary<string, object> target);
-        void PrepareRead(Dictionary<string, object> target, Request request, bool activate);
+        object PrepareObservation(Dictionary<string, object> target, Request request);
     }
 
     internal interface INativeCaptureBackend

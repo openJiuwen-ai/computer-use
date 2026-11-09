@@ -39,6 +39,7 @@ class CollectionPlan:
     view: str
     related: RelatedRead | None = None
     limit: int = 6
+    strict_window: bool = field(default=False, kw_only=True)
     requested: dict[WindowIdentity, frozenset[str]] = field(default_factory=dict)
     attempted: dict[WindowIdentity, frozenset[str]] = field(default_factory=dict)
     captured_components: dict[WindowIdentity, frozenset[str]] = field(default_factory=dict)
@@ -56,7 +57,8 @@ class CollectionPlan:
         anchor = self.related.preferred(directory, self.anchor) if self.related is not None else self.anchor
         self.selection_error = None
         try:
-            selected = select_surface(directory, anchor)
+            options = {"follow_modal": False} if self.strict_window else {}
+            selected = select_surface(directory, anchor, **options)
             self.principal = next(
                 (key for key, item in permitted.items() if item["surface"] == selected.surface), anchor
             )
