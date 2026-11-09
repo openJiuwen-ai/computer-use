@@ -38,11 +38,111 @@ import ApplicationServices
             expected: nil)
         try observesScopedFocusWithoutInventingChildren()
         try observesScopedFocusWithoutInventingChildren(scopeRole: kAXSheetRole)
+        try prioritizesConfirmedFocusedListWithinBudget()
         _ = try sparseRelationSlots()
         try expiredRequestDoesNotCollect()
         try closeButtonUsesSingleObjectGetter()
         try await cancelledRequestDoesNotCollect()
         print("PASS short observation budgets collect real root/relation facts and preserve expired/cancelled boundaries")
+    }
+
+    @MainActor private static func prioritizesConfirmedFocusedListWithinBudget() throws {
+        let registry = ApplicationElements(), clock = Clock()
+        let (ref, window) = root(registry, role: kAXWindowRole)
+        let pid = NSRunningApplication.current.processIdentifier
+        func element(_ offset: pid_t) -> AXUIElement {
+            AXUIElementCreateApplication(pid + 120_000 + offset)
+        }
+        let browser = element(0), early = element(1), column = element(2), list = element(3)
+        let row = element(4), file = element(5), open = element(6), slowChild = element(7)
+        let descriptions = [
+            (window, kAXWindowRole, "Picker"), (browser, "AXBrowser", "Browser"),
+            (early, kAXScrollAreaRole, "Earlier column"), (column, kAXScrollAreaRole, "Focused column"),
+            (list, kAXListRole, "Focused list"), (row, kAXGroupRole, "File row"),
+            (file, kAXTextFieldRole, "Selected file"), (open, kAXButtonRole, "Open"),
+            (slowChild, kAXListRole, "Earlier content"),
+        ]
+        let parents = [(browser, window), (early, browser), (column, browser), (list, column), (row, list), (file, row)]
+        var attached = true
+        var requestDeadline = clock.value
+        func children(_ element: AXUIElement) -> [AXUIElement] {
+            if CFEqual(element, window) { return [browser, open] }
+            if CFEqual(element, browser) { return [early, column] }
+            if CFEqual(element, early) { return [slowChild] }
+            if CFEqual(element, column) && attached { return [list] }
+            if CFEqual(element, list) { return [row] }
+            if CFEqual(element, row) { return [file] }
+            return []
+        }
+        func parent(_ element: AXUIElement) -> AXUIElement? {
+            parents.first { CFEqual($0.0, element) }?.1
+        }
+        var attributes = AXAttributeReader.API()
+        attributes.batch = { element, fields in
+            let description = descriptions.first { CFEqual($0.0, element) }!
+            return (.success, fields.map { field -> Any in
+                switch field {
+                case kAXRoleAttribute: return description.1
+                case kAXTitleAttribute: return description.2
+                case kAXSelectedAttribute: return CFEqual(element, file)
+                default: return ""
+                }
+            } as CFArray)
+        }
+        attributes.single = { element, field in
+            switch field {
+            case kAXFocusedUIElementAttribute: return (.success, list)
+            case kAXWindowAttribute: return (.success, window)
+            case kAXParentAttribute:
+                if let parent = parent(element) { return (.success, parent) }
+                return (.noValue, nil)
+            default: return (.noValue, nil)
+            }
+        }
+        var relations = AXRelationReader.API()
+        relations.count = { element, property in
+            if property == kAXChildrenAttribute && CFEqual(element, early) {
+                clock.value = requestDeadline - 0.001
+            }
+            return (.success, property == kAXChildrenAttribute ? children(element).count : 0)
+        }
+        relations.range = { element, _, length in (.success, Array(children(element).prefix(length)) as CFArray) }
+        relations.single = attributes.single
+        let collector = NativeFactCollector(registry: registry, inspection: .init(registry: registry),
+            attributes: attributes, relations: relations, clock: { clock.value })
+        func read(focused: Bool) throws -> [String: Any] {
+            requestDeadline = clock.value + 0.2
+            return try RequestDiagnostics.$deadline.withValue(requestDeadline) {
+                try collector.collect(ref, session: "budget-session", fields: ["AXRole", "AXTitle", "AXSelected"],
+                    maxNodes: 12, maxDepth: 5, actionDetail: .none, focusedElement: focused)
+            }
+        }
+        func nodesByTitle(_ result: [String: Any]) -> [String: [String: Any]] {
+            Dictionary(uniqueKeysWithValues: (result["nodes"] as! [[String: Any]]).map {
+                (($0["values"] as! [String: Any])["AXTitle"] as! String, $0)
+            })
+        }
+        let ordinary = nodesByTitle(try read(focused: false))
+        precondition(ordinary["Selected file"] == nil && ordinary["Open"] != nil)
+        attached = false
+        let detached = nodesByTitle(try read(focused: true))
+        precondition(detached["Focused list"] != nil && detached["Selected file"] == nil,
+                     "a reverse Parent declaration alone must not authorize forward traversal")
+        attached = true
+        let captured = try read(focused: true)
+        let nodes = nodesByTitle(captured)
+        precondition((nodes["Selected file"]?["values"] as? [String: Any])?["AXSelected"] as? Bool == true,
+                     "the actual focused list must expose its selected descendant within the original budget")
+        precondition(nodes["Open"]?["node"] as? String == ordinary["Open"]?["node"] as? String)
+        let links = captured["relations"] as! [[String: Any]]
+        let browserChildren = links.first {
+            $0["source"] as? String == nodes["Browser"]?["node"] as? String
+                && $0["property"] as? String == kAXChildrenAttribute
+        }
+        precondition(browserChildren?["targets"] as? [String] == ["Earlier column", "Focused column"].map {
+            nodes[$0]!["node"] as! String
+        }, "expansion priority must preserve the native child relation order")
+        precondition((captured["stopReasons"] as! [String]).contains("collection time budget") && clock.value < requestDeadline)
     }
 
     @MainActor private static func sparseRelationSlots() throws -> [[String: Any]] {

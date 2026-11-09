@@ -9,6 +9,8 @@ import ApplicationServices
         try await restoreOnlyProvedCollapsedRange()
         try refocusOnlyProvedOriginalForegroundWindow()
         scalarRecipeRequiresTextCapability()
+        scalarOwnerDeclarationRequiresReadyReplacement()
+        try selectedScalarContractMatchesLiveAXAtRouteBuild()
         richEditorSelectionUsesScopedCommand()
         try richTextFragmentsPreserveInput()
         let window = AXUIElementCreateApplication(1_000_001)
@@ -312,6 +314,38 @@ import ApplicationServices
         }
         for selection: NativeReplacementUnit.Selection in [.range, .markers, .selectAll] {
             precondition(!eligible(selection: selection))
+        }
+    }
+
+    @MainActor static func scalarOwnerDeclarationRequiresReadyReplacement() {
+        func editing(
+            kind: NativeKeyboardIntent.Kind = .replace,
+            selection: NativeReplacementUnit.Selection = .structuredScalarShortcut,
+            supported: Bool = true, readiness: NativeReadiness = .init()
+        ) -> String? {
+            NativeInputUnit.keyboard(kind, selection, .existing)
+                .declaration(id: "primitive", supported: supported, readiness: readiness)["keyboardEditing"] as? String
+        }
+        precondition(editing() == "replace", "a ready structured scalar must retain its exact-owner keyboard route")
+        precondition(editing(selection: .shortcut) == nil, "a generic shortcut does not prove scalar editing")
+        precondition(editing(readiness: .init([("receiver", "no")])) == nil)
+        precondition(editing(supported: false) == nil)
+        precondition(editing(kind: .insert) == nil)
+    }
+
+    @MainActor static func selectedScalarContractMatchesLiveAXAtRouteBuild() throws {
+        // The selected native recipe is stronger than the raw AX declaration.
+        // The original Shotcut owner still reports the ordinary shortcut contract.
+        let selected = NativeReplacementUnit.Selection.structuredScalarShortcut
+        try BuildNativeKeyboardRoutePass.checkReplacementContract(selected) { .shortcut }
+        try BuildNativeKeyboardRoutePass.checkReplacementContract(.range) { .range }
+        for live: NativeReplacementUnit.Selection? in [.range, nil] {
+            do {
+                try BuildNativeKeyboardRoutePass.checkReplacementContract(selected) { live }
+                preconditionFailure("a changed or missing raw replacement contract must stop the selected route")
+            } catch let error as DriverError {
+                precondition(error.code == .inputUnavailable)
+            }
         }
     }
 }

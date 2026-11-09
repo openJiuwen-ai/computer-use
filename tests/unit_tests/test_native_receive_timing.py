@@ -26,6 +26,7 @@ def pending_connection():
         "future": future,
         "timer": timer,
         "pure": True,
+        "writeAdmission": False,
         "cancelSent": False,
     }
     return connection, future, timer, invalidated

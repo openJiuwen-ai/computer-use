@@ -23,8 +23,10 @@ from computer_use.native.contracts import (
     Facts,
     HostPolicy,
     InputContext,
+    InputEffect,
     Intent,
     Knowledge,
+    NativeImpact,
     Primitive,
     StepResult,
 )
@@ -102,6 +104,31 @@ async def test_ready_operations_dispatch_once_without_preparing(case):
     result = await Engine(port).execute(Intent(case[0], case[3]), case[4])
     assert result["status"] == "dispatched"
     assert len(port.commands) == 1 and not port.commands[0].prepare
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("kind", "mechanism", "state", "coverage", "invoked"),
+    (
+        ("openMenu", "AXShowMenu", "invoked", "complete", True),
+        ("openMenu", "AXShowMenu", "possible", "complete", False),
+        ("openMenu", "AXShowMenu", "invoked", "partial", False),
+        ("action", "AXOpen", "invoked", "complete", False),
+    ),
+)
+async def test_only_complete_native_menu_invocation_attaches_original_binding(kind, mechanism, state, coverage, invoked):
+    case = next(case for case in CASES if case[0] == kind)
+    effects = (InputEffect("input", "element", "accessibility", mechanism, state),)
+    receipt = StepResult(
+        case[4], Dispatch.UNKNOWN, "Native action returned an error", error_code="execution_unknown",
+        impact=NativeImpact(coverage, effects, Knowledge.NO, "notUsed"),
+    )
+    port = RecordingPort([facts(case, primitive(case))], [receipt])
+    with pytest.raises(ComputerUseError) as caught:
+        await Engine(port).execute(Intent(kind, case[3]), case[4])
+    assert caught.value.effect == "possible"
+    assert caught.value._invoked_menu_target == (case[4] if invoked else None)
+    assert len(port.commands) == 1
 
 
 @pytest.mark.anyio

@@ -103,6 +103,7 @@ class CollectionPlan:
     capture_status: set[WindowIdentity] = field(default_factory=set)
     reused_content: dict[WindowIdentity, dict] = field(default_factory=dict)
     reused_images: dict[WindowIdentity, dict] = field(default_factory=dict)
+    menu_origin: WindowIdentity | None = None
 
     def update(self, directory: NativeDirectory, permitted: dict[str, SurfaceInfo]) -> None:
         anchor = self.related.preferred(directory, self.anchor) if self.related is not None else self.anchor
@@ -128,7 +129,18 @@ class CollectionPlan:
         attached.sort(key=lambda key: permitted[key].get("modal") is not True)
         presented = [key for key, item in permitted.items() if transient_content(item)]
         keys = dict.fromkeys((self.principal, *attached, *newly_seen, *presented))
-        self.order = tuple(WindowIdentity.of(permitted[key]) for key in keys if key in permitted)
+        self.menu_origin = None
+        origin = self.related.menu_origin if self.related is not None else None
+        original = permitted.get(origin.window) if origin is not None else None
+        if (
+            original is not None and original.get("node") is not None
+            and WindowIdentity.of(original) == origin and directory["session"] == self.related.original.session
+        ):
+            self.menu_origin = origin
+        priority = (self.menu_origin.window,) if self.menu_origin is not None else ()
+        self.order = tuple(
+            WindowIdentity.of(permitted[key]) for key in dict.fromkeys((*priority, *keys)) if key in permitted
+        )
         for identity in self.order:
             item = permitted[identity.window]
             root = item.get("node")
@@ -154,6 +166,8 @@ class CollectionPlan:
                 requested = components("both")
             if identity in self.capture_status:
                 requested = components("tree")
+            if identity == self.menu_origin:
+                requested = requested | {"tree"} if identity.window in keys else frozenset({"tree"})
             self.requested[identity] = self.requested.get(identity, frozenset()) | requested
 
     def next(self) -> tuple[WindowIdentity, str] | None:
@@ -166,6 +180,8 @@ class CollectionPlan:
             if identity in self.pending_upgrades and "tree" in self.requested[identity]:
                 missing |= {"tree"}
             if missing:
+                if identity == self.menu_origin and "tree" in missing:
+                    missing = frozenset({"tree"})
                 self.attempted[identity] = attempted | missing
                 if "tree" in missing:
                     self.attempted_tree_roots[identity] = self.tree_roots.get(identity)
@@ -193,7 +209,8 @@ class CollectionPlan:
             if node is None or identity in self.reused_content or source.tree is None or not complete_content(source.tree, node):
                 continue
             self.reused_content[identity] = {
-                "window": host, "surface": source.target.surface, "node": node,
+                "window": host, "surface": source.target.surface, "instance": source.target.instance,
+                "node": node,
                 "observation": source.tree.native.id,
             }
             self.attempted[identity] = self.attempted.get(identity, frozenset()) | {"tree"}
@@ -232,19 +249,11 @@ class CollectionPlan:
             self.pending_upgrades.discard(identity)
 
     def coverage(self, directory, parts, included_images=(), *, included_trees=None):
-        """Account for each requested object; parent content cannot cover a child."""
+        """Account for exact members, including content delivered through a proven host."""
         current = {WindowIdentity.of(item) for item in directory["surfaces"]}
         records = []
         for identity, requested in self.requested.items():
-            part = next(
-                (
-                    part
-                    for part in parts
-                    if (part.target.root_window, part.target.surface, part.target.instance)
-                    == (identity.window, identity.surface, identity.instance)
-                ),
-                None,
-            )
+            part = next((part for part in parts if part.identity == identity), None)
             captured = tuple(name for name in ("tree", "image") if part is not None and getattr(part, name) is not None)
             reused = self.reused_content.get(identity)
             if reused is not None and "tree" not in captured:
@@ -258,8 +267,8 @@ class CollectionPlan:
                 for name in captured
                 if (name != "image" or identity.window in included_images
                     or shared_image is not None and shared_image["window"] in included_images)
-                and (name != "tree" or included_trees is None or identity.surface in included_trees
-                     or reused is not None and reused["surface"] in included_trees)
+                and (name != "tree" or included_trees is None or identity in included_trees
+                     or reused is not None and WindowIdentity.of(reused) in included_trees)
             )
             records.append(
                 {

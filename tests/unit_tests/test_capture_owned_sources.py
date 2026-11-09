@@ -209,3 +209,42 @@ def test_prepared_layout_uses_typed_immutable_signature_without_cloning_ancestor
         if node.ref in signatures:
             assert node.fields["_interfaceLayout"] is signatures[node.ref]
             assert_immutable(node.fields)
+
+
+@pytest.mark.parametrize("public_api", [False, True])
+def test_compression_evidence_is_shared_only_inside_one_preparation(monkeypatch, public_api):
+    from computer_use.interaction.read.presentation import pipeline
+    from computer_use.interaction.read.presentation.compression.evidence import capture_evidence
+    from computer_use.interaction.read.presentation.preparation import render_prepared_snapshot
+    from computer_use.interaction.read.presentation.semantics.passes import build_projection_input
+
+    captured_refs = []
+
+    def record(snapshot, native_nodes):
+        captured_refs.append(dict(snapshot.refs))
+        return capture_evidence(snapshot, native_nodes)
+
+    monkeypatch.setattr(pipeline, "capture_evidence", record, raising=False)
+    monkeypatch.setattr(build_projection_input, "capture_evidence", record)
+    observation = NativeObservation(
+        "macos",
+        "session",
+        "capture",
+        (1, 2),
+        ("left", "right"),
+        {"left": NativeNode(role="button", name="First"), "right": NativeNode(role="button", name="Second")},
+        {"desktop": CoordinateSpace("point", "desktop_top_left", "down")},
+    )
+    aliases = DisplayReferences("session")
+    first = prepare_snapshot(normalize_facts(observation, aliases), compact=True, public_api=public_api)
+    later_aliases = DisplayReferences("session")
+    later_aliases.reference("earlier")
+    second = prepare_snapshot(normalize_facts(observation, later_aliases), compact=True, public_api=public_api)
+
+    assert len(first.roots) == len(second.roots) == 2
+    assert captured_refs == [{"0": "left", "1": "right"}, {"1": "left", "2": "right"}]
+    first_render, second_render = render_prepared_snapshot(first), render_prepared_snapshot(second)
+    assert first_render["refs"] == {"0": "left", "1": "right"}
+    assert second_render["refs"] == {"1": "left", "2": "right"}
+    for rendered in (first_render, second_render):
+        assert "First" in rendered["text"] and "Second" in rendered["text"]

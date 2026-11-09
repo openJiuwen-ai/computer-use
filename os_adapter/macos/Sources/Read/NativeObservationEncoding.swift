@@ -87,10 +87,11 @@ enum NativeObservationEncoding {
                 ? original : "error") : "value"
     }
 
-    static func encode(_ batch: Record) -> Record {
+    static func encode(_ batch: Record, shareAttributeCatalogues: Bool = false) -> Record {
         precondition(["nodes", "relation"].contains(batch["kind"] as? String ?? ""))
         let records = batch["nodes"] as? [Record] ?? []
         var metadata = NativeReadMetadataPool()
+        var catalogues = [String: NativeReadMetadataPool.AttributeCatalogue]()
         let relations = batch["relations"] as? [Record] ?? (batch["relation"] as? Record).map { [$0] } ?? []
         var nodes = [String: Record](), order = [String]()
         func declare(_ id: String) {
@@ -154,7 +155,11 @@ enum NativeObservationEncoding {
             ]
             properties.append(actionProperty)
             for entry in record["nativeProperties"] as? [Record] ?? [] {
-                declareReferences(entry)
+                if shareAttributeCatalogues, let catalogue = metadata.trackAttributeCatalogue(entry, at: properties.count) {
+                    catalogues[id] = catalogue
+                } else {
+                    declareReferences(entry)
+                }
                 properties.append(entry)
             }
             nodes[id]!["properties"] = properties
@@ -245,7 +250,7 @@ enum NativeObservationEncoding {
                 ((observed["completedAt"] as! NSNumber).int64Value * 1_000_000)
             ], "complete": reasons.isEmpty, "issues": reasons.map { ["reason": $0] }, "details": details(meta)
         ]
-        let publishedNodes = order.map { metadata.encodeNode(nodes[$0]!) }
+        let publishedNodes = order.map { metadata.encodeNode(nodes[$0]!, attributeCatalogue: catalogues[$0]) }
         let publishedRead = metadata.encodeRead(read)
         return [
             "kind": "observation", "session": batch["session"]!, "platform": "macos", "roots": roots,

@@ -19,6 +19,7 @@ from contextvars import ContextVar
 from computer_use import Computer
 from computer_use.client.execution import ExecutionCancellation, SessionExecutor, execution_scope
 from computer_use.client.host import (
+    disable_global_input_for_process,
     lookup_continuation_scope,
     set_action_handler,
     set_diagnostic_handler,
@@ -28,14 +29,16 @@ from computer_use.client.host import (
     set_text_page_handler,
 )
 from computer_use.client.images import (
+    image_caption,
     image_delivered,
     image_label,
     image_metadata,
     image_output_scope,
+    image_point_hints,
     require_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
-from computer_use.errors import ComputerUseError
+from computer_use.errors import ComputerUseError, confirmed_no_requested_input
 from computer_use.identity import Record, WeakIdentityMap
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
 from computer_use.json import utf8
@@ -60,6 +63,11 @@ from .worker_lifecycle import READY_ENV
 from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
 
 _runs = ContextVar("computer_use_execution", default=None)
+
+
+def _window_closed_without_input(error: ComputerUseError) -> bool:
+    """Require confirmed closure and complete evidence about the requested input."""
+    return error.window_lifecycle == "closed" and confirmed_no_requested_input(error.impact)
 
 
 class Runtime:
@@ -120,9 +128,9 @@ class Runtime:
             execution_id = None
         self.send(dict(diagnostic=event, **({"executionId": execution_id} if execution_id is not None else {})))
 
-    def emit(self, block, merge_text=False):
+    def emit(self, block, merge_text=False, *, progress=None):
         if not self.executor.is_owner:
-            return self.executor.call(self.emit, block, merge_text)
+            return self.executor.call(self.emit, block, merge_text, progress=progress)
         run = _runs.get()
         if run is None or not run["active"]:
             return
@@ -132,7 +140,7 @@ class Runtime:
         run["output"].append(dict(block), merge_text)
         if not run["publishing"]:
             run["outputEntries"].append({"kind": "block", "block": dict(block), "merge": merge_text})
-        self.send(dict(output=block, mergeText=merge_text, executionId=run["id"]))
+        self.send({"output": block if progress is None else progress, "mergeText": merge_text, "executionId": run["id"]})
 
     def flush_observations(self, run, *, explicit=False):
         """Retain chronological slots; render only the facts actually delivered.
@@ -157,12 +165,13 @@ class Runtime:
             run["observationEntries"].append(entry)
             run["outputEntries"].append(entry)
 
-    def publish_output(self, run):
+    def publish_output(self, run, *, complete):
         """Commit baselines and image authority only for retained output slots."""
         run["publishing"] = True
         run["output"] = OutputBuffer()
         failure = None
         entries = run["outputEntries"]
+        absent = run["observations"].absent_transients(run["observationEntries"], run["lastWrite"]) if complete else {}
 
         def text_cost(entry):
             if entry["kind"] == "block" and entry["block"]["type"] == "text":
@@ -179,6 +188,12 @@ class Runtime:
                     run["output"].append(dict(entry["block"]), entry["merge"])
                 elif entry["kind"] == "image":
                     self.emit_image(entry["delivery"])
+                elif (ref := absent.get(id(entry))) is not None:
+                    note = (
+                        f"Window {ref} was observed earlier and is absent from the latest complete application observation."
+                    )
+                    if len(utf8(note)) <= run["output"].remaining_text_bytes - reserved:
+                        self.emit({"type": "text", "text": note})
                 elif not entry["superseded"]:
                     self.publish_observation(run, entry["observation"], reserved)
             except Exception as error:  # noqa: BLE001 - retain later receipts, then rethrow the rendering failure
@@ -232,7 +247,7 @@ class Runtime:
         if delivery is not None and caption_bytes <= available:
             if fits and not deferred:
                 run["imageContexts"].set(delivery.source, True)
-            self.emit_image(delivery)
+            self.emit_image(delivery, captured_after_action=observation.get("capturedAfterAction"))
         if not fits:
             if delivery is not None and caption_bytes > available:
                 text += " Image caption exceeds the remaining text budget."
@@ -245,7 +260,12 @@ class Runtime:
         if run is None or not run["active"]:
             return
         self.flush_observations(run)
-        self.emit(dict(type="text", text=run["actions"].render(receipt)), True)
+        number, text = run["actions"].render(receipt)
+        write = run["lastWrite"]
+        if write is not None:
+            write["dispatched"] = receipt["status"] == "dispatched"
+            write["action"] = (current_operation_budget(), number) if write["dispatched"] else None
+        self.emit({"type": "text", "text": text}, True)
 
     def text_page(self, source, page):
         if not self.executor.is_owner:
@@ -273,6 +293,7 @@ class Runtime:
             return
         if event["kind"] == "before-write":
             self.flush_observations(run)
+            run["lastWrite"] = {"source": event["source"], "dispatched": False}
             return
         if event["kind"] == "action-observation":
             result = event["result"]
@@ -292,9 +313,14 @@ class Runtime:
                 )
             self.emit(dict(type="text", text=message), True)
             return
-        observation = event["observation"]
+        write = run["lastWrite"]
+        observation = dict(event["observation"], write=write)
         self.flush_observations(run)
         budget = current_operation_budget()
+        action = write.get("action") if write is not None and write["source"] is observation["source"] else None
+        if action is not None and budget is not None and action[0] is budget:
+            # An explicit read after the write has a different operation budget.
+            observation["capturedAfterAction"] = action[1]
         failure = None
         try:
             if budget is not None:
@@ -524,7 +550,7 @@ class Runtime:
             return
         self.emit_image(delivery)
 
-    def emit_image(self, delivery):
+    def emit_image(self, delivery, *, captured_after_action=None):
         run = _runs.get()
         png = delivery.source
         prepared = run["preparedDeliveries"][id(delivery)] if run is not None else None
@@ -534,7 +560,8 @@ class Runtime:
         if run is not None and run["active"] and output_key in run["imageOutputs"]:
             # Output reuse does not merge the native sources. Every exact
             # capture retains its own acknowledgement after actual delivery.
-            self.record_image(run, delivery, coalesced=True)
+            if self.record_image(run, delivery, coalesced=True):
+                run["imageOutputs"][output_key]["deliveries"].append(delivery)
             return
         data = prepared[2] if prepared is not None else base64.b64encode(delivery.png).decode("ascii")
         identifier = f"{run['id']}.{len(run['imageOutputs']) + 1}" if run is not None else "standalone"
@@ -542,35 +569,84 @@ class Runtime:
         # Mutated bytes cannot borrow their replacement's provenance or map.
         # The immutable encoded output still depicts the originally printed image.
         caption_source = png if source_matches else delivery.png
-        caption = image_label(caption_source, context_shown, delivery.coordinates)
-        label = caption if context_shown else image_label(caption_source, True, delivery.coordinates)
-        self.emit(
-            dict(
-                type="text",
-                text=f"Image {identifier}\n{caption}",
-            )
-        )
-        self.emit(
-            dict(
-                type="image",
-                mimeType="image/png",
-                data=data,
-                _meta={"computer-use": {"imageId": identifier, "caption": label}},
-            )
-        )
-        if run is not None and run["active"]:
-            run["imageOutputs"].add(output_key)
-            self.record_image(run, delivery, coalesced=False)
+        caption = image_caption(caption_source, context_shown, delivery.coordinates)
+        label = caption if context_shown else image_caption(caption_source, True, delivery.coordinates)
+        text = {"type": "text", "text": f"Image {identifier}\n{caption.render()}"}
+        metadata = {"imageId": identifier, "caption": label.render()}
+        if captured_after_action is not None:
+            metadata["capturedAfterAction"] = captured_after_action
+        block = {"type": "image", "mimeType": "image/png", "data": data, "_meta": {"computer-use": metadata}}
+        if run is None or not run["active"]:
+            return
+        # An interrupted worker can return the images already streamed, but
+        # only the completed response can say which coordinate maps survived.
+        passive_text = dict(text, text=f"Image {identifier}\n{caption.render(set())}")
+        self.emit(text, progress=passive_text)
+        text_block = run["output"].content[-1]
+        try:
+            self.emit(block, progress=dict(block, _meta={"computer-use": dict(metadata, caption=label.render(set()))}))
+        except Exception:
+            text_block.update(passive_text)
+            raise
+        run["imageOutputs"][output_key] = {
+            "caption": caption, "label": label, "text": text_block, "metadata": metadata, "deliveries": [delivery],
+        }
+        self.record_image(run, delivery, coalesced=False)
 
     def record_image(self, run, delivery, *, coalesced):
         if any(image.source is delivery.source and image.png == delivery.png for image in run["images"]):
-            return
+            return False
         run["images"].append(delivery)
         captured = run["preparedDeliveries"][id(delivery)][3]
         self.send({
             "diagnostic": {"kind": "image_output", "capture": captured, "coalesced": coalesced},
             "executionId": run["id"],
         })
+        return True
+
+    @staticmethod
+    def reconcile_image_hints(run, acknowledged, pending_point=None):
+        """Describe usable maps and identify an exact newly delivered point mapping."""
+        images = []
+        current_windows = {}
+        pending_source, pending_window = pending_point or (None, None)
+        pending_image = None
+        for image in run["imageOutputs"].values():
+            eligible = set()
+            caption = image["caption"]
+            identifier = image["metadata"]["imageId"]
+            for delivery in image["deliveries"]:
+                if id(delivery) not in acknowledged:
+                    continue
+                current = image_point_hints(delivery.source)
+                eligible.update(current.keys())
+                for ref, point in zip(current.windows, current.points):
+                    if point in caption.hints.points and current.owner is not None:
+                        current_windows[id(current.owner), ref] = (current.generation, identifier)
+                        if delivery.source is pending_source and ref == pending_window:
+                            pending_image = identifier
+            images.append((image, eligible))
+
+        for image, eligible in images:
+            caption, label, metadata = image["caption"], image["label"], image["metadata"]
+            if (caption.hints.keys() | label.hints.keys()) <= eligible:
+                continue
+            hints = caption.hints
+            notes = []
+            for ref, point in zip(hints.windows, hints.points):
+                replacement = current_windows.get((id(hints.owner), ref))
+                if point in eligible or replacement is None or replacement[0] <= hints.generation:
+                    continue
+                note = f"Window {ref} coordinates superseded. Use Image {replacement[1]} pixels."
+                if len(note) <= len(point):
+                    # The final caption must fit the budget reserved for its original hints.
+                    notes.append("\n" + note)
+            note = "".join(notes)
+            image["text"]["text"] = f"Image {metadata['imageId']}\n{caption.render(eligible)}{note}"
+            metadata["caption"] = label.render(eligible) + note
+        if pending_image is None:
+            return ""
+        return f"\nUse the attached image (Image {pending_image}, Window {pending_window}) in the next computer_use call."
 
     async def finish(self, error: BaseException | None = None):
         run = _runs.get()
@@ -585,7 +661,7 @@ class Runtime:
             await asyncio.gather(*list(run["pending"]), return_exceptions=True)
         try:
             self.flush_observations(run)
-            self.publish_output(run)
+            self.publish_output(run, complete=error is None)
         except Exception as failure:
             if error is None:
                 error = failure
@@ -594,17 +670,39 @@ class Runtime:
         except Exception as failure:
             if error is None:
                 error = failure
+        acknowledged = set()
         for delivery in run["images"]:
             if run["preparedDeliveries"][id(delivery)][0] == hashlib.sha256(delivery.source).digest():
                 image_delivered(delivery.source, delivery.coordinates)
+                acknowledged.add(id(delivery))
         for state in run["deliveredObservations"]:
             observation_delivered(state)
+        pending_point = error._pending_point_image if isinstance(error, ComputerUseError) else None
+        point_hint = self.reconcile_image_hints(run, acknowledged, pending_point)
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())
         message = None
         if error is not None:
-            message = (type(error).__name__ + ": " + str(error))[:4096]
+            message = type(error).__name__ + ": " + str(error)
+            if isinstance(error, ComputerUseError) and _window_closed_without_input(error):
+                detail, newline, facts = message.partition("\n")
+                outcome = "\nRequested input: not dispatched."
+                if error.observation_error is None:
+                    # An observation gap already reports the original window's lifecycle.
+                    outcome += "\nOriginal window: closed."
+                message = detail + outcome + newline + facts
+            menu_hint = ""
+            if (
+                isinstance(error, ComputerUseError) and error.observed_menu_window is not None
+                and any(state is error.observation for state in run["deliveredObservations"])
+            ):
+                menu_hint = (
+                    f"\nA new AX menu was observed in Window {error.observed_menu_window} after the input. "
+                    f"Use its menu elements in Window {error.observed_menu_window}. Exact opener unconfirmed."
+                )
+            hints = menu_hint + point_hint
+            message = message[:4096 - len(hints)] + hints
             if not run.get("evaluationStarted"):
                 message += "\nCode execution: not started."
             result["content"].append(dict(type="text", text=message))
@@ -696,10 +794,11 @@ class Runtime:
             output=OutputBuffer(),
             outputEntries=[],
             observationEntries=[],
+            lastWrite=None,
             publishing=False,
             observations=ObservationOutput(self.presenter),
             images=[],
-            imageOutputs=set(),
+            imageOutputs={},
             pending=set(),
             observationLogs=deque(),
             actions=ActionPresentation(),
@@ -783,7 +882,9 @@ async def main(argv=None):
     reader, writer = await worker_connection()
 
     messages = WorkerMessageWriter(writer, protocol=protocol)
-    runtime = Runtime(messages.send, computer_factory=lambda: Computer(allow_global_input=args.allow_global_input))
+    if not args.allow_global_input:
+        disable_global_input_for_process()
+    runtime = Runtime(messages.send)
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
     if ready_requested:

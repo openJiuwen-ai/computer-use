@@ -6,6 +6,7 @@ import AppKit
 /// AX trees, window capture and foreground selection play no part in identity.
 @MainActor final class ApplicationDiscovery {
     private let instances = ApplicationInstances<NSRunningApplication>()
+    var endedApplicationIDs: [String] { instances.ended }
     private var applicationRoots: [URL] {
         ["/Applications", "/System/Applications", "/System/Library/CoreServices", NSHomeDirectory() + "/Applications"]
             .map { URL(fileURLWithPath: $0) }
@@ -109,7 +110,7 @@ import AppKit
                 data: try JSONSerialization.data(withJSONObject: entries, options: [.sortedKeys]), encoding: .utf8)!
             throw DriverError(
                 "multiple running instances match \(selector); candidates: \(json)", code: .ambiguousTarget,
-                next: "use computer.app(candidate.id).read() to inspect the intended instance")
+                next: "use computer.list_windows(app_name=...) with the exact display name, then read the intended app_id and window_ref")
         }
         return candidates.first
     }

@@ -100,12 +100,12 @@ extension NativeElementControl {
         facts.qtComboChoice = try NativeQtComboChoice.query(
             element: target.element, role: role, observedWindow: target.observedInteractionSurface,
             ancestors: target.ancestors, pid: target.application.processIdentifier)
-        if let context = target.popupOwner, target.ancestors.count == 2, CFEqual(target.ancestors[0], context.popup),
-            CFEqual(target.ancestors[1], context.list), let observed = target.observedInteractionSurface,
+        if let context = target.popupOwner, context.matchesForwardPath(target.ancestors, same: { CFEqual($0, $1) }),
+            let observed = target.observedInteractionSurface,
             CFEqual(observed, context.popup)
         {
             facts.popupContext = context
-            if role == "AXStaticText" {
+            if role == "AXStaticText" || context.kind == .submenu {
                 try RequestDiagnostics.checkCancellation()
                 facts.popupElementWindowID = BackgroundEvents.nativeWindowID(target.element)
                 try RequestDiagnostics.checkCancellation()

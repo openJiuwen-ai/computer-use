@@ -62,6 +62,7 @@ class Computer:
         self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None
     ) -> None: ...
     def list_apps(self) -> list[AppInfo]: ...
+    def list_windows(self, *, app_name: str) -> WindowCatalogue: ...
     def app(self, selector: int | str) -> App: ...
     def read(self, *, view: View = "both", full: bool = False) -> Observation: ...
 
@@ -160,21 +161,33 @@ class AppInfo:
     display_name: str
     is_running: bool
 
+class WindowChoice:
+    app_id: int
+    window_ref: int
+    title: str | None
+    app_is_foreground: bool | None
+
+class WindowCatalogue:
+    windows: tuple[WindowChoice, ...]
+    stop_reasons: tuple[str, ...]
+
 class WindowInfo:
     id: int
     title: str
 
-class ActionResult:
+class _ActionReceipt:
     target: str
     intent: str | None
     status: Literal["dispatched", "verified"]
     detail: str
+    impact: ActionImpact | None
+
+class ActionResult(_ActionReceipt):
     observation: Observation | None
     observation_status: Literal["available", "partial", "unavailable", "not_requested"]
     observation_error: ObservationError | None
     window_lifecycle: Literal["observed", "closed", "unknown", "not_applicable"]
     choices: tuple[WindowInfo, ...]
-    impact: ActionImpact | None
 
 class PreparationImpact:
     mouse: Literal["yes", "no", "unknown"]
@@ -230,6 +243,8 @@ class ComputerUseError(Exception):
     target: str
     detail: str
     impact: ActionImpact | None
+    action_receipt: _ActionReceipt | None
+    scope_cleanup: Literal["unknown"] | None
     observation: Observation | None
     observation_status: Literal["available", "partial", "unavailable", "not_requested"]
     observation_error: ObservationError | None

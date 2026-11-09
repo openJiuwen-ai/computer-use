@@ -3,14 +3,15 @@
 import AppKit
 import ApplicationServices
 
-/// A declared action on interactive text inside a conflicting popup list does
-/// not prove click/activation semantics. Ordinary controls keep their routes.
+/// A conflicting reverse popup owner needs the original visible point. Ordinary
+/// controls and menu items without that retained provenance keep their routes.
 enum NativePopupClickPolicy {
     static func actionOffer(_ original: NativeClickContract, requiresPointer: Bool) -> NativeClickContract {
         guard requiresPointer else { return original }
         return .init(
             routeFamily: original.routeFamily, delivery: original.delivery, admission: .insufficientEvidence,
-            reason: "The declared popup text action is not confirmed as a choice click.", preparationOptions: [])
+            reason: "The declared popup action does not confirm a click within its observed input surface.",
+            preparationOptions: [])
     }
 
     static func pointerOffer(_ proof: NativePopupPointerQualification?) -> NativeClickContract {
@@ -32,8 +33,14 @@ enum NativePopupClickPolicy {
         context: NativePopupOwnerStamp<Node, Process>?, window: Node, currentWindowID: UInt32?, role: String?,
         enabled: Bool?, focusWritable: Bool, actions: [NativeAction.Item]?, same: (Node, Node) -> Bool
     ) -> Bool {
-        guard let context, same(context.popup, window), currentWindowID == context.ownerWindowID,
-            currentWindowID != context.popupWindowID, role == "AXStaticText", enabled == true, focusWritable,
+        guard let context, same(context.popup, window) else { return false }
+        if context.kind == .submenu {
+            // Fresh loss of the original reverse owner cannot move this retained
+            // choice onto the ordinary action route.
+            return role == "AXMenuItem"
+        }
+        guard currentWindowID == context.ownerWindowID, currentWindowID != context.popupWindowID,
+            role == "AXStaticText", enabled == true, focusWritable,
             let actions, actions.count == 1, actions[0].name == "AXPress"
         else { return false }
         return true

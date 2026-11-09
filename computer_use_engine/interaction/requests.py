@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING
 from .agent.requests import INTERFACE_REQUESTS
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from computer_use.interaction.records import ElementPath as LookupPath
     from computer_use.interaction.records import ElementSnapshot
     from computer_use.native.contracts import Intent, OperationTarget
+    from computer_use.protocol.records import NativeDirectory
     from computer_use.session.interfaces import WindowIdentity
 
 
@@ -49,6 +52,7 @@ class ExecuteAction:
         forward_current: Forward container input to its current receiver.
         snapshot: Original element provenance for write-time scope validation.
         display_window: Captured public image scope for receipt text only; never an input binding.
+        on_pre_input_directory: Optional call-local observer of a validated directory.
     """
 
     owner: object | None
@@ -60,6 +64,7 @@ class ExecuteAction:
     forward_current: bool = False
     snapshot: ElementSnapshot | None = None
     display_window: WindowIdentity | None = None
+    on_pre_input_directory: Callable[[NativeDirectory], None] | None = None
 
 
 @dataclass(frozen=True)

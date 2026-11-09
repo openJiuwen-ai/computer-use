@@ -475,6 +475,7 @@ def prepared_nodes(
     field_layouts = {}
     group_layouts = {}
     readable_layouts = {}
+    outside_window_fields: set[str] = set()
     selections = (
         selection_summary_plan(snapshot.facts, snapshot.refs, roots=snapshot.roots)
         if defer_inactive_selections
@@ -483,6 +484,8 @@ def prepared_nodes(
     detail_selections: set[str] = set()
 
     for root in checked(roots):
+        if root.source is not None:
+            outside_window_fields.update(root.source.outside_window_fields)
         if root.atoms is not None and selections is not None:
             for claim in checked(root.atoms.field_claims):
                 entry = selections.entries.get(claim.ref)
@@ -574,6 +577,8 @@ def prepared_nodes(
             fields["_interfaceDisclosure"] = group_layouts[node["ref"]]
         if node["ref"] in readable_layouts:
             fields["_interfaceReadable"] = readable_layouts[node["ref"]]
+        if node["ref"] in outside_window_fields:
+            fields["_boundsOutsideWindow"] = True
         # _interfaceLayout is produced as a recursively immutable tuple of
         # layout scalars/tuples. Recopying its shared ancestor path for every
         # descendant adds no isolation. Other fields retain normal detachment.

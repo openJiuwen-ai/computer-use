@@ -13,6 +13,17 @@ import ApplicationServices
         case .launch: return try CollectLaunchDeclarationPass.run(request, access: access)
         case .applications(let scope):
             return try CollectApplicationDirectoryPass.run(request, scope: scope, access: access)
+        case .windowCatalogue(let appName):
+            guard !op.writable, try access.scopes.directoryTarget(request.requested) != nil else {
+                throw DriverError("window catalogue requires a session read scope", code: .invalidRequest)
+            }
+            try access.sharing.checkAvailable()
+            let catalogue = try access.directory.windowCatalogue(appName: appName) {
+                try access.desktop().windowCatalogue(
+                    appName: appName, retainWindow: access.directory.retainDesktopWindow)
+            }
+            try op.check()
+            return catalogue
         case .surfaceBatch(let applications, let profile):
             return try NativeSurfaceBatchPipeline.collect(request, applications: applications, profile: profile, access: access)
         case .capturedText(let ref, let offset, let length):
@@ -30,10 +41,12 @@ import ApplicationServices
             }
         case .nodes(
             let fields, let nodes, let depth, let childrenPage, let relationPage, let advertisedFields,
-            let followRelations, let textContent, let actionDetail, let focusedElement):
+            let followRelations, let textContent, let actionDetail, let focusedElement, let shareAttributeCatalogues):
             try ValidateNativeNodeProfilePass.run(
                 access: access, fields: fields, followRelations: followRelations, relationPage: relationPage)
-            return try NativeNodeQueryPipeline.collect(p["target"], op: op, access: access) { node in
+            return try NativeNodeQueryPipeline.collect(
+                p["target"], op: op, access: access, shareAttributeCatalogues: shareAttributeCatalogues
+            ) { node in
                 try access.objects.nativeFacts(
                     node, session: access.session, fields: fields, maxNodes: nodes, maxDepth: depth,
                     childrenPage: childrenPage, relationPage: relationPage, advertisedFields: advertisedFields,

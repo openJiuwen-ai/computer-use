@@ -54,17 +54,19 @@ import ApplicationServices
             return result
         }
     }
+
+    private func related(_ element: AXUIElement, _ key: String) throws -> AXUIElement? {
+        guard let raw = try value(element, key), CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+        let node = unsafeDowncast(raw, to: AXUIElement.self)
+        return try scoped(node) { node }
+    }
+
     func facts() -> NativePopupFacts<AXUIElement, NativeProcessIdentity> {
         .init(
             role: { try value($0, kAXRoleAttribute) as? String },
             subrole: { try value($0, kAXSubroleAttribute) as? String },
             modal: { try value($0, kAXModalAttribute) as? Bool },
-            parent: { element in
-                guard let raw = try value(element, kAXParentAttribute), CFGetTypeID(raw) == AXUIElementGetTypeID()
-                else { return nil }
-                let parent = unsafeDowncast(raw, to: AXUIElement.self)
-                return try scoped(parent) { parent }
-            },
+            parent: { try related($0, kAXParentAttribute) },
             children: { element in
                 try scoped(element) {
                     guard let count = adapter.count(element), count >= 0, count <= 2048 else { return nil }
@@ -86,7 +88,8 @@ import ApplicationServices
                 let result = NativeProcessIdentity.read(pid)
                 try check()
                 return result
-            })
+            },
+            window: { try related($0, kAXWindowAttribute) })
     }
 }
 

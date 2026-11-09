@@ -111,6 +111,13 @@ SDK 接口是同步的：每个操作返回结果或抛出异常后，再执行�
 通过 `computer.app(id)` 选择应用，用 `app.read(view="both")` 观察界面，再用 `app.element(name_or_path)` 定位控件。
 目标已经明确时可以直接链式操作，例如 `app.element("保存").click()`。
 
+macOS 上，遇到同名应用实例或任务已给出窗口标题时，先调用
+`computer.list_windows(app_name="Google Chrome")`，以准确的应用显示名查询可见窗口元数据。
+从 `catalogue.windows` 按标题选出目标，或在任务指定前台实例时参考 `app_is_foreground`，
+再调用 `computer.app(row.app_id).read(window=row.window_ref)`。这个目录查询无需截图、AX 或置前。
+标题或前台信息缺失时为 `None`，`catalogue.stop_reasons` 说明采集缺口，隐藏窗口可能未列出。
+后端不支持时返回 `unsupported_operation`。
+
 MCP 中观察自动展示：首次展示已采集的内容，后续默认显示变化（diff），包括写后观察及同一次调用中的连续操作。
 每个窗口分别标明 AX、图像采集情况和具体缺口；full/diff/unchanged 表示文字呈现模式。
 同次工具的连续写入保留每条回执，同范围自动观察合并为最终结果；独立弹层及显式打印/完整观察保留。
@@ -138,6 +145,8 @@ SDK 内切片值及文件输出仍保持原意。需要限制读取范围时使�
 目标失效、目标信息暂时无法确认、模态阻挡，
 以及 `effect="partial"` 或 `"possible"` 的 `ComputerUseError`，在原会话仍可观察时也附带这些字段。
 可直接使用错误附带的当前观察决定下一步；原错误与效果保持不变，SDK 不会重放不确定的输入。
+如果原生操作已确认派发，随后释放操作资源失败，`ComputerUseError.action_receipt` 保留派发回执，
+`scope_cleanup="unknown"` 表示资源收尾未确认。输入配对清理仍由 `impact.attempts` 单独报告，会话退役后无法启动写后观察。
 macOS 的 Computer 全局输入不强制写后观察，`observation_status="not_requested"`；需要界面结果时显式读取，读取失败不阻止下一次全局输入。
 
 ### Python SDK

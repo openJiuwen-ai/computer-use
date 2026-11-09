@@ -67,8 +67,127 @@ import ApplicationServices
         precondition(NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: []))
         precondition(!NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: [kAXPressAction]))
         precondition(!NativeWindowScrollExposure.passiveWheelReceiver(role: kAXStaticTextRole, actions: nil))
+        try clippedLeafReveal()
+        clippedHitContextCanEvolve()
+        try revealedLeafContinuationRemainsExact()
         try await hoverReplacesProbeReceiver()
         print("Window scroll exposure regressions passed")
+    }
+
+    @MainActor private static func clippedLeafReveal() throws {
+        typealias Clip = NativeElementViewport.VerticalClip
+        let viewport = CGRect(x: 22, y: 139, width: 1200, height: 690)
+        let sliver = CGRect(x: 988, y: 828, width: 27, height: 1)
+        precondition(Clip.edge(frame: sliver, clipped: sliver, viewport: viewport) == .bottom,
+                     "provider-reported one-point edge is still clipped even when frame equals intersection")
+        let top = CGRect(x: 988, y: 139, width: 27, height: 1)
+        precondition(Clip.edge(frame: top, clipped: top, viewport: viewport) == .top)
+        let unrelated = sliver.offsetBy(dx: 0, dy: -1)
+        precondition(Clip.edge(frame: unrelated, clipped: unrelated, viewport: viewport) == nil)
+        let full = CGRect(x: 988, y: 503, width: 27, height: 17)
+        precondition(Clip.edge(frame: full, clipped: full, viewport: viewport) == nil)
+        precondition(Clip.edge(frame: sliver, clipped: sliver,
+                               viewport: CGRect(x: 22, y: 52, width: 1200, height: 780)) == nil,
+                     "a window edge is not evidence of a scroll viewport clipping edge")
+        precondition(!Clip.isExposed(frame: sliver, clipped: sliver, viewport: viewport))
+        precondition(!Clip.isExposed(frame: full, clipped: sliver, viewport: viewport))
+        precondition(Clip.isExposed(frame: full, clipped: full, viewport: viewport))
+
+        let proof = NativeClickClippedLeaf(
+            region: AXUIElementCreateSystemWide(), passiveAncestor: AXUIElementCreateApplication(7),
+            viewport: viewport, edge: .bottom, window: 42, pid: 7)
+        let offer = proof.offer
+        precondition(offer.delivery == .windowDirected && offer.admission == .preparationRequired)
+        precondition(offer.preparationOptions == ["background"] && offer.requiresExactElementHit)
+        precondition(!offer.permitsElementPointer(hasActuator: true))
+        let operation = NativeOperation(
+            timeoutMs: 1000, writable: true, intent: try NativeIntent(["kind": "click", "parameters": [:]], mode: "write"),
+            target: [:],
+            clickContract: "v2", release: {}, cancelActive: {})
+        let evidence = NativeClickEvidence(target: [:])
+        let receipt = NativeExecutionReceipt(target: [:], onEffect: {})
+        var calls = 0
+        do {
+            try proof.performOnce(operation: operation, receipt: receipt, evidence: evidence) { onCall in
+                onCall()
+                calls += 1
+                return .cannotComplete
+            }
+            preconditionFailure("unconfirmed reveal must fail")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable)
+        }
+        precondition(operation.didRevealClippedClickLeaf && calls == 1)
+        precondition(receipt.dispatch == "notDispatched" && receipt.preparation.count == 1)
+        precondition(!evidence.permitsReselection, "no geometry progress means no blind retry")
+        do {
+            try proof.performOnce(operation: operation, receipt: receipt, evidence: evidence) { _ in
+                preconditionFailure("an admitted reveal can run at most once per public operation")
+            }
+            preconditionFailure("another reveal must be refused")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable)
+        }
+    }
+
+    @MainActor private static func clippedHitContextCanEvolve() {
+        // V4 returned the passive main ancestor on inspect and the preceding
+        // row on the same clipped point during refresh. The preceding row
+        // cannot own the click, but is still inside the same passive layout subtree.
+        let parents = [294: 261, 261: 136, 260: 136, 136: 131, 131: 128, 128: 121, 600: 121, 601: 500, 602: 128]
+        func reaches(_ node: Int, _ ancestor: Int) -> Bool {
+            NativeElementHitSelection.reachesWindow(
+                node, window: ancestor, same: ==, parent: { parents[$0] },
+                isSurface: { [121, 500].contains($0) }, canContinue: { true })
+        }
+        func confirms(_ node: Int) -> Bool {
+            NativeClickClippedLeaf.confirmsHitContext(node, ancestor: 131, same: ==, reaches: reaches)
+        }
+        precondition(reaches(294, 131) && reaches(131, 128))
+        precondition(confirms(131))
+        precondition(confirms(260),
+                     "a different hit in the retained clipping context must not invalidate the addressed reveal")
+        precondition(!confirms(600), "a same-window overlay outside the scroll area cannot authorize reveal")
+        precondition(!confirms(601))
+        precondition(!confirms(602), "merely sharing the scroll area does not prove the retained passive context")
+        precondition(!NativeElementPointerUnit.allowsDispatchBasis(
+            .rejected, requirement: .contentReceiver, exactOriginalHit: false, hasMember: false,
+            requiresExactElementHit: true), "the preceding row never becomes a qualified click hit")
+    }
+
+    @MainActor private static func revealedLeafContinuationRemainsExact() throws {
+        let target: [String: Any] = ["session": "s", "instance": "a", "rootWindow": "w", "surface": "v",
+                                     "node": "leaf", "capture": NSNull()]
+        var sibling = target
+        sibling["node"] = "sibling"
+        let intent = try NativeIntent(["kind": "click", "parameters": [:]], mode: "write")
+        let operation = NativeOperation(
+            timeoutMs: 1000, writable: true, intent: intent, target: target,
+            clickContract: "v2", release: {}, cancelActive: {})
+        try operation.bindInputTarget(target, within: ["w"]) { {} }
+        precondition(!operation.requiresRevealedLeafHit(target, within: ["w"]), "ordinary clicks retain existing routes")
+        operation.recordClippedClickLeafReveal()
+        precondition(operation.requiresRevealedLeafHit(target, within: ["w"]),
+                     "a same-candidate refresh must retain exact-hit and no-preparation obligations after AX reveal")
+        precondition(!operation.requiresRevealedLeafHit(sibling, within: ["w"]))
+        precondition(!operation.requiresRevealedLeafHit(target, within: []))
+        let otherOperation = NativeOperation(
+            timeoutMs: 1000, writable: true, intent: intent, target: target,
+            clickContract: "v2", release: {}, cancelActive: {})
+        try otherOperation.bindInputTarget(target, within: ["w"]) { {} }
+        precondition(!otherOperation.requiresRevealedLeafHit(target, within: ["w"]))
+        let ready = NativeClickClippedLeaf.continuationOffer(ready: true)
+        precondition(NativeClickClippedLeaf.permitsContinuation(ready))
+        precondition(!NativeClickClippedLeaf.permitsContinuation(NativeClickClippedLeaf.continuationOffer(ready: false)))
+        let ordinary = NativeClickContract(
+            routeFamily: ready.routeFamily, delivery: .windowDirected, admission: .ready, reason: nil,
+            preparationOptions: [])
+        precondition(!NativeClickClippedLeaf.permitsContinuation(ordinary), "same family is not the same exact contract")
+        precondition(NativeElementPointerUnit.allowsDispatchBasis(
+            .coarseAncestorGeometry, requirement: .contentReceiver, exactOriginalHit: false, hasMember: false))
+        precondition(!NativeElementPointerUnit.allowsDispatchBasis(
+            .coarseAncestorGeometry, requirement: .contentReceiver, exactOriginalHit: false, hasMember: false,
+            requiresExactElementHit: ready.requiresExactElementHit))
     }
 
     @MainActor private static func hoverReplacesProbeReceiver() async throws {

@@ -5,6 +5,9 @@
 DESCRIPTION = """Execute synchronous Python on the MCP host in a persistent session.
 Preloaded: computer, print, print_image. SDK methods return results directly;
 variables persist across calls. App selectors and paths refer to this host.
+Use the preloaded computer throughout the task. You may alias it with
+c = computer. A desktop image and its point constructor belong to the
+Computer instance that read the image.
 
 All screenshot coordinates use the displayed image's pixels, with (0, 0) at
 its top-left, x increasing right and y increasing down. Use the point constructor
@@ -16,7 +19,14 @@ input method. A composite image uses its whole canvas, including popup placement
 Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
 list_apps() entries expose id, display_name, and is_running. app() selects a
 scope; the first app.read() starts a nonrunning installed app when needed.
-app.read() discovers numbered windows. Use app.read(window=ref) to observe one.
+On macOS, if the task names a window or there are same-name instances, use
+computer.list_windows(app_name=exact_display_name) before reading app content.
+It returns visible window metadata without screenshots. Choose the intended
+title or use app_is_foreground if the task specifies the foreground instance,
+then use computer.app(row.app_id).read(window=row.window_ref). Check
+stop_reasons for an incomplete catalogue. A missing title or foreground value
+is unknown, and hidden windows may be absent. Stay within the task's read scope.
+app.read() also discovers numbered windows within the selected app.
 App methods accept optional window=ref to select the target for that call;
 no Window object is needed. Element numbers are shared across all reads of the
 same App. app.element(number) stays bound to its original control after reading
@@ -32,6 +42,16 @@ On macOS, app.close_window(ref) requests normal close of that exact window,
 including when screen-sharing controls cover its title-bar buttons. Use the
 returned observation to handle any confirmation; the SDK does not choose save
 or discard. A dispatched close request may be declined by the application.
+For an application menu bar that supports menu reads, use
+app.read(menu_path=['Edit'], window=ref) with exact visible menu titles in order.
+Choose an enabled item from that result and use
+app.element(item_ref).click() on the same App.
+If native menu tracking refuses the click before dispatch and the menu closes,
+a shortcut displayed for that enabled item can be used explicitly. Send it to
+the intended window with app.press_key('super+o', window=ref), using the actual
+shortcut shown and checking that the item and window still apply.
+On macOS, displayed punctuation + and ? can be used as the final key,
+for example app.press_key('+', window=ref) or app.press_key('super++', window=ref).
 Choose the interaction method for each operation using this preference:
 1. Prefer clearly identified elements: app.element(name).click(),
    element.type_text(text, replace=True), element.open_menu().
@@ -84,8 +104,11 @@ sequence itself is required. This option never grants global input.
 The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.
-type_text() accepts one line. For multiline text or tabs, use element.paste(text)
-or app.paste(text, window=ref); paste inserts at the target's current selection.
+type_text() accepts one line. Use explicit paste for multiline text or tabs, or
+for single-line literal text when paste behavior fits the task. Use
+element.paste(text) on a confirmed editable control, or app.paste(text, window=ref)
+when the intended editor already receives input in that window. Paste inserts
+at the current selection.
 For double-click: from computer_use import ClickOption;
 app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
 to its Element: app.element(ref).perform_action('raise'), including a window root.
@@ -112,9 +135,11 @@ presentation mode.
 Explicit native detail geometry retains its declared screen/AX coordinate space;
 do not treat it as screenshot pixels.
 
-After reading multiple windows, use window=ref to reuse the corresponding
-image without rereading it. Composite images keep whole-image coordinates.
-Choose coordinates from a newly returned image in the following tool call.
+Use the point constructor beside the current delivered image for the chosen
+window. A newer delivered image can replace that window's default coordinate
+space. If a caption marks the window's coordinates superseded, use the named
+image's pixels or read that window alone with app.read(view='image', window=ref).
+Composite images keep whole-image coordinates.
 Combine operations whose targets and steps are already known in one call.
 Return at a new menu, dialog or other state that requires a fresh decision.
 Calls execute one at a time; each SDK operation completes or raises before the

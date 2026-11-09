@@ -27,6 +27,8 @@ from computer_use.session.observation import lazy_observation
 from computer_use.session.observation_data import component_delivered, retain_observation_data
 from computer_use.session.surface_content import content_host, content_kind, transient_content
 
+from .related import original_lifecycle
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -86,10 +88,30 @@ def related_window_summary(
         "newly observed interface sources have no published references" if newly_observed
         else "no newly observed window entries"
     )
-    return template(
-        "After action: {0}; catalogue {1}.",
-        membership, coverage,
-    )
+    detail = ""
+    if related.window_family_only and not related.content_members(directory):
+        lifecycle = original_lifecycle(related.original, directory, related.original_window)
+        state = "closed" if lifecycle == "closed" else "absent from this catalogue; lifetime unconfirmed"
+        detail = f" Original window: {state}. Other windows are listed without expansion."
+    return template("After action: {0}; catalogue {1}.{2}", membership, coverage, detail)
+
+
+def related_focus_summary(
+    target: Binding, prepared: PreparedSnapshot, window_ref: int,
+) -> DisplayText | None:
+    """Present a scoped AX sample independently of unchanged tree rows."""
+    snapshot = prepared.snapshot
+    collection = snapshot.collection
+    if collection is None or collection.surface != target.surface or snapshot.scope_kind != "window":
+        return None
+    token = collection.focused_element
+    node = snapshot.native.nodes.get(token) if token is not None else None
+    if node is None or node.states.focused is False:
+        return None
+    ref = next((ref for ref in prepared.refs if snapshot.refs.get(ref) == token), None)
+    if ref is None:
+        return None
+    return template("Reported AX focus in window {0} at capture: element {1}.", window_ref, ref)
 
 
 def tree_text(
@@ -173,6 +195,8 @@ def publish(
     on_observation=None,
     window_coverage=(),
     presentations=(),
+    member_trees: Mapping[WindowIdentity, SemanticSnapshot] | None = None,
+    transient_window: tuple[WindowIdentity, int] | None = None,
 ) -> Observation:
     """Publish the combined interface observation and retain its source data.
 
@@ -188,6 +212,7 @@ def publish(
         directory: Current application window catalogue, when available.
         lookup_context: Exact source context for explicit subtree publication; ordinary reads capture their staged view.
         on_observation: Internal sink for deferring delivery while one optional refresh is attempted.
+        transient_window: Exact newly observed window when it supplies the whole automatic body.
     """
     document = text if isinstance(text, DisplayDocument) else DisplayDocument.join((text,))
     # Only sources actually included as tree components contribute to this
@@ -216,7 +241,9 @@ def publish(
             "Observation coverage: partial. " + " ".join(dict.fromkeys(gap.detail for gap in collection_gaps)),
         ))
         by_window = {
-            (target.root_window, target.surface, target.instance): snapshot
+            identity: snapshot for identity, snapshot in member_trees.items() if tree_collection_issues(snapshot)
+        } if member_trees is not None else {
+            WindowIdentity(target.root_window, target.surface, target.instance): snapshot
             for target, snapshot, _ in incomplete
         }
         window_coverage = tuple(
@@ -230,7 +257,7 @@ def publish(
                 },
             }
             if "tree" in record["included"]
-            and (snapshot := by_window.get((record["window"], record["surface"], record["instance"]))) is not None
+            and (snapshot := by_window.get(WindowIdentity(record["window"], record["surface"], record["instance"]))) is not None
             else record
             for record in window_coverage
         )
@@ -350,7 +377,7 @@ def publish(
         # this observation was made through an explicit window parameter.
         instance_state = owner._instance
         captured_lookup = lookup_context
-        captured_query_windows = frozenset(
+        captured_query_windows = frozenset(member_trees) if member_trees is not None else frozenset(
             WindowIdentity(target.root_window, target.surface, target.instance)
             for target, snapshot in trees
             if target.root_window is not None and any(source is snapshot.native for source in shown)
@@ -447,6 +474,7 @@ def publish(
             document=document,
             coverage=document_coverage(document),
             **({"observed": directory["observed"]} if directory else {}),
+            **({"transientWindow": transient_window} if transient_window is not None else {}),
         )
     )
     if owner is not None:
@@ -486,7 +514,7 @@ def capture_header(
     for key, part in parts:
         if part.source is None:
             continue
-        identity = WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+        identity = part.identity
         ref = controller.interfaces.windows.reference(part.target.session, directory["application"], identity)
         item = next((
             member for member in part.source.source_directory["surfaces"]
@@ -495,9 +523,7 @@ def capture_header(
         if ref is not None and item is not None and ref not in entries:
             entries[ref] = (key, item)
     for ref, (key, item) in entries.items():
-        part = next((part for _, part in parts if WindowIdentity(
-            part.target.root_window, part.target.surface, part.target.instance
-        ) == WindowIdentity.of(item)), None)
+        part = next((part for _, part in parts if part.identity == WindowIdentity.of(item)), None)
         source = part.source if part is not None else None
         current_member = permitted.get(key)
         current_member = current_member is not None and WindowIdentity.of(current_member) == WindowIdentity.of(item)

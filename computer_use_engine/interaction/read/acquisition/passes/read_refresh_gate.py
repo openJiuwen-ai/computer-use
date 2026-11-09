@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.acquisition.helpers import window_binding
 from computer_use.interaction.read.acquisition.model import (
     PURE,
     AcquiredObservation,
@@ -41,6 +42,17 @@ def read_refresh_gate(
             )
         )
     if classified.refresh is Refresh.KEEP:
+        image = components.image
+        if (
+            not attempt.scope_confirmed and attempt.current == attempt.target
+            and image is not None and image.target.capture is not None and not image.scope_changed
+            and window_binding(image.target) == window_binding(attempt.target)
+        ):
+            # A successful recheck can confirm this exact image member even
+            # when the application catalogue still has unresolved relationships.
+            scope = image.member_scope(attempt.directory)
+            if scope is not None and scope == image.member_scope(components.source_directory):
+                components = replace(components, image=replace(image, rechecked_scope=scope))
         return Done(
             AcquiredObservation(
                 state.plan,

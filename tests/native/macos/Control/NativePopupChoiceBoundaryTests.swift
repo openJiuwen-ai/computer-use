@@ -65,6 +65,7 @@ import ApplicationServices
         try registryVersions()
         try await noReplayAndDeclaredPress()
         try await foregroundQualification()
+        try await submenuChoice()
         print(
             "PASS original Manual effect through production pointer pipeline; strict context/physical/modal/route/version/no-replay boundaries"
         )
@@ -263,7 +264,7 @@ import ApplicationServices
         precondition(a != missing && registry.target(boundMissing) == nil)
         precondition(observe(nil) == a && registry.target(boundA) != nil)
         let b = NativePopupOwnerStamp(
-            popup: probe.nodes["P"]!, list: probe.nodes["L"]!, reverse: [probe.nodes["L"]!, probe.nodes["B"]!],
+            popup: probe.nodes["P"]!, member: probe.nodes["L"]!, reverse: [probe.nodes["L"]!, probe.nodes["B"]!],
             roles: ["AXList", "AXWindow"], popupWindowID: 284, ownerWindowID: 208, process: probe.scopes.process)!
         precondition(observe(b) != a && registry.target(boundA) == nil)
         precondition(observe(probe.proof.context) != a, "later explicit observation cannot revive old A")
@@ -331,6 +332,63 @@ import ApplicationServices
                 context: background.proof.context, element: background.nodes["E"]!, pid: getpid(), sample: sample,
                 same: { CFEqual($0, $1) }) == nil)
     }
+
+    @MainActor static func submenuChoice() async throws {
+        func setup() throws -> PopupChoiceProbe {
+            let probe = PopupChoiceProbe()
+            let scopes = probe.scopes
+            scopes.roles["E"] = "AXMenuItem"
+            scopes.roles["D"] = "AXMenuItem"
+            scopes.roles["G"] = "AXMenuItem"
+            scopes.subroles["M"] = "AXDialog"
+            scopes.children["P"] = ["E", "Auto"]
+            scopes.children["D"] = ["E"]
+            scopes.children["G"] = ["E"]
+            scopes.parents["E"] = "D"
+            scopes.parents["D"] = "M"
+            scopes.parents["G"] = "M"
+            scopes.axWindows = ["E": "M", "D": "M", "G": "M"]
+            scopes.stamp = try NativePopupAttachment.observeSubmenu(
+                popup: probe.nodes["P"]!, leaf: probe.nodes["E"]!, facts: scopes.facts(), same: { CFEqual($0, $1) })
+            precondition(scopes.stamp != nil, "observed exact submenu leaf and distinct reverse menu branch")
+            return probe
+        }
+        let original = try setup()
+        let offers = try original.offerWire(noHit: false)["primitives"] as! [[String: Any]]
+        let expected = offers.compactMap { $0["click"] as? [String: Any] }
+        precondition(expected.map { $0["admission"] as? String } == ["insufficientEvidence", "ready"])
+        let result = try await original.click()
+        precondition(result["dispatch"] as? String == "dispatched" && original.mode == "Manual")
+        precondition(original.events == [.mouseMoved, .leftMouseDown, .leftMouseUp] && original.presses == 0)
+
+        let replacement = try setup()
+        _ = replacement.proof
+        replacement.scopes.parents["E"] = "G"
+        let replaced = try await replacement.click()
+        precondition(replaced["dispatch"] as? String == "notDispatched" && replacement.events.isEmpty)
+
+        let retired = try setup()
+        _ = retired.proof
+        retired.scopes.ids["P"] = 285
+        let ended = try await retired.click()
+        precondition(ended["dispatch"] as? String == "notDispatched" && retired.events.isEmpty)
+
+        let lostForwardEdge = try setup()
+        _ = lostForwardEdge.proof
+        lostForwardEdge.scopes.children["D"] = ["replacement"]
+        let removed = try await lostForwardEdge.click()
+        precondition(removed["dispatch"] as? String == "notDispatched" && lostForwardEdge.events.isEmpty)
+
+        let noPhysicalProof = try setup()
+        _ = noPhysicalProof.proof
+        noPhysicalProof.scopes.physical = .init(windowServer: .unavailable, accessibility: .window(284))
+        precondition(
+            NativePopupPointerQualification(
+                context: noPhysicalProof.proof.context, element: noPhysicalProof.nodes["E"]!, pid: getpid(),
+                sample: noPhysicalProof.scopes.sample(), same: { CFEqual($0, $1) }) == nil)
+        let unconfirmed = try await noPhysicalProof.click()
+        precondition(unconfirmed["dispatch"] as? String == "notDispatched" && noPhysicalProof.events.isEmpty)
+    }
 }
 
 @MainActor private final class PopupChoiceScopes: NativeScopeAccess {
@@ -344,6 +402,7 @@ import ApplicationServices
     var modals = ["P": false, "M": false, "B": false]
     var children = ["P": ["L"], "L": ["Auto", "E", "MinMax"], "G": [], "D": ["G"], "M": ["D"]]
     var parents = ["E": "L", "L": "G", "G": "D", "D": "M"]
+    var axWindows: [String: String] = [:]
     var ids: [String: UInt32] = ["P": 284, "L": 207, "E": 207, "G": 207, "D": 207, "M": 207, "B": 208]
     var stamp: NativePopupOwnerStamp<AXUIElement, NativeProcessIdentity>?
     var process = NativeProcessIdentity.read(getpid())!
@@ -397,6 +456,10 @@ import ApplicationServices
             process: {
                 try check()
                 return self.process
+            },
+            window: {
+                try check()
+                return self.axWindows[self.key($0)].flatMap { self.nodes[$0] }
             })
     }
     func sample() -> NativePopupPointerSample<AXUIElement> {
@@ -422,8 +485,9 @@ import ApplicationServices
         return (probe.binding, [], "E")
     }
     func popupPointerBoundary(_ raw: Any?, qualification: NativePopupPointerQualification) throws -> [String] {
-        try NativePopupPointerBoundary.validate(
-            qualification, original: stamp, leaf: leaf, ancestors: [nodes["P"]!, nodes["L"]!], popup: nodes["P"]!,
+        let ancestors = roles["E"] == "AXMenuItem" ? [nodes["P"]!] : [nodes["P"]!, nodes["L"]!]
+        return try NativePopupPointerBoundary.validate(
+            qualification, original: stamp, leaf: leaf, ancestors: ancestors, popup: nodes["P"]!,
             currentOwner: currentOwner, facts: facts(), sample: sample, same: { CFEqual($0, $1) },
             ownerBoundary: { popup, owner in
                 self.ownerQueries += 1
@@ -531,7 +595,7 @@ import ApplicationServices
     func retainNode(_ ref: String) -> (() -> Void)? { {} }
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts {
         .init(
-            role: "AXStaticText", actions: [.init(name: "AXPress", description: nil)], enabled: true,
+            role: scopes.roles["E"], actions: [.init(name: "AXPress", description: nil)], enabled: true,
             applicationMenuContext: false, foreground: true, focusWritable: true, documentEvidence: .other,
             popupContext: scopes.stamp, popupElementWindowID: scopes.ids["E"])
     }

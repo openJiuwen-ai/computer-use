@@ -121,6 +121,14 @@ The SDK is synchronous: each operation returns its result or raises before the n
 Select an application with `computer.app(id)`, observe it with `app.read(view="both")`, and resolve a control with
 `app.element(name_or_path)`. A confirmed target can be used directly, for example `app.element("Save").click()`.
 
+On macOS, when instances share a name or the task specifies a window, call
+`computer.list_windows(app_name="Google Chrome")` with the exact display name before reading window content.
+Choose a row from `catalogue.windows` by title or use `app_is_foreground` if the task specifies the foreground
+instance. Then call `computer.app(row.app_id).read(window=row.window_ref)`.
+The catalogue query does not capture pixels, query AX, or change focus. Missing title or foreground information
+is `None`. Check `catalogue.stop_reasons` for collection gaps, and allow for hidden windows to be absent.
+Unsupported backends return `unsupported_operation`.
+
 Within one tool call, every action receipt is retained while superseded automatic observations of the same scope are
 coalesced into the final state. Distinct popups and explicitly printed or full observations are preserved.
 Window coordinate actions retain visual feedback and collect available accessibility information independently.
@@ -156,6 +164,10 @@ A `ComputerUseError` for an expired target,
 temporarily incomplete target evidence, a modal blocker, or `effect="partial"` / `"possible"` also retains
 these fields when the original session can still be observed. Use the attached current observation to
 decide the next action. The original error and effect remain unchanged; the SDK does not replay uncertain input.
+If native input was dispatched and releasing the operation resources then fails,
+`ComputerUseError.action_receipt` retains the dispatch receipt and `scope_cleanup="unknown"` reports unconfirmed
+resource finalization. `impact.attempts` reports paired input cleanup separately. The retired session cannot
+start the related observation.
 On macOS, Computer global input does not force a post-action observation and returns
 `observation_status="not_requested"`. Read explicitly when needed; a failed read does not
 block subsequent global input.

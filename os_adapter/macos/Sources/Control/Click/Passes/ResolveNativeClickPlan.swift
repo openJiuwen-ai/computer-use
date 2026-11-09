@@ -17,6 +17,14 @@ import ApplicationServices
         else {
             throw DriverError("click execution requires a negotiated selected click contract", code: .invalidRequest)
         }
+        if op.requiresRevealedLeafHit(command.target, within: contract.within) {
+            guard case .pointer(.click) = contract.unit, resolved.binding.node != nil,
+                contract.actuator == nil, contract.receiver == nil, !command.foreground,
+                NativeClickClippedLeaf.permitsContinuation(offer)
+            else {
+                throw DriverError("the revealed element requires a ready exact click", code: .inputUnavailable)
+            }
+        }
         let target: NativeClickTarget, pointer: NativePointerIntent?
         switch contract.unit {
         case .selection(let selection):

@@ -17,7 +17,7 @@ from mcp.client.stdio import stdio_client
 from PIL import Image
 
 
-def popup_fixture(failure=None):
+def popup_fixture(failure=None, *, capture_parent=False, transient=False, image_action_chain=False):
     """Replace native I/O only; retain public SDK, read, numbering and delivery paths."""
     import base64
     from contextlib import nullcontext
@@ -37,13 +37,13 @@ def popup_fixture(failure=None):
     from computer_use.session.state import AppState
     from PIL import Image
 
-    def surface(key, parent=None):
+    def surface(key, parent=None, version=0):
         return {
             "window": key,
-            "instance": "instance:" + key,
+            "instance": "instance:" + key + (f":{version}" if version else ""),
             "surface": "surface:" + key,
             "node": "node:" + key,
-            "title": "Accessibility" if parent is None else "Open application",
+            "title": "Accessibility" if key == "A" else "Open application",
             "kind": "sheet" if parent else "window",
             "parent": parent,
             "parentState": "known" if parent else "none",
@@ -68,6 +68,9 @@ def popup_fixture(failure=None):
             self.clicked = self.popup_visible = False
             self.popup_read = False
             self.opened = self.finished = 0
+            self.partial = self.fail_next_write = False
+            self.version = 0
+            self.writes = 0
 
         async def connect(self, timeout):
             return Binding("session", None, None, None)
@@ -87,16 +90,19 @@ def popup_fixture(failure=None):
                 self.suffix_budgets.append(("directory", timeout))
             if failure == "directory" and self.popup_read:
                 raise TimeoutError("Optional popup directory recheck failed")
+            tick = 10 * len(self.trace) if transient else 1
+            partial = self.partial if transient or image_action_chain else self.popup_visible
+            popup = surface("Sheet", None if transient else "A", self.version)
             return {
                 "kind": "surfaces",
                 "session": "session",
                 "application": "application",
                 "platform": "macos",
-                "observed": {"id": "directory", "startedAt": 1, "completedAt": 2},
-                "surfaces": [surface("A"), *([surface("Sheet", "A")] if self.popup_visible else [])],
+                "observed": {"id": f"directory:{tick}", "startedAt": tick, "completedAt": tick + 1},
+                "surfaces": [surface("A"), *([popup] if self.popup_visible else [])],
                 "focusedWindow": "Sheet" if self.popup_visible else "A",
-                "stopReasons": ["unrelated AXError -25202"] if self.popup_visible else [],
-                "rootDiscoveryComplete": not self.popup_visible,
+                "stopReasons": ["unrelated AXError -25202"] if partial else [],
+                "rootDiscoveryComplete": not partial,
                 "provider": {"status": "notRequested", "attribute": None, "writeStatus": None},
             }
 
@@ -108,7 +114,8 @@ def popup_fixture(failure=None):
             if key == "A":
                 # The first suffix directory still contains only the parent.
                 # The popup appears while its perfectly usable AX tree is read.
-                self.popup_visible = self.clicked
+                if not transient and not image_action_chain:
+                    self.popup_visible = self.clicked
                 children = {
                     "add": NativeNode(role="button", name="Add application", actions=(Action("press", "AXPress"),)),
                     "unchanged": NativeNode(role="button", name="Unchanged parent control"),
@@ -152,15 +159,21 @@ def popup_fixture(failure=None):
         async def capture(self, token, target, max_dimension, timeout):
             self.trace.append(("image", target.root_window))
             self.suffix_budgets.append(("image", timeout))
-            assert target.root_window == "Sheet", "A tree-only click must not capture the unchanged parent"
+            assert capture_parent or target.root_window == "Sheet", "A tree-only click must not capture the unchanged parent"
             if failure in ("image", "both"):
                 raise TimeoutError("Popup screenshot unavailable")
             buffer = BytesIO()
-            with Image.new("RGB", (20, 10), "#22bb44") as image:
+            color = "#22bb44"
+            if image_action_chain:
+                if self.writes == 0:
+                    color = "#eeeeee"
+                elif self.writes > 2:
+                    color = "#aa1199"
+            with Image.new("RGB", (20, 10), color) as image:
                 image.save(buffer, format="PNG")
             png = decode_capture(
                 {
-                    "id": "popup-capture",
+                    "id": "popup-capture" if target.root_window == "Sheet" else "parent-capture",
                     "kind": "window",
                     "scope": target.surface,
                     "startedAt": 1,
@@ -190,6 +203,22 @@ def popup_fixture(failure=None):
 
     async def dispatch(intent, target, *args, **kwargs):
         port.trace.append(("write", target.root_window, target.node))
+        if image_action_chain:
+            assert target.root_window == "A"
+            port.writes += 1
+            port.partial = True
+            return {"target": "Fixture window", "status": "dispatched", "detail": "FIXTURE_DISPATCHED"}
+        if transient:
+            assert target.root_window == "A" and target.node == "add"
+            if port.fail_next_write:
+                raise ComputerUseError({
+                    "code": "input_unavailable", "effect": "none", "target": "Add application",
+                    "detail": "Write was refused", "next": "observe the current window",
+                })
+            port.writes += 1
+            port.popup_visible = not port.popup_visible
+            detail = "POPUP_OPEN_DISPATCHED" if port.popup_visible else "POPUP_DISMISS_DISPATCHED"
+            return {"target": "Add application", "status": "dispatched", "detail": detail}
         assert not port.clicked, "Observation recovery must never replay input"
         assert target.root_window == "A" and target.node == "add"
         port.clicked = True
@@ -306,3 +335,73 @@ def test_scope_managed_read_defers_display_without_duplicate_parent_projection(m
     last_capture = max(index for index, entry in enumerate(trace) if entry[0] in ("tree", "image"))
     first_projection = next(index for index, entry in enumerate(trace) if entry[0] == "prepare" and entry[2])
     assert first_projection > last_capture, trace
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("case", [
+    "dismissed", "partial", "printed", "image", "explicit", "full", "refused", "reappeared", "replaced",
+])
+async def test_same_call_transient_window_delivery(tmp_path, case):
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "computer_use_mcp"],
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "COMPUTER_USE_LOG_DIR": str(tmp_path)},
+    )
+    async with stdio_client(params) as streams, ClientSession(*streams) as client:
+        await client.initialize()
+
+        async def call(code):
+            reply = await client.call_tool("computer_use", {"code": code})
+            text = "\n".join(block.text for block in reply.content if block.type == "text")
+            assert not reply.isError, text
+            return reply, text
+
+        _, initial = await call(
+            inspect.getsource(popup_fixture) + "\nglobals().update(vars(popup_fixture(transient=True)))\napp.read()"
+        )
+        add = re.search(r"(\d+) button Add application", initial)
+        assert add is not None
+        before_close = {
+            "partial": "port.partial = True",
+            "printed": "print(opened.observation)",
+            "image": "print_image(opened.observation.screenshot)",
+            "explicit": "app.read(view='both', window=popup)",
+            "full": "app.read(view='both', window=popup, full=True)",
+        }.get(case, "")
+        after_close = {
+            "refused": (
+                "from computer_use.errors import ComputerUseError\n"
+                "port.fail_next_write = True\ntry: button.click()\nexcept ComputerUseError: pass"
+            ),
+            "reappeared": "button.click()",
+            "replaced": "port.version = 2\nbutton.click()",
+        }.get(case, "")
+        reply, text = await call(
+            f"button = app.element({add[1]})\n"
+            "opened = button.click()\n"
+            "popup = next(ref for ref, key in app._instance.windows.items() if key == 'Sheet')\n"
+            f"{before_close}\n"
+            "closed = button.click()\n"
+            f"{after_close}"
+        )
+        images = [block for block in reply.content if block.type == "image"]
+        assert text.index("POPUP_OPEN_DISPATCHED") < text.index("POPUP_DISMISS_DISPATCHED")
+        if case == "dismissed":
+            assert not images, text
+            assert "Search applications" not in text
+            note = "absent from the latest complete application observation"
+            assert text.index("POPUP_OPEN_DISPATCHED") < text.index(note) < text.index("POPUP_DISMISS_DISPATCHED")
+            await call(
+                "from computer_use.session.interfaces import WindowLifetime\n"
+                "coverage = observation_data(opened.observation)['window_coverage']\n"
+                "assert [row['delivered'] for row in coverage] == [()], coverage\n"
+                "assert opened.observation.screenshot is not None\n"
+                "assert 'Search applications' in opened.observation.text\n"
+                "assert any(item.identity.window == 'Sheet' and item.lifetime is WindowLifetime.RETAINED "
+                "for item in app._instance.evidence.values())"
+            )
+        else:
+            assert images, text
+            assert "Search applications" in text
+            assert "absent from the latest complete application observation" not in text

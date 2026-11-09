@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+from functools import cache
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.accounting.pipeline import AccountingPipeline
+from computer_use.interaction.read.presentation.compression.evidence import capture_evidence
 from computer_use.interaction.read.presentation.compression.pipeline import CompressionPipeline
 from computer_use.interaction.read.presentation.fallback import UncompressedFacts, branch_references
 from computer_use.interaction.read.presentation.interface.geometric.presentation.pipeline import (
@@ -51,6 +53,7 @@ __all__ = [
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
+    from computer_use.interaction.read.presentation.compression.evidence import CompressionEvidence
     from computer_use.interaction.read.presentation.ir import ProjectionResult
     from computer_use.interaction.read.presentation.records import RenderedTree, SemanticNode, SnapshotFacts
     from computer_use.pipeline.core import Control, Step
@@ -98,6 +101,7 @@ def _branch_facts(
     root: SemanticNode,
     *,
     checkpoint: Callable[[], object] | None = None,
+    snapshot_evidence: Callable[[], CompressionEvidence] | None = None,
 ) -> BranchFacts:
     """Build the exact source indexes shared by preparation and final accounting."""
     native_nodes = snapshot.presentation_nodes
@@ -113,7 +117,7 @@ def _branch_facts(
             continue
         if key not in source["fieldStatus"] or "textRef" in source["fieldStatus"][key]:
             readable_text.add(ref)
-    return BranchFacts(request, root, members, native_nodes, relations, readable_text)
+    return BranchFacts(request, root, members, native_nodes, relations, readable_text, snapshot_evidence)
 
 
 class _BranchCollection(Node["SnapshotRenderRequest", "PreparedSnapshot"]):
@@ -132,12 +136,20 @@ class _BranchCollection(Node["SnapshotRenderRequest", "PreparedSnapshot"]):
         captured = CapturedSnapshot.capture(request.snapshot, checkpoint=control.remaining)
         snapshot = captured.materialize(read_only_sources=True, checkpoint=control.remaining)
         local_request = replace(request, snapshot=snapshot)
+
+        @cache
+        def snapshot_evidence() -> CompressionEvidence:
+            # All roots use the same immutable source graph. Keep failures inside each root's fallback.
+            return capture_evidence(snapshot, snapshot.presentation_nodes)
+
         roots = []
         recovery_prefix = request.recovery_prefix_units
         for root in _checked(snapshot.roots, control.remaining):
             # Identity and source validation deliberately remain outside the
             # pure display fallback; they must never publish guessed bindings.
-            branch = _branch_facts(snapshot, local_request, root, checkpoint=control.remaining)
+            branch = _branch_facts(
+                snapshot, local_request, root, checkpoint=control.remaining, snapshot_evidence=snapshot_evidence
+            )
             try:
                 if request.compact and request.public_api and request.share_descriptions:
                     source = SemanticPipeline(branch).run(root, control)

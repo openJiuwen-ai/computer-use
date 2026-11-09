@@ -1,6 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""No-UI protocol fixture: the first driver exits after acknowledging read cleanup."""
+"""No-UI protocol fixture for read timeouts and session exit after cleanup."""
 
 import json
 import os
@@ -9,13 +9,28 @@ from pathlib import Path
 
 spawn_log = Path(sys.argv[1])
 first = not spawn_log.exists()
+timeout_reply = sys.argv[2] if len(sys.argv) > 2 else None
 with spawn_log.open("a") as stream:
     stream.write(str(os.getpid()) + "\n")
 
 # Deliberately reuse the wire identity so generation binding is also exercised.
 session = "observation-session"
+held = None
 for line in sys.stdin:
     request = json.loads(line)
+    if "cancel" in request:
+        assert held == request["cancel"]
+        if timeout_reply == "acknowledged":
+            error = {
+                "code": "deadline_exceeded",
+                "target": "inspect",
+                "effect": "none",
+                "detail": "request deadline exceeded",
+                "next": "read again",
+            }
+            sys.stdout.write(json.dumps({"version": 6, "session": session, "id": held, "error": error}) + "\n")
+            sys.stdout.flush()
+        continue
     method = request["method"]
     if method == "hello":
         result = dict(
@@ -37,6 +52,9 @@ for line in sys.stdin:
             stopReasons=[],
         )
         if query["kind"] == "surfaces":
+            if timeout_reply is not None and held is None:
+                held = request["id"]
+                continue
             result.update(
                 application=query["application"],
                 surfaces=[],
@@ -51,5 +69,5 @@ for line in sys.stdin:
     else:
         raise AssertionError("Unexpected native method: " + method)
     print(json.dumps(dict(version=6, session=session, id=request["id"], result=result)), flush=True)
-    if first and method == "finish":
+    if first and timeout_reply is None and method == "finish":
         sys.exit(0)

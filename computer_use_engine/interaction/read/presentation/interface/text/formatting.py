@@ -182,6 +182,8 @@ class InterfaceWriter:
             prefix = ref + (" (" + ", ".join(remaining) + ")" if remaining else "")
         if style is not None and style.glyph is not None:
             prefix = ref + " " + style.glyph + prefix[len(ref) :]
+        if ref in self.request.projection.source.outside_window_fields:
+            prefix += " (bounds outside observed window)"
         captions, inline, blocks = [], [], []
         sharing = self.request.sharing if shared else None
         omitted_slots = sharing.omitted_slots.get(ref, ()) if sharing is not None else ()

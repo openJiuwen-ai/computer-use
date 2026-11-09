@@ -10,6 +10,9 @@ from computer_use.interaction.read.presentation.accounting.relations import Rela
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from computer_use.interaction.read.presentation.compression.evidence import CompressionEvidence
     from computer_use.interaction.read.presentation.interface.disclosure.groups.model import WindowDisclosureContext
     from computer_use.interaction.read.presentation.records import RenderedTree, SemanticNode, SnapshotFacts
     from computer_use.protocol.records import FactNode, Record
@@ -55,6 +58,7 @@ class BranchFacts:
         native_nodes: Original native-node facts indexed by their exact native tokens.
         relations: Accounting helper over the original native relationships for this snapshot.
         readable_text: Display references whose primary native text source supports continuation.
+        snapshot_evidence: Lazily shared compression evidence for the exact prepared snapshot.
     """
 
     request: SnapshotRenderRequest
@@ -63,6 +67,7 @@ class BranchFacts:
     native_nodes: dict[str, FactNode]
     relations: RelationPresentation
     readable_text: set[str]
+    snapshot_evidence: Callable[[], CompressionEvidence] | None = None
 
     @property
     def context(self) -> Record:

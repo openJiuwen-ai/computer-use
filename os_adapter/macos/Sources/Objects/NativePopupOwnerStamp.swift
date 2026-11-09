@@ -1,11 +1,14 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-/// Immutable observation provenance for one popup list. It records a logical
+/// Immutable observation provenance for one popup member. It records a logical
 /// AX parent chain separately from the popup's forward children. It neither
 /// claims reciprocal containment nor changes the App's fixed root.
 struct NativePopupOwnerStamp<Node, Process: Equatable> {
+    enum Kind { case list, submenu }
+
+    let kind: Kind
     let popup: Node
-    let list: Node
+    let member: Node
     let reverse: [Node]
     let roles: [String]
     let popupWindowID: UInt32
@@ -13,14 +16,16 @@ struct NativePopupOwnerStamp<Node, Process: Equatable> {
     let process: Process
 
     init?(
-        popup: Node, list: Node, reverse: [Node], roles: [String], popupWindowID: UInt32, ownerWindowID: UInt32,
-        process: Process
+        popup: Node, member: Node, reverse: [Node], roles: [String], popupWindowID: UInt32, ownerWindowID: UInt32,
+        process: Process, kind: Kind = .list
     ) {
-        guard reverse.count >= 2, reverse.count == roles.count, roles.first == "AXList", roles.last == "AXWindow",
+        guard reverse.count >= 2, reverse.count == roles.count, roles.last == "AXWindow",
+            kind == .list ? roles.first == "AXList" : roles == ["AXMenuItem", "AXMenuItem", "AXWindow"],
             popupWindowID != 0, ownerWindowID != 0, popupWindowID != ownerWindowID
         else { return nil }
+        self.kind = kind
         self.popup = popup
-        self.list = list
+        self.member = member
         self.reverse = reverse
         self.roles = roles
         self.popupWindowID = popupWindowID
@@ -30,9 +35,17 @@ struct NativePopupOwnerStamp<Node, Process: Equatable> {
 
     var owner: Node { reverse.last! }
 
+    func matchesForwardPath(_ ancestors: [Node], same: (Node, Node) -> Bool) -> Bool {
+        switch kind {
+        case .list: return ancestors.count == 2 && same(ancestors[0], popup) && same(ancestors[1], member)
+        case .submenu: return ancestors.count == 1 && same(ancestors[0], popup)
+        }
+    }
+
     func matches(_ other: Self, same: (Node, Node) -> Bool) -> Bool {
-        process == other.process && popupWindowID == other.popupWindowID && ownerWindowID == other.ownerWindowID
-            && roles == other.roles && same(popup, other.popup) && same(list, other.list)
+        kind == other.kind && process == other.process && popupWindowID == other.popupWindowID
+            && ownerWindowID == other.ownerWindowID && roles == other.roles
+            && same(popup, other.popup) && same(member, other.member)
             && reverse.count == other.reverse.count && zip(reverse, other.reverse).allSatisfy { same($0.0, $0.1) }
     }
 }

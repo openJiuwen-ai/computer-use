@@ -157,11 +157,14 @@ import ApplicationServices
             3: Node(role: "AXWebArea", providerID: "12", parent: 4),
             4: Node(role: "AXWindow", providerID: nil, parent: nil)
         ]
-        func prove(_ nodes: [Int: Node]) -> Qualification.ChromiumWebProof? {
+        func prove(_ nodes: [Int: Node], onParent: (Int) -> Void = { _ in }) -> Qualification.ChromiumWebProof? {
             Qualification.chromiumWebImplementation(
                 element: 1, same: ==, role: { nodes[$0]?.role },
                 providerNodeID: { nodes[$0]?.providerID }, actualPID: { nodes[$0]?.actualPID },
-                parent: { nodes[$0]?.parent }, check: {})
+                parent: { node in
+                    onParent(node)
+                    return nodes[node]?.parent
+                }, check: {})
         }
         let proof = prove(baseline)
         precondition(proof?.elementNodeID == 402 && proof?.webAreaNodeID == 12 && proof?.actualPID == 100)
@@ -187,6 +190,50 @@ import ApplicationServices
             unknown = baseline; unknown[1]?.providerID = value
             precondition(prove(unknown) == nil)
         }
+        // The real Chromium Console has 30 parent hops to AXWebArea and 38
+        // to its containing AXWindow. The setter proof needs only the WebArea.
+        var deep = Dictionary(uniqueKeysWithValues: (1...39).map { node in
+            (node, Node(role: "AXGroup", providerID: nil, actualPID: 25181, parent: node + 1))
+        })
+        deep[1] = Node(role: "AXTextArea", providerID: "66", actualPID: 25181, parent: 2)
+        deep[31] = Node(role: "AXWebArea", providerID: "1", actualPID: 25181, parent: 32)
+        deep[39] = Node(role: "AXWindow", providerID: nil, actualPID: 25181, parent: nil)
+        var parentQueries = 0
+        let deepProof = prove(deep) { _ in parentQueries += 1 }
+        precondition(
+            deepProof?.elementNodeID == 66 && deepProof?.webAreaNodeID == 1 && deepProof?.actualPID == 25181,
+            "the exact Chromium SelectedText provider remains identifiable through 30 parents")
+        precondition(parentQueries == 30, "the proof must stop at its WebArea, before the containing window")
+        var adjacent = deep
+        adjacent[31]?.role = "AXGroup"
+        precondition(prove(adjacent) == nil, "a deep native Chromium control keeps its own SelectedText contract")
+        adjacent = deep
+        adjacent[31]?.actualPID = 25182
+        precondition(prove(adjacent) == nil, "another process's WebArea cannot disqualify the setter")
+        adjacent = deep
+        adjacent[31]?.providerID = "66"
+        precondition(prove(adjacent) == nil, "the editor and WebArea require distinct provider node identities")
+        adjacent = deep
+        adjacent[29]?.parent = 25
+        precondition(prove(adjacent) == nil, "a deep cycle cannot prove a Web provider")
+        for boundary in ["AXWindow", "AXSheet", "AXApplication"] {
+            adjacent = deep
+            adjacent[29]?.role = boundary
+            precondition(prove(adjacent) == nil, "the proof cannot cross a native boundary to borrow a WebArea")
+        }
+        adjacent = deep
+        adjacent[29]?.role = nil
+        precondition(prove(adjacent) == nil, "an unreadable deep role preserves the existing candidate")
+        adjacent = deep
+        adjacent[31]?.role = "AXGroup"
+        for node in 39...41 {
+            adjacent[node] = Node(role: "AXGroup", providerID: nil, actualPID: 25181, parent: node + 1)
+        }
+        adjacent[42] = deep[31]
+        parentQueries = 0
+        precondition(prove(adjacent) { _ in parentQueries += 1 } == nil)
+        precondition(parentQueries == 40, "the fresh proof is bounded in parent hops")
+
         struct Cancelled: Error {}
         do {
             _ = try Qualification.chromiumWebImplementation(

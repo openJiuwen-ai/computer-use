@@ -245,7 +245,7 @@ class CallLifecycle:
                 target = target.canonical(opened.target)
             except BaseException as error:
                 # Retire the connection when native admission may have occurred.
-                if not isinstance(error, ComputerUseError) or error.effect != "none":
+                if not isinstance(error, ComputerUseError) or error.effect != "none" or error.scope_cleanup == "unknown":
                     self.retired = True
                 raise
             finally:

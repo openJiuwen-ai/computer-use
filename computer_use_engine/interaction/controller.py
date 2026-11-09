@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from computer_use.native.port import NativePort
     from computer_use.protocol.records import Record
     from computer_use.session.state import AppState
-    from computer_use.types import ActionResult, Observation, TextPage
+    from computer_use.types import ActionResult, Observation, TextPage, WindowCatalogue
 
 
 def _observation_completion(result, error):
@@ -131,6 +131,10 @@ class SessionController:
 
     @overload
     async def run(self, request: DiscoverApps) -> list[AppInfo]:
+        pass
+
+    @overload
+    async def run(self, request: DiscoverWindows) -> WindowCatalogue:
         pass
 
     @overload
@@ -368,6 +372,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.agent.requests import (
         ActOnElement,
         DiscoverApps,
+        DiscoverWindows,
         ObserveDesktop,
         ObserveElement,
         ObserveText,

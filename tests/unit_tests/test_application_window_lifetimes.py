@@ -1,6 +1,7 @@
 """Application discovery never changes explicitly bound input/window lifetimes."""
 
 import asyncio
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -18,6 +19,7 @@ from computer_use.session.interface_images import ImagePiece, InterfaceImage, si
 from computer_use.session.interfaces import WindowIdentity, WindowLifetime
 from computer_use.session.state import AppState
 from computer_use.session.windows import WindowReferences
+from PIL import Image
 
 
 def surface(key, *, scope=None, parent=None, accessible=True, parent_state=None):
@@ -332,14 +334,20 @@ def test_composite_bootstrap_preserves_displayed_canvas_and_restricts_window_sco
         ImagePiece(key, SimpleNamespace(target=target, image=b"png"), (index * 100, 0, 100, 80))
         for index, (key, target) in enumerate(zip(("a", "b"), targets))
     )
-    image = InterfaceImage(b"whole-displayed-canvas", pieces, signature(app._instance.members), delivered=7)
+    buffer = BytesIO()
+    with Image.new("RGBA", (200, 80), "white") as pixels:
+        pixels.putpixel((21, 30), (0, 0, 0, 0))
+        pixels.save(buffer, format="PNG")
+    image = InterfaceImage(buffer.getvalue(), pieces, signature(app._instance.members), delivered=7)
     controller.interfaces.windows.retain_image(app._instance, image)
     window = window_scope(controller, app, ref(app, "b"))
     assert controller.interfaces.windows.delivered_image(app._instance, window).png is image.png
     assert controller.interfaces.windows.delivered_image(app._instance, window).pieces == (pieces[1],)
     assert controller.interfaces.windows.delivered_image(app._instance, window).pieces[0].box == (100, 0, 100, 80)
-    with pytest.raises(ComputerUseError, match="gap outside"):
+    with pytest.raises(ComputerUseError, match="outside the selected window's captured scope"):
         controller.interfaces.windows.delivered_image(app._instance, window).hit((20, 30))
+    with pytest.raises(ComputerUseError, match="gap outside"):
+        controller.interfaces.windows.delivered_image(app._instance, window).hit((21, 30))
 
 
 def test_fixed_window_keyboard_uses_delivered_modal_without_following_app_context():

@@ -25,6 +25,7 @@ GROUPS = (
     "NativeFactCollectionBudget",
     "NativeWindowCaptureRetry",
     "NativeWindowCaptureJoin",
+    "NativeWindowCapturePixels",
     "NativePopupChoiceBoundary",
     "NativeCoordinateMenuPress",
     "NativeCoordinateMenuCompletion",

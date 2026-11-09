@@ -15,7 +15,9 @@ from computer_use.interaction.read.acquisition.loading import window_content_une
 from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
+from computer_use.interaction.write.request.menu_observation import observed_menu_window
 from computer_use.interaction.write.request.model import ObservedAction
+from computer_use.native.contracts import Binding
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
@@ -62,10 +64,10 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         prior = getattr(instance, "directory", None)
         fixed = getattr(request.owner, "_window_identity", None)
         context_root = WindowIdentity(fixed.root_window, fixed.surface, fixed.instance) if fixed is not None else None
-        if context_root is None and prior is not None:
-            # An Element owns its App, not a persistent window view. Preserve
-            # the confirmed parent as read-recovery data when closing a sheet
-            # or popup; another document's focus must not erase that context.
+        window_family_only = request.intent.kind == "closeWindow"
+        if (context_root is None or window_family_only) and prior is not None:
+            # A closing child can disappear while its confirmed parent remains.
+            # Preserve that exact parent, including for a fixed close request.
             identity = WindowIdentity(request.target.root_window, request.target.surface, request.target.instance)
             original = next((item for item in prior["surfaces"] if WindowIdentity.of(item) == identity), None)
             parent = next((
@@ -76,7 +78,9 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             ), None)
             context_root = WindowIdentity.of(parent) if parent is not None else None
         source_owner = getattr(instance, "owners", {}).get(getattr(request.target, "root_window", None))
-        before_tree = self.controller.state(source_owner).query_snapshot if source_owner is not None else None
+        source = self.controller.state(source_owner) if source_owner is not None else None
+        before_tree = source.query_snapshot if source is not None else None
+        before_target = source.query_target if source is not None else None
         image_identity = WindowIdentity(
             getattr(request.target, "root_window", None), getattr(request.target, "surface", None),
             getattr(request.target, "instance", None),
@@ -100,10 +104,31 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
                     PostwriteChanges(None, before_tree, before_image)
                     if before_tree is not None or before_image is not None else None
                 ),
+                window_family_application=prior["application"] if window_family_only else None,
             )
             if prior is not None
             else None
         )
+        menu_origin = None
+        if (
+            related is not None and prior["platform"] == "macos" and request.intent.kind == "openMenu"
+            and isinstance(request.target, Binding) and request.target.root_window is not None
+            and prior["session"] == request.target.session
+        ):
+            target = request.target
+            origin = WindowIdentity(target.root_window, target.surface, target.instance)
+            application = prior["application"]
+
+            def remember_pre_input_directory(directory):
+                nonlocal related, menu_origin
+                if (directory["session"], directory["application"]) != (target.session, application):
+                    return
+                known = tuple(WindowIdentity.of(item) for item in directory["surfaces"])
+                if origin in known:
+                    related = replace(related, known_windows=tuple(dict.fromkeys((*related.known_windows, *known))))
+                    menu_origin = origin
+
+            request = replace(request, on_pre_input_directory=remember_pre_input_directory)
         try:
             receipt = await self.body.arun(request, control)
         except ComputerUseError as error:
@@ -117,6 +142,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             # This is still the original exception, not a fabricated successful
             # receipt. Preparation/dispatch evidence and its original cause stay
             # authoritative while the shared read suffix may add current facts.
+            if menu_origin is not None and error._invoked_menu_target == request.target:
+                related = replace(related, menu_origin=menu_origin)
             outcome = await self.observe(
                 request,
                 ObservedAction(None),
@@ -127,6 +154,14 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
+            if (
+                request.intent.kind == "openMenu" and error._invoked_menu_target == request.target
+                and instance is not None and outcome.observation is not None
+                and self.session_usable(request, session_identity)
+            ):
+                error.observed_menu_window = observed_menu_window(
+                    request.target, before_target, before_tree, outcome.observation, instance.windows,
+                )
             if outcome.observation_error is not None:
                 from computer_use.session.events import action_observation_completed
 
@@ -216,8 +251,14 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             choices = self.window_choices(related_owner, directory)
             refresh_gap = next((gap for gap in metadata.get("gaps", ()) if gap.component == "refresh"), None)
-            if not metadata.get("content_available", True):
-                gaps = metadata.get("gaps", ())
+            gaps = metadata.get("gaps", ())
+            directory_only = (
+                related is not None and related.window_family_only and directory is not None
+                and directory["application"] == related.window_family_application
+                and directory["session"] == request.target.session
+                and not related.content_members(directory)
+            )
+            if not metadata.get("content_available", True) and not directory_only:
                 return replace(
                     outcome,
                     observation=observed,

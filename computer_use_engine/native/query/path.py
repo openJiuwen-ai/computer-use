@@ -135,6 +135,39 @@ class TargetQuery(NativeGraph):
         # coordinates. They are one native candidate, not repeated matches.
         return tuple(dict.fromkeys(children))
 
+    async def _next_relation(self, token, relation_property, cursor, limit):
+        page, batch = await super()._next_relation(token, relation_property, cursor, limit)
+        if (
+            self.platform != "macos" or relation_property != self.relations["children"] or cursor is not None
+            or batch is None or page["relation"]["state"] != "complete" or page["relation"]["certainty"] != "confirmed"
+        ):
+            return page, batch
+        # A first Children page also follows its source's requested content
+        # relations. Accept only complete same-source rows for relations whose
+        # earlier depth-limited sample had a count and no consumed identities.
+        collected = {node["node"] for node in batch["nodes"]}
+        for edge in batch["relations"]:
+            prop = edge["property"]
+            key = token, prop
+            previous = self.edges.get(key)
+            if (
+                edge["source"] != token or prop not in self.follow_relations or key in self.completed_edges
+                or previous is None or previous["state"] != "partial" or previous["certainty"] != "confirmed"
+                or previous["targets"] or previous.get("offset", 0) or previous.get("cursor") is not None
+                or previous.get("unavailablePositions") or previous.get("membershipObservedAt")
+            ):
+                continue
+            if (
+                edge["state"] != "complete" or edge["certainty"] != "confirmed"
+                or not edge["targets"] or len(edge["targets"]) != previous.get("total")
+                or edge.get("total") != previous.get("total")
+                or any(ref not in self.nodes and ref not in collected for ref in edge["targets"])
+            ):
+                continue
+            self.edges[key] = edge
+            self.edge_sources[key].append(batch["observed"]["id"])
+        return page, batch
+
     async def _inline_window(self, token, role):
         if (
             self.platform == "windows"
@@ -177,12 +210,18 @@ class TargetQuery(NativeGraph):
         for step, condition in enumerate(path):
             candidates = [self.root.node] if step == 0 else await self._contents(selected)
             found, visited, incomplete = [], set(), False
-            stack = [(node, (), 0) for node in reversed(candidates)]
+            # Native depth limits each collection. The logical search shares
+            # the graph's node and time budgets across all of its collections.
+            active = set()
+            stack = [(node, True) for node in reversed(candidates)]
             while stack:
+                token, entering = stack.pop()
+                if not entering:
+                    active.remove(token)
+                    continue
                 self.remaining()
-                token, ancestors, depth = stack.pop()
-                if token in ancestors or depth > self.max_depth:
-                    self.fail("observation_incomplete", "Path containment is cyclic or exceeds its budget.")
+                if token in active:
+                    self.fail("observation_incomplete", "Path containment is cyclic.")
                 if token in visited:
                     continue  # One shared native object is still one candidate.
                 if len(visited) >= self.max_nodes:
@@ -216,7 +255,9 @@ class TargetQuery(NativeGraph):
                 incomplete |= descend is None
                 if descend is True:
                     children = await self._contents(token)
-                    stack.extend((child, (*ancestors, token), depth + 1) for child in reversed(children))
+                    active.add(token)
+                    stack.append((token, False))
+                    stack.extend((child, True) for child in reversed(children))
             if incomplete:
                 self.fail(
                     "observation_incomplete",

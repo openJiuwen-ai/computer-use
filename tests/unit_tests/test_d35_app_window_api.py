@@ -17,9 +17,9 @@ from computer_use.interaction.agent.requests import ResolveElement, UIKeyboard
 from computer_use.interaction.agent.scope import request_scope, window_scope
 from computer_use.interaction.query.instances.scope import adopt
 from computer_use.interaction.read.views.publication import publish
-from computer_use.native.contracts import Binding
+from computer_use.native.contracts import Binding, Knowledge
 from computer_use.session.events import observation_delivered, set_observation_handler
-from computer_use.session.interfaces import WindowIdentity
+from computer_use.session.interfaces import WindowIdentity, WindowLifetime
 from unit_tests.test_application_window_lifetimes import directory, image_for, ref, setup, surface
 from unit_tests.test_image_gesture_scope import capture
 
@@ -154,6 +154,127 @@ def test_explicit_unobserved_keyboard_pins_window_before_refresh():
     assert result == "dispatched"
     assert writes.call_args.args[0].target.root_window == "a"
     assert app._instance.input_context is None
+
+
+@pytest.mark.parametrize(
+    "after_close, destination, error, query_count",
+    [
+        ("child_ended", "a", None, 1),
+        ("child_unconfirmed", None, "observation_incomplete", 1),
+        ("child_still_live", "editor", None, 1),
+        ("root_ended", None, "stale_target", 0),
+    ],
+)
+def test_explicit_keyboard_after_closing_a_delivered_child(after_close, destination, error, query_count):
+    root, other = surface("a"), surface("b")
+    child = surface("editor", parent="a")
+    controller, app = setup(root, other, child)
+    root_ref, child_ref = ref(app, "a"), ref(app, "editor")
+    scope = window_scope(controller, app, child_ref)
+    scope._context = "editor"
+    publish(controller, scope, "Editor attached to A", directory=app._instance.directory)
+    assert window_scope(controller, app, root_ref)._input_context == WindowIdentity.of(child)
+
+    facts = {
+        "child_ended": directory(root, other, focus="b", ended=(child,)),
+        "child_unconfirmed": directory(root, other, focus="b", partial=True),
+        "child_still_live": directory(root, other, child, focus="b"),
+        "root_ended": directory(other, focus="b", ended=(root, child)),
+    }[after_close]
+    query = AsyncMock(return_value=facts)
+    controller.reader.directory._query = query
+
+    async def write(request, _control):
+        if request.intent.kind == "closeWindow":
+            assert request.target.root_window == "editor"
+            adopt(controller, app, facts)
+        return "dispatched"
+
+    dispatch = AsyncMock(side_effect=write)
+    controller.interfaces.write = SimpleNamespace(arun=dispatch)
+    assert app.close_window(child_ref) == "dispatched"
+    dispatch.reset_mock()
+
+    if error is None:
+        assert app.press_key("3", window=root_ref) == "dispatched"
+        dispatch.assert_awaited_once()
+        action = dispatch.call_args.args[0]
+        assert action.target == Binding("session", f"owner:{destination}", destination, f"surface:{destination}")
+        assert action.intent.global_input is False
+    else:
+        with pytest.raises(ComputerUseError) as caught:
+            app.press_key("3", window=root_ref)
+        assert caught.value.code == error
+        dispatch.assert_not_awaited()
+    assert query.await_count == query_count
+
+    if after_close == "child_ended":
+        dispatch.reset_mock()
+        for target in (child_ref, None):
+            with pytest.raises(ComputerUseError, match="no longer exists"):
+                app.press_key("3", window=target)
+        dispatch.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "fresh_focus, requested, replacement, expected",
+    [
+        ("a", "a", None, "a"),
+        (None, "a", None, None),
+        ("b", "a", None, None),
+        ("child", "a", None, None),
+        ("a", "editor", None, None),
+        ("a", "a", "old_child_present", "editor"),
+        ("a", "a", "old_child_replaced", None),
+        ("a", "a", "root_replaced", None),
+        ("a", "a", "root_not_native", None),
+    ],
+)
+def test_explicit_key_reselects_only_the_fresh_exact_focused_root(fresh_focus, requested, replacement, expected):
+    root, other = surface("a"), surface("b")
+    editor, child = surface("editor", parent="a"), surface("child", parent="a")
+    popup = {**surface("popup", accessible=False, parent_state="unknown"), "modal": None}
+    controller, app = setup(root, other, editor)
+    root_ref, editor_ref = ref(app, "a"), ref(app, "editor")
+    app._context = "editor"
+    publish(controller, app, "Delivered editor", directory=app._instance.directory)
+    # An image-only popup can become the display primary without proving it
+    # belongs to the fixed window's keyboard context.
+    adopt(controller, app, directory(root, other, child, popup, partial=True))
+    app._context = "popup"
+    publish(controller, app, "Delivered unparented popup", directory=app._instance.directory)
+    assert window_scope(controller, app, root_ref)._input_context == WindowIdentity.of(editor)
+
+    fresh_root = {
+        "root_replaced": surface("a", scope="another-root"),
+        "root_not_native": {**root, "nativeWindow": False},
+    }.get(replacement, root)
+    additional = {
+        "old_child_present": (editor,),
+        "old_child_replaced": (surface("editor", scope="new-editor", parent="a"),),
+    }.get(replacement, ())
+    query = AsyncMock(return_value=directory(fresh_root, other, child, popup, *additional,
+                                            focus=fresh_focus, partial=True))
+    controller.reader.directory._query = query
+    dispatch = AsyncMock(return_value="write entry")
+    controller.interfaces.write = SimpleNamespace(arun=dispatch)
+    requested_ref = root_ref if requested == "a" else editor_ref
+    if expected is None:
+        with pytest.raises(ComputerUseError) as caught:
+            app.press_key("Escape", window=requested_ref)
+        assert caught.value.effect == "none"
+        dispatch.assert_not_awaited()
+    else:
+        assert app.press_key("Escape", window=requested_ref) == "write entry"
+        dispatch.assert_awaited_once()
+        action = dispatch.call_args.args[0]
+        assert action.target == Binding("session", f"owner:{expected}", expected, f"surface:{expected}")
+        assert action.intent.kind == "key" and action.intent.parameters["key"] == "Escape"
+        assert action.intent.global_input is False
+    query.assert_awaited_once()
+    if expected == "a":
+        evidence = app._instance.evidence[WindowIdentity.of(editor)]
+        assert evidence.lifetime is WindowLifetime.RETAINED and evidence.membership is Knowledge.UNKNOWN
 
 
 @pytest.mark.parametrize("method", ["click", "scroll", "drag"])

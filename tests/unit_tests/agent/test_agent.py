@@ -4,6 +4,8 @@
 import asyncio
 import json
 
+from computer_use_mcp.server import ComputerUseServer
+from mcp import types
 from openjiuwen.core.runner import Runner
 from openjiuwen.core.single_agent import create_agent_session
 from openjiuwen.harness import DeepAgent
@@ -54,6 +56,25 @@ def test_native_agent_multi_turn_and_compaction(model_server, tmp_path):
         == 1
     )
     assert all(Runner.resource_mgr.get_tool(identifier) is None for identifier in ids)
+
+
+def test_application_menu_guidance_reaches_mcp_and_reference_agent():
+    async def list_tools():
+        server = ComputerUseServer(allow_global_input=False)
+        handler = server.server.request_handlers[types.ListToolsRequest]
+        response = await handler(types.ListToolsRequest(method="tools/list"))
+        assert server.session is None
+        return response.model_dump(mode="json")["tools"]
+
+    tools = asyncio.run(list_tools())
+    description = next(tool["description"] for tool in tools if tool["name"] == "computer_use")
+    assert ComputerUseToolkit().tools[0].card.description == description
+    assert "app.read(menu_path=['Edit'], window=ref)" in description
+    assert "exact visible menu titles" in description
+    assert "app.element(item_ref).click() on the same App" in description
+    assert "native menu tracking refuses the click before dispatch" in description
+    assert "a shortcut displayed for that enabled item" in description
+    assert "app.press_key('super+o', window=ref)" in description
 
 
 def test_standard_toolkit_delivers_images_to_model(model_server, tmp_path):

@@ -21,7 +21,8 @@ import AppKit
         guard request.kind == .click, request.button == "left", request.count == 1 else {
             throw DriverError("popup point qualification belongs to one primary click", code: .invalidRequest)
         }
-        var fixed = element
+        var fixed = qualification.context.kind == .submenu
+            ? element.requiring(.contentReceiver, exactElementHit: true) : element
         fixed.frozenGeometry = qualification.geometry
         try await fixed.deliver(
             request, check: check, guardOperation: check, onDispatch: onDispatch, onPosted: onPosted,

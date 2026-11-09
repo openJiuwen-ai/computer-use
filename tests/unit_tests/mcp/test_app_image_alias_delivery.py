@@ -48,6 +48,7 @@ from computer_use.session.observation_data import observation_data
 from computer_use.session.operations import OperationBudget
 from computer_use.session.state import AppState
 from computer_use.session.windows import WindowReferences
+from computer_use_mcp.image_delivery import prepare_image
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from unit_tests.test_application_window_lifetimes import directory, ref, setup, surface
@@ -95,7 +96,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             setter(None)
         images_state._delivery_required = self.previous_delivery
 
-    def capture(self, ui, key, size=(100, 80), color=None):
+    def capture(self, ui, key, size=(100, 80), color=None, origin=(0, 0)):
         item = ui._instance.members[key]
         identity = "capture-" + str(len(self.captures))
         buffer = BytesIO()
@@ -117,7 +118,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         )
         part = WindowPart(
             target,
-            image=WindowImage(target, png, {}, dict(nativeSpace="screen", toNative=(1, 0, 0, 1, 0, 0))),
+            image=WindowImage(target, png, {}, dict(nativeSpace="screen", toNative=(1, 0, 0, 1, *origin))),
         )
         image, _ = InterfaceImagePipeline(self.controller).run(ui, [part])
         ui._image, ui._context = image, key
@@ -357,6 +358,83 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ComputerUseError, "no current image mapping"):
             await self.click(self.app)
 
+    async def test_same_call_point_error_identifies_the_exact_newly_delivered_image(self):
+        a = ref(self.app, "a")
+        point = f"app.point((20, 30), window={a})"
+        result = await self.runtime.execute({"executionId": 1, "code": (
+            "from computer_use import ComputerUseError\n"
+            "observed = observe(window, 'a')\n"
+            "try:\n"
+            f"    {point}\n"
+            "except ComputerUseError as error:\n"
+            "    assert error.code == 'snapshot_expired' and error.effect == 'none'\n"
+            "    raise"
+        )})
+        self.assertTrue(result.get("isError"), result)
+        image = next(block for block in result["content"] if block["type"] == "image")
+        self.assertIn(f"Image point for window={a}:", image["_meta"]["computer-use"]["caption"])
+        self.assertEqual(
+            result["content"][-1]["text"],
+            "ComputerUseError: this UI has no current image mapping\nEffect: none\n"
+            f"Use the attached image (Image 1.1, Window {a}) in the next computer_use call.",
+        )
+        self.write.arun.assert_not_awaited()
+        await self.execute(f"p = {point}")
+
+    async def test_same_call_point_error_does_not_label_other_or_unpublished_pixels(self):
+        a = ref(self.app, "a")
+        point = f"app.point((20, 30), window={a})"
+        stale_after_point = (
+            "observe(window, 'a')\ntry:\n"
+            f"    {point}\n"
+            "except Exception:\n"
+            "    window._image.expired = True\n"
+            "    raise"
+        )
+        for code, has_image in (
+            (f"observe(alias, 'b')\n{point}", True),
+            (f"capture(window, 'a')\n{point}", False),
+            (stale_after_point, True),
+            (f"observe(window, 'a')\ncapture(window, 'a')\n{point}", True),
+        ):
+            with self.subTest(code=code):
+                result = await self.runtime.execute({"executionId": len(self.events) + 1, "code": code})
+                self.assertTrue(result.get("isError"), result)
+                self.assertEqual(any(block["type"] == "image" for block in result["content"]), has_image)
+                self.assertEqual(
+                    result["content"][-1]["text"],
+                    "ComputerUseError: this UI has no current image mapping\nEffect: none",
+                )
+        self.write.arun.assert_not_awaited()
+
+    async def test_same_call_point_miss_names_new_fixed_window_image_without_using_it(self):
+        await self.execute("combined = compose(app, ('a', 'b'))")
+        b = ref(self.app, "b")
+        point = f"app.point((20, 30), window={b})"
+        # A fresh image of another window cannot help this fixed-window point.
+        other = await self.runtime.execute({"executionId": 2, "code": f"observe(window, 'a')\n{point}"})
+        self.assertTrue(other.get("isError"), other)
+        self.assertNotIn("Use the attached image", other["content"][-1]["text"])
+
+        hidden = await self.runtime.execute({"executionId": 3, "code": f"capture(scope({b}), 'b')\n{point}"})
+        self.assertTrue(hidden.get("isError"), hidden)
+        self.assertNotIn("Use the attached image", hidden["content"][-1]["text"])
+
+        result = await self.runtime.execute({"executionId": 4, "code": (
+            f"observed = observe(scope({b}), 'b')\n{point}"
+        )})
+        self.assertTrue(result.get("isError"), result)
+        image, = [block for block in result["content"] if block["type"] == "image"]
+        image_id = image["_meta"]["computer-use"]["imageId"]
+        error = result["content"][-1]["text"]
+        self.assertIn("Effect: none", error)
+        self.assertIn(f"Use the attached image (Image {image_id}, Window {b}) in the next computer_use call.", error)
+        self.write.arun.assert_not_awaited()
+
+        await self.execute(f"p = {point}")
+        await self.click(window_scope(self.controller, self.app, b), (20, 30))
+        self.assertEqual(self.last_target(), self.captures[-1].pieces[0].image.target)
+
     async def test_image_only_alias_delivery_keeps_its_exact_mcp_scale_and_native_target(self):
         result = await self.execute("large = capture(alias, 'b', (4096, 1278))\nprint_image(large.png)")
         text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
@@ -413,12 +491,129 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.click(b, (140, 30))
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
         self.assertEqual(self.write.arun.call_args.args[0].intent.parameters["x"], 20)
-        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+        with self.assertRaisesRegex(ComputerUseError, "outside the selected window's captured scope"):
             await self.click(b, (20, 30))
-        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+        with self.assertRaisesRegex(ComputerUseError, "outside the selected window's captured scope"):
             await self.click(self.window, (140, 30))
+        with self.assertRaisesRegex(ComputerUseError, "gap outside"):
+            await self.click(b, (110, 30))
         await self.execute(f"click(scope({ref(self.app, 'b')}), (140, 30))")
         self.assertEqual(self.last_target(), canvas.pieces[1].image.target)
+
+    async def test_composite_bounds_use_the_delivered_image_size(self):
+        with patch(
+            "computer_use_mcp.runtime.prepare_image", side_effect=lambda png: prepare_image(png, max_dimension=110)
+        ):
+            result = await self.execute("combined = compose(app, ('a', 'b'))")
+        caption, = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
+        a, b = ref(self.app, "a"), ref(self.app, "b")
+        self.assertIn("Image: window 110x40 px", caption)
+        self.assertIn(f"Window {a} bounds (0, 0) to (49, 39).", caption)
+        self.assertIn(f"Window {b} bounds (60, 0) to (109, 39).", caption)
+        await self.click(window_scope(self.controller, self.app, b), (60, 39))
+        self.assertEqual(self.last_target().root_window, "b")
+        self.assertEqual(self.write.arun.call_args.args[0].intent.parameters["x"], 0)
+
+    async def test_standalone_chooser_and_parent_canvas_only_advertise_the_actual_window_point(self):
+        adopt(self.controller, self.app, directory(surface("a"), surface("b", parent="a"), focus="b"))
+
+        def chooser():
+            image = self.capture(self.app, "b", (750, 610), "red", (235, 99))
+            return publish(self.controller, self.app, "Save As chooser", image.png)
+
+        def parent_canvas():
+            document = self.capture(self.window, "a", (1220, 748), "white", (0, 30)).pieces[0].image
+            panel = self.capture(self.window, "b", (750, 610), "red", (235, 99)).pieces[0].image
+            parts = [WindowPart(image.target, image=image) for image in (document, panel)]
+            canvas, _ = InterfaceImagePipeline(self.controller).run(self.window, parts)
+            return publish(self.controller, self.window, "Document and chooser", canvas.png)
+
+        self.runtime.task_namespace.update(
+            chooser=lambda: self.runtime.executor.call(chooser),
+            parent_canvas=lambda: self.runtime.executor.call(parent_canvas),
+        )
+        result = await self.execute("standalone = chooser()\ncombined = parent_canvas()")
+        images = [block["_meta"]["computer-use"] for block in result["content"] if block["type"] == "image"]
+        standalone, combined = [item["caption"] for item in images]
+        target = ref(self.app, "b")
+        self.assertIn("750x610", standalone)
+        self.assertIn(f"Window reference: {target}", standalone)
+        self.assertIn('Capture: "capture-0"', standalone)
+        self.assertNotIn(f"Image point for window={target}:", standalone)
+        self.assertNotIn("Coordinate target=", standalone)
+        superseded = f"Window {target} coordinates superseded. Use Image {images[1]['imageId']} pixels."
+        self.assertIn(superseded, standalone)
+        self.assertIn("1220x748", combined)
+        self.assertIn(f"Image point for window={target}:", combined)
+        self.assertNotIn("superseded", combined)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn(superseded, text)
+        self.assertEqual(text.count(f"Image point for window={target}:"), 1)
+
+        panel = window_scope(self.controller, self.app, target)
+        point_error = await self.runtime.execute({
+            "executionId": len(self.events) + 1,
+            "code": (
+                "from computer_use import ComputerUseError\n"
+                "try:\n"
+                f"    app.point((195, 164), window={target})\n"
+                "except ComputerUseError as error:\n"
+                "    assert error.code == 'invalid_request' and error.effect == 'none'\n"
+                "    raise"
+            ),
+        })
+        self.assertTrue(point_error.get("isError"))
+        self.assertEqual(
+            point_error["content"][-1]["text"],
+            "ComputerUseError: the point is outside the selected window's captured scope\nEffect: none",
+        )
+        self.write.arun.assert_not_awaited()
+        with self.assertRaisesRegex(ComputerUseError, "outside the selected window's captured scope"):
+            await self.click(panel, (195, 164))
+        await self.click(panel, (430, 233))
+        request = self.write.arun.call_args.args[0]
+        self.assertEqual(request.target.capture, "capture-2")
+        self.assertEqual((request.intent.parameters["x"], request.intent.parameters["y"]), (195, 164))
+
+        streamed = [event["output"] for event in self.events if "output" in event]
+        image_captions = [block["_meta"]["computer-use"]["caption"] for block in streamed if block["type"] == "image"]
+        self.assertEqual(len(image_captions), 2)
+        self.assertTrue(all("Image point" not in caption for caption in image_captions))
+        self.assertTrue(all("superseded" not in caption for caption in image_captions))
+
+    async def test_same_response_keeps_distinct_window_hint_on_earlier_canvas(self):
+        result = await self.execute("combined = compose(app, ('a', 'b'))\nlatest = observe(window, 'a')")
+        captions = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
+        old, latest = captions
+        a, b = ref(self.app, "a"), ref(self.app, "b")
+        self.assertNotIn(f"Image point for window={a}:", old)
+        self.assertIn(f"Image point for window={b}:", old)
+        self.assertIn(f"Window {a} coordinates superseded.", old)
+        self.assertNotIn(f"Window {b} coordinates superseded.", old)
+        self.assertNotIn(f"Window {a} bounds", old)
+        self.assertIn(f"Window {b} bounds (120, 0) to (219, 79).", old)
+        self.assertNotIn("Coordinate target=", old)
+        self.assertIn(f"Image point for window={a}:", latest)
+        self.assertNotIn(" bounds ", latest)
+        await self.click(window_scope(self.controller, self.app, b), (140, 30))
+        self.assertEqual(self.last_target().root_window, "b")
+        await self.click(self.window)
+        self.assertEqual(self.last_target().capture, self.captures[-1].pieces[0].image.target.capture)
+
+    async def test_coordinate_hints_follow_capture_generation_even_when_printed_in_reverse(self):
+        result = await self.execute(
+            "earlier = capture(app, 'a', (100, 80), 'red')\n"
+            "later = capture(alias, 'a', (120, 90), 'white')\n"
+            "print_image(later.png)\nprint_image(earlier.png)"
+        )
+        captions = [block["_meta"]["computer-use"]["caption"] for block in result["content"] if block["type"] == "image"]
+        later, earlier = captions
+        self.assertIn("120x90", later)
+        self.assertIn("Image point for window=", later)
+        self.assertIn("100x80", earlier)
+        self.assertNotIn("Image point", earlier)
+        await self.click(self.window)
+        self.assertEqual(self.last_target().capture, "capture-1")
 
     async def test_delayed_composite_retains_only_members_without_a_newer_delivered_image(self):
         # Automatic observation sampled a parent and popup before a later
@@ -621,6 +816,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"Window {number} image: historical capture (1–2 native ns)", caption)
         self.assertIn("current scope unconfirmed", caption)
         self.assertNotIn("Coordinate target=", caption)
+        self.assertNotIn("superseded", caption)
         self.assertEqual(displayed, ["pixels"])
         self.assertIsNone(canvas.delivered)
         self.assertIsNone(state.delivered_image)

@@ -75,19 +75,32 @@ class InterfaceImagePipeline:
         members = dict(allowed(ui))
         source_directories = [ui._instance.directory]
         confirmed, aliases = {}, {}
-        requested = set()
+        requested, parent_bound = set(), set()
         images = []
         for part in parts:
-            key = part.target.root_window
+            identity = part.identity
+            key = identity.window
             if key is None:
                 continue
-            identity = WindowIdentity(key, part.target.surface, part.target.instance)
             current = members.get(key)
             current_matches = current is not None and (
                 current["window"], current["surface"], current["instance"]
             ) == (identity.window, identity.surface, identity.instance) and part.target.session == ui._instance.session
             source = part.source
-            confirmed[identity] = current_matches and (source is None or source.scope_confirmed)
+            # A parent-anchored capture supplies the member's pixels. The
+            # existing coordinate contract requires the member's own binding.
+            current_capture = current_matches and (source is None or source.scope_confirmed)
+            image = part.image
+            if current_matches and image is not None and image.rechecked_scope is not None:
+                # A later tree collection may replace the source observation
+                # without replacing this capture or its exact member proof.
+                current_capture = (
+                    image.target.root_window == key
+                    and image.rechecked_scope == image.member_scope(ui._instance.directory)
+                )
+            if current_capture and part.target.root_window != key:
+                parent_bound.add(identity)
+            confirmed[identity] = current_capture and identity not in parent_bound
             if not confirmed[identity] and source is not None:
                 directory = source.source_directory
                 if directory is not None and (
@@ -132,14 +145,12 @@ class InterfaceImagePipeline:
                 on_gap(ObservationGap("image", "observation_incomplete", detail))
 
         def related(child: WindowIdentity, parent: WindowIdentity) -> bool:
-            targets = {key: image.target for key, image in collected}
             for directory in source_directories:
                 rows = {item["window"]: item for item in directory["surfaces"]}
-                if all(key.window in rows and (
-                    rows[key.window]["window"], rows[key.window]["surface"], rows[key.window]["instance"]
-                ) == (key.window, targets[key].surface, targets[key].instance) for key in (child, parent)):
-                    if ancestor(directory, child.window, parent.window):
-                        return True
+                if ancestor(directory, child.window, parent.window) and all(
+                    key.window in rows and WindowIdentity.of(rows[key.window]) == key for key in (child, parent)
+                ):
+                    return True
             return False
 
         def checkpoint() -> None:
@@ -295,8 +306,12 @@ class InterfaceImagePipeline:
             "coordinate mapping unavailable for this window.",
             aliases[key] if aliases[key] is not None else key.window,
             capture_metadata(image.image)["startedAt"], capture_metadata(image.image)["completedAt"],
-        ) for key, image in collected if key in displayed and not confirmed[key])
+        ) for key, image in collected if key in displayed and not confirmed[key] and key not in parent_bound)
         notes.extend(historical)
+        notes.extend(template(
+            "Window {} image: captured through its parent scope; coordinate mapping unavailable for this window.",
+            aliases[key] if aliases[key] is not None else key.window,
+        ) for key in displayed if key in parent_bound)
         summary = self.metadata(canvas, collected, displayed, kind, aliases, confirmed)
         target = canvas.pieces[0].image.target if canvas.pieces else images[0][1].target
         self.register(
@@ -477,6 +492,10 @@ class InterfaceImagePipeline:
 
         fixed_ref = next((ref for ref, key in state.windows.items() if key == ui._anchor), None)
         application_target = "computer.app(" + repr(str(state.selector)) + ")"
+        regions = ()
+        if len(canvas.pieces) > 1 and not historical:
+            boxes = {piece.window: piece.box for piece in canvas.pieces if piece.scope_confirmed}
+            regions = tuple((ref, boxes[key]) for ref, key in state.windows.items() if key in boxes)
 
         def coordinate_target() -> str | None:
             # An older popup/composite can still be valid for one Window even
@@ -509,7 +528,10 @@ class InterfaceImagePipeline:
                 historical=bool(historical),
                 # pylint: disable-next=protected-access
                 selector=str(ui._instance.selector),
+                coordinateOwner=application,
+                coordinateGeneration=generation,
                 coordinateTarget=coordinate_target,
+                coordinateRegions=regions,
                 context=join((template(
                     "App {}; {}",
                     # pylint: disable-next=protected-access

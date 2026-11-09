@@ -54,6 +54,35 @@ import Foundation
         } catch let error as DriverError { precondition(error.code == .staleTarget) }
     }
 
+    @MainActor static func windowCatalogueUsesDirectoryTimestamps() throws {
+        let directory = NativeDirectory(state: NativeDesktopState(), session: "test-session")
+        let reply = directory.windowCatalogue(appName: "Google Chrome") {
+            ([], ["WindowServer catalogue unavailable"])
+        }
+        let observed = reply["observed"] as! [String: Any]
+        let startedAt = observed["startedAt"]!, completedAt = observed["completedAt"]!
+        precondition(type(of: startedAt) == Int64.self && type(of: completedAt) == Int64.self,
+            "directory timestamps must be integer milliseconds, unlike capture timestamps")
+        precondition(startedAt as! Int64 > 0 && completedAt as! Int64 >= startedAt as! Int64)
+        let wire = try JSONSerialization.data(withJSONObject: reply)
+        let parsed = try JSONSerialization.jsonObject(with: wire) as! [String: Any]
+        precondition(parsed["kind"] as? String == "windowCatalogue" && parsed["appName"] as? String == "Google Chrome")
+        precondition(parsed["stopReasons"] as? [String] == ["WindowServer catalogue unavailable"])
+    }
+
+    static func exactEndedApplications() {
+        let instances = ApplicationInstances<Int>()
+        let original = instances.id(for: 1)
+        let peer = instances.id(for: 2)
+        precondition(instances.ended.isEmpty)
+        instances.retire { $0 == 1 }
+        precondition(instances.ended == [original])
+        precondition(instances.instance(original) == nil && instances.instance(peer) == 2)
+        instances.retire { _ in false }
+        precondition(instances.ended == [original], "catalogue rereads must retain exact termination evidence")
+        precondition(instances.id(for: 3) != original)
+    }
+
     @MainActor static func main() throws {
         if CommandLine.arguments.dropFirst().first == "--stdio" {
             // The real Python encoder supplies these frames during the native
@@ -68,16 +97,18 @@ import Foundation
         let cases = try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as! [[String: Any]]
         for test in cases { precondition(accepted(test["query"]!) == test["valid"] as! Bool, test["name"] as! String) }
         try exactApplicationLookup()
+        try windowCatalogueUsesDirectoryTimestamps()
+        exactEndedApplications()
         let nodes: [String: Any] = ["kind": "nodes", "fields": ["AXRole"], "maxNodes": 1, "maxDepth": 0]
         for requested in ["none", "names", "full"] {
             var raw = nodes
             raw["actionDetail"] = requested
-            guard case .nodes(_, _, _, _, _, _, _, _, let detail, _) = try NativeInspectQuery(raw) else {
+            guard case .nodes(_, _, _, _, _, _, _, _, let detail, _, false) = try NativeInspectQuery(raw) else {
                 preconditionFailure("lost explicit node action profile")
             }
             precondition(detail.rawValue == requested)
         }
-        guard case .nodes(_, _, _, _, _, _, _, _, let defaultDetail, _) = try NativeInspectQuery(nodes) else {
+        guard case .nodes(_, _, _, _, _, _, _, _, let defaultDetail, _, false) = try NativeInspectQuery(nodes) else {
             preconditionFailure("lost ordinary observation profile")
         }
         precondition(defaultDetail == .full, "ordinary observations still collect complete action descriptions")
@@ -85,6 +116,15 @@ import Foundation
             var raw = nodes
             raw["actionDetail"] = invalid
             precondition(!accepted(raw))
+        }
+        var compact = nodes
+        compact["shareAttributeCatalogues"] = true
+        guard case .nodes(_, _, _, _, _, _, _, _, _, _, true) = try NativeInspectQuery(compact) else {
+            preconditionFailure("lost opt-in attribute catalogue sharing")
+        }
+        for invalid: Any in [NSNull(), false, 1, "true"] {
+            compact["shareAttributeCatalogues"] = invalid
+            precondition(!accepted(compact))
         }
         let within = (0..<17).map { "node-\($0)" }
         for visual in [false, true] {

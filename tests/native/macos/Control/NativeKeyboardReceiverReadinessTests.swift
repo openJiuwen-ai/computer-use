@@ -296,6 +296,76 @@ import ApplicationServices
                      "a changed position must not select the native setter's offset-zero route")
     }
 
+    @MainActor static func scopedWebTypingRefusalExplainsOnlyTheSoleBlockedRoute() throws {
+        let local = NativeKeyboardDeliveryProposal(interpreter: .init(kind: .localWeb, area: nil))
+        let unresolved = NativeKeyboardDeliveryProposal(interpreter: .init(kind: .observedWebOwnershipUnknown, area: nil))
+        precondition(local.refusalReason?.contains("local Web receiver") == true)
+        precondition(unresolved.refusalReason?.contains("text interpreter") == true)
+        precondition(NativeKeyboardDeliveryProposal(interpreter: local.interpreter, permitsQualifiedLocalInsertion: true)
+            .refusalReason == nil)
+        precondition(NativeKeyboardDeliveryProposal(interpreter: .init(kind: .remoteWeb, area: nil)).refusalReason == nil)
+
+        let state = NativeDesktopState()
+        func encode(
+            _ reason: String?, node: String? = nil, root: Any = "0", capture: Any = NSNull(),
+            keyboardSurface: Any = "window", blocked: [String] = [], alternate: Bool = false,
+            pending: String? = "receiver", focusedNode: String? = nil, originalNode: String? = nil
+        ) throws -> [String: Any] {
+            let binding: [String: Any] = [
+                "session": "s", "instance": "app", "rootWindow": root, "surface": "window",
+                "node": node as Any? ?? NSNull(), "capture": capture,
+            ]
+            let intent = try NativeIntent(["kind": "insert", "parameters": ["text": "g"]], mode: "write")
+            var target = binding
+            if let originalNode { target["node"] = originalNode }
+            let operation = NativeOperation(
+                timeoutMs: 5000, writable: true, intent: intent, target: target, release: {}, cancelActive: {})
+            defer { _ = operation.finish() }
+            let query = NativeInputQueryScope(
+                binding: (binding, blocked, node),
+                selection: NativeSelectionBasis(access: state.applications), scope: "window")
+            let plan = NativeInputContextPlan(
+                query: query, operation: operation, within: [], actuator: nil, receiver: nil, basis: [])
+            let declarations = NativePrimitiveDeclarations(
+                previous: [], op: operation, query: query, within: [], actuator: nil, receiver: nil, basis: [])
+            declarations.declare(.keyboard(.insert), supported: false, enabled: nil) { _ in
+                NativeReadiness(pending.map { [($0, "unknown")] } ?? [], preparationAllowed: false)
+            }
+            if alternate {
+                declarations.declare(.keyboard(.insert), supported: true, enabled: nil) { _ in NativeReadiness() }
+            }
+            return EncodeNativeInputContextPass.run(NativeSampledInput(
+                plan: plan, declarations: declarations, enabled: nil, foreground: true,
+                input: ["keyboardSurface": keyboardSurface, "focusedNode": focusedNode as Any? ?? NSNull()],
+                nativeRole: nil, actionsComplete: false,
+                applicationMenu: false, webTypingRefusal: reason))
+        }
+
+        for proposal in [local, unresolved] {
+            for encoded in try [
+                encode(proposal.refusalReason),
+                encode(proposal.refusalReason, node: "editor", focusedNode: "editor"),
+            ] {
+                precondition(encoded["unavailableReason"] as? String == proposal.refusalReason,
+                             "the confirmed Web Unicode refusal must reach the caller on its exact target")
+                let primitive = (encoded["primitives"] as! [[String: Any]])[0]
+                precondition(primitive["supported"] as? String == "no" && primitive["globalInput"] as? String == "no")
+            }
+        }
+        for encoded in try [
+            encode(nil), encode(local.refusalReason, node: "editor"), encode(local.refusalReason, root: NSNull()),
+            encode(local.refusalReason, capture: "point"), encode(local.refusalReason, pending: nil),
+            encode(local.refusalReason, keyboardSurface: NSNull()), encode(local.refusalReason, blocked: ["modal"]),
+            encode(local.refusalReason, alternate: true), encode(local.refusalReason, pending: "foreground"),
+            encode(local.refusalReason, node: "editor", focusedNode: "neighbor"),
+            encode(local.refusalReason, node: "editor", focusedNode: "editor", originalNode: "owner"),
+            encode(local.refusalReason, node: "editor", keyboardSurface: "neighbor", focusedNode: "editor"),
+            encode(local.refusalReason, node: "editor", alternate: true, focusedNode: "editor"),
+        ] {
+            precondition(encoded["unavailableReason"] == nil, "a Web typing reason must not replace another diagnosis")
+        }
+    }
+
     @MainActor static func comboFocusDoesNotRequireATextContract() {
         precondition(NativePointerFocusUnit.supportsEditorPreparation(role: kAXComboBoxRole, intent: .focus))
         for intent: NativeKeyboardIntent.Kind in [.insert, .replace, .paste, .key] {
@@ -303,7 +373,7 @@ import ApplicationServices
         }
     }
 
-    @MainActor static func savePanelContinuesOnlyTheProvedUnsentSuffix() throws {
+    @MainActor static func savePanelContinuesOnlyTheProvedUnsentSuffix() async throws {
         let objects = (91071...91077).map { AXUIElementCreateApplication(pid_t($0)) }
         let panel = objects[0], group = objects[1], original = objects[2]
         let sheet = objects[3], path = objects[4], foreign = objects[5], unrelatedSheet = objects[6]
@@ -419,6 +489,51 @@ import ApplicationServices
             try proof.validateFocus()
             preconditionFailure("late focus change must stop the remaining input")
         } catch let error as DriverError { precondition(error.code == .staleTarget) }
+
+        // A released slash triggers a new sheet. The old receiver can still be
+        // current when the next scalar asks for a proof.
+        focus = original
+        value = "/"
+        children = [group]
+        let delayed = try capture()!
+        var time: TimeInterval = 0, reads = 0
+        let resolved = try await Input.savePanelPathReceiver(
+            after: "/", now: { time }, pause: {
+                time += $0
+                children = [group, sheet]
+                focus = path
+            }, resolve: { prefix in
+                reads += 1
+                return try delayed.resolve(postedPrefix: prefix, state: state())
+            })
+        precondition(resolved?.authorizes(recipient, lifetime: service) == true && reads == 2,
+                     "the next scalar must wait for the exact receiver after the released slash")
+
+        time = 0
+        reads = 0
+        do {
+            _ = try await Input.savePanelPathReceiver(
+                after: "/", now: { time }, pause: { time += $0 }, resolve: { _ in reads += 1; return nil })
+            preconditionFailure("an unproved handoff must not fall back to the old name field")
+        } catch let error as DriverError {
+            precondition(error.code == .inputUnavailable && time > 0 && time <= 0.25 && reads > 1)
+        }
+        do {
+            _ = try await Input.savePanelPathReceiver(
+                after: "/", pause: { _ in throw CancellationError() }, resolve: { _ in nil })
+            preconditionFailure("cancellation must stop before another scalar")
+        } catch is CancellationError {}
+        for prefix in ["", "/t", "//"] {
+            reads = 0
+            _ = try await Input.savePanelPathReceiver(after: prefix, pause: { _ in
+                preconditionFailure("only the first released slash may wait for a handoff")
+            }, resolve: { checked in
+                precondition(checked == prefix)
+                reads += 1
+                return nil
+            })
+            precondition(reads == 1)
+        }
     }
 
     @MainActor static func cellSelectionUsesOneAddressedPreparation() async throws {
@@ -538,7 +653,8 @@ import ApplicationServices
         try selectedRangeRemainsInTheOriginalTable()
         comboFocusDoesNotRequireATextContract()
         qualifiedLocalInsertionKeepsTheOriginalSelectionAndScope()
-        try savePanelContinuesOnlyTheProvedUnsentSuffix()
+        try scopedWebTypingRefusalExplainsOnlyTheSoleBlockedRoute()
+        try await savePanelContinuesOnlyTheProvedUnsentSuffix()
         try await cellSelectionUsesOneAddressedPreparation()
         explicitAXSelectionWritabilityDoesNotExpandDefaultReads()
         try await firstKeyDownConsumesBeforeAwait()

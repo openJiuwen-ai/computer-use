@@ -71,6 +71,91 @@ import CoreGraphics
         ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
     }
 
+    private static func visibleWindows(_ raw: [[String: Any]], geometry: DesktopGeometry? = nil) -> [[String: Any]] {
+        raw.filter { item in
+            guard !AgentPointer.isDecoration(item), (item[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1 > 0,
+                let rawRect = item[kCGWindowBounds as String] as? [String: Any],
+                let rect = CGRect(dictionaryRepresentation: rawRect as CFDictionary), rect.width > 0, rect.height > 0
+            else { return false }
+            return geometry?.displays.contains(where: { $0.frame.intersects(rect) }) ?? true
+        }
+    }
+
+    /// The image and metadata requests share only window discovery and identity
+    /// retention. The latter never prepares capture or creates a pixel mapping.
+    private func windowRows(
+        _ raw: [[String: Any]], geometry: DesktopGeometry? = nil, appName: String? = nil,
+        frontmost: NSRunningApplication? = nil,
+        retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]
+    ) throws -> (windows: [[String: Any]], omitted: Int, unresolved: Bool) {
+        let nativeWindows = Dictionary(
+            NativeWindows.catalogue(raw).map { ($0.mapping.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var owners = [pid_t: NSRunningApplication]()
+        var windows = [[String: Any]](), omitted = 0, unresolved = false
+        for item in raw {
+            try RequestDiagnostics.checkCancellation()
+            let pid = (item[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+            let id = (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+            let native = id.flatMap { nativeWindows[$0] }
+            let app: NSRunningApplication?
+            if let native {
+                let owner = owners[native.process.pid] ?? NativeWindows.discoveryOwner(native)
+                owners[native.process.pid] = owner
+                app = owner
+            } else { app = pid.flatMap { NSRunningApplication(processIdentifier: $0) } }
+            let name = app?.localizedName ?? item[kCGWindowOwnerName as String] as? String ?? "Unknown application"
+            if let appName {
+                guard name.utf8.elementsEqual(appName.utf8) else { continue }
+                guard let app, let native else {
+                    unresolved = true
+                    continue
+                }
+                guard windows.count < 256 else {
+                    omitted += 1
+                    continue
+                }
+                guard let selector = applications.selector(for: app) else {
+                    unresolved = true
+                    continue
+                }
+                windows.append([
+                    "selector": selector, "window": retainWindow(native, app),
+                    "appIsForeground": frontmost.map { app.isEqual($0) } as Any? ?? NSNull(),
+                ])
+            } else if let geometry {
+                // Image rows include non-selectable windows for hit testing.
+                let rect = CGRect(dictionaryRepresentation: item[kCGWindowBounds as String] as! CFDictionary)!
+                var row: [String: Any] = [
+                    "app": String(name.prefix(512)),
+                    "title": String((item[kCGWindowName as String] as? String ?? "").prefix(512)),
+                    "rect": rectangle(geometry.rect(rect.intersection(geometry.bounds)))
+                ]
+                if let app, let selector = applications.selector(for: app) {
+                    row["selector"] = selector
+                    if let native { row["window"] = retainWindow(native, app) }
+                }
+                windows.append(row)
+            }
+        }
+        return (windows, omitted, unresolved)
+    }
+
+    func windowCatalogue(
+        appName: String, retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]
+    ) throws -> (windows: [[String: Any]], stopReasons: [String]) {
+        try BackgroundTarget.validateDesktop()
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]]
+        else { return ([], ["WindowServer catalogue unavailable"]) }
+        let result = try windowRows(
+            Self.visibleWindows(raw), appName: appName, frontmost: frontmost, retainWindow: retainWindow)
+        var reasons = [String]()
+        if result.omitted > 0 { reasons.append("\(result.omitted) matching windows exceeded the catalogue limit") }
+        if result.unresolved { reasons.append("Some matching windows have no confirmed native identity") }
+        return (result.windows, reasons)
+    }
+
     func read(maxDimension: Int = 4096, retainedCaptures: Set<String> = [], retainWindow: (NativeWindows.Window, NSRunningApplication) -> [String: Any]) async throws -> [String: Any] {
         AgentPointer.beginDesktopCapture()
         defer { AgentPointer.endDesktopCapture() }
@@ -185,42 +270,8 @@ import CoreGraphics
             Desktop changed: \(changes.joined(separator: "; ")) during capture. \
             Window catalogue describes the end of capture and may differ from the image.
             """
-        let visibleWindows = (rawWindows ?? []).filter { raw in
-            guard !AgentPointer.isDecoration(raw), (raw[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1 > 0,
-                let rawRect = raw[kCGWindowBounds as String] as? [String: Any],
-                let rect = CGRect(dictionaryRepresentation: rawRect as CFDictionary), rect.width > 0, rect.height > 0,
-                geometry.displays.contains(where: { $0.frame.intersects(rect) })
-            else { return false }
-            return true
-        }
-        let catalogue = Array(visibleWindows.prefix(256))
-        let nativeWindows = Dictionary(
-            NativeWindows.catalogue(catalogue).map { ($0.mapping.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var owners = [pid_t: NSRunningApplication]()
-        let windows: [[String: Any]] = try catalogue.map { raw in
-            try RequestDiagnostics.checkCancellation()
-            let rect = CGRect(dictionaryRepresentation: raw[kCGWindowBounds as String] as! CFDictionary)!
-            let pid = (raw[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
-            let id = (raw[kCGWindowNumber as String] as? NSNumber)?.uint32Value
-            let native = id.flatMap { nativeWindows[$0] }
-            let app: NSRunningApplication?
-            if let native {
-                let owner = owners[native.process.pid] ?? NativeWindows.discoveryOwner(native)
-                owners[native.process.pid] = owner
-                app = owner
-            } else { app = pid.flatMap { NSRunningApplication(processIdentifier: $0) } }
-            var item: [String: Any] = [
-                "app": String(
-                    (app?.localizedName ?? raw[kCGWindowOwnerName as String] as? String ?? "Unknown application")
-                        .prefix(512)), "title": String((raw[kCGWindowName as String] as? String ?? "").prefix(512)),
-                "rect": rectangle(geometry.rect(rect.intersection(geometry.bounds)))
-            ]
-            if let app, let selector = applications.selector(for: app) {
-                item["selector"] = selector
-                if let native { item["window"] = retainWindow(native, app) }
-            }
-            return item
-        }
+        let visibleWindows = Self.visibleWindows(rawWindows ?? [], geometry: geometry)
+        let catalogue = try windowRows(Array(visibleWindows.prefix(256)), geometry: geometry, retainWindow: retainWindow)
         let displays: [[String: Any]] = geometry.displays.enumerated().map { index, display in
             var item: [String: Any] = [
                 "name": "Display \(index + 1)", "rect": rectangle(geometry.rect(display.frame)),
@@ -231,7 +282,7 @@ import CoreGraphics
         }
         var observation: [String: Any] = [
             "canvas": ["width": geometry.width, "height": geometry.height], "displays": displays,
-            "windows": windows, "omittedWindows": max(0, visibleWindows.count - 256)
+            "windows": catalogue.windows, "omittedWindows": max(0, visibleWindows.count - 256)
         ]
         if let frontmost {
             var app: [String: Any] = ["name": frontmost.localizedName ?? "Unknown application"]

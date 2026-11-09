@@ -25,9 +25,10 @@ def create(*, controller: SessionController):
         if request.snapshot is not None:
             owner, snapshot = request.owner, request.snapshot
             controller.interfaces.validate_snapshot(owner, snapshot, allow_unknown=True)
-            if owner._instance.session is not None:
-                await refresh(controller, owner)
+            directory = await refresh(controller, owner) if owner._instance.session is not None else None
             controller.interfaces.validate_snapshot(owner, snapshot)
+            if directory is not None and request.on_pre_input_directory is not None:
+                request.on_pre_input_directory(directory)
         return request
 
     return validate

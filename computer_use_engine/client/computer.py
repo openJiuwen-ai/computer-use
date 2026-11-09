@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import sys
 import weakref
 
 from computer_use.diagnostics import local_failure
@@ -12,6 +13,7 @@ from computer_use.interaction.agent.requests import (
     ActOnElement,
     CloseWindow,
     DiscoverApps,
+    DiscoverWindows,
     ObserveDesktop,
     ObserveElement,
     ObserveText,
@@ -23,12 +25,13 @@ from computer_use.interaction.agent.requests import (
 from computer_use.interaction.requests import ComputerInput
 from computer_use.native.contracts import Intent
 from computer_use.protocol.primitives import nonempty
-from computer_use.protocol.validation import validate_key, validate_paste_text, validate_text
+from computer_use.protocol.validation import normalize_key, validate_paste_text, validate_text
 from computer_use.session.operations import operation
 
 from . import parameters
 from .execution import on_session, session_executor, synchronous
 from .handles import handle_created
+from .host import global_input_allowed
 from .targets import Target, as_target, element_target, image_target, target_request
 
 
@@ -53,16 +56,12 @@ def _text(text, paste=False):
         raise local_failure(str(error)) from error
 
 
-def _key(key):
-    if isinstance(key, str):
-        prefix, separator, name = key.rpartition("+")
-        if name == "Backspace":
-            key = prefix + separator + "BackSpace"
+def _key(key, controller):
+    platform = getattr(controller.transport, "platform", None)
     try:
-        validate_key(key)
+        return normalize_key(key, allow_macos_glyphs=platform == "macos" or platform is None and sys.platform == "darwin")
     except Exception as error:
         raise local_failure(str(error)) from error
-    return key
 
 
 def _window(window):
@@ -80,7 +79,7 @@ class Computer:
         self._executor = session_executor()
 
         def create():
-            controller = session_controller(allow_global_input=allow_global_input)
+            controller = session_controller(allow_global_input=allow_global_input and global_input_allowed())
             controller._executor = self._executor
             self._executor.register(controller)
             return controller
@@ -126,6 +125,15 @@ class Computer:
                 "app expects an integer reference or application selector string",
             )
         app = self._apps.get(key)
+        # An explicit textual lookup may create a new handle after the prior
+        # process ended. Previously returned handles keep their own lifetime.
+        if app is not None and isinstance(selector, str):
+            running = self._controller.state(app).running
+            if (
+                running is not None and selector != running.application
+                and self._controller.interfaces.windows.application_ended(running.session, running.application)
+            ):
+                app = None
         if app is None:
             app = App(self._controller, scope, _internal=True)
             self._apps[key] = app
@@ -135,6 +143,15 @@ class Computer:
     def list_apps(self):
         """Return application choices with id, display_name, and is_running fields."""
         return operation(lambda: self._controller.run(DiscoverApps()))
+
+    @synchronous
+    def list_windows(self, *, app_name):
+        """Return visible macOS window metadata for an exact application display name."""
+        try:
+            nonempty(app_name, "app_name")
+        except ValueError as error:
+            raise local_failure(str(error)) from error
+        return operation(lambda: self._controller.run(DiscoverWindows(app_name)))
 
     @synchronous
     def read(self, *, view="both", full=False):
@@ -172,7 +189,7 @@ class Computer:
 
     @synchronous
     def press_key(self, key):
-        return self._global_input("key", {"key": _key(key)})
+        return self._global_input("key", {"key": _key(key, self._controller)})
 
     @synchronous
     def paste(self, text):
@@ -299,7 +316,7 @@ class App:
     @synchronous
     def press_key(self, key, *, window=None):
         _window(window)
-        key = _key(key)
+        key = _key(key, self._controller)
         return operation(lambda: self._controller.run(UIKeyboard(self, "press_key", dict(key=key), window)))
 
     @synchronous
@@ -380,7 +397,7 @@ class Element:
 
     @synchronous
     def press_key(self, key):
-        return self._act("key", {"key": _key(key)})
+        return self._act("key", {"key": _key(key, self._controller)})
 
     @synchronous
     def focus(self):

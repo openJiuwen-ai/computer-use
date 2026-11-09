@@ -183,3 +183,46 @@ def test_model_keeps_each_image_label_and_partial_output_on_failure(model_server
         with Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1]))) as image:
             assert image.size == (12, 8)
             assert image.getpixel((6, 4))[:3] == color
+
+
+@pytest.mark.parametrize("repeat_click", [False, True])
+def test_model_image_labels_only_the_automatic_same_action_capture(model_server, tmp_path, repeat_click):
+    setup = (
+        inspect.getsource(popup_fixture)
+        + "\nglobals().update(vars(popup_fixture(capture_parent=True, image_action_chain=True)))"
+        + '\ninitial = app.read(view="both")'
+    )
+    click = "app.click(at=p, window=0)\n"
+    batch = (
+        f"p = app.point((4, 4), window=0)\n{click * (1 + repeat_click)}"
+        'app.press_key("super+a", window=0)\n'
+        'app.type_text("6", window=0)\n'
+        'app.press_key("Return", window=0)\n'
+        "print_image(initial.screenshot)\n"
+        'final = app.read(view="image", window=0)\n'
+        'print("fixture image acquisitions", sum(step[0] == "image" for step in port.trace))'
+    )
+    server = model_server([tool_call(setup), tool_call(batch), answer("Observed numeric edit")])
+    request = run_script(server, tmp_path)
+    _, text = tool_messages(request)
+    assert all(f"#{i} Window 0" in text for i in range(1, 5 + repeat_click))
+    assert "Captured after Action" not in text
+    assert f"fixture image acquisitions {3 + repeat_click}" in text
+    pairs = image_pairs(request)
+    assert len(pairs) == 4
+    expected_colors = ((238, 238, 238), (34, 187, 68), (238, 238, 238), (170, 17, 153))
+    for (_, url), color in zip(pairs, expected_colors, strict=True):
+        with Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1]))) as image:
+            assert image.getpixel((4, 4))[:3] == color
+    assert "Captured after Action #1." in pairs[1][0]
+    assert all("Captured after Action" not in caption for index, (caption, _) in enumerate(pairs) if index != 1)
+    assert "Image 2.1" in pairs[1][0] and "Window reference: 0" in pairs[1][0]
+    assert "Window 0 coordinates superseded. Use Image 2.3 pixels." in pairs[1][0]
+    results = json.loads((tmp_path / "mcp-results.json").read_text())
+    result = next(
+        event["result"]
+        for event in results
+        if event["result"].get("_meta", {}).get("computer-use", {}).get("executionId") == 2
+    )
+    images = [block["_meta"]["computer-use"] for block in result["content"] if block["type"] == "image"]
+    assert [image.get("capturedAfterAction") for image in images] == [1, None, None]

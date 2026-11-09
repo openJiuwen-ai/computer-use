@@ -23,6 +23,7 @@ from computer_use.interaction.read.presentation.rendering.document import prepar
 from computer_use.interaction.read.presentation.rendering.document.formatting import format_document
 from computer_use.json import dumps, utf8
 from computer_use.pipeline.core import Control
+from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
 
 from .baseline_store import DeliveredBaselineStore
@@ -310,6 +311,59 @@ class ObservationOutput:
             return False
         covered = {(replacement_scope[1], item[1], item[0], item[2]) for item in replacement_scope[2]}
         return all((scope[1], item[1], item[0], item[2]) in covered | ended for item in scope[2])
+
+    @staticmethod
+    def absent_transients(entries, last_write):
+        """Reduce earlier automatic transient bodies only with a complete later app sample."""
+        if len(entries) < 2 or last_write is None or not last_write["dispatched"]:
+            return {}
+        last = entries[-1]
+        latest = last["observation"]
+        if (
+            last["superseded"] or latest["write"] is not last_write
+            or latest["source"] is not last_write["source"] or latest.get("presentationGap")
+            or not any(entry["observation"].get("transientWindow") for entry in entries[:-1])
+        ):
+            return {}
+
+        def complete(observation):
+            data = observation_data(observation.get("sourceState", observation["state"]))
+            directory = data["directory"] if data and data["content_available"] and not data["partial"] else None
+            if (
+                directory is not None and directory.get("kind") == "surfaces"
+                and directory.get("rootDiscoveryComplete") is True and not directory["stopReasons"]
+                and not data["gaps"]
+                and any(record["included"] and record["lifecycle"] == "observed" for record in data["window_coverage"])
+            ):
+                return directory
+            return None
+
+        current = complete(latest)
+        if current is None:
+            return {}
+        present = {item["window"] for item in current["surfaces"]}
+        absent = {}
+        for entry in entries[:-1]:
+            observation = entry["observation"]
+            transient = observation.get("transientWindow")
+            write = observation["write"]
+            if (
+                transient is None or entry["pinned"] or entry["superseded"] or observation.get("presentationGap")
+                or observation["state"].get("preparation")
+                or observation["source"] is not latest["source"] or write is last_write
+                or write is None or not write["dispatched"] or write["source"] is not observation["source"]
+            ):
+                continue
+            directory = complete(observation)
+            identity, ref = transient
+            if (
+                directory is not None and identity.window not in present
+                and (directory["session"], directory["application"]) == (current["session"], current["application"])
+                and directory["observed"]["completedAt"] < current["observed"]["startedAt"]
+                and any(WindowIdentity.of(item) == identity for item in directory["surfaces"])
+            ):
+                absent[id(entry)] = ref
+        return absent
 
     def invalidate(self, source):
         self.presenter.invalidate(source)

@@ -13,6 +13,7 @@ from computer_use.interaction.query.instances.scope import allowed, refresh, val
 from computer_use.interaction.requests import ExecuteAction
 from computer_use.native.contracts import Intent
 from computer_use.session.interface_images import signature
+from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.surface_content import display_host
 from computer_use.session.windows import WindowReferences
 
@@ -27,6 +28,21 @@ if TYPE_CHECKING:
 from .membership import compatible_membership
 
 
+def note_pending_point_image(controller, ui, error, *, after=None):
+    """Retain an exact pending image for delivery feedback only."""
+    binding = getattr(ui, "_window_identity", None)
+    if binding is None or not controller.adapters.image_delivery_required():
+        return
+    state = ui._instance
+    identity = WindowIdentity(binding.root_window, binding.surface, binding.instance)
+    pending = state.sampled_window_images.get(identity)
+    if pending is None or pending.delivered is not None or (after is not None and pending.generation <= after):
+        return
+    ref = next((ref for ref, window in state.windows.items() if window == identity.window), None)
+    if ref is not None:
+        error._pending_point_image = (pending.png, ref)
+
+
 def input_image(controller, ui, image=None, *, current=True):
     """Resolve and validate one delivered canvas without reading the desktop."""
     if current:
@@ -37,9 +53,12 @@ def input_image(controller, ui, image=None, *, current=True):
             if ui._anchor is not None
             else ui._instance.delivered_image
         )
-    if image is None or current and (image.expired or hashlib.sha256(image.png).digest() != image.digest):
-        raise local_failure("this UI has no current image mapping", "snapshot_expired")
     adapters = controller.adapters
+    if image is None or current and (image.expired or hashlib.sha256(image.png).digest() != image.digest):
+        error = local_failure("this UI has no current image mapping", "snapshot_expired")
+        if image is None and not current:
+            note_pending_point_image(controller, ui, error)
+        raise error
     if current and adapters.image_delivery_required() and image.delivered != adapters.image_delivery_epoch():
         raise local_failure("this image has not been delivered to the model", "input_unavailable")
     return image

@@ -340,7 +340,13 @@ def decode_selection_basis(value):
 
 _inspect_queries = {
     "launch": obj(dict(kind=enum("launch"))),
-    "applications": obj(dict(kind=enum("applications"), path=identity.optional(), installation=identity.optional())),
+    "applications": obj(
+        {
+            "kind": enum("applications"), "path": identity.optional(), "installation": identity.optional(),
+            "includeEnded": boolean().optional(),
+        }
+    ),
+    "windowCatalogue": obj(dict(kind=enum("windowCatalogue"), appName=identity)),
     "surfaceBatch": obj(
         dict(kind=enum("surfaceBatch"), applications=array(identity, min=1, max=64), profile=enum("visual").optional())
     ),
@@ -379,6 +385,7 @@ _inspect_queries = {
             advertisedFields=array(identity, min=1, max=128).optional(),
             textContent=boolean().optional(),
             focusedElement=boolean().optional(),
+            shareAttributeCatalogues=enum(True).optional(),
             actionDetail=enum("none", "names", "full").optional(),
             followRelations=array(identity, min=1, max=16).optional(),
             focusedFields=array(enum("Text.CaretRange"), min=1, max=1).optional(),
@@ -414,6 +421,10 @@ def decode_inspect_query(value):
         "installation" in result or not result["path"].startswith("/")
     ):
         raise ValueError("protocol: invalid exact application query")
+    if "includeEnded" in result and (
+        result["includeEnded"] is not True or "path" in result or "installation" in result
+    ):
+        raise ValueError("protocol: ended lifetimes require a full application query")
     if "profile" in result and "includeAccessibility" in result:
         raise ValueError("protocol: surface profile and legacy accessibility flag cannot be combined")
     if "currentReceiver" in result and (
@@ -739,7 +750,7 @@ def decode_execution_result(method, value, *, retain_observation=False):
     if (
         method == "inspect"
         and isinstance(value, dict)
-        and value.get("kind") in ("applications", "surfaces", "roots", "surfaceBatch")
+        and value.get("kind") in ("applications", "surfaces", "roots", "surfaceBatch", "windowCatalogue")
     ):
         return decode_directory(value)
     if method == "inspect" and isinstance(value, dict) and value.get("kind") == "observation":

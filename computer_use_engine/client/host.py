@@ -12,6 +12,8 @@ from .handles import set_handle_handler
 
 __all__ = [
     "computer_host",
+    "disable_global_input_for_process",
+    "global_input_allowed",
     "lookup_continuation_scope",
     "record_structured_observations",
     "set_action_handler",
@@ -22,6 +24,18 @@ __all__ = [
     "set_preview_handler",
     "set_text_page_handler",
 ]
+
+_global_input_allowed = True
+
+
+def disable_global_input_for_process():
+    """Apply the host's input ceiling before the worker constructs its sessions."""
+    global _global_input_allowed
+    _global_input_allowed = False
+
+
+def global_input_allowed():
+    return _global_input_allowed
 
 
 def computer_host(factory=None):

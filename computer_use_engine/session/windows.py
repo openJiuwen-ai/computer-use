@@ -41,6 +41,7 @@ class WindowReferences:
         self._aliases = {}
         self._applications = {}
         self._application_selectors = {}
+        self._ended_applications = set()
         self._physical = {}
         self._variants = {}
         self._target_captures = WeakKeyDictionary()
@@ -55,14 +56,26 @@ class WindowReferences:
             state.name = name
         return state
 
+    def retire_applications(self, session, selectors):
+        """Record exact ended lifetimes from the native application catalogue."""
+        self._ended_applications.update((session, selector) for selector in selectors)
+
+    def application_ended(self, session, application):
+        return (session, application) in self._ended_applications
+
     def remember_application_selector(self, selector, state):
-        """Keep a resolved public selector bound to the first exact native instance."""
-        self._application_selectors.setdefault((state.session, selector), state.selector)
+        """Reuse the first exact native instance until its lifetime ends."""
+        key = (state.session, selector)
+        previous = self._application_selectors.get(key)
+        if previous is None or self.application_ended(state.session, previous):
+            self._application_selectors[key] = state.selector
 
     def application_for_selector(self, session, selector):
         """Reuse verified identity across wrappers without looking up another process."""
         application = self._application_selectors.get((session, selector))
-        return self._applications.get((session, application)) if application is not None else None
+        if application is None or self.application_ended(session, application):
+            return None
+        return self._applications.get((session, application))
 
     def clear_lookup_caches(self):
         """Release optional name facts when this driver's session is invalidated."""
@@ -76,19 +89,19 @@ class WindowReferences:
             state.lookup_results.clear()
             discard_lookup_continuation(state)
 
-    def register_directory(self, directory, name=""):
-        # App reads and desktop rows feed the same lifetime authority. Visible
-        # positive evidence can restore membership after hiding; an already
-        # ended native generation can never be republished as a usable ref.
+    def register_directory(self, directory, name="", *, identity_only=False):
+        # App reads and desktop rows feed the same lifetime authority. A
+        # metadata-only catalogue publishes references without replacing it.
         state = self.application(directory["session"], directory["application"], name)
-        state.reconcile(
-            directory,
-            DirectoryMembership(
-                not directory.get("stopReasons", ()),
-                tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in directory["surfaces"]),
-                tuple(WindowIdentity.of(item) for item in directory.get("endedWindows", ())),
-            ),
-        )
+        if not identity_only:
+            state.reconcile(
+                directory,
+                DirectoryMembership(
+                    not directory.get("stopReasons", ()),
+                    tuple(WindowMembership(WindowIdentity.of(item), Knowledge.YES) for item in directory["surfaces"]),
+                    tuple(WindowIdentity.of(item) for item in directory.get("endedWindows", ())),
+                ),
+            )
         aliases = {}
         for item in directory["surfaces"]:
             entry = WindowEntry(
@@ -116,6 +129,11 @@ class WindowReferences:
                     self._physical[physical] = ref
             self._aliases[entry.key] = ref
             previous = self._variants[ref].get(entry.application)
+            if identity_only:
+                state.retain_visible_window_identity(entry.identity)
+                if previous is not None:
+                    aliases[str(ref)] = item["window"]
+                    continue
             if not name and previous is not None:
                 entry = WindowEntry(entry.session, entry.application, previous.name, entry.identity, directory)
             self._variants[ref][entry.application] = entry

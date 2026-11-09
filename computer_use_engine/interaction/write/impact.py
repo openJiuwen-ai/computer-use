@@ -7,10 +7,28 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from computer_use.native.contracts import Dispatch, InputEffect
+
 if TYPE_CHECKING:
     from computer_use.interaction.write.progress import WriteRunState
     from computer_use.native.contracts import HostPolicy
     from computer_use.protocol.records import Record
+
+
+def invoked_ax_menu_target(state: WriteRunState):
+    """Use the receipt of the final native step, not an admission barrier."""
+    if not state.steps:
+        return None
+    command, receipt = state.steps[-1].command, state.steps[-1].receipt
+    if command.prepare or command.intent.kind != "openMenu" or receipt is None or receipt.dispatch != Dispatch.UNKNOWN:
+        return None
+    actual = receipt.impact
+    expected = InputEffect("input", "element", "accessibility", "AXShowMenu", "invoked")
+    if actual is not None and actual.coverage == "complete" and actual.omitted_effects == 0 and tuple(
+        effect for effect in actual.effects if effect.stage == "input"
+    ) == (expected,):
+        return receipt.target
+    return None
 
 
 def action_impact(state: WriteRunState, policy: HostPolicy) -> Record:

@@ -677,9 +677,10 @@ import ApplicationServices
         guard let original = read.popupOwner, original.matches(proof.context, same: { CFEqual($0, $1) }),
             CFEqual(read.element, proof.element)
         else { throw DriverError("the original popup observation changed", code: .staleTarget) }
-        // One existing scope query, with the original owner as discovery hint.
-        // The same result proves the fixed root and both modal boundaries.
-        let scope = try inputScope(requested, canonicalize: false, observed: read, popupOwner: proof.context.owner)
+        // A list uses its document as discovery hint. A split submenu is
+        // already the working surface; its reverse branch owner is separate.
+        let ownerHint = proof.context.kind == .list ? proof.context.owner : nil
+        let scope = try inputScope(requested, canonicalize: false, observed: read, popupOwner: ownerHint)
         try read.validate()
         guard scope.blocked.isEmpty else { return scope.blocked }
         guard let graph = scope.windowEvidence else {

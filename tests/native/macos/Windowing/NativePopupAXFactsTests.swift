@@ -58,7 +58,7 @@ import Foundation
         )
     }
 
-    enum Route: CaseIterable { case role, subrole, modal, parent, children, windowID }
+    enum Route: CaseIterable { case role, subrole, modal, parent, children, windowID, window }
     enum QueryStop: Error { case cancelled }
 
     @MainActor fileprivate static func query(_ route: Route, _ proxy: Proxy, remaining: Double = 0.1) throws {
@@ -76,6 +76,7 @@ import Foundation
         case .parent: _ = try facts.parent(proxy.element)
         case .children: _ = try facts.children(proxy.element)
         case .windowID: _ = try facts.windowID(proxy.element)
+        case .window: _ = try facts.window(proxy.element)
         }
     }
 
@@ -121,7 +122,7 @@ import Foundation
             },
             value: { element, attribute in
                 self.read(element)
-                if attribute == kAXParentAttribute { return self.parent }
+                if [kAXParentAttribute, kAXWindowAttribute].contains(attribute) { return self.parent }
                 if attribute == kAXModalAttribute { return kCFBooleanFalse }
                 return "AXGroup" as CFString
             },

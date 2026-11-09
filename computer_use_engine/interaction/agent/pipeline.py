@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
+from computer_use.identity import FrozenRecord
 from computer_use.interaction.query.instances.membership import ancestor, ancestry, in_scope
 from computer_use.interaction.query.instances.pipeline import ApplicationDiscoveryPipeline
 from computer_use.interaction.query.instances.scope import (
@@ -53,6 +54,7 @@ from .requests import (
     ActOnElement,
     CloseWindow,
     DiscoverApps,
+    DiscoverWindows,
     ObserveDesktop,
     ObserveElement,
     ObserveText,
@@ -70,7 +72,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import ElementSnapshot, UIHandle
     from computer_use.pipeline.core import Control, Step
     from computer_use.protocol.records import Record
-    from computer_use.types import ActionResult, AppInfo, ElementPath, Observation, Point, TextPage
+    from computer_use.types import ActionResult, AppInfo, ElementPath, Observation, Point, TextPage, WindowCatalogue
 
 
 class AgentInterfacePipeline:
@@ -103,7 +105,7 @@ class AgentInterfacePipeline:
         self.windows = WindowReferences()
         controller.reader.window_registry = self.windows
         self.text_cursors = TextCursors()
-        self.discovery = ApplicationDiscoveryPipeline(controller.reader.directory, self.references)
+        self.discovery = ApplicationDiscoveryPipeline(controller.reader.directory, self.references, self.windows)
         self.read_pipeline = InterfaceReadPipeline(controller)
 
     def application(self, ref: int) -> Record:
@@ -125,6 +127,67 @@ class AgentInterfacePipeline:
 
     async def list_applications(self) -> list[AppInfo]:
         return await self.discovery.run()
+
+    async def list_windows(self, app_name: str) -> WindowCatalogue:
+        catalogue = await self.controller.reader.directory.window_catalogue(app_name)
+        items = catalogue["windows"]
+        refs = self._publish_window_catalogue(items, catalogue["observed"], app_name=app_name)
+        windows = []
+        for index, item in enumerate(items):
+            ref = refs.get(str(index))
+            if ref is not None:
+                app_id = self.references.publish(ApplicationEntry(catalogue["session"], item["selector"], app_name, True))
+                windows.append(FrozenRecord(dict(
+                    app_id=app_id,
+                    window_ref=ref,
+                    title=item["window"]["title"] or None,
+                    app_is_foreground=item["appIsForeground"],
+                )))
+        reasons = tuple(catalogue["stopReasons"])
+        if len(windows) != len(items):
+            reasons += ("Some matching windows no longer have a usable reference.",)
+        return FrozenRecord(dict(windows=tuple(windows), stop_reasons=reasons))
+
+    def _publish_window_catalogue(self, items, observed, *, app_name=None):
+        # Both desktop pixels and metadata-only discovery publish the same
+        # positive visible-window subset, never a complete AX directory.
+        catalogues = {}
+        names = {}
+        for item in items:
+            if "window" not in item or not item.get("selector"):
+                continue
+            selector = item["selector"]
+            if selector not in catalogues:
+                names[selector] = app_name if app_name is not None else item["app"]
+                catalogues[selector] = dict(
+                    kind="surfaces",
+                    session=self.controller.transport.session,
+                    platform=self.controller.transport.platform,
+                    application=selector,
+                    observed=observed,
+                    surfaces=[],
+                    focusedWindow=None,
+                    rootDiscoveryComplete=False,
+                    stopReasons=["desktop catalogue is a visible-window subset"],
+                    provider=dict(status="notRequested", attribute=None, writeStatus=None),
+                )
+            catalogues[selector]["surfaces"].append(item["window"])
+        by_selector = {
+            selector: {
+                window: int(ref)
+                for ref, window in self.windows.register_directory(
+                    directory, names[selector], identity_only=app_name is not None
+                ).items()
+            }
+            for selector, directory in catalogues.items()
+        }
+        refs = {}
+        for index, item in enumerate(items):
+            if "window" in item and item.get("selector") in by_selector:
+                ref = by_selector[item["selector"]].get(item["window"]["window"])
+                if ref is not None:
+                    refs[str(index)] = ref
+        return refs
 
     async def read(
         self,
@@ -181,38 +244,7 @@ class AgentInterfacePipeline:
                     applications[selector] = self.references.publish(
                         ApplicationEntry(self.controller.transport.session, selector, name, True)
                     )
-            window_refs = {}
-            catalogues = {}
-            for index, item in enumerate(desktop["windows"]):
-                if "window" not in item or not item.get("selector"):
-                    continue
-                selector = item["selector"]
-                if selector not in catalogues:
-                    catalogues[selector] = dict(
-                        kind="surfaces",
-                        session=self.controller.transport.session,
-                        platform=self.controller.transport.platform,
-                        application=selector,
-                        observed=observed["observed"],
-                        surfaces=[],
-                        focusedWindow=None,
-                        rootDiscoveryComplete=False,
-                        stopReasons=["desktop catalogue is a visible-window subset"],
-                        provider=dict(status="notRequested", attribute=None, writeStatus=None),
-                    )
-                catalogues[selector]["surfaces"].append(item["window"])
-            aliases = {
-                selector: self.windows.register_directory(
-                    directory, next(item["app"] for item in desktop["windows"] if item.get("selector") == selector)
-                )
-                for selector, directory in catalogues.items()
-            }
-            for index, item in enumerate(desktop["windows"]):
-                if "window" in item and item.get("selector") in aliases:
-                    by_window = {window: int(ref) for ref, window in aliases[item["selector"]].items()}
-                    reference = by_window.get(item["window"]["window"])
-                    if reference is not None:
-                        window_refs[str(index)] = reference
+            window_refs = self._publish_window_catalogue(desktop["windows"], observed["observed"])
             document = observed["document"]
             lines.append(
                 replace(
@@ -598,6 +630,12 @@ class AgentInterfacePipeline:
             root_identity = WindowIdentity(ui._anchor, fixed.surface, fixed.instance)
             require_identity(ui, root_identity)
             identity = ui._input_context or root_identity
+            evidence = instance.evidence.get(identity)
+            if evidence is not None and evidence.lifetime is WindowLifetime.RETIRED:
+                # A completed close can end a delivered child before the
+                # next observation is delivered. Keep the explicitly pinned
+                # root; the normal write path still proves its live receiver.
+                identity = root_identity
         else:
             identity = instance.input_context
         if identity is None:
@@ -643,6 +681,30 @@ class AgentInterfacePipeline:
             return None
         return replace(target, node=None)
 
+    @staticmethod
+    def _refreshed_key_root(ui: UIHandle, selected: WindowIdentity, directory: DirectoryFacts) -> Binding | None:
+        """Use positive root focus when a delivered child no longer has a current window entry."""
+        fixed = getattr(ui, "_window_identity", None)
+        if (
+            directory["platform"] != "macos" or fixed is None or fixed.root_window == selected.window
+            or directory.get("focusedWindow") != fixed.root_window
+        ):
+            return None
+        evidence = ui._instance.evidence.get(selected)
+        if (
+            evidence is None or evidence.lifetime is not WindowLifetime.RETAINED
+            or evidence.membership is not Knowledge.UNKNOWN
+            or any(item["window"] == selected.window for item in directory["surfaces"])
+        ):
+            return None
+        root = ui._instance.members.get(fixed.root_window)
+        if (
+            root is not None and root["nativeWindow"] and root["accessibility"] and root["parentState"] == "none"
+            and WindowIdentity.of(root) == WindowIdentity(fixed.root_window, fixed.surface, fixed.instance)
+        ):
+            return fixed
+        return None
+
     async def keyboard(
         self, ui: UIHandle, method: str, parameters: Record, control: Control, *, global_input=False, target=None
     ) -> ActionResult:
@@ -652,13 +714,17 @@ class AgentInterfacePipeline:
         # may turn this operation into input in another document.
         validate_session(self.controller, ui)
         intent = Intent({"type_text": "insert", "press_key": "key"}.get(method, method), parameters, global_input)
-        if target is None and method == "press_key" and not global_input:
+        select_key_context = target is None and method == "press_key" and not global_input
+        if select_key_context:
             command_target = self._application_command_target(ui, parameters.get("key"))
             if command_target is not None:
                 return await self.write.arun(ExecuteAction(ui, intent, command_target), control)
         target = target or self.keyboard_context(ui, require_observed=ui._anchor is None)
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
-        await refresh(self.controller, ui)
+        directory = await refresh(self.controller, ui)
+        if select_key_context and (root := self._refreshed_key_root(ui, identity, directory)) is not None:
+            target = root
+            identity = WindowIdentity(root.root_window, root.surface, root.instance)
         require_identity(ui, identity, current=True)
         if ui._anchor is not None and not ancestor(ui._instance.directory, identity.window, ui._anchor):
             raise local_failure(
@@ -773,6 +839,8 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
             return await api.read_text(request.owner, request.snapshot, request.cursor, request.length)
         if isinstance(request, DiscoverApps):
             return await api.list_applications()
+        if isinstance(request, DiscoverWindows):
+            return await api.list_windows(request.app_name)
         if isinstance(request, ResolveElement):
             snapshot = await api.element(owner, request.target, request.timeout_ms, control, fresh=request.fresh)
             if request.window is not None and type(request.target) is int:

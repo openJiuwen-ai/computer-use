@@ -80,8 +80,11 @@ enum NativeSelectedTextProviderQualification {
         }
         try check()
         guard let elementID = nodeID(element), let pid = actualPID(element), pid > 0 else { return nil }
+        // Match the 40-parent-hop input context observation budget, with fresh
+        // provider ancestry for this exact editor at the point of qualification.
+        let maximumParentHops = 40
         var current = element, seen = [Node]()
-        for _ in 0..<24 {
+        for depth in 0...maximumParentHops {
             try check()
             guard !seen.contains(where: { same($0, current) }), let currentRole = role(current) else { return nil }
             seen.append(current)
@@ -92,7 +95,7 @@ enum NativeSelectedTextProviderQualification {
                 return ChromiumWebProof(actualPID: pid, elementNodeID: elementID, webAreaNodeID: areaID)
             }
             if ["AXWindow", "AXSheet", "AXApplication"].contains(currentRole) { return nil }
-            guard let next = parent(current) else { return nil }
+            guard depth < maximumParentHops, let next = parent(current) else { return nil }
             current = next
         }
         return nil

@@ -15,6 +15,7 @@ from computer_use.session.interfaces import ApplicationEntry
 if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.directory.service import NativeDirectory
     from computer_use.session.interfaces import ApplicationReferences
+    from computer_use.session.windows import WindowReferences
     from computer_use.types import AppInfo
 
 
@@ -25,12 +26,15 @@ class ApplicationDiscoveryPipeline:
     catalogue discovery occurs when the selected App or desktop is observed.
     """
 
-    def __init__(self, directory: NativeDirectory, references: ApplicationReferences) -> None:
-        self.directory, self.references = directory, references
+    def __init__(
+        self, directory: NativeDirectory, references: ApplicationReferences, windows: WindowReferences
+    ) -> None:
+        self.directory, self.references, self.windows = directory, references, windows
 
     async def run(self) -> list[AppInfo]:
         """Publish applications only; concrete windows have their own references."""
-        directory = await self.directory.applications()
+        directory = await self.directory.applications(include_ended=True)
+        self.windows.retire_applications(directory["session"], directory.get("endedApplications", ()))
         result = []
         for application in directory["applications"]:
             entry = ApplicationEntry(

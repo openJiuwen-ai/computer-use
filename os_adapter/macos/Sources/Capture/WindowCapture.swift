@@ -10,6 +10,29 @@ import ApplicationServices
     private let sharing: WindowSharing?
     init(sharing: WindowSharing? = nil) { self.sharing = sharing }
 
+    /// A successful window capture can contain no visible pixels. Check only
+    /// formats whose alpha can be preserved exactly in an 8-bit alpha bitmap.
+    static func requireVisiblePixels(_ image: CGImage) throws {
+        guard !image.isMask, image.bitsPerComponent == 8, !image.bitmapInfo.contains(.floatComponents) else { return }
+        switch image.alphaInfo {
+        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly: break
+        default: return
+        }
+        guard let alpha = CGContext(
+            data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+        ), let data = alpha.data else { return }
+        alpha.setBlendMode(.copy)
+        alpha.interpolationQuality = .none
+        alpha.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bytes = data.assumingMemoryBound(to: UInt8.self)
+        for row in 0..<image.height {
+            let pixels = UnsafeBufferPointer(start: bytes + row * alpha.bytesPerRow, count: image.width)
+            if pixels.contains(where: { $0 != 0 }) { return }
+        }
+        throw DriverError("window screenshot contains no visible pixels", code: .observationIncomplete)
+    }
+
     func validate(_ mapping: WindowMapping) throws { try observation.validate(mapping) }
 
     func validateInputScope() throws { try observation.validateObservation() }
@@ -304,6 +327,7 @@ import ApplicationServices
             throw DriverError("unexpected window screenshot dimensions")
         }
         try RequestDiagnostics.checkObservationBudget()
+        try Self.requireVisiblePixels(image)
         let result: String
         do {
             // Includes ImageIO PNG finalization and its wire base64 conversion.

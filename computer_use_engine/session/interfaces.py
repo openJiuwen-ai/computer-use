@@ -201,6 +201,10 @@ class InstanceState:
     # actual model-delivery baselines. They never authorize or reject input.
     content_presentations: dict[tuple, dict] = field(default_factory=dict)
 
+    def retain_visible_window_identity(self, identity: WindowIdentity) -> None:
+        """Remember a selectable identity without replacing current membership or AX facts."""
+        self.evidence.setdefault(identity, WindowEvidence(identity, Knowledge.UNKNOWN))
+
     def reconcile(self, directory: NativeDirectory, facts: DirectoryMembership) -> None:
         """Replace current authorization facts while retaining unknown lifetimes.
 

@@ -705,7 +705,13 @@ class Connection:
         )
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        pure = method in ("capture", "locatePoint") or method == "inspect" and params.get("query", {}).get("kind") == "capturedText"
+        # These queries can leave an admitted lease unconfirmed without
+        # sending input. The write pipeline retains earlier effects.
+        pure = method in ("capture", "locatePoint") or (
+            method == "inspect" and params["query"]["kind"] in ("capturedText", "inputContext", "surfaces")
+        )
+        # macOS begin may acquire resources, but the requested action needs the returned token.
+        write_admission = method == "begin" and params["mode"] == "write" and self.platform == "macos"
         pending = dict(
             id=id__value,
             method=method,
@@ -715,6 +721,7 @@ class Connection:
             cancelSent=False,
             startedAt=_now(),
             pure=pure,
+            writeAdmission=write_admission,
         )
 
         def timeout():
@@ -937,19 +944,24 @@ class Connection:
         self._pending = None
         if pending_value is not None:
             pure, target = pending_value["pure"], pending_value["target"] or {}
+            write_admission = pending_value["writeAdmission"]
+            no_action = pure or write_admission
+            if write_admission:
+                reason = "requested action was not dispatched; native operation admission unconfirmed"
+            else:
+                reason = "read-only request failed" if pure else "command may have partially executed"
             failure = ComputerUseError(
                 dict(
-                    code="execution_failed" if pure else "execution_unknown",
-                    effect="none" if pure else "possible",
+                    code="execution_failed" if no_action else "execution_unknown",
+                    effect="none" if no_action else "possible",
                     target=target.get("selector", target.get("screen", pending_value["method"])),
-                    detail=(
-                        f"{error}; {'read-only request failed' if pure else 'command may have partially executed'}"
-                        f"; current observation invalidated"
-                    ),
+                    detail=f"{error}; {reason}; current observation invalidated",
                 ),
                 cause=error,
                 method=pending_value["method"],
             )
+            if write_admission:
+                failure.scope_cleanup = "unknown"
             diagnostic(
                 dict(
                     kind="command_end",

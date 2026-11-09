@@ -21,6 +21,7 @@ from computer_use.interaction.query.instances.scope import adopt
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.facts.normalize import normalize_facts
+from computer_use.interaction.read.limits import DEFAULT_WINDOW_MAX_NODES
 from computer_use.interaction.read.model import AppObservation
 from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.interaction.read.presentation.document import DisplayDocument
@@ -29,11 +30,12 @@ from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, 
 from computer_use.interaction.read.views.related import RelatedRead
 from computer_use.native.scopes import WorkingWindow
 from computer_use.protocol.captures import decode_capture
-from computer_use.protocol.observation import NativeNode, NativeObservation, Relation
+from computer_use.protocol.observation import NativeNode, NativeObservation, ReadIssue, Relation
 from computer_use.session import images
 from computer_use.session.events import set_observation_handler
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
+from computer_use.session.operations import operation_budget
 from computer_use_mcp.runtime import Runtime
 from PIL import Image
 from test_d34_read_contracts import directory, setup, window
@@ -66,7 +68,7 @@ def deliver_through_runtime(observations, *, prefix_blocks=0):
     return asyncio.run(deliver())
 
 
-def tree(item, title):
+def tree(item, title, references=None):
     root, child = item["node"], item["node"] + ":child"
     native = NativeObservation(
         "macos",
@@ -85,14 +87,14 @@ def tree(item, title):
             child: NativeNode(role="button", name=title),
         },
     )
-    return normalize_facts(native, DisplayReferences("session"))
+    return normalize_facts(native, references if references is not None else DisplayReferences("session"))
 
 
-def pixels(state, item):
+def pixels(state, item, *, capture=None):
     buffer = BytesIO()
     with Image.new("RGB", (20, 10), "white") as image:
         image.save(buffer, format="PNG")
-    target = replace(member_target(state, item), node=None, capture="capture:" + item["window"])
+    target = replace(member_target(state, item), node=None, capture=capture or "capture:" + item["window"])
     png = decode_capture(
         {
             "id": target.capture,
@@ -193,6 +195,81 @@ def test_late_sheet_is_delivered_in_same_observation_with_partial_catalogue(monk
         assert "Use Touch ID or enter password" in received[0]
 
 
+@pytest.mark.parametrize(
+    "relationship", ["attached", "attached-partial", "independent", "unknown", "replaced", "wrong-anchor"],
+)
+def test_related_read_accounts_for_parent_bound_sheet_by_its_own_window(monkeypatch, relationship):
+    parent, other = window("A"), window("B")
+    sheet = {**window("Sheet", title="Go To", parent="A"), "modal": True, "kind": "sheet"}
+    if relationship in ("independent", "unknown"):
+        sheet = {**sheet, "parent": None, "parentState": "none" if relationship == "independent" else "unknown"}
+    reasons = ("unrelated AX budget",) if relationship == "attached-partial" else ()
+    source = directory(parent, other, sheet, focused="Sheet", reasons=reasons)
+    current = (
+        directory(parent, other, {**sheet, "instance": "replacement", "node": "node:replacement"},
+                  focused="Sheet", ended=(sheet,))
+        if relationship == "replaced" else source
+    )
+    controller, app, state = setup(source)
+    parent_target = member_target(state, parent)
+    target = replace(
+        parent_target, surface=sheet["surface"], node=sheet["node"],
+        instance=other["instance"] if relationship == "wrong-anchor" else parent_target.instance,
+    )
+    image = pixels(state, sheet)
+    image = replace(image, target=replace(target, node=None, capture=image.target.capture))
+    references = DisplayReferences("session")
+    snapshot = tree(sheet, "Path input", references)
+    first = replace(
+        parent_result(state, parent, source, current), target=target, tree=snapshot,
+        image=image, scope_confirmed=not reasons,
+    )
+    controller.reader.read = AsyncMock(return_value=first)
+    pipeline = InterfaceReadPipeline(controller)
+
+    async def member(_owner, item, _view, **_kwargs):
+        return WindowPart(member_target(state, item), tree=tree(item, "Other content", references))
+
+    async def recheck(*_args, **_kwargs):
+        adopt(controller, app, current)
+        return current
+
+    pipeline.member = member
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", recheck)
+    related = RelatedRead(parent_target, tuple(WindowIdentity.of(item) for item in source["surfaces"]))
+    events = []
+    set_observation_handler(events.append)
+    try:
+        observation = asyncio.run(pipeline._collect(app, "tree", False, None, source, None, None, related))
+    finally:
+        set_observation_handler(None)
+    coverage = {record["window"]: record for record in observation_data(observation)["window_coverage"]}
+    if relationship not in ("attached", "attached-partial"):
+        assert "Path input" not in observation.text and observation.screenshot is None
+        assert not set(snapshot.refs).intersection(state.refs)
+        assert not any(item.get("window_identity") == WindowIdentity.of(sheet) for item in state.refs.values())
+        return
+
+    assert "Path input" in observation.text and observation.screenshot is image.image
+    sheet_ref = next(ref for ref, key in state.windows.items() if key == "Sheet")
+    heading = next(line for line in observation.text.splitlines() if line.startswith(f"Window {sheet_ref}:"))
+    assert "current" in heading and "modal" in heading and "not expanded" not in heading
+    assert f"Window {sheet_ref}: image, tree content was not included" not in observation.text
+    assert coverage["Sheet"]["captured"] == coverage["Sheet"]["included"] == ("tree", "image")
+    assert app._image.pieces[0].window == "Sheet"
+    assert app._image.pieces[0].image.target == image.target
+    assert not app._image.pieces[0].scope_confirmed  # coordinate authority still needs the exact member binding
+    result = deliver_through_runtime([event["observation"] for event in events])
+    assert not result.get("isError")
+    assert any("Path input" in block.get("text", "") for block in result["content"])
+    assert any(block["type"] == "image" for block in result["content"])
+    coverage = {record["window"]: record for record in observation_data(observation)["window_coverage"]}
+    assert set(coverage["Sheet"]["delivered"]) == {"tree", "image"}
+    for ref in snapshot.refs:
+        assert state.refs[ref]["binding"].root_window == "A"
+        assert state.refs[ref]["window_identity"] == WindowIdentity.of(sheet)
+
+
 def test_explicit_tree_view_keeps_contract_but_still_collects_late_sheet(monkeypatch):
     a = window("A")
     sheet = {**window("Sheet", parent="A"), "modal": True}
@@ -260,6 +337,169 @@ def test_member_tree_timeout_keeps_independent_pixels(monkeypatch):
     part = asyncio.run(InterfaceReadPipeline(controller).member(app, a, "both", component_budget_ms=100))
     assert part.tree is None and part.image is image
     assert "tree component expired" in part.gaps[0].detail
+
+
+@pytest.mark.parametrize("failed_component", [None, "tree", "image", "partial-tree"])
+def test_new_parentless_modal_delivers_pixels_without_waiting_for_its_tree(monkeypatch, failed_component):
+    parent = window("A", title="Original document")
+    # The accessibility directory can retain a valid root before the
+    # screenshot provider maps the same panel to a physical window.
+    panel = {**window("Panel", title="Open File"), "modal": True, "kind": "dialog", "nativeWindow": False}
+    current = directory(parent, panel, focused="Panel")
+    controller, app, state = setup(current)
+    related = RelatedRead(member_target(state, parent), (WindowIdentity.of(parent),))
+    target = member_target(state, panel)
+    snapshot, image = tree(panel, "File name field"), pixels(state, panel)
+    if failed_component == "partial-tree":
+        native = replace(snapshot.native, issues=(ReadIssue(("nodes",), "partial", "collection time budget"),))
+        snapshot = normalize_facts(native, DisplayReferences("session"))
+    image_gap = ObservationGap("image", "observation_incomplete", "Image temporarily unavailable")
+    controller.reader.read = AsyncMock(return_value=replace(
+        parent_result(state, panel, current, current), tree=snapshot, gaps=(image_gap,), scope_confirmed=True,
+    ))
+    calls = []
+
+    async def read_pixels(_pipeline, binding):
+        assert binding == target
+        calls.append("image")
+        return SimpleNamespace(
+            image=None if failed_component == "image" else image,
+            gap=image_gap if failed_component == "image" else None,
+        )
+
+    async def read_tree(binding, *, max_nodes, scope_kind, **_kwargs):
+        assert binding == target and max_nodes == DEFAULT_WINDOW_MAX_NODES and scope_kind == "window"
+        with controller.port.calls.claim(30000) as remaining:
+            assert 0 < remaining() <= 2000
+        calls.append("tree")
+        if failed_component == "tree":
+            raise TimeoutError("Tree component budget exhausted")
+        return snapshot
+
+    controller.reader.reader.read = AsyncMock(side_effect=read_tree)
+    monkeypatch.setattr("computer_use.interaction.read.views.pipeline.FixedWindowImagePipeline.arun", read_pixels)
+    controller.reader.directory._query = AsyncMock(return_value=current)
+    monkeypatch.setattr(images, "_delivery_required", True)
+    events = []
+    set_observation_handler(events.append)
+    try:
+        observed = asyncio.run(
+            InterfaceReadPipeline(controller).run(app, "tree", False, None, related=related)
+        )
+    finally:
+        set_observation_handler(None)
+    assert observed.screenshot is (None if failed_component == "image" else image.image)
+    assert calls == ["image", "tree"]
+    controller.reader.read.assert_not_awaited()
+    assert len(events) == 1
+    result = deliver_through_runtime([events[0]["observation"]])
+    assert not result.get("isError")
+    coverage = observation_data(observed)["window_coverage"]
+    assert len(coverage) == 1 and coverage[0]["window"] == "Panel"
+    assert set(coverage[0]["requested"]) == {"tree", "image"}
+    assert set(coverage[0]["delivered"]) == {"tree", "image"} - {failed_component}
+    assert observation_data(observed)["partial"] is (failed_component is not None)
+    if failed_component == "partial-tree":
+        assert coverage[0]["partial"] == ("tree",)
+    if failed_component != "tree":
+        assert any("File name field" in block.get("text", "") for block in result["content"])
+    if failed_component != "image":
+        assert app._image.pieces[0].window == "Panel" and app._image.pieces[0].image.target == image.target
+
+
+@pytest.mark.parametrize(
+    "later_evidence",
+    [
+        "ready", "insufficient_budget", "capture_timeout", "capture_scope_change", "capture_rebound", "capture_reused",
+        "no_native_upgrade", "already_native", "capture_stable", "changed_parent", "ended", "different_lifetime",
+    ],
+)
+def test_related_new_window_can_replace_historical_pixels_after_exact_native_upgrade(monkeypatch, later_evidence):
+    parent = window("A", title="Original document")
+    panel = {**window("Panel", title="Track Envelopes"), "nativeWindow": later_evidence == "already_native"}
+    bound = {**panel, "nativeWindow": True}
+    current_panel = {
+        "no_native_upgrade": panel,
+        "changed_parent": {**bound, "parent": "A", "parentState": "known"},
+        "different_lifetime": {**bound, "instance": "replacement", "surface": "surface:replacement"},
+    }.get(later_evidence, bound)
+    before = directory(parent, panel, focused="Panel", reasons=("unrelated attached AX failure",))
+    after = directory(
+        parent, current_panel, focused="Panel", reasons=("unrelated attached AX failure",),
+        ended=(panel,) if later_evidence == "ended" else (),
+    )
+    controller, app, state = setup(before)
+    target = member_target(state, panel)
+    related = RelatedRead(member_target(state, parent), (WindowIdentity.of(parent),))
+    old = replace(pixels(state, panel), scope_changed=later_evidence != "capture_stable")
+    fresh = pixels(state, panel, capture="capture:Panel:refresh")
+    if later_evidence == "capture_scope_change":
+        fresh = replace(fresh, scope_changed=True)
+    if later_evidence == "capture_rebound":
+        fresh = replace(fresh, target=replace(fresh.target, instance="wrong-instance"))
+    if later_evidence == "capture_reused":
+        fresh = replace(old, scope_changed=False)
+    controller.reader.read = AsyncMock(return_value=replace(
+        parent_result(state, panel, before, after),
+        tree=tree(panel, "Envelope control"), image=old,
+    ))
+    controller.reader.images.window = (
+        AsyncMock(side_effect=TimeoutError("image budget")) if later_evidence == "capture_timeout"
+        else AsyncMock(return_value=fresh)
+    )
+    controller.reader.reader.read = AsyncMock(side_effect=AssertionError("unexpected tree collection"))
+    controller.reader.directory._query = AsyncMock(side_effect=AssertionError("unexpected directory collection"))
+    pipeline = InterfaceReadPipeline(controller)
+    if later_evidence in ("ended", "different_lifetime"):
+        pipeline.member = AsyncMock(side_effect=lambda _owner, item, _view, **_kwargs: WindowPart(
+            member_target(state, item)
+        ))
+
+        async def recheck(*_args, **_kwargs):
+            adopt(controller, app, after)
+            return after
+
+        monkeypatch.setattr("computer_use.interaction.read.views.pipeline.refresh", recheck)
+
+    async def collect():
+        # The public SDK gives ordinary calls an operation context with no explicit deadline.
+        timeout_ms = 200 if later_evidence == "insufficient_budget" else None
+        with operation_budget(timeout_ms):
+            return await pipeline._collect(app, "tree", False, None, before, None, None, related)
+
+    events = []
+    monkeypatch.setattr(images, "_delivery_required", True)
+    set_observation_handler(events.append)
+    try:
+        observed = asyncio.run(collect())
+    finally:
+        set_observation_handler(None)
+
+    assert controller.reader.read.await_count == 1
+    controller.reader.reader.read.assert_not_awaited()
+    controller.reader.directory._query.assert_not_awaited()
+    assert len(events) == 1
+    public = deliver_through_runtime([events[0]["observation"]])
+    delivered = [block for block in public["content"] if block["type"] == "image"]
+    identity = WindowIdentity.of(panel)
+    if later_evidence == "ready":
+        assert app._image.png is fresh.image
+        assert "Envelope control" in observed.text and "Directory partial:" in observed.text
+        assert len(delivered) == 1
+        caption = delivered[0]["_meta"]["computer-use"]["caption"]
+        assert "Image point for window=" in caption and "historical capture" not in caption
+        assert state.window_images[identity].hit((5, 5))[0].image.target == fresh.target
+    elif later_evidence not in ("ended", "different_lifetime"):
+        assert app._image.png is old.image and "historical capture" in observed.text
+        assert len(delivered) == 1
+        assert "Image point for window=" not in delivered[0]["_meta"]["computer-use"]["caption"]
+        assert identity not in state.window_images
+    retry = later_evidence in ("ready", "capture_timeout", "capture_scope_change", "capture_rebound", "capture_reused")
+    assert controller.reader.images.window.await_count == int(retry)
+    if retry:
+        binding = controller.reader.images.window.await_args.args[0]
+        assert binding == replace(target, node=None)
+        assert controller.reader.images.window.await_args.kwargs["timeout_ms"] == 600
 
 
 def test_known_window_becoming_modal_gets_content_without_new_window_id():

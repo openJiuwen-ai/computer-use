@@ -26,18 +26,26 @@ import ApplicationServices
     func receiverReady() throws -> Bool {
         try background.validate(input: true)
         if let window {
-            let context = NativeMenuContext(application: application)
-            if context.confirms(window) { return true }
-            guard let attachedDialogs, let windows = context.attachedDialogWindows(window) else { return false }
-            return try attachedDialogs.confirm(windows, application: context.applicationElement)
+            return try confirmsReceiver(window, in: NativeMenuContext(application: application))
         }
         try background.validateWindowlessMenu()
         return true
     }
 
+    private func confirmsReceiver(_ window: AXUIElement, in context: NativeMenuContext) throws -> Bool {
+        if context.confirms(window) { return true }
+        guard let attachedDialogs, let windows = context.attachedDialogWindows(window) else { return false }
+        return try attachedDialogs.confirm(windows, application: context.applicationElement)
+    }
+
     func readiness(enabled: Bool?) throws -> NativeReadiness {
         guard try receiverReady() else { return NativeReadiness([("receiver", "unknown")]) }
         return NativeReadiness(enabled == false ? [("enabled", "no")] : [])
+    }
+
+    static func needsDocumentPreparation(foreground: Bool, receiverReady: () throws -> Bool) rethrows -> Bool {
+        guard foreground else { return true }
+        return try !receiverReady()
     }
 
     private func validatePath() throws {
@@ -316,28 +324,36 @@ import ApplicationServices
             }
         } else {
             let initial = NativeMenuContext(application: application)
-            guard let document = initial.document(for: window) else {
-                throw NativePreparationUnavailable(
-                    description: "the selected menu document context cannot be prepared in the background")
-            }
-            func set(_ object: AXUIElement, _ attribute: String, _ value: CFTypeRef) throws -> Bool {
-                guard AXAccess.writable(object, attribute).value == true else { return false }
-                try check()
-                onPreparation("menu context " + attribute)
-                onNativePreparation(
-                    .init(kind: .windowSelection, phase: .willSend, detail: "menu context " + attribute, window: nil))
-                let status = AXMessaging.setAttributeValue(object, attribute as CFString, value)
-                onNativePreparation(
-                    .init(kind: .windowSelection, phase: .returned, detail: "menu context " + attribute, window: nil))
-                if status == .invalidUIElement { throw DriverError("menu context window expired", code: .staleTarget) }
-                return true
-            }
-            if initial.main.map({ !CFEqual($0, document) }) ?? true {
-                _ = try set(document, kAXMainAttribute, kCFBooleanTrue)
-            }
-            if !(try receiverReady()), try !set(window, kAXFocusedAttribute, kCFBooleanTrue) {
-                _ = try set(
-                    AXUIElementCreateApplication(application.processIdentifier), kAXFocusedWindowAttribute, window)
+            // Document selection is preparation, not another requirement for
+            // an already confirmed foreground menu receiver.
+            if try Self.needsDocumentPreparation(foreground: initial.foreground, receiverReady: {
+                try confirmsReceiver(window, in: initial)
+            }) {
+                guard let document = initial.document(for: window) else {
+                    throw NativePreparationUnavailable(
+                        description: "the selected menu document context cannot be prepared in the background")
+                }
+                func set(_ object: AXUIElement, _ attribute: String, _ value: CFTypeRef) throws -> Bool {
+                    guard AXAccess.writable(object, attribute).value == true else { return false }
+                    try check()
+                    onPreparation("menu context " + attribute)
+                    onNativePreparation(
+                        .init(kind: .windowSelection, phase: .willSend, detail: "menu context " + attribute, window: nil))
+                    let status = AXMessaging.setAttributeValue(object, attribute as CFString, value)
+                    onNativePreparation(
+                        .init(kind: .windowSelection, phase: .returned, detail: "menu context " + attribute, window: nil))
+                    if status == .invalidUIElement {
+                        throw DriverError("menu context window expired", code: .staleTarget)
+                    }
+                    return true
+                }
+                if initial.main.map({ !CFEqual($0, document) }) ?? true {
+                    _ = try set(document, kAXMainAttribute, kCFBooleanTrue)
+                }
+                if !(try receiverReady()), try !set(window, kAXFocusedAttribute, kCFBooleanTrue) {
+                    _ = try set(
+                        AXUIElementCreateApplication(application.processIdentifier), kAXFocusedWindowAttribute, window)
+                }
             }
         }
         // A frontmost, confirmed recipient needs menu validation, not another

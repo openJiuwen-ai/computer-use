@@ -43,10 +43,14 @@ def test_same_exact_content_is_reused_but_partial_host_keeps_menu_tree_obligatio
     plan.reuse_attached_content([part], state.members)
     assert plan.next() == (WindowIdentity.of(parent), "image")
     assert plan.next() == (WindowIdentity.of(menu), "image")
-    coverage = plan.coverage(current, [part], included_trees={parent["surface"]})
+    coverage = plan.coverage(current, [part], included_trees={WindowIdentity.of(parent)})
     record = next(item for item in coverage if item["window"] == "Options")
     assert record["included"] == ("tree",)
     assert record["reused"]["tree"]["node"] == parent["node"]
+
+    replacement = replace(WindowIdentity.of(parent), instance="different-window-instance")
+    coverage = plan.coverage(current, [part], included_trees={replacement})
+    assert "tree" not in next(item for item in coverage if item["window"] == "Options")["included"]
 
     incomplete = replace(snapshot, native=replace(snapshot.native, nodes={parent["node"]: snapshot.native.nodes[parent["node"]]}))
     missing = CollectionPlan("Form", "both")

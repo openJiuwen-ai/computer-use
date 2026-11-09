@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from computer_use.native.contracts import Binding, Intent, OperationTarget
     from computer_use.session.interface_images import CapturedWindow, InterfaceImage
     from computer_use.session.interfaces import InstanceState, WindowIdentity
-    from computer_use.types import ActionResult, AppInfo, Observation, TextPage
+    from computer_use.types import ActionResult, AppInfo, Observation, TextPage, WindowCatalogue
 
 Remaining: TypeAlias = Callable[[], int]
 """Return milliseconds left on the original call, or raise on expiration."""
@@ -90,6 +90,6 @@ WriteArguments: TypeAlias = (
 """Existing write entry tuples; the final flag requests current-target input."""
 
 if TYPE_CHECKING:
-    AgentResult: TypeAlias = Observation | ActionResult | TextPage | ElementSnapshot | list[AppInfo]
+    AgentResult: TypeAlias = Observation | ActionResult | TextPage | ElementSnapshot | list[AppInfo] | WindowCatalogue
     QueryResult: TypeAlias = ElementSnapshot
     InteractionResult: TypeAlias = AgentResult | ActionResult | QueryResult

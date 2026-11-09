@@ -79,7 +79,12 @@ class TextRouteSelectionTests(unittest.TestCase):
 
     def test_unavailable_keyboard_endpoint_cannot_preempt_ready_editor(self):
         keys = replace(KEYS, supported=Knowledge.NO)
-        command = choose(observed(EDITOR, keys), Intent("insert", {"text": "query"}), HostPolicy(), Attempts())
+        command = choose(
+            observed(EDITOR, keys, unavailable_reason="Scoped Unicode typing is unavailable."),
+            Intent("insert", {"text": "query"}),
+            HostPolicy(),
+            Attempts(),
+        )
         self.assertEqual(command.primitive, EDITOR)
 
     def test_ready_keyboard_preserves_ordinary_edit_callbacks(self):
@@ -126,6 +131,28 @@ class RecordingPort:
 
 
 class TextInputExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_scoped_web_typing_reports_the_blocker_without_dispatch(self):
+        window = replace(TARGET, node=None)
+        blocked_keys = replace(
+            KEYS,
+            supported=Knowledge.NO,
+            readiness=Knowledge.UNKNOWN,
+            pending=("receiver",),
+            background_preparation=Knowledge.NO,
+            global_input=Knowledge.NO,
+        )
+        reason = "Scoped Unicode typing is unavailable for the selected local Web receiver."
+        port = RecordingPort(
+            [observed(blocked_keys, binding=window, unavailable_reason=reason)],
+            [],
+            policy=HostPolicy(allow_global_input=False),
+        )
+        with self.assertRaises(ComputerUseError) as caught:
+            await Engine(port).execute(Intent("insert", {"text": "g"}), window)
+        self.assertEqual(caught.exception.detail, reason)
+        self.assertEqual(caught.exception.effect, "none")
+        self.assertEqual(port.commands, [])
+
     async def test_focus_refreshes_capabilities_before_one_native_edit(self):
         cold_keys = replace(KEYS, readiness=Knowledge.NO, pending=("receiver",))
         unavailable_keys = replace(KEYS, supported=Knowledge.NO)

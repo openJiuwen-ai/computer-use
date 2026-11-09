@@ -11,6 +11,12 @@ struct NativeReadMetadataPool {
     private(set) var values = [Record]()
     private var indices = [Key: Int]()
     private var issues = [Key: Record]()
+    struct AttributeCatalogue {
+        fileprivate let position: Int
+        fileprivate let names: [String]
+        fileprivate let value: Record
+    }
+    private var attributeCatalogueCounts = [[String]: Int]()
 
     // Structural keys avoid encoding every repeated value to JSON merely to
     // discover equality. Numeric kinds remain distinct, including CFBoolean.
@@ -27,6 +33,7 @@ struct NativeReadMetadataPool {
         case nativeReference(String, String)
         case nativeItems(String, [Key])
         case nativeFields(String, [Field])
+        case asciiAttributeCatalogue([String])
     }
 
     private static func nativeKey(_ value: Record) -> Key {
@@ -71,9 +78,9 @@ struct NativeReadMetadataPool {
         preconditionFailure("Metadata contains a non-JSON native value")
     }
 
-    private mutating func reference(_ value: Record) -> Record {
+    private mutating func reference(_ value: Record, withKey exactKey: Key? = nil) -> Record {
         if value.count == 1, value["metadataValue"] is Int { return value }
-        let key = Self.nativeKey(value)
+        let key = exactKey ?? Self.nativeKey(value)
         if let index = indices[key] { return ["metadataValue": index] }
         let index = values.count
         indices[key] = index
@@ -119,10 +126,37 @@ struct NativeReadMetadataPool {
         return read
     }
 
-    mutating func encodeNode(_ original: Record) -> Record {
+    /// Only a complete ordered attribute-name result can share a property value.
+    /// Restrict it to ASCII so Swift's canonical Unicode equality cannot merge
+    /// differently encoded provider names.
+    mutating func trackAttributeCatalogue(_ property: Record, at position: Int) -> AttributeCatalogue? {
+        guard property.count == 2, property["key"] as? [String] == ["toolkit", "attribute_names"],
+            let value = property["value"] as? Record, value.count == 2, value["nativeType"] as? String == "CFArray",
+            let data = value["data"] as? Record, data.count == 1, let items = data["items"] as? [Record]
+        else { return nil }
+        var names = [String]()
+        names.reserveCapacity(items.count)
+        for item in items {
+            guard item.count == 2, item["nativeType"] as? String == "CFString", let name = item["data"] as? String,
+                name.utf8.allSatisfy({ $0 < 0x80 })
+            else { return nil }
+            names.append(name)
+        }
+        attributeCatalogueCounts[names, default: 0] += 1
+        return AttributeCatalogue(position: position, names: names, value: value)
+    }
+
+    mutating func encodeNode(_ original: Record, attributeCatalogue: AttributeCatalogue? = nil) -> Record {
         var node = original
         if let read = original["read"] as? Record { node["read"] = encodeRead(read) }
-        if let properties = original["properties"] as? [Record] {
+        if var properties = original["properties"] as? [Record] {
+            if let catalogue = attributeCatalogue, attributeCatalogueCounts[catalogue.names, default: 0] > 1 {
+                // Keep this typed key separate from general read metadata. For
+                // example, an arbitrary Unicode read detail can compare equal
+                // to an ASCII name under Swift String's canonical equality.
+                properties[catalogue.position]["value"] = reference(
+                    catalogue.value, withKey: .asciiAttributeCatalogue(catalogue.names))
+            }
             node["properties"] = properties.map { original in
                 var property = original
                 if let read = original["read"] as? Record { property["read"] = encodeRead(read) }

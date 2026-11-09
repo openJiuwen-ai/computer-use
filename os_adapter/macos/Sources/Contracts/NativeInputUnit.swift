@@ -54,10 +54,13 @@ enum NativeInputUnit: Equatable {
             wire["unit"] = "prepare_receiver"
             wire["channel"] = "pointer"
             wire["backgroundPreparation"] = "yes"
-        case .keyboard(let kind, _, _):
+        case .keyboard(let kind, let replacement, _):
             wire["unit"] = kind.unit
             wire["channel"] = "keyboard"
             wire["backgroundPreparation"] = readiness.pending.contains("foreground") ? "no" : "yes"
+            if kind == .replace, replacement == .structuredScalarShortcut, supported, readiness.ready {
+                wire["keyboardEditing"] = kind.rawValue
+            }
         case .applicationCommand:
             wire["unit"] = "key_sequence"
             wire["channel"] = "keyboard"

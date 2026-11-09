@@ -50,6 +50,7 @@ import Foundation
     }
     private var clickAuthorities = [ClickAuthority]()
     private var clickPreparationRequiresObservation = false
+    private(set) var didRevealClippedClickLeaf = false
     private var foregroundResponsibility: NativeForegroundResponsibility?
     var onForegroundClose: ((NativeForegroundResponsibility, Bool) -> Bool)?
     private let cancelActive: () -> Void
@@ -199,6 +200,15 @@ import Foundation
             throw DriverError(
                 "foreground click requires original-scope background unavailability evidence", code: .invalidRequest)
         }
+    }
+
+    func recordClippedClickLeafReveal() { didRevealClippedClickLeaf = true }
+
+    /// The exact-hit obligation belongs to the input target fixed before the
+    /// AX side effect. A read of another node does not inherit that obligation.
+    func requiresRevealedLeafHit(_ value: [String: Any], within: [String]) -> Bool {
+        guard didRevealClippedClickLeaf, let inputTarget, inputWithin == within else { return false }
+        return NSDictionary(dictionary: inputTarget).isEqual(to: value)
     }
 
     func blockClickContinuation() { clickPreparationRequiresObservation = true }
