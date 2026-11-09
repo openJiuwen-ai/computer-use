@@ -148,13 +148,9 @@ def capture_catalogues(
         ref = node["ref"]
         native_id = refs.get(ref)
         native = observation.nodes.get(native_id)
-        if (
-            not complete(ref)
-            or ref in composed
-            or node.get("actionsUnavailable")
-            or node.get("actions") != node.get("native", node).get("actions")
-            or ref not in source_scopes
-        ):
+        if not complete(ref) or ref in composed or node.get("actionsUnavailable"):
+            continue
+        if node.get("actions") != node.get("native", node).get("actions") or ref not in source_scopes:
             continue
         actions = display_actions(
             node, secondary_actions(node), menu_mechanisms=menu_mechanisms or (), control_raises=control_raises

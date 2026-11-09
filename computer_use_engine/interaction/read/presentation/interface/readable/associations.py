@@ -25,26 +25,25 @@ def explanation_rows(interface: InterfaceDocument, atoms: AtomDocument) -> Mappi
         or executable target, including when several controls share the row.
     """
     rows: dict[str, list[str]] = {}
-    locations: dict[str, str] = {}
+    locations: dict[str, list[str]] = {}
     pending = [(key, None) for key in reversed(interface.roots)]
     while pending:
-        key, row = pending.pop()
+        key, members = pending.pop()
         block = interface.blocks[key]
         if block.origin == "visual" and block.layout == "visual-row":
-            row = key
-            rows.setdefault(row, [])
-        if row is not None:
+            members = rows.setdefault(key, [])
+        if members is not None:
             for ref in block.source_refs:
-                rows[row].append(ref)
-                locations[ref] = row
-        pending.extend((child, row) for child in reversed(block.children))
+                members.append(ref)
+                locations[ref] = members
+        pending.extend((child, members) for child in reversed(block.children))
     result: dict[str, tuple[str, ...]] = {}
-    for ref, key in locations.items():
+    for ref, members in locations.items():
         node = interface.projected_nodes[ref]
         slot = atoms.atoms[ref].slot("description")
         if node["role"] != "image" or slot is None or not isinstance(slot.value, str) or not slot.value.strip():
             continue
-        neighbours = tuple(member for member in rows[key] if member != ref)
+        neighbours = tuple(member for member in members if member != ref)
         if any(interface.projected_nodes[member]["role"] in CONTROL_ROLES | FIELD_ROLES for member in neighbours):
             result[ref] = neighbours
     return result

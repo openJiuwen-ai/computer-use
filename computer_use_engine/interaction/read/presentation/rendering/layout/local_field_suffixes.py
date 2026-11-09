@@ -142,11 +142,9 @@ def expand_local_field_suffixes(
         if len(descriptions) != 1:
             raise ValueError("local URL expression requires its own Description")
         description, description_end = _scalar(body, descriptions[0] + len("Description: "))
-        if (
-            not _plain(description)
-            or description_end > start
-            or (description_end != len(body) and not body[description_end:].startswith(", "))
-        ):
+        if not _plain(description) or description_end > start:
+            raise ValueError("local URL description must remain a preceding literal")
+        if description_end != len(body) and not body[description_end:].startswith(", "):
             raise ValueError("local URL description must remain a preceding literal")
         replacement = "URL: " + format_field(prefix + description)
         offset = entry.start
@@ -224,15 +222,11 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
         ):
             continue
         description, url = source.description, source.url
-        if (
-            description is None
-            or url is None
-            or not _plain(description)
-            or not _plain(url)
-            or node.get("description") != description
-            or node.get("url") != url
-            or not url.endswith(description)
-        ):
+        if description is None or url is None or not _plain(description):
+            continue
+        if not _plain(url) or node.get("description") != description or node.get("url") != url:
+            continue
+        if not url.endswith(description):
             continue
         prefix_value = url[: -len(description)]
         if not _plain(prefix_value):
@@ -240,12 +234,9 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
         current_role = role_prefix
         spelling = spellings.get(ref)
         if spelling:
-            if (
-                spelling_counts[ref] != 1
-                or spelling.source != source.source
-                or spelling.scope != source.scope
-                or (role_prefix != spelling.display_label and not role_prefix.startswith(spelling.display_label + " ("))
-            ):
+            if spelling_counts[ref] != 1 or spelling.source != source.source or spelling.scope != source.scope:
+                continue
+            if role_prefix != spelling.display_label and not role_prefix.startswith(spelling.display_label + " ("):
                 continue
             current_role = spelling.alias + role_prefix[len(spelling.display_label):]
         encoded_description, encoded_url = frame.format_field(description), frame.format_field(url)

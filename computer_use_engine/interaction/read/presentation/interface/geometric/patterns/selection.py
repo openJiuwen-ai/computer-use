@@ -210,32 +210,33 @@ def analyze_collection_patterns(draft: InterfaceDraft) -> tuple[PatternSelection
     if not draft.enabled:
         return ()
     results: list[PatternSelection] = []
-    explanations = {
-        "table": "requires two complete native rows with repeated logical columns",
-        "grid": "requires a measured whole-item run with repeated rows and columns and compatible native order",
-        "cards": "requires two native single-cell rows with repeated multifield content",
-    }
-    priority = {"table": 3, "grid": 2, "cards": 1}
     for block in draft.blocks.values():
         ref = block.primary_ref
         if ref is None or block.origin != "native" or block.layout != "tree":
             continue
         if draft.projected_nodes[ref]["role"] not in _COLLECTIONS or not block.children:
             continue
-        alternatives = (("table", _table(draft, block)), ("grid", _grid(draft, block)), ("cards", _cards(draft, block)))
+        # Each builder emits its own fixed kind. This order is also the priority order.
+        alternatives = (
+            ("table", _table(draft, block), "requires two complete native rows with repeated logical columns"),
+            (
+                "grid",
+                _grid(draft, block),
+                "requires a measured whole-item run with repeated rows and columns and compatible native order",
+            ),
+            ("cards", _cards(draft, block), "requires two native single-cell rows with repeated multifield content"),
+        )
         candidates = tuple(
             PatternCandidate(
                 kind,
                 plan is not None,
-                "supported by " + ", ".join(plan.evidence) if plan is not None else explanations[kind],
+                "supported by " + ", ".join(plan.evidence) if plan is not None else explanation,
                 plan.evidence if plan is not None else (),
             )
-            for kind, plan in alternatives
+            for kind, plan, explanation in alternatives
         )
-        supported = tuple(plan for _, plan in alternatives if plan is not None)
-        selected = (
-            replace(max(supported, key=lambda plan: priority[plan.kind]), candidates=candidates) if supported else None
-        )
+        supported = next((plan for _, plan, _ in alternatives if plan is not None), None)
+        selected = replace(supported, candidates=candidates) if supported is not None else None
         results.append(PatternSelection(block.key, ref, candidates, selected))
     return tuple(results)
 

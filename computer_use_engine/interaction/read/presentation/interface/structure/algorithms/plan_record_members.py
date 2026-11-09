@@ -24,7 +24,9 @@ from computer_use.interaction.read.presentation.interface.geometric.boundaries i
 def _inline_control(draft: InterfaceDraft, block: InterfaceBlock) -> bool:
     """Keep each short independent control intact while sharing only its typed prefix."""
     ref = block.primary_ref
-    if ref is None or block.children or block.layout != "tree" or not known_control(draft, ref):
+    if ref is None or block.children or block.layout != "tree":
+        return False
+    if not known_control(draft, ref):
         return False
     atom = draft.atoms.atoms[ref]
     return (
@@ -75,12 +77,11 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
             end = index + 1
             while end < len(block.children):
                 other = blocks[block.children[end]]
-                if (
-                    not _inline_control(draft, other)
-                    or prefix_signature(draft, other.primary_ref) != signature
-                    or not same_region(draft, (first.primary_ref, other.primary_ref))
-                    or not same_scope(draft, (first.primary_ref, other.primary_ref))
-                ):
+                if not _inline_control(draft, other) or prefix_signature(draft, other.primary_ref) != signature:
+                    break
+                if not same_region(draft, (first.primary_ref, other.primary_ref)):
+                    break
+                if not same_scope(draft, (first.primary_ref, other.primary_ref)):
                     break
                 members.append(other)
                 end += 1
@@ -104,24 +105,19 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
         block = replace(block, children=tuple(children))
         blocks[key] = block
         ref = block.primary_ref
-        if (
-            ref is None
-            or block.kind == "record"
-            or draft.projected_nodes[ref]["role"] != "group"
-            or len(block.children) != 1
-        ):
+        if ref is None or block.kind == "record" or draft.projected_nodes[ref]["role"] != "group":
+            continue
+        if len(block.children) != 1:
             continue
         child = blocks[block.children[0]]
         target = child.primary_ref
-        if (
-            target is None
-            or child.kind in ("window", "region", "field", "record", "table")
-            or child.layout not in ("tree", "record-path")
-            or draft.projected_nodes[ref]["children"] != (target,)
-            or draft.source.parents.get(target) != ref
-            or not confirmed_children(draft, ref, (target,))
-            or not same_scope(draft, (ref, target))
-        ):
+        if target is None or child.kind in ("window", "region", "field", "record", "table"):
+            continue
+        if child.layout not in ("tree", "record-path"):
+            continue
+        if draft.projected_nodes[ref]["children"] != (target,) or draft.source.parents.get(target) != ref:
+            continue
+        if not confirmed_children(draft, ref, (target,)) or not same_scope(draft, (ref, target)):
             continue
         atom = draft.atoms.atoms[ref]
         if (

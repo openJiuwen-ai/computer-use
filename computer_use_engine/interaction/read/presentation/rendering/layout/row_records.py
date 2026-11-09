@@ -146,18 +146,15 @@ def _row(row: _Line, parent: str, position: int, lines: dict[str, _Line], frame:
         return None
     child = node["children"][0]
     cell = lines.get(child["ref"])
-    if (
-        cell is None
-        or child["role"] != "cell"
-        or cell.record.parent != node["ref"]
-        or cell.indent != row.indent + "\t"
-        or cell.record.layout != row.record.layout
-        or cell.index != row.index + 1
-    ):
+    if cell is None or child["role"] != "cell" or cell.record.parent != node["ref"]:
+        return None
+    if cell.indent != row.indent + "\t" or cell.record.layout != row.record.layout or cell.index != row.index + 1:
         return None
     index = node.get("index")
     cell_row, column = _point(child, "rowRange"), _point(child, "columnRange")
-    if type(index) is not int or index < 0 or cell_row is None or column is None:
+    if type(index) is not int or index < 0 or cell_row is None:
+        return None
+    if column is None:
         return None
     name = node.get("name")
     if name and (not isinstance(name, str) or name.startswith("(")):
@@ -187,11 +184,10 @@ def _row(row: _Line, parent: str, position: int, lines: dict[str, _Line], frame:
     children: list[str] = []
     for offset, grandchild in enumerate(child["children"], 2):
         item = lines.get(grandchild["ref"])
+        if item is None or grandchild["children"] or item.record.parent != child["ref"]:
+            return None
         if (
-            item is None
-            or grandchild["children"]
-            or item.record.parent != child["ref"]
-            or item.indent != row.indent + "\t\t"
+            item.indent != row.indent + "\t\t"
             or item.index != row.index + offset
             or item.record.layout != row.record.layout
         ):
@@ -245,11 +241,15 @@ def pack_row_records(frame: LayoutFrame) -> list[str]:
                 current.parent != first.parent
                 or current.position != first.position + len(members)
                 or current.indent != first.indent
-                or current.layout != first.layout
+            ):
+                break
+            if (
+                current.layout != first.layout
                 or current.index_label != first.index_label
                 or current.cell_prefix != first.cell_prefix
-                or current.column != first.column
             ):
+                break
+            if current.column != first.column:
                 break
             members.append(current)
         packed = [

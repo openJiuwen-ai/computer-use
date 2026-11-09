@@ -554,19 +554,22 @@ class ProjectionEditor:
             group.attribute not in ("valueDescription", "rangeDescription")
             or group.value != ""
             or type(group.value) is not str
-            or len(group.facts) < 2
+        ):
+            raise ValueError("Invalid shared description declaration")
+        if (
+            len(group.facts) < 2
             or group.scope not in self._ir.nodes
             or self._ir.source.native_nodes[group.scope]["role"] not in ("window", "sheet", "menuBar")
-            or len(set(group.facts)) != len(group.facts)
         ):
+            raise ValueError("Invalid shared description declaration")
+        if len(set(group.facts)) != len(group.facts):
             raise ValueError("Invalid shared description declaration")
         for fact in group.facts:
             node = self._ir.source.native_nodes.get(fact.source, {})
+            if fact.attribute != group.attribute or fact.attribute not in node or type(node[fact.attribute]) is not str:
+                raise ValueError("Shared description has no unique matching scoped source")
             if (
-                fact.attribute != group.attribute
-                or fact.attribute not in node
-                or type(node[fact.attribute]) is not str
-                or node[fact.attribute] != group.value
+                node[fact.attribute] != group.value
                 or self._ir.source.scopes.get(fact.source) != group.scope
                 or fact.attribute in self._ir.nodes[fact.source].shared_description_fields
             ):
@@ -593,11 +596,15 @@ class ProjectionEditor:
                 fact.attribute != group.attribute
                 or fact.attribute not in source
                 or type(source[fact.attribute]) is not str
-                or source[fact.attribute] != group.value
+            ):
+                raise ValueError("Source role has no matching folded scoped field")
+            if (
+                source[fact.attribute] != group.value
                 or self._ir.source.scopes.get(fact.source) != group.scope
                 or fact.source not in self._ir.elisions
-                or not self._ir.nodes[fact.source].shared_description_fields
             ):
+                raise ValueError("Source role has no matching folded scoped field")
+            if not self._ir.nodes[fact.source].shared_description_fields:
                 raise ValueError("Source role has no matching folded scoped field")
         self._ir.nodes[group.scope].source_roles.append(group)
 
@@ -761,14 +768,16 @@ class ProjectionEditor:
         view = ProjectionView(self._ir)
         owner = view.nodes[proof.owner]
         current = view.field_value(proof.owner, proof.display_field)
+        if current is None or len(current.parts) != 1 or current.parts[0].facts != (proof.anchor,):
+            raise ValueError("Caption composition has no matching native owner field")
         if (
-            current is None
-            or len(current.parts) != 1
-            or current.parts[0].facts != (proof.anchor,)
-            or proof.anchor.source != proof.owner
+            proof.anchor.source != proof.owner
             or proof.anchor.attribute not in ("name", "description")
             or view.scopes[proof.owner] != proof.scope
-            or view.native_nodes[proof.owner].get(proof.anchor.attribute) != proof.composition.value
+        ):
+            raise ValueError("Caption composition has no matching native owner field")
+        if (
+            view.native_nodes[proof.owner].get(proof.anchor.attribute) != proof.composition.value
             or current.value != proof.composition.value
             or len(proof.composition.parts) < 2
         ):
@@ -778,11 +787,10 @@ class ProjectionEditor:
             if len(part.facts) != 1:
                 raise ValueError("Caption component needs one exact source field")
             fact = part.facts[0]
+            if fact.attribute != "value" or fact.source == proof.owner or fact.source in refs:
+                raise ValueError("Caption component is not an independent direct display source")
             if (
-                fact.attribute != "value"
-                or fact.source == proof.owner
-                or fact.source in refs
-                or view.scopes.get(fact.source) != proof.scope
+                view.scopes.get(fact.source) != proof.scope
                 or view.native_nodes.get(fact.source, {}).get(fact.attribute) != part.value
                 or fact.source not in [child["ref"] for child in owner["children"]]
             ):
@@ -943,11 +951,15 @@ def validate_projection(ir: PresentationIR) -> None:
                     fact in shared_fields
                     or fact.attribute != group.attribute
                     or view.scopes.get(fact.source) != group.scope
-                    or fact.attribute not in source
+                ):
+                    raise ValueError("Shared description source or destination mismatch")
+                if (
+                    fact.attribute not in source
                     or type(source[fact.attribute]) is not str
                     or source[fact.attribute] != group.value
-                    or ir.nodes[fact.source].shared_description_fields.get(fact.attribute) != expected
                 ):
+                    raise ValueError("Shared description source or destination mismatch")
+                if ir.nodes[fact.source].shared_description_fields.get(fact.attribute) != expected:
                     raise ValueError("Shared description source or destination mismatch")
                 shared_fields[fact] = expected
     if any(
@@ -963,16 +975,15 @@ def validate_projection(ir: PresentationIR) -> None:
                 raise ValueError("Source role declaration scope must remain visible")
             for fact in group.facts:
                 source = view.native_nodes.get(fact.source, {})
+                if fact in role_facts or fact.source in seen or fact.source not in ir.elisions:
+                    raise ValueError("Source role declaration must retain an exact folded field")
                 if (
-                    fact in role_facts
-                    or fact.source in seen
-                    or fact.source not in ir.elisions
-                    or fact.attribute != group.attribute
+                    fact.attribute != group.attribute
                     or view.scopes.get(fact.source) != group.scope
                     or fact.attribute not in source
-                    or type(source[fact.attribute]) is not str
-                    or source[fact.attribute] != group.value
                 ):
+                    raise ValueError("Source role declaration must retain an exact folded field")
+                if type(source[fact.attribute]) is not str or source[fact.attribute] != group.value:
                     raise ValueError("Source role declaration must retain an exact folded field")
                 role_facts.add(fact)
     omitted = set(ir.elisions)
@@ -988,20 +999,16 @@ def validate_projection(ir: PresentationIR) -> None:
             raise ValueError("Projection fold has no native source or target")
     for proof in ir.caption_equivalences:
         value = view.field_value(proof.owner, proof.display_field)
-        if (
-            proof.owner not in seen
-            or view.scopes[proof.owner] != proof.scope
-            or value is None
-            or value.value != proof.composition.value
-            or len(value.parts) != 1
-            or value.parts[0].facts != (proof.anchor,)
-            or any(
-                len(part.facts) != 1
-                or part.facts[0].source in seen
-                or ir.folded_into.get(part.facts[0].source) != proof.owner
-                or view.native_nodes[part.facts[0].source].get(part.facts[0].attribute) != part.value
-                for part in proof.composition.parts
-            )
+        if proof.owner not in seen or view.scopes[proof.owner] != proof.scope or value is None:
+            raise ValueError("Native caption composition lost its source or display destination")
+        if value.value != proof.composition.value or len(value.parts) != 1 or value.parts[0].facts != (proof.anchor,):
+            raise ValueError("Native caption composition lost its source or display destination")
+        if any(
+            len(part.facts) != 1
+            or part.facts[0].source in seen
+            or ir.folded_into.get(part.facts[0].source) != proof.owner
+            or view.native_nodes[part.facts[0].source].get(part.facts[0].attribute) != part.value
+            for part in proof.composition.parts
         ):
             raise ValueError("Native caption composition lost its source or display destination")
 

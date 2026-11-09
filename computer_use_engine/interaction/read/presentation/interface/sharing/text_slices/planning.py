@@ -149,7 +149,9 @@ def choose(evidence: TextSliceEvidence) -> SelectedTextSlices:
             for slot in ("value", "name"):
                 anchor_key = (current, slot)
                 anchor = evidence.fields.get(anchor_key)
-                if anchor is None or anchor_key in selected or anchor.atom_slot.label is None and slot == "value":
+                if anchor is None or anchor_key in selected:
+                    continue
+                if anchor.atom_slot.label is None and slot == "value":
                     continue
                 position = anchor.value.find(source.value)
                 if position < 0 or anchor.value.find(source.value, position + 1) >= 0:
@@ -190,7 +192,10 @@ def validate(selected: SelectedTextSlices) -> TextSliceDocument:
             key != (source.ref, source.slot)
             or evidence.fields.get(key) != source
             or evidence.fields.get((anchor.ref, anchor.slot)) != anchor
-            or (anchor.ref, anchor.slot) in document.plans
+        ):
+            raise ValueError("Text slice must preserve complete sources and a literal same-scope anchor")
+        if (
+            (anchor.ref, anchor.slot) in document.plans
             or source.scope != anchor.scope
             or plan.estimated_saved_bytes < 64
         ):
@@ -207,8 +212,9 @@ def validate(selected: SelectedTextSlices) -> TextSliceDocument:
             type(plan.start_utf16) is not int
             or type(plan.end_utf16) is not int
             or not 0 <= plan.start_utf16 < plan.end_utf16 <= len(raw) // 2
-            or raw[plan.start_utf16 * 2: plan.end_utf16 * 2].decode("utf-16-le") != source.value
         ):
+            raise ValueError("Text slice range does not restore the exact original scalar")
+        if raw[plan.start_utf16 * 2: plan.end_utf16 * 2].decode("utf-16-le") != source.value:
             raise ValueError("Text slice range does not restore the exact original scalar")
         if plan.mode == "same":
             if source.value != anchor.value or plan.fragments:
@@ -220,9 +226,9 @@ def validate(selected: SelectedTextSlices) -> TextSliceDocument:
                     type(fragment.start) is not int
                     or type(fragment.end) is not int
                     or not 0 <= fragment.start < fragment.end <= len(source.value)
-                    or fragment.start <= previous
-                    or source.value[fragment.start: fragment.end] != fragment.text
                 ):
+                    raise ValueError("Text reuse excerpts must preserve ordered original source spans")
+                if fragment.start <= previous or source.value[fragment.start: fragment.end] != fragment.text:
                     raise ValueError("Text reuse excerpts must preserve ordered original source spans")
                 previous = fragment.end
             if len(plan.fragments) < 2 or plan.fragments[0].start != 0 or plan.fragments[-1].end != len(source.value):

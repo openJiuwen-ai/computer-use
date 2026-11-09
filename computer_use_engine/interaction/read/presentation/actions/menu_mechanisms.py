@@ -48,13 +48,11 @@ def capture_menu_mechanisms(snapshot: SnapshotFacts, projection: ProjectionResul
     for ref, node in projection["nativeNodes"].items():
         token = snapshot.refs.get(ref)
         native = snapshot.native.nodes.get(token)
-        if (
-            native is None
-            or native.role not in ("menu", "menu_bar", "menu_item", "menu_bar_item")
-            or native.actions is None
-            or node.get("actionsUnavailable")
-            or facts.get(token, {}).get("actions", {}).get("state") != "complete"
-        ):
+        if native is None or native.role not in ("menu", "menu_bar", "menu_item", "menu_bar_item"):
+            continue
+        if native.actions is None or node.get("actionsUnavailable"):
+            continue
+        if facts.get(token, {}).get("actions", {}).get("state") != "complete":
             continue
         # A node-wide failure or any role/action issue leaves the mechanism
         # uncertain. Collection-wide partial membership does not invalidate an
@@ -75,20 +73,16 @@ def capture_menu_mechanisms(snapshot: SnapshotFacts, projection: ProjectionResul
             for action in native.actions
         )
         for index, action in enumerate(native.actions):
-            if (
-                (action.key, action.kind) not in secondary
-                or action.target is not None
-                or action.shortcuts
-                or action.key == "AXCancel"
-                and action.kind != "cancel"
-                or action.key == "AXPick"
-                and (
-                    action.kind not in ("custom", "pick", "select")
-                    or native.role not in ("menu_item", "menu_bar_item")
-                    or not primary
-                )
-                or action.key not in ("AXCancel", "AXPick")
-            ):
+            if (action.key, action.kind) not in secondary or action.target is not None or action.shortcuts:
+                continue
+            if action.key == "AXCancel" and action.kind != "cancel":
+                continue
+            if action.key == "AXPick":
+                if action.kind not in ("custom", "pick", "select") or native.role not in ("menu_item", "menu_bar_item"):
+                    continue
+                if not primary:
+                    continue
+            if action.key not in ("AXCancel", "AXPick"):
                 continue
             # Normalized action lines do not carry an ordinal. A reused key with
             # another target or semantic kind must therefore remain fully inline.

@@ -51,7 +51,9 @@ def _active_text(node: NativeNode) -> bool:
 def _covers_reported_text(node: NativeNode, path: tuple[str, ...], value: str) -> bool:
     """Compare a reported full-text count only in its declared offset unit."""
     text = node.text
-    if text is None or text.character_count is None or path != ("text", "content") and path != text.content_field:
+    if text is None or text.character_count is None:
+        return True
+    if path != ("text", "content") and path != text.content_field:
         return True
     if text.unit == "unicode_codepoint":
         return len(value) == text.character_count
@@ -153,13 +155,9 @@ def capture_projected_disclosure(
         token = snapshot.refs.get(ref)
         native = snapshot.native.nodes.get(token)
         record = native_records.get(token)
-        if (
-            native is None
-            or record is None
-            or record.get("observed") is False
-            or not ref.isdecimal()
-            or str(int(ref)) != ref
-        ):
+        if native is None or record is None or record.get("observed") is False:
+            continue
+        if not ref.isdecimal() or str(int(ref)) != ref:
             continue
         passive = native.role == "static_text" or (
             native.role == "document" and native.text is not None and native.text.read_only is True
@@ -187,20 +185,25 @@ def capture_projected_disclosure(
                     normalized.get("representation") != "field"
                     or normalized.get("field") != attribute
                     or normalized.get("node") != token
-                    or type(normalized.get("normalized")) is not str
+                ):
+                    continue
+                if (
+                    type(normalized.get("normalized")) is not str
                     or normalized["normalized"] != value
                     or native_field not in record.get("requestedFields", ())
-                    or type(record.get("values", {}).get(native_field)) is not str
+                ):
+                    continue
+                if (
+                    type(record.get("values", {}).get(native_field)) is not str
                     or record["values"][native_field] != value
                 ):
                     continue
                 path = tuple(normalized.get("path", ()))
                 status = record.get("fieldStatus", {}).get(native_field)
+                if not path or type(_native_value(native, path)) is not str or _native_value(native, path) != value:
+                    continue
                 if (
-                    not path
-                    or type(_native_value(native, path)) is not str
-                    or _native_value(native, path) != value
-                    or not _covers_reported_text(native, path, value)
+                    not _covers_reported_text(native, path, value)
                     or status is not None
                     and status.get("state") != "complete"
                 ):

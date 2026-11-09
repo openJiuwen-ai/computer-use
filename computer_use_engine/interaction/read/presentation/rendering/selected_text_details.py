@@ -95,7 +95,10 @@ def capture_empty_selected_text_fields(
             type(values.get("text.selected_text")) is not str
             or values["text.selected_text"] != ""
             or values.get("text.source") != native.text.source
-            or values.get("text.unit") != native.text.unit
+        ):
+            continue
+        if (
+            values.get("text.unit") != native.text.unit
             or any(
                 key == field or key.startswith(field + ".") or field.startswith(key + ".")
                 for key in fact["fieldStatus"]
@@ -108,7 +111,10 @@ def capture_empty_selected_text_fields(
             not _matches_source(selected, token, ("text", "selected_text"), "field", "selectedText")
             or type(selected.get("normalized")) is not str
             or selected["normalized"] != ""
-            or not _matches_source(snapshot.fields.get((ref, "text.source")), token, ("text", "source"), "raw", None)
+        ):
+            continue
+        if (
+            not _matches_source(snapshot.fields.get((ref, "text.source")), token, ("text", "source"), "raw", None)
             or not _matches_source(snapshot.fields.get((ref, "text.unit")), token, ("text", "unit"), "raw", None)
             or not _matches_source(
                 snapshot.fields.get((ref, "text.selections")), token, ("text", "selections"), "annotation", None

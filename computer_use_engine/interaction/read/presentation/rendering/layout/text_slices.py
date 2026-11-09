@@ -108,12 +108,13 @@ def capture_text_slice_sources(
         parent = next(iter(parent_tokens)) if len(parent_tokens) == 1 and token not in unreliable else None
         # Explicit native parent reports must agree with the child edge.
         for key, relation in node.relations.items():
-            if relation.kind == "parent" and (
-                not complete(token, ("relations", key))
-                or relation.evidence not in ("reported", "verified")
-                or relation.targets != (parent,)
-            ):
-                parent = None
+            if relation.kind == "parent":
+                if (
+                    not complete(token, ("relations", key))
+                    or relation.evidence not in ("reported", "verified")
+                    or relation.targets != (parent,)
+                ):
+                    parent = None
         parent_ref = inverse.get(parent)
         if source_scopes.get(parent_ref) != source_scopes[ref]:
             parent_ref = None
@@ -322,31 +323,22 @@ def _public_fields(frame: LayoutFrame) -> dict[tuple[str, str], _Field]:
     for ref, (index, offset, body) in _segments(frame.lines).items():
         node, record, source = nodes.get(ref), records.get(ref), evidence.nodes.get(ref)
         prefix = ref + " " + frame.node_prefixes.get(ref, "")
-        if (
-            node is None
-            or record is None
-            or source is None
-            or counts[ref] != 1
-            or record_counts[ref] != 1
-            or record.partial
-            or not frame.node_prefixes.get(ref)
-            or ": " in prefix
-            or body != record.text.split("\n", 1)[0].lstrip("\t")
-            or not body.startswith(prefix + " ")
-        ):
+        if node is None or record is None or source is None:
+            continue
+        if counts[ref] != 1 or record_counts[ref] != 1 or record.partial:
+            continue
+        if not frame.node_prefixes.get(ref) or ": " in prefix:
+            continue
+        if body != record.text.split("\n", 1)[0].lstrip("\t") or not body.startswith(prefix + " "):
             continue
         for attribute, value, path in (
             ("Name", source.name, ("name",)),
             ("Value", source.value, ("control_value", "value")),
         ):
             key = attribute.lower()
-            if (
-                value is None
-                or not value
-                or any(c in value for c in "\r\n\u2028\u2029")
-                or _REFERENCE.search(value)
-                or node.get(key) != value
-            ):
+            if value is None or not value or any(c in value for c in "\r\n\u2028\u2029"):
+                continue
+            if _REFERENCE.search(value) or node.get(key) != value:
                 continue
             try:
                 encoded = frame.format_field(value)

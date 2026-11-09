@@ -125,16 +125,11 @@ def _leaves(frame: LayoutFrame) -> dict[int, _Leaf]:
         ref = match[2]
         record = records.get(ref)
         parent, position = positions[ref]
-        if (
-            record is None
-            or record_counts[ref] != 1
-            or line_counts[ref] != 1
-            or occurrences[ref] != 1
-            or record.parent != parent
-            or record.partial
-            or record.hints
-            or "\n" in record.text
-        ):
+        if record is None or record_counts[ref] != 1 or line_counts[ref] != 1:
+            continue
+        if occurrences[ref] != 1 or record.parent != parent or record.partial:
+            continue
+        if record.hints or "\n" in record.text:
             continue
         if (
             index + 1 < len(frame.lines)
@@ -147,8 +142,9 @@ def _leaves(frame: LayoutFrame) -> dict[int, _Leaf]:
             not prefix
             or any(char in prefix for char in "[]\r\n\t")
             or not record.text.startswith(match[1] + ref + " " + prefix)
-            or not match[3].startswith(prefix + " ")
         ):
+            continue
+        if not match[3].startswith(prefix + " "):
             continue
         tail = match[3][len(prefix) + 1:]
         if tail:
@@ -179,14 +175,9 @@ def pack_leaf_headers(frame: LayoutFrame) -> list[str]:
         members = [first]
         while index + len(members) < len(frame.lines):
             current = candidates.get(index + len(members))
-            if (
-                current is None
-                or current.parent != first.parent
-                or current.position != first.position + len(members)
-                or current.indent != first.indent
-                or current.prefix != first.prefix
-                or current.layout != first.layout
-            ):
+            if current is None or current.parent != first.parent or current.position != first.position + len(members):
+                break
+            if current.indent != first.indent or current.prefix != first.prefix or current.layout != first.layout:
                 break
             members.append(current)
         packed = [first.indent + "Elements [" + first.prefix + "]:"]
