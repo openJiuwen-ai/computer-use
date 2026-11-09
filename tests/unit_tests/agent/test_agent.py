@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import asyncio
@@ -74,9 +73,8 @@ def test_application_menu_guidance_reaches_mcp_and_reference_agent():
     assert "app.read(menu_path=['Edit'], window=ref)" in description
     assert "exact visible menu titles" in description
     assert "app.element(item_ref).click() on the same App" in description
-    assert "native menu tracking refuses the click before dispatch" in description
     assert "a shortcut displayed for that enabled item" in description
-    assert "app.press_key('super+o', window=ref)" in description
+    assert "app.press_key(shown_shortcut, window=ref)" in description
 
 
 def test_standard_toolkit_delivers_images_to_model(model_server, tmp_path):

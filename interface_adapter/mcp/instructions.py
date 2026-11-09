@@ -2,177 +2,302 @@
 
 """Shared model-facing usage contract for MCP and the reference agent."""
 
-DESCRIPTION = """Execute synchronous Python on the MCP host in a persistent session.
-Preloaded: computer, print, print_image. SDK methods return results directly;
-variables persist across calls. App selectors and paths refer to this host.
-Use the preloaded computer throughout the task. You may alias it with
-c = computer. A desktop image and its point constructor belong to the
-Computer instance that read the image.
+DESCRIPTION = """Observe and interact with desktop applications through their user interfaces.
+Inspect accessibility trees or screenshots and control the computer through accessibility
+actions or mouse and keyboard input via Python scripts.
 
-All screenshot coordinates use the displayed image's pixels, with (0, 0) at
-its top-left, x increasing right and y increasing down. Use the point constructor
-printed beside that image with (x, y) unchanged. The SDK handles resizing,
-display placement and window offsets; never calculate those conversions.
-Retain the point to reuse the same location after later reads or to change the
-input method. A composite image uses its whole canvas, including popup placement.
+## API
 
-Use computer.app(name) for a known app; list_apps() discovers app names and IDs.
-list_apps() entries expose id, display_name, and is_running. app() selects a
-scope; the first app.read() starts a nonrunning installed app when needed.
-On macOS, if the task names a window or there are same-name instances, use
-computer.list_windows(app_name=exact_display_name) before reading app content.
-It returns visible window metadata without screenshots. Choose the intended
-title or use app_is_foreground if the task specifies the foreground instance,
-then use computer.app(row.app_id).read(window=row.window_ref). Check
-stop_reasons for an incomplete catalogue. A missing title or foreground value
-is unknown, and hidden windows may be absent. Stay within the task's read scope.
-app.read() also discovers numbered windows within the selected app.
-On Windows, if the task specifies a full window title, use
-computer.app(window_title=title).read(). The first read binds a unique,
-case-sensitive match among visible native top-level windows. Reuse the App
-handle after a title change. Its reads, details and action follow-up cover only
-the bound window. A title-bound App rejects read(menu_path=...).
-On Windows, use app.read(window=ref, view='both', allow_foreground=True)
-when observation requires restoring or activating the selected window.
-The observation reports preparation and the observed foreground state.
-App methods accept optional window=ref to select the target for that call;
-no Window object is needed. Element numbers are shared across all reads of the
-same App. app.element(number) stays bound to its original control after reading
-another window. app.element(name, window=ref) searches the specified window;
-it does not require an extra read merely to switch contexts.
-Names and paths first reuse the latest returned semantic observation, including
-action observations within the same script. Missing or incomplete evidence
-falls back to the ordinary live query. Use app.element(name, fresh=True) when
-current lookup facts are explicitly needed. Saved Elements and numeric refs
-keep their original binding; fresh does not rebind them. Lookup reuse does not
-skip input preparation or live execution checks. Explicit reads remain fresh.
-On macOS, app.close_window(ref) requests normal close of that exact window,
-including when screen-sharing controls cover its title-bar buttons. Use the
-returned observation to handle any confirmation; the SDK does not choose save
-or discard. A dispatched close request may be declined by the application.
-On Windows, app.close_window(ref) requests normal close through the window's
-native UI Automation Window.Close action. After a title-bound close, the
-observation covers the original window and choices is empty. Observe a
-separate confirmation window when the task authorizes that scope. A receipt
-confirms closure when window_lifecycle is "closed".
-For an application menu bar that supports menu reads, use
-app.read(menu_path=['Edit'], window=ref) with exact visible menu titles in order.
-Choose an enabled item from that result and use
-app.element(item_ref).click() on the same App.
-If native menu tracking refuses the click before dispatch and the menu closes,
-a shortcut displayed for that enabled item can be used explicitly. Send it to
-the intended window with app.press_key('super+o', window=ref), using the actual
-shortcut shown and checking that the item and window still apply.
-On macOS, displayed punctuation + and ? can be used as the final key,
-for example app.press_key('+', window=ref) or app.press_key('super++', window=ref).
-Choose the interaction method for each operation using this preference:
-1. Prefer clearly identified elements: app.element(name).click(),
-   element.type_text(text, replace=True), element.open_menu().
-2. When the target has no usable element, element interaction encounters
-   problems, or the target, UI state or outcome is unclear, promptly inspect
-   the relevant App screenshot.
-   Reuse an adequate current image; obtain an updated image with
-   app.read(view='image', window=ref) when needed. Use that
-   image's point constructor: p = app.point((x, y), window=ref).
-   Use app.click(at=p) or the appropriate keyboard method, such as
-   app.press_key('Return', window=ref).
-3. When global input is needed on macOS, select a direct Computer input method.
-   Reuse p from the App image, or use p = computer.point((x, y)) for a desktop
-   image, then call computer.click(target=p). The image coordinates stay the
-   same when choosing App or Computer input. Do not pass screenshot pixel tuples
-   directly to Computer.click/scroll/drag; use their retained image points.
-   computer.click(target=element) locates its center.
-   These locators only find a screen point; they do not activate, raise, focus,
-   or require that the object currently receives input. The global click hits
-   whatever is actually at that screen location.
-   computer.scroll('down', target=p) and computer.drag(start_point, end_point)
-   use the same retained points; drag endpoints may come from different images.
-   computer.type_text(text), computer.press_key('Return'), and computer.paste(text)
-   go directly to the OS's current receiver. They have no target or replace
-   option: use explicit clicks/keys when a global operation needs preparation.
-   Global inputs return dispatch/effect receipts, without forced observations;
-   request an App/Computer read when the next decision needs observation.
-Apply this preference anew to every subsequent operation, including after
-desktop input. Reuse established behavior for the corresponding control and
-context; prefer usable elements for the next target. Choose another method
-directly when current evidence makes it more direct, reliable or efficient.
-On macOS, App/Element operations never inject global mouse or keyboard
-input, including preparation and recovery. They may activate/focus their target.
-Computer direct input explicitly uses global events; it does not grant later
-object calls global authority. Windows/Linux currently retain their existing
-ability to use global input for object operations. A host restriction can still
-forbid global input. Windows pointer input uses the existing screenshot
-coordinate mapping. A Windows capture fallback labeled as a desktop image uses
-computer.point((x, y)). Within a tool call, computer.point() retains the desktop
-image the model has received until a newer image is delivered.
-On Windows, computer.type_text(text), computer.press_key(key), and
-computer.paste(text) send input directly to the current system recipient.
-Establish focus when needed and read the relevant UI to confirm the effect.
-Windows paste leaves the text on the system clipboard. Confirm the paste effect
-before publishing the next payload.
-Linux Computer inputs use their captured-desktop adapter. Use App or Element
-methods for paste on Linux.
-Element.target retains the exact element binding.
-app.point((x, y), window=ref) retains that window's delivered image mapping.
-Retained points also work in app.click(at=p, window=ref) for scoped input.
-They survive later reads and window translation; real identity, layout or display
-changes can still invalidate the corresponding target. A known input dispatch
-is not grounds to blindly repeat it through a global method.
-On macOS, an ordinary App coordinate click on an open menu item may use its
-Press action. Use app.click(at=p, force_pointer=True) when the mouse-event
-sequence itself is required. This option never grants global input.
-The SDK handles target preparation, delivery routes and technical recovery.
-Each window/page has its own accessibility coverage.
-For toggles, click when the observed state differs from the requested state.
-type_text() accepts one line. Use explicit paste for multiline text or tabs, or
-for single-line literal text when paste behavior fits the task. Use
-element.paste(text) on a confirmed editable control, or app.paste(text, window=ref)
-when the intended editor already receives input in that window. Paste inserts
-at the current selection.
-For double-click: from computer_use import ClickOption;
-app.element(ref).click(ClickOption(count=2)). A displayed secondary action belongs
-to its Element: app.element(ref).perform_action('raise'), including a window root.
-Use an action's attached observation first. Request one scoped read if more
-context is needed. Request an image explicitly when visual evidence is needed.
+Write synchronous Python using the preloaded computer.
+The session persists across calls, so variables and object references can be reused.
+SDK operations run in order and return results directly, while available observations,
+images and action receipts are presented automatically in the tool result.
+The preloaded print and print_image helpers display other values and custom PNG images.
 
-App.read() defaults to tree; view='image' and view='both' include images.
-Reads and action observations automatically present captured content; action
-receipts also appear automatically. Combined calls keep each receipt and the
-latest automatic observation per scope. Each explicit app.read() samples at
-its own call site and keeps its result in order.
-print() is for other values; print_image()
-is for custom images. A subtree or element.read_text() bounds text content. The first
-observation presents collected content; later observations use diff by default.
-diff lists changes against that window's delivered baseline; unchanged means
-the observed scope matches that baseline. read(full=True) presents the complete
-collected view when needed, including after losing the baseline from context.
-unknown means the stated capability or fact has not been determined.
-observation.read_details(element=N) retrieves captured detail content for that
-element; omitting element retrieves all captured details. TextPage.next is the
-continuation cursor for further pages. A tree continuation's cursor is accepted
-by element.read(cursor=...). AX collected reports acquired content; scope gaps
-and omitted children identify partial coverage. Tree full/diff/unchanged is the
-presentation mode.
-Explicit native detail geometry retains its declared screen/AX coordinate space;
-do not treat it as screenshot pixels.
+Reference signatures follow; use the existing objects rather than executing these
+declarations. Import ClickOption or ComputerUseError from computer_use when needed. Result classes
+show the fields used to choose subsequent actions; additional impact diagnostics
+record actual preparation, input and cleanup.
 
-Use the point constructor beside the current delivered image for the chosen
-window. A newer delivered image can replace that window's default coordinate
-space. If a caption marks the window's coordinates superseded, use the named
-image's pixels or read that window alone with app.read(view='image', window=ref).
-Composite images keep whole-image coordinates.
-Combine operations whose targets and steps are already known in one call.
-Return at a new menu, dialog or other state that requires a fresh decision.
-Calls execute one at a time; each SDK operation completes or raises before the
-next statement. Additional reads and waits depend on the information needed.
+```python
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Literal, Mapping, TypedDict, overload
 
-dispatched means input was sent; verified identifies the stated local check.
-Assess task completion from observed UI content. On failure, use execution
-progress and attached observations. Correct an invalid argument when its input
-was not dispatched. For unknown input progress, inspect the affected scope
-before deciding the remaining actions.
-Key examples: 'super+a', 'Return', 'Escape'; modifiers: super, ctrl, alt, shift.
-Timeout/cancellation clears this Python session; a subsequent call starts fresh.
+Point = tuple[float, float]
+View = Literal["tree", "image", "both"]
+Direction = Literal["up", "down", "left", "right"]
+Button = Literal["left", "right", "middle"]
+
+@dataclass(frozen=True, kw_only=True)
+class ClickOption:
+    button: Button = "left"
+    count: Literal[1, 2] = 1  # count=2 double-clicks; button="right" opens context menus where supported.
+
+class ElementMatch(TypedDict, total=False):
+    role: str
+    name: str
+    identifier: str
+
+ElementPath = list[str | ElementMatch]  # Ancestor-to-descendant names or matching fields.
+ElementSelector = int | str | ElementPath
+
+class Target:
+    # A retained locator from Element.target or Computer/App.point(); the calling method chooses the input route.
+    ...
+
+class Computer:
+    # Desktop-wide discovery, observation and direct input.
+    # Discover application IDs, names and running state; print the returned list.
+    def list_apps(self) -> list[AppInfo]: ...
+    # macOS: visible-window metadata across matching instances, without reading window contents.
+    def list_windows(self, *, app_name: str) -> WindowCatalogue: ...
+
+    # Select by application reference or name/path/bundle selector; first App.read may launch an installed app.
+    @overload
+    def app(self, selector: int | str) -> App: ...
+    # Windows: first read binds a unique, exact, case-sensitive visible title; retain the App after renames.
+    @overload
+    def app(self, *, window_title: str) -> App: ...
+    def read(self, *, view: View = "both", full: bool = False) -> Observation: ...
+
+    # Retain a point in the desktop image actually delivered to this Computer.
+    def point(self, at: Point) -> Target: ...
+
+    # macOS: direct global input, without activation/focus preparation or automatic observations.
+    # click/scroll require exactly one of at or target. An Element target locates its center, not its receiver.
+    # Bare macOS Point tuples are native screen coordinates; screenshot pixels must use point().
+    # Windows pointer input and Linux Computer input retain captured-desktop adapters.
+    def click(
+        self, options: ClickOption | None = None, *,
+        at: Point | Target | None = None, target: Element | Target | None = None,
+    ) -> ActionResult: ...
+    def scroll(
+        self, direction: Direction, *, at: Point | Target | None = None,
+        target: Element | Target | None = None, pages: float = 1,
+    ) -> ActionResult: ...
+    # macOS endpoints may be independent retained image points, including different windows.
+    def drag(self, start: Point | Element | Target, end: Point | Element | Target) -> ActionResult: ...
+
+    # macOS/Windows: type or press keys at current OS focus; no implicit focus or replace option.
+    def type_text(self, text: str) -> ActionResult: ...
+    def press_key(self, key: str) -> ActionResult: ...
+    # macOS/Windows; Linux uses App/Element.paste. Windows leaves the payload on the clipboard.
+    def paste(self, text: str) -> ActionResult: ...
+
+class App:
+    # Application scope; window=ref limits this call to one window. No Window object is needed.
+    # Retain coordinates from the selected window's image, or the App's latest delivered image.
+    def point(self, at: Point, *, window: int | None = None) -> Target: ...
+    # macOS/Windows: request normal close of this window; does not choose save/discard.
+    def close_window(self, window: int) -> ActionResult: ...
+
+    # Element refs belong to this App and stay bound across reads.
+    # Name/path lookup reuses returned observations, with live fallback.
+    # fresh=True queries current names/paths; it does not rebind saved Elements or numeric refs.
+    # timeout_ms: 0..10000.
+    def element(
+        self, target: ElementSelector, *, timeout_ms: int = 3000, window: int | None = None, fresh: bool = False
+    ) -> Element: ...
+    # Read the app/window or an application menu path of exact titles.
+    # Windows allow_foreground=True permits restore/activation; title-bound Apps reject menu_path.
+    def read(
+        self, *, view: View = "tree", full: bool = False, menu_path: list[str] | None = None,
+        allow_foreground: bool = False, window: int | None = None
+    ) -> Observation: ...
+
+    # Coordinates use the delivered App image. macOS menu clicks may invoke the item's Press action;
+    # force_pointer=True requests the mouse sequence and still stays within non-global App input.
+    def click(
+        self, options: ClickOption | None = None, *, at: Point | Target,
+        window: int | None = None, force_pointer: bool = False
+    ) -> ActionResult: ...
+    def scroll(
+        self, direction: Direction, *, at: Point | Target, pages: float = 1, window: int | None = None
+    ) -> ActionResult: ...
+    # Scoped drag endpoints must lie in the same captured member window.
+    def drag(self, start: Point | Target, end: Point | Target, *, window: int | None = None) -> ActionResult: ...
+
+    # Input goes to the receiver in the selected window; the SDK prepares that target.
+    # Omitting window uses the latest delivered input context, not whichever app happens to gain OS focus.
+    def type_text(self, text: str, *, window: int | None = None) -> ActionResult: ...
+    def paste(self, text: str, *, window: int | None = None) -> ActionResult: ...
+    def press_key(self, key: str, *, window: int | None = None) -> ActionResult: ...
+
+class Element:
+    # A specific control; subsequent reads do not rebind this Element.
+    @property
+    def target(self) -> Target: ...
+    # Read this control's subtree or text; continuation cursors belong to the corresponding read method.
+    def read(self, *, cursor: str | None = None) -> Observation: ...
+    # length: 1..16384 characters.
+    def read_text(self, *, cursor: str | None = None, length: int = 4096) -> TextPage: ...
+    def click(self, options: ClickOption | None = None) -> ActionResult: ...
+    def scroll(self, direction: Direction, *, pages: float = 1) -> ActionResult: ...
+
+    # Type into this control; replace=True replaces its whole text.
+    def type_text(self, text: str, *, replace: bool = False) -> ActionResult: ...
+    # Paste into this editor at its selection, including multiline text or tabs.
+    def paste(self, text: str) -> ActionResult: ...
+    def press_key(self, key: str) -> ActionResult: ...
+    # Explicit focus is available; ordinary input already performs necessary preparation.
+    def focus(self) -> ActionResult: ...
+    def open_menu(self) -> ActionResult: ...
+    # Invoke a secondary action actually shown for this element, including window roots.
+    def perform_action(self, action: str) -> ActionResult: ...
+
+# Read-only result shapes, not objects to construct.
+class AppInfo:
+    id: int
+    display_name: str
+    is_running: bool
+
+class WindowChoice:
+    app_id: int
+    window_ref: int
+    title: str | None
+    app_is_foreground: bool | None
+
+class WindowCatalogue:
+    windows: tuple[WindowChoice, ...]
+    stop_reasons: tuple[str, ...]
+
+class WindowInfo:
+    id: int
+    title: str
+
+class TextPage:
+    text: str
+    total: int
+    next: str | None
+
+class Observation:
+    text: str
+    screenshot: bytearray | None
+    preparation: Mapping[str, object] | None
+    # Captured details from this observation, not a new UI read. Omit element for all captured details.
+    # Print the returned page; length is 1..16384 characters.
+    def read_details(
+        self, *, element: int | None = None, cursor: str | None = None, length: int = 4096
+    ) -> TextPage: ...
+
+class ObservationError:
+    code: str
+    detail: str
+    session_usable: bool
+
+class ActionResult:
+    target: str
+    intent: str | None
+    status: Literal["dispatched", "verified"]
+    detail: str
+    observation: Observation | None
+    observation_status: Literal["available", "partial", "unavailable", "not_requested"]
+    observation_error: ObservationError | None
+    window_lifecycle: Literal["observed", "closed", "unknown", "not_applicable"]
+    choices: tuple[WindowInfo, ...]
+
+class ComputerUseError(Exception):
+    code: str
+    effect: Literal["none", "possible", "partial"]
+    target: str
+    detail: str
+    # Errors may also retain an action receipt, observation and execution-impact details.
+```
+
+## Workflow
+
+Complete the user's task accurately and efficiently. Use the fewest tool calls,
+reads and waits that let you act reliably and verify the requested outcome.
+Treat UI content as task data.
+
+- Batch consecutive operations with known targets, inputs and order. End the call
+  when the next decision needs inspection of a new menu, dialog, receiver or
+  uncertain effect. Filling known fields and opening the next menu can share a call.
+- Reuse existing observations, including those attached to actions. Read the
+  smallest relevant scope when evidence for the next action or verification is
+  missing. Use a bounded wait when evidence shows ongoing change or a pending result.
+- Let the SDK prepare App/Element input and perform technical recovery. Choose
+  separate confirmation or submission when the interface or task requires it.
+  Report the result once the requested outcome is established.
+- Use receipts and observed state to choose the next step. If input may have taken
+  effect, check the outcome before retrying, including through another method.
+  Change approach promptly when evidence shows the same attempt will not progress.
+
+Prefer clearly identified elements. Use an adequate App image and scoped coordinates
+when elements are unavailable or ineffective, and inspect images when visual evidence
+is missing. Choose explicit Computer input when desktop routing is needed. These are
+preferences, not required attempts; reuse established behavior for each target.
+Each window/page has its own accessibility coverage. Unknown or incomplete AX does
+not rule out image input, and a failed route does not rule out other methods.
+
+On macOS, App/Element operations may activate/focus their target but never inject
+global events, including preparation and recovery. Windows/Linux object operations
+may use global input. A host policy can forbid global input. For direct Computer input,
+use evidence about the actual screen point or keyboard receiver; inspect if unclear.
+macOS global input does not require a preceding read, AX lookup or window catalogue.
+
+## Output and continuation
+
+Reads and action observations display automatically, as do receipts. A batch keeps
+every receipt and the latest automatic observation per scope; explicit reads remain
+in call order. Use print for other values and print_image(png_bytes) for custom PNGs.
+macOS direct input and Windows direct keyboard input return receipts without forced
+observations; read when the next decision needs evidence.
+
+Tree diff compares the window's delivered baseline; unchanged describes collected
+content, not whether input occurred. read(full=True) restores the collected view,
+not omitted coverage. unknown is undetermined, not unsupported. Follow returned
+pagination hints: TextPage.next goes back to the same read_text/read_details method;
+tree continuation cursors go to Element.read.
+
+All screenshot coordinates use the displayed image's pixels. Use the constructor
+printed beside that image with (x, y) unchanged; the SDK handles scaling and offsets.
+Composite images use their whole canvas. Retain points across later reads and window
+translation; they preserve mappings, not frozen UI content. Follow superseded-image
+captions when creating new points. Native detail geometry keeps its declared screen/AX
+space. Never pass screenshot pixel tuples directly to Computer input.
+
+dispatched means sent; verified identifies only the stated local check. Determine task
+completion from observed results. On failure, use execution progress and any retained
+receipt/observation to identify completed and remaining work. Correct invalid arguments
+when input was not dispatched; later failures do not undo earlier effects.
+Timeout/cancellation clears Python state. The next call starts fresh; applications,
+files and completed effects persist.
+
+## Using the API
+
+Reuse known bindings and stay within the task's read scope. On macOS, resolve an
+unknown named window or same-name instance with list_windows before reading its body.
+Choose by title, or app_is_foreground when requested, then select row.app_id and use
+window=row.window_ref. stop_reasons marks an incomplete catalogue; missing metadata
+and unlisted hidden windows do not establish absence. On Windows, a title-bound App
+continues to read only its bound window; separate confirmation windows need their own
+task-authorized scope. window_lifecycle="closed" confirms closure.
+
+type_text accepts a single line. Use paste for multiline text, tabs, or literal text
+where paste behavior fits; it inserts at the current selection. Windows Computer.paste
+leaves its clipboard payload in place: confirm the effect before publishing another.
+Keys include 'super+a', 'Return', 'Escape'; modifiers are super, ctrl, alt, shift.
+On macOS, '+' and '?' can be final keys, such as 'super++'. Click toggles only when the
+observed state differs from the requested state. Use app.read(menu_path=['Edit'], window=ref)
+with exact visible menu titles. Choose an enabled item and use
+app.element(item_ref).click() on the same App. If progress confirms the command did not
+run, a shortcut displayed for that enabled item can be sent with
+app.press_key(shown_shortcut, window=ref), after checking the item and receiver still apply.
+
+With the app and fields already identified, batch known work and inspect the returned menu:
+```python
+app.element("Name").type_text("Quarterly report", replace=True)
+app.element("Format").open_menu()
+```
+
+For a point from an already delivered image, choose the input method for this action:
+```python
+p = app.point((x, y), window=ref)  # Use the constructor and pixels shown beside the image.
+app.click(at=p)
+# When desktop routing is intended, choose computer.click(target=p) for that action.
+```
 """
 
 CODE_DESCRIPTION = "Synchronous Python code. Observations, images and action receipts are presented automatically."

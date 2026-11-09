@@ -103,6 +103,12 @@ def test_model_receives_scoped_popup_content_and_factual_gap(model_server, tmp_p
         assert image.getpixel((10, 5))[:3] == (34, 187, 68)
     schema = next(tool["function"] for tool in request["tools"] if tool["function"]["name"] == "computer_use")
     assert schema["description"] == DESCRIPTION
+    assert "class Computer:" in schema["description"]
+    # The tool supplies the reference for every client; the agent must not repeat it in its system prompt.
+    assert all(
+        "class Computer:" not in str(message["content"])
+        for message in request["messages"] if message["role"] == "system"
+    )
     assert "All screenshot coordinates use the displayed image's pixels" in schema["description"]
     assert "screen_x" not in schema["description"]
     assert "replace=True" in schema["description"]
