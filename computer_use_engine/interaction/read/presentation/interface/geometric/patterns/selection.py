@@ -147,6 +147,7 @@ def _card_row(draft: InterfaceDraft, key: str) -> tuple[tuple[str, ...], tuple[s
     refs = source_keys(draft, key)
     if any(draft.evidence[ref].incomplete for ref in refs):
         return None
+
     def has_content(ref: str) -> bool:
         return draft.projected_nodes[ref]["role"] in ("staticText", "heading") and any(
             isinstance(draft.projected_nodes[ref].get(field), str) and draft.projected_nodes[ref][field].strip()

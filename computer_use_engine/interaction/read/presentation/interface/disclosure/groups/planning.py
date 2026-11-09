@@ -94,6 +94,7 @@ def candidate(
     characters = sum(len(source.value) for source in captured_text_fields(fields))
     if characters < policy.minimum_characters:
         return None, "short-captured-content"
+
     def outline_field(field: GroupField) -> bool:
         return (
             field.slot_key == "name"
