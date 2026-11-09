@@ -51,50 +51,118 @@ import ApplicationServices
     }
 
     static func matches(_ menu: AXUIElement, window: WindowGeometry.WindowMapping) -> Bool {
-        guard let frame = frame(menu, pid: window.pid), WindowSelection.sameFrame(frame, window.frame),
-            let current = WindowServerInfo.window(window.id),
-            (current[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == window.pid,
-            (current[kCGWindowLayer as String] as? NSNumber)?.intValue == Int(CGWindowLevelForKey(.popUpMenuWindow)),
-            let raw = current[kCGWindowBounds as String] as? [String: Any],
-            let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary),
-            WindowSelection.sameFrame(bounds, window.frame)
-        else { return false }
-        return true
+        guard let frame = frame(menu, pid: window.pid), WindowSelection.sameFrame(frame, window.frame) else { return false }
+        return matchesPhysicalWindow(window,
+            rows: CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]])
     }
 
-    static func classify(_ windows: [NativeWindows.Window]) -> [NativeWindows.Window] {
-        guard AXIsProcessTrusted() else { return windows }
+    /// AXMenu's owning window ID may name its document, not its rendering
+    /// popup. Match one live physical popup; never use that owning ID here.
+    /// Production rows come from the onscreen WindowServer projection.
+    static func matchesPhysicalWindow(_ window: WindowGeometry.WindowMapping, rows: [[String: Any]]?) -> Bool {
+        guard let rows else { return false }
+        let matches = rows.filter { row in
+            guard (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == window.pid,
+                (row[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue != false,
+                (row[kCGWindowLayer as String] as? NSNumber)?.intValue == Int(CGWindowLevelForKey(.popUpMenuWindow)),
+                let raw = row[kCGWindowBounds as String] as? [String: Any],
+                let frame = CGRect(dictionaryRepresentation: raw as CFDictionary)
+            else { return false }
+            return WindowSelection.sameFrame(frame, window.frame)
+        }
+        return matches.count == 1
+            && (matches.first?[kCGWindowNumber as String] as? NSNumber)?.uint32Value == window.id
+    }
+
+    /// Read-only native discovery port. Queries never prepare focus or input.
+    @MainActor struct Query {
+        var trusted: () -> Bool = { AXIsProcessTrusted() }
+        var application: (pid_t) -> AXUIElement = { AXUIElementCreateApplication($0) }
+        var configure: (AXUIElement) -> Void = { _ = AXUIElementSetMessagingTimeout($0, 0.05) }
+        var menuBar: (AXUIElement) -> AXUIElement? = { AXAccess.element($0, kAXMenuBarAttribute) }
+        var role: (AXUIElement) -> String? = { AXAccess.read($0, kAXRoleAttribute).value as? String }
+        var children: (AXUIElement) -> [AXUIElement]? = { AXAccess.elements($0, kAXChildrenAttribute, limit: 256) }
+        var parent: (AXUIElement) -> AXUIElement? = { AXAccess.element($0, kAXParentAttribute) }
+        var nativeID: (AXUIElement) -> CGWindowID? = { BackgroundEvents.nativeWindowID($0) }
+        var frame: (AXUIElement, pid_t) -> CGRect? = { NativeMenuSurfaces.frame($0, pid: $1) }
+        var hit: (AXUIElement, CGPoint) -> AXUIElement? = { root, point in
+            var element: AXUIElement?
+            return AXUIElementCopyElementAtPosition(root, Float(point.x), Float(point.y), &element) == .success ? element : nil
+        }
+        var now: () -> Double = { ProcessInfo.processInfo.systemUptime }
+    }
+
+    static func classify(_ windows: [NativeWindows.Window], query: Query = Query()) -> [NativeWindows.Window] {
+        guard query.trusted() else { return windows }
         var result = windows
         for pid in Set(windows.filter { $0.level == Int(CGWindowLevelForKey(.popUpMenuWindow)) }.map { $0.process.pid })
         {
-            let deadline = ProcessInfo.processInfo.systemUptime + 0.15
-            let root = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(root, 0.05)
-            guard let raw = AXAccess.read(root, kAXMenuBarAttribute).value, CFGetTypeID(raw) == AXUIElementGetTypeID()
-            else { continue }
-            var pending: [(element: AXUIElement, parent: AXUIElement?)] = [
-                (unsafeDowncast(raw, to: AXUIElement.self), nil)
-            ]
+            let deadline = query.now() + 0.15
+            let root = query.application(pid)
+            query.configure(root)
+            var pending: [(element: AXUIElement, parent: AXUIElement?)] =
+                query.menuBar(root).map { [($0, nil)] } ?? []
             var seen = [AXUIElement](), menus = [(element: AXUIElement, frame: CGRect, parent: AXUIElement?)]()
             var cursor = 0
-            while cursor < pending.count, seen.count < 256, ProcessInfo.processInfo.systemUptime < deadline {
+            while cursor < pending.count, seen.count < 256, query.now() < deadline {
                 let item = pending[cursor], element = item.element
                 cursor += 1
                 guard !seen.contains(where: { CFEqual($0, element) }) else { continue }
                 seen.append(element)
-                AXUIElementSetMessagingTimeout(element, 0.05)
-                let role = AXAccess.read(element, kAXRoleAttribute).value as? String
+                query.configure(element)
+                let role = query.role(element)
                 if role == kAXMenuRole {
                     // Hidden static menus are not live input surfaces. Do not
                     // expand their potentially large, unrelated command trees.
-                    guard let bounds = frame(element, pid: pid) else { continue }
+                    guard let bounds = query.frame(element, pid) else { continue }
                     menus.append((element, bounds, item.parent))
                 }
-                pending += (AXAccess.elements(element, kAXChildrenAttribute, limit: 256) ?? []).map {
+                pending += (query.children(element) ?? []).map {
                     ($0, role == kAXMenuRole ? element : item.parent)
                 }
             }
-            guard cursor == pending.count else { continue }
+            if cursor != pending.count { menus.removeAll() }
+            // Control menus need not be descendants of AXMenuBar or AXWindows.
+            // Probe only otherwise-unassociated physical popup surfaces, then
+            // follow their actual AX parent chain. No document tree is scanned.
+            let popupDeadline = query.now() + 0.15
+            var hosts = [CFHashCode: CGWindowID]()
+            for window in result where window.process.pid == pid
+                && window.level == Int(CGWindowLevelForKey(.popUpMenuWindow)) && window.menu == nil
+            {
+                guard query.now() < popupDeadline,
+                    !menus.contains(where: { WindowSelection.sameFrame($0.frame, window.mapping.frame) }),
+                    windows.filter({ $0.process.pid == pid && $0.level == window.level
+                        && WindowSelection.sameFrame($0.mapping.frame, window.mapping.frame) }).count == 1
+                else { continue }
+                let point = CGPoint(x: window.mapping.frame.midX, y: window.mapping.frame.midY)
+                var current = query.hit(root, point), ancestry = [AXUIElement]()
+                var selected: (element: AXUIElement, frame: CGRect, parent: AXUIElement?)?
+                while let node = current, ancestry.count < 12, query.now() < popupDeadline,
+                    !ancestry.contains(where: { CFEqual($0, node) })
+                {
+                    ancestry.append(node)
+                    query.configure(node)
+                    let role = query.role(node)
+                    if role == kAXMenuRole {
+                        if selected != nil { selected?.parent = node; break }
+                        guard let bounds = query.frame(node, pid),
+                            WindowSelection.sameFrame(bounds, window.mapping.frame) else { break }
+                        selected = (node, bounds, nil)
+                    }
+                    if [kAXWindowRole, kAXSheetRole].contains(role ?? "") {
+                        if let selected, let id = query.nativeID(node),
+                            windows.filter({ $0.process.pid == pid && $0.mapping.id == id }).count == 1,
+                            id != window.mapping.id { hosts[CFHash(selected.element)] = id }
+                        break
+                    }
+                    if role == kAXApplicationRole { break }
+                    current = query.parent(node)
+                }
+                if let selected, !menus.contains(where: { CFEqual($0.element, selected.element) }) {
+                    menus.append(selected)
+                }
+            }
             for index in result.indices
             where result[index].process.pid == pid && result[index].level == Int(CGWindowLevelForKey(.popUpMenuWindow))
             {
@@ -107,6 +175,7 @@ import ApplicationServices
                     }).count == 1
                 else { continue }
                 result[index].menu = menu.0
+                result[index].menuHost = hosts[CFHash(menu.0)]
             }
             for index in result.indices where result[index].process.pid == pid {
                 guard let menu = result[index].menu,

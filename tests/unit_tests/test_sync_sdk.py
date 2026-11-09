@@ -175,6 +175,29 @@ def test_all_model_methods_are_synchronous_including_retained_details():
     assert "captured details" in str(page)
 
 
+def test_element_fresh_is_synchronous_and_preserves_existing_parameter_validation(monkeypatch):
+    controller = Controller()
+    requests = []
+    original_run = controller.run
+
+    async def capture(request):
+        requests.append(request)
+        return await original_run(request)
+
+    monkeypatch.setattr(controller, "run", capture)
+    with computer_for_controller(controller) as computer:
+        app = computer.app("Editor")
+        assert isinstance(app.element("Field", fresh=True), Element)
+        assert requests[-1].fresh is True
+        assert isinstance(app.element(0, fresh=True), Element)
+        assert requests[-1].target == 0
+        with pytest.raises(ComputerUseError, match="fresh must be a boolean"):
+            app.element("Field", fresh=1)
+        with pytest.raises(ComputerUseError, match="timeout_ms"):
+            app.element("Field", timeout_ms=-1, fresh=1)
+        assert len(requests) == 2
+
+
 def test_cancel_waits_for_async_cleanup_and_denies_later_submission():
     async def scenario():
         executor = SessionExecutor(loop=asyncio.get_running_loop())

@@ -42,6 +42,9 @@ class DriverReadMetadata:
     input_containers: Mapping[NodeId, bool] = field(default_factory=dict)
     diagnostic_fields: Mapping[NodeId, tuple[FieldPath, ...]] = field(default_factory=dict)
     text_read_fields: Mapping[NodeId, FieldPath] = field(default_factory=dict)
+    # Owned by the native query layer; only captured raw matching inputs, not
+    # a second full semantic graph or permission to execute against old facts.
+    lookup_facts: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         for key in ("relation_fields", "requested_fields", "field_sources", "input_containers", "text_read_fields"):

@@ -9,6 +9,7 @@ import ApplicationServices
     case menu(NativeMenuUnit, node: String, name: String, description: String?)
     case menuPointer(NativeMenuUnit)
     case captured(NativePointerUnit)
+    case coordinateMenuPress(NativeCoordinateMenuPress)
     case element(NativeElementPointerUnit)
     case popupPointer(any NativePopupPointerInput)
 }

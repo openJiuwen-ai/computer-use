@@ -5,10 +5,12 @@
 
 import asyncio
 import hashlib
+from collections import OrderedDict
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
+from weakref import WeakSet
 
 from computer_use.client.factory import session_controller
 from computer_use.diagnostics import local_failure
@@ -21,7 +23,8 @@ from computer_use.native.lifecycle import CallLifecycle
 from computer_use.pipeline import Control, Pipeline, Repeat, Scope, Select, Sequence
 from computer_use.session.events import set_action_handler, set_observation_handler
 from computer_use.session.interface_images import signature
-from computer_use.session.interfaces import LookupContext, WindowEvidence, WindowIdentity
+from computer_use.session.interfaces import LookupContext, SurfaceOwner, WindowEvidence, WindowIdentity
+from computer_use.session.state import AppState
 
 
 class UIStub(SimpleNamespace):
@@ -45,12 +48,17 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                 )
             },
             anchor=None,
+            delivered_lookup_windows=set(),
+            delivered_observation_generation=0,
+            lookup_observations=OrderedDict(),
+            lookup_results=OrderedDict(),
+            lookup_captures=WeakSet(),
             refs={"1": self.snapshot},
             owners={},
             members={"window": {"surface": "surface", "window": "window", "instance": "app"}},
             surface_evidence=lambda *_: None,
         )
-        self.ui = UIStub(_instance=instance, _anchor=None, _menu_only=True, _lookup_scopes=(object(),))
+        self.ui = UIStub(_instance=instance, _anchor=None, _menu_only=True, _lookup_scopes=self.lookup_scopes(1))
         instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         self.controller.register(self.ui, {"selector": "test-app"})
         self.receipt = {"status": "dispatched", "target": "test element", "detail": "sent once"}
@@ -59,6 +67,11 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
         self.events = []
         set_action_handler(lambda value: self.events.append(("action", value)))
         set_observation_handler(lambda value: self.events.append((value["kind"], value)))
+
+    def lookup_scopes(self, count):
+        # Real lookup owners are registered scope handles even when they have
+        # no captured query root. Keep that contract while mocking live lookup.
+        return tuple(SurfaceOwner(self.controller, AppState("test-app")) for _ in range(count))
 
     def tearDown(self):
         set_action_handler(None)
@@ -160,6 +173,8 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             expired=False,
             membership=signature(members),
             pieces=(piece,),
+            identities=(),
+            content_hosts=(),
             hit=lambda point: (piece, (point[0] - 10, point[1] - 20)),
         )
         self.ui._instance.delivered_image = self.ui._image
@@ -179,7 +194,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
 
     async def test_lookup_unique_missing_and_ambiguous(self):
         missing = local_failure("not found", "element_not_found")
-        self.ui._lookup_scopes = (object(), object())
+        self.ui._lookup_scopes = self.lookup_scopes(2)
         self.ui._instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         second = {"binding": replace(self.target, node="other")}
         for results, error in (

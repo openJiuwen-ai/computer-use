@@ -15,6 +15,8 @@ import ApplicationServices
         }
         precondition(directedResult["dispatch"] as? String == "dispatched")
         precondition(directed.mode == "Manual" && directed.presses == 0)
+        precondition(directed.foregroundResultScope,
+                     "selecting the original popup bypassed the phase that returns retained foreground")
         // Independent semantic actions also remain available without global authority.
         let addressed = PopupChoiceProbe()
         addressed.scopes.currentOwner = addressed.nodes["P"]!
@@ -433,6 +435,9 @@ import ApplicationServices
     func checkActuator(_ binding: [String: Any], actuator: NativeInspectQuery.Actuator?, op: NativeOperation) throws {}
     func isDesktop(_ binding: [String: Any]) -> Bool { false }
     func directoryTarget(_ raw: Any?) throws -> [String: Any]? { nil }
+    func retainedForegroundSource(_ binding: [String: Any]) -> (application: NSRunningApplication, element: AXUIElement?)? {
+        (NSRunningApplication.current, nodes["E"]!)
+    }
     func observationTarget(_ raw: Any?) throws -> (wire: [String: Any], node: String) { (probe.binding, "E") }
     func observePointer(_ binding: [String: Any]) {}
     func aimPointer(_ binding: [String: Any], intent: NativeIntent, receiver: String?) {}
@@ -478,6 +483,7 @@ import ApplicationServices
         _ request: NativePointerIntent, check: @escaping @MainActor () throws -> Void, onDispatch: () throws -> Void,
         onPosted: () -> Void, onCleanupUnknown: @escaping @MainActor () -> Void
     ) async throws {
+        probe.foregroundResultScope = NativeForegroundRestorationScope.current != nil
         if probe.failInFlight {
             try check()
             try onDispatch()
@@ -521,7 +527,7 @@ import ApplicationServices
         context: scopes.stamp!, element: nodes["E"]!, pid: getpid(), sample: scopes.sample(), same: { CFEqual($0, $1) })!
     var presses = 0, events = [CGEventType](), mode = "Auto", consumePress = false, failAfterMove = false,
         secondStepRejected = false
-    var modalAfterMove = false, failInFlight = false
+    var modalAfterMove = false, failInFlight = false, foregroundResultScope = false
     func retainNode(_ ref: String) -> (() -> Void)? { {} }
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts {
         .init(

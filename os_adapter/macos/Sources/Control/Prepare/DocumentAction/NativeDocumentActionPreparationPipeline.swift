@@ -10,6 +10,10 @@ import AppKit
         check: () throws -> Void, onPreparation: (String) -> Void, onCleanupUnknown: @escaping @MainActor () -> Void,
         onNativePreparation: (NativePreparationEffect) -> Void, onWait: (NativePreparationWait) -> Void
     ) async throws {
+        func record(_ event: NativePreparationEffect) {
+            NativeForegroundRestorationScope.current?.record(event)
+            onNativePreparation(event)
+        }
         try check()
         let focus = try unit.focus()
         try check()
@@ -20,10 +24,10 @@ import AppKit
             try authorizeForeground()
             try await PrepareActionDocumentForegroundPass.run(
                 unit, check: check, onPreparation: onPreparation, onCleanupUnknown: onCleanupUnknown,
-                onNativePreparation: onNativePreparation, onWait: onWait)
+                onNativePreparation: record, onWait: onWait)
         }
         try PrepareActionDocumentContextPass.run(
-            unit, check: check, onPreparation: onPreparation, onNativePreparation: onNativePreparation)
+            unit, check: check, onPreparation: onPreparation, onNativePreparation: record)
         try await ConfirmActionDocumentContextPass.run(unit, check: check, onWait: onWait)
     }
 }

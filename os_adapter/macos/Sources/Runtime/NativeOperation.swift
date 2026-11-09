@@ -39,6 +39,9 @@ import Foundation
     /// The operation owns original document evidence independently of the
     /// currently declared AX capability list.
     let actionDocuments = NativeActionDocumentContexts()
+    /// This optional coordinate optimization is retired only for this public
+    /// operation after a proven no-effect failure. It never becomes app state.
+    let coordinateMenuPressAttempt = NativeCoordinateMenuPress.Attempt()
     private struct ClickAuthority {
         let target: [String: Any]
         let within: [String]
@@ -48,6 +51,7 @@ import Foundation
     private var clickAuthorities = [ClickAuthority]()
     private var clickPreparationRequiresObservation = false
     private var foregroundResponsibility: NativeForegroundResponsibility?
+    var onForegroundClose: ((NativeForegroundResponsibility, Bool) -> Bool)?
     private let cancelActive: () -> Void
     private let now: () -> TimeInterval
 
@@ -87,6 +91,17 @@ import Foundation
             throw DriverError("a read operation cannot dispatch input", code: .invalidRequest)
         }
         try Task.checkCancellation()
+    }
+
+    func inheritForeground(_ owner: NativeForegroundResponsibility) -> Bool {
+        guard !request.globalInput, writable, foregroundResponsibility == nil else { return false }
+        guard owner.resume(check: { [weak self] in
+            guard let self else { throw CancellationError() }
+            try self.check(write: true)
+            try RequestDiagnostics.checkCancellation()
+        }) else { return false }
+        foregroundResponsibility = owner
+        return true
     }
 
     /// One public operation may prepare its receiver in several units, but may
@@ -379,7 +394,9 @@ import Foundation
     private func close() {
         guard !busy, state != .closed else { return }
         state = .closed
-        foregroundResponsibility?.stop()
+        if let owner = foregroundResponsibility,
+            onForegroundClose?(owner, stopReason == "finished" && cleanup == "complete") != true { owner.stop() }
+        onForegroundClose = nil
         actionDocuments.clear()
         timer?.cancel()
         timer = nil

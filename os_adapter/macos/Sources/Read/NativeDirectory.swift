@@ -20,6 +20,7 @@ import ApplicationServices
         // Historical evidence selects a query; it never proves current
         // membership, ownership, or modality. Keep it with this identity.
         var queryHint: QueryHint? = nil
+        var contentHost: String? = nil
     }
     private let state: NativeDesktopState
     private let session: String
@@ -32,6 +33,7 @@ import ApplicationServices
         var activate: ((NSRunningApplication) -> AccessibilityActivation.Outcome)? = nil
         var focusedWindow: ((NSRunningApplication) -> AXUIElement?)? = nil
         var registerRoot: ((AXUIElement, NSRunningApplication, String) throws -> String)? = nil
+        var observedNode: ((AXUIElement, NSRunningApplication, String) -> String?)? = nil
         var list: (NSRunningApplication) -> [NativeWindows.Window] = { NativeWindows.list($0) }
         var owner: (NSRunningApplication) throws -> Void = { try BackgroundTarget($0).validate() }
         var process: (pid_t) -> NativeProcessIdentity? = { NativeProcessIdentity.read($0) }
@@ -69,6 +71,27 @@ import ApplicationServices
     }
     func surface(_ id: String) -> Surface? { surfaces[id] }
 
+    /// This only carries optional foreground responsibility to a related call.
+    /// It neither grants input membership nor samples/changes desktop state.
+    func sameInteraction(_ first: [String: Any], _ second: [String: Any]) -> Bool {
+        guard let a = first["surface"] as? String, let b = second["surface"] as? String else { return false }
+        if a == b { return first["instance"] as? String == second["instance"] as? String }
+        func context(_ scope: String, _ wire: [String: Any]) -> (NSRunningApplication, Set<String>)? {
+            guard let owner = surfaces[scope]?.owner ?? applicationRoots[scope]?.owner else { return nil }
+            var pending = [(wire["rootWindow"] as? String) ?? surfaces[scope]?.window].compactMap { $0 }
+            var seen = Set<String>()
+            while let key = pending.popLast() {
+                guard seen.insert(key).inserted else { continue }
+                if let item = surfaces.values.first(where: { $0.owner.isEqual(owner) && $0.window == key }) {
+                    pending += [item.parent, item.contentHost].compactMap { $0 }
+                }
+            }
+            return (owner, seen)
+        }
+        guard let left = context(a, first), let right = context(b, second), left.0.isEqual(right.0) else { return false }
+        return !left.1.isDisjoint(with: right.1)
+    }
+
     /// A desktop row is a direct native window selection, independent of AX
     /// completeness or parent relationships. Reuse the same identity owners
     /// as application discovery; presentation never substitutes title/frame.
@@ -85,7 +108,8 @@ import ApplicationServices
         // Preserve retained AX and relation evidence for the original target's
         // input-boundary queries. This catalogue makes no new AX/modal claim.
         remember(Surface(owner: app, window: window, scope: scope,
-            parent: same ? previous?.parent : nil, element: same ? previous?.element : nil, native: native))
+            parent: same ? previous?.parent : nil, element: same ? previous?.element : nil, native: native,
+            contentHost: same ? previous?.contentHost : nil))
         return [
             "window": window, "instance": instance.id, "surface": scope, "node": NSNull(),
             "title": native.mapping.title ?? "", "kind": "window", "parent": NSNull(),
@@ -703,6 +727,8 @@ import ApplicationServices
                 "writeStatus": activation.writeStatus?.rawValue as Any? ?? NSNull()
             ]
         }
+        // NativeWindows already classifies visible menus. Reuse those exact
+        // facts; a second AX menu scan adds latency and can mix presentations.
         let native = windowServices.listIfAvailable(app)
         // Exact presence checks preserve identities even when this projection
         // omitted their windows. No tree traversal is added to this cleanup.
@@ -744,7 +770,8 @@ import ApplicationServices
         func append(
             window: String, title: String, kind: String, parent: String?, parentUnknown: Bool = false,
             applicationParent: Bool = false, modal: Bool?,
-            element: AXUIElement?
+            element: AXUIElement?, contentKind: String = "unknown", contentHost: String? = nil,
+            contentEvidence: String = "unclassified", contentHostNode: String? = nil, nativeID: CGWindowID? = nil
         ) throws {
             guard known.insert(window).inserted else { return }
             guard entries.count < 512 else { entryLimited = true; return }
@@ -787,7 +814,7 @@ import ApplicationServices
             {
                 parentState = "none"
             }
-            let matching = visual[window] ?? []
+            let matching = visual[window] ?? (nativeID.map { id in (native ?? []).filter { $0.mapping.id == id } } ?? [])
             // A native-only image refresh must not discard an older exact AX
             // binding or its modal-query hint. Retention proves no current AX
             // fact; the same input boundary will revalidate it before dispatch.
@@ -817,24 +844,48 @@ import ApplicationServices
                 Surface(
                     owner: app, window: window, scope: scope, parent: parent, element: retainedElement,
                     native: retainedNative,
-                    queryHint: hint))
+                    queryHint: hint, contentHost: contentHost ?? (profile == .visual ? previous?.contentHost : nil)))
             entries.append([
                 "window": window, "instance": instance.id, "surface": scope, "node": node as Any? ?? NSNull(),
                 "title": title, "kind": kind, "parent": parent as Any? ?? NSNull(), "parentState": parentState,
-                "modal": modal as Any? ?? NSNull(), "nativeWindow": visual[window] != nil, "accessibility": node != nil
+                "modal": modal as Any? ?? NSNull(), "nativeWindow": matching.count == 1, "accessibility": node != nil,
+                "content": ["kind": contentKind, "host": contentHost as Any? ?? NSNull(),
+                            "evidence": contentEvidence, "hostNode": contentHostNode as Any? ?? NSNull()]
             ])
         }
         for item in ax {
+            let hostNode: String?
+            if let element = item.contentElement, let host = ax.first(where: { $0.ref == item.contentHost }) {
+                let scope = state.applications.observationScope(app, window: host.element, reference: host.ref)
+                hostNode = state.applications.observedNativeNode(element, app: app, scope: scope)
+            } else { hostNode = nil }
             try append(
                 window: item.ref, title: item.title, kind: item.kind, parent: item.parent,
                 parentUnknown: item.parentUnknown, applicationParent: item.applicationParent,
-                modal: item.modal, element: item.element)
+                modal: item.modal, element: item.element,
+                contentKind: item.contentKind, contentHost: item.contentHost,
+                contentEvidence: item.contentEvidence, contentHostNode: hostNode, nativeID: item.nativeID)
         }
         for item in native ?? [] {
             let ref = state.applications.windowReference(item)
+            let host = item.menu == nil ? nil : (item.menuParent ?? item.menuHost).flatMap { id in
+                native?.first { $0.mapping.id == id }.map { state.applications.windowReference($0) }
+            } ?? relations.parents[ref]
+            let hostNode: String?
+            if let menu = item.menu, let host {
+                // The physical popup can expose the exact AXMenu already
+                // acquired inside its document. Reuse that retained identity;
+                // do not rescan the host or equate two same-shaped menus.
+                let scope = state.applications.observationScope(app, window: nil, reference: host)
+                if let observed = windowServices.observedNode { hostNode = observed(menu, app, scope) }
+                else { hostNode = state.applications.observedNativeNode(menu, app: app, scope: scope) }
+            } else { hostNode = nil }
             try append(
-                window: ref, title: item.mapping.title ?? "", kind: "window", parent: relations.parents[ref],
-                modal: nil, element: nil)
+                window: ref, title: item.mapping.title ?? "", kind: item.menu == nil ? "window" : "menu",
+                parent: relations.parents[ref], modal: nil, element: item.menu,
+                contentKind: item.menu == nil ? "unknown" : "menu",
+                contentHost: host, contentEvidence: item.menu == nil ? "unclassified" : "visibleNativeMenu",
+                contentHostNode: hostNode)
         }
         // A read-time application report, independent of working-window
         // selection and input readiness. Never infer it from z-order, main

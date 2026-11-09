@@ -113,23 +113,33 @@ def selected_text_descendants(node: NodeView) -> list[Any]:
     return result
 
 
+def _has_text(child: NodeView) -> bool:
+    return (
+        not child.get("valueIsNumber") and "value" in child and child["role"] in _TEXT_ROLES | {"staticText"}
+    ) or any(_has_text(c) for c in child["children"])
+
+
 def value_label(node: NodeView) -> str:
     "Choose the value-field label from document, numeric, and descendant-text facts."
     if node.get("valueKind") == "document":
         return "Document text"
 
-    def has_text(child: NodeView) -> bool:
-        return (
-            not child.get("valueIsNumber") and "value" in child and child["role"] in _TEXT_ROLES | {"staticText"}
-        ) or any(has_text(c) for c in child["children"])
-
     return (
         "Native value"
         if node.get("valueIsNumber")
         and node["role"] in ("group", "cell", "row", "unknown", "textField")
-        and any(has_text(c) for c in node["children"])
+        and any(_has_text(c) for c in node["children"])
         else "Value"
     )
+
+
+def _modals(node: NodeView) -> list[str]:
+    """Find modal regions in this view without retaining a recursive closure per node."""
+    if is_active_modal(node):
+        return [node["ref"]]
+    if is_window(node):
+        return []
+    return [ref for child in node["children"] for ref in _modals(child)]
 
 
 def with_interactions(root: NodeView, inherited: Sequence[str] | None = None) -> SemanticNode:
@@ -140,20 +150,8 @@ def with_interactions(root: NodeView, inherited: Sequence[str] | None = None) ->
     """
     inherited = [] if inherited is None else inherited
 
-    def modals(node: NodeView) -> list[str]:
-        """Find modal regions represented in the semantic tree.
-
-        Args:
-            node: Source/projected node in this exact view; its native identity is unchanged.
-        """
-        if is_active_modal(node):
-            return [node["ref"]]
-        if is_window(node):
-            return []
-        return [ref for child in node["children"] for ref in modals(child)]
-
     own = (
-        sorted(unique(root.get("ownedModals", []) + [ref for child in root["children"] for ref in modals(child)]))
+        sorted(unique(root.get("ownedModals", []) + [ref for child in root["children"] for ref in _modals(child)]))
         if is_window(root) or is_active_modal(root)
         else []
     )
@@ -171,6 +169,10 @@ def with_interactions(root: NodeView, inherited: Sequence[str] | None = None) ->
     }
 
 
+def _contains_modal(child: NodeView, root: SemanticNode) -> bool:
+    return child["ref"] in root["blockedBy"] or any(_contains_modal(c, root) for c in child["children"])
+
+
 def interaction_view(root: SemanticNode, include_background: bool) -> SemanticNode:
     """Select the visible interaction scope from the annotated semantic tree.
 
@@ -180,10 +182,7 @@ def interaction_view(root: SemanticNode, include_background: bool) -> SemanticNo
     node = root
     if not include_background and root.get("blockedBy"):
 
-        def contains_modal(child: NodeView) -> bool:
-            return child["ref"] in root["blockedBy"] or any(contains_modal(c) for c in child["children"])
-
-        children = [child for child in root["children"] if contains_modal(child)]
+        children = [child for child in root["children"] if _contains_modal(child, root)]
         if children and len(children) != len(root["children"]):
             node = {
                 **root,

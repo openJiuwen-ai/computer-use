@@ -117,11 +117,12 @@ import Foundation
     }
     func markReturned() { returned = true }
     func complete() { continuation = "stop" }
-    func fail(dispatch: String, cleanup: String, retryReason: String?) {
+    func fail(dispatch: String, cleanup: String, retryReason: String?, refreshWithinScope: Bool = false) {
         if !permitsReselection {
             continuation = "observe"
         } else if dispatch == "notDispatched", cleanup == "complete", let retryReason {
-            continuation = retryReason == "preconditionChanged" ? "sameCandidateRefresh" : "reselectWithinScope"
+            continuation = retryReason == "preconditionChanged" && !refreshWithinScope
+                ? "sameCandidateRefresh" : "reselectWithinScope"
         } else {
             continuation = dispatch == "notDispatched" ? "stop" : "observe"
         }

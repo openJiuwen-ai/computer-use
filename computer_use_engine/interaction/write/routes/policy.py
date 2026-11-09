@@ -35,7 +35,10 @@ def refuse(
     facts: Facts,
     detail: str,
 ) -> NoReturn:
-    raise ComputerUseError(dict(code=code, effect="none", target=facts.target_label, detail=detail))
+    error = ComputerUseError({"code": code, "effect": "none", "target": facts.target_label, "detail": detail})
+    if facts.identity != Knowledge.YES or facts.within_scope != Knowledge.YES or facts.blocked_by:
+        error._observation_reason = "targetState"
+    raise error
 
 
 ReceiverPair = tuple[SelectedActuator | None, SelectedReceiver | None]

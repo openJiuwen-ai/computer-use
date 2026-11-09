@@ -947,7 +947,42 @@ extension NativeActionDocumentTests {
         }
     }
 
+    final class DocumentApplication: NSRunningApplication, @unchecked Sendable {
+        override var processIdentifier: pid_t { getpid() }
+    }
+
     @MainActor static func documentPreparationBoundary() async throws {
+        let application = DocumentApplication()
+        let target = NativeProcessIdentity.read(application.processIdentifier)!
+        let original = NativeProcessIdentity(pid: 101, parent: 1, seconds: 1, microseconds: 0, executable: "/owned/original")
+        var foreground: pid_t? = original.pid
+        let owner = NativeForegroundResponsibility(
+            snapshot: { .init(foregroundPID: foreground, activity: [0]) },
+            process: { $0 == original.pid ? original : $0 == target.pid ? target : nil },
+            window: { _ in nil }, watchActivation: false)
+        let opener = DocumentReceiver()
+        try await NativeForegroundResponsibility.$current.withValue(owner) {
+            try await NativeForegroundRestorationScope.perform(
+                target: BackgroundTarget(application), onPreparation: { _ in }, afterInput: true,
+                inputState: { .completed }, presentation: { .present }
+            ) {
+                try await NativeDocumentActionPreparationPipeline.run(
+                    opener, foreground: false, authorizeForeground: {}, check: {}, onPreparation: { _ in },
+                    onCleanupUnknown: {}, onNativePreparation: { event in
+                        if event.phase == .willSend {
+                            precondition(owner.original == original,
+                                         "document selection must claim original foreground before AXMain")
+                            foreground = target.pid
+                        }
+                    }, onWait: { _ in })
+                NativeForegroundRestorationScope.current?.willDispatchInput()
+                precondition(owner.hasForegroundObligation,
+                             "actual document preparation excursion must be sampled before result inspection")
+            }
+        }
+        precondition(owner.retainedPresentation != nil && owner.suspend(),
+                     "the opened menu must retain the first document's restoration responsibility")
+        owner.stop()
         let ready = DocumentReceiver()
         ready.foreground = false
         ready.selected = true

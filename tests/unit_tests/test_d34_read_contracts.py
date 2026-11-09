@@ -545,8 +545,12 @@ def test_sheet_closes_during_related_capture_then_surviving_fixed_parent_is_deli
             original, "Sheet closed during recheck", directory=after
         )
     pipeline = InterfaceReadPipeline(controller)
-    tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
-    pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, b), tree=tree))
+    tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],), nodes={}), refs={}, roots=())
+    async def member(_ui, item, _view, **_kwargs):
+        assert item["window"] == "B"
+        return WindowPart(member_target(state, item), tree=tree)
+
+    pipeline.member = AsyncMock(side_effect=member)
     pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())
     monkeypatch.setattr("computer_use.interaction.read.views.pipeline.remember", lambda *_: None)
     monkeypatch.setattr(
@@ -614,7 +618,7 @@ def test_rootless_fixed_popup_observes_current_app_window_without_rebinding_popu
         document=DisplayDocument.join(()), refs={}, windows={}, gaps=(), scope_confirmed=False,
     ))
     pipeline = InterfaceReadPipeline(controller)
-    tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],)), refs={}, roots=())
+    tree = SimpleNamespace(native=SimpleNamespace(session="session", roots=(b["node"],), nodes={}), refs={}, roots=())
     async def member(owner, item, view, **kwargs):
         return WindowPart(member_target(state, item), tree=tree if item["window"] == "B" else None)
 
@@ -673,7 +677,8 @@ def test_app_scope_observes_fresh_primary_when_old_principal_closes_during_colle
             pipeline.member.assert_not_awaited()
             assert not observation_data(result)["content_available"]
         else:
-            assert pipeline.member.await_count == 1 and pipeline.member.call_args.args[1]["window"] == "B"
+            requested = [call.args[1]["window"] for call in pipeline.member.call_args_list]
+            assert requested == (["B", "Menu"] if case == "single" else ["B"])
             assert "B input" in result.text
             assert state.anchor.root.root_window == "B"  # Presentation primary only, before delivery.
             observation_delivered(result)

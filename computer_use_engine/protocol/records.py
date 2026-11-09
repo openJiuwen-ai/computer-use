@@ -147,6 +147,13 @@ class ApplicationInfo(TypedDict):
     windows: NotRequired[list[Record]]
 
 
+class SurfaceContent(TypedDict):
+    kind: Literal["window", "menu", "popup", "application", "unknown"]
+    host: str | None
+    evidence: str
+    hostNode: NotRequired[str | None]
+
+
 class SurfaceInfo(TypedDict):
     """One decoded surface; relationship certainty stays explicit.
 
@@ -173,6 +180,7 @@ class SurfaceInfo(TypedDict):
     parent: str | None
     parentState: Literal["known", "none", "unknown"]
     modal: bool | None
+    content: NotRequired[SurfaceContent]
     nativeWindow: bool
     accessibility: bool
 

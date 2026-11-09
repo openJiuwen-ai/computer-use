@@ -7,6 +7,21 @@ import ApplicationServices
     @MainActor static func main() async throws {
         typealias Readiness = NativePointerReadiness
         backgroundDocumentReadiness()
+        precondition(Readiness.nativeWindowMatches(reported: 1729, expected: 1801, presentedMenu: true) == true,
+                     "a menu's owning document ID must not invalidate its proven rendering popup")
+        precondition(Readiness.nativeWindowMatches(reported: 1729, expected: 1801, presentedMenu: false) == false)
+        precondition(Readiness.nativeWindowMatches(reported: nil, expected: 1801, presentedMenu: false) == nil)
+        precondition(Readiness.ready(
+            kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
+            backgroundPrepared: false, presentedMenuReceiver: true),
+            "an exact live popup menu receiver must not activate its application before raw mouse dispatch")
+        precondition(!Readiness.ready(
+            kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
+            backgroundPrepared: false), "ordinary declared surfaces keep their preparation requirement")
+        precondition(!Readiness.ready(
+            kind: .click, foreground: false, windowKind: .otherDeclared, focus: .notRequired,
+            backgroundPrepared: false, requirement: .foregroundWindowPoint, presentedMenuReceiver: true),
+            "a menu hint cannot discharge a separately selected foreground-point contract")
         receiverSampling()
         qtComboChoice()
         try await physicalInputDependencies()

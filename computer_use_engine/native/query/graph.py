@@ -100,8 +100,8 @@ class NativeGraph:
         if matches_edge:
             self.fail("observation_incomplete", "The control containment has conflicting native parent evidence.")
 
-    def fail(self, code, detail):
-        raise ComputerUseError(
+    def fail(self, code, detail, *, observation_reason=None):
+        error = ComputerUseError(
             dict(
                 code=code,
                 effect="none",
@@ -109,6 +109,8 @@ class NativeGraph:
                 detail=detail,
             )
         )
+        error._observation_reason = observation_reason
+        raise error
 
     async def _node(self, token, *, depth=None):
         self.remaining()

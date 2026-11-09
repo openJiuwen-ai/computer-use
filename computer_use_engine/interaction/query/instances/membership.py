@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from computer_use.native.contracts import Knowledge
+from computer_use.session.surface_content import content_within
 
 if TYPE_CHECKING:
     from computer_use.interaction.records import UIHandle
@@ -52,5 +53,10 @@ def in_scope(ui: UIHandle, surface: str | None) -> bool:
     item = next((item for item in instance.members.values() if item["surface"] == surface), None)
     return item is not None and (
         # pylint: disable-next=protected-access
-        ui._anchor is None or ancestor(cast("DirectoryFacts", instance.directory), item["window"], ui._anchor)
+        ui._anchor is None or interaction_contains(cast("DirectoryFacts", instance.directory), item["window"], ui._anchor)
     )
+
+
+def interaction_contains(directory: DirectoryFacts, window: str, root: str) -> bool:
+    """Observation/name-query scope includes proved attached control content."""
+    return content_within({item["window"]: item for item in directory["surfaces"]}, window, root)

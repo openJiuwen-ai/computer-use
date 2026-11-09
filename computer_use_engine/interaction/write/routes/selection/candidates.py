@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.write.routes.policy import refuse
 from computer_use.interaction.write.routes.selection.model import CandidateSet, SelectionRequest
-from computer_use.native.contracts import Channel, Knowledge
+from computer_use.native.contracts import Binding, Channel, Knowledge
 from computer_use.native.semantics import action_for_intent
 from computer_use.protocol.execution import unit_contracts
 
@@ -33,6 +33,38 @@ def _physical_click_required(primitive: Primitive) -> bool:
         and primitive.click is not None
         and primitive.click.admission in ("ready", "preparationRequired")
         and primitive.click.preference_profile == "physicalRequired"
+    )
+
+
+def _coordinate_menu_press(request: SelectionRequest, primitive: Primitive) -> bool:
+    """Accept only the local native menu plugin's fixed action contract.
+
+    The native matcher owns menu visibility, exact hit and action equivalence.
+    This is contract plumbing, not another AX discovery or capability gate.
+    All other coordinate offers retain the existing pointer-only selection.
+    """
+    facts, intent = request.facts, request.intent
+    binding, parameters, offer = facts.binding, intent.parameters, primitive.click
+    return (
+        facts.platform == "macos"
+        and not intent.global_input
+        and intent.kind == "click"
+        and isinstance(binding, Binding)
+        and binding.capture is not None
+        and binding.surface is not None
+        and binding.node is None
+        and {"x", "y"}.issubset(parameters)
+        and set(parameters).issubset({"x", "y", "button", "count", "pointerOnly"})
+        and parameters.get("button", "left") == "left"
+        and parameters.get("count", 1) == 1
+        and not parameters.get("pointerOnly", False)
+        and primitive.unit == "native_action"
+        and primitive.channel == Channel.OBJECT
+        and primitive.action == "AXPress"
+        and offer is not None
+        and offer.route_family == "macos.coordinateMenuPress.v1"
+        and offer.delivery == "object_action"
+        and offer.interaction == "semantic"
     )
 
 
@@ -76,7 +108,9 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
         # explanation; stage_admission still prevents preparing or dispatching
         # unsupported candidates. Dropping one here hides known disabled state.
         return CandidateSet(request, tuple(matches))
-    # Coordinate requests mean pointer events, even when a semantic action exists.
+    # Coordinate requests keep pointer events unless the local native menu
+    # plugin explicitly supplies its qualified Press contract. An arbitrary
+    # element action never qualifies just because it advertises AXPress.
     matches_key = (
         True
         if any(key in intent.parameters for key in ("x", "fromX"))
@@ -88,6 +122,7 @@ def resolve_action_semantics(value: CandidateSet) -> CandidateSet:
     )
     if matches_key:
         candidates = [p for p in candidates if p.channel == Channel.POINTER]
+        candidates.extend(p for p in facts.primitives if _coordinate_menu_press(request, p))
     elif intent.kind in ("click", "openMenu"):
         actions = [p for p in facts.primitives if p.unit == "native_action" and p.action is not None]
         name = action_for_intent(
@@ -202,7 +237,3 @@ def enumerate_candidates(facts: Facts, intent: Intent, policy: HostPolicy | None
     for _, phase, _, _, _ in CANDIDATE_PHASES:
         value = phase(value)
     return cast("CandidateSet", value).primitives
-
-
-if TYPE_CHECKING:
-    from computer_use.native.contracts import Binding

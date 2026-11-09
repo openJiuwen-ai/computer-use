@@ -306,7 +306,7 @@ class AgentInterfacePipeline:
         )
 
     async def element(
-        self, ui: UIHandle, target: int | str | ElementPath, timeout_ms: int, control: Control
+        self, ui: UIHandle, target: int | str | ElementPath, timeout_ms: int, control: Control, *, fresh: bool = False
     ) -> ElementSnapshot:
         """Resolve an observed number, exact name, or path within this UI view.
 
@@ -347,14 +347,25 @@ class AgentInterfacePipeline:
         validate_session(self.controller, ui)
         # pylint: disable-next=protected-access
         instance = ui._instance
-        # Application aliases share the last actually delivered lookup scope.
+        # Application aliases share the delivered lookup scope, or a semantic
+        # result already returned within this host execution. This continuation
+        # never advances model-delivery, image or default keyboard-input state.
         # A window scope uses its own menu view and always bounds window
-        # lookup by its original root. Pending reads grant neither alias a new
-        # name/path context while that scope is live. A retired popup is not
+        # lookup by its original root. Unreturned/background reads grant no
+        # new name/path context. A retired popup is not
         # the App's lifetime: a fresh name query may use the App's already
         # actually delivered current primary. Fixed handles and numbered references do
         # not acquire this recovery, and no input/image delivery is advanced.
-        lookup_context = instance.lookup_context if ui._anchor is None else ui._lookup_context
+        from computer_use.session.lookup_continuation import current_lookup_continuation
+
+        continuation = current_lookup_continuation(instance) if ui._anchor is None else None
+        lookup_context = (
+            continuation.context if continuation is not None
+            else instance.lookup_context if ui._anchor is None else ui._lookup_context
+        )
+        lookup_windows = instance.delivered_lookup_windows | (
+            continuation.windows if continuation is not None else frozenset()
+        )
         if ui._anchor is None and lookup_context is None:
             raise local_failure(
                 "this App has no delivered lookup scope",
@@ -425,7 +436,7 @@ class AgentInterfacePipeline:
                     replacement = instance.members.get(current.root.root_window) if current is not None else None
                     if (
                         replacement is not None
-                        and WindowIdentity.of(replacement) in instance.delivered_lookup_windows
+                        and WindowIdentity.of(replacement) in lookup_windows
                         and observed_query(replacement)
                     ):
                         context = replacement["window"]
@@ -466,6 +477,17 @@ class AgentInterfacePipeline:
 
         lookup_remaining()
         owners, incomplete = lookup_sources()
+        if not fresh and owners and not incomplete:
+            from computer_use.session.observed_lookup import resolve_observed
+
+            cached = await resolve_observed(
+                self.controller, instance, owners, path, lookup_remaining, current_lookup_continuation(instance),
+            )
+            if cached is not None:
+                self.validate_snapshot(ui, cached)
+                return cached
+        from computer_use.session.observed_lookup import invalidate_lookup_result
+
         matched = {}
         end = monotonic() + timeout_ms / 1000
         # Waiting belongs to the complete lookup, not its first member. A
@@ -474,6 +496,7 @@ class AgentInterfacePipeline:
         reconciled = False
         while True:
             lookup_remaining()
+            invalidate_lookup_result(self.controller, instance, owners, path, current_lookup_continuation(instance))
             matched.clear()
             recovery = None
             for owner in dict.fromkeys(owners):
@@ -511,7 +534,7 @@ class AgentInterfacePipeline:
                     and current["node"] != error.binding.node
                     and (current["instance"], current["surface"])
                     == (error.binding.instance, error.binding.surface)
-                    and WindowIdentity.of(current) in instance.delivered_lookup_windows
+                    and WindowIdentity.of(current) in lookup_windows
                 ):
                     self.controller.state(owner).query_target = member_target(instance, current)
                 owners, incomplete = lookup_sources()
@@ -542,6 +565,11 @@ class AgentInterfacePipeline:
             )
         snapshot = next(iter(matched.values()))
         self.validate_snapshot(ui, snapshot)
+        from computer_use.session.observed_lookup import remember_lookup_result
+
+        remember_lookup_result(
+            self.controller, instance, owners, path, snapshot, current_lookup_continuation(instance),
+        )
         return snapshot
 
     def validate_reference_owner(self, ui: UIHandle, snapshot: ElementSnapshot) -> None:
@@ -676,6 +704,10 @@ class AgentInterfacePipeline:
         self, ui: UIHandle, intent: str, points: tuple[Point, ...], options: Record, control: Control,
         *, global_input=False, image=None,
     ) -> ActionResult:
+        if intent == "click" and "pointerOnly" in options and self.controller.transport.platform != "macos":
+            # Other adapters already use pointer delivery for coordinates. Keep
+            # their existing strict wire schemas unchanged by this macOS option.
+            options = {key: value for key, value in options.items() if key != "pointerOnly"}
         return await InterfacePointerPipeline(self.controller, self.write).run(
             ui, intent, points, options, control, global_input=global_input, image=image
         )
@@ -742,7 +774,7 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
         if isinstance(request, DiscoverApps):
             return await api.list_applications()
         if isinstance(request, ResolveElement):
-            snapshot = await api.element(owner, request.target, request.timeout_ms, control)
+            snapshot = await api.element(owner, request.target, request.timeout_ms, control, fresh=request.fresh)
             if request.window is not None and type(request.target) is int:
                 api.validate_snapshot(owner, snapshot, allow_unknown=True)
             return snapshot

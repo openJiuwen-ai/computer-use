@@ -219,7 +219,12 @@ class App:
         return operation(lambda: self._controller.run(CloseWindow(self, window)))
 
     @synchronous
-    def element(self, target, *, timeout_ms=3000, window=None):
+    def element(self, target, *, timeout_ms=3000, window=None, fresh=False):
+        """Locate a name/path in the latest observation, or explicitly query fresh facts.
+
+        Numbers always retain their original binding; fresh only controls
+        name/path lookup. Reads and subsequent input still use their own rules.
+        """
         _window(window)
         # pylint: disable-next=unidiomatic-typecheck
         if type(timeout_ms) is not int or not 0 <= timeout_ms <= 10000:
@@ -227,9 +232,11 @@ class App:
         # pylint: disable-next=unidiomatic-typecheck
         if type(target) is int:
             parameters.reference(target, "element reference")
+        if type(fresh) is not bool:
+            raise local_failure("fresh must be a boolean")
 
         async def resolve():
-            snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms, window)))
+            snapshot = await operation(lambda: self._controller.run(ResolveElement(self, target, timeout_ms, window, fresh)))
             return Element(self._controller, self, snapshot, _internal=True)
 
         return resolve()
@@ -243,11 +250,17 @@ class App:
         return operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground, window)))
 
     @synchronous
-    def click(self, options=None, *, at, window=None):
+    def click(self, options=None, *, at, window=None, force_pointer=False):
+        """Click an image location; force_pointer keeps this call on mouse delivery."""
         _window(window)
+        if type(force_pointer) is not bool:
+            raise local_failure("force_pointer must be a boolean")
+        click = parameters.click(options)
+        if force_pointer:
+            click["pointerOnly"] = True
         if isinstance(at, Target):
-            return self._point_action(at, "click", parameters.click(options), window=window)
-        click, at = parameters.click(options), parameters.point(at)
+            return self._point_action(at, "click", click, window=window)
+        at = parameters.point(at)
         return operation(lambda: self._controller.run(UIPointer(self, "click", (at,), click, window)))
 
     @synchronous

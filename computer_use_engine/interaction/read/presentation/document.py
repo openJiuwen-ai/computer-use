@@ -51,7 +51,7 @@ class DisplayTree:
     indent: int = 0
     details: bool = False
 
-    @property
+    @cached_property
     def nodes(self) -> tuple[PreparedNode, ...]:
         """Return the displayed elements with their structural parent relationships."""
         return tuple(replace(node, depth=node.depth + self.indent) for node in self.prepared.nodes)

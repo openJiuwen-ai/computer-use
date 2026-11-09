@@ -17,6 +17,8 @@ import Darwin
         var level: Int? = nil
         var menu: AXUIElement? = nil
         var menuParent: CGWindowID? = nil
+        // AX ancestry can prove a logical document host without a physical parent.
+        var menuHost: CGWindowID? = nil
         var parentID: CGWindowID? = nil
     }
 

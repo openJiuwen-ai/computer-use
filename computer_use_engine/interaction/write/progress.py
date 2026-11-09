@@ -27,6 +27,8 @@ def failure(
     dispatched: Dispatch,
     preparation: Iterable[str],
     minimum_effect: str = "none",
+    *,
+    observation_reason: str | None = None,
 ) -> ComputerUseError:
     """Build an error whose reported effect includes accumulated preparation and dispatch.
 
@@ -51,7 +53,9 @@ def failure(
     severity = {"none": 0, "possible": 1, "partial": 2}
     if required_item(severity, minimum_effect) > required_item(severity, effect):
         effect = minimum_effect
-    return ComputerUseError(dict(code=code, effect=effect, target=target, detail=detail))
+    error = ComputerUseError({"code": code, "effect": effect, "target": target, "detail": detail})
+    error._observation_reason = observation_reason
+    return error
 
 
 @dataclass(frozen=True)
@@ -311,6 +315,7 @@ def classify_write_progress(outcome: AttemptOutcome, progress: ProgressView) -> 
                     step.detail,
                     progress.dispatched,
                     progress.preparation,
+                    observation_reason="preconditionChanged" if step.retry_reason == "preconditionChanged" else None,
                 ),
             )
     if command.primitive.click is None and step.error_code == "permission_required":

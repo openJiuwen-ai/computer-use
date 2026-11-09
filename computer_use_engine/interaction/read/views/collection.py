@@ -12,10 +12,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.query.instances.membership import ancestor
+from computer_use.interaction.query.instances.membership import interaction_contains
+from computer_use.interaction.query.instances.scope import allowed
 from computer_use.interaction.read.acquisition.loading import window_content_unexposed
 from computer_use.native.query.directory import select_surface
 from computer_use.session.interfaces import WindowIdentity
+from computer_use.session.surface_content import content_host, transient_content
 
 from .related import RelatedRead, window_lifecycle
 
@@ -27,8 +29,56 @@ def components(view: str) -> frozenset[str]:
     return frozenset(("tree", "image")) if view == "both" else frozenset((view,))
 
 
+def observation_members(ui, related: RelatedRead | None):
+    """Include new/unknown content without widening the fixed input scope.
+
+    A newly discovered dialog or an unparented current menu must be visible to
+    the caller even when its relationship to the requested window is unknown.
+    Old unrelated document windows remain directory entries, not extra reads.
+    """
+    permitted = allowed(ui)
+    if ui._anchor is None:
+        return permitted
+    instance = ui._instance
+    newly_seen = related.new_surfaces(instance.directory) if related is not None else ()
+    for key, item in instance.members.items():
+        if key in newly_seen or (
+            transient_content(item) and content_host(item) is None and item["parentState"] != "known"
+        ):
+            permitted[key] = item
+    return permitted
+
+
 def component_view(requested: frozenset[str]) -> str:
     return "both" if len(requested) == 2 else next(iter(requested))
+
+
+def complete_content(snapshot, root):
+    """An exact shared subtree can cover content; a label or root alone cannot."""
+    pending, seen = [root], set()
+    while pending:
+        key = pending.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        node = snapshot.native.nodes.get(key)
+        if node is None:
+            return False
+        relations = [item for item in snapshot.facts["relations"]
+                     if item["source"] == key and item["kind"] == "children"]
+        if not relations:
+            if node.role in ("list", "menu", "window", "group", "tree", "table"):
+                return False
+            continue
+        if len(relations) != 1:
+            return False
+        children = relations[0]
+        if children["state"] != "complete" or children["certainty"] != "confirmed":
+            return False
+        if children.get("total", len(children["targets"])) != len(children["targets"]) or children.get("offset", 0) != 0:
+            return False
+        pending.extend(children["targets"])
+    return True
 
 
 @dataclass
@@ -51,6 +101,8 @@ class CollectionPlan:
     principal: str | None = None
     selection_error: ComputerUseError | None = None
     capture_status: set[WindowIdentity] = field(default_factory=set)
+    reused_content: dict[WindowIdentity, dict] = field(default_factory=dict)
+    reused_images: dict[WindowIdentity, dict] = field(default_factory=dict)
 
     def update(self, directory: NativeDirectory, permitted: dict[str, SurfaceInfo]) -> None:
         anchor = self.related.preferred(directory, self.anchor) if self.related is not None else self.anchor
@@ -64,11 +116,18 @@ class CollectionPlan:
             # Ambiguity affects convenience selection only. Each independently
             # bound member remains a read candidate, including both modals.
             self.principal, self.selection_error = anchor, error
-        attached = [key for key in permitted if key != self.principal and ancestor(directory, key, anchor)]
-        newly_seen = self.related.new_windows(directory) if self.related is not None else ()
+        attached = [key for key in permitted if key != self.principal and interaction_contains(directory, key, anchor)]
+        newly_seen = self.related.new_surfaces(directory) if self.related is not None else ()
+        if self.related is not None and self.related.original.root_window not in permitted:
+            # Recover the surviving form after a popup ends. Unchanged auxiliary
+            # siblings are not missing result content; keep their directory
+            # entries without rereading every old child of the recovered form.
+            attached = [key for key in attached if key in newly_seen or permitted[key]["modal"] is True
+                        or transient_content(permitted[key])]
         # Prioritize actual blockers before ordinary attached or new peers.
         attached.sort(key=lambda key: permitted[key].get("modal") is not True)
-        keys = dict.fromkeys((self.principal, *attached, *newly_seen))
+        presented = [key for key, item in permitted.items() if transient_content(item)]
+        keys = dict.fromkeys((self.principal, *attached, *newly_seen, *presented))
         self.order = tuple(WindowIdentity.of(permitted[key]) for key in keys if key in permitted)
         for identity in self.order:
             item = permitted[identity.window]
@@ -113,6 +172,32 @@ class CollectionPlan:
                     self.pending_upgrades.discard(identity)
                 return identity, component_view(missing)
         return None
+
+    def reuse_attached_content(self, parts, members) -> None:
+        """Avoid rereading a menu that is fully present in the same host capture."""
+        for identity in self.order:
+            item = members.get(identity.window)
+            content = item.get("content", {}) if item is not None else {}
+            node, host = content.get("hostNode"), content.get("host")
+            if host not in members:
+                continue
+            source = next((part for part in parts if
+                           WindowIdentity(part.target.root_window, part.target.surface, part.target.instance)
+                           == WindowIdentity.of(members[host])), None)
+            if source is None or source.source is not None and not source.source.scope_confirmed:
+                continue
+            if content.get("evidence") == "nativeWindowID" and source.image is not None:
+                self.reused_images[identity] = {"window": host, "surface": source.target.surface}
+                self.attempted[identity] = self.attempted.get(identity, frozenset()) | {"image"}
+                self.captured_components[identity] = self.captured_components.get(identity, frozenset()) | {"image"}
+            if node is None or identity in self.reused_content or source.tree is None or not complete_content(source.tree, node):
+                continue
+            self.reused_content[identity] = {
+                "window": host, "surface": source.target.surface, "node": node,
+                "observation": source.tree.native.id,
+            }
+            self.attempted[identity] = self.attempted.get(identity, frozenset()) | {"tree"}
+            self.captured_components[identity] = self.captured_components.get(identity, frozenset()) | {"tree"}
 
     def changed(self, identity: WindowIdentity, requested: frozenset[str]) -> None:
         """Schedule only event-invalidated components, preserving attempt history."""
@@ -161,12 +246,20 @@ class CollectionPlan:
                 None,
             )
             captured = tuple(name for name in ("tree", "image") if part is not None and getattr(part, name) is not None)
+            reused = self.reused_content.get(identity)
+            if reused is not None and "tree" not in captured:
+                captured = ("tree", *captured)
+            shared_image = self.reused_images.get(identity)
+            if shared_image is not None and "image" not in captured:
+                captured = (*captured, "image")
             lifecycle = window_lifecycle(identity, directory)
             included = tuple(
                 name
                 for name in captured
-                if (name != "image" or identity.window in included_images)
-                and (name != "tree" or included_trees is None or identity.surface in included_trees)
+                if (name != "image" or identity.window in included_images
+                    or shared_image is not None and shared_image["window"] in included_images)
+                and (name != "tree" or included_trees is None or identity.surface in included_trees
+                     or reused is not None and reused["surface"] in included_trees)
             )
             records.append(
                 {
@@ -183,6 +276,10 @@ class CollectionPlan:
                     if identity in self.order and lifecycle != "closed"
                     else (),
                     "lifecycle": lifecycle,
+                    **({"reused": {
+                        **({"tree": reused} if reused is not None else {}),
+                        **({"image": shared_image} if shared_image is not None else {}),
+                    }} if reused is not None or shared_image is not None else {}),
                     **({
                         "treeCollection": {
                             "session": part.tree.native.session,

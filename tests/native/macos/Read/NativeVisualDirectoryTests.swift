@@ -26,6 +26,8 @@ import ApplicationServices
         var hintUnavailable = false
         var hintCalls = 0
         var nativeIDs: [CGWindowID] = [380]
+        var nativeMenus = [CGWindowID: AXUIElement]()
+        var nativeMenuHosts = [CGWindowID: CGWindowID]()
         var hiddenNativeIDs = Set<CGWindowID>()
         var nativePresenceUnavailable = false
         var failedApplications = Set<String>()
@@ -34,6 +36,7 @@ import ApplicationServices
         var onLocate: (() -> Void)?
         var nextID: pid_t = 19100
         var rootRegistration: ((AXUIElement, String) throws -> String)?
+        var observedNode: ((AXUIElement, String) -> String?)?
         var ownerFailure: DriverError?
         lazy var access = NativeApplicationAccess(windowQuery: api())
         lazy var state = NativeDesktopState(applications: access, appSelections: AppSelections(validateOwner: { _ in }))
@@ -57,6 +60,7 @@ import ApplicationServices
                 self.content.append("root body registration poison")
                 throw DriverError("scripted content poison", code: .observationIncomplete)
             }
+            services.observedNode = { element, _, scope in self.observedNode?(element, scope) }
             services.owner = { _ in if let error = self.ownerFailure { throw error } }
             services.process = { _ in self.process }
             services.info = { id in self.nativeIDs.contains(id) || self.hiddenNativeIDs.contains(id)
@@ -150,7 +154,9 @@ import ApplicationServices
         func windows() -> [NativeWindows.Window] {
             nativeIDs.map { id in .init(application: app, process: process,
                    mapping: .init(id: id, pid: app.processIdentifier, frame: CGRect(x: 10, y: 10, width: 500, height: 400),
-                                  title: "Native file view", width: 500, height: 400), onScreen: true, parentID: 0) }
+                                  title: "Native file view", width: 500, height: 400), onScreen: true,
+                   level: nativeMenus[id] == nil ? 0 : Int(CGWindowLevelForKey(.popUpMenuWindow)),
+                   menu: nativeMenus[id], menuHost: nativeMenuHosts[id], parentID: 0) }
         }
         func collect(_ profile: String? = "visual") throws -> [String: Any] {
             var raw: [String: Any] = ["kind": "surfaces", "application": "instance:visual-provider"]
@@ -180,6 +186,11 @@ import ApplicationServices
         precondition((result?["provider"] as? [String: Any])?["status"] as? String == "notRequested")
         try exactVisualIdentitySurvivesOptionalHintFailure()
         try visualWindowFacts()
+        try controlMenuKeepsLogicalHostWithoutPhysicalParent()
+        try controlMenuReusesOnlyExactPreviouslyObservedHostNode()
+        try dropdownContentIsAttachedWithoutInventingNativeParent()
+        try sharedPhysicalWindowKeepsDistinctContentSources()
+        try applicationRootIsNotAWindow()
         try rootCoverageIsIndependentOfDescendantGaps()
         try nativeOnlyRefreshRetainsBinding()
         try hiddenAndUnknownNativeLifetimesCanReappear()
@@ -210,6 +221,63 @@ import ApplicationServices
         precondition(retained?.native?.mapping.id == 380)
     }
 
+    @MainActor static func controlMenuKeepsLogicalHostWithoutPhysicalParent() throws {
+        let scene = Scene()
+        let menu = scene.node(kAXMenuRole)
+        scene.nativeIDs.append(381)
+        scene.nativeMenus[381] = menu
+        scene.nativeMenuHosts[381] = 380
+        let result = try scene.collect()
+        let rows = result["surfaces"] as? [[String: Any]] ?? []
+        let menuRow = rows.first { ($0["content"] as? [String: Any])?["kind"] as? String == "menu" }!
+        let hostRow = rows.first { $0["window"] as? String != menuRow["window"] as? String }!
+        let content = menuRow["content"] as! [String: Any]
+        precondition(content["host"] as? String == hostRow["window"] as? String,
+                     "a discovered control menu must retain its proven document host for model delivery")
+        precondition(menuRow["parent"] is NSNull, "logical AX menu ownership must not invent physical parentage")
+        let scope = try scene.directory.windowScope(instance: menuRow["instance"] as! String,
+            root: menuRow["window"] as? String, surface: menuRow["surface"] as! String)
+        precondition(scope.surface.native?.menu.map { CFEqual($0, menu) } == true)
+        precondition(scope.surface.contentHost == hostRow["window"] as? String)
+    }
+
+    @MainActor static func controlMenuReusesOnlyExactPreviouslyObservedHostNode() throws {
+        let scene = Scene()
+        let menu = scene.node(kAXMenuRole)
+        scene.nativeIDs.append(381)
+        scene.nativeMenus[381] = menu
+        scene.nativeMenuHosts[381] = 380
+        let firstRows = try scene.collect()["surfaces"] as! [[String: Any]]
+        let host = firstRows.first { ($0["content"] as? [String: Any])?["kind"] as? String != "menu" }!
+        let scope = host["surface"] as! String
+        func menuContent(_ rows: [[String: Any]]) -> [String: Any] {
+            rows.first { ($0["content"] as? [String: Any])?["kind"] as? String == "menu" }!["content"] as! [String: Any]
+        }
+        precondition(menuContent(firstRows)["hostNode"] is NSNull,
+                     "a menu not yet acquired in its host must not invent a shared node")
+        var lookups = 0
+        scene.observedNode = { element, observedScope in
+            lookups += 1
+            return CFEqual(element, menu) && observedScope == scope ? "host-menu-node" : nil
+        }
+        let rows = try scene.collect()["surfaces"] as! [[String: Any]]
+        precondition(menuContent(rows)["hostNode"] as? String == "host-menu-node",
+                     "native menu omitted its exact previously observed host node, duplicating acquired content")
+        precondition(lookups == 1 && scene.content.isEmpty,
+                     "menu reuse must consult retained identity once, without opening host contents")
+
+        // Same host, role and physical pixels do not make a new AX menu the
+        // old object. Missing exact evidence must leave independent content.
+        scene.nativeMenus[381] = scene.node(kAXMenuRole)
+        let replacement = try scene.collect()["surfaces"] as! [[String: Any]]
+        precondition(menuContent(replacement)["hostNode"] is NSNull,
+                     "replacement AX menu inherited another object's observed host node")
+        scene.nativeMenuHosts.removeValue(forKey: 381)
+        let unattached = try scene.collect()["surfaces"] as! [[String: Any]]
+        precondition(menuContent(unattached)["hostNode"] is NSNull,
+                     "a native menu without a proven host borrowed an unrelated node")
+    }
+
     @MainActor static func confirmedHelperMembershipDoesNotGuessByPath() {
         let ownership = NativeProcessOwnership()
         let owner = NativeProcessIdentity(pid: 101, parent: 1, seconds: 10, microseconds: 0,
@@ -231,6 +299,77 @@ import ApplicationServices
             executable: owner.executable)
         precondition(!ownership.belongs(helper, to: owner, bundle: bundle, read: { processes[$0] }),
             "a replacement owner inherited an earlier process membership claim")
+    }
+
+    @MainActor static func dropdownContentIsAttachedWithoutInventingNativeParent() throws {
+        for physicalPopup in [false, true] {
+            let scene = Scene()
+            let opener = scene.node("AXComboBox", parent: scene.window)
+            let popup = scene.node(kAXWindowRole, parent: scene.application,
+                                   nativeID: physicalPopup ? 381 : nil)
+            let list = scene.node("AXList", parent: popup)
+            scene.put(popup, kAXSubroleAttribute, kAXDialogSubrole as CFString)
+            scene.put(popup, kAXModalAttribute, kCFBooleanFalse)
+            scene.children[CFHash(scene.window)] = [opener]
+            scene.children[CFHash(opener)] = [list]
+            scene.children[CFHash(popup)] = [list]
+            scene.children[CFHash(list)] = []
+            scene.focusedElement = opener
+            scene.declared = [scene.window, popup]
+            scene.rootRegistration = { element, _ in "node:\(CFHash(element))" }
+            let rows = try scene.collect(nil)["surfaces"] as! [[String: Any]]
+            let form = rows.first { $0["node"] as? String == "node:\(CFHash(scene.window))" }!
+            let options = rows.first { $0["node"] as? String == "node:\(CFHash(popup))" }!
+            let content = options["content"] as? [String: Any]
+            precondition(content?["kind"] as? String == "menu", "AX dropdown became an independent work window")
+            precondition(content?["host"] as? String == form["window"] as? String, "exact forward host was lost")
+            precondition(options["parent"] is NSNull, "logical host was forged into native window parent")
+            precondition(options["node"] is String, "AX-only content must stay addressable")
+
+            // A distinct list, even with the same role/title and position,
+            // cannot inherit the first list's host or input boundary.
+            let unrelated = scene.node("AXList", parent: popup)
+            scene.children[CFHash(popup)] = [unrelated]
+            let changed = try scene.collect(nil)["surfaces"] as! [[String: Any]]
+            let separate = changed.first { $0["node"] as? String == "node:\(CFHash(popup))" }!
+            precondition((separate["content"] as? [String: Any])?["host"] is NSNull,
+                         "same-shaped AX content inherited another object's attachment")
+        }
+    }
+
+    @MainActor static func sharedPhysicalWindowKeepsDistinctContentSources() throws {
+        let scene = Scene()
+        let source = scene.node(kAXWindowRole, parent: scene.application)
+        scene.ids[CFHash(source)] = 380
+        scene.declared.append(source)
+        scene.rootRegistration = { element, _ in "node:\(CFHash(element))" }
+        let rows = try scene.collect(nil)["surfaces"] as! [[String: Any]]
+        let form = rows.first { $0["node"] as? String == "node:\(CFHash(scene.window))" }!
+        let extra = rows.first { $0["node"] as? String == "node:\(CFHash(source))" }!
+        precondition(form["window"] as? String != extra["window"] as? String,
+                     "sharing pixels must not merge distinct AX object identities")
+        precondition((extra["content"] as? [String: Any])?["host"] as? String == form["window"] as? String,
+                     "two AX sources for one physical window became independent work windows")
+        precondition(rows.count == 2 && extra["nativeWindow"] as? Bool == true,
+                     "shared sources must retain their own AX input and accurate physical capture")
+        scene.put(source, kAXModalAttribute, kCFBooleanTrue)
+        let updated = try scene.collect(nil)["surfaces"] as! [[String: Any]]
+        let modalSource = updated.first { $0["node"] as? String == "node:\(CFHash(source))" }!
+        precondition((modalSource["content"] as? [String: Any])?["evidence"] as? String == "nativeWindowID",
+                     "a modal fact erased independent evidence that these sources share physical pixels")
+    }
+
+    @MainActor static func applicationRootIsNotAWindow() throws {
+        let scene = Scene()
+        scene.declared = [scene.application]
+        scene.focused = scene.application
+        scene.inputWindow = scene.application
+        scene.focusedElement = nil
+        scene.rootRegistration = { element, _ in "node:\(CFHash(element))" }
+        let rows = try scene.collect(nil)["surfaces"] as! [[String: Any]]
+        let source = rows.first { ($0["content"] as? [String: Any])?["kind"] as? String == "application" }
+        precondition(source?["node"] is String && rows.contains { $0["node"] is NSNull && $0["nativeWindow"] as? Bool == true },
+                     "AXApplication must remain a source without replacing the independent native window")
     }
 
     @MainActor static func desktopAndApplicationShareNativeIdentity() throws {

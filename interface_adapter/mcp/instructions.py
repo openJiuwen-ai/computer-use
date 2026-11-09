@@ -22,6 +22,12 @@ no Window object is needed. Element numbers are shared across all reads of the
 same App. app.element(number) stays bound to its original control after reading
 another window. app.element(name, window=ref) searches the specified window;
 it does not require an extra read merely to switch contexts.
+Names and paths first reuse the latest returned semantic observation, including
+action observations within the same script. Missing or incomplete evidence
+falls back to the ordinary live query. Use app.element(name, fresh=True) when
+current lookup facts are explicitly needed. Saved Elements and numeric refs
+keep their original binding; fresh does not rebind them. Lookup reuse does not
+skip input preparation or live execution checks. Explicit reads remain fresh.
 On macOS, app.close_window(ref) requests normal close of that exact window,
 including when screen-sharing controls cover its title-bar buttons. Use the
 returned observation to handle any confirmation; the SDK does not choose save
@@ -72,6 +78,9 @@ Retained points also work in app.click(at=p, window=ref) for scoped input.
 They survive later reads and window translation; real identity, layout or display
 changes can still invalidate the corresponding target. A known input dispatch
 is not grounds to blindly repeat it through a global method.
+On macOS, an ordinary App coordinate click on an open menu item may use its
+Press action. Use app.click(at=p, force_pointer=True) when the mouse-event
+sequence itself is required. This option never grants global input.
 The SDK handles target preparation, delivery routes and technical recovery.
 Each window/page has its own accessibility coverage.
 For toggles, click when the observed state differs from the requested state.

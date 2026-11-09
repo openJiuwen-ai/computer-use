@@ -22,6 +22,7 @@ def retain_observation_data(
     directory=None,
     window_coverage=(),
     captured_trees=(),
+    presentations=(),
 ):
     # JS Set iteration preserves the observed order (notably window enums).
     data = dict(
@@ -33,6 +34,7 @@ def retain_observation_data(
         gaps=tuple(gaps),
         window_coverage=tuple(frozen(record) for record in window_coverage),
         captured_trees=tuple(captured_trees),
+        presentations=tuple(frozen(item) for item in presentations),
         directory=frozen(
             {
                 **directory,

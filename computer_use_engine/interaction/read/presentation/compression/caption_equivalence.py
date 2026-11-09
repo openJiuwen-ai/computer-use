@@ -591,9 +591,13 @@ def caption_equivalence(
             return False
         return all(visit(child, current) for child in children)
 
-    if not all(visit(child, ref) for child in evidence.complete_children[ref]) or len(parts) < 2:
-        return None
-    composition = PresentedValue(tuple(parts), " ")
-    if composition.value != caption.value:
-        return None
-    return CaptionEquivalence(SourceKey(ref), SourceKey(scope), field, anchor, composition)
+    try:
+        if not all(visit(child, ref) for child in evidence.complete_children[ref]) or len(parts) < 2:
+            return None
+        composition = PresentedValue(tuple(parts), " ")
+        if composition.value != caption.value:
+            return None
+        return CaptionEquivalence(SourceKey(ref), SourceKey(scope), field, anchor, composition)
+    finally:
+        # Release this traversal's captured graph after success, miss or failure.
+        visit = None

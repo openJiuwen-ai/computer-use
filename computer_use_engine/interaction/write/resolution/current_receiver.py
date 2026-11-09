@@ -60,7 +60,10 @@ class CurrentReceiverQuery(NativeGraph):
             self.fail("observation_incomplete", "The driver did not return its declared current receiver evidence.")
         if current.state != "confirmed":
             code = "observation_incomplete" if current.state == "unavailable" else "input_unavailable"
-            self.fail(code, current.detail or "The container has no confirmed current keyboard receiver.")
+            self.fail(
+                code, current.detail or "The container has no confirmed current keyboard receiver.",
+                observation_reason="currentReceiver",
+            )
         if not current.confirms_scope(self.root):
             self.fail("observation_incomplete", "Current receiver evidence does not reach the requested container.")
         token = current.node

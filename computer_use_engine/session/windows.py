@@ -16,6 +16,7 @@ from computer_use.session.interfaces import (
     WindowLifetime,
     WindowMembership,
 )
+from computer_use.session.surface_content import content_host, content_kind
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,18 @@ class WindowReferences:
         """Reuse verified identity across wrappers without looking up another process."""
         application = self._application_selectors.get((session, selector))
         return self._applications.get((session, application)) if application is not None else None
+
+    def clear_lookup_caches(self):
+        """Release optional name facts when this driver's session is invalidated."""
+        from computer_use.session.lookup_continuation import discard_lookup_continuation
+
+        for state in self._applications.values():
+            for source in tuple(state.lookup_captures):
+                source.release()
+            state.lookup_captures.clear()
+            state.lookup_observations.clear()
+            state.lookup_results.clear()
+            discard_lookup_continuation(state)
 
     def register_directory(self, directory, name=""):
         # App reads and desktop rows feed the same lifetime authority. Visible
@@ -148,21 +161,21 @@ class WindowReferences:
         if image.expired or image.unavailable_mapping or image.delivered is None:
             return
         generation = generation or image.generation
-        for piece in image.pieces:
-            if not piece.scope_confirmed:
-                continue
-            target = piece.image.target
-            identity = WindowIdentity(piece.window, target.surface, target.instance)
+        identities = {
+            WindowIdentity(piece.window, piece.image.target.surface, piece.image.target.instance)
+            for piece in image.pieces if piece.scope_confirmed and piece.image.target.session == state.session
+        }
+        aliases = {host for _, host in image.content_hosts} | {source for source, _ in image.shared_pixels}
+        identities.update(identity for identity in image.identities if identity.window in aliases)
+        for identity in identities:
             evidence = state.evidence.get(identity)
             if (
-                target.session != state.session
-                or target.root_window != piece.window
-                or evidence is None
+                evidence is None
                 or evidence.lifetime is WindowLifetime.RETIRED
                 or generation < state.window_image_generations.get(identity, -1)
             ):
                 continue
-            retained = image.for_window(piece.window)
+            retained = image.for_window(identity.window)
             if retained is None:
                 continue
             state.window_images[identity] = retained
@@ -200,4 +213,8 @@ class WindowReferences:
     def choices(self, directory, name=""):
         aliases = self.register_directory(directory, name)
         items = {item["window"]: item for item in directory["surfaces"]}
-        return [FrozenRecord({"id": int(ref), "title": items[key]["title"]}) for ref, key in aliases.items()]
+        return [
+            FrozenRecord({"id": int(ref), "title": items[key]["title"]})
+            for ref, key in aliases.items()
+            if content_host(items[key]) not in items and content_kind(items[key]) != "application"
+        ]

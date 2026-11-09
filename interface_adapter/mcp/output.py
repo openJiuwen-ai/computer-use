@@ -14,6 +14,7 @@ from computer_use.interaction.read.delivery.baseline.model import BaselineInput
 from computer_use.interaction.read.delivery.baseline.passes.assemble_baseline import stage as assemble_baseline
 from computer_use.interaction.read.delivery.baseline.passes.publish_observation import stage as publish_observation
 from computer_use.interaction.read.delivery.baseline.pipeline import BaselinePublicationPipeline
+from computer_use.interaction.read.delivery.coverage import confirms_removal
 from computer_use.interaction.read.delivery.diff.baseline import ComparisonDocument
 from computer_use.interaction.read.delivery.diff.model import DeliverySelection
 from computer_use.interaction.read.delivery.diff.pipeline import DeliverySelectionPipeline
@@ -257,10 +258,31 @@ class ObservationOutput:
         ):
             return False
         data = observation_data(previous.get("sourceState", previous["state"]))
-        if data is not None and (data["partial"] or data["gaps"]):
+        current = observation_data(observation.get("sourceState", observation["state"]))
+        ended = {
+            (item["id"][0], source["instance"], source["window"], source["surface"])
+            for item in (current or {}).get("presentations", ()) if item["state"] == "ended"
+            for source in item["sources"] if source["window"] != item["host"]
+        }
+        # A repeated auxiliary gap need not preserve every intermediate
+        # screenshot. Keep that exact gap in the replacement, and require
+        # all prior content to remain covered or positively removed.
+        if data is not None and (data["partial"] or data["gaps"]) and (
+            current is None or any(gap not in current["gaps"] for gap in data["gaps"])
+        ):
             return False
+        if any(item is not None and (item["partial"] or item["gaps"]) for item in (data, current)):
+            # A later partial capture can omit previously complete content too.
+            # Same tree identity is not proof that an unread child disappeared.
+            ended_refs = {ref for tree in trees if len(tree.scope) >= 4 and tuple(tree.scope[:4]) in ended
+                          for ref in tree.prepared.snapshot.refs}
+            if any(ref not in observation["refs"] and ref not in ended_refs and not confirms_removal(
+                previous.get("coverage"), observation.get("coverage"), ref,
+            ) for ref in previous["refs"]):
+                return False
         if trees:
-            if not all(self.presenter.tree_key(previous, tree) in incoming for tree in trees):
+            if not all(self.presenter.tree_key(previous, tree) in incoming
+                       or len(tree.scope) >= 4 and tuple(tree.scope[:4]) in ended for tree in trees):
                 return False
         elif self.presenter.key(previous) != self.presenter.key(observation) or previous["view"] != observation["view"]:
             return False
@@ -278,7 +300,16 @@ class ObservationOutput:
             observation["imageScope"] if "imageScope" in observation
             else image_output_scope(replacement) if replacement is not None else None
         )
-        return replacement is not None and scope is not None and replacement_scope == scope
+        if replacement is not None and scope is not None and replacement_scope == scope:
+            return True
+        if not ended or replacement is None or scope is None or replacement_scope is None:
+            return False
+        # An ended attached menu can disappear from the current canvas. Keep
+        # all still-relevant sources; a missing/unknown menu is never removal.
+        if scope[0] != "window" or replacement_scope[0] != "window" or scope[1] != replacement_scope[1]:
+            return False
+        covered = {(replacement_scope[1], item[1], item[0], item[2]) for item in replacement_scope[2]}
+        return all((scope[1], item[1], item[0], item[2]) in covered | ended for item in scope[2])
 
     def invalidate(self, source):
         self.presenter.invalidate(source)

@@ -786,7 +786,9 @@ class Connection:
                 def invalid_constant(value):
                     raise ValueError("protocol: invalid JSON constant " + value)
 
+                json_started = _now()
                 value = json.loads(line.decode("utf-8", errors="strict"), parse_constant=invalid_constant)
+                json_decoded = _now()
                 if not isinstance(value, dict):
                     raise ValueError("protocol: expected response object")
                 if self._handshake is not None:
@@ -832,6 +834,7 @@ class Connection:
                     error = failure_error(pending["method"], failure)
                 else:
                     result = decode_execution_result(pending["method"], response["result"], retain_observation=True)
+                protocol_decoded = _now()
                 desktop_capture = (
                     pending["method"] == "capture" and result is not None and result.get("kind") == "desktopCapture"
                 )
@@ -874,6 +877,9 @@ class Connection:
                         id=pending["id"],
                         method=pending["method"],
                         diagnosticMs=diagnostic_elapsed,
+                        jsonDecodeMs=json_decoded - json_started,
+                        protocolDecodeMs=protocol_decoded - json_decoded,
+                        frameBytes=len(line),
                     )
                 )
                 pending["timer"].cancel()

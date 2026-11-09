@@ -144,6 +144,8 @@ import ApplicationServices
                 && $0.click?.pointerRequirement == sampled.pointerRequirement
                 && $0.click?.requiresForegroundGeometry == sampled.requiresForegroundGeometry
                 && sameProof($0.click?.popupPointer, sampled.popupPointer)
+                && ($0.click?.coordinateMenuPress == nil && sampled.coordinateMenuPress == nil
+                    || $0.click?.coordinateMenuPress.flatMap { old in sampled.coordinateMenuPress.map(old.matches) } == true)
                 && selection.equivalent($0.basis, basis, scope: scope)
         }
         let offer = sampled

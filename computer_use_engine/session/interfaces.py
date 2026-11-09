@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+from weakref import WeakSet
 
 from computer_use.diagnostics import local_failure
 from computer_use.native.contracts import Knowledge
@@ -168,6 +169,14 @@ class InstanceState:
     # Semantic query roots actually delivered to the caller. A sampled or
     # image-only window cannot become an unseen fallback name-lookup scope.
     delivered_lookup_windows: set[WindowIdentity] = field(default_factory=set)
+    # Latest returned facts for name/path lookup; never live-input authority.
+    lookup_observations: OrderedDict = field(default_factory=OrderedDict, repr=False)
+    # Exact successful fresh queries, scoped to their original roots and the
+    # latest publication versions. They never fabricate full-tree coverage.
+    lookup_results: OrderedDict = field(default_factory=OrderedDict, repr=False)
+    # Also sees pending delivery sources for invalidation, but never grants
+    # query access or owns their lifetime/payload.
+    lookup_captures: WeakSet = field(default_factory=WeakSet, repr=False)
     delivered_image: InterfaceImage | None = None
     image_generation: int = 0
     delivered_image_generation: int = 0
@@ -188,6 +197,9 @@ class InstanceState:
     # work depends on the active catalogue, not every window ever discovered.
     _window_lifetimes: dict[str, WindowIdentity] = field(default_factory=dict, repr=False)
     owner_identities: dict[str, WindowIdentity] = field(default_factory=dict)
+    # Acquired menu presentation facts, independent of native lifetimes and
+    # actual model-delivery baselines. They never authorize or reject input.
+    content_presentations: dict[tuple, dict] = field(default_factory=dict)
 
     def reconcile(self, directory: NativeDirectory, facts: DirectoryMembership) -> None:
         """Replace current authorization facts while retaining unknown lifetimes.
@@ -262,6 +274,25 @@ class InstanceState:
         """
         if not identities:
             return
+        for source in tuple(self.lookup_captures):
+            target = source.target
+            if WindowIdentity(target.root_window, target.surface, target.instance) in identities or any(
+                snapshot.get("menu_window_identity") in identities for snapshot in source.snapshots.values()
+            ):
+                source.release()
+        for key, source in tuple(self.lookup_observations.items()):
+            target = source.target
+            identity = WindowIdentity(target.root_window, target.surface, target.instance)
+            if source.released or identity in identities or any(
+                snapshot.get("menu_window_identity") in identities for snapshot in source.snapshots.values()
+            ):
+                self.lookup_observations.pop(key, None)
+        for key, snapshot in tuple(self.lookup_results.items()):
+            if any(
+                WindowIdentity(target.root_window, target.surface, target.instance) in identities
+                for target, _generation in key[0]
+            ) or snapshot.get("menu_window_identity") in identities:
+                self.lookup_results.pop(key, None)
         for ref, snapshot in self.refs.items():
             binding = snapshot.get("binding")
             identity = snapshot.get("window_identity")

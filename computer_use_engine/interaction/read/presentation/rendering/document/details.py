@@ -45,7 +45,10 @@ def separate_details(value: DisplayText, snapshots: Mapping[int, RenderedTree]) 
             return tuple(visit(child) for child in item)
         return item
 
-    return replace(value, values=tuple(visit(item) for item in value.values)), tuple(roots)
+    try:
+        return replace(value, values=tuple(visit(item) for item in value.values)), tuple(roots)
+    finally:
+        visit = None
 
 
 def detail_footer(roots: list[str]) -> str:

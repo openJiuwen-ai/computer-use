@@ -91,6 +91,7 @@ class InterfaceMenuPipeline:
         *,
         observed: MenuAppObservation | None = None,
         preparation: dict | None = None,
+        full: bool = False,
     ) -> Observation:
         """Collect and publish menus within the handle's established interface scope.
 
@@ -160,7 +161,7 @@ class InterfaceMenuPipeline:
         ui._lookup_scopes = owners
         # pylint: disable-next=protected-access
         ui._menu_only = True
-        lines.append("Tree: full; scope=application menu.")
+        lines.append("Scope: application menu.")
         for target, tree in trees:
             prepared = self.preparation.run(
                 SnapshotRenderRequest(tree, compact=True, public_api=True), presentation_control
@@ -174,7 +175,7 @@ class InterfaceMenuPipeline:
             ui,
             DisplayDocument.join(lines),
             trees=trees,
-            full=True,
+            full=full,
             # pylint: disable-next=protected-access
             scope="menu:" + state.application + ":" + str(ui._anchor) + ":" + repr(path),
             view="menu",

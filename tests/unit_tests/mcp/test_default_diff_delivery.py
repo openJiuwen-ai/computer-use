@@ -17,6 +17,7 @@ def fixture():
     from dataclasses import replace
 
     from computer_use.identity import Record
+    from computer_use.interaction.read.delivery.coverage import document_coverage
     from computer_use.interaction.read.facts.normalize import normalize_facts
     from computer_use.interaction.read.numbering.references import DisplayReferences
     from computer_use.interaction.read.presentation.document import DisplayDocument
@@ -24,6 +25,7 @@ def fixture():
     from computer_use.protocol.observation import ControlValue, NativeNode, NativeObservation, Relation
     from computer_use.session.events import action_completed, observation_completed
     from computer_use.session.observation import lazy_observation
+    from computer_use.session.observation_data import retain_observation_data
 
     source, references = Record(), DisplayReferences("fixture")
 
@@ -38,6 +40,9 @@ def fixture():
         reverse=False,
         extra=None,
         notice="",
+        view="window",
+        partial=False,
+        incomplete=False,
     ):
         children = ("field",) if short else ("field", "other")
         if reverse:
@@ -47,7 +52,7 @@ def fixture():
                 role="window",
                 name="Form",
                 relations={
-                    "children": Relation(kind="children", targets=children, total=len(children)),
+                    "children": Relation(kind="children", targets=children, total=len(children) + int(incomplete)),
                 },
             ),
             "field": NativeNode(role="text_field", name="Subject", control_value=ControlValue(value=value)),
@@ -82,16 +87,19 @@ def fixture():
             document = DisplayDocument.join((notice, document))
         document = replace(document, context=context)
         state = lazy_observation(document, None)
+        if partial:
+            retain_observation_data(state, (), refs, partial=True, gaps=("Auxiliary AX unavailable",))
         observation_completed(
             {
                 "source": source,
                 "scope": stream or scope,
-                "view": "window",
+                "view": view,
                 "state": state,
                 "document": document,
                 "refs": refs,
                 "full": full,
                 "publicApi": True,
+                "coverage": document_coverage(document),
             }
         )
         return state
@@ -104,6 +112,82 @@ def fixture():
 
 
 class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_complete_capture_survives_later_incomplete_same_scope_capture(self):
+        with tempfile.TemporaryDirectory(prefix="mcp-complete-partial-") as directory:
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=["-m", "computer_use_mcp"],
+                cwd=Path(__file__).resolve().parents[3],
+                env={**os.environ, "COMPUTER_USE_LOG_DIR": directory},
+            )
+            async with (
+                stdio_client(params) as (read, write),
+                ClientSession(read, write, read_timeout_seconds=timedelta(seconds=20)) as client,
+            ):
+                await client.initialize()
+
+                async def call(code):
+                    result = await client.call_tool("computer_use", {"code": code})
+                    self.assertFalse(result.isError, result)
+                    return "\n".join(block.text for block in result.content if block.type == "text")
+
+                setup = inspect.getsource(fixture) + "\nfixture()\n"
+                incomplete = await call(
+                    setup + "observe('Earlier complete')\n"
+                    "observe('Later incomplete', partial=True, short=True, incomplete=True)"
+                )
+                self.assertIn("Earlier complete", incomplete)
+                self.assertIn("Unchanged unrelated control", incomplete)
+                self.assertIn("Later incomplete", incomplete)
+                covered = await call(
+                    "observe('Earlier covered')\nobserve('Later covered', partial=True)"
+                )
+                self.assertNotIn("Earlier covered", covered)
+                self.assertIn("Later covered", covered)
+                removed = await call(
+                    "observe('Before proven removal')\n"
+                    "observe('After proven removal', partial=True, short=True)"
+                )
+                self.assertNotIn("Before proven removal", removed)
+                self.assertIn("After proven removal", removed)
+
+    async def test_menu_uses_same_delivered_diff_contract_as_window_trees(self):
+        from computer_use.client.host import (
+            set_action_handler,
+            set_diagnostic_handler,
+            set_execution_guard,
+            set_observation_handler,
+            set_preview_handler,
+            set_text_page_handler,
+        )
+        from computer_use.session import images as images_state
+        from computer_use_mcp.runtime import Runtime
+
+        previous_delivery = images_state._delivery_required
+        runtime = Runtime(lambda _event: None)
+        try:
+            async def call(code):
+                result = await runtime.execute({"code": code, "executionId": code})
+                self.assertFalse(result.get("isError"), result)
+                return "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+
+            setup = inspect.getsource(fixture) + "\nfixture()\n"
+            first = await call(setup + "observe('Initial', view='menu')")
+            self.assertIn("Unchanged unrelated control", first)
+            changed = await call("observe('Changed', view='menu')")
+            self.assertIn("Tree: diff", changed)
+            self.assertNotIn("Unchanged unrelated control", changed)
+            unchanged = await call("observe('Changed', view='menu')")
+            self.assertIn("Tree: unchanged", unchanged)
+            full = await call("observe('Changed', view='menu', full=True)")
+            self.assertIn("Unchanged unrelated control", full)
+        finally:
+            await runtime.close()
+            for setter in (set_action_handler, set_diagnostic_handler, set_execution_guard, set_observation_handler,
+                           set_preview_handler, set_text_page_handler):
+                setter(None)
+            images_state._delivery_required = previous_delivery
+
     async def test_plain_stdio_client_gets_diffs_across_calls_and_between_writes(self):
         with tempfile.TemporaryDirectory(prefix="mcp-diff-") as directory:
             params = StdioServerParameters(
@@ -140,6 +224,7 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("First write", combined)
                 self.assertIn("Second write", combined)
                 self.assertNotIn("Unchanged unrelated control", combined)
+
                 # Only the final observation becomes the next diff baseline;
                 # both action receipts remain in chronological order.
                 self.assertLess(combined.index("First write"), combined.index("Second write"))
@@ -197,6 +282,23 @@ class DefaultDiffDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Tree: unchanged", parent_only)
                 self.assertNotIn("Unchanged unrelated control", parent_only)
                 self.assertNotIn("Full tree for this scope", parent_only)
+
+                partial = await call(
+                    "observe('Partial intermediate', partial=True)\nobserve('Partial current', partial=True)"
+                )
+                self.assertNotIn("Partial intermediate", partial)
+                self.assertIn("Partial current", partial)
+                removed = await call(
+                    "observe('Before confirmed removal', partial=True)\n"
+                    "observe('After confirmed removal', partial=True, short=True)"
+                )
+                self.assertNotIn("Before confirmed removal", removed)
+                incomplete = await call(
+                    "observe('Earlier covered content', partial=True)\n"
+                    "observe('Later incomplete content', partial=True, short=True, incomplete=True)"
+                )
+                self.assertIn("Earlier covered content", incomplete)
+                self.assertIn("Later incomplete content", incomplete)
 
                 reset = await client.call_tool("computer_use_reset", {})
                 self.assertFalse(reset.isError, reset)

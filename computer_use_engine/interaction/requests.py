@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import ElementPath as LookupPath
     from computer_use.interaction.records import ElementSnapshot
     from computer_use.native.contracts import Intent, OperationTarget
+    from computer_use.session.interfaces import WindowIdentity
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class ExecuteAction:
         app_keyboard: Treat keyboard input as addressed to the App's current receiver.
         forward_current: Forward container input to its current receiver.
         snapshot: Original element provenance for write-time scope validation.
+        display_window: Captured public image scope for receipt text only; never an input binding.
     """
 
     owner: object | None
@@ -57,6 +59,7 @@ class ExecuteAction:
     app_keyboard: bool = False
     forward_current: bool = False
     snapshot: ElementSnapshot | None = None
+    display_window: WindowIdentity | None = None
 
 
 @dataclass(frozen=True)

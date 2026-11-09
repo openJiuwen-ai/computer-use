@@ -83,6 +83,13 @@ import ApplicationServices
         try facts.registerRoot(element, app: app, scope: scope)
     }
 
+    /// Reuse exact content already acquired in its host scope. This lookup
+    /// neither samples AX again nor changes an existing element's binding.
+    func observedNativeNode(_ element: AXUIElement, app: NSRunningApplication, scope: String) -> String? {
+        registry.observed(.init(
+            pid: app.processIdentifier, launched: app.launchDate, element: element, scope: scope))?.id
+    }
+
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any] {
         return try reader.readText(ref, offset: offset, length: length)
     }

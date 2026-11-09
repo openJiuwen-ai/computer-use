@@ -15,6 +15,7 @@ import ApplicationServices
     var order = [String]()
     var contracts = [String: [NativePrimitiveContract]]()
     var selections = [String: NativeSelectionBasis]()
+    private var foregroundContinuation: (owner: NativeForegroundResponsibility, target: [String: Any])?
     lazy var directory = NativeDirectory(state: state, session: session)
     lazy var captures = NativeCapture(directory: directory, sharing: state.sharing)
     var hasUnfinishedOperation: Bool { current.map { $0.state != .closed || $0.cleanup != "complete" } ?? false }
@@ -28,6 +29,7 @@ import ApplicationServices
     func cancel() { current?.stop("cancelled") }
     func shutdown() {
         current?.stop("connection_closed")
+        discardForegroundContinuation()
         state.pointer.stop()
         SyntheticFocusCoordinator.shared.stop()
         state.appObserver.stop()
@@ -72,6 +74,22 @@ import ApplicationServices
     func registerNativeResourceScope(
         _ op: NativeOperation, selection: NativeSelectionBasis, mode: String, intent: String
     ) {
+        if op.request.globalInput || mode == "write" && ["focus", "launch"].contains(intent) {
+            discardForegroundContinuation() // Local bookkeeping only; global input gains no query or gate.
+        } else if mode == "write" {
+            var continuationTarget = op.target
+            if let retained = foregroundContinuation {
+                foregroundContinuation = nil
+                if !directory.sameInteraction(retained.target, op.target) || !op.inheritForeground(retained.owner) {
+                    retained.owner.stop()
+                } else { continuationTarget = retained.target }
+            }
+            op.onForegroundClose = { [weak self] owner, success in
+                guard let self, success, owner.suspend() else { return false }
+                self.foregroundContinuation = (owner, continuationTarget)
+                return true
+            }
+        }
         let activity = mode == "write" && intent != "launch" ? state.pointer.begin() : nil
         pointerActivity = activity
         op.onClose = { success in activity?.finish(success: success) }
@@ -89,6 +107,7 @@ import ApplicationServices
     }
 
     func perform(_ method: String, _ raw: Any?, timeoutMs: Int) async throws -> [String: Any] {
+        if method == "prepareObservation" { discardForegroundContinuation() }
         let token = (raw as? [String: Any])?["operation"] as? String
         let activity = token == current?.token ? pointerActivity : nil
         return try await NativeInputAuthorization.$globalInputAllowed.withValue(state.globalInputAllowed) {
@@ -107,5 +126,10 @@ import ApplicationServices
               }
             }
         }
+    }
+
+    private func discardForegroundContinuation() {
+        foregroundContinuation?.owner.stop()
+        foregroundContinuation = nil
     }
 }

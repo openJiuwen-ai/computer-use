@@ -123,8 +123,12 @@ def _branch(
             descendants.extend(parts)
         return descendants or own
 
-    text = visit(root)
-    return (nodes, text) if text is not None else None
+    try:
+        text = visit(root)
+        return (nodes, text) if text is not None else None
+    finally:
+        # The recursive closure otherwise retains the entire captured view.
+        visit = None
 
 
 def _captions(view: ProjectionView, owner: ViewNode, evidence: CompressionEvidence) -> tuple[set[str], set[str]]:

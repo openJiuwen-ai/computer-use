@@ -15,12 +15,11 @@ if TYPE_CHECKING:
 
 
 def select_full_or_diff(value: DeliverySelection, control: Control) -> bool:
-    """Choose full text for explicit full reads, non-window views, or a missing compatible
-    baseline.
-    """
+    """Window and menu trees share source-scoped, actually delivered baselines."""
     observation, previous = value.observation, value.previous
     return bool(
-        observation["full"] or observation["view"] != "window" or previous is None or previous["view"] != "window"
+        observation["full"] or observation["view"] not in ("window", "menu")
+        or previous is None or previous["view"] not in ("window", "menu")
     )
 
 

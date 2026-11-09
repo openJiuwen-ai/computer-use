@@ -34,6 +34,12 @@ surface_schema = obj(
         modal=boolean().nullable(),
         nativeWindow=boolean(),
         accessibility=boolean(),
+        content=obj({
+            "kind": enum("window", "menu", "popup", "application", "unknown"),
+            "host": identity.nullable(),
+            "evidence": identity,
+            "hostNode": identity.nullable().optional(),
+        }).optional(),
     )
 )
 _common = dict(

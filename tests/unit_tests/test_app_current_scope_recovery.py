@@ -70,7 +70,7 @@ def test_app_read_reselects_current_form_after_inner_fixed_launcher_disappears(m
     controller.reader.read = AsyncMock(side_effect=failure)
     pipeline = InterfaceReadPipeline(controller)
     tree = SimpleNamespace(
-        native=SimpleNamespace(session="session", roots=(form["node"],), issues=()), refs={}, roots=()
+        native=SimpleNamespace(session="session", roots=(form["node"],), issues=(), nodes={}), refs={}, roots=()
     )
     pipeline.member = AsyncMock(return_value=WindowPart(member_target(state, form), tree=tree))
     pipeline.preparation.run = lambda _value, _control=None: SimpleNamespace(roots=())

@@ -21,6 +21,7 @@ import ApplicationServices
 
 /// Live scope facts and last-moment checks; no operation journal or input unit.
 @MainActor protocol NativeScopeAccess: AnyObject {
+    func retainedForegroundSource(_ binding: [String: Any]) -> (application: NSRunningApplication, element: AXUIElement?)?
     func fixedInputWindow(_ binding: [String: Any]) throws -> NativeFixedInputWindow?
     func inputBinding(_ raw: Any?, input: Bool, attachedMenuAction: Bool) throws -> (
         wire: [String: Any], blocked: [String], node: String?
@@ -41,6 +42,7 @@ import ApplicationServices
 }
 
 extension NativeScopeAccess {
+    func retainedForegroundSource(_ binding: [String: Any]) -> (application: NSRunningApplication, element: AXUIElement?)? { nil }
     func fixedInputWindow(_ binding: [String: Any]) throws -> NativeFixedInputWindow? { nil }
     func qtComboChoiceBoundary(_ raw: Any?, qualification: NativeQtComboChoice) throws -> [String] {
         throw DriverError("qualified Qt choice boundary unavailable", code: .inputUnavailable)

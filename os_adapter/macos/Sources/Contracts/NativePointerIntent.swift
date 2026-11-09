@@ -32,13 +32,15 @@ struct NativePointerIntent {
         case .click:
             let keys = Set((parameters as? [String: Any] ?? [:]).keys)
             let coordinates: Set<String> = element ? [] : ["x", "y"]
-            guard keys.isSubset(of: coordinates.union(["button", "count"])), keys.isSuperset(of: coordinates) else {
+            let options: Set<String> = element || screen ? ["button", "count"] : ["button", "count", "pointerOnly"]
+            guard keys.isSubset(of: coordinates.union(options)), keys.isSuperset(of: coordinates) else {
                 throw DriverError(
                     element
                         ? "element click accepts only button/count"
                         : "pointer click requires coordinates and optional button/count", code: .invalidRequest)
             }
             p = try object(parameters, keys: keys)
+            if p["pointerOnly"] != nil { _ = try boolean(p["pointerOnly"], label: "pointerOnly") }
             button = p["button"] == nil ? "left" : try string(p["button"], label: "button")
             let n = p["count"] == nil ? 1 : try number(p["count"], label: "count")
             guard ["left", "right", "middle"].contains(button), n == 1 || n == 2 else {

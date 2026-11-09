@@ -113,8 +113,12 @@ def compose_controls(
                 for nested in child["children"]:
                     collect(nested, depth + 1)
 
-        for child in node["children"]:
-            collect(child, 1)
+        try:
+            for child in node["children"]:
+                collect(child, 1)
+        finally:
+            # Break the recursive closure's ownership of this completed node.
+            collect = None
         matches_complete = (
             True if complete and members and (required_item(node, "role") != "row" or cells <= 1) else False
         )
@@ -122,7 +126,10 @@ def compose_controls(
             node["control"] = dict(kind="item" if required_item(node, "role") == "row" else "button", members=members)
         return node
 
-    return visit(scoped)
+    try:
+        return visit(scoped)
+    finally:
+        visit = None
 
 
 def _editor_path(owner: SemanticNode, editor: str) -> list[SemanticNode] | None:
@@ -149,11 +156,14 @@ def _editor_path(owner: SemanticNode, editor: str) -> list[SemanticNode] | None:
                 return [node, *path]
         return None
 
-    for child in owner["children"]:
-        path = find(child, 1)
-        if path is not None:
-            return path
-    return None
+    try:
+        for child in owner["children"]:
+            path = find(child, 1)
+            if path is not None:
+                return path
+        return None
+    finally:
+        find = None
 
 
 def _editor_capabilities(owner: SemanticNode, editor: SemanticNode) -> None:

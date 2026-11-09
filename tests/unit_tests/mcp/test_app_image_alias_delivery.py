@@ -25,18 +25,23 @@ from computer_use.client.host import (
 from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.scope import window_scope
 from computer_use.interaction.query.instances.scope import adopt
+from computer_use.interaction.read.acquisition.components.support import ObservationGap
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.acquisition.images.composite.pipeline import InterfaceImagePipeline
 from computer_use.interaction.read.views.collection import CollectionPlan
 from computer_use.interaction.read.views.pipeline import WindowPart
 from computer_use.interaction.read.views.publication import publish
+from computer_use.interaction.write.request.model import ActionPlan
+from computer_use.interaction.write.request.pipeline import ExecuteNativeWrite
 from computer_use.interaction.write.ui.pipeline import InterfacePointerPipeline
 from computer_use.native.contracts import Binding, HostPolicy
 from computer_use.native.scopes import RunningApplication
 from computer_use.native.transport import ConnectionPort
+from computer_use.pipeline.core import Control
 from computer_use.protocol.captures import capture_metadata, decode_capture
 from computer_use.protocol.execution import decode_capture_request
 from computer_use.session import images as images_state
+from computer_use.session.events import action_completed
 from computer_use.session.images import register_image_delivery
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
@@ -119,9 +124,10 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.captures.append(image)
         return image
 
-    def observe(self, ui, key):
-        image = self.capture(ui, key)
-        return publish(self.controller, ui, "Observed " + key, image.png)
+    def observe(self, ui, key, presentations=(), gaps=(), color=None):
+        image = self.capture(ui, key, color=color)
+        text = "Observed " + key + "\n" + "\n".join(gap.detail for gap in gaps)
+        return publish(self.controller, ui, text, image.png, presentations=presentations, partial=bool(gaps), gaps=gaps)
 
     def source_part(self, key, token, color):
         item = self.app._instance.members[key]
@@ -137,7 +143,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
             target, png, {}, dict(nativeSpace="screen", toNative=(1, 0, 0, 1, 0, 0)),
         ))
 
-    def compose(self, ui, keys):
+    def compose(self, ui, keys, presentations=()):
         parts = []
         for index, key in enumerate(keys):
             image = self.capture(ui, key)
@@ -157,7 +163,7 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
         coverage = plan.coverage(ui._instance.directory, parts, tuple(piece.window for piece in canvas.pieces))
         return publish(
             self.controller, ui, "Composite", canvas.png,
-            partial=bool(self.composition_gaps), window_coverage=coverage,
+            partial=bool(self.composition_gaps), window_coverage=coverage, presentations=presentations,
         )
 
     async def click(self, ui, point=(20, 30)):
@@ -179,6 +185,97 @@ class AppImageAliasDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     def last_target(self):
         return self.write.arun.call_args.args[0].target
+
+    async def test_attached_menu_model_coordinates_keep_host_and_exact_popup_receiver(self):
+        item = self.app._instance.members["b"]
+        item["content"] = {"kind": "menu", "host": "a", "evidence": "AXChildren"}
+        result = await self.execute("observed = compose(app, ('a', 'b'))")
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertNotIn(f"window={ref(self.app, 'b')}", text)
+        await self.click(self.window, (140, 30))
+        self.assertEqual(self.last_target().root_window, "b")
+        self.assertEqual(self.write.arun.call_args.args[0].intent.parameters["x"], 20)
+
+    async def test_attached_menu_click_receipt_keeps_delivered_host_alias(self):
+        self.app._instance.members["b"]["content"] = {"kind": "menu", "host": "a", "evidence": "AXChildren"}
+        self.controller.engine.execute = AsyncMock(return_value={"status": "dispatched", "detail": "Click sent"})
+
+        async def write(request, _control):
+            receipt = await ExecuteNativeWrite(self.controller).arun(ActionPlan(request, target=request.target), Control())
+            action_completed(receipt)
+            return receipt
+
+        self.write.arun.side_effect = write
+        delivered = await self.execute("compose(app, ('a', 'b'))")
+        caption = next(block for block in delivered["content"] if block["type"] == "image")["_meta"]["computer-use"]["caption"]
+        self.assertIn(f"window={ref(self.app, 'a')}", caption)
+        self.assertNotIn(f"window={ref(self.app, 'b')}", caption)
+        result = await self.execute("click(window, (140, 30))")
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertIn(f"Window {ref(self.app, 'a')} / click", text)
+        self.assertNotIn(f"Window {ref(self.app, 'b')} / click", text)
+        native = self.controller.engine.execute.await_args.args[1]
+        self.assertEqual(native.root_window, "b")
+        self.assertIs(native, self.last_target())
+
+    async def test_delayed_menu_image_does_not_bind_to_replacement_host(self):
+        menu = {**self.app._instance.members["b"],
+                "content": {"kind": "menu", "host": "a", "evidence": "AXChildren"}}
+        adopt(self.controller, self.app, directory(surface("a"), menu))
+        image = self.capture(self.app, "b")
+        adopt(self.controller, self.app, directory(surface("a", scope="replacement"), menu))
+        replacement = WindowIdentity.of(self.app._instance.members["a"])
+        self.runtime.task_namespace["late_menu"] = image
+        result = await self.execute("print_image(late_menu.png)")
+        caption = next(block for block in result["content"] if block["type"] == "image")["_meta"]["computer-use"]["caption"]
+        self.assertNotIn(replacement, self.app._instance.window_images)
+        self.assertNotIn(f"window={ref(self.app, 'a')}", caption)
+        await self.click(self.app)
+        self.assertEqual(self.last_target().root_window, "b")
+
+    async def test_delayed_shared_pixels_do_not_bind_to_replacement_ax_source(self):
+        source = {**self.app._instance.members["b"],
+                  "content": {"kind": "unknown", "host": "a", "evidence": "nativeWindowID"}}
+        adopt(self.controller, self.app, directory(surface("a"), source))
+        image = self.capture(self.app, "a")
+        replacement = {**surface("b", scope="replacement"), "content": source["content"]}
+        adopt(self.controller, self.app, directory(surface("a"), replacement))
+        self.runtime.task_namespace["late_shared"] = image
+        await self.execute("print_image(late_shared.png)")
+        self.assertNotIn(WindowIdentity.of(replacement), self.app._instance.window_images)
+        await self.click(self.window)
+        self.assertEqual(self.last_target().root_window, "a")
+
+    async def test_repeated_partial_images_keep_gap_once_and_deliver_current_pixels(self):
+        self.runtime.task_namespace.update(
+            gap=ObservationGap("tree", "observation_incomplete", "Auxiliary AX children unavailable"),
+            other_gap=ObservationGap("tree", "observation_incomplete", "Other source missing"),
+        )
+        result = await self.execute(
+            "observe(app, 'a', (), (gap,), 'red')\nobserve(app, 'a', (), (gap,), 'blue')"
+        )
+        self.assertEqual(sum(block["type"] == "image" for block in result["content"]), 1)
+        text = "\n".join(block["text"] for block in result["content"] if block["type"] == "text")
+        self.assertEqual(text.count("Auxiliary AX children unavailable"), 1)
+        image = next(block for block in result["content"] if block["type"] == "image")
+        with Image.open(BytesIO(base64.b64decode(image["data"]))) as png:
+            self.assertEqual(png.getpixel((20, 30))[:3], (0, 0, 255))
+        separate = await self.execute(
+            "observe(app, 'a', (), (gap,), 'red')\nobserve(app, 'a', (), (other_gap,), 'blue')",
+            reset_images=True,
+        )
+        self.assertEqual(sum(block["type"] == "image" for block in separate["content"]), 2)
+
+    async def test_finished_attached_menu_image_is_superseded_but_unconfirmed_menu_is_kept(self):
+        item = self.app._instance.members["b"]
+        shown = {"id": ("session", item["surface"], "menu"), "host": "a", "state": "observed",
+                 "sources": ({key: item[key] for key in ("window", "surface", "instance")},)}
+        self.runtime.task_namespace.update(shown=shown, ended={**shown, "state": "ended"},
+                                          unknown={**shown, "state": "unconfirmed"})
+        kept = await self.execute("compose(app, ('a', 'b'), (shown,))\nobserve(app, 'a', (unknown,))")
+        self.assertEqual(sum(block["type"] == "image" for block in kept["content"]), 2)
+        final = await self.execute("compose(app, ('a', 'b'), (shown,))\nobserve(app, 'a', (ended,))", reset_images=True)
+        self.assertEqual(sum(block["type"] == "image" for block in final["content"]), 1)
 
     async def test_postwrite_owner_alias_image_updates_user_app_coordinates(self):
         await self.execute("old = observe(app, 'a')")

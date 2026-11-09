@@ -18,7 +18,7 @@ Computer Use is the desktop-operation component of the openJiuwen Agent System S
 
 Developers can adopt it in two ways:
 
-**Option 1: integrate the computer_use engine.** Connect an agent through MCP or call the Python SDK directly. The MCP tool `computer_use(title, code)` runs Python against the `Computer → App / Window → Element` interface, with variables retained across calls. Agents use accessibility trees and screenshots to locate controls and verify operation results.
+**Option 1: integrate the computer_use engine.** Connect an agent through MCP or call the Python SDK directly. The MCP tool `computer_use(title, code)` runs Python against the `Computer → App → Element` interface, with variables retained across calls. Agents use accessibility trees and screenshots to locate controls and verify operation results.
 
 **Option 2: integrate the Computer Use DeepAgent.** Use the agent assembled on openJiuwen DeepAgent through its standard `invoke()`, `stream()` and `Runner` interfaces. Applications pass natural-language tasks to the agent, which observes the desktop, performs operations and checks their results.
 
@@ -56,9 +56,22 @@ flowchart TD
     OS --> Desktop["Desktop applications"]
 ```
 
-DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App / Window → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. A completed object action returns its `dispatched` or `verified` receipt and a bounded related observation. On macOS, Computer global input returns its dispatch receipt; request observation explicitly when needed. Agents use that observation, and further reads when needed, to judge task results. Failure of the related read does not erase or replay the action.
+DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. A completed object action returns its `dispatched` or `verified` receipt and a bounded related observation. On macOS, Computer global input returns its dispatch receipt; request observation explicitly when needed. Agents use that observation, and further reads when needed, to judge task results. Failure of the related read does not erase or replay the action.
 
 ## Features
+
+App methods accept an optional `window=` scope; retained Elements and image Targets keep their own bindings.
+On macOS, confirmed dropdowns and menus are delivered as attached content of their host. A separate
+native capture or input receiver does not automatically become a new working window. Related content
+is returned with object actions; unknown relationships remain explicitly labelled sources, without
+widening the original window's input scope. Observations and same-source menu reads prefer diffs;
+the first delivered source or explicit `full=True` produces complete content. Image coordinates are
+pixels from the top-left of the delivered PNG, and one missing capture does not invalidate other usable pieces.
+On macOS, an ordinary single-left App coordinate click that precisely hits a selectable item in an
+open menu may use that item's Press action. Other coordinates retain their directed mouse route.
+Use `app.click(at=p, force_pointer=True)` when the mouse-event sequence itself is required. This
+option never grants global input or changes Computer/Element semantics. Windows/Linux keep their
+existing coordinate mouse routes.
 
 On macOS, object input preparation conditionally returns foreground control changed temporarily
 by the SDK while retaining the target's internal input context. This is not an unconditional restore
@@ -67,6 +80,12 @@ switches and session shutdown do not send an extra deactivation notification tha
 menu; paired input and observers are still released. Equivalent foreground restoration and menu
 continuity improvements for Windows/Linux remain future work. Actual-impact receipts distinguish
 foreground changes, restoration outcomes and global input; they do not certify application business results.
+Menus that need foreground can retain it until a later selection or cancellation. The same interaction
+keeps its first borrowed context and, when possible, restores the exact original window. Nothing acts
+on the desktop between calls. Explicit Computer global input only discards the old restoration claim;
+it adds no focus preparation or automatic return, and never moves the real pointer back automatically.
+Native attached-content discovery and multiple AX sources sharing one physical window are also
+implemented first on macOS; Windows/Linux require separate implementation and validation.
 
 - **DeepAgent integration**: standard openJiuwen invocation, streaming and Runner integration, with computer-operation tools reusable in existing DeepAgent applications.
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
@@ -75,6 +94,15 @@ foreground changes, restoration outcomes and global input; they do not certify a
 - **Background-first input**: prefer element and application-directed operations; macOS object methods remain non-global. Explicitly call direct Computer input methods when global mouse or keyboard input is needed.
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.
+
+Name and path lookup first reuse the latest returned semantic observation, including an action's
+observation. Missing, incomplete or known-invalid evidence falls back to the existing live query in
+the same call. Use `app.element("Save", fresh=True)` to explicitly query current facts. `fresh` only
+controls names and paths: numbers and saved Elements keep their original binding, including after
+an application replaces a control with another of the same name. Cached lookup preserves all live
+write checks, preparation and restoration; it does not detect unobserved external object replacement.
+Use `result.observation.read_details(element=ref)` for already captured details. Explicit `app.read()`,
+`element.read()` and `element.read_text()` still acquire fresh observations; `full=True` controls presentation.
 
 ## Project Structure
 
