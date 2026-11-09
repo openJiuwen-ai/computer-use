@@ -79,7 +79,7 @@ uv run --no-dev --extra mcp computer-use-mcp
 ```
 
 通过 wheel 安装时，为同一个 wheel 选择 `mcp` extra，例如
-`uv pip install '/absolute/path/to/computer_use_toolkit-0.0.1-py3-none-any.whl[mcp]'`，
+`uv pip install '/absolute/path/to/openjiuwen_computeruse-0.0.1-py3-none-any.whl[mcp]'`，
 然后在该环境运行 `computer-use-mcp`。
 
 **2. 启用并验证连接。** 保存配置后，启用连接器并重新连接 MCP；必要时重启 Agent 客户端。

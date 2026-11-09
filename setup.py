@@ -19,6 +19,14 @@ from wheel.bdist_wheel import bdist_wheel
 ROOT = Path(__file__).resolve().parent
 BACKENDS = runpy.run_path(str(ROOT / "scripts/backend_artifacts.py"))
 BACKEND_ARCHIVE = os.environ.get("COMPUTER_USE_BACKEND_ARCHIVE")
+BACKEND_DIR = os.environ.get("COMPUTER_USE_BACKEND_DIR")
+if BACKEND_ARCHIVE and BACKEND_DIR:
+    raise ValueError("Select one backend archive or one prepared backend directory.")
+if BACKEND_DIR:
+    CLOUD_BACKENDS = runpy.run_path(str(ROOT / "scripts/cloud_build/backend_artifact.py"))
+    PREPARED_BACKEND = CLOUD_BACKENDS["inspect_directory"](BACKEND_DIR)
+    if PREPARED_BACKEND["protocol"] != BACKENDS["protocol_version"](ROOT):
+        raise ValueError("Prepared backend protocol does not match this checkout.")
 
 # Public imports retain stable, unambiguous package names while the checkout
 # groups code by responsibility. Never scan the repository or native sources as
@@ -88,6 +96,9 @@ class BuildWithResources(build_py):
         super().run()
         output = Path(self.build_lib) / "computer_use" / "_resources"
         output.mkdir(parents=True, exist_ok=True)
+        if BACKEND_DIR:
+            shutil.copytree(BACKEND_DIR, output, dirs_exist_ok=True)
+            return
         resources = [ROOT / name for name in FILES]
         for directory in DIRECTORIES:
             base = ROOT / directory
@@ -123,6 +134,8 @@ class BuildWithResources(build_py):
 
 class BackendWheel(bdist_wheel):
     def get_tag(self):
+        if BACKEND_DIR:
+            return "py3", "none", CLOUD_BACKENDS["WHEEL_PLATFORMS"][PREPARED_BACKEND["target"]]
         if BACKEND_ARCHIVE:
             backend = BACKENDS["inspect_archive"](BACKEND_ARCHIVE, root=ROOT)
             return "py3", "none", BACKENDS["TARGETS"][backend["target"]][2]

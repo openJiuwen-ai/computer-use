@@ -179,6 +179,7 @@ def build_wheels(root, targets, directory, *, backend_directory=None, repository
             source = temporary / target
             shutil.copytree(root, source, ignore=skip_local_artifacts)
             environment = {**os.environ, "COMPUTER_USE_BACKEND_ARCHIVE": str(backend.resolve())}
+            environment.pop("COMPUTER_USE_BACKEND_DIR", None)
             subprocess.run(
                 [sys.executable, "-m", "build", "--wheel", "--outdir", str(directory), str(source)],
                 env=environment,

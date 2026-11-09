@@ -83,7 +83,7 @@ uv run --no-dev --extra mcp computer-use-mcp
 ```
 
 For a wheel installation, install the same wheel with its `mcp` extra, for example
-`uv pip install '/absolute/path/to/computer_use_toolkit-0.0.1-py3-none-any.whl[mcp]'`,
+`uv pip install '/absolute/path/to/openjiuwen_computeruse-0.0.1-py3-none-any.whl[mcp]'`,
 then run `computer-use-mcp` from that environment.
 
 **2. Enable and verify the connection.** Save the configuration, enable the connector

@@ -127,6 +127,7 @@ def test_windows_wheel_preserves_native_build_sources(checkout, tmp_path, distri
         stages.append(stage)
         assert not (stage / "build").exists()
         assert not (stage / "local/Build").exists()
+        assert "COMPUTER_USE_BACKEND_DIR" not in kwargs["env"]
         artifacts.inspect_archive(kwargs["env"]["COMPUTER_USE_BACKEND_ARCHIVE"], root=stage, target=target)
 
     if os.name != "nt":
@@ -142,6 +143,7 @@ def test_windows_wheel_preserves_native_build_sources(checkout, tmp_path, distri
             return ignore_casefolded
 
         monkeypatch.setattr(shutil, "ignore_patterns", casefolded_ignore_patterns)
+    monkeypatch.setenv("COMPUTER_USE_BACKEND_DIR", str(tmp_path / "cloud-payload"))
     monkeypatch.setattr(subprocess, "run", check_staged_source)
     distribution["build_wheels"](checkout, [target], tmp_path / "wheels", backend_directory=tmp_path)
     assert len(stages) == 1
