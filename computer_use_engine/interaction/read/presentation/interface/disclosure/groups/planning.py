@@ -156,11 +156,12 @@ def candidate(
     )
     if saved < policy.minimum_saved_units or saved < full_units * policy.minimum_saved_fraction:
         return None, "insufficient-benefit-after-recovery-cost"
-    records = all(
-        (ref := request.interface.blocks[key].primary_ref) is not None
-        and request.snapshot.native.nodes[request.snapshot.refs[ref]].role in RECORD_ROLES
-        for key in children
-    )
+    records = True
+    for key in children:
+        ref = request.interface.blocks[key].primary_ref
+        if ref is None or request.snapshot.native.nodes[request.snapshot.refs[ref]].role not in RECORD_ROLES:
+            records = False
+            break
     group = GroupOverview(
         section_key,
         capture,

@@ -140,7 +140,12 @@ def _stable_order(keys: Sequence[str], before: Sequence[tuple[str, str]]) -> tup
 
 
 def _row_sets(keys: frozenset[str], alignment: AlignmentAnalysis) -> tuple[frozenset[str], ...]:
-    return tuple(members for row in alignment.rows if (members := keys.intersection(row.members)))
+    rows = []
+    for row in alignment.rows:
+        members = keys.intersection(row.members)
+        if members:
+            rows.append(members)
+    return tuple(rows)
 
 
 def _independent_groups(

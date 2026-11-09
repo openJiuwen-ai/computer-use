@@ -168,7 +168,11 @@ def _cards(draft: InterfaceDraft, owner: InterfaceBlock) -> PatternPlan | None:
     """Select repeated rich single-column native items, keeping heading rows separate."""
     if owner.primary_ref is None:
         return None
-    candidates = {key: card for key in owner.children if (card := _card_row(draft, key)) is not None}
+    candidates = {}
+    for key in owner.children:
+        card = _card_row(draft, key)
+        if card is not None:
+            candidates[key] = card
     if len(candidates) < 2:
         return None
     # Rich text-only notes are valid native items. Repetition distinguishes them

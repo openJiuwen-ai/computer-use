@@ -99,12 +99,11 @@ def _name_delivered(window: MemberHeading, tree: DisplayTree, rendered: Rendered
     output = getattr(rendered, "document", None)
     if not claims or not isinstance(output, RenderedDocument):
         return False
-    return any(
-        node.ref == ref and node.parent is None
-        for section in output.parts
-        if isinstance(section, RenderedSection)
-        for node in section.nodes
-    )
+    for section in output.parts:
+        if isinstance(section, RenderedSection):
+            if any(node.ref == ref and node.parent is None for node in section.nodes):
+                return True
+    return False
 
 
 def full_header_text(document: DisplayDocument, position: int, snapshots: Mapping[int, RenderedTree]) -> str | None:

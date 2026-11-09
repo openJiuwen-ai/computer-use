@@ -5,13 +5,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from computer_use.interaction.read.presentation.interface.text.columns import compact_grid, floating_row
 from computer_use.interaction.read.presentation.interface.text.units import (
     capture_unit,
     write_control_unit,
     write_compound_control,
 )
-from typing import TYPE_CHECKING
 from computer_use.interaction.read.presentation.interface.text.readable import write_heading
 
 if TYPE_CHECKING:

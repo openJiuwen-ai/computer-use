@@ -89,13 +89,13 @@ def capture_control_raises(snapshot: SnapshotFacts, projection: ProjectionResult
     if snapshot.native.backend != "macos":
         return ()
     facts = {node["node"]: node for node in snapshot.facts["nodes"]}
-    blocked = {
-        issue.path[1]
-        for issue in snapshot.native.issues
-        if len(issue.path) >= 2
-        and issue.path[0] == "nodes"
-        and (len(issue.path) == 2 or issue.path[2] in ("role", "actions"))
-    }
+    blocked = set()
+    for issue in snapshot.native.issues:
+        path = issue.path
+        if len(path) < 2 or path[0] != "nodes":
+            continue
+        if len(path) == 2 or path[2] in ("role", "actions"):
+            blocked.add(path[1])
     result = []
     for ref, node in projection["nativeNodes"].items():
         token = snapshot.refs.get(ref)

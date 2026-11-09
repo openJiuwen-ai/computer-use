@@ -48,17 +48,15 @@ class GroupDisclosurePolicy:
     recovery_call_units: int = 32
 
     def __post_init__(self) -> None:
-        if any(
-            type(value) is not int or value < 0
-            for value in (
-                self.minimum_objects,
-                self.minimum_characters,
-                self.head_characters,
-                self.tail_characters,
-                self.minimum_saved_units,
-                self.recovery_call_units,
-            )
-        ):
+        counts = (
+            self.minimum_objects,
+            self.minimum_characters,
+            self.head_characters,
+            self.tail_characters,
+            self.minimum_saved_units,
+            self.recovery_call_units,
+        )
+        if any(type(value) is not int or value < 0 for value in counts):
             raise ValueError("Group disclosure counts must be nonnegative integers")
         if self.minimum_objects < 2 or self.head_characters + self.tail_characters == 0:
             raise ValueError("Group disclosure requires several sources and an original excerpt")

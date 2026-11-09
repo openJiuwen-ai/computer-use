@@ -501,10 +501,12 @@ def render_projection_lines(
                     parts
                     + f" [excerpt: {excerpt.shown}/{excerpt.total} chars; captured details: element {node['ref']}]"
                 )
-            if compact and (encoded := display_embedded(value, field, hint=detail_hint)) is not None:
-                # No full-value claim: accounting keeps the exact field under
-                # its source reference in details, including folded captions.
-                return encoded
+            if compact:
+                encoded = display_embedded(value, field, hint=detail_hint)
+                if encoded is not None:
+                    # No full-value claim: accounting keeps the exact field under
+                    # its source reference in details, including folded captions.
+                    return encoded
             part = shortened(value, limit)
             if part["omitted"]:
                 omissions.append(f"Omitted: {part['omitted']} characters ({name})")
@@ -596,9 +598,9 @@ def render_projection_lines(
                 "Description: "
                 + caption("description", display(node["description"], "Description", attribute="description"))
             )
-        for attribute, label, format in DECISION_SLOTS:
+        for attribute, label, slot_format in DECISION_SLOTS:
             if attribute in node:
-                value = field(node[attribute]) if format == "text" else literal(node[attribute])
+                value = field(node[attribute]) if slot_format == "text" else literal(node[attribute])
                 fields.append(label + ": " + value)
                 record(node, attribute)
         if node.get("fullDescription"):
@@ -706,12 +708,12 @@ def render_projection_lines(
             fields.append("Mark: " + (display(node["menuMark"], "Mark") if node["menuMark"] else "<none>"))
         # The public readText continuation reads Value, not SelectedText. An
         # acquired selection cannot be shortened without another valid entry.
-        selectedText = node.get("selectedText")
+        selected_text = node.get("selectedText")
         selected_parts = shortened(
-            selectedText if selectedText is not None else "", math.inf if coverage is not None else 200
+            selected_text if selected_text is not None else "", math.inf if coverage is not None else 200
         )
-        if selectedText is not None and not selected_parts["omitted"]:
-            fields.append("Selected text: " + field(selectedText))
+        if selected_text is not None and not selected_parts["omitted"]:
+            fields.append("Selected text: " + field(selected_text))
             record(node, "selectedText")
         action_start = len(fields)
         own_action_fields = action_fields(
@@ -969,8 +971,8 @@ def render_projection_lines(
             focus += (
                 f", Selection: {number_string(selection_range['location'])}:{number_string(selection_range['length'])}"
             )
-        if selectedText is not None:
-            focus += ", " + preview(selectedText, "Selected text", 200)
+        if selected_text is not None:
+            focus += ", " + preview(selected_text, "Selected text", 200)
         focus_labels[node["ref"]] = focus
         summary_name = label or node.get("value") or node.get("identifier") or ""
         short = shortened(summary_name, 80)
@@ -1253,13 +1255,12 @@ def render_projection_lines(
             )
         elif reported_focus:
             lines_value.append("\nReported focus: unavailable.")
-        internal = [
-            "inside " + owner
-            for source, owner in projection["foldedInto"].items()
-            if source != focused_ref
-            and projection["nativeNodes"].get(source, {}).get("focused")
-            and owner in focus_labels
-        ]
+        internal = []
+        for source, owner in projection["foldedInto"].items():
+            if source == focused_ref or not projection["nativeNodes"].get(source, {}).get("focused"):
+                continue
+            if owner in focus_labels:
+                internal.append("inside " + owner)
         others = unique([ref for ref in reported_focus if ref != focused_ref] + internal)
         if others:
             lines_value.append(

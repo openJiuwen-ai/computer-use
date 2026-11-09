@@ -17,10 +17,12 @@ from ..policy import choose_excerpt
 
 def choose(value: ClassifiedDisclosure, control: Control) -> SelectedDisclosure:
     """Apply one policy to each eligible field, accounting for recovery notice cost."""
-    selected = tuple(
-        excerpt for field in value.candidates if (excerpt := choose_excerpt(field, value.request.policy)) is not None
-    )
-    return SelectedDisclosure(selected)
+    selected = []
+    for field in value.candidates:
+        excerpt = choose_excerpt(field, value.request.policy)
+        if excerpt is not None:
+            selected.append(excerpt)
+    return SelectedDisclosure(tuple(selected))
 
 
 stage = Pass.define(

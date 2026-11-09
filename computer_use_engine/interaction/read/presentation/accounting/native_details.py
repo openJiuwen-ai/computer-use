@@ -128,29 +128,29 @@ def collect_deferred_fields(
     references: dict[str, set[str]] = {}
     for part in parts:
         for item in part.rendered.get("deferredNativeFields", ()):
-            ref, property = item["ref"], item["property"]
-            mapping = _MAPPED_FIELDS.get(property)
-            source = snapshot.fields.get((ref, property))
+            ref, native_property = item["ref"], item["property"]
+            mapping = _MAPPED_FIELDS.get(native_property)
+            source = snapshot.fields.get((ref, native_property))
             token = snapshot.refs.get(ref)
             original = native.get(token, {}).get("values", {})
             scopes = part.rendered["projection"].source.scopes
             if (
                 mapping is None
                 or source is None
-                or property not in original
+                or native_property not in original
                 or item["native"] != token
                 or item["field"] != mapping[0]
                 or tuple(item["path"]) != mapping[1]
                 or tuple(item["scope"]) != (snapshot.native.session, snapshot.native.id, scopes.get(ref))
-                or type(item["value"]) is not type(original[property])
-                or item["value"] != original[property]
+                or type(item["value"]) is not type(original[native_property])
+                or item["value"] != original[native_property]
                 or item["readState"] != "complete"
                 or item["status"] is not None
             ):
                 raise ValueError("Deferred diagnostic has no matching captured native field")
-            references.setdefault(property, set()).add(ref)
+            references.setdefault(native_property, set()).add(ref)
     return tuple(
         records
-        for property, refs in references.items()
-        for records in collect_native_details(snapshot, parts, property, references=frozenset(refs))
+        for native_property, refs in references.items()
+        for records in collect_native_details(snapshot, parts, native_property, references=frozenset(refs))
     )

@@ -122,7 +122,9 @@ def _disclosure_fields(source: dict[str, Any], role: str | None) -> frozenset[st
         for key, item in source["values"].items()
         if key.startswith("supplements[") and item["key"] == "disclosing"
     }
-    if not values or any(type(value) is not bool for value in values.values()) or len(set(values.values())) != 1:
+    if not values or any(value is not True and value is not False for value in values.values()):
+        return frozenset()
+    if len(set(values.values())) != 1:
         return frozenset()
     paths = [source["fieldPaths"][key] for key in values]
     for key in source["fieldStatus"]:

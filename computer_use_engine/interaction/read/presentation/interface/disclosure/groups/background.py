@@ -103,13 +103,13 @@ def candidate(
     important, uncertain, nested, state_facts = retained_notices(request, refs)
     # Retain regional labels and nested window identities without assigning them
     # to another capture or guessing whether an identically named sheet is shared.
-    outline = tuple(
-        field
-        for field in fields
-        if field.slot_key in ("name", "description")
-        and native.nodes[request.snapshot.refs[field.ref]].role
-        in OUTLINE_ROLES | {"window", "sheet", "dialog", "alert"}
-    )
+    outline_roles = OUTLINE_ROLES | {"window", "sheet", "dialog", "alert"}
+    outline_fields = []
+    for field in fields:
+        if field.slot_key in ("name", "description"):
+            if native.nodes[request.snapshot.refs[field.ref]].role in outline_roles:
+                outline_fields.append(field)
+    outline = tuple(outline_fields)
     full_units = sum(
         estimate_units(atom.ref + atom.role.label)
         + 4

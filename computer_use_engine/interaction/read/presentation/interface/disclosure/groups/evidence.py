@@ -61,22 +61,12 @@ def source_protections(request: GroupDisclosureRequest, ref: str, issues: ReadIs
     ):
         reasons.append("independent-input")
     states = node.states
+    protected_states = (
+        "focused", "focusable", "selected", "selectable", "editable", "protected", "busy", "modal", "has_popup",
+        "virtualized",
+    )
     if (
-        any(
-            getattr(states, name) is True
-            for name in (
-                "focused",
-                "focusable",
-                "selected",
-                "selectable",
-                "editable",
-                "protected",
-                "busy",
-                "modal",
-                "has_popup",
-                "virtualized",
-            )
-        )
+        any(getattr(states, name) is True for name in protected_states)
         or states.enabled is False
         or states.checked is not None
         or states.expanded is not None

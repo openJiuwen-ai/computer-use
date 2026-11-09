@@ -155,5 +155,9 @@ def scope_plan(
 
 def collect_scope_plans(draft: InterfaceDraft) -> InterfaceDraft:
     """Publish one row/anchor analysis for each currently eligible local scope."""
-    plans = {key: plan for key in draft.blocks if (plan := scope_plan(draft, key)) is not None}
+    plans = {}
+    for key in draft.blocks:
+        plan = scope_plan(draft, key)
+        if plan is not None:
+            plans[key] = plan
     return replace(draft, geometric_alignment=MappingProxyType(plans))

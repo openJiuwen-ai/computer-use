@@ -201,13 +201,14 @@ def interface_header(header: InterfaceHeader, *, name_in_body: bool = False) -> 
 
 def image_state_notes(header: ImageHeader) -> tuple[str, ...]:
     """Report independent capture-time state for the windows that supplied pixels."""
-    return tuple(
-        f"Image note (Window {source['ref']}): {note}"
-        for source in header.captures
-        if source.get("displayed") is True and source.get("ref") in header.windows
-        if isinstance(capture := source.get("capture"), Mapping)
-        for note in window_state_notes(capture)
-    )
+    notes = []
+    for source in header.captures:
+        if source.get("displayed") is not True or source.get("ref") not in header.windows:
+            continue
+        capture = source.get("capture")
+        if isinstance(capture, Mapping):
+            notes.extend(f"Image note (Window {source['ref']}): {note}" for note in window_state_notes(capture))
+    return tuple(notes)
 
 
 def image_header(header: ImageHeader) -> str:

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from collections import Counter
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -13,7 +13,7 @@ from dataclasses import fields as dataclass_fields
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from computer_use.protocol.observation import FieldPath, NativeNode, ReadIssue
+from computer_use.protocol.observation import FieldPath, NativeNode, ReadIssue, RelationKind
 from computer_use.interaction.read.presentation.compression.caption_equivalence import (
     PassiveCaptionSource,
     capture_caption_sources,
@@ -457,6 +457,13 @@ def _provider_wrapper(node: NativeNode, issues: tuple[ReadIssue, ...], diagnosti
     return True
 
 
+def _relation_targets(nodes: Iterable[NativeNode], includes: Callable[[RelationKind], bool]) -> Iterator[str]:
+    for node in nodes:
+        for relation in node.relations.values():
+            if includes(relation.kind):
+                yield from relation.targets
+
+
 def capture_evidence(snapshot: SnapshotFacts, native_nodes: Mapping[str, FactNode]) -> CompressionEvidence:
     """Capture only completeness and wrapper proofs needed by compression.
 
@@ -509,45 +516,28 @@ def capture_evidence(snapshot: SnapshotFacts, native_nodes: Mapping[str, FactNod
                 for issue in issues.get(token, ())
             ):
                 descriptions.add((ref, field))
-    related = {
-        target
-        for node in snapshot.native.nodes.values()
-        for relation in node.relations.values()
-        if relation.kind not in ("children", "parent", "window")
-        for target in relation.targets
-    }
-    parents = Counter(
-        target
-        for node in snapshot.native.nodes.values()
-        for relation in node.relations.values()
-        if relation.kind == "children"
-        for target in relation.targets
+    related = set(
+        _relation_targets(snapshot.native.nodes.values(), lambda kind: kind not in ("children", "parent", "window"))
     )
+    parents = Counter(_relation_targets(snapshot.native.nodes.values(), lambda kind: kind == "children"))
     diagnostics = snapshot.collection.diagnostic_fields if snapshot.collection is not None else {}
-    wrappers = frozenset(
-        ref
-        for ref, token in snapshot.refs.items()
-        if token not in related
-        and parents[token] <= 1
-        and token in snapshot.native.nodes
-        and _provider_wrapper(
+    wrappers = set()
+    for ref, token in snapshot.refs.items():
+        if token in related or parents[token] > 1 or token not in snapshot.native.nodes:
+            continue
+        if _provider_wrapper(
             snapshot.native.nodes[token], tuple(issues.get(token, ())), set(diagnostics.get(token, ()))
-        )
+        ):
+            wrappers.add(ref)
+    label_targets = set(
+        _relation_targets(snapshot.native.nodes.values(), lambda kind: kind in ("labelled_by", "labels"))
     )
-    label_targets = {
-        target
-        for node in snapshot.native.nodes.values()
-        for relation in node.relations.values()
-        if relation.kind in ("labelled_by", "labels")
-        for target in relation.targets
-    }
-    unlabelled = frozenset(
-        ref
-        for ref, token in snapshot.refs.items()
-        if token not in label_targets
-        and token in snapshot.native.nodes
-        and _unlabelled_group(snapshot.native.nodes[token], tuple(issues.get(token, ())))
-    )
+    unlabelled = set()
+    for ref, token in snapshot.refs.items():
+        if token in label_targets or token not in snapshot.native.nodes:
+            continue
+        if _unlabelled_group(snapshot.native.nodes[token], tuple(issues.get(token, ()))):
+            unlabelled.add(ref)
     counts = Counter(snapshot.refs.values())
     reference = {token: ref for ref, token in snapshot.refs.items() if counts[token] == 1}
     children = {}
@@ -576,9 +566,9 @@ def capture_evidence(snapshot: SnapshotFacts, native_nodes: Mapping[str, FactNod
     contested_sources, splice_conflicts = _source_conflicts(snapshot, reference, children, issues)
     return CompressionEvidence(
         frozenset(complete),
-        wrappers,
+        frozenset(wrappers),
         frozenset(descriptions),
-        unlabelled,
+        frozenset(unlabelled),
         children,
         frozenset(incomplete_children),
         capture_caption_sources(snapshot),

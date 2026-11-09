@@ -230,12 +230,12 @@ def capture_native_description_fields(
         original = native.get(token)
         if token is None or source_node is None or original is None or counts[token] != 1:
             continue
-        for field, (property, path) in NATIVE_DIAGNOSTIC_FIELDS.items():
+        for field, (native_property, path) in NATIVE_DIAGNOSTIC_FIELDS.items():
             fact = FactKey(SourceKey(ref), field)
             if field in ("role", "roleDescription") and (ref in visible or fact not in role_facts):
                 continue
-            source = snapshot.fields.get((ref, property))
-            value = original["values"].get(property)
+            source = snapshot.fields.get((ref, native_property))
+            value = original["values"].get(native_property)
             actual_node = snapshot.native.nodes.get(token)
             actual = getattr(actual_node, path[0], None)
             if len(path) == 2:
@@ -257,7 +257,9 @@ def capture_native_description_fields(
                 or type(source_node.get(field)) is not str
                 or source_node[field] != normalized
                 or any(
-                    key == property or key.startswith(property + ".") or property.startswith(key + ".")
+                    key == native_property
+                    or key.startswith(native_property + ".")
+                    or native_property.startswith(key + ".")
                     for key in original["fieldStatus"]
                 )
                 or any(
@@ -267,6 +269,6 @@ def capture_native_description_fields(
             ):
                 continue
             result[fact] = NativeDescriptionField(
-                ref, token, (snapshot.native.session, snapshot.native.id, scope), property, field, path, value
+                ref, token, (snapshot.native.session, snapshot.native.id, scope), native_property, field, path, value
             )
     return MappingProxyType(result)

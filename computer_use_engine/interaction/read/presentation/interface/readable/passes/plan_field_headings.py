@@ -30,15 +30,14 @@ def execute(draft: ReadableDraft, control: Control) -> ReadableDraft:
         ):
             continue
         candidates = request.sharing.by_block.get(block.key)
-        questions = tuple(
-            (index, group)
-            for index, group in enumerate(candidates.fields if candidates else ())
-            if group.slot_key == "description"
-            and isinstance(group.slot.value, str)
-            and group.slot.value.strip()
-            and len(group.refs) > 1
-            and all(request.interface.projected_nodes[item]["role"] == "radioButton" for item in group.refs)
-        )
+        questions = []
+        for index, group in enumerate(candidates.fields if candidates else ()):
+            if group.slot_key != "description" or not isinstance(group.slot.value, str):
+                continue
+            if not group.slot.value.strip() or len(group.refs) <= 1:
+                continue
+            if all(request.interface.projected_nodes[item]["role"] == "radioButton" for item in group.refs):
+                questions.append((index, group))
         if len(questions) == 1:
             index, group = questions[0]
             headings[block.key] = ReadableHeading(ref, group.slot, group.refs, index)

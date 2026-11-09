@@ -169,7 +169,12 @@ def organize_subfields(draft: InterfaceDraft) -> InterfaceDraft:
     for parent in draft.blocks.values():
         if not local_parent(parent, draft, minimum_children=1):
             continue
-        candidates = tuple(candidate for key in parent.children if (candidate := _candidate(key, draft)) is not None)
+        found = []
+        for key in parent.children:
+            candidate = _candidate(key, draft)
+            if candidate is not None:
+                found.append(candidate)
+        candidates = tuple(found)
         if not candidates:
             continue
         alignments = _local_alignment(parent, draft)

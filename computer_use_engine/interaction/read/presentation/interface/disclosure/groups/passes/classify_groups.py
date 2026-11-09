@@ -17,9 +17,11 @@ from ..model import CapturedGroupField, ClassifiedGroups, GroupAssessment, Group
 def execute(request: GroupDisclosureRequest, control: Control) -> ClassifiedGroups:
     """Capture explicit protections and assess available window-level evidence."""
     issues = request.snapshot.native.issue_index
-    protections = {
-        ref: reasons for ref in request.interface.source.order if (reasons := source_protections(request, ref, issues))
-    }
+    protections = {}
+    for ref in request.interface.source.order:
+        reasons = source_protections(request, ref, issues)
+        if reasons:
+            protections[ref] = reasons
     # A relation endpoint may be passive by itself yet label an independent input.
     aliases = {token: ref for ref, token in request.snapshot.refs.items()}
     for node in request.snapshot.native.nodes.values():
@@ -27,7 +29,8 @@ def execute(request: GroupDisclosureRequest, control: Control) -> ClassifiedGrou
             if relation.kind in ("children", "parent", "window"):
                 continue
             for token in relation.targets:
-                if (ref := aliases.get(token)) is not None:
+                ref = aliases.get(token)
+                if ref is not None:
                     protections[ref] = (*protections.get(ref, ()), "semantic-relation-endpoint")
     context = request.window_context
     if context is None:
@@ -41,19 +44,21 @@ def execute(request: GroupDisclosureRequest, control: Control) -> ClassifiedGrou
     assessment = GroupAssessment("", (), reason)
     records = {record["node"]: record for record in request.snapshot.facts["nodes"]}
     native_fields: dict[tuple[str, str], list[CapturedGroupField]] = {}
-    for (ref, property), field in request.snapshot.fields.items():
+    for (ref, native_property), field in request.snapshot.fields.items():
         native = records.get(request.snapshot.refs.get(ref))
         if (
             native is None
             or native.get("observed") is False
             or field.get("representation") != "field"
-            or property not in native["requestedFields"]
-            or property not in native["values"]
-            or native["fieldStatus"].get(property, {}).get("state", "complete") != "complete"
+            or native_property not in native["requestedFields"]
+            or native_property not in native["values"]
+            or native["fieldStatus"].get(native_property, {}).get("state", "complete") != "complete"
         ):
             continue
         native_fields.setdefault((ref, field["field"]), []).append(
-            CapturedGroupField(ref, property, native["values"][property], field.get("normalized"), field["field"])
+            CapturedGroupField(
+                ref, native_property, native["values"][native_property], field.get("normalized"), field["field"]
+            )
         )
     return ClassifiedGroups(
         request,

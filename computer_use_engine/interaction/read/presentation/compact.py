@@ -40,13 +40,14 @@ def display_actions(
     from computer_use.interaction.read.presentation.actions.control_raises import control_raise_selected
     from computer_use.interaction.read.presentation.actions.menu_mechanisms import menu_action_selected
 
-    return [
-        action
-        for action in actions
-        if action.get("kind", action["name"]) not in SUPPORTING_ACTIONS
-        and not menu_action_selected(node, action, menu_mechanisms)
-        and not control_raise_selected(node, action, control_raises)
-    ]
+    visible = []
+    for action in actions:
+        if action.get("kind", action["name"]) in SUPPORTING_ACTIONS:
+            continue
+        if menu_action_selected(node, action, menu_mechanisms) or control_raise_selected(node, action, control_raises):
+            continue
+        visible.append(action)
+    return visible
 
 
 def display_selection(node: NodeView) -> Mapping[str, Any] | None:
@@ -167,15 +168,13 @@ def _covered_collection_notes(snapshot: SnapshotFacts, covered: set[tuple[str, s
     explained = {
         "partial native relation: " + selector for selector, matches in by_selector.items() if matches and all(matches)
     }
-    return {
-        "Collection: " + json_string("nodes: " + issue.detail)
-        for issue in snapshot.native.issues
-        if issue.path == ("nodes",)
-        and issue.state == "partial"
-        and issue.detail in explained
-        and issue.continuation is None
-        and not issue.alternatives
-    }
+    notes = set()
+    for issue in snapshot.native.issues:
+        if issue.path != ("nodes",) or issue.state != "partial" or issue.detail not in explained:
+            continue
+        if issue.continuation is None and not issue.alternatives:
+            notes.add("Collection: " + json_string("nodes: " + issue.detail))
+    return notes
 
 
 def _property_list(properties: list[str]) -> str:

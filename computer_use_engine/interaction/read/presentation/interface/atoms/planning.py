@@ -145,7 +145,7 @@ class _AtomBuilder:
         label: str | None,
         *,
         value: object = ...,
-        format: SlotFormat = "text",
+        slot_format: SlotFormat = "text",
         placement: Literal["caption", "inline", "block"] = "inline",
         protection: str | None = None,
         source_attributes: tuple[str, ...] | None = None,
@@ -155,7 +155,8 @@ class _AtomBuilder:
         facts = tuple(fact for key in (source_attributes or (attribute,)) for fact in self.facts(key))
         preview = None
         if self.policy.compact and self.policy.captured_details and protection is None and type(value) is str:
-            if carrier := embedded_content(value):
+            carrier = embedded_content(value)
+            if carrier:
                 preview = AtomPreview("embedded", carrier.header, carrier.encoded_characters)
             elif attribute == "url":
                 if value.lower().startswith(("data:", "webdoc:")):
@@ -165,14 +166,14 @@ class _AtomBuilder:
                 elif len(value) > 160:
                     preview = AtomPreview("url", value[:160])
         if preview is not None:
-            format = "preview"
+            slot_format = "preview"
             placement = "inline" if placement == "block" else placement
         self.slots.append(
             AtomSlot(
                 attribute,
                 label,
                 freeze(value),
-                format,
+                slot_format,
                 placement,
                 facts,
                 self.projection.provenance.get((self.ref, attribute)),
@@ -199,6 +200,12 @@ class _AtomBuilder:
             self.mark(self.facts(attribute), attribute, kind="details")
             return True
         return False
+
+    def matching_text_slot(self, attribute: str, allowed_slots: tuple[str, ...]) -> str | None:
+        for slot in self.slots:
+            if slot.key in allowed_slots and type(slot.value) is str and slot.value == self.node[attribute]:
+                return slot.key
+        return None
 
 
 def _coverage(node: NodeView) -> AtomCoverage:
@@ -309,7 +316,7 @@ def plan_atom(
             if node[attribute] is False and policy.captured_details:
                 builder.mark(builder.facts(attribute), attribute, kind="details")
             else:
-                builder.add(attribute, label, format="literal", protection="state")
+                builder.add(attribute, label, slot_format="literal", protection="state")
     if "errorRelations" in node:
         relations = node["errorRelations"]
         plain = all(
@@ -326,16 +333,16 @@ def plan_atom(
             if not targets and policy.captured_details:
                 builder.mark(builder.facts("errorRelations"), "errorRelations", kind="details")
             else:
-                builder.add("errorRelations", "Error", value=targets, format="refs", protection="state")
+                builder.add("errorRelations", "Error", value=targets, slot_format="refs", protection="state")
         else:
-            builder.add("errorRelations", "Error relation (unresolved)", format="literal", protection="state")
+            builder.add("errorRelations", "Error relation (unresolved)", slot_format="literal", protection="state")
     if node.get("spatialPosition"):
         builder.add("spatialPosition", "Position")
     if node.get("visualLabelRef"):
-        builder.add("visualLabelRef", "Visual label", value=(node["visualLabelRef"],), format="refs")
+        builder.add("visualLabelRef", "Visual label", value=(node["visualLabelRef"],), slot_format="refs")
     for attribute, label in (("rowRange", "Row"), ("columnRange", "Column")):
         if attribute in node:
-            builder.add(attribute, label, format="span")
+            builder.add(attribute, label, slot_format="span")
     for attribute, label in (
         ("rowCount", "Table rows"),
         ("columnCount", "Table columns"),
@@ -351,15 +358,15 @@ def plan_atom(
             ):
                 builder.mark(builder.facts(attribute), attribute, kind="details")
                 continue
-            builder.add(attribute, label, format="number")
+            builder.add(attribute, label, slot_format="number")
     if click_is_deferred(node):
         builder.add("clickState", "Click", value="deferred", source_attributes=("enabled", "capabilities"))
     if node.get("editorOwnerRef"):
-        builder.add("editorOwnerRef", "Editor for", value=(node["editorOwnerRef"],), format="refs")
+        builder.add("editorOwnerRef", "Editor for", value=(node["editorOwnerRef"],), slot_format="refs")
     if "disclosureLevel" in node and node["disclosureLevel"] != node.get("outlineDepth"):
-        builder.add("disclosureLevel", "Outline level", format="number")
+        builder.add("disclosureLevel", "Outline level", slot_format="number")
     if node.get("disclosedBy"):
-        builder.add("disclosedBy", "Parent row", value=(node["disclosedBy"],), format="refs")
+        builder.add("disclosedBy", "Parent row", value=(node["disclosedBy"],), slot_format="refs")
     if node.get("incompleteDisclosureRelation"):
         builder.add("incompleteDisclosureRelation", "Parent row", value="outside this observation or unavailable")
     if node.get("placeholder"):
@@ -385,15 +392,15 @@ def plan_atom(
                 "inputState", "Input", value=caps.get("typeText", "unknown"), source_attributes=("capabilities",)
             )
     if node["ref"] == policy.focused_ref and node.get("focused") is False:
-        builder.add("focused", "Focus flag", value=False, format="literal", protection="focus")
+        builder.add("focused", "Focus flag", value=False, slot_format="literal", protection="focus")
     if node.get("description") and node["description"] != node.get("name"):
         if not builder.deferred("description"):
             builder.add("description", "Description")
     elif node.get("description") and node["description"] == node.get("name"):
         builder.equivalent("description", "name")
-    for attribute, label, format in DECISION_SLOTS:
+    for attribute, label, slot_format in DECISION_SLOTS:
         if attribute in node:
-            builder.add(attribute, label, format=format, protection="state")
+            builder.add(attribute, label, slot_format=slot_format, protection="state")
     if node.get("fullDescription"):
         builder.add("fullDescription", "Full description")
     for attribute, label in (("valueDescription", "Value description"), ("rangeDescription", "Range description")):
@@ -410,17 +417,13 @@ def plan_atom(
         builder.add("localizedLandmarkType", "Landmark")
     show_value = value_is_displayed(node, policy.focused_ref)
     value = displayed_value(node)
-    caption = next(
-        (
-            slot
-            for slot in builder.slots
-            if slot.key in ("name", "description")
-            and "value" in node
-            and type(slot.value) is type(node["value"])
-            and slot.value == node["value"]
-        ),
-        None,
-    )
+    caption = None
+    for slot in builder.slots:
+        if slot.key not in ("name", "description") or "value" not in node:
+            continue
+        if type(slot.value) is type(node["value"]) and slot.value == node["value"]:
+            caption = slot
+            break
     value_destination = None
     if show_value or "value" in node and caption is None:
         natural = (
@@ -440,7 +443,7 @@ def plan_atom(
             "value",
             None if natural else value_label(node),
             value=value,
-            format="unavailable" if value is None else "text",
+            slot_format="unavailable" if value is None else "text",
             placement="block" if isinstance(value, str) and any(c in value for c in "\r\n") else "inline",
             protection="input" if input_value else None,
         )
@@ -451,7 +454,7 @@ def plan_atom(
         builder.equivalent("value", caption.key)
         value_destination = caption.key
     if node.get("labelTargets"):
-        builder.add("labelTargets", "Labels for", format="refs")
+        builder.add("labelTargets", "Labels for", slot_format="refs")
     if node.get("incompleteLabelRelation"):
         builder.add("incompleteLabelRelation", "Label relation", value="partly outside this observation or unavailable")
     selection = display_selection(node) if policy.compact else node.get("selectionRange")
@@ -465,7 +468,7 @@ def plan_atom(
             builder.mark(builder.facts("selectionRange"), "selection-summary", kind="equivalent")
             builder.claim("selectionRange", kind="text-selection-summary")
         else:
-            builder.add("selectionRange", "Selection", value=selection, format="selection", protection="selection")
+            builder.add("selectionRange", "Selection", value=selection, slot_format="selection", protection="selection")
     if "shortcut" in node:
         builder.add("shortcut", "Shortcut")
     if "menuMark" in node:
@@ -474,31 +477,13 @@ def plan_atom(
         if not builder.deferred("selectedText"):
             builder.add("selectedText", "Selected text", protection="selection")
     if node.get("help"):
-        same = next(
-            (
-                slot.key
-                for slot in builder.slots
-                if slot.key in ("name", "description", "value")
-                and type(slot.value) is str
-                and slot.value == node["help"]
-            ),
-            None,
-        )
+        same = builder.matching_text_slot("help", ("name", "description", "value"))
         if same is not None:
             builder.equivalent("help", same)
         else:
             builder.add("help", "Help")
     if node.get("url"):
-        same = next(
-            (
-                slot.key
-                for slot in builder.slots
-                if slot.key in ("name", "description", "value", "help")
-                and type(slot.value) is str
-                and slot.value == node["url"]
-            ),
-            None,
-        )
+        same = builder.matching_text_slot("url", ("name", "description", "value", "help"))
         if same is not None:
             builder.equivalent("url", same)
         else:
@@ -506,7 +491,7 @@ def plan_atom(
     if "documentUrl" in node:
         builder.add("documentUrl", "Document")
     if "documentReports" in node:
-        builder.add("documentReports", "Document reports (unresolved)", format="literal")
+        builder.add("documentReports", "Document reports (unresolved)", slot_format="literal")
     if node.get("identifier"):
         if policy.compact and policy.captured_details:
             builder.mark(builder.facts("identifier"), "identifier", kind="details")
@@ -516,7 +501,7 @@ def plan_atom(
         if parent is not None and tuple(node["blockedBy"]) == tuple(parent.get("blockedBy", ())):
             builder.equivalent("blockedBy", "blockedBy", target_ref=parent["ref"])
         else:
-            builder.add("blockedBy", "Blocked by", format="refs", protection="blocked")
+            builder.add("blockedBy", "Blocked by", slot_format="refs", protection="blocked")
     for attribute, label in (
         ("documentText", "Document text"),
         ("controlValue", "Control value"),

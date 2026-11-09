@@ -113,7 +113,8 @@ def format_document(
         if isinstance(part, DisplayTree) and part.details and id(part.prepared) not in catalogue_sources:
             catalogue_sources.add(id(part.prepared))
             rendered = snapshots[id(part.prepared)]
-            if directory := rendered.get("capturedContentDirectory"):
+            directory = rendered.get("capturedContentDirectory")
+            if directory:
                 directories.append(directory)
                 payloads.append(rendered["capturedContentPayload"])
     tree_index = 0

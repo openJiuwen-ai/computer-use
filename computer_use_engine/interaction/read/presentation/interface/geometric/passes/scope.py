@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from computer_use.interaction.read.presentation.interface.evidence.algorithms.index_sources import (
     apply as index_sources,
 )
@@ -12,7 +14,6 @@ from computer_use.interaction.read.presentation.interface.evidence.algorithms.de
     apply as derive_boundaries,
 )
 from computer_use.interaction.read.presentation.interface.regions.algorithms.seed_regions import apply as seed_regions
-from dataclasses import replace
 from computer_use.interaction.read.presentation.interface.geometric.source import PreparedGeometricSources
 from computer_use.interaction.read.presentation.interface.model import InterfaceRequest, InterfaceDraft
 from computer_use.pipeline import Contract, Effect, Pass

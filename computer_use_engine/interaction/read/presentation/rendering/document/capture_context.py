@@ -196,20 +196,17 @@ def _evidence(
         return None
     if any(member.get(key) != (window.target or {}).get(key) for key in ("surface", "node")):
         return None
-    parent_captures = tuple(
-        item
-        for item in image.captures
-        if item.get("ref") == parent.ref
-        and item.get("window") == parent.native_window
-        and item.get("displayed") is True
-    )
-    child_captures = tuple(
-        item
-        for item in image.captures
-        if item.get("ref") == window.ref
-        and item.get("window") == window.native_window
-        and item.get("displayed") is True
-    )
+    def displayed_captures(owner: MemberHeading) -> list[Mapping[str, object]]:
+        captures = []
+        for item in image.captures:
+            if item.get("ref") != owner.ref or item.get("window") != owner.native_window:
+                continue
+            if item.get("displayed") is True:
+                captures.append(item)
+        return captures
+
+    parent_captures = displayed_captures(parent)
+    child_captures = displayed_captures(window)
     if len(parent_captures) != 1 or len(child_captures) != 1 or not {parent.ref, window.ref} <= set(image.windows):
         return None
     for entry, owner in ((parent_captures[0], parent), (child_captures[0], window)):

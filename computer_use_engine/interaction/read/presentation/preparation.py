@@ -150,7 +150,8 @@ def _copy_collections(value: Any, *, immutable: bool, checkpoint: Callable[[], o
                     local[key] = child
                 else:
                     local.append(child)
-                if child_kind := category(child):
+                child_kind = category(child)
+                if child_kind:
                     children.append((key, child, child_kind))
             pending.append((current, kind, local, children))
             for _, child, child_kind in reversed(children):

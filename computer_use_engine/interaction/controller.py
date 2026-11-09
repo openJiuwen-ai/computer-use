@@ -264,8 +264,10 @@ class SessionController:
 
         def text_source(ref: str, token: str) -> str | None:
             """Use the acquisition's explicit readText source without changing input values."""
-            if tree.collection is not None and (path := tree.collection.text_read_fields.get(token)):
-                return ".".join(map(str, path))
+            if tree.collection is not None:
+                path = tree.collection.text_read_fields.get(token)
+                if path:
+                    return ".".join(map(str, path))
             return tree.value_fields.get(ref)
 
         return cast(
