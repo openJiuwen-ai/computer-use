@@ -3,9 +3,7 @@
 """A proved sharing companion can reuse requested parent pixels."""
 
 import asyncio
-import json
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -18,14 +16,13 @@ from computer_use.interaction.read.views.related import RelatedRead
 from computer_use.protocol.observation.adapters import decode_driver_reply
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.observation_data import observation_data
+from recorded_sharing_control import load_sharing_control_recording
 from test_d34_read_contracts import directory, setup, window
 from test_dynamic_observation import parent_result, pixels, tree
 
 
 def sharing_snapshot(*, ordinary=False, incomplete=False):
-    recording = json.loads((
-        Path(__file__).parents[1] / "fixtures/recorded/offscreen-mute-sharing-control.json"
-    ).read_text())
+    recording = load_sharing_control_recording()
     native = replace(decode_driver_reply(recording["narrow_raw_reply"]).observation, session="session")
     root = native.roots[0]
     button = native.nodes[root].relations["children"].targets[0]

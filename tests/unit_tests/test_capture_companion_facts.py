@@ -2,9 +2,9 @@
 
 """Sharing-control classification uses native evidence before display projection."""
 
+import hashlib
 import json
 from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,12 +14,12 @@ from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.interaction.read.presentation.rendering.document.capture_context import _signature
 from computer_use.protocol.observation import Action, ControlValue, NumericValue, ReadIssue, TextInfo
 from computer_use.protocol.observation.adapters import decode_driver_reply
+from recorded_sharing_control import load_sharing_control_recording
 
 
 @pytest.fixture(scope="module")
 def recorded():
-    path = Path(__file__).parents[1] / "fixtures" / "recorded" / "offscreen-mute-sharing-control.json"
-    fixture = json.loads(path.read_text())
+    fixture = load_sharing_control_recording()
     return {
         "fixture": fixture,
         "full": decode_driver_reply(fixture["raw_reply"]).observation,
@@ -43,6 +43,14 @@ def render_signature(native, *, refs=None, session=None, target_root=None):
     tree = SimpleNamespace(prepared=SimpleNamespace(snapshot=snapshot))
     window = SimpleNamespace(target={"session": session or native.session, "node": target_root or native.roots[0]})
     return _signature(tree, window)
+
+
+def test_narrow_projection_reproduces_the_original_wire_fixture(recorded):
+    # Ordered JSON retains the original property sequence, key order and scalar types.
+    encoded = json.dumps(recorded["fixture"]["narrow_raw_reply"], separators=(",", ":"), allow_nan=False)
+    assert hashlib.sha256(encoded.encode()).hexdigest() == (
+        "1b20bc0b31d31cb216cf28ec01bf985e6e7d12b62a380962f31e459e8fba196c"
+    )
 
 
 def test_recorded_full_and_narrow_reply_supply_the_same_positive_native_signature(recorded):
