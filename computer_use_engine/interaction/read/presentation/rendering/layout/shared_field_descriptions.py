@@ -224,7 +224,11 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
     root_entry = entries.get(root)
     if root_source is None or root_source.scope[2] != root or root_entry is None:
         return unchanged
-    if not root_entry.role_explicit or root_entry.heading or root_entry.body != frame.lines[root_entry.line].lstrip("\t"):
+    if (
+        not root_entry.role_explicit
+        or root_entry.heading
+        or root_entry.body != frame.lines[root_entry.line].lstrip("\t")
+    ):
         return unchanged
     nodes, parents, occurrences = {}, {}, Counter()
     pending = [(frame.roots[0], None)]

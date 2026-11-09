@@ -91,7 +91,9 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
         elif block.kind == "field" and block.field_target_ref is None:
             labels = tuple(member for member in members if member.primary_ref == block.label_ref)
             invalid_field = (
-                block.primary_ref is not None or block.layout not in ("fields", "field-inline") or block.label_ref is None
+                block.primary_ref is not None
+                or block.layout not in ("fields", "field-inline")
+                or block.label_ref is None
             )
             if not invalid_field:
                 invalid_field = len(labels) != 1 or bool(labels[0].children)
@@ -126,7 +128,9 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
                 reason = "compact list lacks its independent leaf targets"
         elif block.layout in ("records", "visual-grid"):
             slots = tuple(member.column_slots or tuple(range(len(member.children))) for member in members)
-            invalid_columns = len(members) < 2 or not block.columns or len(block.column_prefix_refs) != len(block.columns)
+            invalid_columns = (
+                len(members) < 2 or not block.columns or len(block.column_prefix_refs) != len(block.columns)
+            )
             if not invalid_columns and block.column_alignments:
                 invalid_columns = (
                     len(block.column_alignments) != len(block.columns)
@@ -175,7 +179,8 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
                     invalid_prefix = not refs
                     if not invalid_prefix and prefix is not None:
                         invalid_prefix = prefix not in refs or any(
-                            ref is None or prefix_signature(draft, ref) != prefix_signature(draft, prefix) for ref in refs
+                            ref is None or prefix_signature(draft, ref) != prefix_signature(draft, prefix)
+                            for ref in refs
                         )
                     if invalid_prefix:
                         reason = "column prefix differs from original member roles or states"
