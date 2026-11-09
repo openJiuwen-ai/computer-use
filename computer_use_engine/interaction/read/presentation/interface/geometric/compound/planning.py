@@ -73,7 +73,7 @@ def _candidate(draft: InterfaceDraft, key: str) -> CompoundControl | None:
     if target_index == 0 or any(draft.projected_nodes[ref]["role"] != "group" for ref in refs[:target_index]):
         return None
     if any(
-        draft.projected_nodes[ref]["role"] not in ("group", "staticText", "image") for ref in refs[target_index + 1 :]
+        draft.projected_nodes[ref]["role"] not in ("group", "staticText", "image") for ref in refs[target_index + 1:]
     ):
         return None
     if not one_window(draft, tuple(refs)):
@@ -83,7 +83,7 @@ def _candidate(draft: InterfaceDraft, key: str) -> CompoundControl | None:
         return None
     target_box = boxes[target]
     if any(not close_wrapper(boxes[ref], target_box) for ref in refs[:target_index]) or any(
-        not contained_caption(boxes[ref], target_box) for ref in refs[target_index + 1 :]
+        not contained_caption(boxes[ref], target_box) for ref in refs[target_index + 1:]
     ):
         return None
     last = refs[-1]

@@ -92,7 +92,7 @@ def scope_plan(
         and not measured[a].contains(measured[b])
         and not measured[b].contains(measured[a])
         for index, a in enumerate(measured_keys)
-        for b in measured_keys[index + 1 :]
+        for b in measured_keys[index + 1:]
     ):
         return None
     before = native_edges(keys, owners, draft.relations)

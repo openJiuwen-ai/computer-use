@@ -219,7 +219,7 @@ def group_radio_options(draft: InterfaceDraft) -> InterfaceDraft:
                     break
                 options.extend(targets)
                 stop += 1
-            members = (*leading, *children[index + 1 : stop])
+            members = (*leading, *children[index + 1: stop])
             if (
                 label is None
                 or label == parent.label_ref

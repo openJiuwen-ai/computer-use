@@ -120,7 +120,7 @@ def pack_identical_leaves(lines: list[str], roots: Sequence[NodeView], context: 
                 break
             refs.append(item[2])
         packed = first[1] + "Elements [" + first[3] + "]: " + _ordered_references(refs)
-        if len(refs) >= 3 and len(packed) < len("\n".join(lines[index : index + len(refs)])):
+        if len(refs) >= 3 and len(packed) < len("\n".join(lines[index: index + len(refs)])):
             output.append(packed)
             index += len(refs)
         else:

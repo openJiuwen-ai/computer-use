@@ -84,14 +84,14 @@ def compound_issue(block: InterfaceBlock, draft: InterfaceDraft) -> str | None:
     if (
         target_index == 0
         or any(nodes[ref]["role"] != "group" for ref in ordered[:target_index])
-        or any(nodes[ref]["role"] not in ("group", "staticText", "image") for ref in ordered[target_index + 1 :])
+        or any(nodes[ref]["role"] not in ("group", "staticText", "image") for ref in ordered[target_index + 1:])
     ):
         return "compound has an independent semantic member beside its principal control"
     boxes = {ref: draft.source.geometry.boxes.get(ref) for ref in source_refs}
     if (
         any(box is None for box in boxes.values())
         or any(not close_wrapper(boxes[ref], boxes[target]) for ref in ordered[:target_index])
-        or any(not contained_caption(boxes[ref], boxes[target]) for ref in ordered[target_index + 1 :])
+        or any(not contained_caption(boxes[ref], boxes[target]) for ref in ordered[target_index + 1:])
     ):
         return "compound source rectangles no longer describe one visual control"
     return None

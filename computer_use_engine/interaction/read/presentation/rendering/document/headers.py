@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 def _body_after(document: DisplayDocument, position: int) -> DisplayTree | None:
     """Find the first tree within this exact typed window section."""
-    for part in document.parts[position + 1 :]:
+    for part in document.parts[position + 1:]:
         if isinstance(part, DisplayTree):
             return part
         if isinstance(part, DisplayText) and part.kind in ("interface_header", "member_heading", "captured_metadata"):

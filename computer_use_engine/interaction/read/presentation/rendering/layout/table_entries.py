@@ -83,7 +83,7 @@ def expand_table_entries(lines: list[str]) -> list[str]:
             output.append(lines[index])
             index += 1
             continue
-        grammar = stripped[len(_DECLARATION) :]
+        grammar = stripped[len(_DECLARATION):]
         root = _NODE.fullmatch(lines[index + 1]) if index + 1 < len(lines) else None
         if (
             grammar not in (_GRAMMAR, _OWN_GRAMMAR)
@@ -98,7 +98,7 @@ def expand_table_entries(lines: list[str]) -> list[str]:
         end = index + 2
         while end < len(lines) and lines[end].startswith(indent + "\t"):
             end += 1
-        restored = lines[index + 1 : end].copy()
+        restored = lines[index + 1: end].copy()
         changed = 0
         valid = True
         for offset, line in enumerate(restored):
@@ -192,7 +192,7 @@ def pack_table_entries(frame: LayoutFrame) -> TableEntriesLayout:
             or intro[2] not in (_GRAMMAR, _OWN_GRAMMAR)
             or not root_entry.line <= table.line < index < root_end
             or len(intro[1]) != len(frame.lines[table.line]) - len(frame.lines[table.line].lstrip("\t")) + 1
-            or any(not line.startswith(intro[1]) for line in frame.lines[table.line + 1 : index])
+            or any(not line.startswith(intro[1]) for line in frame.lines[table.line + 1: index])
         ):
             return TableEntriesLayout(frame.lines)
         candidates.append((index, evidence, intro[2]))

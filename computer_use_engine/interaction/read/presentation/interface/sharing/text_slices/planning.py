@@ -112,7 +112,7 @@ def _distinguish(plans: dict[tuple[str, str], TextSlicePlan]) -> dict[tuple[str,
             continue
         ranges = {key: [(fragment.start, fragment.end) for fragment in plans[key].fragments] for key in keys}
         for index, left in enumerate(keys):
-            for right in keys[index + 1 :]:
+            for right in keys[index + 1:]:
                 first, second = plans[left].source.value, plans[right].source.value
                 if first == second:
                     continue
@@ -207,7 +207,7 @@ def validate(selected: SelectedTextSlices) -> TextSliceDocument:
             type(plan.start_utf16) is not int
             or type(plan.end_utf16) is not int
             or not 0 <= plan.start_utf16 < plan.end_utf16 <= len(raw) // 2
-            or raw[plan.start_utf16 * 2 : plan.end_utf16 * 2].decode("utf-16-le") != source.value
+            or raw[plan.start_utf16 * 2: plan.end_utf16 * 2].decode("utf-16-le") != source.value
         ):
             raise ValueError("Text slice range does not restore the exact original scalar")
         if plan.mode == "same":
@@ -221,7 +221,7 @@ def validate(selected: SelectedTextSlices) -> TextSliceDocument:
                     or type(fragment.end) is not int
                     or not 0 <= fragment.start < fragment.end <= len(source.value)
                     or fragment.start <= previous
-                    or source.value[fragment.start : fragment.end] != fragment.text
+                    or source.value[fragment.start: fragment.end] != fragment.text
                 ):
                     raise ValueError("Text reuse excerpts must preserve ordered original source spans")
                 previous = fragment.end

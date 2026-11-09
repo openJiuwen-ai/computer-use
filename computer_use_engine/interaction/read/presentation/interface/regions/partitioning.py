@@ -66,7 +66,7 @@ def _vertical_run(members: Sequence[str], bounds: Mapping[str, Box]) -> bool:
     ordered = sorted(members, key=lambda key: bounds[key].y)
     for index, before in enumerate(ordered):
         first = bounds[before]
-        for after in ordered[index + 1 :]:
+        for after in ordered[index + 1:]:
             second = bounds[after]
             if second.y - first.bottom >= 0.25 * min(first.height, second.height):
                 return True
@@ -95,7 +95,7 @@ def local_columns(
     if any(
         measured[first].intersection_area(measured[second]) > 0
         for index, first in enumerate(keys)
-        for second in keys[index + 1 :]
+        for second in keys[index + 1:]
     ):
         return ()
     ordered = sorted(keys, key=lambda key: measured[key].x)

@@ -143,7 +143,7 @@ def capture_text_slice_sources(
         current, path, positions = ref, [], {}
         while current in result and current not in checked:
             if current in positions:
-                cyclic.update(path[positions[current] :])
+                cyclic.update(path[positions[current]:])
                 break
             positions[current] = len(path)
             path.append(current)
@@ -178,7 +178,7 @@ def _boundaries(text: str) -> list[int]:
 
 
 def _scalar(text: str, start: int) -> tuple[str, int]:
-    if text[start : start + 1] == '"':
+    if text[start: start + 1] == '"':
         value, length = json.JSONDecoder().raw_decode(text[start:])
         if not isinstance(value, str):
             raise ValueError("text anchor must be a string")
@@ -222,7 +222,7 @@ def expand_exact_text_slices(lines: list[str], format_field: Callable[[str], str
         for match in _REFERENCE.finditer(body):
             if match.start() not in outside or (match.start() and body[match.start() - 1] != " "):
                 continue
-            if match.end() != len(body) and not body[match.end() :].startswith(", "):
+            if match.end() != len(body) and not body[match.end():].startswith(", "):
                 raise ValueError("ambiguous text slice field")
             _, _, anchor = segments[match[4]]
             label = match[5] + ": "
@@ -238,7 +238,7 @@ def expand_exact_text_slices(lines: list[str], format_field: Callable[[str], str
             start, end = int(match[2]), int(match[3])
             if start < 0 or start >= end or end * 2 > len(raw):
                 raise ValueError("text slice is outside its anchor")
-            restored = format_field(raw[start * 2 : end * 2].decode("utf-16-le"))
+            restored = format_field(raw[start * 2: end * 2].decode("utf-16-le"))
             if match[1] == "Value":
                 restored = "Value: " + restored
             replacements.setdefault(index, []).append((offset + match.start(), offset + match.end(), restored))
@@ -434,7 +434,7 @@ def pack_exact_text_slices(frame: LayoutFrame) -> TextSliceLayout:
                     + " (UTF-16)"
                 )
                 replacement = ("Text: " if field.bare else "") + statement
-                saving = len(frame.lines[field.line][field.start : field.end].encode("utf-8")) - len(
+                saving = len(frame.lines[field.line][field.start: field.end].encode("utf-8")) - len(
                     replacement.encode("utf-8")
                 )
                 if owner_field == "Name" and (current, owner_field) not in anchors:

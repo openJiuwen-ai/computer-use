@@ -163,7 +163,7 @@ def expand_identifier_prefixes(lines: list[str]) -> list[str]:
         if stripped.startswith(_DECLARATION):
             if prefix is not None and not root_started:
                 raise ValueError("multiple identifier prefixes in one root scope")
-            prefix = json.loads(stripped[len(_DECLARATION) :])
+            prefix = json.loads(stripped[len(_DECLARATION):])
             indent = line[: len(line) - len(stripped)]
             root_started = False
             if not isinstance(prefix, str) or not _plain(prefix):
@@ -194,7 +194,7 @@ def expand_identifier_prefixes(lines: list[str]) -> list[str]:
                 marker = " ID suffix: "
                 at = line.rfind(marker)
             if at >= 0:
-                suffix = json.loads(line[at + len(marker) :])
+                suffix = json.loads(line[at + len(marker):])
                 if not isinstance(suffix, str):
                     raise ValueError("invalid identifier suffix")
                 line = line[:at] + marker.replace("ID suffix:", "ID:") + prefix + suffix
@@ -239,7 +239,7 @@ def pack_identifier_prefixes(frame: LayoutFrame) -> list[str]:
         declaration = _DECLARATION + json.dumps(prefix, ensure_ascii=False)
         saving = -len((root_indent + declaration + "\n").encode("utf-8"))
         for member in matching:
-            replacement = "ID suffix: " + json.dumps(member.value[len(prefix) :], ensure_ascii=False)
+            replacement = "ID suffix: " + json.dumps(member.value[len(prefix):], ensure_ascii=False)
             saving += len(("ID: " + member.value).encode("utf-8")) - len(replacement.encode("utf-8"))
         if saving >= _MINIMUM_SAVING and (best is None or saving > best[0]):
             best = saving, prefix, matching
@@ -251,7 +251,7 @@ def pack_identifier_prefixes(frame: LayoutFrame) -> list[str]:
         output[member.index] = (
             output[member.index][: member.start]
             + "ID suffix: "
-            + json.dumps(member.value[len(prefix) :], ensure_ascii=False)
+            + json.dumps(member.value[len(prefix):], ensure_ascii=False)
         )
     output.insert(root_index, root_indent + _DECLARATION + json.dumps(prefix, ensure_ascii=False))
     try:

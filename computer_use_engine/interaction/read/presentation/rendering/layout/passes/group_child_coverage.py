@@ -41,7 +41,7 @@ def group_child_coverage(frame: LayoutFrame) -> list[str]:
             span is None
             or span[0] < 0
             or span[1] > len(frame.lines)
-            or "\n".join(frame.lines[span[0] : span[1]]) != node.text
+            or "\n".join(frame.lines[span[0]: span[1]]) != node.text
             or node.parent is not None
             and node.parent not in paths
         ):

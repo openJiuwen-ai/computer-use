@@ -170,7 +170,7 @@ def _scalar_span(body: str, ref: str, prefix: str, kind: str, encoded: str) -> t
             position
             for position in unquoted_positions(body)
             if body.startswith("URL: ", position)
-            and (position == field_start or body[max(0, position - 2) : position] == ", ")
+            and (position == field_start or body[max(0, position - 2): position] == ", ")
         ]
         if len(positions) != 1:
             return None
@@ -351,7 +351,7 @@ def expand_field_prefixes(lines: list[str]) -> list[str]:
                     continue
                 if match[1] not in prefixes:
                     raise ValueError("field suffix has no declaration")
-                suffix, length = json.JSONDecoder().raw_decode(line[match.end() :])
+                suffix, length = json.JSONDecoder().raw_decode(line[match.end():])
                 if not isinstance(suffix, str):
                     raise ValueError("field suffix must be a string")
                 end = match.end() + length
@@ -404,9 +404,9 @@ def _best_group(kind: str, members: list[_Field], frame: LayoutFrame, indent: st
             declaration = _declaration(kind, prefix, quoted)
             saving = -len((indent + declaration + "\n").encode("utf-8"))
             for member in matching:
-                suffix = member.value[len(prefix) :]
+                suffix = member.value[len(prefix):]
                 replacement = kind + " suffix: " + json.dumps(suffix, ensure_ascii=False)
-                original = frame.lines[member.line][member.start : member.end]
+                original = frame.lines[member.line][member.start: member.end]
                 saving += len(original.encode("utf-8")) - len(replacement.encode("utf-8"))
             if saving >= _MINIMUM_SAVING and (best is None or saving > best.saving):
                 best = _PrefixGroup(saving, prefix, quoted, tuple(matching), declaration)
@@ -447,7 +447,7 @@ def pack_field_prefixes(frame: LayoutFrame) -> FieldPrefixLayout:
     for group in selected:
         declarations.append(indent + group.declaration)
         for member in group.members:
-            suffix = member.value[len(group.prefix) :]
+            suffix = member.value[len(group.prefix):]
             replacement = member.kind + " suffix: " + json.dumps(suffix, ensure_ascii=False)
             edits[member.line].append((member.start, member.end, replacement))
             replacements.append(

@@ -104,21 +104,21 @@ def _observation_payload(message):
 
 def _decode_observation_payload(payload):
     view = memoryview(payload)
-    body = view[len(_OBSERVATION_FRAME) + _DIGEST_BYTES :]
+    body = view[len(_OBSERVATION_FRAME) + _DIGEST_BYTES:]
     if len(body) < HEADER_BYTES:
         raise ValueError("Truncated encoded native-observation diagnostic.")
-    digest = payload[len(_OBSERVATION_FRAME) : len(_OBSERVATION_FRAME) + _DIGEST_BYTES]
+    digest = payload[len(_OBSERVATION_FRAME): len(_OBSERVATION_FRAME) + _DIGEST_BYTES]
     if hashlib.sha256(body).digest() != digest:
         raise ValueError("Encoded native-observation diagnostic integrity mismatch.")
     header_size = int.from_bytes(body[:HEADER_BYTES], "big")
     if not 0 < header_size <= _MAX_DIAGNOSTIC_HEADER_BYTES or HEADER_BYTES + header_size >= len(body):
         raise ValueError("Invalid encoded native-observation diagnostic header size.")
-    header_json = bytes(body[HEADER_BYTES : HEADER_BYTES + header_size])
+    header_json = bytes(body[HEADER_BYTES: HEADER_BYTES + header_size])
     event = loads(header_json)
     _validate_observation_header(event)
     # These exact header bytes become the journal's metadata. The result slice
     # stays opaque; both were bound by the checked digest and enclosing frame.
-    return EncodedObservationDiagnostic(MappingProxyType(event), header_json, body[HEADER_BYTES + header_size :])
+    return EncodedObservationDiagnostic(MappingProxyType(event), header_json, body[HEADER_BYTES + header_size:])
 
 
 def consume_protocol():

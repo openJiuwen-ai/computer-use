@@ -145,7 +145,7 @@ def _leaves(frame: LayoutFrame) -> dict[int, _Leaf]:
             or not match[3].startswith(prefix + " ")
         ):
             continue
-        tail = match[3][len(prefix) + 1 :]
+        tail = match[3][len(prefix) + 1:]
         if tail:
             result[index] = _Leaf(ref, parent, position, match[1], prefix, tail, record.layout)
     return result
@@ -186,7 +186,7 @@ def pack_leaf_headers(frame: LayoutFrame) -> list[str]:
             members.append(current)
         packed = [first.indent + "Elements [" + first.prefix + "]:"]
         packed.extend(first.indent + "\t" + member.ref + " " + member.tail for member in members)
-        original = frame.lines[index : index + len(members)]
+        original = frame.lines[index: index + len(members)]
         saving = _layout_size("\n".join(original)) - _layout_size("\n".join(packed))
         if len(members) >= 3 and saving >= _MINIMUM_SAVING:
             output.extend(packed)

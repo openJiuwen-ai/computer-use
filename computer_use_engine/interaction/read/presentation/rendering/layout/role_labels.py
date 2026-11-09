@@ -336,7 +336,7 @@ def expand_role_labels(lines: list[str]) -> list[str]:
         if stripped.startswith(_DECLARATION):
             if mapping and not started:
                 raise ValueError("multiple role declarations before one root")
-            mapping = _parse_declaration(stripped[len(_DECLARATION) :])
+            mapping = _parse_declaration(stripped[len(_DECLARATION):])
             indent, started = depth, False
             continue
         if mapping:

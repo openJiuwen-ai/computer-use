@@ -51,13 +51,13 @@ def ordered_children(
     if measured is not None and not any(
         measured[first].intersection_area(measured[second]) > 0
         for index, first in enumerate(original)
-        for second in original[index + 1 :]
+        for second in original[index + 1:]
     ):
         positions = {key: index for index, key in enumerate(original)}
         vertical = sorted(original, key=lambda key: (measured[key].y, positions[key]))
         for index, before in enumerate(vertical):
             first = measured[before]
-            for after in vertical[index + 1 :]:
+            for after in vertical[index + 1:]:
                 second = measured[after]
                 if first.horizontal_overlap(second) >= 0.6 and second.y - first.bottom >= 0.25 * min(
                     first.height, second.height

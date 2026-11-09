@@ -319,7 +319,7 @@ def _plan(source: _Source, evidence: CollectionEvidence, ref: str) -> tuple[Tabl
         return None, "row content has repeated projected identities"
     cells = [cell for row in rows for cell in row.cells]
     for index, left in enumerate(cells):
-        for right in cells[index + 1 :]:
+        for right in cells[index + 1:]:
             if (
                 left.row < right.row + right.row_span
                 and right.row < left.row + left.row_span

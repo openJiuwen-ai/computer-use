@@ -277,7 +277,7 @@ def compose_control_units(draft: InterfaceDraft) -> InterfaceDraft:
             visual_unit=True,
         )
         blocks[parent.key] = replace(
-            parent, children=(*parent.children[: span.start], key, *parent.children[span.stop :])
+            parent, children=(*parent.children[: span.start], key, *parent.children[span.stop:])
         )
         used.update((target, label))
         decisions.append("geometric-control-unit:" + target)

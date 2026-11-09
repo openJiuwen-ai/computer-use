@@ -115,7 +115,7 @@ def form_bands(parent: InterfaceBlock, draft: InterfaceDraft) -> tuple[FormBand,
             refs = [label_ref]
             selected = [children[start]]
             bottom = label.bottom
-            for key in children[start + 1 : stop]:
+            for key in children[start + 1: stop]:
                 block = blocks[key]
                 ref = block.primary_ref
                 if ref is None or ref not in boxes:

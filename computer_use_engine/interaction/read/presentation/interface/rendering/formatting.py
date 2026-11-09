@@ -22,7 +22,7 @@ def _reindent(text: str, before: int, after: int) -> str:
     """Move generated indentation, preserving all characters inside source fields."""
     prefix = "\t" * before
     return "\n".join(
-        "\t" * after + (line[len(prefix) :] if line.startswith(prefix) else line) for line in text.split("\n")
+        "\t" * after + (line[len(prefix):] if line.startswith(prefix) else line) for line in text.split("\n")
     )
 
 
@@ -52,7 +52,7 @@ class _InterfaceFormatter:
         start = ref + " " + prefix
         if not text.startswith(start) or len(text) > len(start) and text[len(start)] not in (" ", ","):
             return None
-        return ref + text[len(start) :]
+        return ref + text[len(start):]
 
     def remember(self, ref: str, depth: int, context: tuple[tuple[str, str], ...]) -> None:
         """Keep uncombined atomic facts and the context needed to interpret a later diff."""
@@ -103,7 +103,7 @@ def _find_exact(lines: list[str], expected: list[str]) -> int | None:
     matches = [
         index
         for index, line in enumerate(lines)
-        if line == expected[0] and lines[index : index + len(expected)] == expected
+        if line == expected[0] and lines[index: index + len(expected)] == expected
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -155,7 +155,7 @@ def _inline_fragment(
     if all(slot is not None and slot[0] == atom.text.lstrip("\t") for atom, slot in zip(atoms, slots)):
         variants.append([slot[1] for slot in slots])
     for bodies in variants:
-        short = [ref + body[len(ref + " " + prefix) :] for ref, body in zip(refs, bodies)] if prefix else bodies
+        short = [ref + body[len(ref + " " + prefix):] for ref, body in zip(refs, bodies)] if prefix else bodies
         if prefix and any(not body.startswith(ref + " " + prefix) for ref, body in zip(refs, bodies)):
             continue
         # Old prefix sharing may cover several newly planned geometric rows.
@@ -237,7 +237,7 @@ def format_interface(frame: LayoutFrame) -> LayoutFrame:
             formatter = _InterfaceFormatter(frame, document)
             if start is not None and formatter.records(block, depth, ()):
                 if len("\n".join(formatter.lines)) < len("\n".join(expected)):
-                    lines[start : start + len(expected)] = formatter.lines
+                    lines[start: start + len(expected)] = formatter.lines
                     contexts.update((ref, item.layout) for ref, item in formatter.output_nodes.items())
                     applied.append(block.key)
         elif block.layout == "inline":
@@ -246,7 +246,7 @@ def format_interface(frame: LayoutFrame) -> LayoutFrame:
                 start, expected, replacement = fragment
                 savings = len("\n".join(expected)) - len("\n".join(replacement))
                 if savings > 0 or savings == 0 and block.origin == "visual":
-                    lines[start : start + len(expected)] = replacement
+                    lines[start: start + len(expected)] = replacement
                     applied.append(block.key)
     # Real native headings delimit source-selected sections. An exact outside
     # sibling anchor bounds each region, so field/table packing within it survives.
@@ -281,7 +281,7 @@ def format_interface(frame: LayoutFrame) -> LayoutFrame:
             not lines[end - 1] or len(lines[end - 1]) - len(lines[end - 1].lstrip("\t")) < depth
         ):
             end -= 1
-        lines[start + 1 : end] = ["\t" + line if line else line for line in lines[start + 1 : end]]
+        lines[start + 1: end] = ["\t" + line if line else line for line in lines[start + 1: end]]
         title = "\t" * depth + "Section: " + heading.text.lstrip("\t")
         for ref in members - {block.label_ref}:
             contexts[ref] = ((block.key, title), *contexts.get(ref, nodes[ref].layout))

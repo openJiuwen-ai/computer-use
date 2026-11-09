@@ -58,7 +58,7 @@ def _bounds(node: NativeNode) -> Geometry | None:
 
 def _body(document: DisplayDocument, position: int, window: MemberHeading) -> DisplayTree | None:
     """Find this exact member's retained root without crossing a following heading."""
-    for part in document.parts[position + 1 :]:
+    for part in document.parts[position + 1:]:
         if isinstance(part, DisplayText) and part.kind in ("interface_header", "member_heading", "captured_metadata"):
             break
         if not isinstance(part, DisplayTree):

@@ -44,7 +44,7 @@ class NumberedEntry:
         """Restore the body's role/state prefix when a shared heading supplies it."""
         if not self.heading:
             return self.body
-        return self.ref + " " + self.heading + self.body[len(self.ref) :]
+        return self.ref + " " + self.heading + self.body[len(self.ref):]
 
 
 def unquoted_positions(text: str) -> set[int]:
@@ -90,7 +90,7 @@ def _split_children(text: str, offset: int) -> list[tuple[int, str]]:
     cuts = [m for m in re.finditer(r" > | ; |; ", text) if m.start() in outside]
     result, start = [], 0
     for cut in cuts:
-        result.append((offset + start, text[start : cut.start()]))
+        result.append((offset + start, text[start: cut.start()]))
         start = cut.end()
     result.append((offset + start, text[start:]))
     return result
@@ -125,7 +125,7 @@ def numbered_entries(lines: list[str]) -> list[NumberedEntry]:
                 offset += len(column) + 3
         elif match := _NODE.fullmatch(line):
             if heading and match[1] == heading[1] + "\t":
-                parts.append((len(match[1]), line[len(match[1]) :], heading[2], False))
+                parts.append((len(match[1]), line[len(match[1]):], heading[2], False))
             else:
                 heading = None
                 start = len(match[1])

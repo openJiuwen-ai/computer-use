@@ -87,7 +87,7 @@ def associate_value_controls(draft: InterfaceDraft) -> InterfaceDraft:
             key = parent.children[index]
             field = draft.blocks[key]
             value = _readonly_value(field, draft)
-            following = parent.children[index + 1 : index + 2]
+            following = parent.children[index + 1: index + 2]
             trigger = _selector(draft.blocks[following[0]], draft) if following else None
             if value is None or trigger is None:
                 output.append(key)

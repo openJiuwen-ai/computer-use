@@ -181,7 +181,7 @@ class InterfaceWriter:
             remaining = [state.label for index, state in enumerate(atom.states) if index not in member.state_indices]
             prefix = ref + (" (" + ", ".join(remaining) + ")" if remaining else "")
         if style is not None and style.glyph is not None:
-            prefix = ref + " " + style.glyph + prefix[len(ref) :]
+            prefix = ref + " " + style.glyph + prefix[len(ref):]
         if ref in self.request.projection.source.outside_window_fields:
             prefix += " (bounds outside observed window)"
         captions, inline, blocks = [], [], []

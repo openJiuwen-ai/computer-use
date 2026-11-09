@@ -87,7 +87,7 @@ def _cell_body(cell: GeneratedLine, row: int, column: int) -> str | None:
         return "" if not cell.node.get("name") else None
     prefix, suffix = cell.prefix + " ", ", " + coordinates
     if cell.body.startswith(prefix) and cell.body.endswith(suffix):
-        own = cell.body[len(prefix) : -len(suffix)]
+        own = cell.body[len(prefix): -len(suffix)]
         if own and " > " not in own:
             return own
     return None
@@ -272,7 +272,7 @@ def expand_multi_column_records(lines: list[str]) -> list[str]:
             continue
         indent, row_prefix, outline, cell_prefix, own_text = intro.groups()
         heading = lines[index + 1]
-        columns = heading[len(indent) :].split(" | ") if heading.startswith(indent) else []
+        columns = heading[len(indent):].split(" | ") if heading.startswith(indent) else []
         index_label = columns[1][5:-1] if len(columns) >= 2 and columns[1].startswith("row (") else ""
         if (
             not 4 <= len(columns) <= 7
@@ -290,7 +290,7 @@ def expand_multi_column_records(lines: list[str]) -> list[str]:
         members = 0
         while end < len(lines) and re.match(re.escape(indent) + _NUMBER + r" \| ", lines[end]):
             restored = _expand_member(
-                lines[end][len(indent) :],
+                lines[end][len(indent):],
                 indent,
                 row_prefix,
                 index_label,
@@ -352,7 +352,7 @@ def pack_multi_column_layout(frame: LayoutFrame) -> MultiColumnLayout:
                     end += 1
                 # A row's original public range must independently expand to the
                 # entire proven candidate; unrelated shared titles stay intact.
-                if expand_leaf_headers(frame.lines[start:end]) == expanded[record.start : record.end]:
+                if expand_leaf_headers(frame.lines[start:end]) == expanded[record.start: record.end]:
                     candidates[start] = replace(record, start=start, end=end)
     output: list[str] = []
     tables: list[TableLayoutEvidence] = []
@@ -378,7 +378,7 @@ def pack_multi_column_layout(frame: LayoutFrame) -> MultiColumnLayout:
             first.indent + " | ".join(["---"] * (first.columns + 2)),
             *(first.indent + member.text for member in members),
         ]
-        original = frame.lines[index : members[-1].end]
+        original = frame.lines[index: members[-1].end]
         saving = len("\n".join(original).encode("utf-8", errors="surrogatepass")) - len(
             "\n".join(packed).encode("utf-8", errors="surrogatepass")
         )
@@ -395,7 +395,7 @@ def pack_multi_column_layout(frame: LayoutFrame) -> MultiColumnLayout:
             output.extend(packed)
             index = members[-1].end
         else:
-            output.extend(frame.lines[index : first.end])
+            output.extend(frame.lines[index: first.end])
             index = first.end
     if expand_leaf_headers(expand_multi_column_records(output)) == expanded:
         return MultiColumnLayout(output, tuple(tables))

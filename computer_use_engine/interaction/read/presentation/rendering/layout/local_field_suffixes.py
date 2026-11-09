@@ -78,7 +78,7 @@ def _field_starts(body: str, label: str, start: int, *, first_field: bool = Fals
         and body.startswith(label + ": ", position)
         and (
             position == start
-            or body[max(0, position - 2) : position] == ", "
+            or body[max(0, position - 2): position] == ", "
             or (first_field and position > start and body[position - 1] == " " and ":" not in body[:position])
         )
     )
@@ -100,7 +100,7 @@ def _literal_span(body: str, prefix: str, label: str, encoded: str) -> tuple[int
 
 def _scalar(body: str, start: int) -> tuple[str, int]:
     """Read one literal JSON or plain scalar, without evaluating expressions."""
-    if body[start : start + 1] == '"':
+    if body[start: start + 1] == '"':
         value, size = json.JSONDecoder().raw_decode(body[start:])
         if type(value) is not str:
             raise ValueError("local description must be a string")
@@ -140,7 +140,7 @@ def expand_local_field_suffixes(
             continue
         start = starts[0]
         scalar_start = start + len("URL: ")
-        if body[scalar_start : scalar_start + 1] != '"':
+        if body[scalar_start: scalar_start + 1] != '"':
             continue
         prefix, size = json.JSONDecoder().raw_decode(body[scalar_start:])
         end = scalar_start + size
@@ -163,7 +163,7 @@ def expand_local_field_suffixes(
             raise ValueError("local URL description must remain a preceding literal")
         replacement = "URL: " + format_field(prefix + description)
         offset = entry.start
-        result[entry.line] = lines[entry.line][: offset + start] + replacement + lines[entry.line][offset + end :]
+        result[entry.line] = lines[entry.line][: offset + start] + replacement + lines[entry.line][offset + end:]
     return result
 
 
@@ -262,7 +262,7 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
                 or (role_prefix != spelling.display_label and not role_prefix.startswith(spelling.display_label + " ("))
             ):
                 continue
-            current_role = spelling.alias + role_prefix[len(spelling.display_label) :]
+            current_role = spelling.alias + role_prefix[len(spelling.display_label):]
         encoded_description, encoded_url = frame.format_field(description), frame.format_field(url)
         original = record.text.lstrip("\t")
         spans = []
@@ -280,7 +280,7 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
         if len(entry.body[start:end].encode("utf-8")) - len(statement.encode("utf-8")) < _MINIMUM_SAVING:
             continue
         offset = entry.start
-        result[entry.line] = result[entry.line][: offset + start] + statement + result[entry.line][offset + end :]
+        result[entry.line] = result[entry.line][: offset + start] + statement + result[entry.line][offset + end:]
         replacements.append(
             LocalFieldSuffixReplacement(
                 ref,

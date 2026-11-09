@@ -76,7 +76,7 @@ def member_span(refs: Sequence[str], draft: InterfaceDraft, blocks: Mapping[str,
     parent = blocks[common]
     roots = {path[path.index(common) - 1] for path in paths}
     indices = sorted(parent.children.index(key) for key in roots)
-    selected = parent.children[indices[0] : indices[-1] + 1]
+    selected = parent.children[indices[0]: indices[-1] + 1]
     if len(selected) != len(roots):
         return None
     required = set(refs)

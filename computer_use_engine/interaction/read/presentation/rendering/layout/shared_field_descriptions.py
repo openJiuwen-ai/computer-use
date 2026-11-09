@@ -92,7 +92,7 @@ def _starts(body: str, label: str, minimum: int) -> list[int]:
         and body.startswith(label + ": ", position)
         and (
             position == minimum
-            or body[max(0, position - 2) : position] == ", "
+            or body[max(0, position - 2): position] == ", "
             or (position > minimum and body[position - 1] == " " and ":" not in body[:position])
         )
     )
@@ -126,7 +126,7 @@ def _url_start(body: str, ref: str) -> tuple[int, str]:
         raise ValueError("shared Description requires one URL field and no remaining Description")
     start, label = urls[0]
     scalar_start = start + len(label) + 2
-    if body[scalar_start : scalar_start + 1] == '"':
+    if body[scalar_start: scalar_start + 1] == '"':
         value, size = json.JSONDecoder().raw_decode(body[scalar_start:])
         end = scalar_start + size
         if type(value) is not str or (end != len(body) and not body[end:].startswith(", ")):
@@ -197,7 +197,7 @@ def expand_shared_descriptions(
         value = json.loads(match[3])
         if len(refs) < 2 or len(set(refs)) != len(refs) or type(value) is not str or not _plain(value):
             raise ValueError("shared Description requires unique members and one complete string")
-        entries = unique_numbered_entries(lines[root.line + 1 : end])
+        entries = unique_numbered_entries(lines[root.line + 1: end])
         original = "Description: " + format_field(value) + ", "
         for ref in refs:
             entry = entries.get(ref)
@@ -216,7 +216,7 @@ def expand_shared_descriptions(
             used.add((root.line, ref))
             start, _ = _url_start(entry.body, ref)
             offset = entry.start
-            result[position] = lines[position][: offset + start] + original + lines[position][offset + start :]
+            result[position] = lines[position][: offset + start] + original + lines[position][offset + start:]
         hidden.add(index)
     return [line for index, line in enumerate(result) if index not in hidden]
 
@@ -322,7 +322,7 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
                 or (prefix != spelling.display_label and not prefix.startswith(spelling.display_label + " ("))
             ):
                 continue
-            current_prefix = spelling.alias + prefix[len(spelling.display_label) :]
+            current_prefix = spelling.alias + prefix[len(spelling.display_label):]
         original_url = "URL: " + frame.format_field(url)
         current_url = original_url
         if shared_url := urls.get(ref):
@@ -370,7 +370,7 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
             continue
         declarations.append(public_line)
         for item in members:
-            result[item.line] = result[item.line][: item.start] + result[item.line][item.start + len(item.original) :]
+            result[item.line] = result[item.line][: item.start] + result[item.line][item.start + len(item.original):]
             replacements.append(
                 SharedDescriptionReplacement(
                     item.ref,
@@ -387,7 +387,7 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
             )
     if not replacements:
         return unchanged
-    result[root_entry.line + 1 : root_entry.line + 1] = declarations
+    result[root_entry.line + 1: root_entry.line + 1] = declarations
     try:
         if expand_shared_descriptions(result, frame.format_field) != frame.lines:
             return unchanged

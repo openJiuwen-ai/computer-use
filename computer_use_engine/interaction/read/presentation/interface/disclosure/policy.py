@@ -68,7 +68,7 @@ def validate_excerpt(excerpt: TextExcerpt) -> None:
         if (
             not 0 <= fragment.start < fragment.end <= len(source.value)
             or fragment.start < previous_end
-            or fragment.text != source.value[fragment.start : fragment.end]
+            or fragment.text != source.value[fragment.start: fragment.end]
         ):
             raise ValueError("Disclosure fragments must preserve ordered original characters")
         previous_end = fragment.end

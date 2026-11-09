@@ -63,7 +63,7 @@ def comparable_pane_columns(
     ordered = tuple(sorted(candidates, key=lambda key: (measured[key].x, key)))
     for index, first in enumerate(ordered):
         a = measured[first]
-        for second in ordered[index + 1 :]:
+        for second in ordered[index + 1:]:
             b = measured[second]
             overlap = min(a.bottom, b.bottom) - max(a.y, b.y)
             if overlap < 0.6 * min(a.height, b.height):

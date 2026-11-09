@@ -775,7 +775,7 @@ def render_projection_lines(
         if fields:
             line += field_separator + ", ".join(fields)
         if len(own_action_fields) == 1 and not part_actions.get(node["ref"]):
-            without = fields[:action_start] + fields[action_start + 1 :]
+            without = fields[:action_start] + fields[action_start + 1:]
             node_action_lines[node["ref"]] = (
                 line,
                 field_base + (field_separator + ", ".join(without) if without else ""),
@@ -920,7 +920,7 @@ def render_projection_lines(
             value_start = len(lines_value)
             text_block(value_label(node), value_parts, continuation)
             record(node, "value", kind="continuation" if value_parts["omitted"] else "display")
-            caption("value", "\n".join(text[len(indent) + 1 :] for text in lines_value[value_start:]))
+            caption("value", "\n".join(text[len(indent) + 1:] for text in lines_value[value_start:]))
         for attribute, label in (
             ("documentText", "Document text"),
             ("controlValue", "Control value"),
@@ -1004,7 +1004,7 @@ def render_projection_lines(
                 parent_ref,
                 depth,
                 "\n".join(lines_value[line_start:]),
-                indent + line[:state_at] + line[state_at + len(state_flags) :],
+                indent + line[:state_at] + line[state_at + len(state_flags):],
                 tuple(hints),
                 partial=bool(partial_info and not deferred_menu),
                 layout=layout,
@@ -1113,7 +1113,7 @@ def render_projection_lines(
             ref = destination["ref"]
             node_action_lines.pop(ref, None)
             item = url_slots[ref]
-            retained = item.fields[: item.slot] + item.fields[item.slot + 1 :]
+            retained = item.fields[: item.slot] + item.fields[item.slot + 1:]
             line = item.base + (item.separator + ", ".join(retained) if retained else "")
             old = display_nodes[record_indexes[ref]]
             indent = lines_value[item.line][: len(lines_value[item.line]) - len(lines_value[item.line].lstrip("\t"))]
@@ -1121,7 +1121,7 @@ def render_projection_lines(
             display_nodes[record_indexes[ref]] = replace(
                 old,
                 text="\n".join((lines_value[item.line], *old.text.split("\n")[1:])),
-                content=indent + line[: item.state_at] + line[item.state_at + len(item.state_flags) :],
+                content=indent + line[: item.state_at] + line[item.state_at + len(item.state_flags):],
             )
     tree_end = len(lines_value)
     unexpanded_menus: tuple[UnexpandedMenuSummary, ...] = ()

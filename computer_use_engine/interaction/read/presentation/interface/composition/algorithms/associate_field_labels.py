@@ -52,7 +52,7 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
             member_roles=member_roles,
         )
         blocks[span.parent] = replace(
-            parent, children=(*parent.children[: span.start], key, *parent.children[span.stop :])
+            parent, children=(*parent.children[: span.start], key, *parent.children[span.stop:])
         )
         decisions.append("field-label:" + target if label else "field-description:" + target)
     return revise(draft, blocks, *decisions)

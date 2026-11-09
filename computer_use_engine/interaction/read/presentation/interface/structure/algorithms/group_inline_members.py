@@ -86,7 +86,7 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
             rows = inline_rows(refs, draft.source.geometry)
             row_index = index
             for row in rows:
-                member_keys = children[row_index : row_index + len(row)]
+                member_keys = children[row_index: row_index + len(row)]
                 # Three members amortize the shared header; proven row breaks stay visible.
                 if len(row) >= 3:
                     key = synthetic_key("inline", parent_key, row)

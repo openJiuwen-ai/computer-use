@@ -190,7 +190,7 @@ def pack_input_fields(frame: LayoutFrame) -> InputFieldsLayout:
         if not record.text.lstrip("\t").startswith(expected) or not original_entry.expanded.startswith(expected):
             continue
         position = _value_position(entry)
-        if position is None or entry.body[max(0, position - len(_FIELDS)) : position] != _FIELDS:
+        if position is None or entry.body[max(0, position - len(_FIELDS)): position] != _FIELDS:
             continue
         table_entry, table_record = entries.get(table), records.get(table)
         if (
@@ -252,7 +252,7 @@ def pack_input_fields(frame: LayoutFrame) -> InputFieldsLayout:
         declarations[table_entry.line + 1] = declaration
         for ref, entry, position in members:
             changes[entry.line].append((entry.start + position, len(_FIELDS)))
-            replacement = entry.body[:position] + entry.body[position + len(_FIELDS) :]
+            replacement = entry.body[:position] + entry.body[position + len(_FIELDS):]
             records_out.append(
                 InputFieldsReplacement(ref, table, root, records[ref].layout, declaration, entry.body, replacement)
             )
@@ -261,7 +261,7 @@ def pack_input_fields(frame: LayoutFrame) -> InputFieldsLayout:
         if index in declarations:
             output.append(declarations[index])
         for position, length in sorted(changes.get(index, ()), reverse=True):
-            line = line[:position] + line[position + length :]
+            line = line[:position] + line[position + length:]
         output.append(line)
     if not records_out or expand_input_fields(output) != frame.lines:
         return InputFieldsLayout(frame.lines)

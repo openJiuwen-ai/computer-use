@@ -23,7 +23,7 @@ def execute(selected: SelectedGroups, control: Control) -> GroupDisclosurePlan:
     for group in selected.groups:
         children = request.interface.blocks[group.parent_key].children
         start = children.index(group.child_keys[0])
-        if children[start : start + len(group.child_keys)] != group.child_keys:
+        if children[start: start + len(group.child_keys)] != group.child_keys:
             raise ValueError("Disclosure group must replace consecutive existing child blocks")
         refs = tuple(ref for key in group.child_keys for ref in classified.block_refs[key])
         if refs != group.projected_refs or seen.intersection(refs):
@@ -95,7 +95,7 @@ def execute(selected: SelectedGroups, control: Control) -> GroupDisclosurePlan:
                 or part.slot_key != source.attribute
                 or type(value) is not str
                 or not 0 <= part.start < part.end <= len(value)
-                or value[part.start : part.end] != part.text
+                or value[part.start: part.end] != part.text
             ):
                 raise ValueError("Disclosure excerpt is not an exact original field range")
         if group.captured_characters != sum(len(source.value) for source in captured_text_fields(group.fields)):

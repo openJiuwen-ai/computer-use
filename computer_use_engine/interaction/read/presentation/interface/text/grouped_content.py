@@ -52,7 +52,7 @@ def write_grouped_children(
             writer.write(key, depth, context)
             offset += 1
             continue
-        if block.children[offset : offset + len(group.child_keys)] != group.child_keys:
+        if block.children[offset: offset + len(group.child_keys)] != group.child_keys:
             raise ValueError("Content overview no longer matches its selected child range")
         lines = format_group_overview(group)
         writer.lines.extend("\t" * depth + line for line in lines)

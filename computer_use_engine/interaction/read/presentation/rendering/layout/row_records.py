@@ -109,7 +109,7 @@ def expand_row_records(lines: list[str]) -> list[str]:
             index += 1
             continue
         indent = lines[index][: -len(_TITLE)]
-        header = _HEADER.fullmatch(lines[index + 1][len(indent) :]) if lines[index + 1].startswith(indent) else None
+        header = _HEADER.fullmatch(lines[index + 1][len(indent):]) if lines[index + 1].startswith(indent) else None
         if header is None:
             result.append(lines[index])
             index += 1
@@ -118,7 +118,7 @@ def expand_row_records(lines: list[str]) -> list[str]:
         expanded: list[str] = []
         members = 0
         while end < len(lines) and re.match(re.escape(indent) + _NUMBER + r" / " + _NUMBER + r" \| ", lines[end]):
-            restored = _expand_member(lines[end][len(indent) :], indent, header[1], header[2], header[3])
+            restored = _expand_member(lines[end][len(indent):], indent, header[1], header[2], header[3])
             if restored is None:
                 break
             expanded.extend(restored)
@@ -199,7 +199,7 @@ def _row(row: _Line, parent: str, position: int, lines: dict[str, _Line], frame:
     end = row.index + 2 + len(children)
     if end < len(frame.lines) and frame.lines[end].startswith(row.indent + "\t"):
         return None
-    row_body = node["ref"] + stem[len("row") :] + (row_fields[2] or "")
+    row_body = node["ref"] + stem[len("row"):] + (row_fields[2] or "")
     cell_body = child["ref"] + (" " + cell_name if cell_name else "")
     text = " | ".join((f"{index} / {cell_row}", row_body, cell_body, "; ".join(children) or "—"))
     if utf16_length(text) > 320:
@@ -260,7 +260,7 @@ def pack_row_records(frame: LayoutFrame) -> list[str]:
             + " | cell children (—: none)",
             *(first.indent + member.text for member in members),
         ]
-        original = frame.lines[index : members[-1].end]
+        original = frame.lines[index: members[-1].end]
         saving = len("\n".join(original).encode("utf-8", errors="surrogatepass")) - len(
             "\n".join(packed).encode("utf-8", errors="surrogatepass")
         )
@@ -268,6 +268,6 @@ def pack_row_records(frame: LayoutFrame) -> list[str]:
             output.extend(packed)
             index = members[-1].end
         else:
-            output.extend(frame.lines[index : first.end])
+            output.extend(frame.lines[index: first.end])
             index = first.end
     return output if expand_row_records(output) == frame.lines else frame.lines
