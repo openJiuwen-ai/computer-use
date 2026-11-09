@@ -243,11 +243,11 @@ def _slots(frame: LayoutFrame) -> tuple[int, list[_Slot], tuple[str, ...]] | Non
     for source in sources.values():
         conflicts[source.display_label].add(_alias(source))
     output: list[_Slot] = []
-    for ref, source in sources.items():
-        node, record, entry = nodes[ref], records.get(ref), entries.get(ref)
-        prefix, span = frame.node_prefixes.get(ref), frame.node_line_ranges.get(ref)
-        alias = _alias(source)
-        label = source.display_label
+    for slot_ref, role_source in sources.items():
+        node, record, entry = nodes[slot_ref], records.get(slot_ref), entries.get(slot_ref)
+        prefix, span = frame.node_prefixes.get(slot_ref), frame.node_line_ranges.get(slot_ref)
+        alias = _alias(role_source)
+        label = role_source.display_label
         if (
             record is None
             or entry is None
@@ -258,11 +258,11 @@ def _slots(frame: LayoutFrame) -> tuple[int, list[_Slot], tuple[str, ...]] | Non
             or span[1] <= span[0]
             or alias is None
             or node["role"] in _MENUS
-            or occurrences[ref] != 1
-            or counts[ref] != 1
-            or source_counts[source.source] != 1
-            or source.scope[2] != root
-            or record.parent != parents[ref]
+            or occurrences[slot_ref] != 1
+            or counts[slot_ref] != 1
+            or source_counts[role_source.source] != 1
+            or role_source.scope[2] != root
+            or record.parent != parents[slot_ref]
             or node.get("roleDescription") != label
             or not _plain(label)
             or frame.format_field(label) != label
@@ -271,9 +271,9 @@ def _slots(frame: LayoutFrame) -> tuple[int, list[_Slot], tuple[str, ...]] | Non
         ):
             continue
         original = record.text.split("\n", 1)[0].lstrip("\t")
-        if not _starts(original, ref + " " + prefix) or not _starts(entry.body, ref + " " + prefix):
+        if not _starts(original, slot_ref + " " + prefix) or not _starts(entry.body, slot_ref + " " + prefix):
             continue
-        output.append(_Slot(entry, source, alias))
+        output.append(_Slot(entry, role_source, alias))
     # Prefixes contain only generated role and state labels, never UI names.
     public_roles = tuple(prefix.split(" (", 1)[0] for prefix in frame.node_prefixes.values())
     return root_entry.line, output, public_roles
