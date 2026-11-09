@@ -553,6 +553,7 @@ class ProjectionEditor:
         if (
             group.attribute not in ("valueDescription", "rangeDescription")
             or group.value != ""
+            # pylint: disable-next=unidiomatic-typecheck
             or type(group.value) is not str
         ):
             raise ValueError("Invalid shared description declaration")
@@ -566,6 +567,7 @@ class ProjectionEditor:
             raise ValueError("Invalid shared description declaration")
         for fact in group.facts:
             node = self._ir.source.native_nodes.get(fact.source, {})
+            # pylint: disable-next=unidiomatic-typecheck
             if fact.attribute != group.attribute or fact.attribute not in node or type(node[fact.attribute]) is not str:
                 raise ValueError("Shared description has no unique matching scoped source")
             if (
@@ -585,6 +587,7 @@ class ProjectionEditor:
         """Retain exact role fields after their source nodes are folded from the tree."""
         invalid_declaration = (
             group.attribute not in ("role", "roleDescription")
+            # pylint: disable-next=unidiomatic-typecheck
             or type(group.value) is not str
             or group.scope not in self._ir.nodes
         )
@@ -595,6 +598,7 @@ class ProjectionEditor:
             if (
                 fact.attribute != group.attribute
                 or fact.attribute not in source
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(source[fact.attribute]) is not str
             ):
                 raise ValueError("Source role has no matching folded scoped field")
@@ -955,6 +959,7 @@ def validate_projection(ir: PresentationIR) -> None:
                     raise ValueError("Shared description source or destination mismatch")
                 if (
                     fact.attribute not in source
+                    # pylint: disable-next=unidiomatic-typecheck
                     or type(source[fact.attribute]) is not str
                     or source[fact.attribute] != group.value
                 ):
@@ -983,6 +988,7 @@ def validate_projection(ir: PresentationIR) -> None:
                     or fact.attribute not in source
                 ):
                     raise ValueError("Source role declaration must retain an exact folded field")
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(source[fact.attribute]) is not str or source[fact.attribute] != group.value:
                     raise ValueError("Source role declaration must retain an exact folded field")
                 role_facts.add(fact)

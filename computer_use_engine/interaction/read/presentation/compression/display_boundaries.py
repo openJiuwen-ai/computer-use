@@ -46,6 +46,7 @@ _DETAIL_ACTIONS = frozenset(("show_menu", "scroll_into_view"))
 
 def empty_content(value: object) -> bool:
     """Recognize absent or empty strings while retaining numeric and boolean values."""
+    # pylint: disable-next=unidiomatic-typecheck
     return value is None or type(value) is str and value == ""
 
 

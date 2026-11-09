@@ -93,6 +93,7 @@ def execute(selected: SelectedGroups, control: Control) -> GroupDisclosurePlan:
             if (
                 part.ref != source.ref
                 or part.slot_key != source.attribute
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(value) is not str
                 or not 0 <= part.start < part.end <= len(value)
                 or value[part.start: part.end] != part.text

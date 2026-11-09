@@ -32,6 +32,7 @@ def incidental_menu_label_error(snapshot: SnapshotFacts, relation: Mapping[str, 
     node = snapshot.native.nodes.get(token)
     if node is None or node.role not in ("menu_item", "menu_bar_item"):
         return False
+    # pylint: disable-next=unidiomatic-typecheck
     if type(node.name) is not str or not node.name:
         return False
     original = node.relations.get(key)

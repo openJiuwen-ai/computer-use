@@ -78,6 +78,7 @@ def execute(draft: SharingDraft, control: Control) -> SharingDraft:
             )
             if (
                 not supported
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(slot.value) is not str
                 or slot.preview is not None
                 or slot.protection is not None

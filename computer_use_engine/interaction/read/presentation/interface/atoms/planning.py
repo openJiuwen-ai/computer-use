@@ -155,6 +155,7 @@ class _AtomBuilder:
         facts = tuple(fact for key in (source_attributes or (attribute,)) for fact in self.facts(key))
         preview = None
         if self.policy.compact and self.policy.captured_details:
+            # pylint: disable-next=unidiomatic-typecheck
             if protection is None and type(value) is str:
                 carrier = embedded_content(value)
                 if carrier:
@@ -204,6 +205,7 @@ class _AtomBuilder:
 
     def matching_text_slot(self, attribute: str, allowed_slots: tuple[str, ...]) -> str | None:
         for slot in self.slots:
+            # pylint: disable-next=unidiomatic-typecheck
             if slot.key in allowed_slots and type(slot.value) is str and slot.value == self.node[attribute]:
                 return slot.key
         return None

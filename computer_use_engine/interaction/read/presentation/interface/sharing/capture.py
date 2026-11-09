@@ -77,6 +77,7 @@ def capture_sharing_evidence(branch: BranchFacts, projection: ProjectionResult, 
             or native is None
             or record is None
             or record.get("observed") is False
+            # pylint: disable-next=unidiomatic-typecheck
             or type(native.help) is not str
             or record["values"].get(field) != native.help
             or any(

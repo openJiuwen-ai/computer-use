@@ -61,6 +61,7 @@ def document_projection(source: Mapping[str, Any], supplements: Sequence[Supplem
     complete = (
         not incomplete
         and all(set(record) == {"key", "value"} for record in reports.values())
+        # pylint: disable-next=unidiomatic-typecheck
         and all(type(value) is str for value in values)
         and len(set(values)) == 1
     )

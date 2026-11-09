@@ -25,9 +25,11 @@ def _complete_caption(view: ProjectionView, node: ViewNode, field: str, evidence
     value = view.field_value(node["ref"], field)
     if value is None or not value.parts:
         return None
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value.value) is not str or not value.value:
         return None
     for part in value.parts:
+        # pylint: disable-next=unidiomatic-typecheck
         if type(part.value) is not str or not part.facts:
             return None
         for fact in part.facts:
@@ -37,6 +39,7 @@ def _complete_caption(view: ProjectionView, node: ViewNode, field: str, evidence
                 or (fact.source, fact.attribute) not in evidence.complete_text
             ):
                 return None
+            # pylint: disable-next=unidiomatic-typecheck
             if type(original.get(fact.attribute)) is not str or original[fact.attribute] != part.value:
                 return None
     return value.value
@@ -73,6 +76,7 @@ def _covered_caption_group(
     nonempty = False
     for field in ("name", "description"):
         value = original.get(field)
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is not str or (node["ref"], field) not in evidence.complete_text:
             return False
         if value:

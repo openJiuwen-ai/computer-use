@@ -28,6 +28,7 @@ def shared_description(node: Mapping[str, Any], attribute: str) -> bool:
     return (
         isinstance(destination, SharedDescriptionDestination)
         and destination.fact == FactKey(SourceKey(node["ref"]), attribute)
+        # pylint: disable-next=unidiomatic-typecheck
         and type(node.get(attribute)) is str
         and node[attribute] == destination.value == ""
     )
@@ -58,6 +59,7 @@ def folded_source_roles(view: ProjectionView) -> tuple[SourceRoleDeclaration, ..
         native = view.native_nodes[ref]
         attribute = "roleDescription" if native.get("roleDescription") else "role"
         value = native[attribute]
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is str:
             groups[view.scopes[ref], attribute, value].append(FactKey(SourceKey(ref), attribute))
     return tuple(

@@ -184,6 +184,7 @@ def _incidental_metadata(node: NativeNode, issues: tuple[ReadIssue, ...]) -> boo
     ):
         return False
     bounds = tuple(value for value in (numeric.minimum, numeric.maximum) if value is not None)
+    # pylint: disable-next=unidiomatic-typecheck
     return all(type(value) is int or type(value) is float and math.isfinite(value) for value in bounds)
 
 
@@ -191,6 +192,7 @@ def _passive_native(node: NativeNode, issues: tuple[ReadIssue, ...]) -> tuple[Ac
     """Confirm unavailable input and only neutral, fully known text selections."""
     if node.role != "static_text" or node.role_detail or node.actions is None:
         return None
+    # pylint: disable-next=unidiomatic-typecheck
     if node.control_value is None or type(node.control_value.value) is not str or not node.control_value.value:
         return None
     if not _complete(issues, ("role",)):
@@ -454,6 +456,7 @@ def capture_caption_sources(snapshot: SnapshotFacts) -> Mapping[str, PassiveCapt
 def _complete_text(value: object) -> bool:
     """Exclude text forms whose default renderer can abbreviate or reinterpret them."""
     return (
+        # pylint: disable-next=unidiomatic-typecheck
         type(value) is str
         and bool(value)
         and utf16_length(value) <= VALUE_PREVIEW_LIMIT

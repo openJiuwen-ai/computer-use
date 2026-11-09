@@ -82,6 +82,7 @@ def capture_native_url_sources(
         original = snapshot.native.nodes.get(token)
         source = snapshot.fields.get((ref, "url"))
         native = facts.get(token, {})
+        # pylint: disable-next=unidiomatic-typecheck
         value = original.url if original is not None and type(original.url) is str else None
         status = native.get("fieldStatus", {}).get("url")
         failed = global_gap or token in blocked
@@ -94,6 +95,7 @@ def capture_native_url_sources(
             and source.get("field") == "url"
             and source.get("node") == token
             and tuple(source.get("path", ())) == ("url",)
+            # pylint: disable-next=unidiomatic-typecheck
             and type(source.get("normalized")) is str
             and source["normalized"] == value
         )
@@ -119,6 +121,7 @@ def emitted_caption(
     presented = projection.provenance.get((node["ref"], attribute))
     evidence = projection.source.context.get("compressionEvidence")
     facts = tuple(fact for part in presented.parts for fact in part.facts) if presented else ()
+    # pylint: disable-next=unidiomatic-typecheck
     complete = type(value) is str and bool(value) and bool(facts) and isinstance(evidence, CompressionEvidence)
     if complete:
         complete = all(

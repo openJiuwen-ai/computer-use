@@ -49,6 +49,7 @@ class DocumentSize:
             return 5
         if type(value) is int:
             return len(str(value))
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is float:
             return len(utf8(dumps(value)))
         cached = self.memo.get(id(value))

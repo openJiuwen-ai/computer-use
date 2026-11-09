@@ -96,6 +96,7 @@ def _retained_sources(
     result: list[Record] = []
     seen: set[FactKey] = set()
     for part in caption.parts:
+        # pylint: disable-next=unidiomatic-typecheck
         if type(part.value) is not str or not part.value or not part.facts:
             return None
         if utf16_length(part.value) > VALUE_PREVIEW_LIMIT or ";base64," in part.value.lower():
@@ -175,6 +176,7 @@ def _single_child_value_caption(
         return False
     part, retained = caption.parts[0], value.parts[0]
     return (
+        # pylint: disable-next=unidiomatic-typecheck
         type(part.value) is str
         and bool(part.value)
         and part.value == owner["name"] == child.get("value") == retained.value

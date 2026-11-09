@@ -26,6 +26,7 @@ def capture(request: TextSliceRequest) -> TextSliceEvidence:
             if (
                 slot is None
                 or not value
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(slot.value) is not str
                 or slot.value != value
                 or slot.preview is not None
@@ -39,6 +40,7 @@ def capture(request: TextSliceRequest) -> TextSliceEvidence:
                 or any(
                     fact.key.source != ref
                     or fact.key.attribute != key
+                    # pylint: disable-next=unidiomatic-typecheck
                     or type(fact.value) is not str
                     or fact.value != value
                     for fact in slot.facts

@@ -188,18 +188,21 @@ def capture_projected_disclosure(
                 ):
                     continue
                 if (
+                    # pylint: disable-next=unidiomatic-typecheck
                     type(normalized.get("normalized")) is not str
                     or normalized["normalized"] != value
                     or native_field not in record.get("requestedFields", ())
                 ):
                     continue
                 if (
+                    # pylint: disable-next=unidiomatic-typecheck
                     type(record.get("values", {}).get(native_field)) is not str
                     or record["values"][native_field] != value
                 ):
                     continue
                 path = tuple(normalized.get("path", ()))
                 status = record.get("fieldStatus", {}).get(native_field)
+                # pylint: disable-next=unidiomatic-typecheck
                 if not path or type(_native_value(native, path)) is not str or _native_value(native, path) != value:
                     continue
                 if (

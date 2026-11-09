@@ -81,6 +81,7 @@ def covered_value_lines(view: ProjectionView, owner: ViewNode, parts: Sequence[R
     value = view.field_value(ref, "value")
     original = view.native_nodes[ref].get("value")
     anchor = FactKey(SourceKey(ref), "value")
+    # pylint: disable-next=unidiomatic-typecheck
     if type(original) is not str or not original:
         return None
     if utf16_length(original) > VALUE_PREVIEW_LIMIT or ";base64," in original.lower():
@@ -97,6 +98,7 @@ def covered_value_lines(view: ProjectionView, owner: ViewNode, parts: Sequence[R
             or field not in ("name", "description", "value")
         ):
             return None
+        # pylint: disable-next=unidiomatic-typecheck
         if type(text) is not str or not text:
             return None
         if view.native_nodes.get(source, {}).get(field) != text or not _owned(view, ref, source, evidence):

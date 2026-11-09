@@ -29,6 +29,7 @@ def _complete_caption(projection: ProjectionResult, ref: str, slot: AtomSlot) ->
     evidence = projection.source.context.get("compressionEvidence")
     facts = tuple(key for part in source.parts for key in part.facts) if source is not None else ()
     complete = (
+        # pylint: disable-next=unidiomatic-typecheck
         type(slot.value) is str
         and bool(slot.value)
         and slot.preview is None
@@ -66,6 +67,7 @@ def finalize_native_urls(request: AtomFinalizeRequest) -> AtomDocument:
             candidates.append(ref)
         fragments = []
         for slot in atom.slots:
+            # pylint: disable-next=unidiomatic-typecheck
             if slot.key not in ("name", "description", "value") or type(slot.value) is not str or not slot.value:
                 continue
             excerpt = request.disclosure.get(ref, slot.key) if request.disclosure is not None else None

@@ -19,6 +19,7 @@ def captured_text_fields(fields: tuple[GroupField, ...]) -> tuple[CapturedGroupF
     sources: dict[tuple[str, str], CapturedGroupField] = {}
     for field in fields:
         for source in field.sources:
+            # pylint: disable-next=unidiomatic-typecheck
             if type(source.value) is str:
                 key = (source.ref, source.native_field)
                 previous = sources.setdefault(key, source)

@@ -106,6 +106,7 @@ def capture_code_descriptions(
             or source.get("node") != token
             or source.get("field") != "description"
             or tuple(source.get("path", ())) != ("description",)
+            # pylint: disable-next=unidiomatic-typecheck
             or type(source.get("normalized")) is not str
             or source["normalized"] != value
             or record.get("observed") is False

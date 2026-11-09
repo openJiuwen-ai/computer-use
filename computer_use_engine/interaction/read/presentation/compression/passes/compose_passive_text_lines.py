@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 def _caption(view: ProjectionView, node: ViewNode, evidence: CompressionEvidence) -> Record | None:
     """Find a complete whole caption without concatenating different native fields."""
+    # pylint: disable-next=unidiomatic-typecheck
     values = {node[field] for field in ("name", "description", "value") if type(node.get(field)) is str and node[field]}
     if len(values) != 1:
         return None
@@ -78,6 +79,7 @@ def _help_only_owner_region(view: ProjectionView, owner: ViewNode) -> bool:
     """
     if owner["role"] != "group" or not owner.get("help"):
         return False
+    # pylint: disable-next=unidiomatic-typecheck
     if type(owner["help"]) is not str or owner["help"] != view.native_nodes[owner["ref"]].get("help"):
         return False
     return not display_boundary_reasons(view, owner, retained_help=True)

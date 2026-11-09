@@ -52,12 +52,14 @@ def _field_parts(
         return None
     result = []
     for part in presented.parts:
+        # pylint: disable-next=unidiomatic-typecheck
         if type(part.value) is not str or not part.facts:
             return None
         for fact in part.facts:
             original = view.native_nodes.get(fact.source, {})
             if (fact.source, fact.attribute) not in evidence.complete_text or fact.attribute not in _TEXT_FIELDS:
                 return None
+            # pylint: disable-next=unidiomatic-typecheck
             if type(original.get(fact.attribute)) is not str or original[fact.attribute] != part.value:
                 return None
             result.append(dict(sourceRef=fact.source, attribute=fact.attribute, field=field, text=part.value))
@@ -71,6 +73,7 @@ def _text_parts(view: ProjectionView, node: ViewNode, evidence: CompressionEvide
         value = node.get(field)
         if value in (None, ""):
             continue
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is not str:
             return None
         if value in values:
@@ -131,6 +134,7 @@ def _captions(view: ProjectionView, owner: ViewNode, evidence: CompressionEviden
         if field == "value" and (owner.get("valueIsNumber") or owner["role"] in ("checkBox", "switch", "radioButton")):
             continue
         value = owner.get(field)
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is not str or not value:
             continue
         presented = view.field_value(owner["ref"], field)

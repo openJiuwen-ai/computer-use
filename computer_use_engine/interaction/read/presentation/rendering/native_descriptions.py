@@ -162,8 +162,10 @@ def capture_common_role_aliases(
                 or source.get("node") != token
                 or source.get("field") != attribute
                 or tuple(source.get("path", ())) != (field,)
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(actual) is not str
                 or native[token]["values"].get(field) != actual
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(source.get("normalized")) is not str
                 or source["normalized"] != node.get(attribute)
                 or field != "role"
@@ -243,7 +245,9 @@ def capture_native_description_fields(
                 actual = getattr(actual, path[1], None)
             normalized = source_node.get(field) if field == "role" else value
             if (
+                # pylint: disable-next=unidiomatic-typecheck
                 type(value) is not str
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(actual) is not str
                 or actual != value
                 or field in ("valueDescription", "rangeDescription")
@@ -253,8 +257,10 @@ def capture_native_description_fields(
                 or source.get("node") != token
                 or source.get("field") != field
                 or tuple(source.get("path", ())) != path
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(source.get("normalized")) is not str
                 or source["normalized"] != normalized
+                # pylint: disable-next=unidiomatic-typecheck
                 or type(source_node.get(field)) is not str
                 or source_node[field] != normalized
                 or any(

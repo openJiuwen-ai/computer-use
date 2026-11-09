@@ -57,8 +57,10 @@ def array(value: Any) -> list[Any]:
 
 def _freeze_metadata(value: Any) -> Any:
     """Detach one validated pool value into request-local immutable containers."""
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is dict:
         return MappingProxyType({key: _freeze_metadata(item) for key, item in value.items()})
+    # pylint: disable-next=unidiomatic-typecheck
     if type(value) is list:
         return tuple(_freeze_metadata(item) for item in value)
     return value

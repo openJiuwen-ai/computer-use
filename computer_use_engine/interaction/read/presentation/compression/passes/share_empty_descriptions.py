@@ -46,6 +46,7 @@ def share_empty_descriptions(view: ProjectionView, edit: ProjectionEditor) -> No
         for attribute in DESCRIPTION_LABELS:
             if (
                 (ref, attribute) in evidence.complete_descriptions
+                # pylint: disable-next=unidiomatic-typecheck
                 and type(node.get(attribute)) is str
                 and node[attribute] == ""
             ):

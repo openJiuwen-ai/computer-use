@@ -82,16 +82,20 @@ def capture_empty_selected_text_fields(
             or node is None
             or source_node is None
             or summary is None
+            # pylint: disable-next=unidiomatic-typecheck
             or type(native.text.selected_text) is not str
             or native.text.selected_text != ""
+            # pylint: disable-next=unidiomatic-typecheck
             or type(node.get("selectedText")) is not str
             or node["selectedText"] != ""
+            # pylint: disable-next=unidiomatic-typecheck
             or type(source_node.get("selectedText")) is not str
             or source_node["selectedText"] != ""
         ):
             continue
         values = fact["values"]
         if (
+            # pylint: disable-next=unidiomatic-typecheck
             type(values.get("text.selected_text")) is not str
             or values["text.selected_text"] != ""
             or values.get("text.source") != native.text.source
@@ -109,6 +113,7 @@ def capture_empty_selected_text_fields(
         selected = snapshot.fields.get((ref, "text.selected_text"))
         if (
             not _matches_source(selected, token, ("text", "selected_text"), "field", "selectedText")
+            # pylint: disable-next=unidiomatic-typecheck
             or type(selected.get("normalized")) is not str
             or selected["normalized"] != ""
         ):

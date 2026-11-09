@@ -99,8 +99,10 @@ def _control_value_lines(
         source = snapshot.fields.get((ref, "control_value.value"))
         if node is None or node.control_value is None:
             continue
+        # pylint: disable-next=unidiomatic-typecheck
         if type(node.control_value.value) is not str or not node.control_value.value:
             continue
+        # pylint: disable-next=unidiomatic-typecheck
         if node.text is None or type(node.text.source) is not str or not node.text.source:
             continue
         if (
@@ -216,6 +218,7 @@ def _semantic_region(node: NativeNode) -> bool:
         or any(
             item.key in ("item_status", "item_type")
             and item.value is not None
+            # pylint: disable-next=unidiomatic-typecheck
             and not (type(item.value) is str and item.value == "")
             for item in node.supplements
         )
@@ -501,9 +504,11 @@ def capture_evidence(snapshot: SnapshotFacts, native_nodes: Mapping[str, FactNod
             description_path is not None
             and description is not None
             and native is not None
+            # pylint: disable-next=unidiomatic-typecheck
             and type(description.description) is str
             and description.description == ""
             and tuple(source.get("path", ())) == description_path
+            # pylint: disable-next=unidiomatic-typecheck
             and type(native["values"].get(name)) is str
             and native["values"][name] == ""
             and not any(

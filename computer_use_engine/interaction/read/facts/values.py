@@ -33,6 +33,7 @@ def numeric_aliases(
     result = []
     for name in ("control_value.value", "numeric_value.value"):
         other = values.get(name)
+        # pylint: disable-next=unidiomatic-typecheck
         if name == primary or name in statuses or type(other) is not value_type:
             continue
         if other != value or selectors.get((source["node"], paths[name])) != selector:
