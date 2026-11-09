@@ -6,7 +6,7 @@ Integrate Computer Use DeepAgent into an application, or add its desktop tools t
 
 ## 1. Prepare the environment
 
-Install Python 3.12 or 3.13 and `uv`. Build and run the desktop operation service on the computer whose desktop it will operate.
+Install Python 3.11, 3.12 or 3.13 and `uv`. Build and run the desktop operation service on the computer whose desktop it will operate.
 
 Prepare the native dependencies on the computer whose desktop you will operate:
 
@@ -27,10 +27,10 @@ sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync --python 3.12 --no-dev --extra agent
+uv sync --python 3.11 --no-dev --extra agent
 ```
 
-The SDK, MCP and Agent code are installed in editable mode into the checkout's `.venv`, together with openJiuwen and other Agent dependencies. This command explicitly selects Python 3.12; Python 3.13 is also supported. Run the following commands from the checkout root.
+The SDK, MCP and Agent code are installed in editable mode into the checkout's `.venv`, together with openJiuwen and other Agent dependencies. This command selects Python 3.11. Use `--python 3.12` or `--python 3.13` to match an existing environment. Run the following commands from the checkout root.
 
 Build or prepare the native backend, then check desktop access:
 
@@ -93,7 +93,7 @@ for image locators and post-action observation semantics.
 
 ## 4. Integrate an existing openJiuwen project
 
-The host project must also use Python 3.12 or 3.13. In its directory, add this checkout as an editable dependency to the host environment:
+The host project must also use Python 3.11, 3.12 or 3.13. In its directory, add this checkout as an editable dependency to the host environment:
 
 ```bash
 uv add --editable /absolute/path/to/computer-use --extra agent

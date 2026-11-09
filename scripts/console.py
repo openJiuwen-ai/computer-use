@@ -13,10 +13,21 @@ _OUTPUT.propagate = False
 _LOCK = RLock()
 
 
-def report(message: object, *, stream=None) -> None:
-    """Emit one message to the supplied stream, defaulting to standard output."""
+class _StrictStreamHandler(logging.StreamHandler):
+    """Keep output delivery errors visible to command-line callers."""
+
+    def handleError(self, record):
+        error = sys.exception()
+        if error is None:
+            raise RuntimeError("Output error handler requires an active exception")
+        raise error
+
+
+def report(message: object, *, stream=None, raise_errors: bool = False) -> None:
+    """Emit to stdout by default; result packets can require delivery errors."""
     with _LOCK:
-        handler = logging.StreamHandler(sys.stdout if stream is None else stream)
+        handler_type = _StrictStreamHandler if raise_errors else logging.StreamHandler
+        handler = handler_type(sys.stdout if stream is None else stream)
         _OUTPUT.addHandler(handler)
         try:
             _OUTPUT.info("%s", message)

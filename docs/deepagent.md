@@ -6,7 +6,7 @@
 
 ## 1. 准备环境
 
-安装 Python 3.12 或 3.13 及 `uv`。构建和电脑操作服务均在被操作桌面的电脑上运行。
+安装 Python 3.11、3.12 或 3.13 及 `uv`。构建和电脑操作服务均在被操作桌面的电脑上运行。
 
 在需要操作桌面的目标电脑上准备原生依赖：
 
@@ -27,10 +27,10 @@ sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync --python 3.12 --no-dev --extra agent
+uv sync --python 3.11 --no-dev --extra agent
 ```
 
-SDK、MCP 和 Agent 代码以 editable 方式安装到仓库的 `.venv`，同时安装 openJiuwen 等 Agent 依赖。这里显式选择 Python 3.12；已有 Python 3.13 环境也可使用 3.13。以下命令均在仓库根目录执行。
+SDK、MCP 和 Agent 代码以 editable 方式安装到仓库的 `.venv`，同时安装 openJiuwen 等 Agent 依赖。此命令选择 Python 3.11。已有环境可通过 `--python 3.12` 或 `--python 3.13` 选择对应版本。以下命令均在仓库根目录执行。
 
 构建或准备原生后端，并检查桌面访问条件：
 
@@ -92,7 +92,7 @@ Agent 使用统一执行管线。macOS 对象操作固定不注入全局鼠标�
 
 ## 4. 接入已有 openJiuwen 项目
 
-宿主项目同样使用 Python 3.12 或 3.13。在宿主项目目录中，将本仓库作为 editable 依赖安装到宿主项目的环境：
+宿主项目同样使用 Python 3.11、3.12 或 3.13。在宿主项目目录中，将本仓库作为 editable 依赖安装到宿主项目的环境：
 
 ```bash
 uv add --editable /absolute/path/to/computer-use --extra agent

@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
+from typing import TypeAlias
 
 from computer_use.interaction.read.presentation.interface.model import InterfaceBlock, InterfaceDocument
 
-type LayoutValue = str | int | None | tuple[LayoutValue, ...]
-type BlockLayoutSignature = tuple[tuple[str, LayoutValue], ...]
-type InterfaceLayoutSignature = tuple[BlockLayoutSignature, ...]
+LayoutValue: TypeAlias = str | int | None | tuple["LayoutValue", ...]
+BlockLayoutSignature: TypeAlias = tuple[tuple[str, LayoutValue], ...]
+InterfaceLayoutSignature: TypeAlias = tuple[BlockLayoutSignature, ...]
 
 
 def _block_signature(block: InterfaceBlock) -> BlockLayoutSignature:

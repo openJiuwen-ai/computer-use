@@ -6,7 +6,7 @@ Add desktop operation tools to an existing agent over stdio MCP. The agent clien
 
 ## 1. Prepare the environment
 
-Install Python 3.12 or later and `uv`. Build and run the MCP server on the computer whose desktop it will operate.
+Install Python 3.11 or later and `uv`. Build and run the MCP server on the computer whose desktop it will operate.
 
 Prepare the native dependencies on the computer whose desktop you will operate:
 

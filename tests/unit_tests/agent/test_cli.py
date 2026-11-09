@@ -138,6 +138,31 @@ def test_cli_single_task(model_server, tmp_path, monkeypatch, capsys):
     assert "cli evidence" in records[0].read_text(encoding="utf-8")
 
 
+def test_cli_iteration_limit_reports_failure_after_streamed_output(model_server, tmp_path, monkeypatch, capsys):
+    reply = tool_call("print('one execution')")
+    reply["content"] = "I will run the operation."
+    server = model_server([reply])
+    path = tmp_path / "model.json"
+    path.write_text(
+        json.dumps(
+            {
+                "model": "test-model",
+                "api_key": "test-only",
+                "api_base": server.model().model_client_config.api_base,
+                "max_iterations": 1,
+            }
+        )
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    result = asyncio.run(main(["--config", str(path), "Execute a tool and report the result"]))
+    output = capsys.readouterr().out
+    assert "Max iterations reached without completion" in output
+    assert result == 1
+    assert len(server.requests) == 1
+
+
 def test_interactive_commands_preserve_execution_session(model_server, tmp_path, monkeypatch):
     server = model_server(
         [

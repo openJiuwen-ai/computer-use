@@ -11,7 +11,6 @@ import sys
 
 from computer_use.native import driver_exec
 from computer_use.native.preview import is_preview_event
-from computer_use.session.operations import eager
 
 from .diagnostics import Journal
 from .output import OutputBuffer, is_output
@@ -27,6 +26,12 @@ _LOG = logging.getLogger(__name__)
 
 def execution_error(message):
     return dict(content=[dict(type="text", text=message)], isError=True)
+
+
+def completed(value):
+    future = asyncio.get_running_loop().create_future()
+    future.set_result(value)
+    return future
 
 
 class ExecutionSession:
@@ -52,30 +57,47 @@ class ExecutionSession:
         task.add_done_callback(self._tasks.discard)
         return task
 
-    @eager
-    async def execute(self, code, signal=None, title=None, on_progress=None):
+    def execute(self, code, signal=None, title=None, on_progress=None):
+        """Reserve execution before scheduling, including when not yet awaited."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+
+            async def deferred():
+                return await self.execute(code, signal, title, on_progress)
+
+            return deferred()
         if self._closed:
-            return execution_error("Execution session is closed.")
+            return completed(execution_error("Execution session is closed."))
         if self._resetting is not None:
-            result = await asyncio.shield(self._resetting)
-            return result if result.get("isError") else await self.execute(code, signal, title, on_progress)
+            return self._track(self._after_reset(self._resetting, code, signal, title, on_progress))
         if self._retiring is not None:
-            return execution_error(("Native cleanup: pending. Code execution: not started."))
+            return completed(execution_error("Native cleanup: pending. Code execution: not started."))
         if self._pending is not None or self._starting:
-            return execution_error("Another call is running. This call's code execution: not started.")
+            return completed(execution_error("Another call is running. This call's code execution: not started."))
         if signal is not None and signal.is_set():
-            return execution_error("Call cancelled before execution.")
+            return completed(execution_error("Call cancelled before execution."))
         self._starting = True
         generation = self._generation
         starting = self._track(self._start())
         self._start_task = starting
 
-        def started(_):
-            if self._start_task is starting:
-                self._start_task = None
-                self._starting = False
+        execution = self._track(self._execute(starting, generation, code, signal, title, on_progress))
 
-        starting.add_done_callback(started)
+        def finished(task):
+            # Cancellation before the coroutine's first step cannot enter its
+            # try/finally. Retire the already reserved startup in that case too.
+            if task.cancelled() and generation == self._generation:
+                self.reset("Call cancelled.")
+
+        execution.add_done_callback(finished)
+        return execution
+
+    async def _after_reset(self, resetting, code, signal, title, on_progress):
+        result = await asyncio.shield(resetting)
+        return result if result.get("isError") else await self.execute(code, signal, title, on_progress)
+
+    async def _execute(self, starting, generation, code, signal, title, on_progress):
         startup_cancel = None
         if signal is not None:
 
@@ -119,6 +141,9 @@ class ExecutionSession:
         finally:
             if startup_cancel is not None:
                 startup_cancel.cancel()
+            if self._start_task is starting:
+                self._start_task = None
+                self._starting = False
         if generation != self._generation or self._closed:
             reset = await asyncio.shield(self._resetting) if self._resetting is not None else None
             reason = (
@@ -485,6 +510,9 @@ class ExecutionSession:
                     await asyncio.shield(starting)
                 except Exception:
                     _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
+                if self._start_task is starting:
+                    self._start_task = None
+                    self._starting = False
             # Process creation yields in Python. A reset during that yield must
             # retire the newly created worker before admitting any later call.
             late, self._child = self._child, None

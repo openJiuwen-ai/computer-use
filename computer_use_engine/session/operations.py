@@ -6,7 +6,6 @@ import time
 import weakref
 from contextlib import contextmanager
 from contextvars import ContextVar
-from functools import wraps
 from uuid import uuid4
 
 # Private variables hold mutable session state.
@@ -119,21 +118,6 @@ def operation_budget(timeout_ms=None):
         yield current_operation_budget()
     finally:
         _budget.reset(token)
-
-
-def eager(function):
-    """Match Promise calls: start immediately, including when await is omitted."""
-
-    @wraps(function)
-    def start(*args, **kwargs):
-        coroutine = function(*args, **kwargs)
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return coroutine
-        return asyncio.Task(coroutine, loop=loop, eager_start=True)
-
-    return start
 
 
 def operation_checkpoint():

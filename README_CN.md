@@ -7,7 +7,7 @@
 [English](README.md) | 简体中文
 
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green.svg" alt="License" /></a>
-<img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python" />
+<img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python" />
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg" alt="Platform" />
 
 </div>
