@@ -111,12 +111,9 @@ def pack_identical_leaves(lines: list[str], roots: Sequence[NodeView], context: 
         parent, position = siblings[first[2]]
         while index + len(refs) < len(lines):
             item = candidate(index + len(refs))
-            if (
-                item is None
-                or item[1] != first[1]
-                or item[3] != first[3]
-                or siblings[item[2]] != (parent, position + len(refs))
-            ):
+            if item is None or item[1] != first[1] or item[3] != first[3]:
+                break
+            if siblings[item[2]] != (parent, position + len(refs)):
                 break
             refs.append(item[2])
         packed = first[1] + "Elements [" + first[3] + "]: " + _ordered_references(refs)

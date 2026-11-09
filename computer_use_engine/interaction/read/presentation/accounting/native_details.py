@@ -72,12 +72,9 @@ def collect_native_details(
         entries = () if part.uncompressed else part.rendered.get("factAccounting", {}).get("values", ())
         for entry in entries:
             ref = entry["ref"]
-            if (
-                entry["property"] != native_property
-                or entry["kind"] != "supplement"
-                or references is not None
-                and ref not in references
-            ):
+            if entry["property"] != native_property or entry["kind"] != "supplement":
+                continue
+            if references is not None and ref not in references:
                 continue
             source = snapshot.fields.get((ref, native_property))
             token = snapshot.refs.get(ref)

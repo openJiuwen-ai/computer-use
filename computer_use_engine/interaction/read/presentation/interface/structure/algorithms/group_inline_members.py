@@ -74,11 +74,15 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
                     prefix_signature(draft, target) != signature
                     or _incomplete(draft, target)
                     or draft.evidence[target].hidden
-                    or not single_line(node)
+                ):
+                    break
+                if (
+                    not single_line(node)
                     or not same_scope(draft, (*refs, target))
                     or not same_region(draft, (*refs, target))
-                    or characters + cost > 240
                 ):
+                    break
+                if characters + cost > 240:
                     break
                 refs.append(target)
                 characters += cost

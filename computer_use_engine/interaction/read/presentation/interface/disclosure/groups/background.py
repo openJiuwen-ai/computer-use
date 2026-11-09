@@ -78,13 +78,9 @@ def candidate(
     """Fold only a known blocked window while exposing important state and all gaps."""
     request = classified.request
     context = request.window_context
-    if (
-        context is None
-        or not context.scope_confirmed
-        or not context.confirmed_blockers
-        or context.current
-        or context.modal is True
-    ):
+    if context is None or not context.scope_confirmed or not context.confirmed_blockers:
+        return None, "background-requires-fixed-scope-and-confirmed-blocking"
+    if context.current or context.modal is True:
         return None, "background-requires-fixed-scope-and-confirmed-blocking"
     root = request.interface.blocks[root_key]
     if root.primary_ref is None or not root.children:

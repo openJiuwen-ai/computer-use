@@ -341,11 +341,9 @@ def expand_field_prefixes(lines: list[str]) -> list[str]:
             edits: list[tuple[int, int, str]] = []
             for match in _SUFFIX.finditer(line):
                 within_entry = any(start <= match.start() < end for start, end in entry_ranges[index])
-                if (
-                    not within_entry
-                    or match.start() not in outside
-                    or (match.start() and line[match.start() - 1] != " ")
-                ):
+                if not within_entry or match.start() not in outside:
+                    continue
+                if match.start() and line[match.start() - 1] != " ":
                     continue
                 if match[1] not in prefixes:
                     raise ValueError("field suffix has no declaration")

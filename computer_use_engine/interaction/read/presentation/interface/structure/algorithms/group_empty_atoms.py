@@ -21,24 +21,18 @@ def _empty_atom(draft: InterfaceDraft, key: str) -> str | None:
     """Find a complete leaf whose complete public meaning is its identity and prefix."""
     block = draft.blocks[key]
     ref = block.primary_ref
+    if ref is None or block.children or block.layout != "tree":
+        return None
     if (
-        ref is None
-        or block.children
-        or block.layout != "tree"
-        or block.kind in ("window", "region", "field", "record", "table")
+        block.kind in ("window", "region", "field", "record", "table")
         or draft.evidence[ref].incomplete
         or draft.evidence[ref].hidden
     ):
         return None
     atom = draft.atoms.atoms[ref]
-    if (
-        atom.slots
-        or atom.actions
-        or atom.actions_unavailable
-        or atom.declarations
-        or atom.coverage.partial
-        or atom.coverage.unexpanded_menu
-    ):
+    if atom.slots or atom.actions or atom.actions_unavailable:
+        return None
+    if atom.declarations or atom.coverage.partial or atom.coverage.unexpanded_menu:
         return None
     return ref
 
@@ -72,8 +66,9 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
                     prefix_signature(draft, candidate) != signature
                     or draft.source.parents.get(candidate) != native_parent
                     or not same_scope(draft, (*refs, candidate))
-                    or not same_region(draft, (*refs, candidate))
                 ):
+                    break
+                if not same_region(draft, (*refs, candidate)):
                     break
                 refs.append(candidate)
                 end += 1
