@@ -9,7 +9,7 @@ them. Elements returned by scoped lookup continue to belong to the public App.
 
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.query.instances.scope import adopt, require_identity, validate_session
-from computer_use.native.query.directory import SurfaceReadProfile, select_application, select_surface, surfaces_query
+from computer_use.native.query.directory import SurfaceReadProfile, select_application, select_surface
 from computer_use.native.scopes import RunningApplication
 from computer_use.session.interfaces import LookupContext, WindowIdentity
 from computer_use.session.state import AppState
@@ -77,7 +77,7 @@ def window_scope(controller, app, ref):
 
 async def bind_window_title(controller, app):
     title = app._window_title
-    applications = await controller.reader.directory._query({"kind": "applications", "windowTitle": title}, 30000)
+    applications = await controller.reader.directory.applications_for_window_title(title)
     matches = []
     for application in applications["applications"]:
         for window in application["windows"]:
@@ -89,10 +89,8 @@ async def bind_window_title(controller, app):
     if not matches:
         raise local_failure("no running Windows window has this exact caption", "element_not_found")
     application, window = matches[0]
-    directory = await controller.reader.directory._query(
-        surfaces_query(application["id"], profile=SurfaceReadProfile.VISUAL,
-                       capabilities=controller.transport.capabilities),
-        30000,
+    directory = await controller.reader.directory.scoped_surfaces(
+        application["id"], profile=SurfaceReadProfile.VISUAL, capabilities=controller.transport.capabilities
     )
     item = next((item for item in directory["surfaces"] if (
         item["window"] == window["window"] and item["instance"] == window["selector"] and item["title"] == title

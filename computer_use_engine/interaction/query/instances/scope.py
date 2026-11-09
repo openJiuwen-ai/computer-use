@@ -11,7 +11,7 @@ from computer_use.diagnostics import local_failure
 from computer_use.interaction.query.instances.membership import ancestor, interaction_contains
 from computer_use.interaction.read.model import WindowSelectionRequired
 from computer_use.native.contracts import Knowledge
-from computer_use.native.query.directory import SurfaceReadProfile, select_application, surfaces_query
+from computer_use.native.query.directory import SurfaceReadProfile, select_application
 from computer_use.native.scopes import (
     FixedWindowInvalidated,
     FixedWindowUnconfirmed,
@@ -196,14 +196,11 @@ async def refresh(controller, ui, *, accessibility=True):
         running = RunningApplication(instance.selector, instance.name, instance.session)
     if running is None:
         raise local_failure("this UI has no observed application", "stale_target")
-    directory = await controller.reader.directory._query(
-        surfaces_query(
-            running.application,
-            profile=SurfaceReadProfile.ACCESSIBILITY if accessibility else SurfaceReadProfile.VISUAL,
-            capabilities=controller.transport.capabilities,
-            root_window=ui._anchor if accessibility and getattr(ui, "_strict_window", False) else None,
-        ),
-        30000,
+    directory = await controller.reader.directory.scoped_surfaces(
+        running.application,
+        profile=SurfaceReadProfile.ACCESSIBILITY if accessibility else SurfaceReadProfile.VISUAL,
+        capabilities=controller.transport.capabilities,
+        root_window=ui._anchor if accessibility and getattr(ui, "_strict_window", False) else None,
     )
     adopt(controller, ui, directory)
     validate_session(controller, ui)

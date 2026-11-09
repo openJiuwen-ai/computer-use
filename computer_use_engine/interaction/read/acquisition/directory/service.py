@@ -12,6 +12,7 @@ from computer_use.native.query.directory import (
     select_application,
     select_surface,
     selected_window,
+    surfaces_query,
 )
 
 __all__ = ["NativeDirectory", "select_application", "select_surface", "selected_window"]
@@ -39,6 +40,10 @@ class NativeDirectory:
             query["includeEnded"] = True
         return await self._query(query, timeout_ms, application_selector=selector)
 
+    async def applications_for_window_title(self, title: str) -> DirectoryFacts:
+        """Observe applications with an exact native window-caption match."""
+        return await self._query({"kind": "applications", "windowTitle": title}, 30000)
+
     async def window_catalogue(self, app_name: str) -> DirectoryFacts:
         return await self._query(dict(kind="windowCatalogue", appName=app_name), 30000)
 
@@ -46,6 +51,18 @@ class NativeDirectory:
         if not isinstance(application, str) or not application:
             raise ValueError("An observed running-application id is required")
         return await self._query(dict(kind="surfaces", application=application), timeout_ms)
+
+    async def scoped_surfaces(
+        self,
+        application: str,
+        *,
+        profile: SurfaceReadProfile,
+        capabilities: frozenset[str],
+        root_window: str | None = None,
+    ) -> DirectoryFacts:
+        """Use the declared surface-read isolation for a retained application scope."""
+        query = surfaces_query(application, profile=profile, capabilities=capabilities, root_window=root_window)
+        return await self._query(query, 30000)
 
     async def surface_batch(
         self,
