@@ -73,27 +73,24 @@ def generated_lines(
         node, record = nodes.get(ref), records.get(ref)
         prefix = frame.node_prefixes.get(ref)
         span = frame.node_line_ranges.get(ref)
-        if (
-            node is None
-            or record is None
-            or prefix is None
-            or span is None
-            or occurrences[ref] != 1
-            or counts[ref] != 1
-            or line_counts[ref] != 1
-            or span[1] - span[0] != 1
-            or "\n" in record.text
-            or record.partial
-            or record.hints
-            or record.related
-            or has_incomplete_children(node)
-            or node["role"] in _SCOPES
-            or node.get("subrole") in ("dialog", "systemDialog", "popover")
-            or not record.text.startswith(("\t" * record.depth if allow_reindent else match[1]) + ref + " " + prefix)
-            or not (match[3] == prefix or match[3].startswith(prefix + " ") or match[3].startswith(prefix + ", "))
-            or not safe_record_text(match[3])
-            or utf16_length(match[3]) > 320
-        ):
+        if node is None or record is None or prefix is None:
+            continue
+        if span is None:
+            continue
+        if occurrences[ref] != 1 or counts[ref] != 1 or line_counts[ref] != 1:
+            continue
+        if span[1] - span[0] != 1 or "\n" in record.text or record.partial:
+            continue
+        if record.hints or record.related or has_incomplete_children(node):
+            continue
+        if node["role"] in _SCOPES or node.get("subrole") in ("dialog", "systemDialog", "popover"):
+            continue
+        indent = "\t" * record.depth if allow_reindent else match[1]
+        if not record.text.startswith(indent + ref + " " + prefix):
+            continue
+        if not (match[3] == prefix or match[3].startswith(prefix + " ") or match[3].startswith(prefix + ", ")):
+            continue
+        if not safe_record_text(match[3]) or utf16_length(match[3]) > 320:
             continue
         result[ref] = GeneratedLine(node, record, index, match[1], prefix, match[3])
     return result, positions

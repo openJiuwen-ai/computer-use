@@ -25,6 +25,16 @@ class ExecutionCancellation:
         self.cancelled = threading.Event()
         self._tasks = set()
 
+    def track_task(self, task):
+        self._tasks.add(task)
+
+    def untrack_task(self, task):
+        self._tasks.discard(task)
+
+    async def drain(self):
+        while self._tasks:
+            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+
     def cancel(self):
         if self.cancelled.is_set():
             return
@@ -104,13 +114,13 @@ class SessionExecutor:
             task = asyncio.current_task()
             self._tasks.add(task)
             if cancellation is not None:
-                cancellation._tasks.add(task)
+                cancellation.track_task(task)
             try:
                 return await factory()
             finally:
                 self._tasks.discard(task)
                 if cancellation is not None:
-                    cancellation._tasks.discard(task)
+                    cancellation.untrack_task(task)
 
         future = asyncio.run_coroutine_threadsafe(invoke(), self.loop)
         try:
@@ -156,8 +166,7 @@ class SessionExecutor:
         self._resources.pop(id(controller), None)
 
     async def drain(self, cancellation):
-        while cancellation._tasks:
-            await asyncio.gather(*tuple(cancellation._tasks), return_exceptions=True)
+        await cancellation.drain()
 
     async def aclose(self):
         if self._closed:

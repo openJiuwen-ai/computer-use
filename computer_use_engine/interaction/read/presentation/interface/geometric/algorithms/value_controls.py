@@ -21,13 +21,12 @@ from computer_use.interaction.read.presentation.interface.regions.scope import (
 def _readonly_value(block: InterfaceBlock, draft: InterfaceDraft) -> str | None:
     """Require a complete label/value field with an explicitly readonly text control."""
     target, label = block.field_target_ref, block.label_ref
+    if block.kind != "field" or block.visual_unit:
+        return None
+    if target is None or label is None or len(block.children) != 2:
+        return None
     if (
-        block.kind != "field"
-        or block.visual_unit
-        or target is None
-        or label is None
-        or len(block.children) != 2
-        or any(draft.blocks[key].children for key in block.children)
+        any(draft.blocks[key].children for key in block.children)
         or set(block_sources(block.key, draft.blocks)) != {target, label}
     ):
         return None
@@ -47,12 +46,11 @@ def _selector(block: InterfaceBlock, draft: InterfaceDraft) -> str | None:
     if ref is None or block.children:
         return None
     node = draft.projected_nodes[ref]
-    if (
-        node["role"] not in ("button", "menuButton", "popUpButton")
-        or node.get("enabled") is False
-        or node.get("subrole") in ("close", "minimize", "zoom", "fullscreen")
-        or node.get("capabilities", {}).get("click") != "available"
-    ):
+    if node["role"] not in ("button", "menuButton", "popUpButton") or node.get("enabled") is False:
+        return None
+    if node.get("subrole") in ("close", "minimize", "zoom", "fullscreen"):
+        return None
+    if node.get("capabilities", {}).get("click") != "available":
         return None
     return ref
 
@@ -73,14 +71,11 @@ def associate_value_controls(draft: InterfaceDraft) -> InterfaceDraft:
         return draft
     blocks, decisions = dict(draft.blocks), []
     for parent in draft.blocks.values():
-        if (
-            parent.kind in ("field", "table", "collection", "record")
-            or parent.layout != "tree"
-            or parent.primary_ref is None
-            or ordered_ancestry(parent.primary_ref, draft)
-            or draft.evidence[parent.primary_ref].incomplete
-            or draft.evidence[parent.primary_ref].hidden
-        ):
+        if parent.kind in ("field", "table", "collection", "record") or parent.layout != "tree":
+            continue
+        if parent.primary_ref is None or ordered_ancestry(parent.primary_ref, draft):
+            continue
+        if draft.evidence[parent.primary_ref].incomplete or draft.evidence[parent.primary_ref].hidden:
             continue
         output, index = [], 0
         while index < len(parent.children):

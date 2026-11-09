@@ -111,20 +111,22 @@ def transparent_group(ref: str, draft: InterfaceDraft | InterfaceDocument) -> bo
     )
     hidden = node.get("visible") is False or node.get("showing") is False or node.get("offscreen") is True
     caps = node.get("capabilities")
+    if node["role"] != "group" or incomplete or hidden:
+        return False
+    if not isinstance(caps, Mapping) or not caps:
+        return False
+    if any(caps.get(key) != "unavailable" for key in _PASSIVE_CAPABILITIES):
+        return False
+    if any(value != "unavailable" for value in caps.values()):
+        return False
+    if "actions" not in node or node["actions"] or node.get("enabled") is False:
+        return False
+    if node.get("subrole") not in (None, "", "hostingView"):
+        return False
+    if node.get("roleDescription") not in (None, "", "group", "组", "container"):
+        return False
     if (
-        node["role"] != "group"
-        or incomplete
-        or hidden
-        or not isinstance(caps, Mapping)
-        or not caps
-        or any(caps.get(key) != "unavailable" for key in _PASSIVE_CAPABILITIES)
-        or any(value != "unavailable" for value in caps.values())
-        or "actions" not in node
-        or node["actions"]
-        or node.get("enabled") is False
-        or node.get("subrole") not in (None, "", "hostingView")
-        or node.get("roleDescription") not in (None, "", "group", "组", "container")
-        or any(node.get(key) is not None and node.get(key) != "" for key in _CONTENT_FIELDS)
+        any(node.get(key) is not None and node.get(key) != "" for key in _CONTENT_FIELDS)
         or any(node.get(key) for key in _OWNED_STATE)
         or any(key in node for key in _STRUCTURAL_FIELDS)
     ):

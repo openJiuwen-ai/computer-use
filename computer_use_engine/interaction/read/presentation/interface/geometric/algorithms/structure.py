@@ -81,13 +81,9 @@ def _label_evidence(label: str, targets: tuple[str, ...], draft: InterfaceDraft)
 
 def _candidate(key: str, draft: InterfaceDraft) -> _Subfield | None:
     row = draft.blocks[key]
-    if (
-        row.layout != "visual-row"
-        or row.primary_ref is not None
-        or row.source_refs
-        or len(row.children) < 2
-        or not row_geometry(row.children, draft, draft.blocks)
-    ):
+    if row.layout != "visual-row" or row.primary_ref is not None or row.source_refs:
+        return None
+    if len(row.children) < 2 or not row_geometry(row.children, draft, draft.blocks):
         return None
     refs = tuple(draft.blocks[child].primary_ref for child in row.children)
     if any(ref is None for ref in refs):

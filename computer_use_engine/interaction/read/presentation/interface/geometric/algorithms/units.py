@@ -63,23 +63,20 @@ def _same_visual_control(target: str, label: str, draft: InterfaceDraft) -> bool
     selection_row = control["role"] in ("row", "cell") and (
         control.get("selectable") is True or control.get("selected") is True
     )
-    if (
-        control["role"] not in CONTAINED_CAPTIONS
-        and not form_control(control)
-        and not selection_row
-        or caption["role"] != "staticText"
-        or caption.get("children")
-        or not any(
-            isinstance(caption.get(key), str) and caption[key].strip() for key in ("name", "value", "description")
-        )
-        or any(
-            (draft.evidence[ref].boundary and not (selection_row and ref == target))
-            or draft.evidence[ref].hidden
-            or draft.evidence[ref].incomplete
-            for ref in refs
-        )
-        or not same_scope(draft, refs)
+    if control["role"] not in CONTAINED_CAPTIONS and not form_control(control) and not selection_row:
+        return False
+    if caption["role"] != "staticText" or caption.get("children"):
+        return False
+    if not any(isinstance(caption.get(key), str) and caption[key].strip() for key in ("name", "value", "description")):
+        return False
+    if any(
+        (draft.evidence[ref].boundary and not (selection_row and ref == target))
+        or draft.evidence[ref].hidden
+        or draft.evidence[ref].incomplete
+        for ref in refs
     ):
+        return False
+    if not same_scope(draft, refs):
         return False
     target_scope, label_scope = (reading_scope(ref, draft) for ref in refs)
     if target_scope != label_scope or any(scope.startswith("unresolved:") for scope in target_scope):
@@ -115,12 +112,9 @@ def _contained_caption_path(target: str, draft: InterfaceDraft) -> tuple[str, ..
         if len(children) != 1 or children != original_children:
             return ()
         child = children[0]
-        if (
-            child in visited
-            or child not in draft.projected_nodes
-            or draft.source.parents.get(child) != ref
-            or draft.projected_parents.get(child) != ref
-        ):
+        if child in visited or child not in draft.projected_nodes:
+            return ()
+        if draft.source.parents.get(child) != ref or draft.projected_parents.get(child) != ref:
             return ()
         if source is not None:
             report = source.parent_reports.get(child)
@@ -167,21 +161,14 @@ def _duplicate_child_caption(target: str, draft: InterfaceDraft) -> str | None:
                 return None
     target_atom, child_atom = draft.atoms.atoms[target], draft.atoms.atoms[child]
     captions = tuple(slot for slot in target_atom.slots if slot.placement == "caption")
-    if (
-        len(captions) != 1
-        or not isinstance(captions[0].value, str)
-        or not captions[0].value
-        or len(child_atom.slots) != 1
-    ):
+    if len(captions) != 1 or not isinstance(captions[0].value, str) or not captions[0].value:
+        return None
+    if len(child_atom.slots) != 1:
         return None
     slot = child_atom.slots[0]
-    if (
-        slot.key not in ("name", "description", "value")
-        or slot.format != "text"
-        or slot.value != captions[0].value
-        or slot.protection
-        or any(character in slot.value for character in ("\r", "\n", "\t"))
-    ):
+    if slot.key not in ("name", "description", "value") or slot.format != "text" or slot.value != captions[0].value:
+        return None
+    if slot.protection or any(character in slot.value for character in ("\r", "\n", "\t")):
         return None
     return child if _same_visual_control(target, child, draft) else None
 
@@ -245,12 +232,9 @@ def compose_control_units(draft: InterfaceDraft) -> InterfaceDraft:
     used: set[str] = set()
     for target in draft.order:
         label = labels.get(target)
-        if (
-            not isinstance(label, str)
-            or users.get(label) != [target]
-            or used.intersection((target, label))
-            or not _same_visual_control(target, label, draft)
-        ):
+        if not isinstance(label, str) or users.get(label) != [target]:
+            continue
+        if used.intersection((target, label)) or not _same_visual_control(target, label, draft):
             continue
         span = member_span((target, label), draft, blocks)
         if span is None or blocks[span.parent].kind == "field":

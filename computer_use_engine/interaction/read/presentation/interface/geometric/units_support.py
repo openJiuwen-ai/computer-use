@@ -69,19 +69,15 @@ def inline_unit_refs(key: str, blocks: Mapping[str, InterfaceBlock]) -> tuple[st
         )
     target, label = block.field_target_ref, block.label_ref
     roles = dict(block.member_roles)
-    if (
-        not block.visual_unit
-        or block.kind != "field"
-        or block.source_refs
-        or block.layout not in ("fields", "control-unit")
-        or target is None
-        or label is None
-        or target == label
-        or len(roles) != len(block.member_roles)
-        or roles.get(target) != "control"
-        or roles.get(label) != "label"
-        or any(role != "content" for ref, role in roles.items() if ref not in (target, label))
-    ):
+    if not block.visual_unit or block.kind != "field" or block.source_refs:
+        return None
+    if block.layout not in ("fields", "control-unit"):
+        return None
+    if target is None or label is None or target == label:
+        return None
+    if len(roles) != len(block.member_roles) or roles.get(target) != "control" or roles.get(label) != "label":
+        return None
+    if any(role != "content" for ref, role in roles.items() if ref not in (target, label)):
         return None
     sources: list[str] = []
     visited: set[str] = set()
@@ -174,25 +170,24 @@ def row_unit(key: str, draft: InterfaceDraft, blocks: Mapping[str, InterfaceBloc
     refs = inline_unit_refs(key, blocks)
     if refs is None:
         return None
-    if (
-        not same_scope(draft, refs)
-        or len({reading_scope(ref, draft) for ref in refs}) != 1
-        or draft.geometric_sources is not None
-        and not set(refs) <= draft.geometric_sources.allowed_layout_refs
-    ):
+    if not same_scope(draft, refs) or len({reading_scope(ref, draft) for ref in refs}) != 1:
+        return None
+    if draft.geometric_sources is not None and not set(refs) <= draft.geometric_sources.allowed_layout_refs:
         return None
     boxes = []
     path = blocks[key].layout == "record-path"
     for ref in refs:
         node, evidence = draft.projected_nodes[ref], draft.evidence[ref]
+        if evidence.boundary and not path:
+            return None
+        if evidence.incomplete or evidence.hidden:
+            return None
+        if ordered_ancestry(ref, draft) and not path:
+            return None
+        if not single_line(node):
+            return None
         if (
-            (evidence.boundary and not path)
-            or evidence.incomplete
-            or evidence.hidden
-            or ordered_ancestry(ref, draft)
-            and not path
-            or not single_line(node)
-            or node.get("subrole") in ("close", "minimize", "zoom", "fullscreen")
+            node.get("subrole") in ("close", "minimize", "zoom", "fullscreen")
             or node["role"] in ("closeButton", "minimizeButton", "zoomButton")
         ):
             return None
@@ -202,16 +197,13 @@ def row_unit(key: str, draft: InterfaceDraft, blocks: Mapping[str, InterfaceBloc
         boxes.append(box)
         if len(refs) > 1 and draft.atoms is not None:
             atom = draft.atoms.atoms.get(ref)
-            if (
-                atom is None
-                or atom.coverage.partial
-                or atom.declarations
-                or any(
-                    slot.placement == "block"
-                    or isinstance(slot.value, str)
-                    and any(char in slot.value for char in ("\r", "\n", "\t", "|"))
-                    for slot in atom.slots
-                )
+            if atom is None or atom.coverage.partial or atom.declarations:
+                return None
+            if any(
+                slot.placement == "block"
+                or isinstance(slot.value, str)
+                and any(char in slot.value for char in ("\r", "\n", "\t", "|"))
+                for slot in atom.slots
             ):
                 return None
     if len({box.space for box in boxes}) != 1:

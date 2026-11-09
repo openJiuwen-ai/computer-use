@@ -75,16 +75,15 @@ def incremental_snapshot(
     for root in prepared.roots:
         if checkpoint is not None:
             checkpoint()
-        if (
-            root.failure is not None
-            or root.projection is None
-            or root.source is None
-            or root.interface is None
-            or root.atoms is None
-            or root.collections is not None and root.collections.tables
-            or root.disclosure is not None and root.disclosure.excerpts
-            or root.groups is not None and root.groups.groups
-        ):
+        if root.failure is not None or root.projection is None or root.source is None:
+            return None
+        if root.interface is None or root.atoms is None:
+            return None
+        if root.collections is not None and root.collections.tables:
+            return None
+        if root.disclosure is not None and root.disclosure.excerpts:
+            return None
+        if root.groups is not None and root.groups.groups:
             return None
         if any(
             atom.coverage.omissions

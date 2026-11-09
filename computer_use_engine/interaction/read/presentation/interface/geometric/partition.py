@@ -120,7 +120,9 @@ def _stable_order(keys: Sequence[str], before: Sequence[tuple[str, str]]) -> tup
     incoming = dict.fromkeys(keys, 0)
     outgoing: dict[str, set[str]] = {key: set() for key in keys}
     for first, second in before:
-        if first == second or first not in positions or second not in positions or second in outgoing[first]:
+        if first == second or first not in positions or second not in positions:
+            continue
+        if second in outgoing[first]:
             continue
         outgoing[first].add(second)
         incoming[second] += 1
@@ -180,7 +182,9 @@ def _columns_supported(
     rows_left, rows_right = _row_sets(left, alignment), _row_sets(right, alignment)
     first_pane = len(first) == 1 and first[0] in independent
     second_pane = len(second) == 1 and second[0] in independent
-    if len(rows_left) < 2 and not first_pane or len(rows_right) < 2 and not second_pane:
+    if len(rows_left) < 2 and not first_pane:
+        return False
+    if len(rows_right) < 2 and not second_pane:
         return False
     first_band = min(items[key].box.y for key in first), max(items[key].box.bottom for key in first)
     second_band = min(items[key].box.y for key in second), max(items[key].box.bottom for key in second)
@@ -212,12 +216,9 @@ def _spanning_boundary(
             pane_side = len(left) == 1 and left[0] in independent or len(right) == 1 and right[0] in independent
             if gutter.width < (0.25 if pane_side else 0.75) * scale:
                 continue
-            if (
-                len(left) < 2
-                and not (len(left) == 1 and left[0] in independent)
-                or len(right) < 2
-                and not (len(right) == 1 and right[0] in independent)
-            ):
+            if len(left) < 2 and not (len(left) == 1 and left[0] in independent):
+                continue
+            if len(right) < 2 and not (len(right) == 1 and right[0] in independent):
                 continue
             if any(items[key].box.x < gutter.start and items[key].box.right > gutter.stop for key in spanning):
                 return True

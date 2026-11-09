@@ -315,7 +315,8 @@ class InterfaceReadPipeline:
                 return related.content_members(directory, allowed(ui))
             return observation_members(ui, related)
 
-        if related is not None and not window_family_only and ui._anchor is None and instance.anchor is None:
+        related_app_scope = related is not None and not window_family_only
+        if related_app_scope and ui._anchor is None and instance.anchor is None:
             preferred = related.preferred(directory, related.original.root_window)
             if preferred in instance.members:
                 instance.anchor = controller.reader._selection(
@@ -455,11 +456,11 @@ class InterfaceReadPipeline:
             plan.reuse_attached_content(parts, permitted)
             work = plan.next()
             if work is None:
-                if (
-                    not recheck_pending and not change_waited and related is not None
-                    and related.changes is not None and related.changes.baseline is not None
-                    and not related.new_windows(directory)
-                ):
+                can_wait_for_change = not recheck_pending and not change_waited and related is not None
+                has_change_baseline = (
+                    can_wait_for_change and related.changes is not None and related.changes.baseline is not None
+                )
+                if has_change_baseline and not related.new_windows(directory):
                     change_waited = True
                     original = None
                     for candidate in parts:
@@ -516,15 +517,17 @@ class InterfaceReadPipeline:
             identity, member_view = work
             key = identity.window
             item = permitted[key]
-            if (
-                related is not None and related.selection_target is not None and initial
-                and principal_error is None and identity == related.original_window
-                and not related.new_windows(directory)
+            has_initial_selection = related is not None and related.selection_target is not None and initial
+            original_selected_member = (
+                has_initial_selection and principal_error is None and identity == related.original_window
+            )
+            same_selection_scope = (
+                original_selected_member and not related.new_windows(directory)
                 and directory.get("focusedWindow") in (None, key)
-                and not any(
-                    other["window"] != key and (other["modal"] is True or transient_content(other))
-                    for other in permitted.values()
-                )
+            )
+            if same_selection_scope and not any(
+                other["window"] != key and (other["modal"] is True or transient_content(other))
+                for other in permitted.values()
             ):
                 selected = await self._selected_item(ui, item, related.selection_target)
                 if selected is not None:
@@ -543,10 +546,8 @@ class InterfaceReadPipeline:
                 and item["modal"] is True and item["parentState"] == "none" and item["node"] is not None
                 and identity not in related.known_windows
             )
-            if (
-                initial and not window_family_only and principal_error is None and ui._anchor is None
-                and identity != plan.menu_origin and not new_modal_root
-            ):
+            initial_app_root = initial and not window_family_only and principal_error is None and ui._anchor is None
+            if initial_app_root and identity != plan.menu_origin and not new_modal_root:
                 initial = False
                 selected = controller.reader._selection(
                     instance.anchor.application, instance.anchor.name, directory, anchor
@@ -702,12 +703,13 @@ class InterfaceReadPipeline:
             if related is not None:
                 # Only automatic related reads follow member transitions.
                 recheck_pending = True
-        if (
+        empty_related_catalogue = (
             related is not None and ui._anchor is None
             and directory.get("rootDiscoveryComplete") is True
             and not directory["surfaces"] and not directory["stopReasons"]
-            and not collection_gaps
-            and not any(part.tree is not None or part.image is not None for part in parts)
+        )
+        if empty_related_catalogue and not collection_gaps and not any(
+            part.tree is not None or part.image is not None for part in parts
         ):
             # A closing window can lose AX before its WindowServer animation
             # ends. The final complete catalogue is now empty: failed attempts
@@ -874,10 +876,8 @@ class InterfaceReadPipeline:
                         )
             except Exception as error:  # noqa: BLE001 - image composition must not discard independent text content
                 collection_gaps.append(_collection_gap("image", error))
-        if (
-            screenshot is None and image_parts and related is None and directory.get("platform") == "windows"
-            and not getattr(ui, "_strict_window", False)
-        ):
+        desktop_fallback = screenshot is None and bool(image_parts) and related is None
+        if desktop_fallback and directory.get("platform") == "windows" and not getattr(ui, "_strict_window", False):
             # Reuse the desktop capture and its delivery-owned coordinate map.
             # Pixels of the visible desktop do not satisfy window image coverage.
             controller.port.capture_references = controller.interfaces.windows.capture_references()
@@ -1122,13 +1122,12 @@ class InterfaceReadPipeline:
         transient_window = None
         if related is not None and len(displayed_parts) == 1:
             identity = displayed_parts[0][1].identity
-            if (
-                identity in current_identities and (identity in member_trees or identity.window in included_images)
-                and identity.window in related.new_windows(directory)
-                and all(
-                    (target.root_window, target.surface, target.instance)
-                    == (identity.window, identity.surface, identity.instance) for target, _ in trees
-                )
+            displayed_current_member = identity in current_identities and (
+                identity in member_trees or identity.window in included_images
+            )
+            if displayed_current_member and identity.window in related.new_windows(directory) and all(
+                (target.root_window, target.surface, target.instance)
+                == (identity.window, identity.surface, identity.instance) for target, _ in trees
             ):
                 ref = controller.interfaces.windows.reference(directory["session"], directory["application"], identity)
                 if ref is not None:
@@ -1187,9 +1186,10 @@ class InterfaceReadPipeline:
             self.controller.port, "image",
             lambda: self.controller.reader.images.window(target, timeout_ms=600),
         )
+        if refreshed is None or refreshed.scope_changed:
+            return
         if (
-            refreshed is not None and not refreshed.scope_changed
-            and refreshed.target.capture is not None and refreshed.target.capture != image.target.capture
+            refreshed.target.capture is not None and refreshed.target.capture != image.target.capture
             and window_binding(refreshed.target) == target
         ):
             part.image = replace(refreshed, rechecked_scope=scope)

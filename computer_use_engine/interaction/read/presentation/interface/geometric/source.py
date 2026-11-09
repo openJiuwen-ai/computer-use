@@ -251,12 +251,13 @@ class PreparedGeometricSources:
         semantic = dict(index.semantic_nodes) if index is not None else {}
         semantic.update(source.native_nodes)
         refs = index.refs if index is not None else {}
-        if snapshot is not None and (
-            len(set(refs.values())) != len(refs)
-            or not semantic.keys() <= refs.keys()
-            or not set(refs.values()) <= snapshot.native.nodes.keys()
-        ):
-            raise ValueError("Geometric captured aliases do not identify the same source observation")
+        if snapshot is not None:
+            if (
+                len(set(refs.values())) != len(refs)
+                or not semantic.keys() <= refs.keys()
+                or not set(refs.values()) <= snapshot.native.nodes.keys()
+            ):
+                raise ValueError("Geometric captured aliases do not identify the same source observation")
         facts = index.facts if index is not None else MappingProxyType({})
         fields = index.fields if index is not None else MappingProxyType({})
         captured = index.captured_order if index is not None else ()

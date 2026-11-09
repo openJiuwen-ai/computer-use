@@ -121,12 +121,8 @@ def capture_common_role_aliases(
         if path in (("role_detail",), ("supplements", "AXSubrole")) and issue.state in ("absent", "unsupported"):
             token = str(issue.path[1])
             original = snapshot.native.nodes.get(token)
-            if (
-                original is not None
-                and original.role_detail is None
-                and not issue.alternatives
-                and not any(item.key == "provider.role_detail" for item in original.supplements)
-            ):
+            subtype_absent = original is not None and original.role_detail is None and not issue.alternatives
+            if subtype_absent and not any(item.key == "provider.role_detail" for item in original.supplements):
                 continue
         issues.setdefault(str(issue.path[1]), []).append(path)
     native = {node["node"]: node for node in snapshot.facts["nodes"]}
@@ -139,7 +135,9 @@ def capture_common_role_aliases(
         ref = node["ref"]
         token = snapshot.refs.get(ref)
         original = snapshot.native.nodes.get(token)
-        if token is None or original is None or counts[token] != 1 or ref not in projection.source.scopes:
+        if token is None or original is None:
+            continue
+        if counts[token] != 1 or ref not in projection.source.scopes:
             continue
         label = _COMMON_ROLE_LABELS.get((original.role, original.role_detail, original.role_description))
         if label is None or any(item.key == "provider.role_detail" for item in original.supplements):
@@ -176,9 +174,10 @@ def capture_common_role_aliases(
         if not valid or node.get("subrole") != original.role_detail:
             continue
         source_node = projection.source.native_nodes.get(ref)
+        if source_node is None:
+            continue
         if (
-            source_node is None
-            or source_node.get("roleDescription") != original.role_description
+            source_node.get("roleDescription") != original.role_description
             or source_node.get("role") != node["role"]
             or source_node.get("subrole") != original.role_detail
         ):
@@ -228,7 +227,9 @@ def capture_native_description_fields(
         token = snapshot.refs.get(ref)
         source_node = projection["nativeNodes"].get(ref)
         original = native.get(token)
-        if token is None or source_node is None or original is None or counts[token] != 1:
+        if token is None or source_node is None or original is None:
+            continue
+        if counts[token] != 1:
             continue
         for field, (native_property, path) in NATIVE_DIAGNOSTIC_FIELDS.items():
             fact = FactKey(SourceKey(ref), field)

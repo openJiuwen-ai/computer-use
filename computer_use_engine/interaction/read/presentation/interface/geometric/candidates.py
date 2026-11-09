@@ -42,13 +42,11 @@ def scope_plan(
     """
     blocks = draft.blocks if blocks is None else blocks
     parent = blocks[key]
-    if (
-        not draft.enabled
-        or len(parent.children) < 2
-        or parent.layout not in ("tree", "fields", "field-inline")
-        or parent.kind in ("table", "collection", "record")
-        or parent.visual_unit
-    ):
+    if not draft.enabled or len(parent.children) < 2:
+        return None
+    if parent.layout not in ("tree", "fields", "field-inline") or parent.kind in ("table", "collection", "record"):
+        return None
+    if parent.visual_unit:
         return None
     if document_flow_scope(key, draft, blocks):
         return None

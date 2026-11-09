@@ -73,61 +73,59 @@ _NODE = re.compile(r"^(\t*)([0-9]+) (.+)\Z")
 _MENUS = frozenset(("menu", "menuBar", "menuBarItem", "menuItem"))
 _MINIMUM_SAVING = 8
 # Aliases describe familiar controls. Provider-specific unknown roles stay literal.
-_ALIASES = {
-    name: name.replace("_", " ")
-    for name in (
-        "window",
-        "dialog",
-        "alert",
-        "sheet",
-        "popover",
-        "split_group",
-        "scroll_area",
-        "toolbar",
-        "separator",
-        "button",
-        "toggle_button",
-        "checkbox",
-        "radio_button",
-        "switch",
-        "menu_button",
-        "popup_button",
-        "combo_box",
-        "text_field",
-        "text_area",
-        "slider",
-        "spinner",
-        "scrollbar",
-        "progress_indicator",
-        "heading",
-        "image",
-        "link",
-        "document",
-        "web_area",
-        "list",
-        "list_item",
-        "tree",
-        "tree_item",
-        "row",
-        "column",
-        "cell",
-        "table",
-        "grid",
-        "row_header",
-        "column_header",
-        "tab_group",
-        "tab",
-        "header_item",
-        "value_indicator",
-        "browser",
-        "ruler",
-        "handle",
-        "color_well",
-        "date_field",
-        "time_field",
-        "disclosure_triangle",
-    )
-}
+_ALIAS_ROLES = (
+    "window",
+    "dialog",
+    "alert",
+    "sheet",
+    "popover",
+    "split_group",
+    "scroll_area",
+    "toolbar",
+    "separator",
+    "button",
+    "toggle_button",
+    "checkbox",
+    "radio_button",
+    "switch",
+    "menu_button",
+    "popup_button",
+    "combo_box",
+    "text_field",
+    "text_area",
+    "slider",
+    "spinner",
+    "scrollbar",
+    "progress_indicator",
+    "heading",
+    "image",
+    "link",
+    "document",
+    "web_area",
+    "list",
+    "list_item",
+    "tree",
+    "tree_item",
+    "row",
+    "column",
+    "cell",
+    "table",
+    "grid",
+    "row_header",
+    "column_header",
+    "tab_group",
+    "tab",
+    "header_item",
+    "value_indicator",
+    "browser",
+    "ruler",
+    "handle",
+    "color_well",
+    "date_field",
+    "time_field",
+    "disclosure_triangle",
+)
+_ALIASES = {name: name.replace("_", " ") for name in _ALIAS_ROLES}
 _ALIASES["static_text"] = "text"
 
 
@@ -159,14 +157,12 @@ def capture_role_sources(
     result: dict[str, NativeRoleSource] = {}
     for ref, token in refs.items():
         node = observation.nodes.get(token)
-        if (
-            node is None
-            or counts[token] != 1
-            or ref not in source_scopes
-            or not isinstance(node.role, str)
-            or not isinstance(node.role_description, str)
-            or not _plain(node.role_description)
-            or any(not path or path[0] in ("role", "role_description") for path in issues[token])
+        if node is None or counts[token] != 1 or ref not in source_scopes:
+            continue
+        if not isinstance(node.role, str) or not isinstance(node.role_description, str):
+            continue
+        if not _plain(node.role_description) or any(
+            not path or path[0] in ("role", "role_description") for path in issues[token]
         ):
             continue
         subtype_fields = [

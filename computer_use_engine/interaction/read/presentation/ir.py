@@ -580,13 +580,12 @@ class ProjectionEditor:
 
     def declare_source_roles(self, group: SourceRoleDeclaration) -> None:
         """Retain exact role fields after their source nodes are folded from the tree."""
-        if (
+        invalid_declaration = (
             group.attribute not in ("role", "roleDescription")
             or type(group.value) is not str
             or group.scope not in self._ir.nodes
-            or not group.facts
-            or len(set(group.facts)) != len(group.facts)
-        ):
+        )
+        if invalid_declaration or not group.facts or len(set(group.facts)) != len(group.facts):
             raise ValueError("Invalid source role declaration")
         for fact in group.facts:
             source = self._ir.source.native_nodes.get(fact.source, {})
@@ -906,9 +905,10 @@ def validate_projection(ir: PresentationIR) -> None:
         groups = node.get("layoutGroups", ())
         if groups:
             members = [ref for group in groups for ref in group["members"]]
+            changed_membership = members != [child["ref"] for child in node["children"]]
+            invalid_partition = changed_membership or len(set(members)) != len(members)
             if (
-                members != [child["ref"] for child in node["children"]]
-                or len(set(members)) != len(members)
+                invalid_partition
                 or any(group["kind"] != "row" or len(group["members"]) < 2 for group in groups)
                 or any(view.scopes[ref] != view.scopes[node["ref"]] for ref in members)
             ):
@@ -917,21 +917,15 @@ def validate_projection(ir: PresentationIR) -> None:
             raise ValueError("Layout context has an unknown source reference")
         label_ref = node.get("visualLabelRef")
         if label_ref is not None:
-            if (
-                not isinstance(label_ref, str)
-                or label_ref not in view.native_nodes
-                or label_ref == ref
-                or view.scopes[label_ref] != view.scopes[ref]
-            ):
+            unknown_label = not isinstance(label_ref, str) or label_ref not in view.native_nodes
+            if unknown_label or label_ref == ref or view.scopes[label_ref] != view.scopes[ref]:
                 raise ValueError("Visual labels require a distinct source reference in the same scope")
             visual_labels.add(label_ref)
         child_ref = node.get("visualChainChild")
         if child_ref is not None:
+            no_single_child = not isinstance(child_ref, str) or len(node["children"]) != 1
             if (
-                not isinstance(child_ref, str)
-                or len(node["children"]) != 1
-                or child_ref != node["children"][0]["ref"]
-                or view.scopes[child_ref] != view.scopes[ref]
+                no_single_child or child_ref != node["children"][0]["ref"] or view.scopes[child_ref] != view.scopes[ref]
             ):
                 raise ValueError("Visual chains require one direct child in the same source scope")
         pending.extend(node["children"])

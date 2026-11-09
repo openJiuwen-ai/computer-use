@@ -218,13 +218,9 @@ def analyze_collection_patterns(draft: InterfaceDraft) -> tuple[PatternSelection
     priority = {"table": 3, "grid": 2, "cards": 1}
     for block in draft.blocks.values():
         ref = block.primary_ref
-        if (
-            ref is None
-            or block.origin != "native"
-            or block.layout != "tree"
-            or draft.projected_nodes[ref]["role"] not in _COLLECTIONS
-            or not block.children
-        ):
+        if ref is None or block.origin != "native" or block.layout != "tree":
+            continue
+        if draft.projected_nodes[ref]["role"] not in _COLLECTIONS or not block.children:
             continue
         alternatives = (("table", _table(draft, block)), ("grid", _grid(draft, block)), ("cards", _cards(draft, block)))
         candidates = tuple(
