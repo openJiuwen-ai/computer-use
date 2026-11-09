@@ -54,7 +54,7 @@ def load(path: Path | None = None, *, overrides=None):
 def build(value, *, workspace):
     from openjiuwen.core.foundation.llm import Model, ModelClientConfig, ModelRequestConfig
 
-    from computer_use_agent import AgentConfig, McpConfig
+    from computer_use_agent import AgentConfig, McpConfig, RoutingConfig
 
     native_client = dict(value.get("model_client_config") or {})
     native_client.update(
@@ -71,6 +71,7 @@ def build(value, *, workspace):
         model_config=ModelRequestConfig(**native_request),
     )
     mcp = value.get("mcp")
+    routing = value.get("routing")
     config = AgentConfig(
         desktop=value.get("desktop", "exclusive"),
         max_iterations=value.get("max_iterations", 40),
@@ -84,5 +85,31 @@ def build(value, *, workspace):
         )
         if mcp
         else None,
+        routing=_routing_config(routing) if routing else RoutingConfig(),
     )
     return model, config
+
+
+def _routing_config(value):
+    from computer_use_agent import RoutingConfig
+
+    allowed = {
+        "enabled",
+        "min_confidence",
+        "refuse_floor",
+        "refuse_after_attempts",
+        "allow_destructive",
+        "time_weight",
+        "cost_weight",
+        "exploration",
+        "time_scale_s",
+        "cost_scale",
+        "gui_ops_estimate",
+        "paths_file",
+        "metrics_file",
+        "auto_record_gui",
+    }
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(f"unknown routing settings: {sorted(unknown)}")
+    return RoutingConfig(**value)

@@ -6,5 +6,22 @@
   "desktop": "exclusive",
   "max_iterations": 40,
   "context_window": 1000000,
-  "model_timeout": 600
+  "model_timeout": 600,
+  "routing": {
+    "enabled": true,
+    "min_confidence": 0.45,
+    "refuse_floor": 0.2,
+    "refuse_after_attempts": 5,
+    "allow_destructive": false,
+    "time_weight": 0.3,
+    "cost_weight": 0.2,
+    "exploration": 0.3,
+    "time_scale_s": 60,
+    "cost_scale": 1.0,
+    "gui_ops_estimate": 8,
+    "paths_file": null,
+    "metrics_file": null,
+    "auto_record_gui": true
+  }
 }
+
