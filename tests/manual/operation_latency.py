@@ -101,7 +101,8 @@ async def measure(args):
             }
         )
         save()
-        print(category, f"{elapsed:.1f} ms", flush=True)
+        sys.stdout.write(f"{category} {elapsed:.1f} ms\n")
+        sys.stdout.flush()
         if reply.isError:
             raise AssertionError(body[:2000])
         return body

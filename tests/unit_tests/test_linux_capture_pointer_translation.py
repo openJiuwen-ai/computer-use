@@ -171,11 +171,12 @@ def scene(native_modules):
             "target": dict(target),
             "foreground": foreground,
         }
-        execute = lambda: (
-            m.click.NativeClickPipeline(None, unit, None).run(s.operation, command, ctx)
-            if s.operation.click_contract == "v1"
-            else unit.execute(s.operation, command, ctx)
-        )
+
+        def execute():
+            if s.operation.click_contract == "v1":
+                return m.click.NativeClickPipeline(None, unit, None).run(s.operation, command, ctx)
+            return unit.execute(s.operation, command, ctx)
+
         result = s.operation.step(step, command, execute)
         return result, command
 

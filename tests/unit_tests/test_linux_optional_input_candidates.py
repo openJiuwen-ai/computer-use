@@ -235,11 +235,12 @@ def test_optional_candidate_failure_policy_is_shared(query, code, native_modules
     }
     scope = SimpleNamespace(operation=object(), target=object(), request={"within": []})
     ctx = SimpleNamespace(check=Mock(), effect="none")
-    collect = lambda: (
-        module.collect_pointer_contracts(scope, result, ctx, unit)
-        if query == "pointer"
-        else module.collect_keyboard_contracts(scope, {}, result, ctx, unit)
-    )
+
+    def collect():
+        if query == "pointer":
+            return module.collect_pointer_contracts(scope, result, ctx, unit)
+        return module.collect_keyboard_contracts(scope, {}, result, ctx, unit)
+
     if code in ("stale_target", "blocked_by_modal"):
         with pytest.raises(native_modules.protocol.Failure) as caught:
             collect()

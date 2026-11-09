@@ -280,7 +280,8 @@ def main():
     try:
         asyncio.run(diagnose(folder.resolve(), args.python.absolute(), args.mechanism, args.ax_probe.absolute()))
     finally:
-        print(f"Qt date diagnostic ({args.mechanism}): {folder}", flush=True)
+        sys.stdout.write(f"Qt date diagnostic ({args.mechanism}): {folder}\n")
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":

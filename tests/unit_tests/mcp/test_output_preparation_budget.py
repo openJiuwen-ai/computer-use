@@ -231,7 +231,10 @@ class PresentationBudgetBoundaryTests(unittest.IsolatedAsyncioTestCase):
         from computer_use.pipeline.core import Control
 
         flow = _PrepareCapturedObservation(object())
-        cancelled = lambda: False
+
+        def cancelled():
+            return False
+
         original = Control(
             remaining=lambda: (_ for _ in ()).throw(AssertionError("native component clock reused")),
             cancelled=cancelled, call_id="original-call", path=("parent",),

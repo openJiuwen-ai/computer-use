@@ -68,6 +68,7 @@ for line in sys.stdin:
         result = dict(cleanup="complete")
     else:
         raise AssertionError("Unexpected native method: " + method)
-    print(json.dumps(dict(version=6, session=session, id=request["id"], result=result)), flush=True)
+    sys.stdout.write(json.dumps(dict(version=6, session=session, id=request["id"], result=result)) + "\n")
+    sys.stdout.flush()
     if first and timeout_reply is None and method == "finish":
         sys.exit(0)
