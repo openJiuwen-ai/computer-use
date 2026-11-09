@@ -128,6 +128,8 @@ def _type_check(expected: Any) -> _TypeCheck:
         def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
             if depth > 96:
                 raise _type_error(path, "record nesting budget exceeded")
+            # Bool and int can compare equal while representing distinct literal kinds.
+            # pylint: disable-next=unidiomatic-typecheck
             if not any(type(value) is kind and value == choice for kind, choice in allowed):
                 raise _type_error(path, "unknown enum value")
     elif expected is type(None):
@@ -165,6 +167,8 @@ def _type_check(expected: Any) -> _TypeCheck:
             def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
                 if depth > 96:
                     raise _type_error(path, "record nesting budget exceeded")
+                # The observation schema requires the normalized built-in tuple.
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(value) is not tuple:
                     raise _type_error(path, "expected tuple")
                 if value:
@@ -177,6 +181,8 @@ def _type_check(expected: Any) -> _TypeCheck:
             def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
                 if depth > 96:
                     raise _type_error(path, "record nesting budget exceeded")
+                # The observation schema requires the normalized built-in tuple.
+                # pylint: disable-next=unidiomatic-typecheck
                 if type(value) is not tuple:
                     raise _type_error(path, "expected tuple")
                 if len(value) != len(checks):
@@ -202,6 +208,8 @@ def _type_check(expected: Any) -> _TypeCheck:
         def check(value: Any, path: FieldPath, depth: int, records: list) -> None:
             if depth > 96:
                 raise _type_error(path, "record nesting budget exceeded")
+            # A declared schema record has one concrete field layout.
+            # pylint: disable-next=unidiomatic-typecheck
             if type(value) is not expected:
                 raise _type_error(path, f"expected {expected.__name__}")
             records.append((path, value))

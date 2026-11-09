@@ -146,6 +146,8 @@ class DriverWire:
 
     def metadata_value(self, value: Any, depth: int = 0) -> Any:
         """Resolve a pool index in a declared sharing slot."""
+        # A metadata index is recognized only in a built-in wire record.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(value) is dict and "metadataValue" in value:
             self.remaining -= 1
             if self.remaining < 0 or depth > 96:

@@ -684,6 +684,7 @@ class AgentInterfacePipeline:
         running, lookup = state.running, instance.lookup_context
         # StartingApplication and SelectedApplicationWindow represent other
         # lifecycle states and cannot admit a windowless command.
+        # pylint: disable-next=unidiomatic-typecheck
         if type(running) is not RunningApplication or running.session != instance.session:
             return None
         if state.selection is not None or instance.anchor is not None or instance.input_context is not None:
