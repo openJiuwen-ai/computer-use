@@ -26,7 +26,7 @@ NATIVE_DIAGNOSTIC_FIELDS = MappingProxyType(
     }
 )
 _MAPPED_FIELDS = {
-    **{property: (field, path) for field, (property, path) in NATIVE_DIAGNOSTIC_FIELDS.items()},
+    **{native_property: (field, path) for field, (native_property, path) in NATIVE_DIAGNOSTIC_FIELDS.items()},
     "description": ("description", ("description",)),
     "text.selected_text": ("selectedText", ("text", "selected_text")),
 }
@@ -35,7 +35,7 @@ _MAPPED_FIELDS = {
 def collect_native_details(
     snapshot: SnapshotFacts,
     parts: Sequence[RenderedPart],
-    property: Literal[
+    native_property: Literal[
         "identifier",
         "url",
         "description",
@@ -53,7 +53,7 @@ def collect_native_details(
     Args:
         snapshot: Captured source fields and unchanged native reference bindings.
         parts: Already-accounted root presentations and their retained supplements.
-        property: Independent native scalar whose delivery is being classified.
+        native_property: Independent native scalar whose delivery is being classified.
         references: Restrict classification to fields actually deferred by the renderer.
 
     Returns:
@@ -64,8 +64,8 @@ def collect_native_details(
     """
     native = {node["node"]: node for node in snapshot.facts["nodes"]}
     coverage = []
-    title = {"identifier": "Identifier", "url": "URL"}.get(property, "Native " + property)
-    mapped = _MAPPED_FIELDS.get(property)
+    title = {"identifier": "Identifier", "url": "URL"}.get(native_property, "Native " + native_property)
+    mapped = _MAPPED_FIELDS.get(native_property)
     found: set[str] = set()
     for part in parts:
         records = []
@@ -73,38 +73,38 @@ def collect_native_details(
         for entry in entries:
             ref = entry["ref"]
             if (
-                entry["property"] != property
+                entry["property"] != native_property
                 or entry["kind"] != "supplement"
                 or references is not None
                 and ref not in references
             ):
                 continue
-            source = snapshot.fields.get((ref, property))
+            source = snapshot.fields.get((ref, native_property))
             token = snapshot.refs.get(ref)
             original = native.get(token, {}).get("values", {})
-            value = original.get(property)
+            value = original.get(native_property)
             normalized = (
                 part.rendered["projection"].source.native_nodes.get(ref, {}).get("role")
-                if property == "role"
+                if native_property == "role"
                 else value
             )
-            expected_field, expected_path = mapped if mapped else (property, (property,))
+            expected_field, expected_path = mapped if mapped else (native_property, (native_property,))
             actual = getattr(snapshot.native.nodes.get(token), expected_path[0], None)
             if len(expected_path) == 2:
                 actual = getattr(actual, expected_path[1], None)
             if (
                 source is None
                 or source.get("field") != expected_field
-                or property not in original
+                or native_property not in original
                 or type(source.get("normalized")) is not type(normalized)
                 or source["normalized"] != normalized
                 or mapped is not None
                 and (type(actual) is not type(value) or actual != value)
-                or (property == "url" or mapped is not None)
+                or (native_property == "url" or mapped is not None)
                 and (source.get("node") != token or tuple(source.get("path", ())) != expected_path)
             ):
                 raise ValueError(title + " supplement has no matching source field")
-            label = property + ": " + literal(value)
+            label = native_property + ": " + literal(value)
             if ref not in part.supplements.get(label, ()):
                 raise ValueError(title + " destination has no captured detail supplement")
             records.append(entry)

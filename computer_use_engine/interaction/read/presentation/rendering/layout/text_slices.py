@@ -142,13 +142,16 @@ def capture_text_slice_sources(
     cyclic: set[str] = set()
     for ref in result:
         current, path, positions = ref, [], {}
-        while current in result and current not in checked:
+        while current not in checked:
+            source = result.get(current)
+            if source is None:
+                break
             if current in positions:
                 cyclic.update(path[positions[current]:])
                 break
             positions[current] = len(path)
             path.append(current)
-            current = result[current].parent
+            current = source.parent
         checked.update(path)
     return TextSliceSources(
         {
