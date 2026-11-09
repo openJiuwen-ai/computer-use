@@ -48,35 +48,30 @@ def execute(request: ReadableRequest, control: Control) -> ReadableDraft:
         role = request.interface.projected_nodes[ref]["role"]
         value = atom.slot("value")
         glyph = toggle_glyph(role, value.value) if value is not None else None
-        caption_slots = tuple(
-            slot.key
-            for slot in atom.slots
-            if ref in form_refs
-            and slot.key in ("name", "value")
-            and role in ("staticText", "image")
-            and identifier_caption(slot.value)
-        )
+        caption_slots = []
+        for slot in atom.slots:
+            if ref not in form_refs or slot.key not in ("name", "value") or role not in ("staticText", "image"):
+                continue
+            if identifier_caption(slot.value):
+                caption_slots.append(slot.key)
         empty_selection = tuple(slot.key for slot in atom.slots if slot.key == "selectedText" and slot.value == "")
         note_slots = (*caption_slots, *empty_selection)
-        blocks = tuple(
-            slot.key
-            for slot in atom.slots
-            if slot.key in ("help", "fullDescription")
-            or slot.key == "description"
-            and isinstance(slot.value, str)
-            and len(slot.value) > 40
-        )
-        actions = tuple(
-            action.catalogue_index
-            for action in atom.actions
-            if role not in ("window", "sheet", "dialog", "alert", "application")
-            and action.source_ref == ref
-            and action.source.get("kind") in ("raise", "increment", "decrement")
-        )
+        blocks = []
+        for slot in atom.slots:
+            if slot.key in ("help", "fullDescription"):
+                blocks.append(slot.key)
+            elif slot.key == "description" and isinstance(slot.value, str) and len(slot.value) > 40:
+                blocks.append(slot.key)
+        actions = []
+        for action in atom.actions:
+            if role in ("window", "sheet", "dialog", "alert", "application") or action.source_ref != ref:
+                continue
+            if action.source.get("kind") in ("raise", "increment", "decrement"):
+                actions.append(action.catalogue_index)
         notes_only = bool(caption_slots) and passive_note_source(atom, note_slots)
         if note_slots or blocks or actions or glyph is not None:
             styles[ref] = ReadableNode(
-                note_slots, blocks, actions, "value" if glyph is not None else None, glyph, notes_only
+                note_slots, tuple(blocks), tuple(actions), "value" if glyph is not None else None, glyph, notes_only
             )
     return ReadableDraft(request, ReadablePlan(MappingProxyType(styles)))
 

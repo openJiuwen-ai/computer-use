@@ -143,7 +143,8 @@ def unique_matches(
             if kind is not None:
                 candidates.append(LabelMatch(label["ref"], target["ref"], kind))
         contained = [item for item in candidates if item.relation == "inside"]
-        by_label[label["ref"]] = contained or candidates
-        for item in by_label[label["ref"]]:
+        matches = contained or candidates
+        by_label[label["ref"]] = matches
+        for item in matches:
             by_target.setdefault(item.target, []).append(item)
     return tuple(items[0] for items in by_label.values() if len(items) == 1 and len(by_target[items[0].target]) == 1)

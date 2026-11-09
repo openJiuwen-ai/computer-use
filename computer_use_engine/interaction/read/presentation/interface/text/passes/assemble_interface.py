@@ -26,7 +26,9 @@ def execute(formatted: FormattedInterface, control: Control) -> RenderedTree:
     text = "\n".join((*((formatted.prefix,) if formatted.prefix else ()), *formatted.lines, *formatted.suffix))
     excerpts = request.disclosure.excerpts if request.disclosure else {}
     field_plans = tuple(request.fields.fields.values()) if request.fields is not None else ()
-    composed = {member.ref for plan in field_plans for member in plan.members if member.mode != "complete"}
+    composed = set()
+    for plan in field_plans:
+        composed.update(member.ref for member in plan.members if member.mode != "complete")
     dispositions = tuple(item for item in atoms.dispositions if item.target_ref not in composed) + tuple(
         item for plan in field_plans for item in plan.dispositions
     )
@@ -34,16 +36,10 @@ def execute(formatted: FormattedInterface, control: Control) -> RenderedTree:
         item for plan in field_plans for item in plan.field_claims
     )
     slices = request.text_slices.plans if request.text_slices is not None else {}
-    grouped = (
-        frozenset(
-            ref
-            for group in request.groups.groups
-            for ref in group.projected_refs
-            if ref not in getattr(group, "important_refs", ())
-        )
-        if request.groups
-        else frozenset()
-    )
+    grouped = set()
+    if request.groups:
+        for group in request.groups.groups:
+            grouped.update(ref for ref in group.projected_refs if ref not in getattr(group, "important_refs", ()))
     shared_fields = (
         {(ref, key) for ref, keys in request.sharing.omitted_slots.items() for key in keys}
         if request.sharing is not None

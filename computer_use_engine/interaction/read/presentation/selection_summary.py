@@ -227,13 +227,12 @@ def selection_summary_plan(
             + ("; ".join(pieces) or "none")
             + ". Keyboard focus and caret activity are separate facts."
         )
-        coverage_paths = tuple(
-            key
-            for key, value in values.items()
-            if key.startswith("supplements[")
-            and isinstance(value, Mapping)
-            and value.get("key") == "text.selections.coverage"
-        )
+        coverage_paths = []
+        for key, value in values.items():
+            if not key.startswith("supplements[") or not isinstance(value, Mapping):
+                continue
+            if value.get("key") == "text.selections.coverage":
+                coverage_paths.append(key)
         coverage_issue = any(
             name == "supplements" or any(name == path or name.startswith(path + ".") for path in coverage_paths)
             for name in node["fieldStatus"]
