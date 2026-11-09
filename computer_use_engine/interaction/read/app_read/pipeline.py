@@ -94,7 +94,9 @@ class DirectorySelectionPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
             )
             catalogue = await services.directory.collect(read, query, _control=control)
             if catalogue["stopReasons"]:
-                raise failure("observation_incomplete", "Application discovery is partial. Startup remains unconfirmed.")
+                raise failure(
+                    "observation_incomplete", "Application discovery is partial. Startup remains unconfirmed."
+                )
             if "installation" in query:
                 candidates = catalogue["applications"]
                 if len(candidates) > 1:

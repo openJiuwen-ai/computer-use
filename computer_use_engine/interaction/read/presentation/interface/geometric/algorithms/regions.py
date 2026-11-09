@@ -77,7 +77,9 @@ def canonicalize_scopes(draft: InterfaceDraft) -> InterfaceDraft:
             candidates = []
             for band in plan.alignment.rows:
                 candidates.extend(member for member in band.members if member in members)
-            local = stable_order(tuple(candidates), tuple((a, b) for a, b in plan.before if a in members and b in members))
+            local = stable_order(
+                tuple(candidates), tuple((a, b) for a, b in plan.before if a in members and b in members)
+            )
             if local is not None:
                 for original, replacement in zip(segment, local):
                     ordered[positions[original]] = replacement
