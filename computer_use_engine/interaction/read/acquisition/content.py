@@ -25,6 +25,14 @@ _CONTENT_PATHS = (
     ("structure", "scroll_y", "position"),
 )
 _LAYOUT_ROLES = {"group", "split_group", "scroll_area", "unknown"}
+_MEANINGFUL_PATHS = (
+    ("name",),
+    ("description",),
+    ("placeholder",),
+    ("text", "content"),
+    ("control_value", "value"),
+    ("numeric_value", "value"),
+)
 
 
 def same_content_scope(before: SemanticSnapshot | None, after: SemanticSnapshot | None) -> bool:
@@ -82,15 +90,7 @@ def _meaningful(observation: NativeObservation, key: str) -> bool:
     if _known(observation, key, ("role",)) and node.role not in _LAYOUT_ROLES:
         return True
     return any(
-        _known(observation, key, path) and _value(node, path) not in (None, "")
-        for path in (
-            ("name",),
-            ("description",),
-            ("placeholder",),
-            ("text", "content"),
-            ("control_value", "value"),
-            ("numeric_value", "value"),
-        )
+        _known(observation, key, path) and _value(node, path) not in (None, "") for path in _MEANINGFUL_PATHS
     )
 
 
@@ -117,9 +117,10 @@ def has_content_progress(before: SemanticSnapshot | None, after: SemanticSnapsho
             if not _complete_children(left, key, name, old_relation):
                 continue
             relation = right.nodes[key].relations.get(name)
+            if relation is None:
+                continue
             if (
-                relation is None
-                or relation.kind != "children"
+                relation.kind != "children"
                 or relation.evidence == "candidate"
                 or relation.view != old_relation.view
             ):

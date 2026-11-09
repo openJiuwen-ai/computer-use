@@ -839,11 +839,10 @@ class InterfaceReadPipeline:
             and part.identity in current_identities
             for _, part in displayed_parts
         )
-        summarized_history = {
-            id(part) for _, part in displayed_parts
-            if has_current_capture
-            and part.identity not in current_identities
-        }
+        summarized_history = (
+            {id(part) for _, part in displayed_parts if part.identity not in current_identities}
+            if has_current_capture else set()
+        )
         delivered_gaps = tuple(
             (part.source.directory, part.gaps)
             for _, part in displayed_parts
@@ -998,13 +997,9 @@ class InterfaceReadPipeline:
                 else:
                     trees.append((part.target, part.tree))
                     member_trees[part.identity] = part.tree
+                    root_groups = (root.groups for root in prepared.roots if root.groups is not None)
                     recovery_prefix = max(
-                        (
-                            group.recovery_units
-                            for root in prepared.roots
-                            if root.groups is not None
-                            for group in root.groups.groups
-                        ),
+                        (group.recovery_units for groups in root_groups for group in groups.groups),
                         default=recovery_prefix,
                     )
                     same_action_window = (

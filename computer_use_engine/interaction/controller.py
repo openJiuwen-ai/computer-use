@@ -240,11 +240,16 @@ class SessionController:
             captured text/child relations for subsequent operations.
         """
         native_nodes = {node["node"]: node for node in tree.facts["nodes"]}
-        outside = {
-            token for token, node in tree.native.nodes.items()
-            if any(supplement.key == "observation_scope" and isinstance(supplement.value, Mapping)
-                   and supplement.value.get("ownership") == "outside" for supplement in node.supplements)
-        } if tree.native.backend == "windows" else set()
+        outside = set()
+        if tree.native.backend == "windows":
+            for token, node in tree.native.nodes.items():
+                if any(
+                    supplement.key == "observation_scope"
+                    and isinstance(supplement.value, Mapping)
+                    and supplement.value.get("ownership") == "outside"
+                    for supplement in node.supplements
+                ):
+                    outside.add(token)
         child_relations = {r["source"]: r for r in tree.facts["relations"] if r["kind"] == "children"}
 
         def ordinary(token: str, node: NativeNode | None) -> bool:

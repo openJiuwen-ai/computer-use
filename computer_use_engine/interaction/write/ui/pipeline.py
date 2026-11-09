@@ -50,11 +50,9 @@ def input_image(controller, ui, image=None, *, current=True):
     if current:
         validate_session(controller, ui)
     if image is None:
-        image = (
-            WindowReferences.delivered_image(ui._instance, ui)
-            if ui._anchor is not None
-            else ui._instance.delivered_image
-        )
+        fixed_window = ui._anchor is not None
+        instance = ui._instance
+        image = WindowReferences.delivered_image(instance, ui) if fixed_window else instance.delivered_image
     adapters = controller.adapters
     image_invalid = image is not None and current and (
         image.expired or hashlib.sha256(image.png).digest() != image.digest

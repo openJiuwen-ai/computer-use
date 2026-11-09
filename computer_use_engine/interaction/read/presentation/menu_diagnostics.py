@@ -19,14 +19,9 @@ def incidental_menu_label_error(snapshot: SnapshotFacts, relation: Mapping[str, 
     asking which other objects it labels. Own-title relations, known endpoints
     and collection/identity restrictions retain their public warning.
     """
-    if (
-        snapshot.native.backend != "macos"
-        or relation["kind"] != "labels"
-        or relation["state"] != "error"
-        or relation["certainty"] != "unknown"
-        or relation["targets"]
-        or relation.get("cursor") is not None
-    ):
+    if snapshot.native.backend != "macos" or relation["kind"] != "labels" or relation["state"] != "error":
+        return False
+    if relation["certainty"] != "unknown" or relation["targets"] or relation.get("cursor") is not None:
         return False
     token, key = relation["source"], relation["recordKey"]
     if (
@@ -35,19 +30,16 @@ def incidental_menu_label_error(snapshot: SnapshotFacts, relation: Mapping[str, 
     ):
         return False
     node = snapshot.native.nodes.get(token)
-    if node is None or node.role not in ("menu_item", "menu_bar_item") or type(node.name) is not str or not node.name:
+    if node is None or node.role not in ("menu_item", "menu_bar_item"):
+        return False
+    if type(node.name) is not str or not node.name:
         return False
     original = node.relations.get(key)
-    if (
-        original is None
-        or original.kind != "labels"
-        or original.targets
-        or original.evidence != "candidate"
-        or original.total is not None
-        or original.offset is not None
-        or original.positions is not None
-        or original.enumeration != "enumerated"
-    ):
+    if original is None or original.kind != "labels" or original.targets:
+        return False
+    if original.evidence != "candidate" or original.total is not None or original.offset is not None:
+        return False
+    if original.positions is not None or original.enumeration != "enumerated":
         return False
     restrictions = []
     for issue in snapshot.native.issues:

@@ -242,16 +242,11 @@ class _RenderPreparedRoots(Node["PreparedSnapshot", "SnapshotParts"]):
                     )
                     part = renderer.run(materialized, control)
                 output = getattr(part.rendered, "document", None)
-                displayed = (
-                    [
-                        node.ref
-                        for section in _checked(output.parts, control.remaining)
-                        if isinstance(section, RenderedSection)
-                        for node in _checked(section.nodes, control.remaining)
-                    ]
-                    if isinstance(output, RenderedDocument)
-                    else []
-                )
+                displayed = []
+                if isinstance(output, RenderedDocument):
+                    for section in _checked(output.parts, control.remaining):
+                        if isinstance(section, RenderedSection):
+                            displayed.extend(node.ref for node in _checked(section.nodes, control.remaining))
                 if len(displayed) != len(set(displayed)) or set(displayed) != visible.intersection(projection.members):
                     raise ValueError("Rendered branch does not account for its prepared element references")
             except PRESENTATION_FAILURES as error:

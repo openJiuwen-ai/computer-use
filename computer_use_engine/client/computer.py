@@ -32,7 +32,7 @@ from . import parameters
 from .execution import on_session, session_executor, synchronous
 from .handles import handle_created
 from .host import global_input_allowed
-from .targets import Target, as_target, element_target, image_target, target_request
+from .targets import Target, as_target, image_target, target_request
 
 
 def observation_state(state=None, *, document=None):
@@ -366,7 +366,16 @@ class Element:
     @property
     @on_session
     def target(self):
-        return element_target(self)
+        return Element._retain_target(self)
+
+    def _retain_target(self):
+        return Target(
+            self._controller,
+            self._owner,
+            self._snapshot["binding"],
+            _snapshot=dict(self._snapshot),
+            _internal=True,
+        )
 
     @synchronous
     def read(self, *, cursor=None):

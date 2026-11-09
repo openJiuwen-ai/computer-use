@@ -57,13 +57,12 @@ def document_coverage(document: DisplayDocument) -> Mapping[str, Any]:
                 continue
             relation = relations[0]
             targets = relation["targets"]
-            if (
+            complete_range = (
                 relation["state"] == "complete"
                 and relation.get("offset", 0) == 0
                 and relation.get("total", len(targets)) == len(targets)
-                and not unread.intersection(targets)
-                and source in aliases
-            ):
+            )
+            if complete_range and not unread.intersection(targets) and source in aliases:
                 complete.add(aliases[source])
     return frozen({"parents": frozen(parents), "complete": tuple(sorted(complete))})
 

@@ -49,7 +49,10 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
         return draft
     blocks = dict(draft.blocks)
     decisions = []
-    pending = [child for block in blocks.values() if block.layout == "record-blocks" for child in block.children]
+    pending = []
+    for block in blocks.values():
+        if block.layout == "record-blocks":
+            pending.extend(block.children)
     ordered = []
     while pending:
         key = pending.pop()

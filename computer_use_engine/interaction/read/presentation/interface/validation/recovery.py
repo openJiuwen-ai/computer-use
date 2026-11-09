@@ -125,15 +125,11 @@ def recover_layout(assessment: LayoutAssessment) -> InterfaceDraft:
             replacements[key] = key
         else:
             replacements[key] = element_key(root_ref)
-        reasons = sorted(
-            {
-                reason
-                for selected_key, items in selected.items()
-                if selected_key in subtree_keys[key]
-                for reason in items
-            }
-        )
-        decisions.append("local-layout-fallback:" + (root_ref or key) + ": " + "; ".join(reasons))
+        reasons = set()
+        for selected_key, items in selected.items():
+            if selected_key in subtree_keys[key]:
+                reasons.update(items)
+        decisions.append("local-layout-fallback:" + (root_ref or key) + ": " + "; ".join(sorted(reasons)))
     for key, block in tuple(blocks.items()):
         children = tuple(replacements.get(child, child) for child in block.children)
         if children != block.children:

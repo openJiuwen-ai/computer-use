@@ -28,7 +28,8 @@ def create(*, controller):
         # Neither the foreground window nor a modal child becomes the close target.
         await refresh(controller, owner)
         require_identity(owner, identity, current=True)
-        root = member_target(owner._instance, owner._instance.members[identity.window])
+        instance = owner._instance
+        root = member_target(instance, instance.members[identity.window])
         if root.node is None:
             raise local_failure("the selected window has no accessible close control source", "input_unavailable")
         # Keep the requested window and intent for receipts and related observation.

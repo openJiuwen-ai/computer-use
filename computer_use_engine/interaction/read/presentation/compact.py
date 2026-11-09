@@ -387,31 +387,25 @@ def observation_warnings(
     # Uncollected ancestor/window endpoints alone do not mean missing content;
     # incomplete child branches already carry a local coverage annotation.
     covered_notes = _covered_collection_notes(snapshot, covered_relations)
-    warnings.extend(
-        containment_notes(
-            [
-                line
-                for line in snapshot.annotations
-                if (
-                    " contains " in line
-                    or " has no expanded containment path " in line
-                    or diagnostic_details
-                    and line.startswith("Collection:")
-                )
-                and line not in covered_notes
-            ],
-            columns=table_columns,
-            covered=covered_columns,
+    notes = []
+    for line in snapshot.annotations:
+        relevant = (
+            " contains " in line
+            or " has no expanded containment path " in line
+            or diagnostic_details and line.startswith("Collection:")
         )
-    )
+        if relevant and line not in covered_notes:
+            notes.append(line)
+    warnings.extend(containment_notes(notes, columns=table_columns, covered=covered_columns))
     if not diagnostic_details:
-        collection = dict.fromkeys(
-            (issue.path, issue.state)
-            for issue in snapshot.native.issues
-            if (not issue.path or issue.path[0] != "nodes" or len(issue.path) < 2)
-            and issue.state not in ("absent", "unsupported")
-            and ("Collection: " + json_string("nodes: " + issue.detail) if issue.detail else "") not in covered_notes
-        )
+        collection = {}
+        for issue in snapshot.native.issues:
+            observation_issue = not issue.path or issue.path[0] != "nodes" or len(issue.path) < 2
+            if not observation_issue or issue.state in ("absent", "unsupported"):
+                continue
+            note = "Collection: " + json_string("nodes: " + issue.detail) if issue.detail else ""
+            if note not in covered_notes:
+                collection[issue.path, issue.state] = None
         warnings.extend(
             "Collection: " + label(".".join(map(str, path)) or "observation") + " (" + state + ")"
             for path, state in collection

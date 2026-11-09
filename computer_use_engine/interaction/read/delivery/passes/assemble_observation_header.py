@@ -30,12 +30,8 @@ def create(*, services: NativeAppReader) -> Callable[[RenderedObservation, Contr
             # complete capture. Leave the component snapshots intact.
             return ObservationDraft(value, {}, {}, DisplayDocument.join(()), components.overview)
         target, directory = acquired.target, acquired.directory
-        refs = {
-            ref: replace(target, node=node, capture=None)
-            for ref, node in (
-                components.tree.refs.items() if components.tree is not None and value.snapshots_numbered else ()
-            )
-        }
+        tree_refs = components.tree.refs.items() if components.tree is not None and value.snapshots_numbered else ()
+        refs = {ref: replace(target, node=node, capture=None) for ref, node in tree_refs}
         windows = services.window_aliases(directory)
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access

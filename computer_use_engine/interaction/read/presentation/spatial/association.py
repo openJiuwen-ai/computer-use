@@ -21,6 +21,15 @@ from computer_use.interaction.read.presentation.spatial.policy import (
 from computer_use.protocol.primitives import utf16_length
 from computer_use.interaction.read.presentation.tree import VALUE_PREVIEW_LIMIT
 
+_CAPTION_DISQUALIFIERS = (
+    "focused",
+    "selected",
+    "actionsUnavailable",
+    "valueExpected",
+    "incompleteLabelRelation",
+    "modal",
+)
+
 
 def caption_competitor(node: NodeView) -> bool:
     """Recognize controls that can make a nearby caption's ownership ambiguous.
@@ -65,17 +74,7 @@ def referenceable_caption(node: NodeView) -> bool:
         and "value" in node.get("_completeTextValues", ())
         and utf16_length(value) <= VALUE_PREVIEW_LIMIT
         and not caption_competitor(node)
-        and not any(
-            node.get(key)
-            for key in (
-                "focused",
-                "selected",
-                "actionsUnavailable",
-                "valueExpected",
-                "incompleteLabelRelation",
-                "modal",
-            )
-        )
+        and not any(node.get(key) for key in _CAPTION_DISQUALIFIERS)
         and "control" not in node
     )
 

@@ -38,15 +38,42 @@ class Target:
         kind = "point" if self._point is not None else "element"
         return f"Target({kind})"
 
-
-def element_target(element):
-    return Target(
-        element._controller,
-        element._owner,
-        element._snapshot["binding"],
-        _snapshot=dict(element._snapshot),
-        _internal=True,
-    )
+    def _request(self, controller, intent, parameters, *, global_input, owner, end):
+        scope = self._owner if owner is None else owner
+        if intent == "drag" and self._point is None:
+            raise local_failure("drag requires two image point targets")
+        if self._point is not None:
+            if intent not in ("click", "scroll", "drag"):
+                raise local_failure("an image point accepts pointer input; use App or Element for keyboard input")
+            points = (self._point,)
+            if end is not None:
+                last = as_target(controller, end)
+                same_capture = last._point is not None and last._binding == self._binding
+                if same_capture and self._image is not None:
+                    first_image, last_image = self._image, last._image
+                    same_capture = (
+                        last_image is not None
+                        and last_image.png is first_image.png
+                        and last_image.delivered_coordinates == first_image.delivered_coordinates
+                    )
+                if not same_capture:
+                    raise local_failure("drag targets must use the same captured window or desktop image")
+                if self._point == last._point:
+                    raise local_failure("drag start and end must differ")
+                points += (last._point,)
+            if self._image is not None:
+                return UIPointer(scope, intent, points, parameters, global_input=global_input, image=self._image)
+            if owner is not None:
+                raise local_failure("a desktop point requires a Computer input method")
+            coordinates = (
+                {"fromX": points[0][0], "fromY": points[0][1], "toX": points[1][0], "toY": points[1][1]}
+                if intent == "drag"
+                else {"x": points[0][0], "y": points[0][1]}
+            )
+            return ExecuteAction(None, Intent(intent, dict(parameters, **coordinates), global_input), self._binding)
+        if owner is not None:
+            raise local_failure("at expects image coordinates or a Target obtained from point()")
+        return ActOnElement(scope, self._snapshot, intent, parameters, global_input)
 
 
 def image_target(controller, owner, point):
@@ -79,7 +106,7 @@ def as_target(controller, value):
     from .computer import Element
 
     if isinstance(value, Element):
-        value = element_target(value)
+        value = Element._retain_target(value)
     if not isinstance(value, Target):
         raise local_failure("target expects an Element or retained Target")
     if value._controller is not controller:
@@ -89,38 +116,4 @@ def as_target(controller, value):
 
 def target_request(controller, value, intent, parameters, *, global_input=False, owner=None, end=None):
     target = as_target(controller, value)
-    scope = target._owner if owner is None else owner
-    if intent == "drag" and target._point is None:
-        raise local_failure("drag requires two image point targets")
-    if target._point is not None:
-        if intent not in ("click", "scroll", "drag"):
-            raise local_failure("an image point accepts pointer input; use App or Element for keyboard input")
-        points = (target._point,)
-        if end is not None:
-            last = as_target(controller, end)
-            same_capture = last._point is not None and last._binding == target._binding
-            if same_capture and target._image is not None:
-                first_image, last_image = target._image, last._image
-                same_capture = (
-                    last_image is not None
-                    and last_image.png is first_image.png
-                    and last_image.delivered_coordinates == first_image.delivered_coordinates
-                )
-            if not same_capture:
-                raise local_failure("drag targets must use the same captured window or desktop image")
-            if target._point == last._point:
-                raise local_failure("drag start and end must differ")
-            points += (last._point,)
-        if target._image is not None:
-            return UIPointer(scope, intent, points, parameters, global_input=global_input, image=target._image)
-        if owner is not None:
-            raise local_failure("a desktop point requires a Computer input method")
-        coordinates = (
-            {"fromX": points[0][0], "fromY": points[0][1], "toX": points[1][0], "toY": points[1][1]}
-            if intent == "drag"
-            else {"x": points[0][0], "y": points[0][1]}
-        )
-        return ExecuteAction(None, Intent(intent, dict(parameters, **coordinates), global_input), target._binding)
-    if owner is not None:
-        raise local_failure("at expects image coordinates or a Target obtained from point()")
-    return ActOnElement(scope, target._snapshot, intent, parameters, global_input)
+    return Target._request(target, controller, intent, parameters, global_input=global_input, owner=owner, end=end)
