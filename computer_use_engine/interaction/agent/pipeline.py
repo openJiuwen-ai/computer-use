@@ -181,10 +181,14 @@ class AgentInterfacePipeline:
             by_selector[selector] = {window: int(ref) for ref, window in registered.items()}
         refs = {}
         for index, item in enumerate(items):
-            if "window" in item and item.get("selector") in by_selector:
-                ref = by_selector[item["selector"]].get(item["window"]["window"])
-                if ref is not None:
-                    refs[str(index)] = ref
+            if "window" not in item:
+                continue
+            registered = by_selector.get(item.get("selector"))
+            if registered is None:
+                continue
+            ref = registered.get(item["window"]["window"])
+            if ref is not None:
+                refs[str(index)] = ref
         return refs
 
     async def read(

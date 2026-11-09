@@ -122,8 +122,8 @@ def unique_matches(
     No distance tie-break is used: two plausible controls or captions retain their
     original entries instead of choosing a possibly unrelated input field.
     """
-    by_label: dict[str, list[LabelMatch]] = {}
-    by_target: dict[str, list[LabelMatch]] = {}
+    by_label: dict[str, LabelMatch | None] = {}
+    target_counts: dict[str, int] = {}
     for label in labels:
         box = geometry.boxes.get(label["ref"])
         if box is None:
@@ -144,7 +144,7 @@ def unique_matches(
                 candidates.append(LabelMatch(label["ref"], target["ref"], kind))
         contained = [item for item in candidates if item.relation == "inside"]
         matches = contained or candidates
-        by_label[label["ref"]] = matches
+        by_label[label["ref"]] = matches[0] if len(matches) == 1 else None
         for item in matches:
-            by_target.setdefault(item.target, []).append(item)
-    return tuple(items[0] for items in by_label.values() if len(items) == 1 and len(by_target[items[0].target]) == 1)
+            target_counts[item.target] = target_counts.get(item.target, 0) + 1
+    return tuple(match for match in by_label.values() if match is not None and target_counts.get(match.target) == 1)
