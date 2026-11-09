@@ -129,8 +129,8 @@ class CollectionPlan:
             # siblings are not missing result content; keep their directory
             # entries without rereading every old child of the recovered form.
             attached = [
-                key for key in attached if key in newly_seen or permitted[key]["modal"] is True
-                or transient_content(permitted[key])
+                key for key in attached
+                if key in newly_seen or permitted[key]["modal"] is True or transient_content(permitted[key])
             ]
         # Prioritize actual blockers before ordinary attached or new peers.
         attached.sort(key=lambda key: permitted[key].get("modal") is not True)

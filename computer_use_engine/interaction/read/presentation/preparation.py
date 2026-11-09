@@ -468,12 +468,11 @@ def prepared_nodes(
 
     result: list[PreparedNode] = []
     native = {node["node"]: node for node in checked(snapshot.facts["nodes"])}
-    layouts = {
-        ref: signature
-        for root in checked(roots)
-        if root.interface is not None
-        for ref, signature in checked(interface_layout_signatures(root.interface, checkpoint=checkpoint).items())
-    }
+    layouts = {}
+    for root in checked(roots):
+        if root.interface is not None:
+            signatures = interface_layout_signatures(root.interface, checkpoint=checkpoint)
+            layouts.update(checked(signatures.items()))
     field_layouts = {}
     group_layouts = {}
     readable_layouts = {}

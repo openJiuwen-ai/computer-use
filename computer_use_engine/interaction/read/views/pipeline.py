@@ -257,12 +257,11 @@ class InterfaceReadPipeline:
 
     async def _reconcile_close_application(self, related, directory, error):
         """Resolve a stale close-family catalogue without reviving its current choices."""
-        if (
-            related is None or not related.window_family_only or directory is None
-            or directory["platform"] != "macos"
-            or not isinstance(error, ComputerUseError) or error.code != "stale_target"
-            or isinstance(error, FixedWindowInvalidated)
-        ):
+        if related is None or not related.window_family_only or directory is None:
+            return
+        if directory["platform"] != "macos" or not isinstance(error, ComputerUseError):
+            return
+        if error.code != "stale_target" or isinstance(error, FixedWindowInvalidated):
             return
         session, application = related.original.session, related.window_family_application
         if (directory["session"], directory["application"]) != (session, application):
@@ -333,10 +332,10 @@ class InterfaceReadPipeline:
             )
 
         async def application_content():
-            if (
-                window_family_only or ui._anchor is not None or view == "image"
-                or "nativeApplicationContent" not in controller.transport.capabilities
-                or any(surface["node"] is not None for surface in directory["surfaces"])
+            if window_family_only or ui._anchor is not None or view == "image":
+                return None, None
+            if "nativeApplicationContent" not in controller.transport.capabilities or any(
+                surface["node"] is not None for surface in directory["surfaces"]
             ):
                 return None, None
             content, gap = await collect_application_content(controller, directory["application"], presentation_control)
@@ -462,11 +461,13 @@ class InterfaceReadPipeline:
                     and not related.new_windows(directory)
                 ):
                     change_waited = True
-                    original = next((part for part in parts if (
-                        part.target.root_window, part.target.surface, part.target.instance
-                    ) == (
-                        related.original.root_window, related.original.surface, related.original.instance
-                    )), None)
+                    original = None
+                    for candidate in parts:
+                        if (
+                            candidate.target.root_window, candidate.target.surface, candidate.target.instance
+                        ) == (related.original.root_window, related.original.surface, related.original.instance):
+                            original = candidate
+                            break
                     if related.changes.needs_observation(original):
                         try:
                             changed = await related.changes.wait(
@@ -1164,12 +1165,13 @@ class InterfaceReadPipeline:
     async def _refresh_new_native_image(self, part: WindowPart, directory: NativeDirectory) -> None:
         """Recover a changed capture after the same member gains a native binding."""
         image, source = part.image, part.image_directory
-        if (
-            image is None or source is None or part.source is None or part.source.scope_confirmed
-            or image.rechecked_scope is not None or not image.scope_changed or image.target.capture is None
-            or image.target.root_window != part.identity.window
-            or window_binding(image.target) != window_binding(part.target)
-        ):
+        if image is None or source is None or part.source is None:
+            return
+        if part.source.scope_confirmed or image.rechecked_scope is not None or not image.scope_changed:
+            return
+        if image.target.capture is None or image.target.root_window != part.identity.window:
+            return
+        if window_binding(image.target) != window_binding(part.target):
             return
         scope = image.native_upgrade_scope(source, directory)
         if scope is None:

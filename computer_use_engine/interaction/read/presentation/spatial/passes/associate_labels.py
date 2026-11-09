@@ -47,15 +47,14 @@ def associate_spatial_labels(view: ProjectionView, edit: ProjectionEditor, geome
         # Named and incomplete controls still compete for nearby captions.
         # Eligibility to receive a new name is checked only after matching.
         targets = [node for node in candidates if not hidden(node)]
-        labels = [
-            node
-            for node in children
-            if node["role"] == "staticText"
-            and not node["children"]
-            and not hidden(node)
-            and not node.get("labelTargets")
-            and not view.targets.get(node["ref"])
-        ]
+        labels = []
+        for node in children:
+            if not (node["role"] == "staticText" and not node["children"]):
+                continue
+            if hidden(node) or node.get("labelTargets"):
+                continue
+            if not view.targets.get(node["ref"]):
+                labels.append(node)
         consumed = set()
         for pair in unique_matches(labels, targets, geometry):
             label, target = view.nodes[pair.label], view.nodes[pair.target]

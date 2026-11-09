@@ -65,15 +65,13 @@ def source_protections(request: GroupDisclosureRequest, ref: str, issues: ReadIs
         "focused", "focusable", "selected", "selectable", "editable", "protected", "busy", "modal", "has_popup",
         "virtualized",
     )
-    if (
+    interaction_state = (
         any(getattr(states, name) is True for name in protected_states)
         or states.enabled is False
         or states.checked is not None
-        or states.expanded is not None
-        and node.role in ("row", "list_item")
-        or states.visible is False
-        or states.showing is False
-    ):
+    )
+    protected_control = interaction_state or (states.expanded is not None and node.role in ("row", "list_item"))
+    if protected_control or states.visible is False or states.showing is False:
         reasons.append("active-or-important-state")
     text = node.text
     if text is not None and (
@@ -87,12 +85,8 @@ def source_protections(request: GroupDisclosureRequest, ref: str, issues: ReadIs
         reasons.append("input-or-selection")
     if node.role == "document" and (text is None or text.read_only is not True):
         reasons.append("unconfirmed-readonly-document")
-    if (
-        node.control_value is not None
-        and node.control_value.read_only is False
-        or node.numeric_value is not None
-        and node.numeric_value.read_only is False
-    ):
+    writable_control = node.control_value is not None and node.control_value.read_only is False
+    if writable_control or node.numeric_value is not None and node.numeric_value.read_only is False:
         reasons.append("writable-value")
     # Provider namespaces hold original diagnostics retained in the existing
     # global detail supplement. Portable semantic additions remain protective.
@@ -106,7 +100,8 @@ def source_protections(request: GroupDisclosureRequest, ref: str, issues: ReadIs
         for issue in issues.for_node(token)
     ):
         reasons.append("native-uncertainty")
-    if view.get("error") or view.get("invalid") or view.get("blockedBy") or view.get("modified") or view.get("unsaved"):
+    error_or_blocked = bool(view.get("error")) or bool(view.get("invalid")) or bool(view.get("blockedBy"))
+    if error_or_blocked or view.get("modified") or view.get("unsaved"):
         reasons.append("error-or-blocked-state")
     for relation in node.relations.values():
         if relation.kind not in ("children", "parent", "window") and relation.targets:

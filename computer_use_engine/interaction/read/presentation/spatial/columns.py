@@ -105,13 +105,12 @@ def _refine_floating(
         if row_index in conflicting_rows:
             result.append(row)
             continue
-        neighbours = tuple(
-            (column, key)
-            for index in (row_index - 1, row_index + 1)
-            if 0 <= index < len(rows)
-            for key, column in zip(rows[index].members, rows[index].slots)
-            if column is not None
-        )
+        neighbours = []
+        for index in (row_index - 1, row_index + 1):
+            if 0 <= index < len(rows):
+                for key, column in zip(rows[index].members, rows[index].slots):
+                    if column is not None:
+                        neighbours.append((column, key))
         proposals: dict[int, int] = {}
         for member_index, (key, current) in enumerate(zip(row.members, row.slots)):
             if current is not None or key in assigned:
@@ -146,12 +145,11 @@ def _refine_floating(
                 proposals[member_index] = next(iter(candidates))
         # Two independent units may both fit one empty slot, or propose reversed
         # columns. Retain both as floating rather than choosing by traversal order.
-        conflicts = {
-            index
-            for index, column in proposals.items()
-            for other, target in proposals.items()
-            if index != other and (column == target or (index < other) != (column < target))
-        }
+        conflicts = set()
+        for index, column in proposals.items():
+            for other, target in proposals.items():
+                if index != other and (column == target or (index < other) != (column < target)):
+                    conflicts.add(index)
         result.append(
             ColumnRow(
                 row.members,

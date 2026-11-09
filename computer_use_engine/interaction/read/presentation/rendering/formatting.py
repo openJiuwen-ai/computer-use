@@ -207,8 +207,9 @@ def partial(node: NodeView) -> None | str:
     "Describe incomplete child collection using its observed counts and stop reason."
     read = node.get("childrenRead", len(node.get("native", node)["children"]))
     reason = node.get("partialReason")
-    if reason is None and node["role"] != "application" and "childCount" in node and read < node["childCount"]:
-        reason = "children not fully read"
+    if reason is None:
+        if node["role"] != "application" and "childCount" in node and read < node["childCount"]:
+            reason = "children not fully read"
     if reason is None:
         return None
     if "childrenRead" in node and "childCount" in node:
@@ -316,13 +317,9 @@ def render_projection_lines(
 
     def defer_fields(facts: Iterable[FactKey]) -> bool:
         selected = tuple(facts)
-        if (
-            not compact
-            or context.get("subtreeRef")
-            or not native_description_fields
-            or not selected
-            or any(fact not in native_description_fields for fact in selected)
-        ):
+        if not compact or context.get("subtreeRef") or not native_description_fields:
+            return False
+        if not selected or any(fact not in native_description_fields for fact in selected):
             return False
         for fact in selected:
             deferred_native_fields[fact] = native_description_fields[fact].destination()

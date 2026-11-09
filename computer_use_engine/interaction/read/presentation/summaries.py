@@ -139,7 +139,9 @@ def _unspecified_document_text(node: Mapping[str, Any], facts: Mapping[str, Any]
             return False
     for issue in facts.get("issues", ()):
         path = tuple(issue["path"])
-        if len(path) < 2 or path[0] != "nodes" or path[1] == node["node"] and body_path(path[2:]):
+        if len(path) < 2 or path[0] != "nodes":
+            return False
+        if path[1] == node["node"] and body_path(path[2:]):
             return False
     return True
 
@@ -170,12 +172,9 @@ def geometry_summaries(facts: Mapping[str, Any], aliases: Mapping[str, str]) -> 
             continue
         bounds = values.get("geometry.bounds", {})
         rectangle = [bounds.get(name) for name in ("x", "y", "width", "height")]
-        if (
-            not all(type(number) in (float, int) for number in rectangle)
-            or rectangle[2] <= 0
-            or rectangle[3] <= 0
-            or bounds.get("valid") is False
-        ):
+        if not all(type(number) in (float, int) for number in rectangle):
+            continue
+        if rectangle[2] <= 0 or rectangle[3] <= 0 or bounds.get("valid") is False:
             continue
         space = bounds.get("space")
         metadata = facts.get("coordinateSpaces", {}).get(space)

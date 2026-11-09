@@ -147,15 +147,13 @@ def _card_row(draft: InterfaceDraft, key: str) -> tuple[tuple[str, ...], tuple[s
     refs = source_keys(draft, key)
     if any(draft.evidence[ref].incomplete for ref in refs):
         return None
-    content = tuple(
-        ref
-        for ref in refs
-        if draft.projected_nodes[ref]["role"] in ("staticText", "heading")
-        and any(
+    def has_content(ref: str) -> bool:
+        return draft.projected_nodes[ref]["role"] in ("staticText", "heading") and any(
             isinstance(draft.projected_nodes[ref].get(field), str) and draft.projected_nodes[ref][field].strip()
             for field in ("name", "value", "description")
         )
-    )
+
+    content = tuple(ref for ref in refs if has_content(ref))
     if len(content) < 2:
         return None
     # A real row and single native cell establish the item boundary. Multiple

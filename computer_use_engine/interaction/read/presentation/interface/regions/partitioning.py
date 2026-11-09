@@ -32,7 +32,11 @@ def _crosses_relation(
     groups: Sequence[tuple[str, ...]], draft: InterfaceDraft, blocks: Mapping[str, InterfaceBlock]
 ) -> bool:
     """Keep established label membership inside one proposed reading region."""
-    owners = {ref: index for index, group in enumerate(groups) for key in group for ref in block_sources(key, blocks)}
+    owners = {}
+    for index, group in enumerate(groups):
+        for key in group:
+            for ref in block_sources(key, blocks):
+                owners[ref] = index
     for ref, owner in owners.items():
         node = draft.projected_nodes[ref]
         related = [node.get("titleRef"), node.get("visualLabelRef"), *node.get("labelTargets", ())]
@@ -50,12 +54,11 @@ def _crosses_relation(
 def _aligned_rows(groups: Sequence[tuple[str, ...]], bounds: Mapping[str, Box]) -> bool:
     """Recognize repeated cross-column row bands that compete with column reading."""
     for left, right in zip(groups, groups[1:]):
-        aligned = [
-            (first, second)
-            for first in left
-            for second in right
-            if bounds[first].vertical_overlap(bounds[second]) >= 0.6
-        ]
+        aligned = []
+        for first in left:
+            for second in right:
+                if bounds[first].vertical_overlap(bounds[second]) >= 0.6:
+                    aligned.append((first, second))
         if len({first for first, _ in aligned}) >= 2 and len({second for _, second in aligned}) >= 2:
             return True
     return False
@@ -138,9 +141,11 @@ def local_columns(
     # Alternating L→R→L edges would create a cycle and veto the partition.
     by_key = {column.members[0]: column for column in columns}
     column_keys = tuple(sorted(by_key, key=source_positions.__getitem__))
-    owners = {
-        ref: column.members[0] for column in columns for key in column.members for ref in block_sources(key, blocks)
-    }
+    owners = {}
+    for column in columns:
+        for key in column.members:
+            for ref in block_sources(key, blocks):
+                owners[ref] = column.members[0]
     edges = native_edges(column_keys, owners, draft.relations)
     if edges is None:
         return ()

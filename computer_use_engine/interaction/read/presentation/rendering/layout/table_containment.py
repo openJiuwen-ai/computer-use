@@ -92,10 +92,12 @@ def capture_table_grids(
             not clean(token, ("relations", key))
             or value.evidence not in ("reported", "verified")
             or value.enumeration != "enumerated"
-            or value.offset not in (None, 0)
-            or type(value.total) is not int
-            or value.total != len(value.targets)
-            or value.positions != tuple(range(len(value.targets)))
+        ):
+            return None
+        if value.offset not in (None, 0) or type(value.total) is not int or value.total != len(value.targets):
+            return None
+        if (
+            value.positions != tuple(range(len(value.targets)))
             or len(set(value.targets)) != len(value.targets)
             or any(target not in aliases or target not in observation.nodes for target in value.targets)
         ):
@@ -111,12 +113,9 @@ def capture_table_grids(
 
     result = []
     for token, table in observation.nodes.items():
-        if (
-            table.role not in ("table", "tree")
-            or token not in aliases
-            or scope(token) is None
-            or not clean(token, ("role",))
-        ):
+        if table.role not in ("table", "tree") or token not in aliases:
+            continue
+        if scope(token) is None or not clean(token, ("role",)):
             continue
         children, rows = relation(token, "children"), relation(token, "rows")
         if children is None or rows is None or not rows.targets:
@@ -127,14 +126,11 @@ def capture_table_grids(
         for row_token in rows.targets:
             row = observation.nodes[row_token]
             members = relation(row_token, "children")
-            if (
-                row.role != "row"
-                or not clean(row_token, ("role",))
-                or scope(row_token) != scope(token)
-                or not parent(row_token, token)
-                or members is None
-                or not members.targets
-            ):
+            if row.role != "row" or not clean(row_token, ("role",)):
+                break
+            if scope(row_token) != scope(token) or not parent(row_token, token):
+                break
+            if members is None or not members.targets:
                 break
             cells: list[TableCell] = []
             for position, cell_token in enumerate(members.targets):
@@ -145,18 +141,19 @@ def capture_table_grids(
                     cell.role not in ("cell", "column_header")
                     or not clean(cell_token, ("role",))
                     or structure is None
-                    or any(not clean(cell_token, ("structure", key)) for key in fields)
-                    or type(structure.row_index) is not int
-                    or structure.row_index < 0
-                    or type(structure.column_index) is not int
-                    or structure.column_index != position
-                    or type(structure.row_span) is not int
-                    or structure.row_span != 1
-                    or type(structure.column_span) is not int
-                    or structure.column_span != 1
-                    or scope(cell_token) != scope(token)
-                    or not parent(cell_token, row_token)
                 ):
+                    break
+                if any(not clean(cell_token, ("structure", key)) for key in fields):
+                    break
+                if type(structure.row_index) is not int or structure.row_index < 0:
+                    break
+                if type(structure.column_index) is not int or structure.column_index != position:
+                    break
+                if type(structure.row_span) is not int or structure.row_span != 1:
+                    break
+                if type(structure.column_span) is not int or structure.column_span != 1:
+                    break
+                if scope(cell_token) != scope(token) or not parent(cell_token, row_token):
                     break
                 cells.append(TableCell(aliases[cell_token], structure.row_index + 1, position + 1))
             if len(cells) != len(members.targets) or len({cell.row for cell in cells}) != 1:
@@ -173,16 +170,13 @@ def capture_table_grids(
         for column_token in children.targets:
             column = observation.nodes[column_token]
             structure = column.structure
-            if (
-                column.role != "column"
-                or not clean(column_token, ("role",))
-                or structure is None
-                or not clean(column_token, ("structure", "index"))
-                or type(structure.index) is not int
-                or not 0 <= structure.index < len(native_rows[0].cells)
-                or scope(column_token) != scope(token)
-                or not parent(column_token, token)
-            ):
+            if column.role != "column" or not clean(column_token, ("role",)) or structure is None:
+                continue
+            if not clean(column_token, ("structure", "index")) or type(structure.index) is not int:
+                continue
+            if not 0 <= structure.index < len(native_rows[0].cells):
+                continue
+            if scope(column_token) != scope(token) or not parent(column_token, token):
                 continue
             members = relation(column_token, "children")
             targets = tuple(row.cells[structure.index].ref for row in native_rows)
@@ -248,33 +242,24 @@ def published_table_columns(frame: LayoutFrame) -> tuple[PublishedTableColumn, .
     def displayed(ref: str, parent: str | None, layout: tuple[tuple[str, str], ...]) -> tuple[int, str] | None:
         record, node = records.get(ref), nodes.get(ref)
         matches = public.get(ref, ())
-        if (
-            record is None
-            or node is None
-            or counts[ref] != 1
-            or occurrences[ref] != 1
-            or len(matches) != 1
-            or record.parent != parent
-            or parents[ref] != parent
-            or record.layout != layout
-            or record.partial
-            or record.hints
-            or record.related
-            or "\n" in record.text
-            or matches[0][1].lstrip("\t") != record.text.lstrip("\t")
-        ):
+        if record is None or node is None:
+            return None
+        if counts[ref] != 1 or occurrences[ref] != 1 or len(matches) != 1:
+            return None
+        if record.parent != parent or parents[ref] != parent or record.layout != layout:
+            return None
+        if record.partial or record.hints or record.related:
+            return None
+        if "\n" in record.text or matches[0][1].lstrip("\t") != record.text.lstrip("\t"):
             return None
         return matches[0]
 
     published = []
     for source in frame.table_sources:
         table, record = nodes.get(source.ref), records.get(source.ref)
-        if (
-            table is None
-            or record is None
-            or table["role"] not in ("table", "outline")
-            or source.scope[2] != frame.roots[0]["ref"]
-        ):
+        if table is None or record is None:
+            continue
+        if table["role"] not in ("table", "outline") or source.scope[2] != frame.roots[0]["ref"]:
             continue
         title = displayed(source.ref, record.parent, record.layout)
         row_refs = tuple(child["ref"] for child in table["children"] if child["role"] == "row")
@@ -286,14 +271,11 @@ def published_table_columns(frame: LayoutFrame) -> tuple[PublishedTableColumn, .
         for row in source.rows:
             line = displayed(row.ref, source.ref, record.layout)
             node = nodes.get(row.ref)
-            if (
-                line is None
-                or node is None
-                or node["role"] != "row"
-                or line[0] <= previous
-                or len(line[1]) - len(line[1].lstrip("\t")) != indent + 1
-                or tuple(child["ref"] for child in node["children"]) != tuple(cell.ref for cell in row.cells)
-            ):
+            if line is None or node is None or node["role"] != "row":
+                break
+            if line[0] <= previous or len(line[1]) - len(line[1].lstrip("\t")) != indent + 1:
+                break
+            if tuple(child["ref"] for child in node["children"]) != tuple(cell.ref for cell in row.cells):
                 break
             packed_rows += line[1] not in original_lines
             previous = line[0]
@@ -301,16 +283,13 @@ def published_table_columns(frame: LayoutFrame) -> tuple[PublishedTableColumn, .
                 item = displayed(cell.ref, row.ref, record.layout)
                 child = nodes.get(cell.ref)
                 coordinates = f"Row: {cell.row}, Column: {cell.column}"
-                if (
-                    item is None
-                    or child is None
-                    or child["role"] not in ("cell", "columnHeader")
-                    or item[0] <= previous
-                    or len(item[1]) - len(item[1].lstrip("\t")) != indent + 2
-                    or point_position(child, "rowRange") != cell.row
-                    or point_position(child, "columnRange") != cell.column
-                    or not re.search(r"(?: |, )" + re.escape(coordinates) + r"(?:, |$)", item[1])
-                ):
+                if item is None or child is None or child["role"] not in ("cell", "columnHeader"):
+                    break
+                if item[0] <= previous or len(item[1]) - len(item[1].lstrip("\t")) != indent + 2:
+                    break
+                if point_position(child, "rowRange") != cell.row or point_position(child, "columnRange") != cell.column:
+                    break
+                if not re.search(r"(?: |, )" + re.escape(coordinates) + r"(?:, |$)", item[1]):
                     break
                 previous = item[0]
             else:

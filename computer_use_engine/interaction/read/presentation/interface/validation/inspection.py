@@ -172,12 +172,12 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
                 reason = "visual grid lacks complete independently rendered units"
             else:
                 for index, prefix in enumerate(block.column_prefix_refs):
-                    refs = tuple(
-                        draft.blocks[child].primary_ref
-                        for member, indices in zip(members, slots)
-                        for child, column in zip(member.children, indices)
-                        if column == index
-                    )
+                    column_refs = []
+                    for member, indices in zip(members, slots):
+                        for child, column in zip(member.children, indices):
+                            if column == index:
+                                column_refs.append(draft.blocks[child].primary_ref)
+                    refs = tuple(column_refs)
                     if (
                         not refs
                         or prefix is not None

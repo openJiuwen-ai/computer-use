@@ -47,13 +47,12 @@ def capture_entries(classified: ClassifiedGroups, refs: tuple[str, ...]) -> tupl
     atoms = classified.request.atoms.atoms
 
     def source_field(ref: str, slot: AtomSlot) -> GroupField:
-        sources = tuple(
-            source
-            for fact in slot.facts
-            for source in classified.native_fields.get((str(fact.key.source), fact.key.attribute), ())
-            if type(source.normalized) is type(fact.value) and source.normalized == fact.value
-        )
-        return GroupField(ref, slot.key, slot, sources)
+        sources = []
+        for fact in slot.facts:
+            for source in classified.native_fields.get((str(fact.key.source), fact.key.attribute), ()):
+                if type(source.normalized) is type(fact.value) and source.normalized == fact.value:
+                    sources.append(source)
+        return GroupField(ref, slot.key, slot, tuple(sources))
 
     return tuple(
         GroupEntry(
@@ -95,12 +94,13 @@ def candidate(
     characters = sum(len(source.value) for source in captured_text_fields(fields))
     if characters < policy.minimum_characters:
         return None, "short-captured-content"
-    outline = tuple(
-        field
-        for field in fields
-        if field.slot_key == "name"
-        and request.snapshot.native.nodes[request.snapshot.refs[field.ref]].role in OUTLINE_ROLES
-    )
+    def outline_field(field: GroupField) -> bool:
+        return (
+            field.slot_key == "name"
+            and request.snapshot.native.nodes[request.snapshot.refs[field.ref]].role in OUTLINE_ROLES
+        )
+
+    outline = tuple(field for field in fields if outline_field(field))
     body = tuple(field for field in fields if field not in outline)
     head = fragments(body, policy.head_characters)
     tail = fragments(body, policy.tail_characters, tail=True)
@@ -136,19 +136,15 @@ def candidate(
         + 3 * estimate_units(section_key)
         + sum(estimate_units(entry.ref + entry.role) + 8 for entry in entries)
         + sum(estimate_units(str(field.slot.value)) + estimate_units(field.slot_key) + 5 for field in fields)
-        + sum(
-            estimate_units(str(fact.value)) + 8
-            for field in fields
-            for fact in field.slot.facts
-            if type(fact.value) is not type(field.slot.value) or fact.value != field.slot.value
-        )
-        + sum(
-            estimate_units(str(source.value)) + 8
-            for field in fields
-            for source in field.sources
-            if type(source.value) is not type(source.normalized) or source.value != source.normalized
-        )
     )
+    for field in fields:
+        for fact in field.slot.facts:
+            if type(fact.value) is not type(field.slot.value) or fact.value != field.slot.value:
+                own_recovery_units += estimate_units(str(fact.value)) + 8
+    for field in fields:
+        for source in field.sources:
+            if type(source.value) is not type(source.normalized) or source.value != source.normalized:
+                own_recovery_units += estimate_units(str(source.value)) + 8
     recovery_units = recovery_prefix_units + own_recovery_units
     calls = ceil(4 * recovery_units / policy.recovery_page_characters)
     saved = (

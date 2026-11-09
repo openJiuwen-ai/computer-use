@@ -88,18 +88,13 @@ def collect_supporting_actions(
             if projection is not None and not part.uncompressed
             else set()
         )
-        selected_raises = (
-            {
-                item
-                for item in capture_control_raises(snapshot, projection)
-                if any(
-                    type(marker.get("index")) is int and marker == asdict(item)
-                    for marker in part.rendered.get("deferredControlRaises", ())
-                )
-            }
-            if projection is not None and not part.uncompressed
-            else set()
-        )
+        selected_raises = set()
+        if projection is not None and not part.uncompressed:
+            for item in capture_control_raises(snapshot, projection):
+                for marker in part.rendered.get("deferredControlRaises", ()):
+                    if type(marker.get("index")) is int and marker == asdict(item):
+                        selected_raises.add(item)
+                        break
         for ref, node in projection["nativeNodes"].items() if projection is not None and not part.uncompressed else ():
             native_id = snapshot.refs.get(ref)
             native = snapshot.native.nodes.get(native_id)

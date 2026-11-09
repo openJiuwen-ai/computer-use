@@ -622,9 +622,10 @@ class InterfaceWriter:
             prefix = (
                 " [" + _role(self.atoms[block.shared_prefix_ref]) + "]" if block.shared_prefix_ref is not None else ""
             )
-            card_rows = {
-                row.key for plan in self.document.geometric_patterns if plan.kind == "cards" for row in plan.rows
-            }
+            card_rows = set()
+            for plan in self.document.geometric_patterns:
+                if plan.kind == "cards":
+                    card_rows.update(row.key for row in plan.rows)
             caption = "Items" if block.children and set(block.children) <= card_rows else "Records (visual grouping)"
             heading = indent + caption + prefix + ":"
             self.lines.append(heading)

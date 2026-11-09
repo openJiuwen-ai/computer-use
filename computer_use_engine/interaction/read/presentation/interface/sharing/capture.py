@@ -53,13 +53,15 @@ def capture_sharing_evidence(branch: BranchFacts, projection: ProjectionResult, 
     )
     # Explicit subtree/noncompact captures may have a different selected action
     # list; they cannot borrow a proof for a whole-view display filter.
-    compatible = {
-        ref: source
-        for ref, source in catalogues.items()
-        if ref in atoms.atoms
-        and tuple(action.name for action in atoms.atoms[ref].actions) == source.names
-        and all(action.source_ref == ref for action in atoms.atoms[ref].actions)
-    }
+    compatible = {}
+    for ref, source in catalogues.items():
+        if ref not in atoms.atoms:
+            continue
+        same_names = tuple(action.name for action in atoms.atoms[ref].actions) == source.names
+        if not same_names:
+            continue
+        if all(action.source_ref == ref for action in atoms.atoms[ref].actions):
+            compatible[ref] = source
     compression = projection.source.context.get("compressionEvidence")
     complete = set(compression.complete_text if isinstance(compression, CompressionEvidence) else ())
     # Compression's caption proof deliberately covers only name/description/value.

@@ -136,17 +136,15 @@ def recover_layout(assessment: LayoutAssessment) -> InterfaceDraft:
             blocks[key] = replace(block, children=children)
     restored_keys = frozenset(member for key in owners for member in subtree_keys[key])
     restored_refs = frozenset(ref for key in owners for ref in subtree_refs[key])
-    patterns = tuple(
-        plan
-        for plan in draft.geometric_patterns
-        if plan.owner_key in draft.blocks
-        and plan.owner_key not in restored_keys
-        and plan.owner_ref not in restored_refs
-    )
+    patterns = []
+    for plan in draft.geometric_patterns:
+        owner_retained = plan.owner_key in draft.blocks and plan.owner_key not in restored_keys
+        if owner_retained and plan.owner_ref not in restored_refs:
+            patterns.append(plan)
     return replace(
         draft,
         roots=tuple(replacements.get(key, key) for key in draft.roots),
         blocks=MappingProxyType(blocks),
         decisions=(*draft.decisions, *decisions),
-        geometric_patterns=patterns,
+        geometric_patterns=tuple(patterns),
     )
