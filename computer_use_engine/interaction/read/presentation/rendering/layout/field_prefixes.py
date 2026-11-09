@@ -167,12 +167,12 @@ def _scalar_span(body: str, ref: str, prefix: str, kind: str, encoded: str) -> t
     if kind == "Caption":
         start = scalar = field_start
     else:
-        positions = [
-            position
-            for position in unquoted_positions(body)
-            if body.startswith("URL: ", position)
-            and (position == field_start or body[max(0, position - 2): position] == ", ")
-        ]
+        positions = []
+        for position in unquoted_positions(body):
+            if not body.startswith("URL: ", position):
+                continue
+            if position == field_start or body[max(0, position - 2): position] == ", ":
+                positions.append(position)
         if len(positions) != 1:
             return None
         start = positions[0]
@@ -220,19 +220,13 @@ def _fields(frame: LayoutFrame) -> tuple[int, list[_Field]] | None:
         node, record, segment = nodes.get(ref), records.get(ref), entries.get(ref)
         prefix = frame.node_prefixes.get(ref)
         span = frame.node_line_ranges.get(ref)
-        if (
-            node is None
-            or record is None
-            or segment is None
-            or not prefix
-            or span is None
-            or span[1] <= span[0]
-            or occurrences[ref] != 1
-            or counts[ref] != 1
-            or source.scope[2] != root
-            or record.parent != parents[ref]
-            or node["role"] in _MENUS
-        ):
+        if node is None or record is None or segment is None:
+            continue
+        if not prefix or span is None or span[1] <= span[0]:
+            continue
+        if occurrences[ref] != 1 or counts[ref] != 1 or source.scope[2] != root:
+            continue
+        if record.parent != parents[ref] or node["role"] in _MENUS:
             continue
         original = record.text.split("\n", 1)[0].lstrip("\t")
         current = segment.expanded

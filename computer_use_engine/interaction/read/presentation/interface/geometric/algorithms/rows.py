@@ -28,8 +28,9 @@ def local_parent(parent: InterfaceBlock, draft: InterfaceDraft, *, minimum_child
         parent.visual_unit
         or parent.layout in _PRESERVED_LAYOUTS
         or parent.kind in ("table", "collection", "record")
-        or len(parent.children) < minimum_children
     ):
+        return False
+    if len(parent.children) < minimum_children:
         return False
     if parent.primary_ref is None:
         return parent.kind in ("field", "region")
@@ -73,15 +74,11 @@ def source_partition(ref: str, draft: InterfaceDraft) -> str | None:
             return None
         read = node.get("childrenRead", len(node.get("children", ())))
         total = node.get("childCount", read)
-        if (
-            node.get("partialReason")
-            or node.get("visible") is False
-            or node.get("showing") is False
-            or node.get("offscreen") is True
-            or isinstance(read, int)
-            and isinstance(total, int)
-            and read < total
-        ):
+        if node.get("partialReason") or node.get("visible") is False or node.get("showing") is False:
+            return None
+        if node.get("offscreen") is True:
+            return None
+        if isinstance(read, int) and isinstance(total, int) and read < total:
             return None
         if len(node.get("children", ())) != 1:
             return current
@@ -107,16 +104,15 @@ def row_geometry(
     units = tuple(row_unit(key, draft, blocks) for key in keys)
     if len(set(keys)) != len(keys) or any(unit is None for unit in units):
         return False
-    refs = tuple(ref for unit in units if unit is not None for ref in unit.sources)
+    refs = tuple(ref for unit in units for ref in unit.sources)
     partitions = tuple(source_partition(ref, draft) for ref in refs)
     if (
         len(set(refs)) != len(refs)
         or not same_scope(draft, refs)
         or not same_region(draft, refs)
-        or len({reading_scope(ref, draft) for ref in refs}) != 1
-        or None in partitions
-        or len(set(partitions)) != 1
     ):
+        return False
+    if len({reading_scope(ref, draft) for ref in refs}) != 1 or None in partitions or len(set(partitions)) != 1:
         return False
     boxes = tuple(unit.box for unit in units if unit is not None)
     if len({box.space for box in boxes}) != 1:

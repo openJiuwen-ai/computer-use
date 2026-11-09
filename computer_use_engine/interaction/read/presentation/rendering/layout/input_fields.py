@@ -120,12 +120,9 @@ def pack_input_fields(frame: LayoutFrame) -> InputFieldsLayout:
     immediately before Value qualify. Nearest table containment, original
     parents, layout scope, generated prefixes and current public slots agree.
     """
-    if (
-        not frame.context.get("compact")
-        or frame.context.get("subtreeRef")
-        or len(frame.roots) != 1
-        or frame.roots[0]["role"] in ("menu", "menuBar")
-    ):
+    if not frame.context.get("compact") or frame.context.get("subtreeRef"):
+        return InputFieldsLayout(frame.lines)
+    if len(frame.roots) != 1 or frame.roots[0]["role"] in ("menu", "menuBar"):
         return InputFieldsLayout(frame.lines)
     nodes, parents, tables, order, counts = {}, {}, {}, [], Counter()
     pending = [(frame.roots[0], None, None, True)]

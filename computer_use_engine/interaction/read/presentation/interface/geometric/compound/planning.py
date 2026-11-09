@@ -21,12 +21,9 @@ from computer_use.interaction.read.presentation.interface.model import Interface
 def _candidate(draft: InterfaceDraft, key: str) -> CompoundControl | None:
     """Prove one whole original group-to-control path before changing display parents."""
     first = draft.blocks[key]
-    if (
-        first.primary_ref is None
-        or first.source_refs != (first.primary_ref,)
-        or first.layout != "tree"
-        or draft.projected_nodes[first.primary_ref]["role"] != "group"
-    ):
+    if first.primary_ref is None or first.source_refs != (first.primary_ref,) or first.layout != "tree":
+        return None
+    if draft.projected_nodes[first.primary_ref]["role"] != "group":
         return None
     members, refs = [], []
     current = key
@@ -34,17 +31,11 @@ def _candidate(draft: InterfaceDraft, key: str) -> CompoundControl | None:
     while True:
         block = draft.blocks[current]
         ref = block.primary_ref
-        if (
-            current in seen
-            or ref is None
-            or block.source_refs != (ref,)
-            or block.origin != "native"
-            or block.layout != "tree"
-            or draft.projected_nodes[ref]["role"] not in MEMBER_ROLES
-            or draft.evidence[ref].hidden
-            or draft.evidence[ref].incomplete
-            or draft.evidence[ref].boundary
-        ):
+        if current in seen or ref is None or block.source_refs != (ref,):
+            return None
+        if block.origin != "native" or block.layout != "tree" or draft.projected_nodes[ref]["role"] not in MEMBER_ROLES:
+            return None
+        if draft.evidence[ref].hidden or draft.evidence[ref].incomplete or draft.evidence[ref].boundary:
             return None
         if draft.geometric_sources is not None and ref not in draft.geometric_sources.allowed_layout_refs:
             return None

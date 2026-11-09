@@ -15,8 +15,8 @@ import unicodedata
 
 from computer_use.interaction.read.presentation.rendering.layout.public_entries import (
     numbered_entries,
+    labelled_field_positions,
     unique_numbered_entries,
-    unquoted_positions,
 )
 
 if TYPE_CHECKING:
@@ -83,37 +83,22 @@ def _plain(value: str) -> bool:
     )
 
 
-def _starts(body: str, label: str, minimum: int) -> list[int]:
-    """Find labelled scalar starts outside quoted UI text."""
-    return sorted(
-        position
-        for position in unquoted_positions(body)
-        if position >= minimum
-        and body.startswith(label + ": ", position)
-        and (
-            position == minimum
-            or body[max(0, position - 2): position] == ", "
-            or (position > minimum and body[position - 1] == " " and ":" not in body[:position])
-        )
-    )
-
-
 def _adjacent_slot(body: str, prefix: str, description: str, url_field: str) -> int | None:
     """Prove the generated description immediately precedes one literal URL."""
     if not body.startswith(prefix):
         return None
-    starts = _starts(body, "Description", len(prefix))
-    urls = [(position, label) for label in ("URL", "URL suffix") for position in _starts(body, label, len(prefix))]
+    starts = labelled_field_positions(body, "Description", len(prefix), first_field=True)
+    urls = []
+    for label in ("URL", "URL suffix"):
+        urls.extend(labelled_field_positions(body, label, len(prefix), first_field=True))
     if len(starts) != 1 or len(urls) != 1:
         return None
-    start, (url_start, _) = starts[0], urls[0]
+    start, url_start = starts[0], urls[0]
     original = "Description: " + description + ", "
     end = url_start + len(url_field)
-    if (
-        body[start:url_start] != original
-        or body[url_start:end] != url_field
-        or (end != len(body) and not body[end:].startswith(", "))
-    ):
+    if body[start:url_start] != original or body[url_start:end] != url_field:
+        return None
+    if end != len(body) and not body[end:].startswith(", "):
         return None
     return start
 
@@ -121,8 +106,10 @@ def _adjacent_slot(body: str, prefix: str, description: str, url_field: str) -> 
 def _url_start(body: str, ref: str) -> tuple[int, str]:
     """Locate an independent literal URL using only the public numbered line."""
     minimum = len(ref) + 1
-    urls = [(position, label) for label in ("URL", "URL suffix") for position in _starts(body, label, minimum)]
-    if len(urls) != 1 or _starts(body, "Description", minimum):
+    urls = []
+    for label in ("URL", "URL suffix"):
+        urls.extend((position, label) for position in labelled_field_positions(body, label, minimum, first_field=True))
+    if len(urls) != 1 or labelled_field_positions(body, "Description", minimum, first_field=True):
         raise ValueError("shared Description requires one URL field and no remaining Description")
     start, label = urls[0]
     scalar_start = start + len(label) + 2
@@ -175,14 +162,12 @@ def expand_shared_descriptions(
         # Numbered-entry parsing distinguishes real members from table cells,
         # inherited headings and chain components without inspecting UI values.
         preceding = numbered_entries(lines[:index])
-        roots = [
-            entry
-            for entry in preceding
-            if entry.body == lines[entry.line].lstrip("\t")
-            and entry.role_explicit
-            and not entry.heading
-            and len(lines[entry.line]) - len(entry.body) == depth
-        ]
+        roots = []
+        for entry in preceding:
+            if entry.body != lines[entry.line].lstrip("\t") or not entry.role_explicit or entry.heading:
+                continue
+            if len(lines[entry.line]) - len(entry.body) == depth:
+                roots.append(entry)
         if not roots:
             raise ValueError("shared Description has no preceding root")
         root = max(roots, key=lambda entry: entry.line)
@@ -234,12 +219,9 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
     previously published table evidence are unchanged.
     """
     unchanged = SharedDescriptionLayout(frame.lines)
-    if (
-        not frame.context.get("compact")
-        or frame.context.get("subtreeRef")
-        or len(frame.roots) != 1
-        or frame.roots[0]["role"] in _MENUS
-    ):
+    if not frame.context.get("compact") or frame.context.get("subtreeRef"):
+        return unchanged
+    if len(frame.roots) != 1 or frame.roots[0]["role"] in _MENUS:
         return unchanged
     root = frame.roots[0]["ref"]
     root_source = frame.field_prefix_sources.get(root)

@@ -75,20 +75,19 @@ class _Source:
                 and not (issue.path == prefix and issue.state == "partial")
                 for issue in self.issues.overlapping(prefix)
             )
+        if not clean or edge.evidence not in ("reported", "verified") or edge.enumeration != "enumerated":
+            return None
+        if edge.offset not in (None, 0):
+            return None
+        invalid_total = (
+            edge.total is None or edge.total < len(edge.targets) if allow_prefix else edge.total != len(edge.targets)
+        )
         if (
-            not clean
-            or edge.evidence not in ("reported", "verified")
-            or edge.enumeration != "enumerated"
-            or edge.offset not in (None, 0)
-            or (
-                edge.total is None or edge.total < len(edge.targets)
-                if allow_prefix
-                else edge.total != len(edge.targets)
-            )
-            or edge.positions != tuple(range(len(edge.targets)))
+            invalid_total or edge.positions != tuple(range(len(edge.targets)))
             or len(set(edge.targets)) != len(edge.targets)
-            or any(token not in self.aliases for token in edge.targets)
         ):
+            return None
+        if any(token not in self.aliases for token in edge.targets):
             return None
         return tuple(self.aliases[token] for token in edge.targets)
 
@@ -114,11 +113,10 @@ class _Source:
         pending = [(child, ref) for child in reversed(self.atoms[ref].children)]
         while pending:
             child, parent = pending.pop()
+            if child in seen or child not in self.atoms or child not in self.nodes:
+                return None
             if (
-                child in seen
-                or child not in self.atoms
-                or child not in self.nodes
-                or self.atoms[child].parent != parent
+                self.atoms[child].parent != parent
                 or self.scope(child) != self.scope(ref)
                 or self.request.interface.projected_parents.get(child) != parent
             ):
@@ -158,14 +156,9 @@ class _Source:
 
 def _cell(source: _Source, ref: str, row_ref: str) -> TableCellPlan | None:
     native = source.native(ref)
-    if (
-        native is None
-        or native.role not in ("cell", "column_header")
-        or not source.clean(ref, "role")
-        or native.structure is None
-        or source.atoms[ref].parent != row_ref
-        or source.scope(ref) != source.scope(row_ref)
-    ):
+    if native is None or native.role not in ("cell", "column_header") or not source.clean(ref, "role"):
+        return None
+    if native.structure is None or source.atoms[ref].parent != row_ref or source.scope(ref) != source.scope(row_ref):
         return None
     structure = native.structure
     fields = ("row_index", "column_index", "row_span", "column_span")
@@ -173,7 +166,8 @@ def _cell(source: _Source, ref: str, row_ref: str) -> TableCellPlan | None:
         return None
     row, column = _nonnegative(structure.row_index), _nonnegative(structure.column_index)
     row_span, column_span = _nonnegative(structure.row_span), _nonnegative(structure.column_span)
-    if row is None or column is None or not row_span or not column_span:
+    missing_coordinate = row is None or column is None
+    if missing_coordinate or not row_span or not column_span:
         return None
     projected = source.nodes[ref]
     for key, position, span in (("rowRange", row, row_span), ("columnRange", column, column_span)):
@@ -200,11 +194,10 @@ def _cell(source: _Source, ref: str, row_ref: str) -> TableCellPlan | None:
 
 def _row(source: _Source, ref: str, table_ref: str) -> TableRowPlan | None:
     native = source.native(ref)
+    if native is None or native.role != "row" or not source.clean(ref, "role"):
+        return None
     if (
-        native is None
-        or native.role != "row"
-        or not source.clean(ref, "role")
-        or source.atoms[ref].parent != table_ref
+        source.atoms[ref].parent != table_ref
         or source.scope(ref) != source.scope(table_ref)
         or not source.children_match(ref)
     ):
@@ -265,12 +258,8 @@ def _compact_cells(source: _Source, rows: tuple[TableRowPlan, ...]) -> bool:
 
 def _plan(source: _Source, evidence: CollectionEvidence, ref: str) -> tuple[TablePlan | None, str]:
     native = source.native(ref)
-    if (
-        native is None
-        or native.role not in ("table", "tree")
-        or not source.clean(ref, "role")
-        or source.scope(ref) is None
-    ):
+    has_table_role = native is not None and native.role in ("table", "tree")
+    if not has_table_role or not source.clean(ref, "role") or source.scope(ref) is None:
         return None, "logical table identity or source scope is unavailable"
     if not source.children_match(ref, allow_prefix=True):
         return None, "captured native children differ from the projected table"
@@ -287,11 +276,11 @@ def _plan(source: _Source, evidence: CollectionEvidence, ref: str) -> tuple[Tabl
         original_rows = tuple(
             child for child in children if source.native(child) is not None and source.native(child).role == "row"
         )
-        if (
-            (proof is None and (local_rows != row_refs or original_rows != row_refs))
-            or proof is not None
-            and (proof.rows != row_refs or proof.children != children)
-        ):
+        invalid_membership = (
+            local_rows != row_refs or original_rows != row_refs if proof is None
+            else proof.rows != row_refs or proof.children != children
+        )
+        if invalid_membership:
             return None, "outline row membership is unconfirmed"
     complete_rows = []
     for row_ref in row_refs:
@@ -320,10 +309,9 @@ def _plan(source: _Source, evidence: CollectionEvidence, ref: str) -> tuple[Tabl
     cells = [cell for row in rows for cell in row.cells]
     for index, left in enumerate(cells):
         for right in cells[index + 1:]:
+            rows_overlap = left.row < right.row + right.row_span and right.row < left.row + left.row_span
             if (
-                left.row < right.row + right.row_span
-                and right.row < left.row + left.row_span
-                and left.column < right.column + right.column_span
+                rows_overlap and left.column < right.column + right.column_span
                 and right.column < left.column + left.column_span
             ):
                 return None, "reported logical cell extents overlap"
@@ -340,11 +328,9 @@ def _plan(source: _Source, evidence: CollectionEvidence, ref: str) -> tuple[Tabl
     column_count = (
         _nonnegative(structure.column_count) if structure and source.clean(ref, "structure", "column_count") else None
     )
-    if (
-        row_count is not None
-        and any(cell.row + cell.row_span > row_count for cell in cells)
-        or column_count is not None
-        and any(cell.column + cell.column_span > column_count for cell in cells)
+    row_extent_exceeded = row_count is not None and any(cell.row + cell.row_span > row_count for cell in cells)
+    if row_extent_exceeded or column_count is not None and any(
+        cell.column + cell.column_span > column_count for cell in cells
     ):
         return None, "cell extents exceed the reported logical table size"
     partial = (

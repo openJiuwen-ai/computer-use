@@ -24,6 +24,13 @@ from computer_use.interaction.read.presentation.interface.geometric.boundaries i
 from computer_use.interaction.read.presentation.interface.regions.scope import block_sources
 
 
+def _column_row(row: InterfaceBlock) -> bool:
+    """Accept a complete synthetic row whose original cells can form columns."""
+    if row.primary_ref is not None or row.source_refs:
+        return False
+    return row.layout in ("visual-row", "inline") and bool(row.children)
+
+
 def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
     """Project complete visual units, then select a record or plain grid template.
 
@@ -45,13 +52,7 @@ def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
 
     def project_run(parent: InterfaceBlock, row_keys: tuple[str, ...]) -> str | None:
         rows = tuple(blocks[key] for key in row_keys)
-        if len(rows) < 2 or any(
-            row.primary_ref is not None
-            or row.source_refs
-            or row.layout not in ("visual-row", "inline")
-            or not row.children
-            for row in rows
-        ):
+        if len(rows) < 2 or any(not _column_row(row) for row in rows):
             return None
         keys = tuple(key for row in rows for key in row.children)
         refs = tuple(ref for key in keys for ref in block_sources(key, blocks))
@@ -70,12 +71,12 @@ def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
         projected = project_columns(analysis)
         if projected is None or tuple(row.members for row in projected.rows) != tuple(row.children for row in rows):
             return None
-        roles = tuple(
-            draft.projected_nodes[units[key].target_ref]["role"]
-            for row in projected.rows
-            for key, slot in zip(row.members, row.slots)
-            if slot is not None
-        )
+        roles = []
+        for row in projected.rows:
+            roles.extend(
+                draft.projected_nodes[units[key].target_ref]["role"]
+                for key, slot in zip(row.members, row.slots) if slot is not None
+            )
         atomic = all(blocks[key].primary_ref is not None and not blocks[key].children for key in keys)
         record = atomic and (
             parent.layout == "records"
@@ -105,12 +106,12 @@ def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
             return None
         columns = []
         for column in range(len(projected.alignments)):
-            refs = tuple(
-                units[key].target_ref
-                for row in projected.rows
-                for key, slot in zip(row.members, row.slots)
-                if slot == column
-            )
+            column_refs = []
+            for row in projected.rows:
+                column_refs.extend(
+                    units[key].target_ref for key, slot in zip(row.members, row.slots) if slot == column
+                )
+            refs = tuple(column_refs)
             # Repeated records have matching cell meanings. A form containing
             # a date, a duration and a toggle is still a set of distinct fields.
             if parent.layout != "records" and len({draft.projected_nodes[ref]["role"] for ref in refs}) != 1:
@@ -172,12 +173,7 @@ def plan_columns(draft: InterfaceDraft) -> InterfaceDraft:
 
         for child in parent.children:
             row = blocks[child]
-            if (
-                row.primary_ref is None
-                and not row.source_refs
-                and row.layout in ("visual-row", "inline")
-                and row.children
-            ):
+            if _column_row(row):
                 if run and not same_region(draft, (ref for key in (*run, child) for ref in block_sources(key, blocks))):
                     flush(parent, run, output)
                 run.append(child)

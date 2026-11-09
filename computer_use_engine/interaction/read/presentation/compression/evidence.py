@@ -97,24 +97,27 @@ def _control_value_lines(
     for ref, token in snapshot.refs.items():
         node = snapshot.native.nodes.get(token)
         source = snapshot.fields.get((ref, "control_value.value"))
+        if node is None or node.control_value is None:
+            continue
+        if type(node.control_value.value) is not str or not node.control_value.value:
+            continue
+        if node.text is None or type(node.text.source) is not str or not node.text.source:
+            continue
         if (
-            node is None
-            or node.control_value is None
-            or type(node.control_value.value) is not str
-            or not node.control_value.value
-            or node.text is None
-            or type(node.text.source) is not str
-            or not node.text.source
-            or node.text.content_field != ("control_value", "value")
+            node.text.content_field != ("control_value", "value")
             or node.text.unit not in ("utf16_code_unit", "unicode_codepoint")
             or node.text.content is not None
-            or snapshot.value_fields.get(ref) != "control_value.value"
-            or source is None
-            or source.get("field") != "value"
+        ):
+            continue
+        if snapshot.value_fields.get(ref) != "control_value.value" or source is None:
+            continue
+        if (
+            source.get("field") != "value"
             or tuple(source.get("path", ())) != ("control_value", "value")
             or source.get("normalized") != node.control_value.value
-            or native_nodes.get(token, {}).get("values", {}).get("control_value.value") != node.control_value.value
         ):
+            continue
+        if native_nodes.get(token, {}).get("values", {}).get("control_value.value") != node.control_value.value:
             continue
         paths = (("role",), ("control_value", "value"), ("text", "source"), ("text", "unit"), ("text", "content_field"))
         incomplete = any(
@@ -166,30 +169,26 @@ def _semantic_region(node: NativeNode) -> bool:
     """Retain explicit collection, viewport and business semantics on provider groups."""
     structure = node.structure
     if structure is not None:
-        if (
-            any(
-                getattr(structure, name) is not None
-                for name in (
-                    "heading_level",
-                    "landmark",
-                    "landmark_description",
-                    "index",
-                    "set_size",
-                    "selected_count",
-                    "row_count",
-                    "column_count",
-                    "row_index",
-                    "column_index",
-                    "row_span",
-                    "column_span",
-                    "collection_mode",
-                )
-            )
-            or structure.level is not None
-            and structure.level != 0
-            or structure.can_select_multiple is True
-            or structure.selection_required is True
-        ):
+        collection_fields = (
+            "heading_level",
+            "landmark",
+            "landmark_description",
+            "index",
+            "set_size",
+            "selected_count",
+            "row_count",
+            "column_count",
+            "row_index",
+            "column_index",
+            "row_span",
+            "column_span",
+            "collection_mode",
+        )
+        if any(getattr(structure, name) is not None for name in collection_fields):
+            return True
+        if structure.level is not None and structure.level != 0:
+            return True
+        if structure.can_select_multiple is True or structure.selection_required is True:
             return True
         for axis in (structure.scroll_x, structure.scroll_y):
             if axis is not None and (axis.scrollable is True or axis.position not in (None, 0)):
@@ -229,15 +228,13 @@ def _reported_owner(node: NativeNode, kind: str, issues: tuple[ReadIssue, ...]) 
     if len(matches) != 1:
         return None
     key, relation = matches[0]
-    if (
-        len(relation.targets) != 1
-        or relation.total not in (None, 1)
-        or relation.offset not in (None, 0)
-        or relation.positions not in (None, (0,))
-        or relation.enumeration != "enumerated"
-        or relation.evidence == "candidate"
-        or not _relation_complete(key, issues, empty=False)
-    ):
+    if len(relation.targets) != 1 or relation.total not in (None, 1):
+        return None
+    if relation.offset not in (None, 0) or relation.positions not in (None, (0,)):
+        return None
+    if relation.enumeration != "enumerated" or relation.evidence == "candidate":
+        return None
+    if not _relation_complete(key, issues, empty=False):
         return None
     return relation.targets[0]
 
@@ -297,12 +294,10 @@ def _source_conflicts(
             window_conflict = (
                 declared_window is not None and expected_window is not None and declared_window != expected_window
             )
-            if (
-                len(incoming.get(child, ())) > 1
-                or declared_parent is not None
-                and declared_parent != parent_token
-                or window_conflict
-            ):
+            ownership_conflict = len(incoming.get(child, ())) > 1
+            if not ownership_conflict and declared_parent is not None:
+                ownership_conflict = declared_parent != parent_token
+            if ownership_conflict or window_conflict:
                 contested.update((parent, child))
             if window_conflict:
                 splice_conflicts.update((parent, child))
@@ -318,15 +313,12 @@ def _relation_complete(key: str, issues: tuple[ReadIssue, ...], *, empty: bool) 
     """Accept exact absence only when the relation separately proves an empty set."""
     for issue in issues:
         path = issue.path[2:]
-        if not path or path == ("relations",) or path[:2] == ("relations", key):
-            if (
-                not empty
-                or path != ("relations", key)
-                or issue.state != "absent"
-                or issue.continuation is not None
-                or issue.alternatives
-            ):
-                return False
+        if path and path != ("relations",) and path[:2] != ("relations", key):
+            continue
+        if not empty or path != ("relations", key) or issue.state != "absent":
+            return False
+        if issue.continuation is not None or issue.alternatives:
+            return False
     return True
 
 
@@ -343,14 +335,11 @@ def _unlabelled_group(node: NativeNode, issues: tuple[ReadIssue, ...]) -> bool:
         if len(relations) != 1:
             return False
         key, relation = relations[0]
-        if (
-            relation.targets
-            or relation.total != 0
-            or relation.offset not in (None, 0)
-            or relation.positions not in (None, ())
-            or relation.enumeration != "enumerated"
-            or relation.evidence == "candidate"
-        ):
+        if relation.targets or relation.total != 0:
+            return False
+        if relation.offset not in (None, 0) or relation.positions not in (None, ()):
+            return False
+        if relation.enumeration != "enumerated" or relation.evidence == "candidate":
             return False
         if not _relation_complete(key, issues, empty=True):
             return False
@@ -364,14 +353,14 @@ def _complete_children(node: NativeNode, issues: tuple[ReadIssue, ...]) -> tuple
         return None
     key, relation = relations[0]
     size = len(relation.targets)
+    if type(relation.total) is not int or relation.total != size:
+        return None
+    if relation.offset not in (None, 0) or len(set(relation.targets)) != size:
+        return None
+    if relation.positions is not None and relation.positions != tuple(range(size)):
+        return None
     if (
-        type(relation.total) is not int
-        or relation.total != size
-        or relation.offset not in (None, 0)
-        or len(set(relation.targets)) != size
-        or relation.positions is not None
-        and relation.positions != tuple(range(size))
-        or relation.enumeration != "enumerated"
+        relation.enumeration != "enumerated"
         or relation.evidence == "candidate"
         or not _relation_complete(key, issues, empty=size == 0)
     ):
@@ -381,26 +370,25 @@ def _complete_children(node: NativeNode, issues: tuple[ReadIssue, ...]) -> tuple
 
 def _provider_wrapper(node: NativeNode, issues: tuple[ReadIssue, ...], diagnostics: set[FieldPath]) -> bool:
     """Recognize a complete, inactive one-child wrapper from native facts."""
+    if node.role != "group" or node.role_detail is not None:
+        return False
+    semantic_fields = (
+        "name",
+        "description",
+        "help",
+        "identifier",
+        "placeholder",
+        "url",
+        "control_value",
+        "numeric_value",
+        "text",
+        "structure",
+        "shortcuts",
+    )
+    if any(getattr(node, key) is not None for key in semantic_fields):
+        return False
     if (
-        node.role != "group"
-        or node.role_detail is not None
-        or any(
-            getattr(node, key) is not None
-            for key in (
-                "name",
-                "description",
-                "help",
-                "identifier",
-                "placeholder",
-                "url",
-                "control_value",
-                "numeric_value",
-                "text",
-                "structure",
-                "shortcuts",
-            )
-        )
-        or node.actions is None
+        node.actions is None
         or any(
             action.key is not None
             or action.available is not False
@@ -416,11 +404,13 @@ def _provider_wrapper(node: NativeNode, issues: tuple[ReadIssue, ...], diagnosti
             or action.shortcuts
             for action in node.actions
         )
-        or any(
-            issue.state not in ("unsupported", "absent") or issue.continuation or issue.alternatives for issue in issues
-        )
-        or any(geometry.valid is False for geometry in node.geometry.values())
     ):
+        return False
+    if any(
+        issue.state not in ("unsupported", "absent") or issue.continuation or issue.alternatives for issue in issues
+    ):
+        return False
+    if any(geometry.valid is False for geometry in node.geometry.values()):
         return False
     for part in dataclass_fields(node.states):
         value = getattr(node.states, part.name)
@@ -429,26 +419,21 @@ def _provider_wrapper(node: NativeNode, issues: tuple[ReadIssue, ...], diagnosti
         ):
             return False
     supplements = [item for index, item in enumerate(node.supplements) if ("supplements", index) not in diagnostics]
-    if (
-        len(supplements) != 1
-        or supplements[0].key != "provider.role_detail"
-        or not isinstance(supplements[0].value, str)
-        or not supplements[0].value
-    ):
+    if len(supplements) != 1 or supplements[0].key != "provider.role_detail":
+        return False
+    if not isinstance(supplements[0].value, str) or not supplements[0].value:
         return False
     children = [(key, relation) for key, relation in node.relations.items() if relation.kind == "children"]
     if len(children) != 1:
         return False
     key, child = children[0]
-    if (
-        len(child.targets) != 1
-        or child.total not in (None, 1)
-        or child.offset not in (None, 0)
-        or child.positions not in (None, (0,))
-        or child.enumeration != "enumerated"
-        or child.evidence == "candidate"
-        or any(issue.path[2:4] == ("relations", key) for issue in issues)
-    ):
+    if len(child.targets) != 1 or child.total not in (None, 1):
+        return False
+    if child.offset not in (None, 0) or child.positions not in (None, (0,)):
+        return False
+    if child.enumeration != "enumerated" or child.evidence == "candidate":
+        return False
+    if any(issue.path[2:4] == ("relations", key) for issue in issues):
         return False
     for relation_key, relation in node.relations.items():
         if relation.kind == "children":
@@ -458,15 +443,13 @@ def _provider_wrapper(node: NativeNode, issues: tuple[ReadIssue, ...], diagnosti
             for issue in issues
         )
         if relation.kind in ("parent", "window") and relation.targets:
-            if (
-                len(relation.targets) != 1
-                or relation.total not in (None, 1)
-                or relation.evidence == "candidate"
-                or relation.enumeration != "enumerated"
-                or relation.offset not in (None, 0)
-                or relation.positions not in (None, (0,))
-                or any(issue.path[2:4] == ("relations", relation_key) for issue in issues)
-            ):
+            if len(relation.targets) != 1 or relation.total not in (None, 1):
+                return False
+            if relation.evidence == "candidate" or relation.enumeration != "enumerated":
+                return False
+            if relation.offset not in (None, 0) or relation.positions not in (None, (0,)):
+                return False
+            if any(issue.path[2:4] == ("relations", relation_key) for issue in issues):
                 return False
             continue
         if relation.targets or not unsupported:

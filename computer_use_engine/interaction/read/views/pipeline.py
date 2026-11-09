@@ -176,7 +176,7 @@ def remember(controller: SessionController, ui: UIHandle, part: WindowPart) -> N
     state.selection, state.observation = None, None
     if part.tree is not None and part.snapshots_numbered:
         # pylint: disable-next=protected-access
-        controller._remember(state, part.target, part.tree)
+        controller.remember_observation(state, part.target, part.tree)
         for element_ref in part.tree.refs:
             instance.refs[element_ref]["window_identity"] = identity
     # An explicit bounded window read observes its identity even if AX and

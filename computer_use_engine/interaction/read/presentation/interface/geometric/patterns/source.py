@@ -39,11 +39,10 @@ def wrapper_chain(draft: InterfaceDraft, key: str) -> tuple[str, ...]:
     while True:
         block = draft.blocks[chain[-1]]
         ref = block.primary_ref
+        if ref is None or block.source_refs != (ref,) or len(block.children) != 1:
+            break
         if (
-            ref is None
-            or block.source_refs != (ref,)
-            or len(block.children) != 1
-            or block.layout not in ("tree", "record-path", "chain")
+            block.layout not in ("tree", "record-path", "chain")
             or draft.projected_nodes[ref]["role"] not in _WRAPPERS
             or draft.evidence[ref].incomplete
         ):
@@ -105,12 +104,9 @@ def inline_chain(draft: InterfaceDraft, key: str) -> tuple[str, ...] | None:
 def complete_row_cells(draft: InterfaceDraft, block: InterfaceBlock) -> tuple[tuple[str, int], ...] | None:
     """Read independently captured native cells of one complete original row."""
     ref = block.primary_ref
-    if (
-        ref is None
-        or draft.projected_nodes[ref]["role"] != "row"
-        or not block.children
-        or draft.evidence[ref].incomplete
-    ):
+    if ref is None or draft.projected_nodes[ref]["role"] != "row":
+        return None
+    if not block.children or draft.evidence[ref].incomplete:
         return None
     cells: list[tuple[str, int]] = []
     rows: set[int] = set()
@@ -120,14 +116,12 @@ def complete_row_cells(draft: InterfaceDraft, block: InterfaceBlock) -> tuple[tu
             return None
         node = draft.projected_nodes[cell.primary_ref]
         row, column = native_range(node, "rowRange"), native_range(node, "columnRange")
+        if node["role"] not in ("cell", "columnHeader") or row is None or column is None:
+            return None
+        if row[1] != 1 or column[1] != 1 or draft.evidence[cell.primary_ref].incomplete:
+            return None
         if (
-            node["role"] not in ("cell", "columnHeader")
-            or row is None
-            or column is None
-            or row[1] != 1
-            or column[1] != 1
-            or draft.evidence[cell.primary_ref].incomplete
-            or draft.projected_parents.get(cell.primary_ref) != ref
+            draft.projected_parents.get(cell.primary_ref) != ref
             or draft.source.scopes.get(cell.primary_ref) != draft.source.scopes.get(ref)
         ):
             return None

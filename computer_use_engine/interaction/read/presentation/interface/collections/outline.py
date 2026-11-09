@@ -19,11 +19,10 @@ def select_outline_layout(plan: TablePlan, request: CollectionRequest) -> TableP
     remain directly visible. Grids, merged cells and long branches retain their
     existing table or tree presentation.
     """
+    if plan.kind != "outline" or plan.layout != "table" or plan.partial:
+        return plan
     if (
-        plan.kind != "outline"
-        or plan.layout != "table"
-        or plan.partial
-        or plan.column_indices != (0,)
+        plan.column_indices != (0,)
         or plan.column_count not in (None, 1)
         or any(len(row.cells) != 1 or row.cells[0].row_span != 1 or row.cells[0].column_span != 1 for row in plan.rows)
     ):
@@ -33,18 +32,15 @@ def select_outline_layout(plan: TablePlan, request: CollectionRequest) -> TableP
 
     def retain_detail(ref: str, key: str, value: object) -> None:
         slot = request.atoms.atoms[ref].slot(key)
-        if (
-            slot is not None
-            and type(slot.value) is type(value)
-            and slot.value == value
-            and slot.facts
-            and all(
-                fact.key.source == ref
-                and fact.key.attribute == key
-                and type(fact.value) is type(value)
-                and fact.value == value
-                for fact in slot.facts
-            )
+        if slot is None:
+            return
+        matches_value = type(slot.value) is type(value) and slot.value == value
+        if matches_value and slot.facts and all(
+            fact.key.source == ref
+            and fact.key.attribute == key
+            and type(fact.value) is type(value)
+            and fact.value == value
+            for fact in slot.facts
         ):
             fields.append(CollectionDetailField(ref, slot))
 

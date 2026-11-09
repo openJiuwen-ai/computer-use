@@ -29,10 +29,13 @@ def _radio_targets(key: str, draft: InterfaceDraft) -> tuple[str, ...] | None:
     target = block.field_target_ref if block.visual_unit else block.primary_ref
     if target is not None and draft.projected_nodes[target]["role"] == "radioButton":
         return (target,) if inline_unit_refs(key, draft.blocks) is not None else None
-    if block.primary_ref is None and not block.source_refs and block.layout == "visual-row" and block.children:
-        members = tuple(_radio_targets(child, draft) for child in block.children)
-        if all(group is not None for group in members):
-            return tuple(ref for group in members if group is not None for ref in group)
+    if block.primary_ref is not None or block.source_refs:
+        return None
+    if block.layout != "visual-row" or not block.children:
+        return None
+    members = tuple(_radio_targets(child, draft) for child in block.children)
+    if all(group is not None for group in members):
+        return tuple(ref for group in members for ref in group)
     return None
 
 
@@ -68,7 +71,9 @@ def _label_support(label: str, targets: tuple[str, ...], draft: InterfaceDraft) 
         for target, caption_ref in pairs:
             if target not in selected and caption_ref != label:
                 continue
-            if not relation.complete or not relation.confirmed or target not in selected or caption_ref != label:
+            if not relation.complete or not relation.confirmed:
+                return False, True
+            if target not in selected or caption_ref != label:
                 return False, True
             confirmed.add(target)
         if not relation.targets and (relation.source == label or relation.source in selected):
@@ -83,16 +88,11 @@ def _question_start(key: str, draft: InterfaceDraft) -> tuple[str, tuple[str, ..
     if block.primary_ref is not None:
         return key, ()
     target, label = block.field_target_ref, block.label_ref
-    if (
-        block.kind != "field"
-        or block.visual_unit
-        or block.origin != "visual"
-        or block.source_refs
-        or target is None
-        or label is None
-        or draft.projected_nodes[target]["role"] != "radioButton"
-        or len(block.children) != 2
-    ):
+    if block.kind != "field" or block.visual_unit or block.origin != "visual":
+        return None
+    if block.source_refs or target is None or label is None:
+        return None
+    if draft.projected_nodes[target]["role"] != "radioButton" or len(block.children) != 2:
         return None
     members = {draft.blocks[child].primary_ref: child for child in block.children if not draft.blocks[child].children}
     if set(members) != {target, label} or dict(block.member_roles) != {target: "control", label: "label"}:
@@ -135,14 +135,16 @@ def _safe_group(label_key: str, children: tuple[str, ...], targets: tuple[str, .
         len(refs) != len(set(refs))
         or not same_scope(draft, refs)
         or not same_region(draft, refs)
-        or len({reading_scope(ref, draft) for ref in refs}) != 1
-        or any(
-            draft.evidence[ref].boundary
-            or draft.evidence[ref].hidden
-            or draft.evidence[ref].incomplete
-            or ordered_ancestry(ref, draft)
-            for ref in refs
-        )
+    ):
+        return False
+    if len({reading_scope(ref, draft) for ref in refs}) != 1:
+        return False
+    if any(
+        draft.evidence[ref].boundary
+        or draft.evidence[ref].hidden
+        or draft.evidence[ref].incomplete
+        or ordered_ancestry(ref, draft)
+        for ref in refs
     ):
         return False
     selected = frozenset(refs)

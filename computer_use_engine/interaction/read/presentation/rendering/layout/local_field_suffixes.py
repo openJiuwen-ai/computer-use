@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 import unicodedata
 
 from computer_use.interaction.read.presentation.rendering.layout.public_entries import (
+    labelled_field_positions,
     unique_numbered_entries,
-    unquoted_positions,
 )
 
 if TYPE_CHECKING:
@@ -69,26 +69,11 @@ def _plain(value: str) -> bool:
     )
 
 
-def _field_starts(body: str, label: str, start: int, *, first_field: bool = False) -> list[int]:
-    """Locate labelled fields outside quoted provider text."""
-    return sorted(
-        position
-        for position in unquoted_positions(body)
-        if position >= start
-        and body.startswith(label + ": ", position)
-        and (
-            position == start
-            or body[max(0, position - 2): position] == ", "
-            or (first_field and position > start and body[position - 1] == " " and ":" not in body[:position])
-        )
-    )
-
-
 def _literal_span(body: str, prefix: str, label: str, encoded: str) -> tuple[int, int] | None:
     """Verify one exact generated field and its complete scalar boundary."""
     if not body.startswith(prefix):
         return None
-    starts = _field_starts(body, label, len(prefix))
+    starts = labelled_field_positions(body, label, len(prefix))
     if len(starts) != 1:
         return None
     start = starts[0]
@@ -136,7 +121,7 @@ def expand_local_field_suffixes(
         if not entry.role_explicit or entry.heading or entry.body != lines[entry.line].lstrip("\t"):
             continue
         body = entry.body
-        starts = _field_starts(body, "URL", len(entry.ref) + 1, first_field=True)
+        starts = labelled_field_positions(body, "URL", len(entry.ref) + 1, first_field=True)
         if len(starts) != 1:
             continue
         start = starts[0]
@@ -153,7 +138,7 @@ def expand_local_field_suffixes(
         prefix_type = type(prefix)
         if prefix_type is not str or not _plain(prefix):
             raise ValueError("local URL prefix must be a nonempty literal string")
-        descriptions = _field_starts(body, "Description", len(entry.ref) + 1, first_field=True)
+        descriptions = labelled_field_positions(body, "Description", len(entry.ref) + 1, first_field=True)
         if len(descriptions) != 1:
             raise ValueError("local URL expression requires its own Description")
         description, description_end = _scalar(body, descriptions[0] + len("Description: "))
@@ -178,12 +163,9 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
     Structured node records, bindings and their source accounting remain intact.
     """
     unchanged = LocalFieldSuffixLayout(frame.lines)
-    if (
-        not frame.context.get("compact")
-        or frame.context.get("subtreeRef")
-        or len(frame.roots) != 1
-        or frame.roots[0]["role"] in _MENUS
-    ):
+    if not frame.context.get("compact") or frame.context.get("subtreeRef"):
+        return unchanged
+    if len(frame.roots) != 1 or frame.roots[0]["role"] in _MENUS:
         return unchanged
     root = frame.roots[0]["ref"]
     root_source = frame.field_prefix_sources.get(root)

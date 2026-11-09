@@ -93,7 +93,7 @@ class AgentElementReadPipeline:
         state = controller.state(ui)
         # The pipeline shares retained bindings with their owning service.
         # pylint: disable-next=protected-access
-        controller._remember(state, target, tree)
+        controller.remember_observation(state, target, tree)
         for field in ("window_identity", "menu_window_identity"):
             if field in snapshot:
                 for ref in tree.refs:

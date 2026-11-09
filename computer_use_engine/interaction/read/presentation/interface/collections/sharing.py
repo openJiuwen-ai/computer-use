@@ -48,19 +48,14 @@ def shared_prefix(
     for first_index, first in enumerate(members[0].states):
         matching = [first_index]
         for member_index, member in enumerate(members[1:], 1):
-            index = next(
-                (
-                    index
-                    for index, state in enumerate(member.states)
-                    if index not in indices[member_index]
-                    and state.label == first.label
-                    and _facts(state.facts) == _facts(first.facts)
-                ),
-                None,
-            )
-            if index is None:
+            for index, state in enumerate(member.states):
+                if index in indices[member_index]:
+                    continue
+                if state.label == first.label and _facts(state.facts) == _facts(first.facts):
+                    matching.append(index)
+                    break
+            else:
                 break
-            matching.append(index)
         if len(matching) != len(members):
             continue
         states.append(
@@ -116,16 +111,12 @@ def passive_cell_chain(request: CollectionRequest, ref: str, descendants: tuple[
         fields = request.interface.projected_nodes[child]
         capabilities = fields.get("capabilities")
         capabilities = capabilities if isinstance(capabilities, Mapping) else {}
-        if (
-            atoms[previous].children != (child,)
-            or native is None
-            or native.role not in ("static_text", "image")
-            or native.actions != ()
-            or atom.actions
-            or atom.actions_unavailable
-            or atom.coverage.partial
-            or any(value == "available" for value in capabilities.values())
-            or any(isinstance(slot.value, str) and ("\n" in slot.value or "\r" in slot.value) for slot in atom.slots)
+        if atoms[previous].children != (child,) or native is None or native.role not in ("static_text", "image"):
+            return ()
+        if native.actions != () or atom.actions or atom.actions_unavailable:
+            return ()
+        if atom.coverage.partial or any(value == "available" for value in capabilities.values()) or any(
+            isinstance(slot.value, str) and ("\n" in slot.value or "\r" in slot.value) for slot in atom.slots
         ):
             return ()
         previous = child

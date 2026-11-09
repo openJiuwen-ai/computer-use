@@ -91,50 +91,41 @@ def _identifier_lines(frame: LayoutFrame) -> tuple[int, list[_IdentifierLine]] |
         positions.setdefault(line, []).append(index)
     counts = Counter(record.ref for record in frame.rendered_nodes)
     root_record = next((record for record in frame.rendered_nodes if record.ref == root["ref"]), None)
-    if (
-        root_record is None
-        or counts[root["ref"]] != 1
-        or "\n" in root_record.text
-        or not root_record.text.startswith("\t" * root_record.depth + root["ref"] + " ")
-        or len(positions.get(root_record.text, ())) != 1
-    ):
+    if root_record is None or counts[root["ref"]] != 1:
         return None
-    root_index = positions[root_record.text][0]
+    if "\n" in root_record.text or not root_record.text.startswith("\t" * root_record.depth + root["ref"] + " "):
+        return None
+    root_positions = positions.get(root_record.text, ())
+    if len(root_positions) != 1:
+        return None
+    root_index = root_positions[0]
     candidates: list[_IdentifierLine] = []
     for record in frame.rendered_nodes:
         source, node = frame.identifier_sources.get(record.ref), nodes.get(record.ref)
         span = frame.node_line_ranges.get(record.ref)
-        if (
-            source is None
-            or node is None
-            or source.scope[2] != root["ref"]
-            or counts[record.ref] != 1
-            or occurrences[record.ref] != 1
-            or record.parent != parents[record.ref]
-            or node["role"] in _MENUS
-            or record.partial
-            or record.hints
-            or record.related
-            or record.layout
-            or span is None
-            or span[1] - span[0] != 1
-            or "\n" in record.text
-            or len(positions.get(record.text, ())) != 1
-            or not _plain(source.value)
-            or node.get("identifier") != source.value
-            or frame.format_field(source.value) != source.value
-        ):
+        if source is None or node is None or source.scope[2] != root["ref"]:
             continue
-        index = positions[record.text][0]
+        if counts[record.ref] != 1 or occurrences[record.ref] != 1 or record.parent != parents[record.ref]:
+            continue
+        if node["role"] in _MENUS or record.partial or record.hints:
+            continue
+        if record.related or record.layout:
+            continue
+        if span is None or span[1] - span[0] != 1 or "\n" in record.text:
+            continue
+        line_positions = positions.get(record.text, ())
+        if len(line_positions) != 1:
+            continue
+        if not _plain(source.value) or node.get("identifier") != source.value:
+            continue
+        if frame.format_field(source.value) != source.value:
+            continue
+        index = line_positions[0]
         prefix = "\t" * record.depth + record.ref + " "
         suffix = "ID: " + source.value
-        if (
-            index < root_index
-            or not record.text.startswith(prefix)
-            or not record.text.endswith(suffix)
-            or " | " in record.text
-            or " > " in record.text
-        ):
+        if index < root_index or not record.text.startswith(prefix) or not record.text.endswith(suffix):
+            continue
+        if " | " in record.text or " > " in record.text:
             continue
         start = len(record.text) - len(suffix)
         if start <= len(prefix) or record.text[start - 1] != " ":

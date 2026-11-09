@@ -11,6 +11,11 @@ from computer_use.interaction.read.presentation.compression.evidence import Comp
 from computer_use.interaction.read.presentation.interface.atoms.model import AtomDocument, AtomPlan, AtomSlot
 from computer_use.interaction.read.presentation.interface.model import InterfaceBlock, InterfaceDocument
 
+_INDEPENDENT_FIELDS = (
+    "selected", "focused", "busy", "invalid", "editable", "pressable", "focusable", "selectable", "expandable",
+    "submenu", "sensitive", "protected", "modal", "incompleteLabelRelation", "actionsUnavailable", "preserveGroup",
+)
+
 
 def duplicate_caption_slots(
     member: AtomPlan,
@@ -36,68 +41,41 @@ def duplicate_caption_slots(
     source = member.source_fields
     caps = source.get("capabilities")
     if (
-        not block.visual_unit
-        or block.layout != "control-unit"
+        not block.visual_unit or block.layout != "control-unit"
         or target.source_fields.get("role") not in ("button", "link")
-        or source.get("role") != "staticText"
-        or member.children
-        or member.states
-        or member.actions
-        or member.actions_unavailable
-        or member.declarations
-        or member.coverage.partial
-        or atoms.focused_ref == member.ref
-        or not isinstance(caps, Mapping)
-        or any(caps.get(key) not in ("unknown", "unavailable") for key in ("click", "typeText", "replaceText", "focus"))
-        or "actions" not in source
-        or source["actions"]
-        or source.get("enabled") is False
-        or any(
-            source.get(key)
-            for key in (
-                "selected",
-                "focused",
-                "busy",
-                "invalid",
-                "editable",
-                "pressable",
-                "focusable",
-                "selectable",
-                "expandable",
-                "submenu",
-                "sensitive",
-                "protected",
-                "modal",
-                "incompleteLabelRelation",
-                "actionsUnavailable",
-                "preserveGroup",
-            )
-        )
-        or document.source.parents.get(member.ref) != target.ref
+    ):
+        return ()
+    if source.get("role") != "staticText" or member.children or member.states:
+        return ()
+    if member.actions or member.actions_unavailable or member.declarations:
+        return ()
+    if member.coverage.partial or atoms.focused_ref == member.ref or not isinstance(caps, Mapping):
+        return ()
+    if any(caps.get(key) not in ("unknown", "unavailable") for key in ("click", "typeText", "replaceText", "focus")):
+        return ()
+    if "actions" not in source or source["actions"] or source.get("enabled") is False:
+        return ()
+    if any(source.get(key) for key in _INDEPENDENT_FIELDS):
+        return ()
+    if (
+        document.source.parents.get(member.ref) != target.ref
         or document.projected_parents.get(member.ref) != target.ref
         or tuple(document.projected_nodes[target.ref].get("children", ())) != (member.ref,)
     ):
         return ()
     captions = tuple(slot for slot in target.slots if slot.placement == "caption")
     slots = member.slots
-    if (
-        len(captions) != 1
-        or captions[0].format != "text"
-        or captions[0].preview is not None
-        or not isinstance(captions[0].value, str)
-        or not captions[0].value
-        or not slots
-        or any(
-            slot.key not in ("name", "description", "value")
-            or slot.protection
-            or slot.format != "text"
-            or slot.preview is not None
-            or slot.value != captions[0].value
-            or any(character in slot.value for character in ("\r", "\n", "\t"))
-            for slot in slots
-        )
-    ):
+    if len(captions) != 1 or captions[0].format != "text" or captions[0].preview is not None:
         return ()
+    if not isinstance(captions[0].value, str) or not captions[0].value or not slots:
+        return ()
+    for slot in slots:
+        if slot.key not in ("name", "description", "value") or slot.protection or slot.format != "text":
+            return ()
+        if slot.preview is not None or slot.value != captions[0].value:
+            return ()
+        if any(character in slot.value for character in ("\r", "\n", "\t")):
+            return ()
     evidence = atoms.source.context.get("compressionEvidence")
     if any(
         slot.key not in owner.source_fields.get("_completeTextValues", ())

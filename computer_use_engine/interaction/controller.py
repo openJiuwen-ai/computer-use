@@ -221,7 +221,8 @@ class SessionController:
     def validate_element(self, target: Binding) -> None:
         self.bindings.validate_element(target, self.transport.session)
 
-    def _remember(self, state: AppState, target: Binding, tree: SemanticSnapshot) -> None:
+    def remember_observation(self, state: AppState, target: Binding, tree: SemanticSnapshot) -> None:
+        """Retain observed element identities and continuations for later SDK calls."""
         if {"nativeRelationPages", "nativeNodePages"} & set(self.transport.capabilities):
             self.pages.remember(target, tree)
         self.bindings.remember(state, self._snapshots(target, tree))

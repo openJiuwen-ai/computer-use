@@ -50,13 +50,10 @@ class _DocumentFlowIndex:
                 result = None
                 break
             children = self._children(node)
-            if (
-                node["role"] not in ("group", "webArea")
-                or len(children) != 1
-                or node.get("actions")
-                or node.get("selected")
-                or node.get("editable")
-            ):
+            if node["role"] not in ("group", "webArea") or len(children) != 1:
+                result = node
+                break
+            if node.get("actions") or node.get("selected") or node.get("editable"):
                 result = node
                 break
             ref = children[0]

@@ -40,11 +40,11 @@ def complete_children(draft: InterfaceDraft, ref: str) -> tuple[str, ...] | None
             edge["certainty"] != "confirmed"
             or edge["state"] not in ("complete", "absent")
             or edge.get("enumeration", "enumerated") != "enumerated"
-            or edge.get("offset", 0) != 0
-            or edge.get("total", len(targets)) != len(targets)
-            or tuple(edge.get("positions", range(len(targets)))) != tuple(range(len(targets)))
-            or targets != expected
         ):
+            return None
+        if edge.get("offset", 0) != 0 or edge.get("total", len(targets)) != len(targets):
+            return None
+        if tuple(edge.get("positions", range(len(targets)))) != tuple(range(len(targets))) or targets != expected:
             return None
     return projected
 

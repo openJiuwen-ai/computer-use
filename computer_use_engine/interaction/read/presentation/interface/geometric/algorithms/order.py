@@ -48,13 +48,9 @@ def order_visual_rows(draft: InterfaceDraft) -> InterfaceDraft:
     decisions: list[str] = []
     for key, block in draft.blocks.items():
         original = block.children
-        if (
-            block.layout != "visual-row"
-            or block.primary_ref is not None
-            or block.source_refs
-            or len(original) < 2
-            or not row_geometry(original, draft, blocks, require_source_order=False)
-        ):
+        if block.layout != "visual-row" or block.primary_ref is not None or block.source_refs:
+            continue
+        if len(original) < 2 or not row_geometry(original, draft, blocks, require_source_order=False):
             continue
         measured = comparable_members(original, draft, blocks)
         if measured is None:
@@ -68,7 +64,7 @@ def order_visual_rows(draft: InterfaceDraft) -> InterfaceDraft:
         edges: dict[str, set[str]] = {member: set() for member in original}
         for before, after in native:
             edges[before].add(after)
-        horizontal = sorted(original, key=lambda member: measured[member].x)
+        horizontal = sorted(original, key=lambda member, boxes=measured: boxes[member].x)
         for before, after in zip(horizontal, horizontal[1:]):
             add_compatible_edge(edges, before, after)
         ordered = stable_order(

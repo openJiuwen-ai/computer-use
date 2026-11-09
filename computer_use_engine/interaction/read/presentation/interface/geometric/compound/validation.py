@@ -27,22 +27,17 @@ def compound_issue(block: InterfaceBlock, draft: InterfaceDraft) -> str | None:
         A local recovery reason, or None when every source is represented exactly
         once under the same original single-child control path.
     """
-    if (
-        block.kind != "field"
-        or block.primary_ref is not None
-        or block.source_refs
-        or not block.visual_unit
-        or block.field_target_ref is None
-    ):
+    if block.kind != "field" or block.primary_ref is not None or block.source_refs:
+        return "compound lacks its independently referenced principal control"
+    if not block.visual_unit or block.field_target_ref is None:
         return "compound lacks its independently referenced principal control"
     members = tuple(draft.blocks[key] for key in block.children)
     refs = tuple(member.primary_ref for member in members)
     target = block.field_target_ref
+    if len(refs) < 2 or any(ref is None for ref in refs) or len(set(refs)) != len(refs):
+        return "compound lost or duplicated an original auxiliary source"
     if (
-        len(refs) < 2
-        or any(ref is None for ref in refs)
-        or len(set(refs)) != len(refs)
-        or refs[0] != target
+        refs[0] != target
         or any(member.children or member.source_refs != (member.primary_ref,) for member in members)
         or set(refs) != {ref for ref, _ in block.member_roles}
     ):
@@ -57,8 +52,9 @@ def compound_issue(block: InterfaceBlock, draft: InterfaceDraft) -> str | None:
             nodes[ref].get("modal") is True or nodes[ref].get("subrole") in ("dialog", "systemDialog", "popover")
             for ref in source_refs
         )
-        or not one_window(draft, source_refs)
     ):
+        return "compound crossed a semantic or window boundary"
+    if not one_window(draft, source_refs):
         return "compound crossed a semantic or window boundary"
     roots = tuple(ref for ref in source_refs if draft.projected_parents.get(ref) not in refs)
     if len(roots) != 1 or nodes[roots[0]]["role"] != "group":

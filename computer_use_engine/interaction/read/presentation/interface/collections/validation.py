@@ -8,6 +8,7 @@ from __future__ import annotations
 from computer_use.interaction.read.presentation.interface.collections.model import (
     CollectionDocument,
     CollectionPrefixPlan,
+    TablePlan,
 )
 
 
@@ -22,13 +23,21 @@ def _validate_prefix(prefix: CollectionPrefixPlan | None, refs: tuple[str, ...])
         raise ValueError("A collection prefix lacks distinct members or fields")
     for member in prefix.members:
         indices = member.state_indices
+        inconsistent_indices = len(indices) != len(prefix.states) or len(set(indices)) != len(indices)
         if (
-            len(indices) != len(prefix.states)
-            or len(set(indices)) != len(indices)
-            or any(type(index) is not int or index < 0 for index in indices)
+            inconsistent_indices or any(type(index) is not int or index < 0 for index in indices)
             or member.slot_keys != keys
         ):
             raise ValueError("A collection prefix has inconsistent member field destinations")
+
+
+def _column_refs(plan: TablePlan, index: int, *, single_span: bool = False) -> tuple[str, ...]:
+    refs = []
+    for row in plan.rows:
+        for cell in row.cells:
+            if cell.column == index and (not single_span or cell.column_span == 1):
+                refs.append(cell.ref)
+    return tuple(refs)
 
 
 def validate_collections(document: CollectionDocument) -> None:
@@ -55,16 +64,11 @@ def validate_collections(document: CollectionDocument) -> None:
                 raise ValueError("A logical row has inconsistent cell coordinates")
             members.append(row.ref)
             for cell in row.cells:
-                if (
-                    type(cell.row) is not int
-                    or type(cell.column) is not int
-                    or cell.row < 0
-                    or cell.column < 0
-                    or type(cell.row_span) is not int
-                    or type(cell.column_span) is not int
-                    or cell.row_span < 1
-                    or cell.column_span < 1
-                ):
+                invalid_coordinate_types = type(cell.row) is not int or type(cell.column) is not int
+                if invalid_coordinate_types or cell.row < 0 or cell.column < 0:
+                    raise ValueError("A cell lacks a valid original logical extent")
+                invalid_span_types = type(cell.row_span) is not int or type(cell.column_span) is not int
+                if invalid_span_types or cell.row_span < 1 or cell.column_span < 1:
                     raise ValueError("A cell lacks a valid original logical extent")
                 if any(child not in cell.descendant_refs for child in cell.children):
                     raise ValueError("A cell lost one of its original content branches")
@@ -77,23 +81,23 @@ def validate_collections(document: CollectionDocument) -> None:
         if set(members) & set(plan.remaining_refs) or plan.ref in members:
             raise ValueError("A table layout consumed an unrelated or parent object")
         details = tuple((field.ref, field.slot.key) for field in plan.detail_fields)
-        if (
-            len(set(details)) != len(details)
-            or plan.detail_fields
-            and (plan.layout != "outline" or plan.kind != "outline" or plan.column_indices != (0,) or plan.partial)
+        if len(set(details)) != len(details):
+            raise ValueError("An outline detail field lacks its original structural source")
+        outside_outline = plan.detail_fields and (
+            plan.layout != "outline" or plan.kind != "outline" or plan.column_indices != (0,) or plan.partial
+        )
+        if outside_outline or any(
+            field.ref not in members
+            or field.slot.key not in ("index", "disclosureLevel", "rowRange", "columnRange")
+            or not field.slot.facts
             or any(
-                field.ref not in members
-                or field.slot.key not in ("index", "disclosureLevel", "rowRange", "columnRange")
-                or not field.slot.facts
-                or any(
-                    fact.key.source != field.ref
-                    or fact.key.attribute != field.slot.key
-                    or fact.value != field.slot.value
-                    or type(fact.value) is not type(field.slot.value)
-                    for fact in field.slot.facts
-                )
-                for field in plan.detail_fields
+                fact.key.source != field.ref
+                or fact.key.attribute != field.slot.key
+                or fact.value != field.slot.value
+                or type(fact.value) is not type(field.slot.value)
+                for fact in field.slot.facts
             )
+            for field in plan.detail_fields
         ):
             raise ValueError("An outline detail field lacks its original structural source")
         if (
@@ -104,13 +108,8 @@ def validate_collections(document: CollectionDocument) -> None:
             raise ValueError("A table has inconsistent column prefix slots")
         _validate_prefix(plan.row_prefix, tuple(row.ref for row in plan.rows))
         for index, prefix in zip(plan.column_indices, plan.column_prefixes):
-            _validate_prefix(prefix, tuple(cell.ref for row in plan.rows for cell in row.cells if cell.column == index))
+            _validate_prefix(prefix, _column_refs(plan, index))
         for column in plan.columns:
-            expected = tuple(
-                cell.ref
-                for row in plan.rows
-                for cell in row.cells
-                if cell.column == column.index and cell.column_span == 1
-            )
+            expected = _column_refs(plan, column.index, single_span=True)
             if expected != column.cell_refs or column.ref not in plan.remaining_refs:
                 raise ValueError("A native column no longer matches its captured cell sequence")

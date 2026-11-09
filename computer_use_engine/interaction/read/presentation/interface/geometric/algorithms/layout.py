@@ -19,18 +19,13 @@ def _caption_label(draft: InterfaceDraft, ref: str) -> bool:
     if draft.atoms is None:
         return False
     atom = draft.atoms.atoms.get(ref)
-    if (
-        atom is None
-        or atom.source_fields.get("role") != "staticText"
-        or atom.children
-        or atom.states
-        or atom.actions
-        or atom.actions_unavailable
-        or atom.declarations
-        or atom.coverage.partial
-        or draft.atoms.focused_ref == ref
-        or len(atom.slots) != 1
-    ):
+    if atom is None or atom.source_fields.get("role") != "staticText" or atom.children:
+        return False
+    if atom.states or atom.actions or atom.actions_unavailable:
+        return False
+    if atom.declarations or atom.coverage.partial:
+        return False
+    if draft.atoms.focused_ref == ref or len(atom.slots) != 1:
         return False
     slot = atom.slots[0]
     return (

@@ -62,6 +62,21 @@ def unquoted_positions(text: str) -> set[int]:
     return result
 
 
+def labelled_field_positions(body: str, label: str, minimum: int, *, first_field: bool = False) -> list[int]:
+    """Locate labelled scalar fields outside quoted values and at a field boundary."""
+    positions = []
+    marker = label + ": "
+    for position in unquoted_positions(body):
+        if position < minimum or not body.startswith(marker, position):
+            continue
+        if position == minimum or body[max(0, position - 2): position] == ", ":
+            positions.append(position)
+            continue
+        if first_field and body[position - 1] == " " and ":" not in body[:position]:
+            positions.append(position)
+    return sorted(positions)
+
+
 def _table_lines(lines: list[str]) -> dict[int, str]:
     """Locate complete public record-table blocks accepted by their grammar."""
     result = {}

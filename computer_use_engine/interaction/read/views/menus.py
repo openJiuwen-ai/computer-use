@@ -58,7 +58,7 @@ def remember_menu(
         state.menu_window_identity = WindowIdentity.of(ui._instance.members[context]) if context is not None else None
         owner = SurfaceOwner(controller, state)
         # pylint: disable-next=protected-access
-        controller._remember(state, part.target, tree)
+        controller.remember_observation(state, part.target, tree)
         # Menu references retain the exact source window independently of a
         # later menu read that may reuse the same application-menu surface.
         for element_ref in tree.refs:

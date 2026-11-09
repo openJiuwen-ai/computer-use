@@ -125,13 +125,9 @@ def pack_table_entries(frame: LayoutFrame) -> TableEntriesLayout:
     Role/state labels, outline levels and row/cell data remain local to each
     table. Generated evidence and current public member order must both match.
     """
-    if (
-        not frame.context.get("compact")
-        or frame.context.get("subtreeRef")
-        or len(frame.roots) != 1
-        or frame.roots[0]["role"] in ("menu", "menuBar")
-        or len(frame.table_layouts) < 2
-    ):
+    if not frame.context.get("compact") or frame.context.get("subtreeRef"):
+        return TableEntriesLayout(frame.lines)
+    if len(frame.roots) != 1 or frame.roots[0]["role"] in ("menu", "menuBar") or len(frame.table_layouts) < 2:
         return TableEntriesLayout(frame.lines)
     root = frame.roots[0]["ref"]
     entries = unique_numbered_entries(frame.lines)

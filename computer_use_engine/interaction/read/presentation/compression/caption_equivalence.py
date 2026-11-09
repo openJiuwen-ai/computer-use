@@ -26,6 +26,38 @@ if TYPE_CHECKING:
     from computer_use.protocol.observation import Action, NativeNode, ReadIssue, TextInfo
 
 
+_INDEPENDENT_CAPTION_FIELDS = (
+    "name",
+    "description",
+    "help",
+    "url",
+    "identifier",
+    "titleRef",
+    "labelTargets",
+    "linkedLabel",
+    "incompleteLabelRelation",
+    "preserveGroup",
+    "subrole",
+    "placeholder",
+    "documentUrl",
+    "documentText",
+    "controlValue",
+    "rangeValue",
+    "valueExpected",
+    "headingLevel",
+    "landmarkType",
+    "fullDescription",
+    "shortcut",
+    "menuMark",
+    "toggleState",
+    "disclosedBy",
+    "incompleteDisclosureRelation",
+)
+_ACTIVE_CAPTION_FIELDS = (
+    "focused", "selected", "pressable", "focusable", "selectable", "expandable", "submenu", "modal"
+)
+
+
 @dataclass(frozen=True)
 class PassiveCaptionSource:
     """Complete original value and input/selection evidence for one passive source.
@@ -80,15 +112,13 @@ def _complete(
     """Require local field evidence, accepting exact absence only when requested."""
     for issue in issues:
         local = issue.path[2:]
-        if local[: len(path)] == path or path[: len(local)] == local:
-            if (
-                not absent
-                or local != path
-                or issue.state not in (("absent", "unsupported") if unsupported else ("absent",))
-                or issue.continuation is not None
-                or issue.alternatives
-            ):
-                return False
+        if not (local[: len(path)] == path or path[: len(local)] == local):
+            continue
+        if not absent or local != path:
+            return False
+        states = ("absent", "unsupported") if unsupported else ("absent",)
+        if issue.state not in states or issue.continuation is not None or issue.alternatives:
+            return False
     return True
 
 
@@ -111,12 +141,9 @@ def _optional_record_complete(
             if len(local) == 1
             else (len(local) == 2 and local[1] in names and (record is None or getattr(record, local[1]) is None))
         )
-        if (
-            not missing
-            or issue.state not in ("absent", "unsupported")
-            or issue.continuation is not None
-            or issue.alternatives
-        ):
+        if not missing:
+            return False
+        if issue.state not in ("absent", "unsupported") or issue.continuation is not None or issue.alternatives:
             return False
     return True
 
@@ -162,18 +189,15 @@ def _incidental_metadata(node: NativeNode, issues: tuple[ReadIssue, ...]) -> boo
 
 def _passive_native(node: NativeNode, issues: tuple[ReadIssue, ...]) -> tuple[Action, ...] | None:
     """Confirm unavailable input and only neutral, fully known text selections."""
-    if (
-        node.role != "static_text"
-        or node.role_detail
-        or node.actions is None
-        or node.control_value is None
-        or type(node.control_value.value) is not str
-        or not node.control_value.value
-        or not _complete(issues, ("role",))
-        or not _complete(issues, ("role_detail",), absent=node.role_detail is None, unsupported=True)
-        or not _complete(issues, ("control_value", "value"))
-        or not _complete(issues, ("actions",))
-    ):
+    if node.role != "static_text" or node.role_detail or node.actions is None:
+        return None
+    if node.control_value is None or type(node.control_value.value) is not str or not node.control_value.value:
+        return None
+    if not _complete(issues, ("role",)):
+        return None
+    if not _complete(issues, ("role_detail",), absent=node.role_detail is None, unsupported=True):
+        return None
+    if not _complete(issues, ("control_value", "value")) or not _complete(issues, ("actions",)):
         return None
     for name in ("name", "description", "help", "identifier", "placeholder", "url"):
         value = getattr(node, name)
@@ -184,9 +208,11 @@ def _passive_native(node: NativeNode, issues: tuple[ReadIssue, ...]) -> tuple[Ac
         or not _complete(
             issues, ("control_value", "description"), absent=node.control_value.description is None, unsupported=True
         )
-        or node.control_value.read_only is not None
-        or not _complete(issues, ("control_value", "read_only"), absent=True, unsupported=True)
     ):
+        return None
+    if node.control_value.read_only is not None:
+        return None
+    if not _complete(issues, ("control_value", "read_only"), absent=True, unsupported=True):
         return None
     states = node.states
     for name, expected in (
@@ -234,15 +260,15 @@ def _passive_native(node: NativeNode, issues: tuple[ReadIssue, ...]) -> tuple[Ac
             return None
         if relations:
             key, relation = relations[0]
+            if relation.targets or relation.total != 0 or relation.offset not in (None, 0):
+                return None
             if (
-                relation.targets
-                or relation.total != 0
-                or relation.offset not in (None, 0)
-                or relation.positions not in (None, ())
+                relation.positions not in (None, ())
                 or relation.evidence not in ("reported", "verified")
                 or relation.enumeration != "enumerated"
-                or not _complete(issues, ("relations", key), absent=True)
             ):
+                return None
+            if not _complete(issues, ("relations", key), absent=True):
                 return None
         elif not _complete(issues, ("relations", kind)):
             return None
@@ -253,59 +279,61 @@ def _passive_native(node: NativeNode, issues: tuple[ReadIssue, ...]) -> tuple[Ac
         ("replace_selection", ("text", "selections")),
     ):
         matches = tuple(action for action in node.actions if action.kind == kind)
-        if (
-            len(matches) != 1
-            or matches[0].key is not None
-            or matches[0].available is not False
-            or matches[0].target != target
-        ):
+        if len(matches) != 1:
             return None
-        inputs.append(matches[0])
+        action = matches[0]
+        if action.key is not None or action.available is not False or action.target != target:
+            return None
+        inputs.append(action)
     if any(
         action.kind not in ("focus", "set_value", "replace_selection", "show_menu", "scroll_into_view")
         for action in node.actions
     ):
         return None
-    text = node.text
-    if (
-        text is None
-        or text.content_field != ("control_value", "value")
-        or text.content is not None
-        or text.unit != "utf16_code_unit"
-        or text.selections is None
-        or text.read_only is not None
-        or not _complete(issues, ("text", "read_only"), absent=True, unsupported=True)
-        or not _complete(issues, ("text", "selections"))
-        or text.selected_text not in (None, "")
-        or not _complete(issues, ("text", "selected_text"), absent=text.selected_text is None, unsupported=True)
-        or text.caret is not None
-        or text.caret_active is not None
-        and text.caret_active is not False
-        or any(
-            getattr(text, name) is not None
-            for name in ("runs", "embedded", "visible_ranges", "line_ranges", "supported_selection")
-        )
-        or text.character_count is not None
-        and (type(text.character_count) is not int or text.character_count != utf16_length(node.control_value.value))
-    ):
+    if not _passive_text(node, issues):
         return None
+    return tuple(inputs)
+
+
+def _passive_text(node: NativeNode, issues: tuple[ReadIssue, ...]) -> bool:
+    """Confirm complete value-backed text and inactive selection evidence."""
+    text = node.text
+    if text is None or text.content_field != ("control_value", "value") or text.content is not None:
+        return False
+    if text.unit != "utf16_code_unit" or text.selections is None or text.read_only is not None:
+        return False
+    if (
+        not _complete(issues, ("text", "read_only"), absent=True, unsupported=True)
+        or not _complete(issues, ("text", "selections"))
+    ):
+        return False
+    if text.selected_text not in (None, ""):
+        return False
+    if not _complete(issues, ("text", "selected_text"), absent=text.selected_text is None, unsupported=True):
+        return False
+    if text.caret is not None or (text.caret_active is not None and text.caret_active is not False):
+        return False
+    if any(
+        getattr(text, name) is not None
+        for name in ("runs", "embedded", "visible_ranges", "line_ranges", "supported_selection")
+    ):
+        return False
+    if text.character_count is not None:
+        if type(text.character_count) is not int or text.character_count != utf16_length(node.control_value.value):
+            return False
     for item in fields(text):
         if not _complete(issues, ("text", item.name), absent=getattr(text, item.name) is None, unsupported=True):
-            return None
+            return False
     for span in text.selections:
-        if (
-            type(span.start) is not int
-            or type(span.end) is not int
-            or span.start != 0
-            or span.end != 0
-            or span.collapsed is not True
-            or span.text not in (None, "")
-            or span.geometry
-            or span.attributes
-            or span.read_ref is not None
-        ):
-            return None
-    return tuple(inputs)
+        if type(span.start) is not int or type(span.end) is not int:
+            return False
+        if span.start != 0 or span.end != 0 or span.collapsed is not True:
+            return False
+        if span.text not in (None, "") or span.geometry or span.attributes:
+            return False
+        if span.read_ref is not None:
+            return False
+    return True
 
 
 def _window_targets(
@@ -321,14 +349,16 @@ def _window_targets(
         return None
     key, relation = relations[0]
     size = len(relation.targets)
+    if size > 1 or type(relation.total) is not int or relation.total != size:
+        return None
     if (
-        size > 1
-        or type(relation.total) is not int
-        or relation.total != size
-        or relation.offset not in (None, 0)
+        relation.offset not in (None, 0)
         or relation.positions not in (None, tuple(range(size)))
         or relation.evidence not in ("reported", "verified")
-        or relation.enumeration != "enumerated"
+    ):
+        return None
+    if (
+        relation.enumeration != "enumerated"
         or not _complete(issues, ("relations", key), absent=size == 0)
         or any(target not in aliases for target in relation.targets)
     ):
@@ -370,16 +400,17 @@ def capture_caption_sources(snapshot: SnapshotFacts) -> Mapping[str, PassiveCapt
             continue
         if declared:
             key, relation = declared[0]
+            if relation.targets != (candidates[0],) or type(relation.total) is not int or relation.total != 1:
+                inconsistent_parents.add(aliases[token])
+                continue
             if (
-                relation.targets != (candidates[0],)
-                or type(relation.total) is not int
-                or relation.total != 1
-                or relation.offset not in (None, 0)
+                relation.offset not in (None, 0)
                 or relation.positions not in (None, (0,))
                 or relation.evidence not in ("reported", "verified")
-                or relation.enumeration != "enumerated"
-                or not _complete(local, ("relations", key))
             ):
+                inconsistent_parents.add(aliases[token])
+                continue
+            if relation.enumeration != "enumerated" or not _complete(local, ("relations", key)):
                 inconsistent_parents.add(aliases[token])
                 continue
         elif not _complete(local, ("relations", "parent")):
@@ -396,8 +427,10 @@ def capture_caption_sources(snapshot: SnapshotFacts) -> Mapping[str, PassiveCapt
             if ref in inconsistent_parents:
                 continue
             current, ancestors = ref, []
-            while current in parents and parents[current] not in (ref, *ancestors):
-                parent = parents[current]
+            while True:
+                parent = parents.get(current)
+                if parent is None or parent in (ref, *ancestors):
+                    break
                 parent_node = snapshot.native.nodes[snapshot.refs[parent]]
                 boundary = parent_node.role in ("window", "dialog", "alert")
                 if parent in inconsistent_parents and not boundary:
@@ -443,44 +476,33 @@ def caption_equivalence(
     """
     ref = owner["ref"]
     original = view.native_nodes[ref]
-    if (
-        owner["role"] not in ("link", "button")
-        or original["role"] != owner["role"]
-        or owner.get("capabilities", {}).get("click") != "available"
-        or owner.get("actionsUnavailable")
-        or owner.get("incompleteLabelRelation")
-        or has_incomplete_children(owner)
-        or has_incomplete_children(original)
-        or ref not in evidence.complete_children
-    ):
+    if owner["role"] not in ("link", "button") or original["role"] != owner["role"]:
+        return None
+    if owner.get("capabilities", {}).get("click") != "available" or owner.get("actionsUnavailable"):
+        return None
+    if owner.get("incompleteLabelRelation"):
+        return None
+    if has_incomplete_children(owner) or has_incomplete_children(original) or ref not in evidence.complete_children:
         return None
     field: Literal["name", "description"] = "name" if owner.get("name") else "description"
     caption = view.field_value(ref, field)
-    if (
-        caption is None
-        or len(caption.parts) != 1
-        or len(caption.parts[0].facts) != 1
-        or not _complete_text(caption.value)
-    ):
+    if caption is None or len(caption.parts) != 1 or len(caption.parts[0].facts) != 1:
+        return None
+    if not _complete_text(caption.value):
         return None
     anchor = caption.parts[0].facts[0]
-    if (
-        anchor.source != ref
-        or anchor.attribute not in ("name", "description")
-        or original.get(anchor.attribute) != caption.value
-        or (ref, anchor.attribute) not in evidence.complete_text
-        or any(original.get(name) not in (None, "", caption.value) for name in ("name", "description"))
-    ):
+    if anchor.source != ref or anchor.attribute not in ("name", "description"):
+        return None
+    if original.get(anchor.attribute) != caption.value or (ref, anchor.attribute) not in evidence.complete_text:
+        return None
+    if any(original.get(name) not in (None, "", caption.value) for name in ("name", "description")):
         return None
     scope, parts, visited = view.scopes[ref], [], set()
 
     def visit(current: str, parent: str) -> bool:
-        if (
-            current in visited
-            or view.parents.get(current) != parent
-            or view.scopes.get(current) != scope
-            or current in evidence.incomplete_children
-        ):
+        if current in visited or view.parents.get(current) != parent or view.scopes.get(current) != scope:
+            return False
+        if current in evidence.incomplete_children:
             return False
         visited.add(current)
         native = view.native_nodes.get(current)
@@ -489,49 +511,24 @@ def caption_equivalence(
         node = visible.get(current)
         if native["role"] == "staticText":
             source = evidence.caption_sources.get(current)
+            if node is None or source is None or node["children"]:
+                return False
+            if has_incomplete_children(node) or ref not in source.ancestors or view.keep(node):
+                return False
             if (
-                node is None
-                or source is None
-                or node["children"]
-                or has_incomplete_children(node)
-                or ref not in source.ancestors
-                or view.keep(node)
-                or current == view.context.get("focusedRef")
+                current == view.context.get("focusedRef")
                 or node.get("valueIsNumber")
                 or node.get("valueKind") == "document"
-                or node.get("blockedBy", ()) != owner.get("blockedBy", ())
+            ):
+                return False
+            if (
+                node.get("blockedBy", ()) != owner.get("blockedBy", ())
                 or (current, "value") not in evidence.complete_text
                 or not _complete_text(source.value)
-                or any(
-                    node.get(key)
-                    for key in (
-                        "name",
-                        "description",
-                        "help",
-                        "url",
-                        "identifier",
-                        "titleRef",
-                        "labelTargets",
-                        "linkedLabel",
-                        "incompleteLabelRelation",
-                        "preserveGroup",
-                        "subrole",
-                        "placeholder",
-                        "documentUrl",
-                        "documentText",
-                        "controlValue",
-                        "rangeValue",
-                        "valueExpected",
-                        "headingLevel",
-                        "landmarkType",
-                        "fullDescription",
-                        "shortcut",
-                        "menuMark",
-                        "toggleState",
-                        "disclosedBy",
-                        "incompleteDisclosureRelation",
-                    )
-                )
+            ):
+                return False
+            if (
+                any(node.get(key) for key in _INDEPENDENT_CAPTION_FIELDS)
                 or current in referenced_labels
                 or independent_actions(node)
             ):
@@ -550,42 +547,25 @@ def caption_equivalence(
             # native input declarations above. It remains unknown in the source record.
             if (
                 protected_content(protected)
-                or any(
-                    node.get(key)
-                    for key in (
-                        "focused",
-                        "selected",
-                        "pressable",
-                        "focusable",
-                        "selectable",
-                        "expandable",
-                        "submenu",
-                        "modal",
-                    )
-                )
+                or any(node.get(key) for key in _ACTIVE_CAPTION_FIELDS)
                 or any(value == "available" for value in node.get("capabilities", {}).values())
             ):
                 return False
             value = view.field_value(current, "value")
             fact = FactKey(SourceKey(current), "value")
-            if (
-                value is None
-                or value.value != source.value
-                or len(value.parts) != 1
-                or value.parts[0].facts != (fact,)
-                or native.get("value") != source.value
-            ):
+            if value is None or value.value != source.value or len(value.parts) != 1:
+                return False
+            if value.parts[0].facts != (fact,) or native.get("value") != source.value:
                 return False
             parts.append(ValuePart(source.value, (fact,)))
             return True
         children = evidence.complete_children.get(current)
         if native["role"] == "image":
             return node is not None and not native["children"] and not independent_actions(native)
+        if node is not None or native["role"] != "group" or children is None:
+            return False
         if (
-            node is not None
-            or native["role"] != "group"
-            or children is None
-            or any(native.get(key) for key in ("name", "description", "value", "help", "url", "titleRef"))
+            any(native.get(key) for key in ("name", "description", "value", "help", "url", "titleRef"))
             or independent_actions(native)
         ):
             return False

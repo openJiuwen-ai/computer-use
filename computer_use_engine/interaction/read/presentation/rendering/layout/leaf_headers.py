@@ -71,13 +71,17 @@ def expand_leaf_headers(lines: list[str]) -> list[str]:
 def _unexpanded_menus(frame: LayoutFrame) -> dict[str, int]:
     """Use generated coverage only while its exact summary remains delivered."""
     counts = Counter(ref for summary in frame.unexpanded_menus for ref, _ in summary.entries)
-    return {
-        ref: total
-        for summary in frame.unexpanded_menus
-        if frame.lines.count(summary.text) == 1
-        for ref, total in summary.entries
-        if counts[ref] == 1 and type(total) is int and total > 0
-    }
+    menus = {}
+    for summary in frame.unexpanded_menus:
+        if frame.lines.count(summary.text) != 1:
+            continue
+        for ref, total in summary.entries:
+            if counts[ref] != 1:
+                continue
+            total_type = type(total)
+            if total_type is int and total > 0:
+                menus[ref] = total
+    return menus
 
 
 def _leaves(frame: LayoutFrame) -> dict[int, _Leaf]:

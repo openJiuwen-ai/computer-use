@@ -61,5 +61,5 @@ def remember_application_content(
         query_target=target,
         query_scope_kind="applicationContent",
     )
-    controller._remember(state, target, tree)
+    controller.remember_observation(state, target, tree)
     return SurfaceOwner(controller, state)

@@ -215,13 +215,9 @@ def published_table_columns(frame: LayoutFrame) -> tuple[PublishedTableColumn, .
     generated table, row, cell and independent column must still match its original
     record, parent, scope and order. No element is inferred from its label or position.
     """
-    if (
-        not frame.context.get("compact")
-        or frame.context.get("subtreeRef")
-        or not frame.table_sources
-        or len(frame.roots) != 1
-        or frame.roots[0]["role"] in ("menu", "menuBar", "menuBarItem")
-    ):
+    if not frame.context.get("compact") or frame.context.get("subtreeRef") or not frame.table_sources:
+        return ()
+    if len(frame.roots) != 1 or frame.roots[0]["role"] in ("menu", "menuBar", "menuBarItem"):
         return ()
     # Restore later public spellings in reverse layout order before comparing
     # the delivered table with the original, unchanged node records.

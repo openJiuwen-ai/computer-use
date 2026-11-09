@@ -26,6 +26,10 @@ def _transparent(ref: str, draft: InterfaceDraft) -> bool:
     """Require affirmative passive facts before crossing a layout-only wrapper."""
     node = draft.projected_nodes[ref]
     caps = node.get("capabilities")
+    content_fields = (
+        "name", "description", "value", "help", "placeholder", "selectedText", "modal", "busy", "invalid",
+        "preserveGroup",
+    )
     return (
         node["role"] == "group"
         and not draft.evidence[ref].incomplete
@@ -37,21 +41,7 @@ def _transparent(ref: str, draft: InterfaceDraft) -> bool:
         and "actions" in node
         and not node["actions"]
         and not node.get("actionsUnavailable")
-        and not any(
-            node.get(name)
-            for name in (
-                "name",
-                "description",
-                "value",
-                "help",
-                "placeholder",
-                "selectedText",
-                "modal",
-                "busy",
-                "invalid",
-                "preserveGroup",
-            )
-        )
+        and not any(node.get(name) for name in content_fields)
     )
 
 

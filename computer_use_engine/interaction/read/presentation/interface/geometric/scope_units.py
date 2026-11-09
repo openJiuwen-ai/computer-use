@@ -91,9 +91,9 @@ def measured_units(keys: Sequence[str], draft: InterfaceDraft, blocks: Mapping[s
                 "zoom",
                 "fullScreen",
             )
-            or node["role"] in ("closeButton", "minimizeButton", "zoomButton")
-            or _ordered_outside_unit(anchor, draft)
         ):
+            continue
+        if node["role"] in ("closeButton", "minimizeButton", "zoomButton") or _ordered_outside_unit(anchor, draft):
             continue
         # The unit keeps all its inner identities. Its captured outer scope must
         # nevertheless agree: this never combines objects from different windows.
@@ -118,6 +118,9 @@ def measured_units(keys: Sequence[str], draft: InterfaceDraft, blocks: Mapping[s
     coincident: dict[Box, list[str]] = {}
     for key, box in result.items():
         coincident.setdefault(box, []).append(key)
-    ambiguous = {key for keys_at_box in coincident.values() if len(keys_at_box) > 1 for key in keys_at_box}
+    ambiguous = set()
+    for keys_at_box in coincident.values():
+        if len(keys_at_box) > 1:
+            ambiguous.update(keys_at_box)
     result = {key: box for key, box in result.items() if key not in ambiguous}
     return result

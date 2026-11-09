@@ -279,7 +279,7 @@ def test_explicit_read_retains_selected_reference_or_reports_unconfirmed(refs):
     def remember(state, target, captured):
         state.refs.update({ref: {"source": {"ref": ref}} for ref in captured.refs})
 
-    controller._remember = remember
+    controller.remember_observation = remember
     pipeline = AgentElementReadPipeline(controller)
     if "1" in refs:
         _, fresh = asyncio.run(pipeline.collect(app, snapshot))

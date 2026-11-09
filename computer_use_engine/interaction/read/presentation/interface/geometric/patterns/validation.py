@@ -36,49 +36,35 @@ def _reason(plan: PatternPlan, draft: InterfaceDraft) -> str | None:
         else tuple(row.key for row in plan.rows)
     )
     remaining = plan.remaining_keys
-    if (
-        not selected
-        or len(selected) != len(set(selected))
-        or len(remaining) != len(set(remaining))
-        or set(selected).intersection(remaining)
-        or set((*selected, *remaining)) != set(inputs)
-    ):
+    if not selected or len(selected) != len(set(selected)) or len(remaining) != len(set(remaining)):
+        return "selected pattern duplicated, invented or omitted an original member"
+    if set(selected).intersection(remaining) or set((*selected, *remaining)) != set(inputs):
         return "selected pattern duplicated, invented or omitted an original member"
     if plan.kind == "grid":
         grids = tuple(blocks[key] for key in owner.children if blocks[key].layout == "visual-grid")
         row_keys = tuple(row.key for row in plan.rows)
-        if (
-            len(grids) != 1
-            or grids[0].children != row_keys
-            or len(grids[0].columns) != plan.column_count
-            or plan.column_count < 2
-        ):
+        if len(grids) != 1 or grids[0].children != row_keys:
+            return "selected grid differs from its materialized rows or columns"
+        if len(grids[0].columns) != plan.column_count or plan.column_count < 2:
             return "selected grid differs from its materialized rows or columns"
         for row in plan.rows:
             block = blocks.get(row.key)
-            if (
-                row.ref is not None
-                or block is None
-                or block.primary_ref is not None
-                or block.source_refs
-                or block.layout != "visual-row"
-                or block.children != row.members
-                or block.column_slots != row.slots
-                or len(row.members) != len(row.slots)
-                or tuple(sorted(set(row.slots))) != row.slots
-                or any(type(slot) is not int or not 0 <= slot < plan.column_count for slot in row.slots)
+            if row.ref is not None or block is None or block.primary_ref is not None:
+                return "selected grid row changed its independently sourced units"
+            if block.source_refs or block.layout != "visual-row" or block.children != row.members:
+                return "selected grid row changed its independently sourced units"
+            if block.column_slots != row.slots or len(row.members) != len(row.slots):
+                return "selected grid row changed its independently sourced units"
+            if tuple(sorted(set(row.slots))) != row.slots or any(
+                type(slot) is not int or not 0 <= slot < plan.column_count for slot in row.slots
             ):
                 return "selected grid row changed its independently sourced units"
     elif plan.kind in ("table", "cards", "list"):
         for row in plan.rows:
             block = blocks.get(row.key)
-            if (
-                block is None
-                or row.ref is None
-                or block.primary_ref != row.ref
-                or draft.projected_nodes[row.ref]["role"] != "row"
-                or any(key not in blocks for key in row.members)
-            ):
+            if block is None or row.ref is None or block.primary_ref != row.ref:
+                return "selected native item changed its original row identity"
+            if draft.projected_nodes[row.ref]["role"] != "row" or any(key not in blocks for key in row.members):
                 return "selected native item changed its original row identity"
             if plan.kind == "table":
                 children = tuple(draft.projected_nodes[row.ref].get("children", ()))
@@ -96,19 +82,16 @@ def _reason(plan: PatternPlan, draft: InterfaceDraft) -> str | None:
     else:
         return "selected pattern has an unknown layout kind"
     for path in plan.wrapper_chains:
-        if (
-            len(path) < 2
-            or len(set(path)) != len(path)
-            or path[0] not in selected
-            or any(key not in blocks or blocks[key].primary_ref not in expected for key in path)
-        ):
+        if len(path) < 2 or len(set(path)) != len(path) or path[0] not in selected:
+            return "selected pattern has an invalid source wrapper path"
+        if any(key not in blocks or blocks[key].primary_ref not in expected for key in path):
             return "selected pattern has an invalid source wrapper path"
         for parent_key, child_key in zip(path, path[1:]):
             parent, child = blocks[parent_key].primary_ref, blocks[child_key].primary_ref
+            if parent is None or child is None:
+                return "selected pattern wrapper path crosses an original parent"
             if (
-                parent is None
-                or child is None
-                or tuple(draft.projected_nodes[parent].get("children", ())) != (child,)
+                tuple(draft.projected_nodes[parent].get("children", ())) != (child,)
                 or draft.projected_parents.get(child) != parent
             ):
                 return "selected pattern wrapper path crosses an original parent"

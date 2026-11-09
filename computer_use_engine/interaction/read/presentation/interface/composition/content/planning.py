@@ -44,32 +44,19 @@ def _content_slots(atom: AtomPlan, atoms: AtomDocument) -> tuple[AtomSlot, ...]:
     source = atom.source_fields
     caps = source.get("capabilities")
     required = ("click", "typeText", "replaceText", "focus")
-    if (
-        source.get("role") != "staticText"
-        or atom.children
-        or atom.states
-        or atom.coverage.partial
-        or atom.actions_unavailable
-        or atom.declarations
-        or atoms.focused_ref == atom.ref
-        or not isinstance(caps, Mapping)
-        or any(caps.get(key) != "unavailable" for key in required)
-        or "actions" not in source
-        or any(
-            source.get(key)
-            for key in (
-                "selected",
-                "focused",
-                "busy",
-                "invalid",
-                "modal",
-                "incompleteLabelRelation",
-                "actionsUnavailable",
-                "preserveGroup",
-            )
-        )
-        or source.get("enabled") is False
-    ):
+    if source.get("role") != "staticText" or atom.children or atom.states:
+        return ()
+    if atom.coverage.partial or atom.actions_unavailable or atom.declarations:
+        return ()
+    if atoms.focused_ref == atom.ref or not isinstance(caps, Mapping):
+        return ()
+    if any(caps.get(key) != "unavailable" for key in required) or "actions" not in source:
+        return ()
+    independent_fields = (
+        "selected", "focused", "busy", "invalid", "modal", "incompleteLabelRelation", "actionsUnavailable",
+        "preserveGroup",
+    )
+    if any(source.get(key) for key in independent_fields) or source.get("enabled") is False:
         return ()
     slots = atom.slots
     if not slots or any(

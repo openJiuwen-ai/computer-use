@@ -540,7 +540,7 @@ def test_menu_source_window_identity_survives_later_same_surface_menu_read():
     a, b = window("A"), window("B")
     controller, app, state = setup(directory(a, b))
     controller.reader.number_snapshots = lambda values: values
-    controller._remember = lambda native_state, target, tree: native_state.refs.update(
+    controller.remember_observation = lambda native_state, target, tree: native_state.refs.update(
         {ref: dict(binding=target) for ref in tree.refs}
     )
     target = Binding("session", "menu-instance", None, "shared-application-menu", "menu-root")

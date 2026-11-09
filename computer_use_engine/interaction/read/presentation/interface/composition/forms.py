@@ -42,13 +42,14 @@ def form_bands(parent: InterfaceBlock, draft: InterfaceDraft) -> tuple[FormBand,
     Returns:
         Non-overlapping source-complete bands. Unclassified siblings remain in place.
     """
+    if parent.primary_ref is None or parent.layout != "tree":
+        return ()
+    if draft.projected_nodes[parent.primary_ref]["role"] not in (
+        "window", "sheet", "group", "splitGroup", "tabPanel", "scrollArea",
+    ):
+        return ()
     if (
-        parent.primary_ref is None
-        or parent.layout != "tree"
-        or draft.projected_nodes[parent.primary_ref]["role"]
-        not in ("window", "sheet", "group", "splitGroup", "tabPanel", "scrollArea")
-        or ordered_ancestry(parent.primary_ref, draft)
-        or draft.evidence[parent.primary_ref].incomplete
+        ordered_ancestry(parent.primary_ref, draft) or draft.evidence[parent.primary_ref].incomplete
         or draft.evidence[parent.primary_ref].hidden
     ):
         return ()
@@ -58,7 +59,9 @@ def form_bands(parent: InterfaceBlock, draft: InterfaceDraft) -> tuple[FormBand,
     for index, key in enumerate(children[:-1]):
         block = blocks[key]
         ref = block.primary_ref
-        if ref is None or block.children or ref not in boxes or not referenceable_caption(nodes[ref]):
+        if ref is None or block.children or ref not in boxes:
+            continue
+        if not referenceable_caption(nodes[ref]):
             continue
         following = blocks[children[index + 1]].primary_ref
         if following is None or following not in boxes:
@@ -122,27 +125,25 @@ def form_bands(parent: InterfaceBlock, draft: InterfaceDraft) -> tuple[FormBand,
                     break
                 box, evidence = boxes[ref], draft.evidence[ref]
                 descendants = block_sources(key, blocks)
+                if evidence.boundary or evidence.incomplete or evidence.hidden:
+                    break
+                if not same_scope(draft, (label_ref, ref)) or any(
+                    draft.evidence[child].boundary
+                    or draft.evidence[child].incomplete
+                    or draft.evidence[child].hidden
+                    or reading_scope(child, draft) != reading_scope(label_ref, draft)
+                    for child in descendants
+                ):
+                    break
                 if (
-                    evidence.boundary
-                    or evidence.incomplete
-                    or evidence.hidden
-                    or not same_scope(draft, (label_ref, ref))
-                    or any(
-                        draft.evidence[child].boundary
-                        or draft.evidence[child].incomplete
-                        or draft.evidence[child].hidden
-                        or reading_scope(child, draft) != reading_scope(label_ref, draft)
-                        for child in descendants
-                    )
-                    or reading_scope(ref, draft) != reading_scope(label_ref, draft)
+                    reading_scope(ref, draft) != reading_scope(label_ref, draft)
                     or draft.source.parents.get(ref) != draft.source.parents.get(label_ref)
                     or not box.comparable(label)
-                    or box.x < label.right
-                    or box.y < label.y - 0.5 * label.height
-                    or next_box is not None
-                    and box.bottom > next_box.y
-                    or box.y - bottom > 3 * label.height
                 ):
+                    break
+                if box.x < label.right or box.y < label.y - 0.5 * label.height:
+                    break
+                if next_box is not None and box.bottom > next_box.y or box.y - bottom > 3 * label.height:
                     break
                 # A later native item jumping back up is a separate fixed surface.
                 if box.bottom < bottom - label.height:
@@ -153,12 +154,12 @@ def form_bands(parent: InterfaceBlock, draft: InterfaceDraft) -> tuple[FormBand,
             if len(selected) < 2:
                 continue
             members = set(refs)
-            related = [
-                relation
-                for relation in draft.relations
-                if relation.kind in ("labelled_by", "labels", "described_by", "describes")
-                and (relation.source in members or members.intersection(relation.targets))
-            ]
+            related = []
+            for relation in draft.relations:
+                if relation.kind not in ("labelled_by", "labels", "described_by", "describes"):
+                    continue
+                if relation.source in members or members.intersection(relation.targets):
+                    related.append(relation)
             if any(
                 not relation.complete
                 or not relation.confirmed
