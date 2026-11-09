@@ -125,9 +125,9 @@ class PathRegistry:
                 imported.append(path)
         return imported
 
-    def check_preconditions(self, path: TaskPath) -> tuple[bool, str]:
-        """Runtime eligibility evidence. CLI paths require their binary; other declared
-        preconditions are opaque labels unless a probe is supplied by the caller."""
+    @staticmethod
+    def check_preconditions(path: TaskPath) -> tuple[bool, str]:
+        """Runtime eligibility evidence: CLI paths require their declared binary."""
 
         if path.cli and path.cli.binary and shutil.which(path.cli.binary) is None:
             return False, f"binary {path.cli.binary!r} not found"

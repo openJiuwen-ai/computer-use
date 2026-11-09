@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -25,7 +26,7 @@ class PathArgumentError(ValueError):
     pass
 
 
-_TOKEN = __import__("re").compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)(!r)?\}")
+_TOKEN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)(!r)?\}")
 
 
 def substitute(template: str, arguments: dict[str, Any]) -> str:
@@ -79,7 +80,8 @@ def validate_arguments(path: TaskPath, arguments: dict[str, Any]):
 
 
 async def execute_api(path: TaskPath, arguments: dict[str, Any]) -> RouteExecution:
-    assert path.api is not None
+    if path.api is None:
+        raise ValueError(f"path {path.id} has no api spec")
     started = time.monotonic()
     url = substitute(path.api.url, arguments)
     body_arguments = {key: value for key, value in arguments.items() if "{" + key + "}" not in path.api.url}
@@ -110,7 +112,7 @@ async def execute_api(path: TaskPath, arguments: dict[str, Any]) -> RouteExecuti
             error=f"http {error.code}: {error.reason}",
             detail=json.dumps({"status": error.code}),
         )
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+    except OSError as error:
         return RouteExecution(
             path_id=path.id,
             status=ExecutionStatus.EFFECT_UNKNOWN,
@@ -146,7 +148,8 @@ def _usage_cost(body: str) -> float | None:
 
 
 async def execute_cli(path: TaskPath, arguments: dict[str, Any]) -> RouteExecution:
-    assert path.cli is not None
+    if path.cli is None:
+        raise ValueError(f"path {path.id} has no cli spec")
     started = time.monotonic()
     argv = [substitute(part, arguments) for part in path.cli.argv]
     try:
@@ -191,13 +194,14 @@ async def execute_cli(path: TaskPath, arguments: dict[str, Any]) -> RouteExecuti
 
 
 async def execute_sdk(path: TaskPath, arguments: dict[str, Any], run_code: CodeRunner) -> RouteExecution:
-    assert path.sdk is not None
+    if path.sdk is None:
+        raise ValueError(f"path {path.id} has no sdk spec")
     started = time.monotonic()
     code = substitute(path.sdk.code_template, arguments)
+    # CancelledError is a BaseException and propagates untouched; only genuine
+    # runner failures are converted, and those are effect-unknown by contract.
     try:
         success, output = await run_code(code)
-    except asyncio.CancelledError:
-        raise
     except Exception as error:  # transport/session failure: effect unknown per project rules
         return RouteExecution(
             path_id=path.id,

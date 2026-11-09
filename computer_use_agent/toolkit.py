@@ -34,8 +34,13 @@ from .routing.paths import ExecutionStatus
 
 logger = logging.getLogger(__name__)
 
-ROUTE_TASK_DESCRIPTION = """Rank every known way to accomplish a task — registered app API routes, shell CLI routes, and direct GUI operation — by learned success rate, expected time and cost, then act on the best eligible path.
-Call this before manipulating the UI when the task might be achievable through an API or shell route. It executes the chosen path itself when the decision is execute, and reports the outcome. If the decision is gui_fallback, continue with computer_use. If the decision is refuse, explain the reason and ask the user instead of forcing operations. Pass subtasks to split the task into independently routed subtasks. Never retry a route whose effect is unknown."""
+ROUTE_TASK_DESCRIPTION = """Rank every known way to accomplish a task — registered app API routes, shell CLI
+routes, and direct GUI operation — by learned success rate, expected time and cost, then act on the best
+eligible path. Call this before manipulating the UI when the task might be achievable through an API or shell
+route. It executes the chosen path itself when the decision is execute, and reports the outcome. If the
+decision is gui_fallback, continue with computer_use. If the decision is refuse, explain the reason and ask
+the user instead of forcing operations. Pass subtasks to split the task into independently routed subtasks.
+Never retry a route whose effect is unknown."""
 
 
 class DesktopTool(Tool):
@@ -187,12 +192,9 @@ class ComputerUseToolkit:
 
     def _record_gui_sample(self, name, inputs, started, success):
         routing = self.routing
-        if (
-            routing is None
-            or not self.config.routing.auto_record_gui
-            or name != "computer_use"
-            or self._route_depth > 0
-        ):
+        if routing is None or name != "computer_use" or self._route_depth > 0:
+            return
+        if not self.config.routing.auto_record_gui:
             return
         routing.store.record(
             OutcomeRecord(
