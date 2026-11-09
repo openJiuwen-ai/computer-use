@@ -88,21 +88,17 @@ def record_candidate(draft: InterfaceDraft, block: InterfaceBlock) -> RecordCand
     button never needs to be discarded to fit a record template.
     """
     ref = block.primary_ref
-    if (
-        draft.atoms is None
-        or ref is None
-        or block.origin != "native"
-        or block.layout != "tree"
-        or block.kind not in ("tree", "record")
-        or draft.projected_nodes[ref]["role"] not in ("group", "row")
-        or not block.children
-    ):
+    if draft.atoms is None or ref is None:
+        return None
+    if block.origin != "native" or block.layout != "tree" or block.kind not in ("tree", "record"):
+        return None
+    if draft.projected_nodes[ref]["role"] not in ("group", "row") or not block.children:
         return None
     parent = draft.source.parents.get(ref)
+    if parent is None or draft.projected_parents.get(ref) != parent:
+        return None
     if (
-        parent is None
-        or draft.projected_parents.get(ref) != parent
-        or draft.source.native_nodes[parent]["role"] in ("table", "outline")
+        draft.source.native_nodes[parent]["role"] in ("table", "outline")
         or sum(child["role"] in ("group", "row") for child in draft.source.native_nodes[parent]["children"]) < 2
         or not confirmed_children(
             draft, parent, tuple(child["ref"] for child in draft.source.native_nodes[parent]["children"])
@@ -128,16 +124,11 @@ def record_candidate(draft: InterfaceDraft, block: InterfaceBlock) -> RecordCand
         node = draft.projected_nodes[current]
         evidence = draft.evidence[current]
         box = draft.source.geometry.boxes.get(current)
-        if (
-            evidence.incomplete
-            or evidence.hidden
-            or box is None
-            or not bounds.contains(box)
-            or current != ref
-            and node["role"] in _BOUNDARIES
-            or node.get("modal") is True
-            or node.get("blockedBy")
-        ):
+        if evidence.incomplete or evidence.hidden or box is None:
+            return None
+        if not bounds.contains(box) or (current != ref and node["role"] in _BOUNDARIES):
+            return None
+        if node.get("modal") is True or node.get("blockedBy"):
             return None
         native_children = tuple(child["ref"] for child in draft.source.native_nodes[current]["children"])
         if native_children and not confirmed_children(draft, current, native_children):
@@ -176,7 +167,9 @@ def record_candidate(draft: InterfaceDraft, block: InterfaceBlock) -> RecordCand
 def peer_axis(left: RecordCandidate, right: RecordCandidate) -> str | None:
     """Recognize a short local row or column in the existing source order."""
     a, b = left.bounds, right.bounds
-    if left.parent != right.parent or left.shape != right.shape or not a.comparable(b) or a.intersection_area(b) > 0:
+    if left.parent != right.parent or left.shape != right.shape:
+        return None
+    if not a.comparable(b) or a.intersection_area(b) > 0:
         return None
     if b.y >= a.bottom and a.horizontal_overlap(b) >= 0.6 and b.y - a.bottom <= max(a.height, b.height):
         return "vertical"

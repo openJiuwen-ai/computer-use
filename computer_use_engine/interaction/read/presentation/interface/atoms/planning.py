@@ -154,17 +154,18 @@ class _AtomBuilder:
             value = self.node[attribute]
         facts = tuple(fact for key in (source_attributes or (attribute,)) for fact in self.facts(key))
         preview = None
-        if self.policy.compact and self.policy.captured_details and protection is None and type(value) is str:
-            carrier = embedded_content(value)
-            if carrier:
-                preview = AtomPreview("embedded", carrier.header, carrier.encoded_characters)
-            elif attribute == "url":
-                if value.lower().startswith(("data:", "webdoc:")):
-                    scheme, _, rest = value.partition(":")
-                    kind = rest.split(",", 1)[0] if scheme.lower() == "data" else ""
-                    preview = AtomPreview("embedded-url", scheme + ":" + kind[:60])
-                elif len(value) > 160:
-                    preview = AtomPreview("url", value[:160])
+        if self.policy.compact and self.policy.captured_details:
+            if protection is None and type(value) is str:
+                carrier = embedded_content(value)
+                if carrier:
+                    preview = AtomPreview("embedded", carrier.header, carrier.encoded_characters)
+                elif attribute == "url":
+                    if value.lower().startswith(("data:", "webdoc:")):
+                        scheme, _, rest = value.partition(":")
+                        kind = rest.split(",", 1)[0] if scheme.lower() == "data" else ""
+                        preview = AtomPreview("embedded-url", scheme + ":" + kind[:60])
+                    elif len(value) > 160:
+                        preview = AtomPreview("url", value[:160])
         if preview is not None:
             slot_format = "preview"
             placement = "inline" if placement == "block" else placement
@@ -212,8 +213,9 @@ def _coverage(node: NodeView) -> AtomCoverage:
     read = node.get("childrenRead", len(node.get("native", node).get("children", ())))
     total = node.get("childCount")
     reason = node.get("partialReason")
-    if reason is None and node["role"] != "application" and total is not None and read < total:
-        reason = "children not fully read"
+    if reason is None and node["role"] != "application":
+        if total is not None and read < total:
+            reason = "children not fully read"
     return AtomCoverage(
         reason,
         read,
@@ -275,13 +277,11 @@ def plan_atom(
     builder = _AtomBuilder(projection, node, policy)
     role_choice = select_role(node)
     alias = policy.role_aliases.get(node["ref"]) if policy.role_aliases else None
-    if (
-        alias is not None
-        and node["role"] == alias.role
-        and node.get("subrole") == alias.subrole
-        and node.get("roleDescription") == alias.description.value
-        and builder.deferred("roleDescription")
-    ):
+    use_alias = False
+    if alias is not None and node["role"] == alias.role and node.get("subrole") == alias.subrole:
+        if node.get("roleDescription") == alias.description.value:
+            use_alias = builder.deferred("roleDescription")
+    if use_alias:
         role_facts = tuple(fact for field in ("role", "subrole") for fact in builder.facts(field))
         role = AtomRole(alias.label, role_facts)
     else:
@@ -349,16 +349,13 @@ def plan_atom(
         ("selectedChildCount", "Selected children"),
         ("index", "Index (0-based)"),
     ):
-        if attribute in node:
-            if (
-                attribute == "index"
-                and policy.compact
-                and policy.captured_details
-                and not index_has_collection_context(node["ref"], projection)
-            ):
+        if attribute not in node:
+            continue
+        if attribute == "index" and policy.compact and policy.captured_details:
+            if not index_has_collection_context(node["ref"], projection):
                 builder.mark(builder.facts(attribute), attribute, kind="details")
                 continue
-            builder.add(attribute, label, slot_format="number")
+        builder.add(attribute, label, slot_format="number")
     if click_is_deferred(node):
         builder.add("clickState", "Click", value="deferred", source_attributes=("enabled", "capabilities"))
     if node.get("editorOwnerRef"):
@@ -509,15 +506,20 @@ def plan_atom(
     ):
         if attribute not in node:
             continue
-        if value_destination is not None and (
-            attribute in node.get("_numericValueAliases", ())
-            and node[attribute] == node.get("value")
-            and show_value
-            or node[attribute] == node.get("value")
-            and {attribute, "value"} <= set(node.get("_completeTextValues", ()))
-        ):
-            builder.equivalent(attribute, value_destination)
-            continue
+        if value_destination is not None:
+            if (
+                attribute in node.get("_numericValueAliases", ())
+                and node[attribute] == node.get("value")
+                and show_value
+            ):
+                matches_value = True
+            elif node[attribute] == node.get("value"):
+                matches_value = {attribute, "value"} <= set(node.get("_completeTextValues", ()))
+            else:
+                matches_value = False
+            if matches_value:
+                builder.equivalent(attribute, value_destination)
+                continue
         builder.add(attribute, label, placement="block" if any(c in node[attribute] for c in "\r\n") else "inline")
 
     declarations = []

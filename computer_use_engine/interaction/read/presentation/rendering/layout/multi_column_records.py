@@ -97,16 +97,14 @@ def _branch(
     item: GeneratedLine, parent: GeneratedLine, expected_index: int, lines: dict[str, GeneratedLine], depth: int = 0
 ) -> tuple[str, int] | None:
     """Retain one short single-child chain with every original object body."""
+    if item.record.parent != parent.node["ref"] or item.indent != parent.indent + "\t" or item.index != expected_index:
+        return None
     if (
-        item.record.parent != parent.node["ref"]
-        or item.indent != parent.indent + "\t"
-        or item.index != expected_index
-        or item.record.layout != parent.record.layout
+        item.record.layout != parent.record.layout
         or len(item.indent) - item.record.depth != len(parent.indent) - parent.record.depth
-        or len(item.node["children"]) > 1
-        or depth > 2
-        or " > " in item.body
     ):
+        return None
+    if len(item.node["children"]) > 1 or depth > 2 or " > " in item.body:
         return None
     text = item.node["ref"] + " " + item.body
     end = item.index + 1
@@ -129,21 +127,21 @@ def _row(
     node = item.node
     table = lines.get(parent)
     index, outline = node.get("index"), node.get("disclosureLevel")
+    if table is None:
+        return None
+    if table.node["role"] != "table" and (table.node["role"] != "outline" or not _outline_row(table, item, frame)):
+        return None
+    if node["role"] != "row" or item.record.parent != parent or item.record.layout != table.record.layout:
+        return None
     if (
-        table is None
-        or (table.node["role"] != "table" and (table.node["role"] != "outline" or not _outline_row(table, item, frame)))
-        or node["role"] != "row"
-        or item.record.parent != parent
-        or item.record.layout != table.record.layout
-        or item.indent != table.indent + "\t"
+        item.indent != table.indent + "\t"
         or not 2 <= len(node["children"]) <= 5
         or len(item.indent) - item.record.depth != len(table.indent) - table.record.depth
-        or node.get("name")
-        or type(index) is not int
-        or index < 0
-        or type(outline) is not int
-        or outline < 0
     ):
+        return None
+    if node.get("name") or type(index) is not int or index < 0:
+        return None
+    if type(outline) is not int or outline < 0:
         return None
     fields = re.fullmatch(
         re.escape(item.prefix) + r" (Index(?: \(0-based\))?): " + str(index) + ", Outline level: " + str(outline),
@@ -160,18 +158,17 @@ def _row(
     for column, child in enumerate(node["children"], 1):
         cell = lines.get(child["ref"])
         row_number = point_position(child, "rowRange")
+        if cell is None or child["role"] not in ("cell", "columnHeader") or row_number is None:
+            return None
+        if len(child["children"]) > _MAX_CELL_BRANCHES or point_position(child, "columnRange") != column:
+            return None
         if (
-            cell is None
-            or child["role"] not in ("cell", "columnHeader")
-            or row_number is None
-            or len(child["children"]) > _MAX_CELL_BRANCHES
-            or point_position(child, "columnRange") != column
-            or cell.record.parent != node["ref"]
+            cell.record.parent != node["ref"]
             or cell.record.layout != item.record.layout
             or cell.indent != item.indent + "\t"
-            or cell.index != end
-            or len(cell.indent) - cell.record.depth != len(item.indent) - item.record.depth
         ):
+            return None
+        if cell.index != end or len(cell.indent) - cell.record.depth != len(item.indent) - item.record.depth:
             return None
         own = _cell_body(cell, row_number, column)
         if own is None:
@@ -193,13 +190,9 @@ def _row(
         if utf16_length(cell_text) > _MAX_CELL_UNITS:
             return None
         cells.append(cell_text)
-    if (
-        len(prefixes) != 1
-        or len(roles) != 1
-        or len(row_numbers) != 1
-        or end < len(frame.lines)
-        and frame.lines[end].startswith(item.indent + "\t")
-    ):
+    if len(prefixes) != 1 or len(roles) != 1 or len(row_numbers) != 1:
+        return None
+    if end < len(frame.lines) and frame.lines[end].startswith(item.indent + "\t"):
         return None
     text = " | ".join((str(next(iter(row_numbers))), f"{node['ref']} ({index})", *cells))
     if utf16_length(text) > _MAX_ROW_UNITS:
@@ -274,11 +267,12 @@ def expand_multi_column_records(lines: list[str]) -> list[str]:
         heading = lines[index + 1]
         columns = heading[len(indent):].split(" | ") if heading.startswith(indent) else []
         index_label = columns[1][5:-1] if len(columns) >= 2 and columns[1].startswith("row (") else ""
+        if not 4 <= len(columns) <= 7 or columns[0] != "Row" or index_label not in ("Index", "Index (0-based)"):
+            result.append(lines[index])
+            index += 1
+            continue
         if (
-            not 4 <= len(columns) <= 7
-            or columns[0] != "Row"
-            or index_label not in ("Index", "Index (0-based)")
-            or columns[1] != f"row ({index_label})"
+            columns[1] != f"row ({index_label})"
             or columns[2:] != [f"Column {n}" for n in range(1, len(columns) - 1)]
             or lines[index + 2] != indent + " | ".join(["---"] * len(columns))
         ):

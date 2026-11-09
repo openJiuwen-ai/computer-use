@@ -193,14 +193,9 @@ def expand_shared_descriptions(
             if entry is None:
                 raise ValueError("shared Description member is missing or duplicated")
             position = root.line + 1 + entry.line
-            if (
-                (root.line, ref) in used
-                or ref == root.ref
-                or position <= index
-                or not entry.role_explicit
-                or entry.heading
-                or entry.body != lines[position].lstrip("\t")
-            ):
+            if (root.line, ref) in used or ref == root.ref or position <= index:
+                raise ValueError("shared Description requires later ordinary members of its own root")
+            if not entry.role_explicit or entry.heading or entry.body != lines[position].lstrip("\t"):
                 raise ValueError("shared Description requires later ordinary members of its own root")
             used.add((root.line, ref))
             start, _ = _url_start(entry.body, ref)
@@ -227,14 +222,9 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
     root_source = frame.field_prefix_sources.get(root)
     entries = unique_numbered_entries(frame.lines)
     root_entry = entries.get(root)
-    if (
-        root_source is None
-        or root_source.scope[2] != root
-        or root_entry is None
-        or not root_entry.role_explicit
-        or root_entry.heading
-        or root_entry.body != frame.lines[root_entry.line].lstrip("\t")
-    ):
+    if root_source is None or root_source.scope[2] != root or root_entry is None:
+        return unchanged
+    if not root_entry.role_explicit or root_entry.heading or root_entry.body != frame.lines[root_entry.line].lstrip("\t"):
         return unchanged
     nodes, parents, occurrences = {}, {}, Counter()
     pending = [(frame.roots[0], None)]
@@ -267,60 +257,42 @@ def pack_shared_descriptions(frame: LayoutFrame) -> SharedDescriptionLayout:
     for ref, entry in entries.items():
         source, node, record = frame.field_prefix_sources.get(ref), nodes.get(ref), records.get(ref)
         prefix, span = frame.node_prefixes.get(ref), frame.node_line_ranges.get(ref)
-        if (
-            ref == root
-            or ref in excluded
-            or source is None
-            or node is None
-            or record is None
-            or not prefix
-            or span is None
-            or span[1] <= span[0]
-            or occurrences[ref] != 1
-            or record_counts[ref] != 1
-            or source_counts[source.source] != 1
-            or source.scope != root_source.scope
-            or record.parent != parents[ref]
-            or node["role"] in _MENUS
-            or entry.line <= root_entry.line
-            or not entry.role_explicit
-            or entry.heading
-            or entry.body != frame.lines[entry.line].lstrip("\t")
-            or "\n" in record.text
-        ):
+        if ref == root or ref in excluded:
+            continue
+        if source is None or node is None or record is None:
+            continue
+        if not prefix or span is None or span[1] <= span[0]:
+            continue
+        if occurrences[ref] != 1 or record_counts[ref] != 1 or source_counts[source.source] != 1:
+            continue
+        if source.scope != root_source.scope or record.parent != parents[ref] or node["role"] in _MENUS:
+            continue
+        if entry.line <= root_entry.line or not entry.role_explicit or entry.heading:
+            continue
+        if entry.body != frame.lines[entry.line].lstrip("\t") or "\n" in record.text:
             continue
         description, url = source.description, source.url
-        if (
-            description is None
-            or url is None
-            or not _plain(description)
-            or not _plain(url)
-            or node.get("description") != description
-            or node.get("url") != url
-        ):
+        if description is None or url is None:
+            continue
+        if not _plain(description) or not _plain(url):
+            continue
+        if node.get("description") != description or node.get("url") != url:
             continue
         current_prefix = prefix
         spelling = spellings.get(ref)
         if spelling:
-            if (
-                spelling_counts[ref] != 1
-                or spelling.source != source.source
-                or spelling.scope != source.scope
-                or (prefix != spelling.display_label and not prefix.startswith(spelling.display_label + " ("))
-            ):
+            if spelling_counts[ref] != 1 or spelling.source != source.source or spelling.scope != source.scope:
+                continue
+            if prefix != spelling.display_label and not prefix.startswith(spelling.display_label + " ("):
                 continue
             current_prefix = spelling.alias + prefix[len(spelling.display_label):]
         original_url = "URL: " + frame.format_field(url)
         current_url = original_url
         shared_url = urls.get(ref)
         if shared_url:
-            if (
-                url_counts[ref] != 1
-                or shared_url.field != "URL"
-                or shared_url.value != url
-                or shared_url.source != source.source
-                or shared_url.scope != source.scope
-            ):
+            if url_counts[ref] != 1 or shared_url.field != "URL" or shared_url.value != url:
+                continue
+            if shared_url.source != source.source or shared_url.scope != source.scope:
                 continue
             current_url = shared_url.replacement
         encoded = frame.format_field(description)

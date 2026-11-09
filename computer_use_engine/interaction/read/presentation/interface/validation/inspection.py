@@ -45,13 +45,12 @@ def validate_sources(draft: InterfaceDraft) -> InterfaceDraft:
                 members.update(member.source_refs)
                 descendants.extend(member.children)
             roles = dict(block.member_roles)
-            if (
-                block.kind != "field"
-                or len(roles) != len(block.member_roles)
-                or not set(roles) <= members
-                or block.field_target_ref is not None
-                and (block.field_target_ref not in members or roles.get(block.field_target_ref) != "control")
-            ):
+            invalid_roles = False
+            if block.kind != "field" or len(roles) != len(block.member_roles) or not set(roles) <= members:
+                invalid_roles = True
+            elif block.field_target_ref is not None:
+                invalid_roles = block.field_target_ref not in members or roles.get(block.field_target_ref) != "control"
+            if invalid_roles:
                 raise ValueError("A composed field lost its original member or input target")
         pending.extend(reversed(block.children))
     expected = set(draft.projected_nodes)
@@ -80,12 +79,8 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
         elif block.layout == "source-only":
             from computer_use.interaction.read.presentation.interface.geometric.frontier import transparent_group
 
-            if (
-                block.primary_ref is None
-                or block.source_refs != (block.primary_ref,)
-                or block.children
-                or not transparent_group(block.primary_ref, draft)
-            ):
+            lacks_source = block.primary_ref is None or block.source_refs != (block.primary_ref,)
+            if lacks_source or block.children or not transparent_group(block.primary_ref, draft):
                 reason = "source-only wrapper lacks complete passive source evidence"
         elif block.layout == "compound-control":
             from computer_use.interaction.read.presentation.interface.geometric.compound.validation import (
@@ -95,24 +90,21 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
             reason = compound_issue(block, draft)
         elif block.kind == "field" and block.field_target_ref is None:
             labels = tuple(member for member in members if member.primary_ref == block.label_ref)
-            if (
-                block.primary_ref is not None
-                or block.layout not in ("fields", "field-inline")
-                or block.label_ref is None
-                or len(labels) != 1
-                or labels[0].children
-                or len(members) < 2
-            ):
+            invalid_field = (
+                block.primary_ref is not None or block.layout not in ("fields", "field-inline") or block.label_ref is None
+            )
+            if not invalid_field:
+                invalid_field = len(labels) != 1 or bool(labels[0].children)
+            if invalid_field or len(members) < 2:
                 reason = "visual field lacks its original atomic label and independent members"
         elif block.layout == "control-unit":
             if not block.visual_unit or block.field_target_ref is None or block.kind != "field":
                 reason = "control unit lacks its original control target and membership evidence"
         elif block.layout in ("chain", "record-path"):
             child = members[0] if len(members) == 1 else None
+            missing_source_edge = block.primary_ref is None or child is None or child.primary_ref is None
             if (
-                block.primary_ref is None
-                or child is None
-                or child.primary_ref is None
+                missing_source_edge
                 or tuple(draft.projected_nodes[block.primary_ref].get("children", ())) != (child.primary_ref,)
                 or draft.projected_parents.get(child.primary_ref) != block.primary_ref
             ):
@@ -125,25 +117,23 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
             elif block.layout == "record-path" and draft.source.parents.get(child.primary_ref) != block.primary_ref:
                 reason = "record path crosses original native parents"
         elif block.layout == "compact-list":
+            missing_leaf_group = block.primary_ref is not None or block.shared_prefix_ref is None or len(members) < 3
             if (
-                block.primary_ref is not None
-                or block.shared_prefix_ref is None
-                or len(members) < 3
+                missing_leaf_group
                 or any(member.primary_ref is None or member.children for member in members)
                 or block.shared_prefix_ref != members[0].primary_ref
             ):
                 reason = "compact list lacks its independent leaf targets"
         elif block.layout in ("records", "visual-grid"):
             slots = tuple(member.column_slots or tuple(range(len(member.children))) for member in members)
-            if (
-                len(members) < 2
-                or not block.columns
-                or len(block.column_prefix_refs) != len(block.columns)
-                or block.column_alignments
-                and (
+            invalid_columns = len(members) < 2 or not block.columns or len(block.column_prefix_refs) != len(block.columns)
+            if not invalid_columns and block.column_alignments:
+                invalid_columns = (
                     len(block.column_alignments) != len(block.columns)
                     or any(kind not in ("left", "right", "center") for kind in block.column_alignments)
                 )
+            if (
+                invalid_columns
                 or any(
                     len(indices) != len(member.children)
                     or not indices
@@ -159,18 +149,22 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
                 )
             ):
                 reason = "rows differ from their typed column plan"
-            elif block.layout == "visual-grid" and (
-                block.primary_ref is not None
-                or block.source_refs
-                or any(prefix is not None for prefix in block.column_prefix_refs)
-                or any(
-                    member.layout != "visual-row" or member.primary_ref is not None or member.source_refs
-                    for member in members
+            if reason is None and block.layout == "visual-grid":
+                invalid_grid = (
+                    block.primary_ref is not None
+                    or bool(block.source_refs)
+                    or any(prefix is not None for prefix in block.column_prefix_refs)
                 )
-                or any(inline_unit_refs(child, draft.blocks) is None for member in members for child in member.children)
-            ):
-                reason = "visual grid lacks complete independently rendered units"
-            else:
+                if not invalid_grid:
+                    invalid_grid = any(
+                        member.layout != "visual-row" or member.primary_ref is not None or member.source_refs
+                        for member in members
+                    ) or any(
+                        inline_unit_refs(child, draft.blocks) is None for member in members for child in member.children
+                    )
+                if invalid_grid:
+                    reason = "visual grid lacks complete independently rendered units"
+            if reason is None:
                 for index, prefix in enumerate(block.column_prefix_refs):
                     column_refs = []
                     for member, indices in zip(members, slots):
@@ -178,28 +172,23 @@ def layout_issues(draft: InterfaceDraft) -> tuple[LayoutIssue, ...]:
                             if column == index:
                                 column_refs.append(draft.blocks[child].primary_ref)
                     refs = tuple(column_refs)
-                    if (
-                        not refs
-                        or prefix is not None
-                        and (
-                            prefix not in refs
-                            or any(
-                                ref is None or prefix_signature(draft, ref) != prefix_signature(draft, prefix)
-                                for ref in refs
-                            )
+                    invalid_prefix = not refs
+                    if not invalid_prefix and prefix is not None:
+                        invalid_prefix = prefix not in refs or any(
+                            ref is None or prefix_signature(draft, ref) != prefix_signature(draft, prefix) for ref in refs
                         )
-                    ):
+                    if invalid_prefix:
                         reason = "column prefix differs from original member roles or states"
                         break
         elif block.layout == "record-blocks":
             refs = tuple(member.primary_ref for member in members)
-            if (
-                block.kind != "collection"
-                or block.primary_ref is not None
-                or len(members) < 2
-                or any(ref is None or draft.projected_nodes[ref]["role"] not in ("group", "row") for ref in refs)
-                or len({draft.source.scopes[ref] for ref in refs if ref is not None}) != 1
-            ):
+            if block.kind != "collection" or block.primary_ref is not None or len(members) < 2:
+                invalid_rows = True
+            else:
+                invalid_rows = any(
+                    ref is None or draft.projected_nodes[ref]["role"] not in ("group", "row") for ref in refs
+                ) or len({draft.source.scopes[ref] for ref in refs if ref is not None}) != 1
+            if invalid_rows:
                 reason = "record blocks lack separate original rows in one scope"
         elif block.layout == "visual-row":
             if any(

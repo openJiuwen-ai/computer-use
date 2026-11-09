@@ -79,13 +79,9 @@ def expand_input_fields(lines: list[str]) -> list[str]:
             continue
         table = _NODE.fullmatch(lines[index - 1])
         refs = match[2].split(", ")
-        if (
-            table is None
-            or match[1] != table[1] + "\t"
-            or len(refs) < 3
-            or len(set(refs)) != len(refs)
-            or claimed.intersection(refs)
-        ):
+        if table is None or match[1] != table[1] + "\t":
+            continue
+        if len(refs) < 3 or len(set(refs)) != len(refs) or claimed.intersection(refs):
             continue
         end = index + 1
         while end < len(lines) and lines[end].startswith(table[1] + "\t"):
@@ -156,28 +152,26 @@ def pack_input_fields(frame: LayoutFrame) -> InputFieldsLayout:
         table = tables[ref]
         caps = node.get("capabilities")
         span = frame.node_line_ranges.get(ref)
+        if table is None or record is None or entry is None:
+            continue
+        if original_entry is None or record_counts[ref] != 1 or record.parent != parents[ref]:
+            continue
+        if not prefix or span is None or span[1] - span[0] != 1:
+            continue
+        if record.partial or record.hints or record.related:
+            continue
+        if "\n" in record.text or has_incomplete_children(node) or node["children"]:
+            continue
         if (
-            table is None
-            or record is None
-            or entry is None
-            or original_entry is None
-            or record_counts[ref] != 1
-            or record.parent != parents[ref]
-            or not prefix
-            or span is None
-            or span[1] - span[0] != 1
-            or record.partial
-            or record.hints
-            or record.related
-            or "\n" in record.text
-            or has_incomplete_children(node)
-            or node["children"]
-            or node.get("name")
+            node.get("name")
             or node["role"] not in ("textField", "textArea", "comboBox")
             or node.get("enabled") is False
-            or node.get("blocked")
-            or not isinstance(caps, Mapping)
-            or caps.get("click") != "unknown"
+        ):
+            continue
+        if node.get("blocked") or not isinstance(caps, Mapping):
+            continue
+        if (
+            caps.get("click") != "unknown"
             or caps.get("typeText") != "unknown"
             or caps.get("replaceText") == "available"
         ):
@@ -190,27 +184,19 @@ def pack_input_fields(frame: LayoutFrame) -> InputFieldsLayout:
         if position is None or entry.body[max(0, position - len(_FIELDS)): position] != _FIELDS:
             continue
         table_entry, table_record = entries.get(table), records.get(table)
-        if (
-            table_entry is None
-            or table_record is None
-            or record_counts[table] != 1
-            or record.layout != table_record.layout
-            or table_record.partial
-            or has_incomplete_children(nodes[table])
-            or table_record.parent != parents[table]
-        ):
+        if table_entry is None or table_record is None or record_counts[table] != 1:
+            continue
+        if record.layout != table_record.layout or table_record.partial:
+            continue
+        if has_incomplete_children(nodes[table]) or table_record.parent != parents[table]:
             continue
         ancestor, valid = ref, True
         while ancestor != table:
             original = records.get(ancestor)
-            if (
-                original is None
-                or record_counts[ancestor] != 1
-                or original.parent != parents[ancestor]
-                or original.layout != table_record.layout
-                or original.partial
-                or has_incomplete_children(nodes[ancestor])
-            ):
+            if original is None or record_counts[ancestor] != 1 or original.parent != parents[ancestor]:
+                valid = False
+                break
+            if original.layout != table_record.layout or original.partial or has_incomplete_children(nodes[ancestor]):
                 valid = False
                 break
             ancestor = parents[ancestor]
@@ -225,11 +211,10 @@ def pack_input_fields(frame: LayoutFrame) -> InputFieldsLayout:
     for table, members in groups.items():
         table_entry = entries[table]
         match = _NODE.fullmatch(frame.lines[table_entry.line])
+        if len(members) < 3 or match is None or match[2] != table:
+            continue
         if (
-            len(members) < 3
-            or match is None
-            or match[2] != table
-            or [(entry.line, entry.start) for _, entry, _ in members]
+            [(entry.line, entry.start) for _, entry, _ in members]
             != sorted((entry.line, entry.start) for _, entry, _ in members)
         ):
             continue

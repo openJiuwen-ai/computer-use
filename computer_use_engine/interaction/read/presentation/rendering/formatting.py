@@ -630,40 +630,38 @@ def render_projection_lines(
             and (any(c in node["value"] for c in "\r\n") or value_parts["omitted"] > 0)
         )
         compact_value = None
-        if (
-            block_value
-            and compact_multiline_values
-            and compact
-            and context.get("publicApi")
-            and context.get("shareDescriptions")
-            and not context.get("subtreeRef")
-            and not value_parts["omitted"]
-        ):
-            source = projection.provenance.get((node["ref"], "value"))
-            evidence = projection.source.context.get("compressionEvidence")
-            complete_value = (
-                isinstance(evidence, CompressionEvidence)
-                and source is not None
-                and bool(source.parts)
-                and all(
-                    part.facts and all((fact.source, fact.attribute) in evidence.complete_text for fact in part.facts)
-                    for part in source.parts
-                )
-            )
-            if complete_value:
-                natural_text = node["role"] == "staticText" and not node.get("name") and not node.get("description")
-                # Later fields have not been assembled yet. The two-byte separator
-                # bounds their cost; a lone Value can cost one byte less.
-                prefix = ", " + ("" if natural_text else value_label(node) + ": ")
-                compact_value = compact_multiline_value(
-                    value,
-                    label=value_label(node),
-                    indent=indent,
-                    inline_prefix=prefix,
-                    quote=quoted,
-                    format_field=field,
-                )
-                block_value = compact_value is None
+        if block_value and compact_multiline_values and compact:
+            if context.get("publicApi") and context.get("shareDescriptions") and not context.get("subtreeRef"):
+                if not value_parts["omitted"]:
+                    source = projection.provenance.get((node["ref"], "value"))
+                    evidence = projection.source.context.get("compressionEvidence")
+                    complete_value = (
+                        isinstance(evidence, CompressionEvidence)
+                        and source is not None
+                        and bool(source.parts)
+                        and all(
+                            part.facts and all(
+                                (fact.source, fact.attribute) in evidence.complete_text for fact in part.facts
+                            )
+                            for part in source.parts
+                        )
+                    )
+                    if complete_value:
+                        natural_text = (
+                            node["role"] == "staticText" and not node.get("name") and not node.get("description")
+                        )
+                        # Later fields have not been assembled yet. The two-byte separator
+                        # bounds their cost; a lone Value can cost one byte less.
+                        prefix = ", " + ("" if natural_text else value_label(node) + ": ")
+                        compact_value = compact_multiline_value(
+                            value,
+                            label=value_label(node),
+                            indent=indent,
+                            inline_prefix=prefix,
+                            quote=quoted,
+                            format_field=field,
+                        )
+                        block_value = compact_value is None
         if show_value and not block_value:
             natural_text = (
                 compact
@@ -781,16 +779,17 @@ def render_projection_lines(
                 field_base + (field_separator + ", ".join(without) if without else ""),
             )
         line_start = len(lines_value)
-        if compact and native_url_sources is not None and coverage is not None and url_slot is not None:
-            url_slots[node["ref"]] = _NativeUrlSlot(
-                line_start,
-                field_base,
-                tuple(fields),
-                url_slot,
-                field_separator,
-                len(f"{node['ref']} {role_label}"),
-                state_flags,
-            )
+        if compact and native_url_sources is not None:
+            if coverage is not None and url_slot is not None:
+                url_slots[node["ref"]] = _NativeUrlSlot(
+                    line_start,
+                    field_base,
+                    tuple(fields),
+                    url_slot,
+                    field_separator,
+                    len(f"{node['ref']} {role_label}"),
+                    state_flags,
+                )
         hints: list[str] = []
 
         def hint(text: str) -> None:
@@ -850,17 +849,12 @@ def render_projection_lines(
                         child_hints.append(coverage_hint)
             else:
                 hint(indent + "\tChildren: " + partial_info)
-        if (
-            compact
-            and not partial_info
-            and not deferred_menu
-            and "childrenStart" in node
-            and "childrenEnd" in node
-            and node["childrenEnd"] == node.get("childCount")
-        ):
-            hint(
-                (f"{indent}\tChildren: offsets {node['childrenStart']}–{node['childrenEnd']}; end of direct children.")
-            )
+        if compact and not partial_info and not deferred_menu:
+            if "childrenStart" in node and "childrenEnd" in node and node["childrenEnd"] == node.get("childCount"):
+                hint(
+                    f"{indent}\tChildren: offsets {node['childrenStart']}–{node['childrenEnd']};"
+                    " end of direct children."
+                )
         if "childrenStart" in node and not deferred_menu and not compact:
             end = (
                 ""
@@ -892,8 +886,9 @@ def render_projection_lines(
                 if context.get("publicApi")
                 else (f"{indent}\tNext child offset: {number_string(node['nextChildOffset'])}")
             )
-        elif partial_info and "childrenStart" not in node and node["role"] != "application" and not deferred_menu:
-            hint(f"{indent}\tSubtree coverage: partial; element {node['ref']}")
+        elif partial_info and "childrenStart" not in node:
+            if node["role"] != "application" and not deferred_menu:
+                hint(f"{indent}\tSubtree coverage: partial; element {node['ref']}")
         for omission in omissions:
             hint(indent + "\t" + omission)
 
@@ -928,15 +923,10 @@ def render_projection_lines(
         ):
             if attribute not in node:
                 continue
-            if (
-                attribute in node.get("_numericValueAliases", ())
-                and node[attribute] == node.get("value")
-                and show_value
-                and not value_parts["omitted"]
-                and embedded_value is None
-            ):
-                record(node, attribute, kind="equivalent")
-                continue
+            if attribute in node.get("_numericValueAliases", ()) and node[attribute] == node.get("value"):
+                if show_value and not value_parts["omitted"] and embedded_value is None:
+                    record(node, attribute, kind="equivalent")
+                    continue
             if node[attribute] == node.get("value") and {attribute, "value"} <= set(
                 node.get("_completeTextValues", ())
             ):
@@ -985,16 +975,14 @@ def render_projection_lines(
         if node.get("focused"):
             reported_focus.append(node["ref"])
         labels_value[node["ref"]] = node.get("name") or node.get("description") or node.get("value") or node["role"]
-        if (
-            node["role"] in ("group", "cell")
-            and not node.get("name")
-            and not node.get("description")
-            and len(node["children"]) > 1
-            and any(child["role"] in ("staticText", "heading") for child in node["children"])
-        ):
-            context_refs[node["ref"]] = unique(
-                context_refs.get(node["ref"], []) + [child["ref"] for child in node["children"]]
-            )
+        if node["role"] in ("group", "cell") and not node.get("name") and not node.get("description"):
+            if (
+                len(node["children"]) > 1
+                and any(child["role"] in ("staticText", "heading") for child in node["children"])
+            ):
+                context_refs[node["ref"]] = unique(
+                    context_refs.get(node["ref"], []) + [child["ref"] for child in node["children"]]
+                )
         for target in node.get("labelTargets", []):
             context_refs.setdefault(target, []).append(node["ref"])
         state_at = len(f"{node['ref']} {role_label}")
@@ -1012,19 +1000,17 @@ def render_projection_lines(
         )
         node_line_ranges[node["ref"]] = (line_start, len(lines_value))
         cell = empty_cells.get(node["ref"])
-        if (
-            cell is not None
-            and cell.parent == parent_ref
-            and show_value
-            and len(lines_value) == line_start + 1
-            and field_base == f"{node['ref']} {node_prefixes[node['ref']]} {node['name']}"
-        ):
-            # A common source caption before the address remains part of the
-            # shared header. Escaped/excerpted captions keep their explicit line.
-            properties = node_prefixes[node["ref"]] + (" " + cell.caption if cell.caption else "")
-            empty_lines[node["ref"]] = EmptyValueLine(
-                cell, indent, properties, tuple(fields), lines_value[line_start]
-            )
+        if cell is not None and cell.parent == parent_ref and show_value:
+            if (
+                len(lines_value) == line_start + 1
+                and field_base == f"{node['ref']} {node_prefixes[node['ref']]} {node['name']}"
+            ):
+                # A common source caption before the address remains part of the
+                # shared header. Escaped/excerpted captions keep their explicit line.
+                properties = node_prefixes[node["ref"]] + (" " + cell.caption if cell.caption else "")
+                empty_lines[node["ref"]] = EmptyValueLine(
+                    cell, indent, properties, tuple(fields), lines_value[line_start]
+                )
         groups = {ref: group for group in node.get("layoutGroups", ()) for ref in group["members"]}
         for child in node["children"]:
             child_layout = layout

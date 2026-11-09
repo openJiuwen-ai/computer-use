@@ -146,7 +146,7 @@ def action_saving(refs: Sequence[str], actions: Sequence[AtomAction]) -> int:
 def field_saving(refs: Sequence[str], slot: AtomSlot) -> int:
     """Compare repeated scalar slots with a single explicit source declaration."""
     label = slot.label or slot.key
-    content = string_cost(slot.value) if type(slot.value) is str else string_cost(str(slot.value))
+    content = string_cost(str(slot.value))
     local_label_cost = len(slot.label) + 2 if slot.label is not None else 0
     individual = len(refs) * (local_label_cost + content + 2)
     declaration = len(label) + len(" [elements ]: ") + len(reference_set(refs)) + content + 1

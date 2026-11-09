@@ -158,12 +158,9 @@ def _bounds(geometry: Geometry) -> tuple[float, float, float, float] | None:
     if geometry.valid is False or not all(_finite(value) for value in values):
         return None
     x, y, width, height = (float(value) for value in values)
-    if (
-        width <= 0
-        or height <= 0
-        or width * height <= 0
-        or not all(math.isfinite(value) for value in (x + width, y + height, width * height))
-    ):
+    if width <= 0 or height <= 0 or width * height <= 0:
+        return None
+    if not all(math.isfinite(value) for value in (x + width, y + height, width * height)):
         return None
     return x, y, width, height
 
@@ -192,7 +189,9 @@ def _transformed(
     left, top = min(point[0] for point in points), min(point[1] for point in points)
     right, bottom = max(point[0] for point in points), max(point[1] for point in points)
     width, height = right - left, bottom - top
-    if width <= 0 or height <= 0 or width * height <= 0 or not math.isfinite(width * height):
+    if width <= 0 or height <= 0 or width * height <= 0:
+        return None
+    if not math.isfinite(width * height):
         return None
     return left, top, width, height
 
@@ -213,10 +212,10 @@ def _comparable_box(geometry: Geometry, spaces: Mapping[str, CoordinateSpace], i
         parent = space.parent
         if parent is None and space.to_parent is None:
             break
+        if parent is None or space.to_parent is None:
+            return None
         if (
-            parent is None
-            or space.to_parent is None
-            or issues.affects(("coordinate_spaces", identity, "parent"))
+            issues.affects(("coordinate_spaces", identity, "parent"))
             or issues.affects(("coordinate_spaces", identity, "to_parent"))
             or not _usable_space(parent, spaces, issues)
         ):

@@ -160,19 +160,12 @@ def select_states(node: NodeView, *, compact: bool, focused_ref: str | None) -> 
         add(node["landmarkType"] + " landmark", "landmarkType")
     caps = node.get("capabilities")
     if caps is not None:
-        if (
-            caps.get("click") == "available"
-            and not node.get("selectable")
-            and (not compact or node["role"] not in STANDARD_CLICK)
-        ):
-            add("clickable", "capabilities")
-        if (
-            node.get("selectable")
-            and node.get("enabled") is not False
-            and not node.get("selected")
-            and caps.get("click") != "unavailable"
-        ):
-            add("selectable", "selectable", "capabilities")
+        if caps.get("click") == "available" and not node.get("selectable"):
+            if not compact or node["role"] not in STANDARD_CLICK:
+                add("clickable", "capabilities")
+        if node.get("selectable") and node.get("enabled") is not False:
+            if not node.get("selected") and caps.get("click") != "unavailable":
+                add("selectable", "selectable", "capabilities")
         if caps.get("typeText") == "available":
             add("text-input", "capabilities")
         elif caps.get("replaceText") == "available":
@@ -182,27 +175,19 @@ def select_states(node: NodeView, *, compact: bool, focused_ref: str | None) -> 
             and caps.get("replaceText") == "unavailable"
         ):
             add("replace " + caps.get("replaceText", "unknown"), "capabilities")
-        if (
-            caps.get("focus") == "available"
-            and caps.get("typeText") != "available"
-            and node["role"] not in CONVENTIONAL
-            and not node.get("selectable")
-            and (not compact or node["role"] not in ("group", "webArea"))
-        ):
-            add("focusable", "capabilities")
+        if caps.get("focus") == "available" and caps.get("typeText") != "available":
+            if node["role"] not in CONVENTIONAL and not node.get("selectable"):
+                if not compact or node["role"] not in ("group", "webArea"):
+                    add("focusable", "capabilities")
     else:
         if node.get("selectable"):
             if not node.get("selected"):
                 add("selectable", "selectable")
         elif node.get("pressable") and node["role"] not in CONVENTIONAL:
             add("clickable", "pressable")
-        if (
-            node.get("focusable")
-            and node["role"] not in CONVENTIONAL
-            and not node.get("selectable")
-            and (not compact or node["role"] not in ("group", "webArea"))
-        ):
-            add("focusable", "focusable")
+        if node.get("focusable") and node["role"] not in CONVENTIONAL and not node.get("selectable"):
+            if not compact or node["role"] not in ("group", "webArea"):
+                add("focusable", "focusable")
     if node.get("submenu"):
         add("submenu", "submenu")
     expanded = disclosure(node)

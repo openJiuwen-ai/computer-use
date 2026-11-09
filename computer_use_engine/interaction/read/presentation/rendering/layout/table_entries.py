@@ -155,15 +155,17 @@ def pack_table_entries(frame: LayoutFrame) -> TableEntriesLayout:
     for evidence in frame.table_layouts:
         table = entries.get(evidence.table)
         record = records.get(evidence.table)
-        if table is None or record is None or counts[evidence.table] != 1 or record.layout != evidence.layout:
+        if table is None or record is None:
+            return TableEntriesLayout(frame.lines)
+        if counts[evidence.table] != 1 or record.layout != evidence.layout:
             return TableEntriesLayout(frame.lines)
         ancestor = evidence.table
         while ancestor != root:
             source, original = nodes.get(ancestor), records.get(ancestor)
+            if source is None or original is None:
+                return TableEntriesLayout(frame.lines)
             if (
-                source is None
-                or original is None
-                or counts[ancestor] != 1
+                counts[ancestor] != 1
                 or original.parent != parents[ancestor]
                 or source["role"] in ("application", "window", "sheet", "menu", "menuBar")
             ):
@@ -181,10 +183,10 @@ def pack_table_entries(frame: LayoutFrame) -> TableEntriesLayout:
             return TableEntriesLayout(frame.lines)
         index = ordered_matches[0]
         intro = _INTRO.fullmatch(evidence.introduction)
+        if intro is None or intro[2] not in (_GRAMMAR, _OWN_GRAMMAR):
+            return TableEntriesLayout(frame.lines)
         if (
-            intro is None
-            or intro[2] not in (_GRAMMAR, _OWN_GRAMMAR)
-            or not root_entry.line <= table.line < index < root_end
+            not root_entry.line <= table.line < index < root_end
             or len(intro[1]) != len(frame.lines[table.line]) - len(frame.lines[table.line].lstrip("\t")) + 1
             or any(not line.startswith(intro[1]) for line in frame.lines[table.line + 1: index])
         ):
