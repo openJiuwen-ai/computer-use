@@ -4,36 +4,10 @@
     {
       "data": {
         "fields": [
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "nativeCode",
-            {
-              "data": {
-                "integer": "-25202"
-              },
-              "nativeType": "CFNumber.i"
-            }
-          ],
-          [
-            "nativeDomain",
-            {
-              "data": "AXError",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ]
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["nativeCode", {"data": {"integer": "-25202"}, "nativeType": "CFNumber.i"}],
+          ["nativeDomain", {"data": "AXError", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}]
         ]
       },
       "nativeType": "record"
@@ -41,50 +15,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXChildren",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXChildren", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -92,50 +28,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXParent",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXParent", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -143,50 +41,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXTitleUIElement",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXTitleUIElement", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -194,50 +54,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXServesAsTitleForUIElements",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXServesAsTitleForUIElements", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -245,50 +67,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXWindow",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXWindow", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -296,50 +80,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXVisibleRows",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXVisibleRows", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -347,50 +93,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXVisibleCells",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXVisibleCells", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -398,50 +106,12 @@
     {
       "data": {
         "fields": [
-          [
-            "certainty",
-            {
-              "data": "unknown",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "detail",
-            {
-              "data": "AXError -25202",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "property",
-            {
-              "data": "AXRows",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "source",
-            {
-              "data": "37gaxazsotmtg:t679",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "state",
-            {
-              "data": "error",
-              "nativeType": "CFString"
-            }
-          ],
-          [
-            "targets",
-            {
-              "data": {
-                "items": []
-              },
-              "nativeType": "CFArray"
-            }
-          ]
+          ["certainty", {"data": "unknown", "nativeType": "CFString"}],
+          ["detail", {"data": "AXError -25202", "nativeType": "CFString"}],
+          ["property", {"data": "AXRows", "nativeType": "CFString"}],
+          ["source", {"data": "37gaxazsotmtg:t679", "nativeType": "CFString"}],
+          ["state", {"data": "error", "nativeType": "CFString"}],
+          ["targets", {"data": {"items": []}, "nativeType": "CFArray"}]
         ]
       },
       "nativeType": "record"
@@ -449,133 +119,43 @@
     {
       "data": {
         "items": [
-          {
-            "data": "AXRole",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXTitle",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXDescription",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXValue",
-            "nativeType": "CFString"
-          }
+          {"data": "AXRole", "nativeType": "CFString"},
+          {"data": "AXTitle", "nativeType": "CFString"},
+          {"data": "AXDescription", "nativeType": "CFString"},
+          {"data": "AXValue", "nativeType": "CFString"}
         ]
       },
       "nativeType": "CFArray"
     },
-    {
-      "data": {
-        "integer": "-25202"
-      },
-      "nativeType": "CFNumber.i"
-    },
-    {
-      "data": true,
-      "nativeType": "CFBoolean"
-    },
-    {
-      "data": {
-        "ref": "37gaxazsotmtg:t679"
-      },
-      "nativeType": "AXUIElement"
-    },
-    {
-      "data": {
-        "integer": "0"
-      },
-      "nativeType": "CFNumber.q"
-    },
-    {
-      "data": {
-        "integer": "1"
-      },
-      "nativeType": "CFNumber.q"
-    },
-    {
-      "data": {
-        "integer": "2"
-      },
-      "nativeType": "CFNumber.q"
-    },
-    {
-      "data": {
-        "integer": "3"
-      },
-      "nativeType": "CFNumber.q"
-    },
-    {
-      "data": "action catalogue not requested by this query profile",
-      "nativeType": "CFString"
-    },
-    {
-      "data": "not_read",
-      "nativeType": "CFString"
-    },
-    {
-      "data": "unknown",
-      "nativeType": "CFString"
-    },
-    {
-      "data": "AXError -25202",
-      "nativeType": "CFString"
-    },
-    {
-      "data": "error",
-      "nativeType": "CFString"
-    },
-    {
-      "data": "B8467AE5-8B96-470C-9E7F-5A6A583F79D0",
-      "nativeType": "CFString"
-    },
+    {"data": {"integer": "-25202"}, "nativeType": "CFNumber.i"},
+    {"data": true, "nativeType": "CFBoolean"},
+    {"data": {"ref": "37gaxazsotmtg:t679"}, "nativeType": "AXUIElement"},
+    {"data": {"integer": "0"}, "nativeType": "CFNumber.q"},
+    {"data": {"integer": "1"}, "nativeType": "CFNumber.q"},
+    {"data": {"integer": "2"}, "nativeType": "CFNumber.q"},
+    {"data": {"integer": "3"}, "nativeType": "CFNumber.q"},
+    {"data": "action catalogue not requested by this query profile", "nativeType": "CFString"},
+    {"data": "not_read", "nativeType": "CFString"},
+    {"data": "unknown", "nativeType": "CFString"},
+    {"data": "AXError -25202", "nativeType": "CFString"},
+    {"data": "error", "nativeType": "CFString"},
+    {"data": "B8467AE5-8B96-470C-9E7F-5A6A583F79D0", "nativeType": "CFString"},
     {
       "data": {
         "items": [
-          {
-            "data": "AXChildren",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXParent",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXTitleUIElement",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXServesAsTitleForUIElements",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXWindow",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXVisibleRows",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXVisibleCells",
-            "nativeType": "CFString"
-          },
-          {
-            "data": "AXRows",
-            "nativeType": "CFString"
-          }
+          {"data": "AXChildren", "nativeType": "CFString"},
+          {"data": "AXParent", "nativeType": "CFString"},
+          {"data": "AXTitleUIElement", "nativeType": "CFString"},
+          {"data": "AXServesAsTitleForUIElements", "nativeType": "CFString"},
+          {"data": "AXWindow", "nativeType": "CFString"},
+          {"data": "AXVisibleRows", "nativeType": "CFString"},
+          {"data": "AXVisibleCells", "nativeType": "CFString"},
+          {"data": "AXRows", "nativeType": "CFString"}
         ]
       },
       "nativeType": "CFArray"
     },
-    {
-      "data": "37gaxazsotmtg:scope7",
-      "nativeType": "CFString"
-    }
+    {"data": "37gaxazsotmtg:scope7", "nativeType": "CFString"}
   ],
   "nodes": [
     {
@@ -584,555 +164,176 @@
       "nativeType": "AXUIElement",
       "properties": [
         {
-          "key": [
-            "macos.ax",
-            "AXRole"
-          ],
+          "key": ["macos.ax", "AXRole"],
           "read": {
             "complete": false,
-            "details": [
-              [
-                "batch_owner",
-                {
-                  "metadataValue": 12
-                }
-              ],
-              [
-                "batch_index",
-                {
-                  "metadataValue": 13
-                }
-              ]
-            ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 0
-                },
-                "reason": "error"
-              }
-            ]
+            "details": [["batch_owner", {"metadataValue": 12}], ["batch_index", {"metadataValue": 13}]],
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 0}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXTitle"
-          ],
+          "key": ["macos.ax", "AXTitle"],
           "read": {
             "complete": false,
-            "details": [
-              [
-                "batch_owner",
-                {
-                  "metadataValue": 12
-                }
-              ],
-              [
-                "batch_index",
-                {
-                  "metadataValue": 14
-                }
-              ]
-            ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 0
-                },
-                "reason": "error"
-              }
-            ]
+            "details": [["batch_owner", {"metadataValue": 12}], ["batch_index", {"metadataValue": 14}]],
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 0}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXDescription"
-          ],
+          "key": ["macos.ax", "AXDescription"],
           "read": {
             "complete": false,
-            "details": [
-              [
-                "batch_owner",
-                {
-                  "metadataValue": 12
-                }
-              ],
-              [
-                "batch_index",
-                {
-                  "metadataValue": 15
-                }
-              ]
-            ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 0
-                },
-                "reason": "error"
-              }
-            ]
+            "details": [["batch_owner", {"metadataValue": 12}], ["batch_index", {"metadataValue": 15}]],
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 0}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXValue"
-          ],
+          "key": ["macos.ax", "AXValue"],
           "read": {
             "complete": false,
-            "details": [
-              [
-                "batch_owner",
-                {
-                  "metadataValue": 12
-                }
-              ],
-              [
-                "batch_index",
-                {
-                  "metadataValue": 16
-                }
-              ]
-            ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 0
-                },
-                "reason": "error"
-              }
-            ]
+            "details": [["batch_owner", {"metadataValue": 12}], ["batch_index", {"metadataValue": 16}]],
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 0}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "toolkit",
-            "actions"
-          ],
-          "read": {
-            "complete": false,
-            "details": [
-              [
-                "detail",
-                {
-                  "metadataValue": 17
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 18
-                }
-              ]
-            ]
-          },
-          "value": {
-            "data": {
-              "items": []
-            },
-            "nativeType": "CFArray"
-          }
+          "key": ["toolkit", "actions"],
+          "read": {"complete": false, "details": [["detail", {"metadataValue": 17}], ["state", {"metadataValue": 18}]]},
+          "value": {"data": {"items": []}, "nativeType": "CFArray"}
         },
         {
-          "key": [
-            "toolkit",
-            "attribute_names"
-          ],
+          "key": ["toolkit", "attribute_names"],
           "read": {
             "api": "AXUIElementCopyAttributeNames",
             "complete": false,
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 0
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 0}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXChildren"
-          ],
+          "key": ["macos.ax", "AXChildren"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 1
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 1}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXParent"
-          ],
+          "key": ["macos.ax", "AXParent"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 2
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 2}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXTitleUIElement"
-          ],
+          "key": ["macos.ax", "AXTitleUIElement"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 3
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 3}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXServesAsTitleForUIElements"
-          ],
+          "key": ["macos.ax", "AXServesAsTitleForUIElements"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 4
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 4}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXWindow"
-          ],
+          "key": ["macos.ax", "AXWindow"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 5
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 5}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXVisibleRows"
-          ],
+          "key": ["macos.ax", "AXVisibleRows"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 6
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 6}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXVisibleCells"
-          ],
+          "key": ["macos.ax", "AXVisibleCells"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 7
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 7}, "reason": "error"}]
           },
           "state": "error",
           "value": null
         },
         {
-          "key": [
-            "macos.ax",
-            "AXRows"
-          ],
+          "key": ["macos.ax", "AXRows"],
           "read": {
             "complete": false,
             "details": [
-              [
-                "certainty",
-                {
-                  "metadataValue": 19
-                }
-              ],
-              [
-                "detail",
-                {
-                  "metadataValue": 20
-                }
-              ],
-              [
-                "relation",
-                {
-                  "metadataValue": 11
-                }
-              ],
-              [
-                "state",
-                {
-                  "metadataValue": 21
-                }
-              ]
+              ["certainty", {"metadataValue": 19}],
+              ["detail", {"metadataValue": 20}],
+              ["relation", {"metadataValue": 11}],
+              ["state", {"metadataValue": 21}]
             ],
-            "issues": [
-              {
-                "detail": "AXError -25202",
-                "nativeStatus": {
-                  "metadataValue": 8
-                },
-                "reason": "error"
-              }
-            ]
+            "issues": [{"detail": "AXError -25202", "nativeStatus": {"metadataValue": 8}, "reason": "error"}]
           },
           "state": "error",
           "value": null
@@ -1141,30 +342,10 @@
       "read": {
         "api": "AXUIElementCopyMultipleAttributeValues",
         "details": [
-          [
-            "batch_fields",
-            {
-              "metadataValue": 9
-            }
-          ],
-          [
-            "batch_status",
-            {
-              "metadataValue": 10
-            }
-          ],
-          [
-            "queried",
-            {
-              "metadataValue": 11
-            }
-          ],
-          [
-            "requested_fields",
-            {
-              "metadataValue": 9
-            }
-          ]
+          ["batch_fields", {"metadataValue": 9}],
+          ["batch_status", {"metadataValue": 10}],
+          ["queried", {"metadataValue": 11}],
+          ["requested_fields", {"metadataValue": 9}]
         ]
       },
       "source": "macos.ax"
@@ -1176,34 +357,14 @@
     "cached": false,
     "complete": true,
     "details": [
-      [
-        "observation_id",
-        {
-          "metadataValue": 22
-        }
-      ],
-      [
-        "requested_relations",
-        {
-          "metadataValue": 23
-        }
-      ],
-      [
-        "surface",
-        {
-          "metadataValue": 24
-        }
-      ]
+      ["observation_id", {"metadataValue": 22}],
+      ["requested_relations", {"metadataValue": 23}],
+      ["surface", {"metadataValue": 24}]
     ],
-    "intervalNs": [
-      1793770277612000000,
-      1793770277613000000
-    ],
+    "intervalNs": [1793770277612000000, 1793770277613000000],
     "issues": [],
     "producer": "computer-use-macos"
   },
-  "roots": [
-    "37gaxazsotmtg:t679"
-  ],
+  "roots": ["37gaxazsotmtg:t679"],
   "session": "69E8A5FA-1702-4503-9EFA-FC820818121A"
 }
