@@ -28,14 +28,16 @@ def toggle_glyph(role: str, value: object) -> str | None:
     """Use ASCII markers for explicit checkbox and radio checked states."""
     if role not in ("checkBox", "radioButton"):
         return None
-    # pylint: disable-next=unidiomatic-typecheck
-    if role == "checkBox" and type(value) is str and value == "mixed":
+    kind = type(value)
+    if role == "checkBox" and kind is str and value == "mixed":
         return "[-]"
-    # pylint: disable-next=unidiomatic-typecheck
-    if value is True or type(value) is int and value == 1 or type(value) is str and value in ("on", "true", "1"):
+    if value is True or kind is int and value == 1:
         enabled = True
-    # pylint: disable-next=unidiomatic-typecheck
-    elif value is False or type(value) is int and value == 0 or type(value) is str and value in ("off", "false", "0"):
+    elif kind is str and value in ("on", "true", "1"):
+        enabled = True
+    elif value is False or kind is int and value == 0:
+        enabled = False
+    elif kind is str and value in ("off", "false", "0"):
         enabled = False
     else:
         return None

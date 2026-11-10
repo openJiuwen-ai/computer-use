@@ -46,8 +46,9 @@ def parallel_regions(
             view.scopes[child["ref"]] != view.scopes[parent["ref"]]
             or not same_blocking(parent, child)
             or not complete_visible(child)
-            or not visible_source_path(view, child)
         ):
+            return ()
+        if not visible_source_path(view, child):
             return ()
         box = geometry.boxes.get(child["ref"])
         if box is None:

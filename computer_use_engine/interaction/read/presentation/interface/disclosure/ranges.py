@@ -55,13 +55,9 @@ def editing_ranges(
             offsets[count] = index + 1
     ranges = []
     for span in spans:
-        if (
-            type(span.start) is not int
-            or type(span.end) is not int
-            or span.start not in offsets
-            or span.end not in offsets
-            or span.start > span.end
-        ):
+        if type(span.start) is not int or type(span.end) is not int or span.start not in offsets:
+            return None
+        if span.end not in offsets or span.start > span.end:
             return None
         start, end = offsets[span.start], offsets[span.end]
         if span.text is not None and span.text != value[start:end]:

@@ -46,11 +46,10 @@ def execute(request: GroupDisclosureRequest, control: Control) -> ClassifiedGrou
     native_fields: dict[tuple[str, str], list[CapturedGroupField]] = {}
     for (ref, native_property), field in request.snapshot.fields.items():
         native = records.get(request.snapshot.refs.get(ref))
+        if native is None or native.get("observed") is False or field.get("representation") != "field":
+            continue
         if (
-            native is None
-            or native.get("observed") is False
-            or field.get("representation") != "field"
-            or native_property not in native["requestedFields"]
+            native_property not in native["requestedFields"]
             or native_property not in native["values"]
             or native["fieldStatus"].get(native_property, {}).get("state", "complete") != "complete"
         ):

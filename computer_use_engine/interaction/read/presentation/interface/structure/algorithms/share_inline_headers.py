@@ -43,7 +43,10 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
                     peer.layout != "inline"
                     or peer.shared_prefix_ref is None
                     or not same_scope(draft, (first.shared_prefix_ref, peer.shared_prefix_ref))
-                    or not same_region(draft, (first.shared_prefix_ref, peer.shared_prefix_ref))
+                ):
+                    break
+                if (
+                    not same_region(draft, (first.shared_prefix_ref, peer.shared_prefix_ref))
                     or prefix_signature(draft, peer.shared_prefix_ref) != signature
                 ):
                     break

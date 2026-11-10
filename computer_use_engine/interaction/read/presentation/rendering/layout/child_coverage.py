@@ -34,13 +34,18 @@ def capture_child_hint(
             type(candidate.get("childrenStart")) is not int
             or candidate["childrenStart"] != 0
             or type(candidate.get("childrenEnd")) is not int
-            or candidate["childrenEnd"] != 0
+        ):
+            return None
+        if (
+            candidate["childrenEnd"] != 0
             or type(candidate.get("childCount")) is not int
             or candidate["childCount"] <= 0
-            or candidate.get("children")
-            or "nextChildOffset" in candidate
-            or candidate.get("childOmissions")
-            or candidate.get("childrenRead", 0) != 0
+        ):
+            return None
+        if candidate.get("children") or "nextChildOffset" in candidate or candidate.get("childOmissions"):
+            return None
+        if (
+            candidate.get("childrenRead", 0) != 0
             or not isinstance(candidate.get("partialReason"), str)
             or not candidate["partialReason"]
         ):

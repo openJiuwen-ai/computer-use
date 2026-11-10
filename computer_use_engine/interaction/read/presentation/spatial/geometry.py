@@ -40,7 +40,10 @@ class Box:
             not self.space
             or not all(_finite(number) for number in (self.x, self.y, self.width, self.height))
             or self.width <= 0
-            or self.height <= 0
+        ):
+            raise ValueError("A presentation box requires finite positive bounds and a declared space")
+        if (
+            self.height <= 0
             or self.area <= 0
             or not all(math.isfinite(number) for number in (self.right, self.bottom, self.area))
         ):

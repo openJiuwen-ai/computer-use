@@ -143,9 +143,9 @@ def containment_notes(
             )
             previous = [compact] if len(compact) < len("\n".join(originals)) else originals
             column = published.get(parents[0]) if len(parents) == 1 else None
+            matching_column = column is not None and bool(kind == "shared")
             if (
-                column is not None
-                and kind == "shared"
+                matching_column
                 and column.targets == targets
                 and len(column.statement().encode("utf-8")) < len("\n".join(previous).encode("utf-8"))
             ):

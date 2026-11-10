@@ -64,8 +64,9 @@ class GroupDisclosurePolicy:
             not 0 < self.minimum_saved_fraction <= 1
             or not 0 <= self.recovery_weight <= 1
             or type(self.recovery_page_characters) is not int
-            or self.recovery_page_characters <= 0
         ):
+            raise ValueError("Invalid group recovery or saving policy")
+        if self.recovery_page_characters <= 0:
             raise ValueError("Invalid group recovery or saving policy")
 
 

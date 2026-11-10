@@ -83,12 +83,9 @@ def read_summaries(
         if "text.source" not in values:
             continue
         selection = selections_plan.entries.get(ref)
-        if (
-            selection is not None
-            and (not compact or selection.group is None)
-            and not (compact and defer_inactive_selections and selection.inactive)
-        ):
-            output.append(selection.statement(ref, concise=concise) if compact else selection.detail_statement())
+        if selection is not None and (not compact or selection.group is None):
+            if not (compact and defer_inactive_selections and selection.inactive):
+                output.append(selection.statement(ref, concise=concise) if compact else selection.detail_statement())
         caret = {
             key: values[source]
             for key, source in (("active", "text.caret_active"), ("range", "text.caret"))

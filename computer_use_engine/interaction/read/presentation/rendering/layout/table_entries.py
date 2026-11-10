@@ -85,10 +85,9 @@ def expand_table_entries(lines: list[str]) -> list[str]:
             continue
         grammar = stripped[len(_DECLARATION):]
         root = _NODE.fullmatch(lines[index + 1]) if index + 1 < len(lines) else None
+        invalid_table_intro = grammar not in (_GRAMMAR, _OWN_GRAMMAR) or root is None or bool(root[1] != indent)
         if (
-            grammar not in (_GRAMMAR, _OWN_GRAMMAR)
-            or root is None
-            or root[1] != indent
+            invalid_table_intro
             or index > 0
             and lines[index - 1].lstrip("\t").startswith(_DECLARATION)
         ):

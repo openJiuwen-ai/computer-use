@@ -37,11 +37,10 @@ def group_child_coverage(frame: LayoutFrame) -> list[str]:
     # leave that branch in its explicit per-element form.
     for node in frame.rendered_nodes:
         span = frame.node_line_ranges.get(node.ref)
+        if span is None or span[0] < 0 or span[1] > len(frame.lines):
+            continue
         if (
-            span is None
-            or span[0] < 0
-            or span[1] > len(frame.lines)
-            or "\n".join(frame.lines[span[0]: span[1]]) != node.text
+            "\n".join(frame.lines[span[0]: span[1]]) != node.text
             or node.parent is not None
             and node.parent not in paths
         ):
@@ -59,16 +58,11 @@ def group_child_coverage(frame: LayoutFrame) -> list[str]:
     for hint in frame.child_hints:
         node = nodes.get(hint.ref)
         span = frame.node_line_ranges.get(hint.ref)
-        if (
-            hint.ref in used_refs
-            or hint.ref not in paths
-            or node is None
-            or span is None
-            or not span[0] < hint.line_index < span[1]
-            or frame.lines[hint.line_index] != hint.text
-            or hint.text not in node.hints
-            or hint.total <= 0
-        ):
+        if hint.ref in used_refs or hint.ref not in paths or node is None:
+            continue
+        if span is None or not span[0] < hint.line_index < span[1] or frame.lines[hint.line_index] != hint.text:
+            continue
+        if hint.text not in node.hints or hint.total <= 0:
             continue
         expected = "\t" * (node.depth + len(node.layout) + 1) + f"Children: 0/{hint.total} read; partial; read()"
         if hint.text != expected:

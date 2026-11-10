@@ -483,13 +483,9 @@ def capture_evidence(snapshot: SnapshotFacts, native_nodes: Mapping[str, FactNod
         field = source.get("field")
         token = snapshot.refs.get(ref)
         native = native_nodes.get(token) if token is not None else None
-        if (
-            field in ("name", "description", "value")
-            and native is not None
-            and name not in native["fieldStatus"]
-            and isinstance(native["values"].get(name), str)
-        ):
-            complete.add((ref, field))
+        if field in ("name", "description", "value") and native is not None and name not in native["fieldStatus"]:
+            if isinstance(native["values"].get(name), str):
+                complete.add((ref, field))
         description_path = {
             "valueDescription": ("control_value", "description"),
             "rangeDescription": ("numeric_value", "description"),
@@ -500,19 +496,24 @@ def capture_evidence(snapshot: SnapshotFacts, native_nodes: Mapping[str, FactNod
             if description_path is not None and original is not None
             else None
         )
-        if (
-            description_path is not None
-            and description is not None
-            and native is not None
+        complete_empty_description = description_path is not None and description is not None and native is not None
+        complete_empty_description = (
+            complete_empty_description
             # pylint: disable-next=unidiomatic-typecheck
             and type(description.description) is str
-            and description.description == ""
-            and tuple(source.get("path", ())) == description_path
+            and bool(description.description == "")
+            and bool(tuple(source.get("path", ())) == description_path)
+        )
+        complete_empty_description = (
+            complete_empty_description
             # pylint: disable-next=unidiomatic-typecheck
             and type(native["values"].get(name)) is str
+        )
+        if (
+            complete_empty_description
             and native["values"][name] == ""
             and not any(
-                key == name or key.startswith(name + ".") or name.startswith(key + ".") for key in native["fieldStatus"]
+            key == name or key.startswith(name + ".") or name.startswith(key + ".") for key in native["fieldStatus"]
             )
         ):
             path = ("nodes", token, *description_path)

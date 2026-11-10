@@ -110,13 +110,12 @@ def _leaves(frame: LayoutFrame) -> dict[int, _Leaf]:
                 and type(child.get("childCount")) is int
                 and child.get("childCount") == unexpanded[ref]
             )
-            if (
-                not child["children"]
-                and (not has_incomplete_children(child) or covered_menu)
-                and child["role"] not in _SCOPE_ROLES
-                and child.get("subrole") not in ("dialog", "systemDialog", "popover")
-            ):
-                positions[ref] = (parent["ref"], position)
+            if not child["children"] and (not has_incomplete_children(child) or covered_menu):
+                if (
+                    child["role"] not in _SCOPE_ROLES
+                    and child.get("subrole") not in ("dialog", "systemDialog", "popover")
+                ):
+                    positions[ref] = (parent["ref"], position)
     result: dict[int, _Leaf] = {}
     for index, line in enumerate(frame.lines):
         match = _NODE.fullmatch(line)

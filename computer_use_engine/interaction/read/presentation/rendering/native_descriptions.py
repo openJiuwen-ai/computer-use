@@ -156,18 +156,27 @@ def capture_common_role_aliases(
             source = snapshot.fields.get((ref, field))
             attribute = {"role": "role", "role_description": "roleDescription", "role_detail": "subrole"}[field]
             actual = getattr(original, field)
-            if (
+            wrong_source = (
                 source is None
-                or source.get("representation") != "field"
-                or source.get("node") != token
-                or source.get("field") != attribute
-                or tuple(source.get("path", ())) != (field,)
+                or bool(source.get("representation") != "field")
+                or bool(source.get("node") != token)
+            )
+            wrong_source = (
+                wrong_source
+                or bool(source.get("field") != attribute)
+                or bool(tuple(source.get("path", ())) != (field,))
                 # pylint: disable-next=unidiomatic-typecheck
                 or type(actual) is not str
-                or native[token]["values"].get(field) != actual
+            )
+            wrong_source = (
+                wrong_source
+                or bool(native[token]["values"].get(field) != actual)
                 # pylint: disable-next=unidiomatic-typecheck
                 or type(source.get("normalized")) is not str
-                or source["normalized"] != node.get(attribute)
+                or bool(source["normalized"] != node.get(attribute))
+            )
+            if (
+                wrong_source
                 or field != "role"
                 and source["normalized"] != actual
             ):
@@ -250,18 +259,26 @@ def capture_native_description_fields(
                 # pylint: disable-next=unidiomatic-typecheck
                 or type(actual) is not str
                 or actual != value
-                or field in ("valueDescription", "rangeDescription")
+            ):
+                continue
+            if (
+                field in ("valueDescription", "rangeDescription")
                 and value != ""
                 or source is None
-                or source.get("representation") != "field"
-                or source.get("node") != token
-                or source.get("field") != field
-                or tuple(source.get("path", ())) != path
+            ):
+                continue
+            if source.get("representation") != "field" or source.get("node") != token or source.get("field") != field:
+                continue
+            if (
+                tuple(source.get("path", ())) != path
                 # pylint: disable-next=unidiomatic-typecheck
                 or type(source.get("normalized")) is not str
                 or source["normalized"] != normalized
+            ):
+                continue
+            if (
                 # pylint: disable-next=unidiomatic-typecheck
-                or type(source_node.get(field)) is not str
+                type(source_node.get(field)) is not str
                 or source_node[field] != normalized
                 or any(
                     key == native_property
@@ -269,7 +286,10 @@ def capture_native_description_fields(
                     or native_property.startswith(key + ".")
                     for key in original["fieldStatus"]
                 )
-                or any(
+            ):
+                continue
+            if (
+                any(
                     not failed or failed[: len(path)] == path or path[: len(failed)] == failed
                     for failed in issues.get(token, ())
                 )

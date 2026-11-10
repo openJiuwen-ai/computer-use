@@ -24,10 +24,12 @@ def _quoted_size(value: str) -> int:
         code = ord(char)
         if char in '"\\\n\r\t\b\f':
             total += 2
-        elif code < 32 or 127 <= code <= 159 or code in (0x2028, 0x2029) or 0xD800 <= code <= 0xDFFF:
-            total += 6
         else:
-            total += _bytes(char)
+            escaped_control = bool(code < 32) or bool(127 <= code <= 159)
+            if escaped_control or code in (0x2028, 0x2029) or 0xD800 <= code <= 0xDFFF:
+                total += 6
+            else:
+                total += _bytes(char)
     return total
 
 
@@ -94,14 +96,9 @@ def select_multiline(request: AtomFinalizeRequest) -> AtomFinalizeRequest:
                     for part in slot.provenance.parts
                 )
             )
-            if (
-                slot.placement == "block"
-                and slot.preview is None
-                and isinstance(value, str)
-                and ("\n" in value or "\r" in value)
-                and complete
-                and (request.disclosure is None or request.disclosure.get(ref, slot.key) is None)
-            ):
+            can_inline_block = bool(slot.placement == "block") and slot.preview is None and isinstance(value, str)
+            can_inline_block = can_inline_block and ("\n" in value or "\r" in value) and bool(complete)
+            if can_inline_block and (request.disclosure is None or request.disclosure.get(ref, slot.key) is None):
                 if prefers_inline(value, label=slot.label, depth=depth):
                     slot = replace(slot, placement="inline")
             slots.append(slot)

@@ -55,10 +55,9 @@ def heading_sections(refs: Sequence[str], nodes: Mapping[str, Mapping[str, Any]]
     for ref in refs:
         node = nodes[ref]
         role = node.get("role")
+        starts_chrome = role in _CHROME or (bool(role == "button") and node.get("subrole") in _WINDOW_BUTTONS)
         if (
-            role in _CHROME
-            or role == "button"
-            and node.get("subrole") in _WINDOW_BUTTONS
+            starts_chrome
             or node.get("modal") is True
             or node.get("subrole") in ("dialog", "alert", "systemDialog", "popover")
         ):

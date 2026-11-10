@@ -46,25 +46,18 @@ def mark_visual_chains(view: ProjectionView, edit: ProjectionEditor, geometry: G
             parent["role"] != "group"
             or len(parent["children"]) != 1
             or len(view.native_nodes[parent["ref"]]["children"]) != 1
-            or parent.get("layoutGroups")
-            or parent.get("spatialPosition")
-            or parent.get("blockedBy")
-            or parent.get("modal")
-            or not complete_visible(parent)
-            or not visible_source_path(view, parent)
         ):
             continue
+        if parent.get("layoutGroups") or parent.get("spatialPosition") or parent.get("blockedBy"):
+            continue
+        if parent.get("modal") or not complete_visible(parent) or not visible_source_path(view, parent):
+            continue
         child = parent["children"][0]
-        if (
-            child["role"] not in _CHILD_ROLES
-            or child.get("blockedBy")
-            or child.get("modal")
-            or child.get("layoutGroups")
-            or child.get("spatialPosition")
-            or not complete_visible(child)
-            or not visible_source_path(view, child)
-            or view.scopes[parent["ref"]] != view.scopes[child["ref"]]
-        ):
+        if child["role"] not in _CHILD_ROLES or child.get("blockedBy") or child.get("modal"):
+            continue
+        if child.get("layoutGroups") or child.get("spatialPosition") or not complete_visible(child):
+            continue
+        if not visible_source_path(view, child) or view.scopes[parent["ref"]] != view.scopes[child["ref"]]:
             continue
         outer, inner = geometry.boxes.get(parent["ref"]), geometry.boxes.get(child["ref"])
         if outer is None or inner is None or not _tight_containment(outer, inner):

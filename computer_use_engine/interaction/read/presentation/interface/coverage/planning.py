@@ -31,33 +31,26 @@ def _source_scope(request: CoverageRequest, ref: str) -> str | None:
 def _empty_initial(request: CoverageRequest, ref: str) -> bool:
     """Require the original and projected coverage to describe the same empty first page."""
     coverage = request.atoms.atoms[ref].coverage
-    if (
-        coverage.unexpanded_menu
-        or type(coverage.start) is not int
-        or coverage.start != 0
-        or type(coverage.end) is not int
-        or coverage.end != 0
-        or coverage.read not in (None, 0)
-        or type(coverage.total) is not int
-        or coverage.total <= 0
-        or coverage.next_offset is not None
-        or coverage.omissions
-        or not coverage.reason
-    ):
+    if coverage.unexpanded_menu or type(coverage.start) is not int or coverage.start != 0:
+        return False
+    if type(coverage.end) is not int or coverage.end != 0 or coverage.read not in (None, 0):
+        return False
+    if type(coverage.total) is not int or coverage.total <= 0 or coverage.next_offset is not None:
+        return False
+    if coverage.omissions or not coverage.reason:
         return False
     for node in (request.interface.source.native_nodes[ref], request.interface.projected_nodes[ref]):
         if (
             type(node.get("childrenStart")) is not int
             or node.get("childrenStart") != 0
             or type(node.get("childrenEnd")) is not int
-            or node.get("childrenEnd") != 0
-            or node.get("childCount") != coverage.total
-            or node.get("children")
-            or node.get("partialReason") != coverage.reason
-            or node.get("childOmissions")
-            or "nextChildOffset" in node
-            or node.get("childrenRead", 0) != 0
         ):
+            return False
+        if node.get("childrenEnd") != 0 or node.get("childCount") != coverage.total or node.get("children"):
+            return False
+        if node.get("partialReason") != coverage.reason or node.get("childOmissions") or "nextChildOffset" in node:
+            return False
+        if node.get("childrenRead", 0) != 0:
             return False
     return True
 

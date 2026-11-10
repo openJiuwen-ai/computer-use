@@ -22,11 +22,10 @@ def execute(draft: SharingDraft, control: Control) -> SharingDraft:
             continue
         atom = request.atoms.atoms[ref]
         source = request.evidence.actions.get(ref)
+        if source is None or not atom.actions or atom.actions_unavailable:
+            continue
         if (
-            source is None
-            or not atom.actions
-            or atom.actions_unavailable
-            or ref in request.evidence.contested_sources
+            ref in request.evidence.contested_sources
             or any(action.source_ref != ref for action in atom.actions)
             or tuple(action.name for action in atom.actions) != source.names
         ):

@@ -31,13 +31,14 @@ def retained_notices(
             and source.control_value.read_only is False
             or any(view.get("capabilities", {}).get(key) == "available" for key in ("typeText", "replaceText"))
         )
-        if (
+        important_state = (
             any(view.get(key) for key in ("error", "invalid", "modified", "unsaved", "busy"))
             or source.states.busy is True
-            or source.states.focused is True
-            and input_target
-            or source.text is not None
-            and source.text.caret_active is True
+        )
+        important_state = important_state or (source.states.focused is True and bool(input_target))
+        important_state = important_state or (source.text is not None and source.text.caret_active is True)
+        if (
+            important_state
             or any(
                 item.key in ("modified", "unsaved", "invalid", "error") and item.value for item in source.supplements
             )
@@ -57,9 +58,9 @@ def retained_notices(
         state_facts.extend(
             (ref, "states." + key, True) for key in ("busy", "focused") if getattr(source.states, key) is True
         )
+        incomplete_atom = bool(atom.coverage.partial) or bool(atom.actions_unavailable)
         if (
-            atom.coverage.partial
-            or atom.actions_unavailable
+            incomplete_atom
             or any(slot.format == "unavailable" for slot in atom.slots)
             or any(
                 issue.path[:2] == ("nodes", request.snapshot.refs[ref]) and issue.state not in ("unsupported", "absent")

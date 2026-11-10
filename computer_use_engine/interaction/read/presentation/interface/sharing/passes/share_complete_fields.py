@@ -24,13 +24,14 @@ def _empty_value_eligible(request: SharingRequest, ref: str) -> bool:
         not isinstance(evidence, CompressionEvidence)
         or ref in request.evidence.protected_values
         or ref in evidence.concrete_inputs
-        or ref in evidence.semantic_regions
-        or ref == request.atoms.focused_ref
-        or ref in request.atoms.selected_refs
-        or node.get("focused") is True
-        or node.get("selected") is True
-        or node.get("editable") is True
-        or node.get("protected") is True
+    ):
+        return False
+    if ref in evidence.semantic_regions or ref == request.atoms.focused_ref or ref in request.atoms.selected_refs:
+        return False
+    if node.get("focused") is True or node.get("selected") is True or node.get("editable") is True:
+        return False
+    if (
+        node.get("protected") is True
         or bool(node.get("selectedText"))
         or any(slot.protection in ("input", "focus") for slot in atom.slots)
     ):
@@ -81,10 +82,12 @@ def execute(draft: SharingDraft, control: Control) -> SharingDraft:
                 # pylint: disable-next=unidiomatic-typecheck
                 or type(slot.value) is not str
                 or slot.preview is not None
-                or slot.protection is not None
-                or slot.placement != "inline"
-                or not slot.facts
-                or request.disclosure is not None
+            ):
+                continue
+            if slot.protection is not None or slot.placement != "inline" or not slot.facts:
+                continue
+            if (
+                request.disclosure is not None
                 and request.disclosure.get(ref, slot.key) is not None
                 or any(
                     (fact.key.source, fact.key.attribute) not in request.evidence.complete_fields

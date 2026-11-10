@@ -41,7 +41,9 @@ def explanation_rows(interface: InterfaceDocument, atoms: AtomDocument) -> Mappi
     for ref, members in locations.items():
         node = interface.projected_nodes[ref]
         slot = atoms.atoms[ref].slot("description")
-        if node["role"] != "image" or slot is None or not isinstance(slot.value, str) or not slot.value.strip():
+        if node["role"] != "image" or slot is None or not isinstance(slot.value, str):
+            continue
+        if not slot.value.strip():
             continue
         neighbours = tuple(member for member in members if member != ref)
         if any(interface.projected_nodes[member]["role"] in CONTROL_ROLES | FIELD_ROLES for member in neighbours):

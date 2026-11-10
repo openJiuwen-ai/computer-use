@@ -100,11 +100,10 @@ def capture_control_raises(snapshot: SnapshotFacts, projection: ProjectionResult
     for ref, node in projection["nativeNodes"].items():
         token = snapshot.refs.get(ref)
         native = snapshot.native.nodes.get(token)
+        if native is None or native.actions is None or token in blocked:
+            continue
         if (
-            native is None
-            or native.actions is None
-            or token in blocked
-            or node.get("actionsUnavailable")
+            node.get("actionsUnavailable")
             or facts.get(token, {}).get("actions", {}).get("state") != "complete"
             or not _ordinary_context(native)
         ):

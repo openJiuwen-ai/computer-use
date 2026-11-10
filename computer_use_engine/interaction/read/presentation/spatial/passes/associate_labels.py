@@ -59,16 +59,15 @@ def associate_spatial_labels(view: ProjectionView, edit: ProjectionEditor, geome
         for pair in unique_matches(labels, targets, geometry):
             label, target = view.nodes[pair.label], view.nodes[pair.target]
             label_region = source_region(view, parent, pair.label)
+            if not caption_target(target) or not complete_visible(target) or not complete_visible(label):
+                continue
             if (
-                not caption_target(target)
-                or not complete_visible(target)
-                or not complete_visible(label)
-                or any(target.get(key) for key in ("titleRef", "linkedLabel", "incompleteLabelRelation"))
+                any(target.get(key) for key in ("titleRef", "linkedLabel", "incompleteLabelRelation"))
                 or label_region is None
                 or label_region != source_region(view, parent, pair.target)
-                or view.scopes[pair.label] != view.scopes[pair.target]
-                or not same_blocking(label, target)
             ):
+                continue
+            if view.scopes[pair.label] != view.scopes[pair.target] or not same_blocking(label, target):
                 continue
             # An input's own value descendant is content, rather than an external
             # caption. Keep native label relationships and independent siblings intact.

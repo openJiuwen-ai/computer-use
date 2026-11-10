@@ -222,12 +222,8 @@ def group_radio_options(draft: InterfaceDraft) -> InterfaceDraft:
                 options.extend(targets)
                 stop += 1
             members = (*leading, *children[index + 1: stop])
-            if (
-                label is None
-                or label == parent.label_ref
-                or len(options) < 2
-                or not _safe_group(label_key, members, tuple(options), draft)
-            ):
+            invalid_options = label is None or bool(label == parent.label_ref)
+            if invalid_options or len(options) < 2 or not _safe_group(label_key, members, tuple(options), draft):
                 output.append(start_key)
                 index += 1
                 continue

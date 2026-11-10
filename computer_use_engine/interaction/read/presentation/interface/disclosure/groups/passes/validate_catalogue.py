@@ -34,20 +34,24 @@ def execute(selected: SelectedGroups, control: Control) -> GroupDisclosurePlan:
         if background:
             context = request.window_context
             root = request.interface.blocks[group.parent_key]
+            if context is None or not context.scope_confirmed or context.current:
+                raise ValueError("Background overview lacks its confirmed native window and modal boundary")
+            if context.modal is True or not context.confirmed_blockers or group.blockers != context.confirmed_blockers:
+                raise ValueError("Background overview lacks its confirmed native window and modal boundary")
             if (
-                context is None
-                or not context.scope_confirmed
-                or context.current
-                or context.modal is True
-                or not context.confirmed_blockers
-                or group.blockers != context.confirmed_blockers
-                or group.window_ref != context.window_ref
+                group.window_ref != context.window_ref
                 or group.directory_complete != context.directory_complete
                 or root.primary_ref is None
-                or request.snapshot.refs[root.primary_ref] not in native.roots
+            ):
+                raise ValueError("Background overview lacks its confirmed native window and modal boundary")
+            if (
+                request.snapshot.refs[root.primary_ref] not in native.roots
                 or group.child_keys != root.children
                 or group.kind != "background"
-                or (group.important_refs, group.uncertain_refs, group.nested_windows, group.state_facts)
+            ):
+                raise ValueError("Background overview lacks its confirmed native window and modal boundary")
+            if (
+                (group.important_refs, group.uncertain_refs, group.nested_windows, group.state_facts)
                 != retained_notices(request, refs)
             ):
                 raise ValueError("Background overview lacks its confirmed native window and modal boundary")
@@ -95,9 +99,9 @@ def execute(selected: SelectedGroups, control: Control) -> GroupDisclosurePlan:
                 or part.slot_key != source.attribute
                 # pylint: disable-next=unidiomatic-typecheck
                 or type(value) is not str
-                or not 0 <= part.start < part.end <= len(value)
-                or value[part.start: part.end] != part.text
             ):
+                raise ValueError("Disclosure excerpt is not an exact original field range")
+            if not 0 <= part.start < part.end <= len(value) or value[part.start: part.end] != part.text:
                 raise ValueError("Disclosure excerpt is not an exact original field range")
         if group.captured_characters != sum(len(source.value) for source in captured_text_fields(group.fields)):
             raise ValueError("Disclosure count must describe captured fields only")

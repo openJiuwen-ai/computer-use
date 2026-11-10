@@ -39,9 +39,9 @@ def execute(draft: SharingDraft, control: Control) -> SharingPlan:
                     slot != request.atoms.atoms[ref].slot(group.slot_key)
                     or slot.key != group.slot.key
                     or slot.label != group.slot.label
-                    or type(slot.value) is not type(group.slot.value)
-                    or slot.value != group.slot.value
                 ):
+                    raise ValueError("Shared field declaration differs from an original slot")
+                if type(slot.value) is not type(group.slot.value) or slot.value != group.slot.value:
                     raise ValueError("Shared field declaration differs from an original slot")
                 if group.slot_key in fields.setdefault(ref, set()):
                     raise ValueError("Shared field occurrence has multiple declarations")

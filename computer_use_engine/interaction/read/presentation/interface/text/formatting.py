@@ -201,13 +201,9 @@ class InterfaceWriter:
             value = self.value(ref, slot, shared=shared)
             label = "Index" if slot.key == "index" and self.request.atoms.shared_index_basis else slot.label
             label = source_slot_label(self, ref, slot.key, label)
-            if (
-                shared
-                and label is None
-                and self.request.text_slices is not None
-                and self.request.text_slices.plan_by(ref, slot.key) is not None
-            ):
-                label = "Text"
+            if shared and label is None and self.request.text_slices is not None:
+                if self.request.text_slices.plan_by(ref, slot.key) is not None:
+                    label = "Text"
             if shared and self.request.text_slices is not None and (ref, slot.key) in self.request.text_slices.anchors:
                 label = slot.key.capitalize()
             text = (label + ": " if label is not None else "") + value
@@ -222,7 +218,8 @@ class InterfaceWriter:
                     and self.request.text_slices is not None
                     and self.request.text_slices.plan_by(ref, slot.key) is not None
                 )
-                if isinstance(slot.value, str) and slot.preview is None and excerpt is None and not sliced:
+                literal_block = isinstance(slot.value, str) and slot.preview is None
+                if literal_block and excerpt is None and not sliced:
                     blocks.append((label or "Value") + ":")
                     blocks.extend("| " + field(paragraph) for paragraph in re.split(r"\r\n|\r|\n", slot.value))
                 else:

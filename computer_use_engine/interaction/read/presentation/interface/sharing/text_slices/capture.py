@@ -28,16 +28,24 @@ def capture(request: TextSliceRequest) -> TextSliceEvidence:
                 or not value
                 # pylint: disable-next=unidiomatic-typecheck
                 or type(slot.value) is not str
-                or slot.value != value
-                or slot.preview is not None
-                or slot.format != "text"
-                or slot.protection is not None
+            ):
+                continue
+            if slot.value != value or slot.preview is not None or slot.format != "text":
+                continue
+            if (
+                slot.protection is not None
                 or any(character in value for character in "\r\n\u2028\u2029")
                 or (ref, key) in request.excluded_slots
-                or request.disclosure is not None
+            ):
+                continue
+            if (
+                request.disclosure is not None
                 and request.disclosure.get(ref, key) is not None
                 or not slot.facts
-                or any(
+            ):
+                continue
+            if (
+                any(
                     fact.key.source != ref
                     or fact.key.attribute != key
                     # pylint: disable-next=unidiomatic-typecheck

@@ -201,14 +201,9 @@ def select_deferred_native_urls(
     for ref in candidates:
         node, source = nodes[ref], sources.get(ref)
         fragments = captions.get(ref, ())
-        if (
-            node["role"] not in ("link", "image")
-            or source is None
-            or not source.complete
-            or not source.value
-            or node.get("url") != source.value
-            or not any(item.complete for item in fragments)
-        ):
+        if node["role"] not in ("link", "image") or source is None or not source.complete:
+            continue
+        if not source.value or node.get("url") != source.value or not any(item.complete for item in fragments):
             continue
         key = source.scope, context(ref), tuple(item.text for item in fragments)
         if key not in proofs:

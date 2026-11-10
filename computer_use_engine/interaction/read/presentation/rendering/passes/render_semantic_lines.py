@@ -63,24 +63,20 @@ def create(
         if branch.request.compact:
             options["native_url_sources"] = capture_native_url_sources(snapshot, projection)
         # Explicit element reads opt out of whole-view description sharing.
-        if (
-            branch.request.compact
-            and branch.request.public_api
-            and branch.request.share_descriptions
-            and not branch.context.get("subtreeRef")
-        ):
-            aliases = capture_common_role_aliases(snapshot, projection)
-            options["native_role_aliases"] = aliases
-            options["native_description_fields"] = {
-                **(capture_native_description_fields(snapshot, projection) or {}),
-                **{alias.fact: alias.description for alias in aliases.values()},
-            }
-            options["compact_multiline_values"] = True
-            options["concise_menu_summary"] = True
-            menu_mechanisms = capture_menu_mechanisms(snapshot, projection)
-            options["menu_mechanisms"] = menu_mechanisms
-            control_raises = capture_control_raises(snapshot, projection)
-            options["control_raises"] = control_raises
+        if branch.request.compact and branch.request.public_api and branch.request.share_descriptions:
+            if not branch.context.get("subtreeRef"):
+                aliases = capture_common_role_aliases(snapshot, projection)
+                options["native_role_aliases"] = aliases
+                options["native_description_fields"] = {
+                    **(capture_native_description_fields(snapshot, projection) or {}),
+                    **{alias.fact: alias.description for alias in aliases.values()},
+                }
+                options["compact_multiline_values"] = True
+                options["concise_menu_summary"] = True
+                menu_mechanisms = capture_menu_mechanisms(snapshot, projection)
+                options["menu_mechanisms"] = menu_mechanisms
+                control_raises = capture_control_raises(snapshot, projection)
+                options["control_raises"] = control_raises
         if selections is not None:
             options["selection_summaries"] = selections
         frame = render_projection_lines(

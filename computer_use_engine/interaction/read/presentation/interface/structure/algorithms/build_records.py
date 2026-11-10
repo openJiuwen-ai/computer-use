@@ -38,13 +38,15 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
                 not draft.evidence[ref].incomplete
                 and not ordered_ancestry(ref, draft)
                 and parent.children == tuple(element_key(child) for child in children)
-                and all(draft.source.parents.get(child) == ref for child in children)
-                and not any(draft.evidence[child].boundary for child in children)
-                and comparable_members(parent.children, draft, blocks) is not None
             ):
-                groups = atomic_rows(
-                    tuple(draft.projected_nodes[child] for child in children), draft.source.geometry, minimum_rows=1
-                )
+                if (
+                    all(draft.source.parents.get(child) == ref for child in children)
+                    and not any(draft.evidence[child].boundary for child in children)
+                    and comparable_members(parent.children, draft, blocks) is not None
+                ):
+                    groups = atomic_rows(
+                        tuple(draft.projected_nodes[child] for child in children), draft.source.geometry, minimum_rows=1
+                    )
         if not groups or any(group.get("kind") != "row" for group in groups):
             continue
         rows = tuple(tuple(group.get("members", ())) for group in groups)

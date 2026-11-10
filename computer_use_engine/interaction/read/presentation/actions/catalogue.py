@@ -133,9 +133,9 @@ def capture_catalogues(
     composed = set()
     for owner, source in folded_sources:
         native = observation.nodes.get(refs.get(source["ref"]))
+        incomplete_source_actions = not complete(source["ref"]) or bool(source.get("actionsUnavailable"))
         if (
-            not complete(source["ref"])
-            or source.get("actionsUnavailable")
+            incomplete_source_actions
             or render_actions(source)
             or any(action.available is not False for action in native.actions)
         ):

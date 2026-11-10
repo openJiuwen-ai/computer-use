@@ -74,14 +74,17 @@ def source_protections(request: GroupDisclosureRequest, ref: str, issues: ReadIs
     if protected_control or states.visible is False or states.showing is False:
         reasons.append("active-or-important-state")
     text = node.text
-    if text is not None and (
-        text.read_only is False
-        or text.caret_active is True
-        or bool(text.selected_text)
-        or any(
-            span.collapsed is not True or span.start != span.end or bool(span.text) for span in text.selections or ()
+    active_native_text = text is not None
+    if active_native_text:
+        active_native_text = text.read_only is False or text.caret_active is True or bool(text.selected_text)
+        active_native_text = (
+            active_native_text
+            or any(
+                span.collapsed is not True or span.start != span.end or bool(span.text)
+                for span in text.selections or ()
+            )
         )
-    ):
+    if active_native_text:
         reasons.append("input-or-selection")
     if node.role == "document" and (text is None or text.read_only is not True):
         reasons.append("unconfirmed-readonly-document")
@@ -106,13 +109,20 @@ def source_protections(request: GroupDisclosureRequest, ref: str, issues: ReadIs
     for relation in node.relations.values():
         if relation.kind not in ("children", "parent", "window") and relation.targets:
             reasons.append("independent-semantic-relation")
-        if (relation.kind == "children" or relation.targets or relation.total not in (None, 0)) and (
-            relation.evidence == "candidate"
-            or relation.enumeration != "enumerated"
-            or relation.offset not in (None, 0)
-            or relation.total is not None
-            and relation.total != len(relation.targets)
-        ):
+        incomplete_membership = (
+            (bool(relation.kind == "children") or bool(relation.targets) or relation.total not in (None, 0))
+        )
+        if incomplete_membership:
+            incomplete_membership = (
+                bool(relation.evidence == "candidate")
+                or bool(relation.enumeration != "enumerated")
+                or relation.offset not in (None, 0)
+            )
+            incomplete_membership = (
+                incomplete_membership
+                or (relation.total is not None and bool(relation.total != len(relation.targets)))
+            )
+        if incomplete_membership:
             reasons.append("incomplete-relation")
     if atom is not None:
         if atom.actions or atom.actions_unavailable:

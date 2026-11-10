@@ -108,10 +108,9 @@ def associate_value_controls(draft: InterfaceDraft) -> InterfaceDraft:
                 and value_box.vertical_overlap(other_box) >= 0.75
                 and 0 <= other_box.x - trigger_box.right <= value_box.height
             )
-            if (
-                measured is None
-                or value_box is None
-                or trigger_box is None
+            unsafe_pair = measured is None or value_box is None or trigger_box is None
+            unsafe_pair = (
+                unsafe_pair
                 or not same_scope(draft, refs)
                 or not same_region(draft, refs)
                 or any(
@@ -121,23 +120,31 @@ def associate_value_controls(draft: InterfaceDraft) -> InterfaceDraft:
                     or ordered_ancestry(ref, draft)
                     for ref in refs
                 )
-                or captions - {field.label_ref}
-                or node.get("incompleteLabelRelation")
+            )
+            unsafe_pair = (
+                unsafe_pair
+                or bool(captions - {field.label_ref})
+                or bool(node.get("incompleteLabelRelation"))
                 or edges is None
-                or stable_order(keys, edges) != keys
+            )
+            unsafe_pair = (
+                unsafe_pair
+                or bool(stable_order(keys, edges) != keys)
                 or any(
                     relation.kind in ("flows_to", "flows_from")
                     and set((relation.source, *relation.targets)) & owners.keys()
                     and not set((relation.source, *relation.targets)) <= owners.keys()
                     for relation in draft.relations
                 )
-                or competing
+                or bool(competing)
+            )
+            unsafe_pair = (
+                unsafe_pair
                 or not value_box.comparable(trigger_box)
-                or value_box.vertical_overlap(trigger_box) < 0.75
+                or bool(value_box.vertical_overlap(trigger_box) < 0.75)
                 or not 0 <= trigger_box.x - value_box.right <= value_box.height
-                or trigger_box.width > 2 * value_box.height
-                or trigger_box.height > 1.5 * value_box.height
-            ):
+            )
+            if unsafe_pair or trigger_box.width > 2 * value_box.height or trigger_box.height > 1.5 * value_box.height:
                 output.append(key)
                 index += 1
                 continue

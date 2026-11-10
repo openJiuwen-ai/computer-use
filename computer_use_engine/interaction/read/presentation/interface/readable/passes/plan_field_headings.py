@@ -20,14 +20,9 @@ def execute(draft: ReadableDraft, control: Control) -> ReadableDraft:
     for block in request.interface.blocks.values():
         ref = block.label_ref
         style = draft.plan.nodes.get(ref)
-        if (
-            block.kind != "field"
-            or block.visual_unit
-            or ref is None
-            or style is None
-            or not style.notes_only
-            or block.heading_style != "caption"
-        ):
+        if block.kind != "field" or block.visual_unit or ref is None:
+            continue
+        if style is None or not style.notes_only or block.heading_style != "caption":
             continue
         candidates = request.sharing.by_block.get(block.key)
         questions = []

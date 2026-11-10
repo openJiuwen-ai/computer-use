@@ -100,15 +100,17 @@ def collect_native_capabilities(
                 related = action_issues(issues.get(native_id, ()), index)
                 data = asdict(action)
                 previous = displayed.get((ref, index))
-                if (
+                already_declared = (
                     previous is not None
-                    and previous.get("kind") == "display"
-                    and previous.get("native") == native_id
-                    and previous.get("target") == ref
-                    and previous.get("action") == data
-                    and previous.get("state") == state
-                    and previous.get("issues") == related
-                ):
+                    and bool(previous.get("kind") == "display")
+                    and bool(previous.get("native") == native_id)
+                )
+                already_declared = (
+                    already_declared
+                    and bool(previous.get("target") == ref)
+                    and bool(previous.get("action") == data)
+                )
+                if already_declared and previous.get("state") == state and previous.get("issues") == related:
                     continue
                 key = json.dumps(
                     (scope, data, state, related), sort_keys=True, ensure_ascii=True, separators=(",", ":")

@@ -206,13 +206,8 @@ def expand_transparent_frontier(draft: InterfaceDraft) -> InterfaceDraft:
         for child_key in parent.children:
             child = blocks[child_key]
             ref = child.primary_ref
-            if (
-                ref is None
-                or child.source_refs != (ref,)
-                or not child.children
-                or child.layout != "tree"
-                or not transparent_group(ref, draft)
-            ):
+            opaque_child = ref is None or bool(child.source_refs != (ref,)) or not child.children
+            if opaque_child or child.layout != "tree" or not transparent_group(ref, draft):
                 children.append(child_key)
                 continue
             children.extend(child.children)

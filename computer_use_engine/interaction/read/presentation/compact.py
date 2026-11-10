@@ -312,14 +312,18 @@ def observation_warnings(
         )
         if covered:
             covered_relations.add((relation["source"], relation["recordKey"]))
-        if (
+        reportable_relation = (
             relation["state"] in ("error", "timeout", "truncated")
             or not diagnostic_details
             and relation["state"] in ("partial", "not_read", "stale", "redacted", "unavailable")
-            or relation["certainty"] == "conflicting"
+        )
+        reportable_relation = reportable_relation or bool(relation["certainty"] == "conflicting")
+        reportable_relation = (
+            reportable_relation
             or relation["state"] not in ("absent", "unsupported")
-            and (relation.get("detail") or relation["certainty"] == "unknown")
-        ) and not covered:
+            and (bool(relation.get("detail")) or bool(relation["certainty"] == "unknown"))
+        )
+        if reportable_relation and not covered:
             coverage = ""
             if not diagnostic_details and relation["state"] not in ("complete", "absent", "unsupported"):
                 raw = snapshot.native.nodes[relation["source"]].relations.get(relation["recordKey"])

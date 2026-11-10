@@ -75,7 +75,9 @@ def group_sibling_actions(frame: LayoutFrame) -> list[str]:
         ref = node["ref"]
         position = positions.get(ref)
         parent_position = positions.get(path[-1]) if path else None
-        if position is None or path and (parent_position is None or position[1] != parent_position[1] + "\t"):
+        if position is None:
+            continue
+        if path and (parent_position is None or position[1] != parent_position[1] + "\t"):
             continue
         if node["role"] in ("window", "sheet", "menuBar", "menu"):
             scope = ref

@@ -490,12 +490,14 @@ def prepared_nodes(
         if root.atoms is not None and selections is not None:
             for claim in checked(root.atoms.field_claims):
                 entry = selections.entries.get(claim.ref)
+                inactive_selection_claim = (
+                    bool(claim.kind == "text-selection-summary")
+                    and bool(claim.field == "selectionRange")
+                    and bool(claim.target == claim.ref)
+                )
+                inactive_selection_claim = inactive_selection_claim and entry is not None and bool(entry.inactive)
                 if (
-                    claim.kind == "text-selection-summary"
-                    and claim.field == "selectionRange"
-                    and claim.target == claim.ref
-                    and entry is not None
-                    and entry.inactive
+                    inactive_selection_claim
                     and isinstance(claim.value, Mapping)
                     and selections.covers(claim.ref, claim.value)
                 ):
@@ -563,13 +565,9 @@ def prepared_nodes(
     def visit(node: Mapping[str, Any], parent: str | None, depth: int) -> None:
         fields = {key: value for key, value in checked(node.items()) if key not in ("children", "native")}
         selection = fields.get("selectionRange")
-        if (
-            node["ref"] in detail_selections
-            and isinstance(selection, Mapping)
-            and selections is not None
-            and selections.covers(node["ref"], selection)
-        ):
-            fields.pop("selectionRange")
+        if node["ref"] in detail_selections and isinstance(selection, Mapping) and selections is not None:
+            if selections.covers(node["ref"], selection):
+                fields.pop("selectionRange")
         if node["ref"] in layouts:
             fields["_interfaceLayout"] = layouts[node["ref"]]
         if node["ref"] in field_layouts:

@@ -89,17 +89,27 @@ def collect_native_details(
             actual = getattr(snapshot.native.nodes.get(token), expected_path[0], None)
             if len(expected_path) == 2:
                 actual = getattr(actual, expected_path[1], None)
-            if (
+            source_disagrees = (
                 source is None
-                or source.get("field") != expected_field
+                or bool(source.get("field") != expected_field)
                 or native_property not in original
+            )
+            source_disagrees = (
+                source_disagrees
                 or type(source.get("normalized")) is not type(normalized)
-                or source["normalized"] != normalized
-                or mapped is not None
-                and (type(actual) is not type(value) or actual != value)
-                or (native_property == "url" or mapped is not None)
-                and (source.get("node") != token or tuple(source.get("path", ())) != expected_path)
-            ):
+                or bool(source["normalized"] != normalized)
+            )
+            source_disagrees = (
+                source_disagrees
+                or (mapped is not None and (type(actual) is not type(value) or bool(actual != value)))
+            )
+            if not source_disagrees:
+                source_disagrees = (bool(native_property == "url") or mapped is not None)
+                source_disagrees = (
+                    source_disagrees
+                    and (bool(source.get("node") != token) or bool(tuple(source.get("path", ())) != expected_path))
+                )
+            if source_disagrees:
                 raise ValueError(title + " supplement has no matching source field")
             label = native_property + ": " + literal(value)
             if ref not in part.supplements.get(label, ()):
@@ -131,19 +141,17 @@ def collect_deferred_fields(
             token = snapshot.refs.get(ref)
             original = native.get(token, {}).get("values", {})
             scopes = part.rendered["projection"].source.scopes
+            if mapping is None or source is None or native_property not in original:
+                raise ValueError("Deferred diagnostic has no matching captured native field")
+            if item["native"] != token or item["field"] != mapping[0] or tuple(item["path"]) != mapping[1]:
+                raise ValueError("Deferred diagnostic has no matching captured native field")
             if (
-                mapping is None
-                or source is None
-                or native_property not in original
-                or item["native"] != token
-                or item["field"] != mapping[0]
-                or tuple(item["path"]) != mapping[1]
-                or tuple(item["scope"]) != (snapshot.native.session, snapshot.native.id, scopes.get(ref))
+                tuple(item["scope"]) != (snapshot.native.session, snapshot.native.id, scopes.get(ref))
                 or type(item["value"]) is not type(original[native_property])
                 or item["value"] != original[native_property]
-                or item["readState"] != "complete"
-                or item["status"] is not None
             ):
+                raise ValueError("Deferred diagnostic has no matching captured native field")
+            if item["readState"] != "complete" or item["status"] is not None:
                 raise ValueError("Deferred diagnostic has no matching captured native field")
             references.setdefault(native_property, set()).add(ref)
     return tuple(

@@ -40,7 +40,8 @@ def inline_rows(refs: Sequence[str], geometry: GeometryIndex) -> tuple[tuple[str
         len(rows) < 2
         or any(len(row.members) < 2 for row in rows)
         or tuple(ref for row in rows for ref in row.members) != tuple(refs)
-        or any(previous.box.bottom > following.box.y for previous, following in zip(rows, rows[1:]))
     ):
+        return original
+    if any(previous.box.bottom > following.box.y for previous, following in zip(rows, rows[1:])):
         return original
     return tuple(row.members for row in rows)

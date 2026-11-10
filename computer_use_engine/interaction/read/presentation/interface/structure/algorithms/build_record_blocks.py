@@ -42,7 +42,10 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
                     next_axis is None
                     or axis is not None
                     and next_axis != axis
-                    or not same_region(
+                ):
+                    break
+                if (
+                    not same_region(
                         draft, (ref for member in (*members, candidate) for ref in block_sources(member.key, blocks))
                     )
                 ):

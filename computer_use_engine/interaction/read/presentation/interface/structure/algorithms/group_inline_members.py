@@ -45,15 +45,13 @@ def apply(draft: InterfaceDraft) -> InterfaceDraft:
         while index < len(children):
             first = blocks[children[index]]
             ref = first.primary_ref
-            if (
-                ref is None
-                or first.children
-                or first.layout != "tree"
+            unfit_member = ref is None or bool(first.children) or bool(first.layout != "tree")
+            unfit_member = (
+                unfit_member
                 or draft.projected_nodes[ref]["role"] not in _INLINE_ROLES
-                or _incomplete(draft, ref)
-                or draft.evidence[ref].hidden
-                or not single_line(draft.projected_nodes[ref])
-            ):
+                or bool(_incomplete(draft, ref))
+            )
+            if unfit_member or draft.evidence[ref].hidden or not single_line(draft.projected_nodes[ref]):
                 result.append(children[index])
                 index += 1
                 continue

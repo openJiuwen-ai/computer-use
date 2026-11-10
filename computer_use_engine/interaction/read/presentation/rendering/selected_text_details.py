@@ -72,22 +72,22 @@ def capture_empty_selected_text_fields(
         node = projection["nativeNodes"].get(ref)
         source_node = projection.source.native_nodes.get(ref)
         summary = summaries.entries.get(ref)
+        if token is None or token in blocked or counts[token] != 1:
+            continue
+        if native is None or native.text is None or fact is None:
+            continue
+        if node is None or source_node is None or summary is None:
+            continue
         if (
-            token is None
-            or token in blocked
-            or counts[token] != 1
-            or native is None
-            or native.text is None
-            or fact is None
-            or node is None
-            or source_node is None
-            or summary is None
             # pylint: disable-next=unidiomatic-typecheck
-            or type(native.text.selected_text) is not str
+            type(native.text.selected_text) is not str
             or native.text.selected_text != ""
             # pylint: disable-next=unidiomatic-typecheck
             or type(node.get("selectedText")) is not str
-            or node["selectedText"] != ""
+        ):
+            continue
+        if (
+            node["selectedText"] != ""
             # pylint: disable-next=unidiomatic-typecheck
             or type(source_node.get("selectedText")) is not str
             or source_node["selectedText"] != ""
@@ -127,20 +127,16 @@ def capture_empty_selected_text_fields(
         ):
             continue
         spans = native.text.selections
+        if native.text.unit not in ("utf16_code_unit", "unicode_codepoint") or spans is None or len(spans) != 1:
+            continue
+        if spans[0].collapsed is not True or type(spans[0].start) is not int or type(spans[0].end) is not int:
+            continue
+        if spans[0].start < 0 or spans[0].start != spans[0].end or spans[0].text not in (None, ""):
+            continue
+        if summary.source != token or summary.read_state != "complete" or summary.unit != native.text.unit:
+            continue
         if (
-            native.text.unit not in ("utf16_code_unit", "unicode_codepoint")
-            or spans is None
-            or len(spans) != 1
-            or spans[0].collapsed is not True
-            or type(spans[0].start) is not int
-            or type(spans[0].end) is not int
-            or spans[0].start < 0
-            or spans[0].start != spans[0].end
-            or spans[0].text not in (None, "")
-            or summary.source != token
-            or summary.read_state != "complete"
-            or summary.unit != native.text.unit
-            or summary.interval != (spans[0].start, 0)
+            summary.interval != (spans[0].start, 0)
             or len(summary.spans) != 1
             or any(
                 summary.spans[0].get(field) != getattr(spans[0], field)

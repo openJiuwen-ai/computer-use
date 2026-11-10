@@ -201,25 +201,17 @@ def pack_local_field_suffixes(frame: LayoutFrame) -> LocalFieldSuffixLayout:
         node, record = nodes.get(ref), records.get(ref)
         role_prefix = frame.node_prefixes.get(ref)
         span = frame.node_line_ranges.get(ref)
-        if (
-            source is None
-            or node is None
-            or record is None
-            or not role_prefix
-            or span is None
-            or span[1] <= span[0]
-            or occurrences[ref] != 1
-            or record_counts[ref] != 1
-            or source_counts[source.source] != 1
-            or source.scope != root_source.scope
-            or record.parent != parents[ref]
-            or node["role"] in _MENUS
-            or ref in table_entries
-            or not entry.role_explicit
-            or entry.heading
-            or entry.body != frame.lines[entry.line].lstrip("\t")
-            or "\n" in record.text
-        ):
+        if source is None or node is None or record is None:
+            continue
+        if not role_prefix or span is None or span[1] <= span[0]:
+            continue
+        if occurrences[ref] != 1 or record_counts[ref] != 1 or source_counts[source.source] != 1:
+            continue
+        if source.scope != root_source.scope or record.parent != parents[ref] or node["role"] in _MENUS:
+            continue
+        if ref in table_entries or not entry.role_explicit or entry.heading:
+            continue
+        if entry.body != frame.lines[entry.line].lstrip("\t") or "\n" in record.text:
             continue
         description, url = source.description, source.url
         if description is None or url is None or not _plain(description):

@@ -118,11 +118,10 @@ def _row_compatible(items: Sequence[LayoutItem]) -> bool:
     for left, right in zip(ordered, ordered[1:]):
         first, second = left.box, right.box
         width = min(first.width, second.width)
+        if second.x <= first.x or second.center[0] <= first.center[0] or first.contains(second):
+            return False
         if (
-            second.x <= first.x
-            or second.center[0] <= first.center[0]
-            or first.contains(second)
-            or second.contains(first)
+            second.contains(first)
             or first.right - second.x > 0.35 * width
             or second.center[0] - first.center[0] < 0.5 * width
         ):

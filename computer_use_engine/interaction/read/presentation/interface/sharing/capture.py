@@ -71,15 +71,17 @@ def capture_sharing_evidence(branch: BranchFacts, projection: ProjectionResult, 
         token = snapshot.refs.get(ref)
         record = branch.native_nodes.get(token)
         native = snapshot.native.nodes.get(token)
+        if attribute != "help" or tuple(source.get("path", ())) != ("help",) or native is None:
+            continue
         if (
-            attribute != "help"
-            or tuple(source.get("path", ())) != ("help",)
-            or native is None
-            or record is None
+            record is None
             or record.get("observed") is False
             # pylint: disable-next=unidiomatic-typecheck
             or type(native.help) is not str
-            or record["values"].get(field) != native.help
+        ):
+            continue
+        if (
+            record["values"].get(field) != native.help
             or any(
                 key == field or key.startswith(field + ".") or field.startswith(key + ".")
                 for key in record["fieldStatus"]
@@ -109,12 +111,18 @@ def capture_sharing_evidence(branch: BranchFacts, projection: ProjectionResult, 
                 for span in spans
             )
         )
+        protected_text = any(getattr(states, name) is True for name in ("focused", "selected", "editable", "protected"))
+        if not protected_text:
+            protected_text = text is not None
+            if protected_text:
+                protected_text = bool(selection_context) or bool(text.selected_text) or text.caret_active is True
+                protected_text = protected_text or text.read_only is False
+        protected_text = (
+            protected_text
+            or (native.control_value is not None and native.control_value.read_only is False)
+        )
         if (
-            any(getattr(states, name) is True for name in ("focused", "selected", "editable", "protected"))
-            or text is not None
-            and (selection_context or bool(text.selected_text) or text.caret_active is True or text.read_only is False)
-            or native.control_value is not None
-            and native.control_value.read_only is False
+            protected_text
             or native.numeric_value is not None
             and native.numeric_value.read_only is False
         ):

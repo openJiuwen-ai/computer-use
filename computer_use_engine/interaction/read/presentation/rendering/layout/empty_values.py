@@ -107,12 +107,9 @@ def compact_empty_values(lines: list[str], generated: Mapping[str, EmptyValueLin
         run, direction = [first], None
         while index + len(run) < len(lines):
             following = cells.get(lines[index + len(run)])
-            if following is None or (
-                following.cell.parent != first.cell.parent
-                or following.indent != first.indent
-                or following.properties != first.properties
-                or following.fields != first.fields
-            ):
+            if following is None or following.cell.parent != first.cell.parent or following.indent != first.indent:
+                break
+            if following.properties != first.properties or following.fields != first.fields:
                 break
             previous = run[-1].cell
             horizontal = following.cell.row == previous.row and following.cell.column - previous.column == 1

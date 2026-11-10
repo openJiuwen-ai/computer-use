@@ -31,17 +31,13 @@ def _caption(node: Mapping[str, object]) -> str | None:
     """Find a complete ordinary caption independent of the technical description."""
     for key in _CAPTIONS:
         value = node.get(key)
-        if (
-            isinstance(value, str)
-            and value.strip()
-            and len(value) <= 256
-            and not _QUALIFIED_CODE.fullmatch(value)
-            and (
-                any(character.isalpha() and not character.isascii() for character in value)
-                or re.fullmatch(r"[A-Za-z][A-Za-z '\u2019.?!\u2026-]*", value)
-            )
-        ):
-            return value
+        if isinstance(value, str) and value.strip() and len(value) <= 256:
+            if (
+                not _QUALIFIED_CODE.fullmatch(value)
+                and (any(character.isalpha() and not character.isascii() for character in value)
+                or re.fullmatch(r"[A-Za-z][A-Za-z '\u2019.?!\u2026-]*", value))
+            ):
+                return value
     return None
 
 
@@ -90,33 +86,41 @@ def capture_code_descriptions(
         record = records.get(token, {})
         source = snapshot.fields.get((ref, "description"))
         caption_key = next((key for key in _CAPTIONS if node.get(key) == caption), None)
+        if not isinstance(value, str) or _QUALIFIED_CODE.fullmatch(value) is None or caption is None:
+            continue
+        if caption_key is None or scope is None or native is None:
+            continue
+        if native.role not in _SUPPLEMENT_ROLES or token in error_sources or counts[token] != 1:
+            continue
+        if native.description != value or source is None or source.get("representation") != "field":
+            continue
         if (
-            not isinstance(value, str)
-            or _QUALIFIED_CODE.fullmatch(value) is None
-            or caption is None
-            or caption_key is None
-            or scope is None
-            or native is None
-            or native.role not in _SUPPLEMENT_ROLES
-            or token in error_sources
-            or counts[token] != 1
-            or native.description != value
-            or source is None
-            or source.get("representation") != "field"
-            or source.get("node") != token
+            source.get("node") != token
             or source.get("field") != "description"
             or tuple(source.get("path", ())) != ("description",)
+        ):
+            continue
+        if (
             # pylint: disable-next=unidiomatic-typecheck
-            or type(source.get("normalized")) is not str
+            type(source.get("normalized")) is not str
             or source["normalized"] != value
             or record.get("observed") is False
-            or record.get("values", {}).get("description") != value
+        ):
+            continue
+        if (
+            record.get("values", {}).get("description") != value
             or "description" in record.get("fieldStatus", {})
             or (ref, "description") not in evidence.complete_text
-            or (ref, caption_key) not in evidence.complete_text
+        ):
+            continue
+        if (
+            (ref, caption_key) not in evidence.complete_text
             or len(peers.get((scope, str(node["role"]), caption), ())) != 1
             or native.states.editable is True
-            or native.states.protected is True
+        ):
+            continue
+        if (
+            native.states.protected is True
             or node.get("errorRelations")
             or any(node.get(key) for key in ("invalid", "error", "documentText"))
         ):

@@ -64,22 +64,17 @@ class SelectionSummary:
         A complete collapsed range without reported text has a shorter whole-view
         spelling. Other states and range coverage retain their existing statement.
         """
-        if (
-            concise
-            and self.read_state == "complete"
-            and self.interval is not None
-            and not self.coverage
-            and len(self.spans) == 1
-        ):
-            span = self.spans[0]
-            if span.get("collapsed") is True and span.get("text") is None:
-                short = short_collapsed_selection(references, span, self.unit)
-                if short is not None:
-                    return short
-                return (
-                    f"Selection [{references}]: complete; {unit_label(self.unit)} "
-                    f"[{span['start']},{span['end']}), collapsed; text unknown"
-                )
+        if concise and self.read_state == "complete" and self.interval is not None:
+            if not self.coverage and len(self.spans) == 1:
+                span = self.spans[0]
+                if span.get("collapsed") is True and span.get("text") is None:
+                    short = short_collapsed_selection(references, span, self.unit)
+                    if short is not None:
+                        return short
+                    return (
+                        f"Selection [{references}]: complete; {unit_label(self.unit)} "
+                        f"[{span['start']},{span['end']}), collapsed; text unknown"
+                    )
         return "Text selection [" + references + "]" + self.compact
 
 
@@ -255,16 +250,12 @@ def selection_summary_plan(
             if type(start) is int and type(end) is int and 0 <= start <= end:
                 interval = (start, end - start)
         group = None
-        if (
-            clean
-            and ref in scopes
-            and selections
-            and all(span.get("collapsed") is True and span.get("text") in (None, "") for span in selections)
-        ):
-            identity = json.dumps(
-                [unit, thaw(selections), thaw(coverage)], ensure_ascii=False, sort_keys=True, allow_nan=False
-            )
-            group = (scopes[ref], identity)
+        if clean and ref in scopes and selections:
+            if all(span.get("collapsed") is True and span.get("text") in (None, "") for span in selections):
+                identity = json.dumps(
+                    [unit, thaw(selections), thaw(coverage)], ensure_ascii=False, sort_keys=True, allow_nan=False
+                )
+                group = (scopes[ref], identity)
         focus_paths = ("states.focused", "text.selected_text", "text.caret", "text.caret_active")
         focus_issues = "states" in node["fieldStatus"] or any(
             name == path or name.startswith(path + ".") for name in node["fieldStatus"] for path in focus_paths

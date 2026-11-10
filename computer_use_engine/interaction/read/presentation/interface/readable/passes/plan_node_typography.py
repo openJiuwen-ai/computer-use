@@ -69,7 +69,8 @@ def execute(request: ReadableRequest, control: Control) -> ReadableDraft:
             if action.source.get("kind") in ("raise", "increment", "decrement"):
                 actions.append(action.catalogue_index)
         notes_only = bool(caption_slots) and passive_note_source(atom, note_slots)
-        if note_slots or blocks or actions or glyph is not None:
+        has_layout = bool(note_slots) or bool(blocks)
+        if has_layout or actions or glyph is not None:
             styles[ref] = ReadableNode(
                 note_slots, tuple(blocks), tuple(actions), "value" if glyph is not None else None, glyph, notes_only
             )
