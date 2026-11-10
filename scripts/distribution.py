@@ -97,7 +97,9 @@ class GitCodeArtifacts:
             if not artifacts or page * 100 >= listing["total_count"]:
                 break
             page += 1
-        raise ValueError(f"No retained backend artifact matches {target}. Run the native-backends pipeline first.")
+        raise ValueError(
+            f"No retained backend artifact matches {target}. Build a matching archive, then pass --backend-dir."
+        )
 
 
 def build_backend(root, target, directory):
