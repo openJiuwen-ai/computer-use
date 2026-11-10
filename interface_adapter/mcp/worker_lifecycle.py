@@ -80,6 +80,8 @@ class WorkerLifecycle:
         if not done:
             # Process.wait can otherwise wait for a descendant's inherited
             # stderr handle, even after this process has an exit status.
+            # StreamReader has no public close; release only this worker's diagnostic pipe.
+            # pylint: disable-next=protected-access
             self.child.stderr._transport.close()
             self._drain.cancel()
         await asyncio.gather(self._drain, return_exceptions=True)

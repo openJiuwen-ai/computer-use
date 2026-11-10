@@ -11,6 +11,9 @@ from computer_use.pipeline.core import Node
 from computer_use.protocol.primitives import frozen
 
 
+_PROCESS_EXIT_ERRORS = (KeyboardInterrupt, SystemExit)
+
+
 class ObservationPreparationPipeline(Node):
     """Borrow only the original window and a bounded native preparation lease."""
 
@@ -40,7 +43,7 @@ class ObservationPreparationPipeline(Node):
 
 def annotate_preparation_failure(error, preparation):
     """A later read failure cannot erase an already requested activation/raise."""
-    if isinstance(error, (KeyboardInterrupt, SystemExit)):
+    if isinstance(error, _PROCESS_EXIT_ERRORS):
         return error
     # Preserve cancellation semantics while retaining evidence for its owner.
     error.observation_preparation = frozen(preparation)

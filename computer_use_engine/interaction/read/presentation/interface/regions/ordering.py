@@ -64,5 +64,6 @@ def ordered_children(
                 ):
                     add_compatible_edge(edges, before, after)
     result = stable_order(original, tuple((key, target) for key, targets in edges.items() for target in targets))
-    assert result is not None
+    if __debug__ and result is None:
+        raise AssertionError()
     return result

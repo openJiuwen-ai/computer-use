@@ -57,6 +57,7 @@ def remember_application_content(
     state = AppState(
         controller.state(ui).selector,
         running=controller.state(ui).running,
+        # pylint: disable-next=protected-access
         refs=ui._instance.refs,
         query_target=target,
         query_scope_kind="applicationContent",

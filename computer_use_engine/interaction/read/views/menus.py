@@ -55,6 +55,7 @@ def remember_menu(
             query_target=part.target,
             query_scope_kind=tree.scope_kind,
         )
+        # pylint: disable-next=protected-access
         state.menu_window_identity = WindowIdentity.of(ui._instance.members[context]) if context is not None else None
         owner = SurfaceOwner(controller, state)
         # pylint: disable-next=protected-access
@@ -112,6 +113,7 @@ class InterfaceMenuPipeline:
         )
         state = controller.state(ui)
         lines: list[str | DisplayText | DisplayDocument]
+        # pylint: disable-next=protected-access
         if instance.anchor is None and ui._anchor is None and instance.members:
             # An application catalogue can be useful without a preferred
             # document. Application-menu observation does not grant an input
@@ -121,8 +123,10 @@ class InterfaceMenuPipeline:
                     state.running.application, remaining, path=path, context=None
                 )
             context = None
+            # pylint: disable-next=protected-access
             ui._context = context
             lines = directory_text(controller, ui, cast("DirectoryFacts", instance.directory))
+        # pylint: disable-next=protected-access
         elif instance.anchor is None and ui._anchor is None:
             # NativeAppReader retains the established running identity and
             # performs the same final directory/session recheck as window reads.
@@ -142,6 +146,7 @@ class InterfaceMenuPipeline:
             # This is observation selection, not permission to deliver input.
             # A new App.read(menu_path=...) must not require a prior delivered
             # keyboard context, nor overwrite it until this result is returned.
+            # pylint: disable-next=protected-access
             selected = select_surface(instance.directory, ui._anchor or instance.anchor.root.root_window)
             item = next(item for item in instance.members.values() if item["surface"] == selected.surface)
             target = Binding(instance.directory["session"], item["instance"], item["window"], item["surface"], None)
@@ -154,8 +159,10 @@ class InterfaceMenuPipeline:
                 # pylint: disable-next=protected-access
                 await controller.reader._discover(state.selection or instance.anchor, remaining)
             context = next(key for key, item in instance.members.items() if item["surface"] == target.surface)
+            # pylint: disable-next=protected-access
             ui._context = context
             lines = directory_text(controller, ui, cast("DirectoryFacts", instance.directory))
+        # pylint: disable-next=protected-access
         ui._context = context
         owners, trees = remember_menu(controller, ui, menu, context)
         # pylint: disable-next=protected-access

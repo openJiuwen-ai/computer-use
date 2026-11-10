@@ -37,8 +37,10 @@ def observation_members(ui, related: RelatedRead | None):
     Old unrelated document windows remain directory entries, not extra reads.
     """
     permitted = allowed(ui)
+    # pylint: disable-next=protected-access
     if ui._anchor is None:
         return permitted
+    # pylint: disable-next=protected-access
     instance = ui._instance
     newly_seen = related.new_surfaces(instance.directory) if related is not None else ()
     for key, item in instance.members.items():

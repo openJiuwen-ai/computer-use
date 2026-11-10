@@ -28,6 +28,8 @@ def create(*, controller):
         # Neither the foreground window nor a modal child becomes the close target.
         await refresh(controller, owner)
         require_identity(owner, identity, current=True)
+        # UIHandle exposes the separate instance catalogue to internal pipelines.
+        # pylint: disable-next=protected-access
         instance = owner._instance
         root = member_target(instance, instance.members[identity.window])
         if root.node is None:

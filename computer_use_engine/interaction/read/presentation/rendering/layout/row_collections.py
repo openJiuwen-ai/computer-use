@@ -3,11 +3,12 @@
 
 """Narrow immutable row-membership evidence for presentation-only table layout."""
 
-from __future__ import annotations
+# These standard-library imports precede the local presentation imports.
+from __future__ import annotations  # pylint: disable=wrong-import-order
 
-from collections import Counter
-from collections.abc import Mapping
-from types import MappingProxyType
+from collections import Counter  # pylint: disable=wrong-import-order
+from collections.abc import Mapping  # pylint: disable=wrong-import-order
+from types import MappingProxyType  # pylint: disable=wrong-import-order
 
 from computer_use.interaction.read.presentation.rendering.layout.model import RowCollection
 from computer_use.protocol.observation import NativeObservation, Relation

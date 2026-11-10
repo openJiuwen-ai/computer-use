@@ -63,9 +63,11 @@ def window_scope(controller, app, ref):
     """Bind a known application/window pair, without querying or changing focus."""
     validate_session(controller, app)
     running = controller.state(app).running
+    # pylint: disable-next=protected-access
     application = running.application if running is not None else app._instance.selector
     entry = controller.interfaces.windows.resolve(ref, controller.transport.session, application=application)
     instance = controller.interfaces.windows.application(entry.session, entry.application, entry.name)
+    # pylint: disable-next=protected-access
     app._instance = instance
     if instance.directory is None:
         adopt(controller, app, entry.directory)
@@ -76,6 +78,7 @@ def window_scope(controller, app, ref):
 
 
 async def bind_window_title(controller, app):
+    # pylint: disable-next=protected-access
     title = app._window_title
     applications = await controller.reader.directory.applications_for_window_title(title)
     matches = []
@@ -97,6 +100,7 @@ async def bind_window_title(controller, app):
     )), None)
     if item is None or directory["session"] != applications["session"]:
         raise local_failure("the matched window changed during title discovery", "stale_target")
+    # pylint: disable-next=protected-access
     if app._title_window_ref is not None:
         return
     controller.state(app).running = RunningApplication(
@@ -106,25 +110,31 @@ async def bind_window_title(controller, app):
     ref = controller.interfaces.windows.reference(directory["session"], application["id"], WindowIdentity.of(item))
     if ref is None:
         raise local_failure("the matched window identity is no longer available", "stale_target")
+    # pylint: disable-next=protected-access
     app._title_window_ref = ref
 
 
 async def request_scope(controller, app, ref, *, discover_title=False):
     if getattr(app, "_window_title", None) is not None:
+        # pylint: disable-next=protected-access
         if app._title_window_ref is None:
             if not discover_title or ref is not None:
                 raise local_failure("read the exact titled window before using its references", "stale_target")
             await bind_window_title(controller, app)
+        # pylint: disable-next=protected-access
         if ref is not None and ref != app._title_window_ref:
             raise local_failure("the window reference is outside this exact titled window", "stale_target")
+        # pylint: disable-next=protected-access
         return window_scope(controller, app, app._title_window_ref)
     if ref is None:
         return app
     validate_session(controller, app)
     state = controller.state(app)
+    # pylint: disable-next=protected-access
     if state.running is None and app._instance.session is None:
         # Resolve selector aliases by native application identity. Selecting an
         # existing window never launches a second application or reads a tree.
+        # pylint: disable-next=protected-access
         selector = app._instance.selector
         applications = (
             await controller.reader.directory.applications(selector=selector)
@@ -148,7 +158,10 @@ def lookup_window(ui):
     from computer_use.interaction.query.instances.scope import allowed
 
     permitted = allowed(ui)
+    # pylint: disable-next=protected-access
     if ui._anchor not in permitted:
+        # pylint: disable-next=protected-access
         return ui._anchor
+    # pylint: disable-next=protected-access
     target = select_surface({**ui._instance.directory, "surfaces": list(permitted.values())}, ui._anchor)
     return next(key for key, item in permitted.items() if item["surface"] == target.surface)

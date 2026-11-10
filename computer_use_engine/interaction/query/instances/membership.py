@@ -50,6 +50,7 @@ def in_scope(ui: UIHandle, surface: str | None) -> bool:
     # The pipeline shares retained bindings with their owning service.
     # pylint: disable-next=protected-access
     instance = ui._instance
+    # pylint: disable-next=protected-access
     anchor = ui._anchor
     item = next((item for item in instance.members.values() if item["surface"] == surface), None)
     if getattr(ui, "_strict_window", False):

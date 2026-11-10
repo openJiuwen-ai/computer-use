@@ -109,7 +109,8 @@ def form_bands(parent: InterfaceBlock, draft: InterfaceDraft) -> tuple[FormBand,
         control_rows = 0
         for offset, start in enumerate(column):
             label_ref = blocks[children[start]].primary_ref
-            assert label_ref is not None
+            if __debug__ and label_ref is None:
+                raise AssertionError()
             label = boxes[label_ref]
             stop = column[offset + 1] if offset + 1 < len(column) else len(children)
             next_box = boxes[blocks[children[stop]].primary_ref] if stop < len(children) else None

@@ -124,6 +124,8 @@ class AgentElementReadPipeline:
             source = AppState(
                 state.selector,
                 running=state.running,
+                # UIHandle exposes the separate instance catalogue to internal pipelines.
+                # pylint: disable-next=protected-access
                 refs=ui._instance.refs,
                 query_target=fresh["binding"],
                 query_scope_kind=fresh["scope_kind"],

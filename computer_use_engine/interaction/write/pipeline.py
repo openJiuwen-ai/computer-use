@@ -176,6 +176,8 @@ class WritePipeline:
                     minimum_effect=(
                         "possible" if caught.effect == "none" and self.state.native_mutation_possible else caught.effect
                     ),
+                    # Internal failure metadata requests observation without changing the public error.
+                    # pylint: disable-next=protected-access
                     observation_reason=caught._observation_reason,
                 )
                 error.scope_cleanup = caught.scope_cleanup
@@ -190,6 +192,8 @@ class WritePipeline:
                 )
             error.impact = freeze_result(action_impact(self.state, self.native.policy))
             if isinstance(error, ComputerUseError) and intent.kind == "openMenu":
+                # Internal dispatch evidence preserves the invoked menu target for failure observation.
+                # pylint: disable-next=protected-access
                 error._invoked_menu_target = invoked_ax_menu_target(self.state)
             if self.app_change_baseline is not None:
                 error.app_change_baseline = self.app_change_baseline

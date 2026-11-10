@@ -22,7 +22,7 @@ def _block_signature(block: InterfaceBlock) -> BlockLayoutSignature:
     Native child membership already belongs to the projected hierarchy. Keeping
     it out of this path signature limits a changed visual group to its members.
     """
-    return (
+    signature = (
         ("key", block.key),
         ("kind", block.kind),
         ("layout", block.layout),
@@ -43,6 +43,7 @@ def _block_signature(block: InterfaceBlock) -> BlockLayoutSignature:
         ("column_slots", block.column_slots),
         ("column_alignments", block.column_alignments),
     )
+    return signature
 
 
 def interface_layout_signatures(

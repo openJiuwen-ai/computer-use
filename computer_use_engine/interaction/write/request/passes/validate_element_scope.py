@@ -25,6 +25,8 @@ def create(*, controller: SessionController):
         if request.snapshot is not None:
             owner, snapshot = request.owner, request.snapshot
             controller.interfaces.validate_snapshot(owner, snapshot, allow_unknown=True)
+            # UIHandle exposes the separate instance catalogue to internal pipelines.
+            # pylint: disable-next=protected-access
             directory = await refresh(controller, owner) if owner._instance.session is not None else None
             controller.interfaces.validate_snapshot(owner, snapshot)
             if directory is not None and request.on_pre_input_directory is not None:

@@ -111,6 +111,8 @@ def _seal_projection_sources(snapshot):
     snapshot.root_contexts = MappingProxyType(snapshot.root_contexts)
     snapshot.value_fields = MappingProxyType(snapshot.value_fields)
     capsule = _CapturedSources(**{item.name: getattr(snapshot, item.name) for item in fields(_CapturedSources)})
+    # The projection builder alone attaches this private ownership certificate.
+    # pylint: disable-next=protected-access
     snapshot._captured_sources = capsule
     return snapshot
 

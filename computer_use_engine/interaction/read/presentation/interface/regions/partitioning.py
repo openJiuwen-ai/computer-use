@@ -150,5 +150,6 @@ def local_columns(
     if edges is None:
         return ()
     order = stable_order(column_keys, edges)
-    assert order is not None
+    if __debug__ and order is None:
+        raise AssertionError()
     return tuple(by_key[key] for key in order)

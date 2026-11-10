@@ -26,10 +26,18 @@ async def locate_point(port, target, remaining):
     """Convert an explicit locator; raw tuples are already native screen points."""
     if isinstance(target, tuple):
         return target
+    # The global locator consumes the retained Target binding and capture as one internal contract.
+    # pylint: disable-next=protected-access
     if target._point is None and target._snapshot is None:
         raise local_failure("a global pointer target requires an Element or an image point")
+    # The global locator consumes the retained Target binding and capture as one internal contract.
+    # pylint: disable-next=protected-access
     binding, point = target._binding, target._point
+    # The global locator consumes the retained Target capture without object routing.
+    # pylint: disable-next=protected-access
     if target._image is not None:
+        # The global locator consumes the retained Target capture without object routing.
+        # pylint: disable-next=protected-access
         piece, point = target._image.hit(point, scope_required=False)
         binding = piece.image.target
     return await port.locate_point(binding, point, remaining())
@@ -126,6 +134,9 @@ class GlobalInput(Node):
                         step.dispatch,
                         step.preparation,
                     )
+        except asyncio.CancelledError as caught:
+            caught.impact = global_impact(port, step, caught, entered=entered)
+            raise
         except BaseException as caught:
             # Never replay: a lost or partial receipt may already have changed
             # the desktop. Cleanup errors also retain known dispatch evidence.
@@ -135,9 +146,6 @@ class GlobalInput(Node):
                     error.effect = failure(
                         error.code, error.target, error.detail, step.dispatch, step.preparation, error.effect
                     ).effect
-            elif isinstance(caught, asyncio.CancelledError):
-                caught.impact = global_impact(port, step, caught, entered=entered)
-                raise
             else:
                 error = failure(
                     "execution_unknown" if entered else "execution_failed",
@@ -147,6 +155,8 @@ class GlobalInput(Node):
                     step.preparation if step is not None else (),
                 )
             error.impact = global_impact(port, step, error, entered=entered)
+            # The execution boundary supplies the public-method name for error formatting.
+            # pylint: disable-next=protected-access
             error._method = intent.kind
             if error is caught:
                 raise caught
@@ -159,6 +169,8 @@ class GlobalInput(Node):
             "impact": global_impact(port, step, entered=True),
         }
         action_completed(receipt)
+        # The global route uses the session-owned result constructor without object routing.
+        # pylint: disable-next=protected-access
         return self.controller._action_result(
             receipt,
             observation=ObservedAction(receipt, observation_status="not_requested", window_lifecycle="not_applicable"),

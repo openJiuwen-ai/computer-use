@@ -37,6 +37,8 @@ def refuse(
 ) -> NoReturn:
     error = ComputerUseError({"code": code, "effect": "none", "target": facts.target_label, "detail": detail})
     if facts.identity != Knowledge.YES or facts.within_scope != Knowledge.YES or facts.blocked_by:
+        # Internal failure metadata requests observation without changing the public error.
+        # pylint: disable-next=protected-access
         error._observation_reason = "targetState"
     raise error
 

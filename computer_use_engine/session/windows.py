@@ -209,6 +209,8 @@ class WindowReferences:
             image = state.window_images.get(identity)
             if image is not None:
                 return image
+        # The fixed view owns these delivered pixels; App state may name another view.
+        # pylint: disable-next=protected-access
         return view._image
 
     def capture_references(self):

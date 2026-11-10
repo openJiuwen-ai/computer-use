@@ -81,6 +81,8 @@ class Computer:
 
         def create():
             controller = session_controller(allow_global_input=allow_global_input and global_input_allowed())
+            # Client construction binds this controller to its owning session executor.
+            # pylint: disable-next=protected-access
             controller._executor = self._executor
             self._executor.register(controller)
             return controller
@@ -437,6 +439,8 @@ def executor_for_controller(controller):
     executor = getattr(controller, "_executor", None)
     if executor is None:
         executor = session_executor()
+        # Handle construction shares the controller's existing session executor.
+        # pylint: disable-next=protected-access
         controller._executor = executor
         executor.register(controller)
     return executor
@@ -445,5 +449,7 @@ def executor_for_controller(controller):
 def computer_for_controller(controller):
     computer = object.__new__(Computer)
     computer._controller, computer._apps = controller, weakref.WeakValueDictionary()
+    # This factory initializes the same private handle state as Computer.__init__.
+    # pylint: disable-next=protected-access
     computer._executor = executor_for_controller(controller)
     return computer

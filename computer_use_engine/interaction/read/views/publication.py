@@ -270,6 +270,7 @@ def publish(
     refs = {ref: node for _, snapshot in trees for ref, node in snapshot.refs.items()}
     windows, instance, identity = {}, None, None
     if owner is not None and lookup_context is None:
+        # pylint: disable-next=protected-access
         item = owner._instance.members.get(getattr(owner, "_context", None))
         lookup_context = LookupContext(
             WindowIdentity.of(item) if item is not None and content_available else None,
@@ -380,6 +381,7 @@ def publish(
         # Publication proposes a context. Only actual delivery changes the
         # canonical application's convenience-input receiver, including when
         # this observation was made through an explicit window parameter.
+        # pylint: disable-next=protected-access
         instance_state = owner._instance
         captured_lookup = lookup_context
         captured_query_windows = frozenset(member_trees) if member_trees is not None else frozenset(
@@ -541,15 +543,18 @@ def capture_header(
     Existing instance membership and input-report facts determine the header.
     Per-member metadata retains its collection and recheck directories separately.
     """
+    # pylint: disable-next=protected-access
     instance = ui._instance
     anchor = instance.anchor
     strict = getattr(ui, "_strict_window", False)
+    # pylint: disable-next=protected-access
     aliases = {key: ref for ref, key in instance.windows.items() if not strict or key == ui._anchor}
     permitted = allowed(ui)
     focus = directory.get("focusedWindow")
     windows = []
     entries = {
         ref: (key, instance.members[key]) for ref, key in instance.windows.items()
+        # pylint: disable-next=protected-access
         if not strict or key == ui._anchor
     }
     for key, part in parts:
@@ -588,6 +593,7 @@ def capture_header(
                 window_ref,
                 item["title"],
                 key,
+                # pylint: disable-next=protected-access
                 key == ui._anchor,
                 current_member and key == getattr(ui, "_context", None),
                 current_member and key == focus,
@@ -617,7 +623,9 @@ def capture_header(
             )
     return InterfaceHeader(
         controller.state(ui).name or (anchor.name if anchor is not None else str(instance.selector)),
+        # pylint: disable-next=protected-access
         "application" if ui._anchor is None else "window",
+        # pylint: disable-next=protected-access
         aliases.get(ui._anchor),
         aliases.get(getattr(ui, "_context", None)),
         aliases.get(focus),
@@ -658,6 +666,7 @@ def window_heading(ui: UIHandle, ref: int, title: str) -> DisplayText:
         ref: Published window number, distinct from an element number.
         title: Title retained for the window section being rendered.
     """
+    # pylint: disable-next=protected-access
     instance = ui._instance
     listed = len(instance.members) > 1 and instance.members.get(instance.windows.get(ref), {}).get("title") == title
     return template("Window {0}:", ref) if listed else template("Window {0}: {1}", ref, quoted(title))

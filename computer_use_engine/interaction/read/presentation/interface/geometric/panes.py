@@ -56,7 +56,8 @@ def comparable_pane_columns(
     signatures = set()
     for key in candidates:
         ref = blocks[key].primary_ref
-        assert ref is not None
+        if __debug__ and ref is None:
+            raise AssertionError()
         signatures.add((draft.evidence[ref].scope, tuple(draft.projected_nodes[ref].get("blockedBy", ()))))
     if len(signatures) != 1:
         return ()

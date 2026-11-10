@@ -46,7 +46,8 @@ def heading_sections(refs: Sequence[str], nodes: Mapping[str, Mapping[str, Any]]
         completed = stack.pop()
         if len(completed.children) > 1:
             heading = completed.children[0]
-            assert isinstance(heading, str)
+            if __debug__ and not isinstance(heading, str):
+                raise AssertionError()
             stack[-1].children.append(HeadingSection(heading, tuple(completed.children)))
         else:
             stack[-1].children.extend(completed.children)

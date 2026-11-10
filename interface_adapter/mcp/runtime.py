@@ -691,6 +691,8 @@ class Runtime:
                 acknowledged.add(id(delivery))
         for state in run["deliveredObservations"]:
             observation_delivered(state)
+        # Host-only failure metadata retains exact pending pixels for delivery feedback.
+        # pylint: disable-next=protected-access
         pending_point = error._pending_point_image if isinstance(error, ComputerUseError) else None
         point_hint = self.reconcile_image_hints(run, acknowledged, pending_point)
         run["active"] = False

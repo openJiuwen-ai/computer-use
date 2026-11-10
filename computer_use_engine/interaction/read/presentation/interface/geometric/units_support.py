@@ -213,5 +213,6 @@ def row_unit(key: str, draft: InterfaceDraft, blocks: Mapping[str, InterfaceBloc
         boxes[0].space, left, top, max(box.right for box in boxes) - left, max(box.bottom for box in boxes) - top
     )
     target = blocks[key].primary_ref or blocks[key].field_target_ref
-    assert target is not None
+    if __debug__ and target is None:
+        raise AssertionError()
     return RowUnit(key, target, refs, bounds)

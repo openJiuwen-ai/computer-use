@@ -293,6 +293,7 @@ class AgentInterfacePipeline:
         target = snapshot["binding"]
         self.controller.validate_element(target)
         if getattr(ui, "_strict_window", False) and (
+            # pylint: disable-next=protected-access
             window_binding(target) != ui._window_identity or snapshot.get("native_window_outside", False)
         ):
             raise local_failure("this element is outside the exact titled window", "stale_target")
@@ -314,6 +315,7 @@ class AgentInterfacePipeline:
             if evidence is not None and identity is None:
                 snapshot["window_identity"] = evidence.identity
             return
+        # pylint: disable-next=protected-access
         if ui._anchor is None and target.root_window is None and snapshot.get("scope_kind") == "applicationContent":
             # The reference came from this App. Native read admission proves
             # the original application and the node's content membership.
@@ -321,6 +323,7 @@ class AgentInterfacePipeline:
         if snapshot.get("scope_kind") == "applicationMenu" and "menu_window_identity" in snapshot:
             menu_window = snapshot["menu_window_identity"]
             if menu_window is None:
+                # pylint: disable-next=protected-access
                 if ui._anchor is None:
                     return
             else:
@@ -329,6 +332,7 @@ class AgentInterfacePipeline:
                 from computer_use.interaction.query.instances.scope import require_identity
 
                 require_identity(ui, menu_window, current=not allow_unknown)
+                # pylint: disable-next=protected-access
                 if ui._anchor is None or ancestor(ui._instance.directory, menu_window.window, ui._anchor):
                     return
         membership = evidence.membership if evidence is not None else Knowledge.NO
@@ -401,19 +405,23 @@ class AgentInterfacePipeline:
         # not acquire this recovery, and no input/image delivery is advanced.
         from computer_use.session.lookup_continuation import current_lookup_continuation
 
+        # pylint: disable-next=protected-access
         continuation = current_lookup_continuation(instance) if ui._anchor is None else None
         lookup_context = (
             continuation.context if continuation is not None
+            # pylint: disable-next=protected-access
             else instance.lookup_context if ui._anchor is None else ui._lookup_context
         )
         lookup_windows = instance.delivered_lookup_windows | (
             continuation.windows if continuation is not None else frozenset()
         )
+        # pylint: disable-next=protected-access
         if ui._anchor is None and lookup_context is None:
             raise local_failure(
                 "this App has no delivered lookup scope",
                 "stale_target",
             )
+        # pylint: disable-next=protected-access
         if ui._anchor is not None:
             from .scope import lookup_window
 
@@ -461,11 +469,13 @@ class AgentInterfacePipeline:
 
         def lookup_sources():
             context = (
+                # pylint: disable-next=protected-access
                 lookup_window(ui) if ui._anchor is not None
                 else lookup_context.window.window if lookup_context.window is not None else None
             )
             owners = list(lookup_context.menus) if lookup_context is not None else []
 
+            # pylint: disable-next=protected-access
             if ui._anchor is None and not menu_only:
                 reselected = False
                 old = instance.members.get(context)
@@ -517,6 +527,7 @@ class AgentInterfacePipeline:
                 # Ancillary name scopes come from owned AX query evidence. A new
                 # child seen only as pixels is not a new required AX search scope;
                 # every previously AX-observed descendant still participates.
+            # pylint: disable-next=protected-access
             if content_owner is not None and ui._anchor is None:
                 owners.append(content_owner)
             return owners, incomplete
@@ -553,6 +564,7 @@ class AgentInterfacePipeline:
                     )
                 except QueryRootUnavailable as error:
                     failed = self.controller.state(owner).query_target
+                    # pylint: disable-next=protected-access
                     if reconciled or ui._anchor is not None or menu_only:
                         raise
                     failed_binding = error.binding
@@ -631,6 +643,7 @@ class AgentInterfacePipeline:
         """
         target = snapshot["binding"]
         self.controller.validate_element(target)
+        # pylint: disable-next=protected-access
         instance = ui._instance
         if instance.session is not None and instance.session != target.session:
             raise local_failure("element belongs to another session", "stale_target")
@@ -640,11 +653,14 @@ class AgentInterfacePipeline:
         """Pin explicit Window or the last application context actually delivered."""
         from computer_use.interaction.query.instances.scope import require_identity
 
+        # pylint: disable-next=protected-access
         instance = ui._instance
         fixed = getattr(ui, "_window_identity", None)
         if fixed is not None:
+            # pylint: disable-next=protected-access
             root_identity = WindowIdentity(ui._anchor, fixed.surface, fixed.instance)
             require_identity(ui, root_identity)
+            # pylint: disable-next=protected-access
             identity = ui._input_context or root_identity
             evidence = instance.evidence.get(identity)
             if evidence is not None and evidence.lifetime is WindowLifetime.RETIRED:
@@ -675,10 +691,12 @@ class AgentInterfacePipeline:
             return None
         if (
             key[-1] not in ascii_lowercase
+            # pylint: disable-next=protected-access
             or ui._anchor is not None
             or getattr(ui, "_window_identity", None) is not None
         ):
             return None
+        # pylint: disable-next=protected-access
         instance = ui._instance
         state = self.controller.state(ui)
         running, lookup = state.running, instance.lookup_context
@@ -715,6 +733,7 @@ class AgentInterfacePipeline:
             return None
         if fixed.root_window == selected.window or directory.get("focusedWindow") != fixed.root_window:
             return None
+        # pylint: disable-next=protected-access
         evidence = ui._instance.evidence.get(selected)
         if (
             evidence is None or evidence.lifetime is not WindowLifetime.RETAINED
@@ -723,6 +742,7 @@ class AgentInterfacePipeline:
             return None
         if any(item["window"] == selected.window for item in directory["surfaces"]):
             return None
+        # pylint: disable-next=protected-access
         root = ui._instance.members.get(fixed.root_window)
         if root is None or not root["nativeWindow"] or not root["accessibility"]:
             return None
@@ -746,6 +766,7 @@ class AgentInterfacePipeline:
             command_target = self._application_command_target(ui, parameters.get("key"))
             if command_target is not None:
                 return await self.write.arun(ExecuteAction(ui, intent, command_target), control)
+        # pylint: disable-next=protected-access
         target = target or self.keyboard_context(ui, require_observed=ui._anchor is None)
         identity = WindowIdentity(target.root_window, target.surface, target.instance)
         directory = await refresh(self.controller, ui)
@@ -755,6 +776,7 @@ class AgentInterfacePipeline:
                 target = root
                 identity = WindowIdentity(root.root_window, root.surface, root.instance)
         require_identity(ui, identity, current=True)
+        # pylint: disable-next=protected-access
         if ui._anchor is not None and not ancestor(ui._instance.directory, identity.window, ui._anchor):
             raise local_failure(
                 "the delivered receiver is no longer confirmed inside this fixed Window",
@@ -896,6 +918,7 @@ class AgentDispatch(Node["InterfaceRequest", "AgentResult"]):
                 global_input=request.global_input,
             )
         if isinstance(request, CloseWindow):
+            # pylint: disable-next=protected-access
             return await api.write.arun(ExecuteAction(owner, Intent("closeWindow"), owner._window_identity), control)
         if isinstance(request, UIKeyboard):
             return await api.keyboard(

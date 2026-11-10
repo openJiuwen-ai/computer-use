@@ -96,7 +96,7 @@ def field_memberships(draft: InterfaceDraft) -> tuple[FieldMembership, ...]:
                 candidate = draft.projected_nodes[target].get("visualLabelRef")
                 if (
                     isinstance(candidate, str)
-                    and visual_users[candidate] == {target}
+                    and visual_users.get(candidate) == {target}
                     and not label_users.get(candidate, set()).difference({target})
                 ):
                     label, origin = candidate, "visual"

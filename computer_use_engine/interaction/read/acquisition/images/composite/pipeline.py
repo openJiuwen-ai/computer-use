@@ -73,6 +73,8 @@ class InterfaceImagePipeline:
         from computer_use.interaction.query.instances.scope import allowed
 
         members = dict(allowed(ui))
+        # UIHandle exposes the separate instance catalogue to internal pipelines.
+        # pylint: disable-next=protected-access
         source_directories = [ui._instance.directory]
         confirmed, aliases = {}, {}
         requested, parent_bound = set(), set()
@@ -85,6 +87,8 @@ class InterfaceImagePipeline:
             current = members.get(key)
             current_matches = current is not None and (
                 current["window"], current["surface"], current["instance"]
+                # UIHandle exposes the separate instance catalogue to internal pipelines.
+                # pylint: disable-next=protected-access
             ) == (identity.window, identity.surface, identity.instance) and part.target.session == ui._instance.session
             source = part.source
             # A parent-anchored capture supplies the member's pixels. The
@@ -96,6 +100,8 @@ class InterfaceImagePipeline:
                 # without replacing this capture or its exact member proof.
                 current_capture = (
                     image.target.root_window == key
+                    # UIHandle exposes the separate instance catalogue to internal pipelines.
+                    # pylint: disable-next=protected-access
                     and image.rechecked_scope == image.member_scope(ui._instance.directory)
                 )
             if current_capture and part.target.root_window != key:
@@ -105,6 +111,8 @@ class InterfaceImagePipeline:
                 directory = source.source_directory
                 if directory is not None and (
                     directory["session"], directory["application"]
+                    # UIHandle exposes the separate instance catalogue to internal pipelines.
+                    # pylint: disable-next=protected-access
                 ) == (part.target.session, ui._instance.selector):
                     original = next(
                         (item for item in directory["surfaces"] if WindowIdentity.of(item) == identity), None,
@@ -116,9 +124,13 @@ class InterfaceImagePipeline:
                         source_directories.append(directory)
             aliases[identity] = (
                 next(
+                    # UIHandle exposes the separate instance catalogue to internal pipelines.
+                    # pylint: disable-next=protected-access
                     (ref for ref, window in ui._instance.windows.items() if window == display_host(members, key)), None,
                 )
                 if confirmed[identity] else self.controller.interfaces.windows.reference(
+                    # UIHandle exposes the separate instance catalogue to internal pipelines.
+                    # pylint: disable-next=protected-access
                     part.target.session, ui._instance.selector, identity
                 )
             )
@@ -394,6 +406,8 @@ class InterfaceImagePipeline:
         canvas.digest = hashlib.sha256(canvas.png).digest()
         # pylint: disable-next=protected-access
         state = ui._instance
+        # UIHandle keeps the fixed observation scope separate from App state.
+        # pylint: disable-next=protected-access
         fixed_window = ui._anchor is not None
         previous = (
             self.controller.interfaces.windows.delivered_image(state, ui) if fixed_window else state.delivered_image
@@ -493,6 +507,8 @@ class InterfaceImagePipeline:
                 image.unavailable_mapping and has_confirmed_pixels or bool(coordinate_windows())
             )
 
+        # UIHandle keeps the fixed observation scope separate from App state.
+        # pylint: disable-next=protected-access
         fixed_ref = next((ref for ref, key in state.windows.items() if key == ui._anchor), None)
         application_target = "computer.app(" + repr(str(state.selector)) + ")"
         regions = ()

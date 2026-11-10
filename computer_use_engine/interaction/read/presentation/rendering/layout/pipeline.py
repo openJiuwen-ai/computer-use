@@ -100,9 +100,13 @@ def layout_pass(
         join_text_parts: apply_join_text_parts,
         join_visual_chains: apply_join_visual_chains,
     }
+    name = function.__name__
+    handler = handlers.get(function)
+    if handler is None:
+        raise KeyError(function)
     return Pass(
-        function.__name__,
-        handlers[function],
+        name,
+        handler,
         Contract(
             LayoutFrame,
             LayoutFrame,

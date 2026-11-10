@@ -33,6 +33,8 @@ def note_pending_point_image(controller, ui, error, *, after=None):
     binding = getattr(ui, "_window_identity", None)
     if binding is None or not controller.adapters.image_delivery_required():
         return
+    # UIHandle exposes the separate instance catalogue to internal pipelines.
+    # pylint: disable-next=protected-access
     state = ui._instance
     identity = WindowIdentity(binding.root_window, binding.surface, binding.instance)
     pending = state.sampled_window_images.get(identity)
@@ -42,6 +44,8 @@ def note_pending_point_image(controller, ui, error, *, after=None):
         return
     ref = next((ref for ref, window in state.windows.items() if window == identity.window), None)
     if ref is not None:
+        # Host-only failure metadata retains exact pending pixels for delivery feedback.
+        # pylint: disable-next=protected-access
         error._pending_point_image = (pending.png, ref)
 
 
@@ -50,7 +54,11 @@ def input_image(controller, ui, image=None, *, current=True):
     if current:
         validate_session(controller, ui)
     if image is None:
+        # UIHandle keeps the fixed observation scope separate from App state.
+        # pylint: disable-next=protected-access
         fixed_window = ui._anchor is not None
+        # UIHandle exposes the separate instance catalogue to internal pipelines.
+        # pylint: disable-next=protected-access
         instance = ui._instance
         image = WindowReferences.delivered_image(instance, ui) if fixed_window else instance.delivered_image
     adapters = controller.adapters

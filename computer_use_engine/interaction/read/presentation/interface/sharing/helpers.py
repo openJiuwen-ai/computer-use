@@ -51,7 +51,7 @@ def member_scope(request: SharingRequest, ref: str) -> tuple[object, ...]:
             boundary = pending
             break
         pending = parent
-    return (
+    scope = (
         interface.source.scopes.get(ref),
         boundary,
         canonical(node.get("capabilities")),
@@ -61,6 +61,7 @@ def member_scope(request: SharingRequest, ref: str) -> tuple[object, ...]:
         canonical(node.get("invalid")),
         atom.actions_unavailable,
     )
+    return scope
 
 
 def declaration_parent(request: SharingRequest, refs: Sequence[str]) -> str | None:

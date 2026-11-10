@@ -70,7 +70,8 @@ def order_visual_rows(draft: InterfaceDraft) -> InterfaceDraft:
         ordered = stable_order(
             original, tuple((before, after) for before, targets in edges.items() for after in targets)
         )
-        assert ordered is not None
+        if __debug__ and ordered is None:
+            raise AssertionError()
         if ordered != original:
             blocks[key] = replace(block, children=ordered)
             decisions.append("geometric-row-order:" + key)

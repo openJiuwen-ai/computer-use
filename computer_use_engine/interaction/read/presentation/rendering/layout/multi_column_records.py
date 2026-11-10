@@ -52,7 +52,7 @@ class _Row:
     @property
     def shared(self) -> tuple[object, ...]:
         """Return fields whose meaning must match throughout a public table."""
-        return (
+        fields = (
             self.parent,
             self.indent,
             self.layout,
@@ -62,6 +62,7 @@ class _Row:
             self.cell_prefix,
             self.columns,
         )
+        return fields
 
 
 def _outline_row(table: GeneratedLine, row: GeneratedLine, frame: LayoutFrame) -> bool:

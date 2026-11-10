@@ -110,6 +110,8 @@ class NativeGraph:
                 detail=detail,
             )
         )
+        # Internal failure metadata requests observation without changing the public error.
+        # pylint: disable-next=protected-access
         error._observation_reason = observation_reason
         raise error
 

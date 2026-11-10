@@ -76,6 +76,8 @@ class ExecuteNativeWrite(Node["ActionPlan", "Record"]):
                 receipt["target"] = label
             return receipt
         except ComputerUseError as error:
+            # The execution boundary supplies the public-method name for error formatting.
+            # pylint: disable-next=protected-access
             error._method = request.intent.kind
             if label:
                 error.target = f"{label} / {error.target}"

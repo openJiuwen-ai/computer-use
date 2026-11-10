@@ -157,6 +157,8 @@ class SessionExecutor:
     async def _close_resource(self, controller):
         if id(controller) not in self._resources:
             return
+        # The executor owns controller shutdown; decorators consume this closure marker.
+        # pylint: disable-next=protected-access
         controller._sdk_closed = True
         transport = controller.transport
         if hasattr(transport, "close"):
@@ -218,10 +220,14 @@ def synchronous(function):
     @wraps(function)
     def invoke(self, *args, **kwargs):
         async def operation():
+            # This decorator implements the handle method on its owning controller.
+            # pylint: disable-next=protected-access
             if getattr(self._controller, "_sdk_closed", False):
                 raise RuntimeError("Computer session is closed")
             return await function(self, *args, **kwargs)
 
+        # Dispatch the decorated handle through its bound executor.
+        # pylint: disable-next=protected-access
         return self._executor.run(operation)
 
     return invoke
@@ -231,10 +237,14 @@ def on_session(function):
     @wraps(function)
     def invoke(self, *args, **kwargs):
         def call():
+            # This decorator implements the handle method on its owning controller.
+            # pylint: disable-next=protected-access
             if getattr(self._controller, "_sdk_closed", False):
                 raise RuntimeError("Computer session is closed")
             return function(self, *args, **kwargs)
 
+        # Dispatch the decorated handle through its bound executor.
+        # pylint: disable-next=protected-access
         return self._executor.call(call)
 
     return invoke

@@ -54,6 +54,8 @@ def failure(
     if required_item(severity, minimum_effect) > required_item(severity, effect):
         effect = minimum_effect
     error = ComputerUseError({"code": code, "effect": effect, "target": target, "detail": detail})
+    # Internal failure metadata requests observation without changing the public error.
+    # pylint: disable-next=protected-access
     error._observation_reason = observation_reason
     return error
 

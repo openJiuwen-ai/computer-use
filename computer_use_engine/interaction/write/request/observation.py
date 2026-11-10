@@ -155,11 +155,15 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
         except ComputerUseError as error:
             close_unavailable = request.intent.kind == "closeWindow" and error.code == "input_unavailable"
             refresh_needed = error.code in TARGET_OBSERVATION_ERRORS or close_unavailable
+            # Internal failure metadata requests observation without changing the public error.
+            # pylint: disable-next=protected-access
             if error.effect not in ("partial", "possible") and not refresh_needed and error._observation_reason is None:
                 raise
             # This is still the original exception, not a fabricated successful
             # receipt. Preparation/dispatch evidence and its original cause stay
             # authoritative while the shared read suffix may add current facts.
+            # Internal dispatch evidence preserves the invoked menu target for failure observation.
+            # pylint: disable-next=protected-access
             if menu_origin is not None and error._invoked_menu_target == request.target:
                 related = replace(related, menu_origin=menu_origin)
             outcome = await self.observe(
@@ -171,6 +175,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
             )
             for field in ("observation", "observation_status", "observation_error", "window_lifecycle", "choices"):
                 setattr(error, field, getattr(outcome, field))
+            # Internal dispatch evidence preserves the invoked menu target for failure observation.
+            # pylint: disable-next=protected-access
             invoked_menu = request.intent.kind == "openMenu" and error._invoked_menu_target == request.target
             has_observation = instance is not None and outcome.observation is not None
             if invoked_menu and has_observation and self.session_usable(request, session_identity):
@@ -373,6 +379,8 @@ class WriteWithObservation(Node[ExecuteAction, ObservedAction]):
     def window_choices(self, owner, directory):
         if directory is None or owner is None or getattr(owner, "_strict_window", False):
             return ()
+        # UIHandle exposes the separate instance catalogue to internal pipelines.
+        # pylint: disable-next=protected-access
         name = self.controller.state(owner).name or str(owner._instance.selector)
         return tuple(self.controller.interfaces.windows.choices(directory, name))
 

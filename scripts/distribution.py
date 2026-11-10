@@ -40,7 +40,8 @@ class GitCodeArtifacts:
             raise ValueError("Repository must be owner/repo.")
         if urllib.parse.urlsplit(api).scheme != "https":
             raise ValueError("GitCode API requires HTTPS.")
-        self.base = api.rstrip("/") + "/api/v8/repos/" + "/".join(urllib.parse.quote(p, safe="") for p in parts)
+        owner, repo = (urllib.parse.quote(part, safe="") for part in parts)
+        self.base = f"{api.rstrip('/')}/api/v8/repos/{owner}/{repo}"
         self.token = token
         self.opener = opener or urllib.request.build_opener(ArtifactRedirect())
 
@@ -58,7 +59,7 @@ class GitCodeArtifacts:
             query = urllib.parse.urlencode(
                 {"name": name, "sort": "created", "direction": "desc", "page": page, "per_page": 100}
             )
-            with self.get("/actions/artifacts?" + query) as response:
+            with self.get(f"/actions/artifacts?{query}") as response:
                 listing = json.load(response)
             artifacts = listing["artifacts"]
             for artifact in artifacts:

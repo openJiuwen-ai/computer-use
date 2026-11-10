@@ -228,10 +228,13 @@ class InterfaceReadPipeline:
         except ComputerUseError as error:
             await self._reconcile_close_application(related, instance.directory, error)
             raise
+        # pylint: disable-next=protected-access
         instance = ui._instance
         preparation = None
+        # pylint: disable-next=protected-access
         if allow_foreground and (ui._anchor is not None or instance.anchor is not None):
             permitted = allowed(ui)
+            # pylint: disable-next=protected-access
             anchor = ui._anchor or instance.anchor.root.root_window
             options = {"follow_modal": False} if getattr(ui, "_strict_window", False) else {}
             current = select_surface(directory, anchor, **options)
@@ -300,12 +303,14 @@ class InterfaceReadPipeline:
             cancelled=budget.cancelled if budget is not None else None,
             call_id=budget.operation_id if budget is not None else None,
         )
+        # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
         # Stage this observation's own lookup configuration, including a
         # catalogue-only result. Previous menu samples are not its content.
         ui._lookup_scopes, ui._menu_only = (), False
         window_family_only = related is not None and related.window_family_only
         if window_family_only:
+            # pylint: disable-next=protected-access
             ui._context = None
 
         def content_members():
@@ -316,6 +321,7 @@ class InterfaceReadPipeline:
             return observation_members(ui, related)
 
         related_app_scope = related is not None and not window_family_only
+        # pylint: disable-next=protected-access
         if related_app_scope and ui._anchor is None and instance.anchor is None:
             preferred = related.preferred(directory, related.original.root_window)
             if preferred in instance.members:
@@ -333,6 +339,7 @@ class InterfaceReadPipeline:
             )
 
         async def application_content():
+            # pylint: disable-next=protected-access
             if window_family_only or ui._anchor is not None or view == "image":
                 return None, None
             if "nativeApplicationContent" not in controller.transport.capabilities or any(
@@ -354,9 +361,11 @@ class InterfaceReadPipeline:
             return (target, tree, tree_document(controller, target, tree, prepared=prepared), owner), gap
 
         content_gap = None
+        # pylint: disable-next=protected-access
         if not window_family_only and instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
             launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
+            # pylint: disable-next=protected-access
             ui._context = None
             content, content_gap = await application_content()
             if content is not None:
@@ -388,6 +397,7 @@ class InterfaceReadPipeline:
                     # these reads. Continue with the retained application and let
                     # its actual observation select the window or menu branch.
                     directory, first = await observe_application(controller, ui, state.running, view)
+                    # pylint: disable-next=protected-access
                     instance = ui._instance
                     if (
                         isinstance(first, AppObservation) and instance.anchor is not None
@@ -398,6 +408,7 @@ class InterfaceReadPipeline:
                     return await InterfaceMenuPipeline(controller).run(
                         ui, (), observed=first, full=full, on_observation=on_observation,
                     )
+        # pylint: disable-next=protected-access
         if not window_family_only and instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
             launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
@@ -428,6 +439,7 @@ class InterfaceReadPipeline:
             )
         permitted = content_members()
         # A fixed close must not fall through to the App's new display anchor.
+        # pylint: disable-next=protected-access
         anchor = related.original.root_window if window_family_only else ui._anchor or instance.anchor.root.root_window
         if related is not None:
             anchor = related.preferred(directory, anchor)
@@ -546,6 +558,7 @@ class InterfaceReadPipeline:
                 and item["modal"] is True and item["parentState"] == "none" and item["node"] is not None
                 and identity not in related.known_windows
             )
+            # pylint: disable-next=protected-access
             initial_app_root = initial and not window_family_only and principal_error is None and ui._anchor is None
             if initial_app_root and identity != plan.menu_origin and not new_modal_root:
                 initial = False
@@ -591,6 +604,7 @@ class InterfaceReadPipeline:
                         if instance.anchor is not None:
                             anchor = plan.anchor = instance.anchor.root.root_window
                             principal, principal_error = anchor, None
+                            # pylint: disable-next=protected-access
                             ui._context = anchor
                 if observed is not None:
                     adopt(controller, ui, observed.directory, instance.anchor)
@@ -632,6 +646,7 @@ class InterfaceReadPipeline:
                         current_member = permitted.get(item["window"])
                         if current_member is not None and WindowIdentity.of(current_member) == WindowIdentity.of(item):
                             remember(controller, ui, part)
+                        # pylint: disable-next=protected-access
                         ui._context = item["window"] if observed.scope_confirmed else None
                     else:
                         # Exact old objects never acquire a replacement's body.
@@ -646,6 +661,7 @@ class InterfaceReadPipeline:
             item = permitted[key]
             companion = (
                 companion_capture(item, directory, parts)
+                # pylint: disable-next=protected-access
                 if ui._anchor is None and not full and identity != plan.menu_origin else None
             )
             part = None
@@ -704,6 +720,7 @@ class InterfaceReadPipeline:
                 # Only automatic related reads follow member transitions.
                 recheck_pending = True
         empty_related_catalogue = (
+            # pylint: disable-next=protected-access
             related is not None and ui._anchor is None
             and directory.get("rootDiscoveryComplete") is True
             and not directory["surfaces"] and not directory["stopReasons"]
@@ -774,7 +791,9 @@ class InterfaceReadPipeline:
                 plan.order = tuple(dict.fromkeys((*plan.order, identity)))
                 remember(controller, ui, fallback)
                 if fallback.tree is not None or fallback.image is not None:
+                    # pylint: disable-next=protected-access
                     ui._context = old["window"]
+                    # pylint: disable-next=protected-access
                     if ui._anchor is None:
                         instance.anchor = controller.reader.select_working_window(
                             directory["application"], instance.name, directory, old["window"]
@@ -798,8 +817,11 @@ class InterfaceReadPipeline:
         current_part = next((part for part in parts if part.identity == current_identity), None)
         if current_part is not None and (current_part.tree is not None or current_part.image is not None):
             principal, principal_error = plan.principal, plan.selection_error
+            # pylint: disable-next=protected-access
             if principal_error is None and (related is not None or ui._anchor is not None):
+                # pylint: disable-next=protected-access
                 ui._context = principal
+                # pylint: disable-next=protected-access
                 if related is not None and ui._anchor is None:
                     instance.anchor = controller.reader.select_working_window(
                         directory["application"], instance.name, directory, principal
@@ -1197,6 +1219,7 @@ class InterfaceReadPipeline:
 
     async def _selected_item(self, ui, item, target: Binding) -> WindowPart | None:
         """Prove the exact selected control using the existing node collector."""
+        # pylint: disable-next=protected-access
         if window_binding(member_target(ui._instance, item)) != window_binding(target):
             return None
         part = await self.member(
@@ -1271,6 +1294,7 @@ class InterfaceReadPipeline:
         controller = self.controller
         # pylint: disable-next=protected-access
         target = detail or member_target(ui._instance, item)
+        # pylint: disable-next=protected-access
         source_directory = ui._instance.directory
         tree = image = None
         snapshots_numbered = True

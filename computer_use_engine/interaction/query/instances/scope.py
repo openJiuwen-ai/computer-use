@@ -40,6 +40,7 @@ def validate_session(controller: SessionController, ui: UIHandle) -> None:
             "native session is retired after unconfirmed cleanup",
             "stale_target",
         )
+    # pylint: disable-next=protected-access
     instance = ui._instance
     session = instance.session
     running = controller.state(ui).running
@@ -54,17 +55,20 @@ def validate_session(controller: SessionController, ui: UIHandle) -> None:
     identity = getattr(ui, "_window_identity", None)
     if identity is not None:
         controller.validate_element(identity)
+        # pylint: disable-next=protected-access
         require_identity(ui, WindowIdentity(ui._anchor, identity.surface, identity.instance))
 
 
 def require_identity(ui: UIHandle, identity: WindowIdentity, *, current: bool = False) -> None:
     """Retained unknown identities can refresh; retired windows never come back."""
+    # pylint: disable-next=protected-access
     evidence = ui._instance.evidence.get(identity)
     if evidence is None or evidence.lifetime is WindowLifetime.RETIRED:
         raise local_failure(
             "the fixed Window identity no longer exists",
             "stale_target",
         )
+    # pylint: disable-next=protected-access
     item = ui._instance.members.get(identity.window)
     if item is not None and WindowIdentity.of(item) != identity:
         raise local_failure("the fixed Window identity changed", "stale_target")
@@ -139,14 +143,18 @@ def _retained_or_readable_window(instance, entries):
 def adopt(controller, ui, directory, selection=None):
     """Reconcile one application catalogue; a display selection is not its identity."""
     state = controller.state(ui)
+    # pylint: disable-next=protected-access
     name = selection.name if selection is not None else state.name or ui._instance.name or str(state.selector)
     instance = controller.interfaces.windows.application(directory["session"], directory["application"], name)
+    # pylint: disable-next=protected-access
     if ui._instance is not instance:
+        # pylint: disable-next=protected-access
         ui._instance = instance
     aliases = controller.interfaces.windows.register_directory(directory, name)
     instance.windows = {int(ref): key for ref, key in aliases.items() if key in instance.members}
     state.running = RunningApplication(directory["application"], name, directory["session"])
     state.directory, state.refs, state.windows = directory, instance.refs, aliases
+    # pylint: disable-next=protected-access
     if ui._anchor is None:
         state.selection = None
         controller.interfaces.windows.remember_application_selector(state.selector, instance)
@@ -156,6 +164,7 @@ def adopt(controller, ui, directory, selection=None):
         fixed = state.selection
         try:
             state.selection = controller.reader.select_working_window(
+                # pylint: disable-next=protected-access
                 directory["application"], name, directory, ui._anchor, previous=fixed
             )
         except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
@@ -163,6 +172,7 @@ def adopt(controller, ui, directory, selection=None):
                 retain_fixed_failure(instance, fixed, error)
             raise
         require_identity(
+            # pylint: disable-next=protected-access
             ui, WindowIdentity(ui._anchor, state.selection.root.surface, state.selection.root.instance), current=True
         )
     for key, item in instance.members.items():
@@ -190,6 +200,7 @@ async def refresh(controller, ui, *, accessibility=True):
     """Refresh facts within the retained scope without changing the delivered input context."""
     validate_session(controller, ui)
     state = controller.state(ui)
+    # pylint: disable-next=protected-access
     instance = ui._instance
     running = state.running
     if running is None and instance.session is not None:
@@ -200,6 +211,7 @@ async def refresh(controller, ui, *, accessibility=True):
         running.application,
         profile=SurfaceReadProfile.ACCESSIBILITY if accessibility else SurfaceReadProfile.VISUAL,
         capabilities=controller.transport.capabilities,
+        # pylint: disable-next=protected-access
         root_window=ui._anchor if accessibility and getattr(ui, "_strict_window", False) else None,
     )
     adopt(controller, ui, directory)
@@ -213,9 +225,11 @@ async def resolve(controller, ui, view):
     state = controller.state(ui)
     if isinstance(state.running, StartingApplication):
         return await observe_application(controller, ui, state.running, view)
+    # pylint: disable-next=protected-access
     if state.running is not None or ui._instance.session is not None:
         directory = await refresh(controller, ui, accessibility=view != "image")
     else:
+        # pylint: disable-next=protected-access
         selector = ui._instance.selector
         if controller.reader.pending_launch(selector) is not None:
             return await observe_application(controller, ui, selector, view)
@@ -229,7 +243,9 @@ async def resolve(controller, ui, view):
             return await observe_application(controller, ui, selector, view, source_applications=applications)
         state.running = RunningApplication(application["id"], application["displayName"], applications["session"])
         directory = await refresh(controller, ui, accessibility=view != "image")
+    # pylint: disable-next=protected-access
     if ui._anchor is None:
+        # pylint: disable-next=protected-access
         ui._instance.anchor = display_selection(controller, ui._instance, directory)
     return directory, None
 
@@ -252,21 +268,27 @@ async def observe_application(controller, ui, selector, view, *, source_applicat
     except WindowSelectionRequired as choices:
         state.running = RunningApplication(choices.application, choices.display_name, choices.directory["session"])
         adopt(controller, ui, choices.directory)
+        # pylint: disable-next=protected-access
         ui._instance.anchor = display_selection(controller, ui._instance, choices.directory)
         return choices.directory, choices.launch
     adopt(controller, ui, observed.directory, observed.selection)
+    # pylint: disable-next=protected-access
     ui._instance.anchor = display_selection(controller, ui._instance, observed.directory)
     return observed.directory, observed
 
 
 def allowed(ui):
     """Application catalogue, or one fixed Window and confirmed descendants."""
+    # pylint: disable-next=protected-access
     instance = ui._instance
     if getattr(ui, "_strict_window", False):
+        # pylint: disable-next=protected-access
         item = instance.members.get(ui._anchor)
+        # pylint: disable-next=protected-access
         return {ui._anchor: item} if item is not None else {}
     return {
         key: item
         for key, item in instance.members.items()
+        # pylint: disable-next=protected-access
         if ui._anchor is None or interaction_contains(instance.directory, key, ui._anchor)
     }
