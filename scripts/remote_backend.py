@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 from backend_artifacts import TARGETS, artifact_name, inspect_archive
+from console import write_result
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,7 +100,7 @@ def main(argv=None):
         args.output.mkdir(parents=True, exist_ok=True)
         output = args.output / (artifact_name(ROOT, args.target) + ".zip")
         output.write_bytes(result.stdout)
-        sys.stdout.write(str(output) + "\n")
+        write_result(sys.stdout, str(output))
 
 
 if __name__ == "__main__":

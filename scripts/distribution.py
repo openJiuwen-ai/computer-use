@@ -18,6 +18,7 @@ import zipfile
 from pathlib import Path
 
 from backend_artifacts import TARGETS, artifact_name, fingerprint, host_target, inspect_archive, sha256, write_archive
+from console import write_result
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGETS = ("macos-arm64", "windows-x86_64", "linux-x86_64")
@@ -206,9 +207,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "name":
-            sys.stdout.write(artifact_name(ROOT, args.target) + "\n")
+            write_result(sys.stdout, artifact_name(ROOT, args.target))
         elif args.command == "backend":
-            sys.stdout.write(str(build_backend(ROOT, args.target or host_target(), args.output)) + "\n")
+            write_result(sys.stdout, str(build_backend(ROOT, args.target or host_target(), args.output)))
         else:
             build_wheels(
                 ROOT,

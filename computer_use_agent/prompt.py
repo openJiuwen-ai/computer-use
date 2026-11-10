@@ -23,5 +23,6 @@ operations. Pass subtasks to split a complex task into independently routed
 subtasks. A route reported with unknown effect must not be retried blindly.
 """
 
+
 def system_prompt(routing: bool = False) -> str:
     return f"{INSTRUCTIONS}\n{ROUTING_INSTRUCTIONS}" if routing else INSTRUCTIONS

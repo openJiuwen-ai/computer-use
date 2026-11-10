@@ -2,6 +2,7 @@
 
 """Explicit window preparation before observation; never an implicit query effect."""
 
+import builtins
 from dataclasses import replace
 
 from computer_use.errors import ComputerUseError, format_failure
@@ -9,9 +10,6 @@ from computer_use.native.contracts import Binding
 from computer_use.pipeline import Contract, Effect
 from computer_use.pipeline.core import Node
 from computer_use.protocol.primitives import frozen
-
-
-_PROCESS_EXIT_ERRORS = (KeyboardInterrupt, SystemExit)
 
 
 class ObservationPreparationPipeline(Node):
@@ -43,7 +41,7 @@ class ObservationPreparationPipeline(Node):
 
 def annotate_preparation_failure(error, preparation):
     """A later read failure cannot erase an already requested activation/raise."""
-    if isinstance(error, _PROCESS_EXIT_ERRORS):
+    if isinstance(error, (builtins.KeyboardInterrupt, builtins.SystemExit)):
         return error
     # Preserve cancellation semantics while retaining evidence for its owner.
     error.observation_preparation = frozen(preparation)

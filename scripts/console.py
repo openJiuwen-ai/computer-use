@@ -1,16 +1,22 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Unprefixed command-line output through standard logging."""
+"""Command-line results and diagnostic reporting."""
 
 import logging
 import sys
 from threading import RLock
+from typing import TextIO
 
 _OUTPUT = logging.getLogger(__name__)
 _OUTPUT.setLevel(logging.INFO)
 _OUTPUT.propagate = False
 _LOCK = RLock()
+
+
+def write_result(stream: TextIO, value: str) -> None:
+    """Write one machine-readable result independently of log configuration."""
+    stream.write(f"{value}\n")
 
 
 class _StrictStreamHandler(logging.StreamHandler):
