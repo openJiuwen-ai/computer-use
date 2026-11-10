@@ -19,6 +19,7 @@ from computer_use.interaction.write.model import (
     BoundWrite,
     OperationSpec,
     PlannedUnit,
+    RecordedStep,
     ResolutionMemory,
     ResolvedTarget,
     ResolvedWrite,
@@ -55,7 +56,7 @@ def scenario(*, prepare=False, remaining=lambda: 1234):
         readiness=Knowledge.UNKNOWN if prepare else Knowledge.YES,
         pending=("receiver",) if prepare else (),
     )
-    spec = OperationSpec(intent, target, (), HostPolicy("shared", False))
+    spec = OperationSpec(intent, target, (), HostPolicy(allow_global_input=False))
     facts = Facts(
         target, "fresh-observation", "same visible name", Knowledge.YES, Knowledge.YES, Knowledge.YES, (), (primitive,)
     )
@@ -88,8 +89,9 @@ def test_uncertain_input_ends_at_gate_and_retains_preparation(dispatch, effect):
     assert isinstance(transition, Done)
     assert transition.reason.kind == "stop"
     assert transition.reason.error.effect == effect
-    assert "do not replay" in transition.reason.error.next
-    assert state.steps == [step] and state.preparation == ["receiver prepared"]
+    assert transition.reason.error.code == "execution_unknown"
+    assert state.steps == [RecordedStep(unit.command, step)]
+    assert state.preparation == ["receiver prepared"]
     assert state.dispatched == dispatch and not state.in_flight
     native.execute.assert_awaited_once_with("original-operation", 1, unit.command, 1234)
 
@@ -114,7 +116,8 @@ def test_changed_native_identity_is_retired_without_retargeting(field):
     with pytest.raises(ValueError, match="different target"):
         asyncio.run(chain(native, state).arun(unit))
     assert native.calls.retired and state.dispatched == Dispatch.UNKNOWN
-    assert state.steps == [step] and state.preparation == ["prepared"]
+    assert state.steps == [RecordedStep(unit.command, step)]
+    assert state.preparation == ["prepared"]
     native.execute.assert_awaited_once_with("original-operation", 1, unit.command, 1234)
     assert unit.command.target != wrong
 
@@ -128,7 +131,7 @@ def test_cleanup_failure_cannot_erase_dispatch_or_trigger_another_route(cleanup,
     with pytest.raises(ValueError, match="cleanup was not confirmed"):
         asyncio.run(chain(native, state).arun(unit))
     assert native.calls.retired and state.dispatched == dispatch
-    assert state.steps == [step] and state.steps[0].cleanup == cleanup
+    assert state.steps == [RecordedStep(unit.command, step)]
     native.execute.assert_awaited_once()
 
 
@@ -141,7 +144,7 @@ def test_cancel_timeout_or_lost_receipt_retires_inflight_scope(prepare, error_ty
     with pytest.raises(error_type) as caught:
         asyncio.run(chain(native, state).arun(unit))
     assert caught.value is error and native.calls.retired and not state.in_flight
-    assert state.steps == []  # Lost receipt is not fabricated as notDispatched.
+    assert state.steps == [RecordedStep(unit.command, failure_effect="possible")]
     assert state.preparation == (["unknown"] if prepare else [])
     assert state.dispatched == (Dispatch.NOT_DISPATCHED if prepare else Dispatch.UNKNOWN)
     native.execute.assert_awaited_once()
@@ -150,7 +153,7 @@ def test_cancel_timeout_or_lost_receipt_retires_inflight_scope(prepare, error_ty
 def test_explicit_predispatch_failure_preserves_no_input_evidence():
     unit, state = scenario(), WriteRunState()
     error = ComputerUseError(
-        dict(code="stale_target", target="editor", detail="destroyed", effect="none", next="observe")
+        dict(code="stale_target", target="editor", detail="destroyed", effect="none")
     )
     native = port(side_effect=error)
     with pytest.raises(ComputerUseError) as caught:

@@ -5,10 +5,12 @@
 
 import asyncio
 import hashlib
+from collections import OrderedDict
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
+from weakref import WeakSet
 
 from computer_use.client.factory import session_controller
 from computer_use.diagnostics import local_failure
@@ -16,9 +18,13 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.requests import ActOnElement, ResolveElement, UIKeyboard, UIPointer
 from computer_use.interaction.query.pipeline import FindElementPipeline
 from computer_use.interaction.requests import ExecuteAction
-from computer_use.native.contracts import Binding, Intent
+from computer_use.native.contracts import Binding, Intent, Knowledge
+from computer_use.native.lifecycle import CallLifecycle
 from computer_use.pipeline import Control, Pipeline, Repeat, Scope, Select, Sequence
 from computer_use.session.events import set_action_handler, set_observation_handler
+from computer_use.session.interface_images import signature
+from computer_use.session.interfaces import LookupContext, SurfaceOwner, WindowEvidence, WindowIdentity
+from computer_use.session.state import AppState
 
 
 class UIStub(SimpleNamespace):
@@ -28,19 +34,32 @@ class UIStub(SimpleNamespace):
 class InteractionBehaviorTests(IsolatedAsyncioTestCase):
     def setUp(self):
         port = SimpleNamespace(
-            connection=SimpleNamespace(session="test", capabilities=()), calls=SimpleNamespace(retired=False)
+            connection=SimpleNamespace(session="test", capabilities=(), session_identity=(1, "test")),
         )
+        port.calls = CallLifecycle(port)
         self.controller = session_controller(port)
         self.target = Binding("test", "app", "window", "surface", "node")
         self.snapshot = {"binding": self.target}
         instance = SimpleNamespace(
+            session=None,
+            evidence={
+                WindowIdentity("window", "surface", "app"): WindowEvidence(
+                    WindowIdentity("window", "surface", "app"), Knowledge.YES
+                )
+            },
             anchor=None,
+            delivered_lookup_windows=set(),
+            lookup_observations=OrderedDict(),
+            lookup_results=OrderedDict(),
+            lookup_captures=WeakSet(),
             refs={"1": self.snapshot},
-            members={"window": {"surface": "surface", "window": "window"}},
+            owners={},
+            members={"window": {"surface": "surface", "window": "window", "instance": "app"}},
             surface_evidence=lambda *_: None,
             menu_contexts={},
         )
-        self.ui = UIStub(_instance=instance, _anchor=None, _menu_only=True, _lookup_scopes=(object(),))
+        self.ui = UIStub(_instance=instance, _anchor=None, _menu_only=True, _lookup_scopes=self.lookup_scopes(1))
+        instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         self.controller.register(self.ui, {"selector": "test-app"})
         self.receipt = {"status": "dispatched", "target": "test element", "detail": "sent once"}
         self.engine = AsyncMock(return_value=self.receipt)
@@ -48,6 +67,11 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
         self.events = []
         set_action_handler(lambda value: self.events.append(("action", value)))
         set_observation_handler(lambda value: self.events.append((value["kind"], value)))
+
+    def lookup_scopes(self, count):
+        # Real lookup owners are registered scope handles even when they have
+        # no captured query root. Keep that contract while mocking live lookup.
+        return tuple(SurfaceOwner(self.controller, AppState("test-app")) for _ in range(count))
 
     def tearDown(self):
         set_action_handler(None)
@@ -115,7 +139,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
 
     async def test_failed_or_cancelled_write_is_not_replayed(self):
         for failure in (
-            local_failure("uncertain dispatch", "read first", "execution_unknown"),
+            local_failure("uncertain dispatch", "execution_unknown"),
             asyncio.CancelledError(),
         ):
             self.engine.reset_mock()
@@ -125,33 +149,38 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                 await self.controller.run(ActOnElement(self.ui, self.snapshot, "click", {}))
             self.assertIs(caught.exception, failure)
             self.engine.assert_awaited_once()
-            self.assertEqual([kind for kind, _ in self.events], ["discard-pending"])
+            self.assertEqual([kind for kind, _ in self.events], ["before-write"])
 
     async def test_receipt_delivery_failure_does_not_replay_action(self):
         def fail(_):
             raise ValueError("delivery failed")
 
         set_action_handler(fail)
-        with self.assertRaisesRegex(RuntimeError, "do not replay"):
+        with self.assertRaisesRegex(RuntimeError, "Action completed, but its receipt could not be displayed"):
             await self.controller.run(ActOnElement(self.ui, self.snapshot, "click", {}))
         self.engine.assert_awaited_once()
 
     async def test_pointer_maps_coordinates_and_dispatches_once(self):
         target = replace(self.target, node=None, capture="capture")
         piece = SimpleNamespace(window="window", image=SimpleNamespace(target=target))
+        members = {
+            "window": {"window": "window", "surface": "surface", "parent": None, "parentState": "none", "modal": False}
+        }
         self.ui._image = SimpleNamespace(
             png=b"image",
             digest=hashlib.sha256(b"image").digest(),
             expired=False,
-            membership="layout",
+            membership=signature(members),
             pieces=(piece,),
+            identities=(),
+            content_hosts=(),
             hit=lambda point: (piece, (point[0] - 10, point[1] - 20)),
         )
+        self.ui._instance.delivered_image = self.ui._image
         self.controller.adapters = replace(self.controller.adapters, image_delivery_required=lambda: False)
         with (
             patch("computer_use.interaction.write.ui.pipeline.refresh", new_callable=AsyncMock),
-            patch("computer_use.interaction.write.ui.pipeline.allowed", return_value={}),
-            patch("computer_use.interaction.write.ui.pipeline.signature", return_value="layout"),
+            patch("computer_use.interaction.write.ui.pipeline.allowed", return_value=members),
         ):
             await self.controller.run(UIPointer(self.ui, "click", ((30, 50),), {"button": "left"}))
         self.engine.assert_awaited_once()
@@ -163,8 +192,9 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.call_args.args[1], target)
 
     async def test_lookup_unique_missing_and_ambiguous(self):
-        missing = local_failure("not found", "read again", "element_not_found")
-        self.ui._lookup_scopes = (object(), object())
+        missing = local_failure("not found", "element_not_found")
+        self.ui._lookup_scopes = self.lookup_scopes(2)
+        self.ui._instance.lookup_context = LookupContext(None, True, self.ui._lookup_scopes)
         second = {"binding": replace(self.target, node="other")}
         for results, error in (
             ([missing, self.snapshot], None),
@@ -174,6 +204,7 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
             with (
                 self.subTest(error=error),
                 patch.object(FindElementPipeline, "arun", new_callable=AsyncMock) as lookup,
+                patch("computer_use.interaction.agent.pipeline.monotonic", side_effect=(0, 1)),
             ):
                 lookup.side_effect = results
                 if error:
@@ -184,13 +215,18 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
                     self.assertIs(await self.controller.run(ResolveElement(self.ui, "button", 1000)), self.snapshot)
                 requests = [call.args[0] for call in lookup.call_args_list]
                 self.assertEqual([request.owner for request in requests], list(self.ui._lookup_scopes))
-                self.assertLessEqual(requests[1].timeout_ms, requests[0].timeout_ms)
+                self.assertEqual([request.timeout_ms for request in requests], [0, 0])
                 self.assertEqual(tuple(dict(segment) for segment in requests[0].path), ({"name": "button"},))
         self.engine.assert_not_awaited()
 
     async def test_incomplete_scope_cannot_claim_unique_match(self):
         self.ui._menu_only = False
         self.ui._instance.observed = set()
+        self.ui._context = "unknown"
+        self.ui._instance.directory = {"surfaces": []}
+        self.ui._instance.lookup_context = LookupContext(
+            WindowIdentity("window", "surface", "app"), False, self.ui._lookup_scopes
+        )
         with (
             patch("computer_use.interaction.agent.pipeline.allowed", return_value={"unknown": {}}),
             patch.object(FindElementPipeline, "arun", new_callable=AsyncMock, return_value=self.snapshot),
