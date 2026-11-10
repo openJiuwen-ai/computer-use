@@ -27,10 +27,10 @@ sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync --python 3.11 --no-dev --extra agent
+uv sync --python 3.12 --no-dev --extra agent
 ```
 
-The SDK, MCP and Agent code are installed in editable mode into the checkout's `.venv`, together with openJiuwen and other Agent dependencies. This command selects Python 3.11. Use `--python 3.12` or `--python 3.13` to match an existing environment. Run the following commands from the checkout root.
+The SDK, MCP and Agent code are installed in editable mode into the checkout's `.venv`, together with openJiuwen and other Agent dependencies. This command selects Python 3.12. Use `--python 3.11` or `--python 3.13` to match an existing environment. Run the following commands from the checkout root.
 
 Build or prepare the native backend, then check desktop access:
 
@@ -85,11 +85,7 @@ uv run --no-dev --extra agent python desktop_agent.py
 
 First check application enumeration, then use the streaming call to inspect actual window text and screenshots. Enumeration only verifies local backend calls; desktop access also requires the relevant permissions and successful observations.
 
-The agent uses the same execution pipeline. On macOS, object operations never inject global mouse or keyboard input; the agent explicitly selects direct Computer input when needed. Windows/Linux retain their existing behavior. `AgentConfig.allow_global_input` defaults to `True` for its local MCP session; an explicit `False` is forwarded as a restriction. Configure `AgentConfig.mcp` with `McpConfig` to connect to another MCP host. The async context manager closes the computer-operation session when the conversation ends.
-
-Model screenshot input always uses displayed image pixels and the `point((x, y))` example beside the image.
-The SDK handles resizing and display/window offsets. See the [MCP/SDK interface reference](mcp.en.md#4-interface-reference)
-for image locators and post-action observation semantics.
+`AgentConfig.allow_global_input` defaults to `True`. Set it to `False` to restrict global input in the local MCP session. Set `AgentConfig.mcp` to a `McpConfig` to connect to another MCP host. The async context manager closes the computer-operation session when the conversation ends.
 
 ## 4. Integrate an existing openJiuwen project
 

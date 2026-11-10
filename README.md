@@ -56,69 +56,17 @@ flowchart TD
     OS --> Desktop["Desktop applications"]
 ```
 
-DeepAgent manages model calls, conversation context and the tool loop. The engine manages the `Computer → App → Element` interfaces, target identity, observations and operation routing. OS adapters resolve native objects, prepare the input receiver and dispatch operations. A completed object action returns its `dispatched` or `verified` receipt and a bounded related observation. On macOS, Computer global input returns its dispatch receipt; request observation explicitly when needed. Agents use that observation, and further reads when needed, to judge task results. Failure of the related read does not erase or replay the action.
+DeepAgent manages model calls, conversation context and the tool loop. The engine manages target identity, observations and operation routing. OS adapters prepare input receivers and dispatch operations.
 
 ## Features
-
-App methods accept an optional `window=` scope; retained Elements and image Targets keep their own bindings.
-On macOS, confirmed dropdowns and menus are delivered as attached content of their host. A separate
-native capture or input receiver does not automatically become a new working window. Related content
-is returned with object actions; unknown relationships remain explicitly labelled sources, without
-widening the original window's input scope. Observations and same-source menu reads prefer diffs;
-the first delivered source or explicit `full=True` produces complete content. Each explicit read
-samples separately, including consecutive reads in one tool call. Automatic post-action
-observations return scoped text and receipts. Request an image explicitly when needed.
-On macOS, set `COMPUTER_USE_AX_SUBTREE_PREFETCH=1` before launching the SDK or MCP server to
-enable bulk attribute prefetch for eligible window trees. Child order, geometry and identity are
-read live. Missing or unavailable prefetch data uses ordinary AX collection. Image coordinates are
-pixels from the top-left of the delivered PNG, and one missing capture does not invalidate other usable pieces.
-On macOS, an ordinary single-left App coordinate click that precisely hits a selectable item in an
-open menu may use that item's Press action. Other coordinates retain their directed mouse route.
-Use `app.click(at=p, force_pointer=True)` when the mouse-event sequence itself is required. This
-option never grants global input or changes Computer/Element semantics. Windows/Linux keep their
-existing coordinate mouse routes.
-
-On Windows, ordinary reads observe the window in its current state. Use
-`app.read(window=ref, view="both", allow_foreground=True)` to explicitly permit restoration or activation
-of that window and receive a preparation receipt with the observed foreground state. A desktop image
-returned after window capture fails is labeled with its desktop scope. Use `computer.point((x, y))` to
-select a point from that image.
-
-When a Windows task specifies a full window title, `computer.app(window_title=title).read()`
-binds a unique, case-sensitive match in the visible native window catalogue. Reuse the App after
-the title changes. Its observations and action follow-up cover only the bound window. See the
-[SDK reference](docs/mcp.en.md#python-sdk) for menu paths and separate confirmation windows.
-
-On macOS, object input preparation conditionally returns foreground control changed temporarily
-by the SDK while retaining the target's internal input context. This is not an unconditional restore
-after every operation: explicit activation and subsequent user choices are preserved. Workspace
-switches and session shutdown do not send an extra deactivation notification that would undo an open
-menu; paired input and observers are still released. Equivalent foreground restoration and menu
-continuity improvements for Windows/Linux remain future work. Actual-impact receipts distinguish
-foreground changes, restoration outcomes and global input; they do not certify application business results.
-Menus that need foreground can retain it until a later selection or cancellation. The same interaction
-keeps its first borrowed context and, when possible, restores the exact original window. Nothing acts
-on the desktop between calls. Explicit Computer global input only discards the old restoration claim;
-it adds no focus preparation or automatic return, and never moves the real pointer back automatically.
-Native attached-content discovery and multiple AX sources sharing one physical window are also
-implemented first on macOS; Windows/Linux require separate implementation and validation.
 
 - **DeepAgent integration**: standard openJiuwen invocation, streaming and Runner integration, with computer-operation tools reusable in existing DeepAgent applications.
 - **Single-tool code execution**: the model writes Python, variables persist across calls, one call can complete a multi-step workflow.
 - **Accessibility-tree first**: elements are numbered by decimal refs; `element(path)` queries, paged text reads and menu reads are supported.
-- **Verifiable receipts**: actions retain `target / intent / status` independently of `observation_status` and `observation_error`. Input failures expose `code / effect / target / detail / impact`. `unsupported_operation` means the required capability or operation is unavailable; `permission_required` identifies a missing input grant.
-- **Background-first input**: prefer element and application-directed operations; macOS object methods remain non-global. Explicitly call direct Computer input methods when global mouse or keyboard input is needed.
+- **Verifiable receipts**: dispatch and post-action observation are reported separately. Observations show diffs by default. Request screenshots explicitly.
+- **Background-first input**: App methods accept an optional `window=` scope. On macOS, direct Computer methods send global input.
 - **Cross-platform native drivers**: one each for macOS, Windows and Linux behind the same protocol.
 - **Observable**: every execution is journaled as JSONL under `~/.computer-use/logs`, including code, observations and receipts.
-
-Name and path lookup first reuse the latest returned semantic observation, including an action's
-observation. Missing, incomplete or known-invalid evidence falls back to the existing live query in
-the same call. Use `app.element("Save", fresh=True)` to explicitly query current facts. `fresh` only
-controls names and paths: numbers and saved Elements keep their original binding, including after
-an application replaces a control with another of the same name. Cached lookup preserves all live
-write checks, preparation and restoration; it does not detect unobserved external object replacement.
-Use `result.observation.read_details(element=ref)` for already captured details. Explicit `app.read()`,
-`element.read()` and `element.read_text()` still acquire fresh observations; `full=True` controls presentation.
 
 ## Project Structure
 

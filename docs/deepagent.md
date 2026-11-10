@@ -27,10 +27,10 @@ sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync --python 3.11 --no-dev --extra agent
+uv sync --python 3.12 --no-dev --extra agent
 ```
 
-SDK、MCP 和 Agent 代码以 editable 方式安装到仓库的 `.venv`，同时安装 openJiuwen 等 Agent 依赖。此命令选择 Python 3.11。已有环境可通过 `--python 3.12` 或 `--python 3.13` 选择对应版本。以下命令均在仓库根目录执行。
+SDK、MCP 和 Agent 代码以 editable 方式安装到仓库的 `.venv`，同时安装 openJiuwen 等 Agent 依赖。此命令选择 Python 3.12。已有 Python 3.11 或 3.13 环境也可选择对应版本。以下命令均在仓库根目录执行。
 
 构建或准备原生后端，并检查桌面访问条件：
 
@@ -85,10 +85,7 @@ uv run --no-dev --extra agent python desktop_agent.py
 
 先核对应用枚举结果，再用流式调用检查实际窗口文字和截图。应用枚举成功仅验证本机后端调用，完整桌面访问还需所需权限和实际观察结果。
 
-Agent 使用统一执行管线。macOS 对象操作固定不注入全局鼠标或键盘；需要全局输入时由 Agent 显式选择 Computer 直接输入方法。Windows／Linux 当前保持原有行为。`AgentConfig.allow_global_input` 默认 `True`，本地 MCP 会话可使用全局鼠标和键盘输入；显式设置 `False` 会将该限制传递到会话。通过 `AgentConfig.mcp` 配置 `McpConfig` 可连接其他 MCP 宿主。异步上下文在对话结束时清理电脑操作会话。
-
-模型看图操作统一使用所展示图片的像素坐标，通过图片旁的 `point((x, y))` 示例定位；
-缩放、多屏和窗口偏移由 SDK 换算。用法和写后观察语义见 [MCP／SDK 接口说明](mcp.md#4-接口使用参考)。
+`AgentConfig.allow_global_input` 默认开启。设为 `False` 可限制本地 MCP 会话的全局输入。通过 `AgentConfig.mcp` 配置 `McpConfig` 可连接其他 MCP 宿主。异步上下文在对话结束时清理电脑操作会话。
 
 ## 4. 接入已有 openJiuwen 项目
 
