@@ -1,9 +1,11 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
+
 from computer_use_native_tools.evaluation.ledger import Episode
 from manual.save_shortcut_workflow import replace_and_save
 from test_program_runtime import Desktop, invoke
@@ -14,31 +16,33 @@ def test_native_fixture_never_saves_after_query_log_failure(tmp_path, phase):
     episode = Episode(tmp_path, {"task": "evidence-boundary"})
     calls = []
 
-    def replace(text, **kwargs):
+    async def replace(text, **kwargs):
         calls.append("replace")
 
-    def text():
+    async def text():
         return SimpleNamespace(text="Q4 replaced probe")
 
-    def click():
+    async def click():
         calls.append("save")
 
-    def read(**kwargs):
+    async def read(**kwargs):
         if phase == "menu_read":
             episode.journal._error = "injected full disk during query"
 
-    def element(name, **kwargs):
+    async def element(name):
         if phase == "element_lookup":
             episode.journal._error = "injected full disk during query"
         return SimpleNamespace(click=click)
 
     with pytest.raises(RuntimeError, match="evidence could not be persisted"):
-        replace_and_save(
-            episode,
-            SimpleNamespace(read=read, element=element),
-            SimpleNamespace(type_text=replace, read_text=text),
-            tmp_path,
-            "menu",
+        asyncio.run(
+            replace_and_save(
+                episode,
+                SimpleNamespace(read=read, element=element),
+                SimpleNamespace(type_text=replace, read_text=text),
+                tmp_path,
+                "menu",
+            )
         )
     assert calls == ["replace"]
 
@@ -48,8 +52,8 @@ def test_generic_runtime_stops_after_silently_reported_query_log_failure():
     failed = []
     original = desktop.read
 
-    def read(**kwargs):
-        result = original(**kwargs)
+    async def read(**kwargs):
+        result = await original(**kwargs)
         if desktop.content == "new":
             failed.append(True)
         return result

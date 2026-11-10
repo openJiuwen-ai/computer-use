@@ -5,18 +5,40 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
 from time import sleep
 
+LINUX_RUNTIME = Path("os_adapter/linux/.build/runtime")
 _WINDOWS_BUILD = Path("os_adapter/windows/.build")
 _WINDOWS_DRIVER = "computer-use-driver.exe"
 _WINDOWS_CAPTURE = "computer-use-capture.exe"
 _WINDOWS_FILES = (_WINDOWS_DRIVER, _WINDOWS_CAPTURE, "Interop.NativeUIA.dll")
 # The bundled .NET Framework executables exit before Main at 253 UTF-16 units.
 _WINDOWS_FRAMEWORK_PATH_MAX = 252
+
+
+def linux_python():
+    command = os.environ.get("COMPUTER_USE_PYTHON")
+    if command:
+        return shutil.which(command) or command
+    system_python = shutil.which("/usr/bin/python3")
+    if system_python is not None:
+        probe = subprocess.run(
+            [
+                system_python, "-I", "-S", "-c",
+                "import sys; sys.exit(sys.implementation.name != 'cpython' or sys.version_info < (3, 11))",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if probe.returncode == 0:
+            return system_python
+    return sys.executable
 
 
 def checkout_root():
@@ -113,7 +135,9 @@ def repository_root():
         backend = temporary / "backend.json"
         if backend.is_file():
             # Wheel installers need not preserve archive executable bits.
-            for name, details in json.loads(backend.read_text(encoding="utf-8"))["files"].items():
+            metadata = json.loads(backend.read_text(encoding="utf-8"))
+            files = metadata["files"] if "format" in metadata else metadata.get("files", {})
+            for name, details in files.items():
                 (temporary / name).chmod(details["mode"])
         _publish_runtime(temporary, target, windows=windows)
         return target
@@ -145,6 +169,9 @@ def native_driver(platform=None, root=None):
             args=[],
         )
     if platform == "linux":
+        if (root / LINUX_RUNTIME / "__main__.py").is_file():
+            # CPython adds the entry directory itself to the import path, including with -I.
+            return {"command": linux_python(), "args": ["-I", str(root / LINUX_RUNTIME)]}
         return dict(command=str(root / "os_adapter/linux/.venv/bin/python"), args=["-m", "computer_use_linux"])
     if platform == "win32":
         return dict(command=str(root / _WINDOWS_BUILD / _WINDOWS_DRIVER), args=[])

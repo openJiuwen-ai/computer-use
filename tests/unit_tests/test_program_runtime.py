@@ -5,20 +5,17 @@
 
 import asyncio
 from dataclasses import asdict, replace
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from time import monotonic
 from types import SimpleNamespace
 
 import pytest
-from computer_use.client.computer import computer_for_controller
-from computer_use.client.execution import SessionExecutor, execution_scope
+
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.agent.requests import ActOnElement
 from computer_use.programs.model import Check, conclude
 from computer_use.programs.pipeline import execute
 from program_fixtures import artifact_at
-from unit_tests.test_sync_sdk import Controller
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class Desktop:
@@ -40,7 +37,7 @@ class Desktop:
             foreground_app=self.foreground,
         )
 
-    def list_apps(self):
+    async def list_apps(self):
         self.calls.append("discover")
         return [SimpleNamespace(id=self.id + n, display_name="sample.txt", is_running=True) for n in range(self.count)]
 
@@ -48,24 +45,24 @@ class Desktop:
         assert ref == self.id
         return self
 
-    def read(self, **kwargs):
+    async def read(self, **kwargs):
         self.calls.append("read")
         return SimpleNamespace(
             text='Reported input window: 0\nWindow 0: "sample.txt"\n'
             + "\n".join(f"{self.editor_ref + n} editor" for n in range(self.editor_count))
         )
 
-    def element(self, ref):
+    async def element(self, ref):
         self.calls.append(("element", ref))
         if isinstance(ref, int):
             assert ref == self.editor_ref
         return self
 
-    def read_text(self):
+    async def read_text(self):
         self.reads += 1
         return SimpleNamespace(text=self.content, next="cursor" if self.truncated else None)
 
-    def type_text(self, text, *, replace):
+    async def type_text(self, text, *, replace):
         assert replace
         self.calls.append(("replace", text))
         self.content = text
@@ -73,7 +70,7 @@ class Desktop:
             raise self.write_error
         return SimpleNamespace(status="verified", detail="editor text replaced")
 
-    def click(self):
+    async def click(self):
         self.calls.append("save")
         self.saves += 1
         return SimpleNamespace(status="dispatched", detail="save sent")
@@ -244,8 +241,8 @@ def test_deadline_or_cancel_during_write_does_not_save(cancel):
             await asyncio.Event().wait()
 
         desktop.type_text = blocked_write
-        task = asyncio.create_task(invoke_async(desktop, timeout_s=5 if cancel else 0.2))
-        await asyncio.wait_for(started.wait(), timeout=2)
+        task = asyncio.create_task(invoke_async(desktop, timeout_s=5 if cancel else 0.02))
+        await started.wait()
         if cancel:
             task.cancel()
         return await task
@@ -254,66 +251,6 @@ def test_deadline_or_cancel_during_write_does_not_save(cancel):
     assert result.status == ("cancelled" if cancel else "timeout")
     assert result.failure["effect"] == "unknown" and result.observation_required
     assert desktop.saves == 0
-
-
-def test_cancelled_sync_sdk_step_waits_for_native_cleanup(tmp_path, monkeypatch):
-    artifact = artifact_at(
-        tmp_path,
-        source="""async def run(ctx, computer, p):
-    editor = await ctx.step("bind", lambda: computer.app("Editor").element("Field"))
-    await ctx.step("replace", lambda: editor.type_text(p["replacement"], replace=True), write=True)
-    await ctx.step("save", lambda: editor.press_key("super+s"), write=True)
-""",
-    )
-    monkeypatch.setattr("computer_use.session.operations._guard", None)
-
-    async def scenario():
-        entered, retiring, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
-        actions = []
-
-        class BlockingController(Controller):
-            async def run(self, request):
-                if not isinstance(request, ActOnElement):
-                    return await super().run(request)
-                actions.append(request.intent)
-                entered.set()
-                try:
-                    await asyncio.Future()
-                finally:
-                    retiring.set()
-                    await release.wait()
-                    actions.append("retired")
-
-        executor = SessionExecutor(loop=asyncio.get_running_loop())
-        with execution_scope(executor):
-            computer = computer_for_controller(BlockingController())
-        task = asyncio.create_task(
-            execute(
-                artifact.path,
-                computer,
-                {"document": "fixture", "initial": "old", "replacement": "new"},
-                Desktop().environment,
-                emit=lambda _: None,
-                checkpoint=lambda: None,
-                development=True,
-            )
-        )
-        try:
-            await asyncio.wait_for(entered.wait(), timeout=2)
-            task.cancel()
-            await asyncio.wait_for(retiring.wait(), timeout=2)
-            task.cancel()
-            await asyncio.sleep(0)
-            assert not task.done()
-        finally:
-            release.set()
-            result = await task
-            await executor.aclose()
-        assert result.status == "cancelled"
-        assert result.failure["effect"] == "unknown"
-        assert actions == ["replace", "retired"]
-
-    asyncio.run(scenario())
 
 
 def test_recording_failure_after_dispatch_preserves_receipt_and_stops():

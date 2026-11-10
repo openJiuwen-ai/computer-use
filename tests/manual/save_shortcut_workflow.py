@@ -8,11 +8,12 @@ from a permission-authorized terminal. Never rerun a write within an episode.
 """
 
 import argparse
+import asyncio
 import json
 import os
 import subprocess
 from pathlib import Path
-from time import monotonic, sleep
+from time import monotonic
 
 from computer_use import Computer
 from computer_use.diagnostics import set_diagnostic_handler
@@ -22,30 +23,18 @@ from computer_use_native_tools.evaluation.ledger import Check, Episode
 from computer_use_native_tools.evaluation.provenance import digest, runtime_snapshot
 
 
-def stop_fixture(fixture):
+async def stop_fixture(fixture):
     (fixture / "stop").touch()
     deadline = monotonic() + 2
     while monotonic() < deadline:
         event_log = fixture / "events.jsonl"
         if event_log.exists() and '"kind":"exit"' in event_log.read_text():
             return True
-        sleep(0.1)
+        await asyncio.sleep(0.1)
     return False
 
 
-def fixture_window(computer, episode_id):
-    title = f"Q4 Save Probe {episode_id}"
-    deadline = monotonic() + 15
-    while monotonic() < deadline:
-        catalogue = computer.list_windows(app_name="Q4 Save Probe")
-        matches = [window for window in catalogue["windows"] if window["title"] == title]
-        if len(matches) == 1 and not catalogue["stop_reasons"]:
-            return computer.app(matches[0]["app_id"]), matches[0]["window_ref"]
-        sleep(0.2)
-    raise RuntimeError("Fixture window not uniquely discovered")
-
-
-def run(bundle, output, route, target="responder", initial_focus="background", fault="none"):
+async def run(bundle, output, route, target="responder", initial_focus="background", fault="none"):
     episode = Episode(
         output,
         {
@@ -68,7 +57,7 @@ def run(bundle, output, route, target="responder", initial_focus="background", f
     fixture = episode.directory / "fixture"
     fixture.mkdir()
     fixtures = [fixture]
-    computer = None
+    computer = Computer()
     set_diagnostic_handler(episode.diagnostic)
     set_action_handler(episode.action)
     set_observation_handler(episode.observation)
@@ -77,7 +66,7 @@ def run(bundle, output, route, target="responder", initial_focus="background", f
     try:
         start = monotonic()
         try:
-            computer = Computer(allow_global_input=False)
+            await computer.list_apps()
             subprocess.run(
                 [
                     "open",
@@ -89,19 +78,26 @@ def run(bundle, output, route, target="responder", initial_focus="background", f
                     target,
                 ],
                 check=True,
-                timeout=10,
             )
-            app, window = fixture_window(computer, episode.id)
+            deadline = monotonic() + 15
+            while monotonic() < deadline:
+                matches = [a for a in await computer.list_apps() if episode.id in a.display_name]
+                if len(matches) == 1:
+                    app = computer.app(matches[0].id)
+                    break
+                await asyncio.sleep(0.2)
+            else:
+                raise RuntimeError("Fixture window not uniquely discovered")
         finally:
             reset_duration = monotonic() - start
         with episode.step("observe"):
-            app.read(view="tree", window=window)
-            editor = app.element([{"identifier": "q4-editor"}], window=window)
-            if editor.read_text().text != "Q4 initial probe":
+            await app.read(view="tree")
+            editor = await app.element([{"identifier": "q4-editor"}])
+            if (await editor.read_text()).text != "Q4 initial probe":
                 raise RuntimeError("Wrong initial contents")
         if fault == "replace-target":
             with episode.step("replace_native_instance"):
-                if not stop_fixture(fixture):
+                if not await stop_fixture(fixture):
                     raise RuntimeError("Original fixture did not acknowledge exit")
                 replacement = episode.directory / "replacement"
                 replacement.mkdir()
@@ -114,10 +110,10 @@ def run(bundle, output, route, target="responder", initial_focus="background", f
                 while not (replacement / "events.jsonl").exists():
                     if monotonic() >= deadline:
                         raise RuntimeError("Replacement fixture did not start")
-                    sleep(0.1)
+                    await asyncio.sleep(0.1)
             with episode.step("write_using_destroyed_target"):
                 try:
-                    editor.type_text("MUST NOT REACH REPLACEMENT", replace=True)
+                    await editor.type_text("MUST NOT REACH REPLACEMENT", replace=True)
                 except ComputerUseError as error:
                     episode.record("expected_stale_target", code=error.code, effect=error.effect)
                     if error.code != "stale_target" or error.effect != "none":
@@ -125,10 +121,13 @@ def run(bundle, output, route, target="responder", initial_focus="background", f
                 else:
                     raise RuntimeError("Destroyed target unexpectedly accepted input")
             with episode.step("independent_replacement_check"):
-                replacement_app, replacement_window = fixture_window(computer, episode.id)
-                replacement_app.read(view="tree", window=replacement_window)
-                replacement_editor = replacement_app.element([{"identifier": "q4-editor"}], window=replacement_window)
-                content = replacement_editor.read_text()
+                entries = [a for a in await computer.list_apps() if episode.id in a.display_name]
+                if len(entries) != 1:
+                    raise RuntimeError("Replacement fixture not uniquely observed")
+                replacement_app = computer.app(entries[0].id)
+                await replacement_app.read(view="tree")
+                replacement_editor = await replacement_app.element([{"identifier": "q4-editor"}])
+                content = await replacement_editor.read_text()
                 events = [json.loads(line) for line in (replacement / "events.jsonl").read_text().splitlines()]
                 untouched = (
                     content.next is None
@@ -141,50 +140,40 @@ def run(bundle, output, route, target="responder", initial_focus="background", f
                     {"content_sha256": digest(content.text.encode()), "events": events},
                 )
         else:
-            result = replace_and_save(episode, app, editor, fixture, route, window=window)
+            result = await replace_and_save(episode, app, editor, fixture, route)
     except BaseException as error:
         episode.failed(error)
     finally:
         start = monotonic()
-        exited = []
-        try:
-            exited = [stop_fixture(item) for item in fixtures]
-        except OSError as error:
-            episode.failed(error)
-        finally:
-            try:
-                if computer is not None:
-                    computer.close()
-            except Exception as error:  # noqa: BLE001 - Close failure remains part of the episode.
-                episode.failed(error)
-            finally:
-                set_diagnostic_handler(None)
-                set_action_handler(None)
-                set_observation_handler(None)
+        exited = [await stop_fixture(item) for item in fixtures]
+        computer._controller.transport.close()
+        set_diagnostic_handler(None)
+        set_action_handler(None)
+        set_observation_handler(None)
         cleanup = {
-            "status": "fixture_exit_recorded" if exited and all(exited) else "fixture_exit_unconfirmed",
+            "status": "fixture_exit_recorded" if all(exited) else "owned_fixture_stop_requested",
             "duration_s": monotonic() - start,
         }
     return episode.finish(result, reset_duration_s=reset_duration, cleanup=cleanup)
 
 
-def replace_and_save(episode, app, editor, fixture, route, *, window=None):
+async def replace_and_save(episode, app, editor, fixture, route):
     with episode.step("replace"):
-        editor.type_text("Q4 replaced probe", replace=True)
-        if editor.read_text().text != "Q4 replaced probe":
+        await editor.type_text("Q4 replaced probe", replace=True)
+        if (await editor.read_text()).text != "Q4 replaced probe":
             raise RuntimeError("Replacement not observed")
     with episode.step("save"):
         if route == "key":
-            editor.press_key("super+s")
+            await editor.press_key("super+s")
         else:
-            app.read(view="tree", menu_path=["File"], window=window)
-            save = app.element("Save", window=window)
+            await app.read(view="tree", menu_path=["File"])
+            save = await app.element("Save")
             episode.require_log()
-            save.click()
+            await save.click()
     with episode.step("independent_acceptance"):
         deadline = monotonic() + 3
         while not (fixture / "saved.txt").exists() and monotonic() < deadline:
-            sleep(0.1)
+            await asyncio.sleep(0.1)
         actual = (fixture / "saved.txt").read_bytes() if (fixture / "saved.txt").exists() else None
         events = [json.loads(line) for line in (fixture / "events.jsonl").read_text().splitlines()]
         result = Check(
@@ -208,5 +197,7 @@ if __name__ == "__main__":
     parser.add_argument("--initial-focus", choices=("background", "foreground"), default="background")
     parser.add_argument("--fault", choices=("none", "replace-target"), default="none")
     args = parser.parse_args()
-    result = run(args.bundle.resolve(), args.output.resolve(), args.route, args.target, args.initial_focus, args.fault)
+    result = asyncio.run(
+        run(args.bundle.resolve(), args.output.resolve(), args.route, args.target, args.initial_focus, args.fault)
+    )
     print(json.dumps({k: result[k] for k in ("episode_id", "outcome", "acceptance", "journal")}, ensure_ascii=False))  # noqa: T201

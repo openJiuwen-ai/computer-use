@@ -8,6 +8,7 @@ import json
 
 from computer_use.programs.artifact import Artifact
 
+
 DOCUMENT_PROGRAM = """import hashlib
 import re
 
@@ -42,7 +43,7 @@ async def run(ctx, computer, p):
 
 def artifact_at(path, *, source=DOCUMENT_PROGRAM, program_id="test.document", schema=None, acceptance=None):
     path.mkdir(parents=True, exist_ok=True)
-    (path / "program.py").write_bytes(source.encode("utf-8"))
+    (path / "program.py").write_text(source)
     schema = schema or {
         key: {"type": "string", "min_length": 1, "max_length": 4096} for key in ("document", "initial", "replacement")
     }
@@ -57,7 +58,7 @@ def artifact_at(path, *, source=DOCUMENT_PROGRAM, program_id="test.document", sc
         or {"condition": "independent_result", "scope_parameter": "document", "expected_parameters": ["replacement"]},
         "constraints": "Synthetic mechanism fixture; no desktop application",
     }
-    (path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (path / "manifest.json").write_text(json.dumps(manifest))
     return Artifact.read(path)
 
 

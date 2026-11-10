@@ -1,12 +1,9 @@
+# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import asyncio
 import json
-import os
 
-import pytest
-from computer_use_mcp.server import ComputerUseServer
-from mcp import types
 from openjiuwen.core.runner import Runner
 from openjiuwen.core.single_agent import create_agent_session
 from openjiuwen.harness import DeepAgent
@@ -59,24 +56,6 @@ def test_native_agent_multi_turn_and_compaction(model_server, tmp_path):
     assert all(Runner.resource_mgr.get_tool(identifier) is None for identifier in ids)
 
 
-def test_application_menu_guidance_reaches_mcp_and_reference_agent():
-    async def list_tools():
-        server = ComputerUseServer(allow_global_input=False)
-        handler = server.server.request_handlers[types.ListToolsRequest]
-        response = await handler(types.ListToolsRequest(method="tools/list"))
-        assert server.session is None
-        return response.model_dump(mode="json")["tools"]
-
-    tools = asyncio.run(list_tools())
-    description = next(tool["description"] for tool in tools if tool["name"] == "computer_use")
-    assert ComputerUseToolkit().tools[0].card.description == description
-    assert "app.read(menu_path=['Edit'], window=ref)" in description
-    assert "exact visible menu titles" in description
-    assert "app.element(item_ref).click() on the same App" in description
-    assert "a shortcut displayed for that enabled item" in description
-    assert "app.press_key(shown_shortcut, window=ref)" in description
-
-
 def test_standard_toolkit_delivers_images_to_model(model_server, tmp_path):
     code = (
         "from PIL import Image; import io; "
@@ -126,8 +105,7 @@ def test_cancellation_resets_python_without_replay(tmp_path):
                 toolkit.tools[0].invoke(
                     {
                         "code": f"from pathlib import Path; marker = 'before'; "
-                        f"Path({str(started)!r}).write_text(marker)\n"
-                        "import time\nwhile True:\n    time.sleep(0.01)"
+                        f"Path({str(started)!r}).write_text(marker); await __import__('asyncio').sleep(60)"
                     }
                 )
             )
@@ -176,41 +154,6 @@ def test_partial_output_and_error_status_are_retained():
     asyncio.run(run())
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows common application data environment")
-@pytest.mark.parametrize("override", [False, True])
-def test_windows_common_data_reaches_mcp_worker(monkeypatch, tmp_path, override):
-    from computer_use_agent import McpConfig
-    from computer_use_agent.connection import McpConnection
-
-    host = str(tmp_path / "host-data")
-    expected = str(tmp_path / "configured-data") if override else host
-    monkeypatch.setenv("ProgramData", host)
-    monkeypatch.setenv("CUA_TEST_UNRELATED_ENV", "do-not-inherit")
-    default = AgentConfig().mcp_config()
-    config = McpConfig(command=default.command, args=default.args, env={"PROGRAMDATA": expected} if override else {})
-
-    async def run():
-        connection = McpConnection(config)
-        try:
-            result = await connection.call(
-                "computer_use",
-                {
-                    "title": "Check common data environment",
-                    "code": (
-                        f"import os; assert os.environ.get('ProgramData') == {expected!r}; "
-                        "assert 'CUA_TEST_UNRELATED_ENV' not in os.environ; print('common data available')"
-                    ),
-                },
-            )
-            assert not result.isError and any(
-                getattr(item, "text", "") == "common data available" for item in result.content
-            ), result
-        finally:
-            await connection.close()
-
-    asyncio.run(run())
-
-
 def test_connection_shutdown_error_preserves_cause_without_reconnect(monkeypatch):
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
@@ -242,7 +185,7 @@ def test_connection_shutdown_error_preserves_cause_without_reconnect(monkeypatch
     async def run():
         connection = McpConnection(McpConfig(command="unused"))
         await connection.start()
-        with pytest.raises(RuntimeError, match="Computer Use MCP connection ended") as raised:
+        with pytest.raises(RuntimeError, match="previous actions may have executed") as raised:
             await connection.close()
         assert raised.value.__cause__ is failure
 

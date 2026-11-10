@@ -6,13 +6,13 @@
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from .config import AgentConfig, McpConfig
+from .config import AgentConfig, McpConfig, RoutingConfig
 
 if TYPE_CHECKING:
     from .agent import ComputerUseAgent, create_agent
     from .toolkit import ComputerUseToolkit
 
-__all__ = ["AgentConfig", "ComputerUseAgent", "ComputerUseToolkit", "McpConfig", "create_agent"]
+__all__ = ["AgentConfig", "ComputerUseAgent", "ComputerUseToolkit", "McpConfig", "RoutingConfig", "create_agent"]
 
 _MODULES = {
     "ComputerUseAgent": ".agent",
