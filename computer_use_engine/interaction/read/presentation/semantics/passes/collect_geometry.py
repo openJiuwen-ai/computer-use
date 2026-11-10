@@ -22,14 +22,11 @@ def _outside_window_fields(source: ProjectionInput, branch: BranchFacts, geometr
     native = snapshot.native
     root = snapshot.refs.get(source.root)
     frame = geometry.boxes.get(source.root)
-    if (
-        not (request.compact and request.public_api and request.share_descriptions)
-        or snapshot.scope_kind != "window"
-        or native.backend != "macos"
-        or root is None
-        or native.roots != (root,)
-        or frame is None
-    ):
+    if not (request.compact and request.public_api and request.share_descriptions):
+        return frozenset()
+    if snapshot.scope_kind != "window" or native.backend != "macos":
+        return frozenset()
+    if root is None or native.roots != (root,) or frame is None:
         return frozenset()
     window = native.nodes[root]
     children = window.relations.get("children")
@@ -48,7 +45,9 @@ def _outside_window_fields(source: ProjectionInput, branch: BranchFacts, geometr
         if node.role != "text_field" or node.states.enabled is not True:
             continue
         parent, owner = node.relations.get("parent"), node.relations.get("window")
-        if parent is None or parent.evidence == "candidate" or parent.targets != (root,) or parent.total != 1:
+        if parent is None or parent.evidence == "candidate":
+            continue
+        if parent.targets != (root,) or parent.total != 1:
             continue
         if owner is not None and any(target != root for target in owner.targets):
             continue

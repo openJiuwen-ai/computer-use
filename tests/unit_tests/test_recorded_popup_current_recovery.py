@@ -122,7 +122,7 @@ def test_original_popup_already_absent_does_not_force_a_new_old_popup_capture(mo
     parent = next(item for item in later["surfaces"] if item["window"] == "2")
     # InterfaceReadPipeline.run resolves the current App display selection
     # before _collect. The generic fixture helper instead selects row zero.
-    state.anchor = controller.reader._selection("application", "Fixture", later, "2")
+    state.anchor = controller.reader.select_working_window("application", "Fixture", later, "2")
     current = replace(parent_result(state, parent, later, later), scope_confirmed=True)
     controller.reader.read = AsyncMock(return_value=current)
     pipeline = InterfaceReadPipeline(controller)

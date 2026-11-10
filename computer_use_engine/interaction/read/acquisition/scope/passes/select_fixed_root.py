@@ -27,9 +27,7 @@ def create(
         evidence.
         """
         selection, directory = value.request.selection, value.directory
-        # The pipeline shares retained bindings with their owning service.
-        # pylint: disable-next=protected-access
-        return services._selection(
+        return services.select_working_window(
             selection.application, selection.name, directory, selection.root.root_window, previous=selection
         ), directory
 

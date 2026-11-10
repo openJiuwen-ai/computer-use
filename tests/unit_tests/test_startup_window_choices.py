@@ -64,7 +64,7 @@ def test_first_read_startup_preserves_window_choice_impact_after_launch(monkeypa
         "code": "ambiguous_target", "effect": "none", "target": "window",
         "detail": "Several windows are available.", "impact": impact,
     })
-    reader._selection = Mock(side_effect=original)
+    monkeypatch.setattr(reader, "select_working_window", Mock(side_effect=original))
     launch = {
         "application": running,
         "dispatch": "dispatched",

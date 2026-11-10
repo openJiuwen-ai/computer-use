@@ -32,7 +32,11 @@ def _crosses_relation(
     groups: Sequence[tuple[str, ...]], draft: InterfaceDraft, blocks: Mapping[str, InterfaceBlock]
 ) -> bool:
     """Keep established label membership inside one proposed reading region."""
-    owners = {ref: index for index, group in enumerate(groups) for key in group for ref in block_sources(key, blocks)}
+    owners: dict[str, int] = {}
+    for index, group in enumerate(groups):
+        for key in group:
+            for ref in block_sources(key, blocks):
+                owners[ref] = index
     for ref, owner in owners.items():
         node = draft.projected_nodes[ref]
         related = [node.get("titleRef"), node.get("visualLabelRef"), *node.get("labelTargets", ())]

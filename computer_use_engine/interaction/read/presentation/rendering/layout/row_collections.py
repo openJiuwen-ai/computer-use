@@ -32,13 +32,16 @@ def capture_row_collections(observation: NativeObservation, refs: Mapping[str, s
             return None
         key, relation = choices[0]
         prefix = ("nodes", token, "relations", key)
+        if relation.evidence not in ("reported", "verified") or relation.enumeration != "enumerated":
+            return None
         if (
-            relation.evidence not in ("reported", "verified")
-            or relation.enumeration != "enumerated"
-            or relation.offset not in (None, 0)
+            relation.offset not in (None, 0)
             or relation.total != len(relation.targets)
             or relation.positions != tuple(range(len(relation.targets)))
-            or len(set(relation.targets)) != len(relation.targets)
+        ):
+            return None
+        if (
+            len(set(relation.targets)) != len(relation.targets)
             or any(target not in observation.nodes or target not in aliases for target in relation.targets)
             or issues.overlapping(prefix)
         ):

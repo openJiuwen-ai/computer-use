@@ -24,14 +24,11 @@ def share_field_labels(request: AtomFinalizeRequest) -> AtomFinalizeRequest:
     """
     interface = request.interface
     policy = request.branch.request
-    if (
-        interface is None
-        or interface.format_version != "geometric-2"
-        or not policy.compact
-        or not policy.public_api
-        or not policy.share_descriptions
-        or request.projection.source.context.get("subtreeRef")
-    ):
+    if interface is None or interface.format_version != "geometric-2":
+        return request
+    if not policy.compact or not policy.public_api or not policy.share_descriptions:
+        return request
+    if request.projection.source.context.get("subtreeRef"):
         return request
     atoms = dict(request.atoms.atoms)
     applicable: dict[str, frozenset[str]] = {}
@@ -41,13 +38,9 @@ def share_field_labels(request: AtomFinalizeRequest) -> AtomFinalizeRequest:
         block = interface.blocks[key]
         if block.kind == "window":
             labels = frozenset()
-        if (
-            block.kind == "field"
-            and block.label_ref is not None
-            and block.label_ref in atoms
-            and block.label_ref in interface.ref_locations
-        ):
-            labels = labels | {block.label_ref}
+        if block.kind == "field" and block.label_ref is not None:
+            if block.label_ref in atoms and block.label_ref in interface.ref_locations:
+                labels = labels | {block.label_ref}
         for ref in block.source_refs:
             applicable[ref] = labels
         pending.extend((child, labels) for child in reversed(block.children))
@@ -57,10 +50,10 @@ def share_field_labels(request: AtomFinalizeRequest) -> AtomFinalizeRequest:
         if slot is None or not isinstance(slot.value, tuple) or len(slot.value) != 1:
             continue
         label = slot.value[0]
+        if label == ref or label not in applicable.get(ref, ()):
+            continue
         if (
-            label == ref
-            or label not in applicable.get(ref, ())
-            or interface.source.scopes.get(ref) is None
+            interface.source.scopes.get(ref) is None
             or interface.source.scopes.get(ref) != interface.source.scopes.get(label)
         ):
             continue

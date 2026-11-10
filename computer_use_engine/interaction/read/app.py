@@ -387,7 +387,7 @@ class NativeAppReader:
         )
 
     @staticmethod
-    def _selection(
+    def select_working_window(
         application: str,
         name: str,
         directory: DirectoryFacts,

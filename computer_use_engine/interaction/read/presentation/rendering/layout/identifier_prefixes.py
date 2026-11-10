@@ -39,18 +39,15 @@ def capture_identifiers(
     for issue in observation.issues:
         if not issue.path or (issue.path == ("nodes",) and issue.state != "partial"):
             return MappingProxyType({})
-        if (
-            issue.path[0] == "nodes"
-            and len(issue.path) >= 2
-            and (len(issue.path) == 2 or issue.path[2] == "identifier")
-        ):
-            blocked.add(issue.path[1])
+        if issue.path[0] == "nodes" and len(issue.path) >= 2:
+            if len(issue.path) == 2 or issue.path[2] == "identifier":
+                blocked.add(issue.path[1])
     result: dict[str, NativeIdentifier] = {}
     for ref, token in refs.items():
         node = observation.nodes.get(token)
-        if node is None or counts[token] != 1 or ref not in source_scopes or not isinstance(node.identifier, str):
+        if node is None or counts[token] != 1 or ref not in source_scopes:
             continue
-        if token in blocked:
+        if not isinstance(node.identifier, str) or token in blocked:
             continue
         result[ref] = NativeIdentifier(
             node.identifier, token, (observation.session, observation.id, source_scopes[ref])

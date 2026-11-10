@@ -60,7 +60,7 @@ def test_app_read_reselects_current_form_after_inner_fixed_launcher_disappears(m
     launcher, form = window("Launcher"), window("Form")
     before, after = read_directory(launcher), read_directory(form, ended=(launcher,) if ended else ())
     controller, app, state = read_setup(before)
-    old = controller.reader._selection("application", "Fixture", before, "Launcher")
+    old = controller.reader.select_working_window("application", "Fixture", before, "Launcher")
     state.anchor = old
     failure = (
         FixedWindowInvalidated(old.root, "launcher ended", directory=after)
@@ -89,7 +89,7 @@ def test_app_read_reselects_current_form_after_inner_fixed_launcher_disappears(m
     assert state.evidence[identity].lifetime is (WindowLifetime.RETIRED if ended else WindowLifetime.RETAINED)
     assert state.evidence[identity].membership is (Knowledge.NO if ended else Knowledge.UNKNOWN)
     with pytest.raises(FixedWindowInvalidated if ended else FixedWindowUnconfirmed):
-        controller.reader._selection("application", "Fixture", after, "Launcher", previous=old)
+        controller.reader.select_working_window("application", "Fixture", after, "Launcher", previous=old)
 
 
 @pytest.mark.parametrize("delivered, duplicate", [(True, False), (False, False), (True, True)])

@@ -319,7 +319,7 @@ class InterfaceReadPipeline:
         if related_app_scope and ui._anchor is None and instance.anchor is None:
             preferred = related.preferred(directory, related.original.root_window)
             if preferred in instance.members:
-                instance.anchor = controller.reader._selection(
+                instance.anchor = controller.reader.select_working_window(
                     directory["application"], instance.name, directory, preferred
                 )
         if menu_path is not None:
@@ -549,7 +549,7 @@ class InterfaceReadPipeline:
             initial_app_root = initial and not window_family_only and principal_error is None and ui._anchor is None
             if initial_app_root and identity != plan.menu_origin and not new_modal_root:
                 initial = False
-                selected = controller.reader._selection(
+                selected = controller.reader.select_working_window(
                     instance.anchor.application, instance.anchor.name, directory, anchor
                 )
                 try:
@@ -776,7 +776,7 @@ class InterfaceReadPipeline:
                 if fallback.tree is not None or fallback.image is not None:
                     ui._context = old["window"]
                     if ui._anchor is None:
-                        instance.anchor = controller.reader._selection(
+                        instance.anchor = controller.reader.select_working_window(
                             directory["application"], instance.name, directory, old["window"]
                         )
                     principal_error = None
@@ -801,7 +801,7 @@ class InterfaceReadPipeline:
             if principal_error is None and (related is not None or ui._anchor is not None):
                 ui._context = principal
                 if related is not None and ui._anchor is None:
-                    instance.anchor = controller.reader._selection(
+                    instance.anchor = controller.reader.select_working_window(
                         directory["application"], instance.name, directory, principal
                     )
         if principal_error is not None:

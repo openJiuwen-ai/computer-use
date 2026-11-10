@@ -322,8 +322,7 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                 )
             else:
                 original = cast("WorkingWindow", call.request.selector)
-                # pylint: disable-next=protected-access
-                selection = services._selection(
+                selection = services.select_working_window(
                     original.application, original.name, directory, original.root.root_window, previous=original
                 )
             return ApplicationSelection(
@@ -355,8 +354,9 @@ class AppReadPreparationPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
             selection = None
             if directory["surfaces"] or "nativeApplicationRoots" not in services.port.connection.capabilities:
                 try:
-                    # pylint: disable-next=protected-access
-                    selection = services._selection(application["id"], application["displayName"], directory, window)
+                    selection = services.select_working_window(
+                        application["id"], application["displayName"], directory, window
+                    )
                 except ComputerUseError as error:
                     if (
                         window is None

@@ -25,8 +25,8 @@ class RequestScope:
         self._anchor = entry.identity.window
         self._context, self._image = None, None
         self._lookup_scopes, self._menu_only = (), False
-        selection = controller.reader._selection(
-            entry.application, entry.name, entry.directory, self._anchor,
+        selection = controller.reader.select_working_window(
+            entry.application, entry.name, entry.directory, self._anchor
         )
         self._window_identity = selection.root
         state = AppState(

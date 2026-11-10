@@ -118,7 +118,7 @@ def display_selection(controller, instance, directory):
             key = _retained_or_readable_window(instance, entries)
     if key is None:
         return None
-    return controller.reader._selection(directory["application"], instance.name, directory, key)
+    return controller.reader.select_working_window(directory["application"], instance.name, directory, key)
 
 
 def _retained_or_readable_window(instance, entries):
@@ -155,7 +155,7 @@ def adopt(controller, ui, directory, selection=None):
     else:
         fixed = state.selection
         try:
-            state.selection = controller.reader._selection(
+            state.selection = controller.reader.select_working_window(
                 directory["application"], name, directory, ui._anchor, previous=fixed
             )
         except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
@@ -168,7 +168,7 @@ def adopt(controller, ui, directory, selection=None):
     for key, item in instance.members.items():
         identity = WindowIdentity.of(item)
         if instance.owner_identities.get(key) != identity:
-            selected = controller.reader._selection(directory["application"], name, directory, key)
+            selected = controller.reader.select_working_window(directory["application"], name, directory, key)
             native_state = AppState(
                 instance.selector,
                 selection=selected,
