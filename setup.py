@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import runpy
@@ -25,6 +26,7 @@ except ModuleNotFoundError:
     from wheel.bdist_wheel import bdist_wheel
 
 ROOT = Path(__file__).resolve().parent
+_LOG = logging.getLogger(__name__)
 BACKENDS = runpy.run_path(str(ROOT / "scripts/backend_artifacts.py"))
 BACKEND_ARCHIVE = os.environ.get("COMPUTER_USE_BACKEND_ARCHIVE")
 BACKEND_DIR = os.environ.get("COMPUTER_USE_BACKEND_DIR")
@@ -126,7 +128,7 @@ def install_source_backend(build_lib: Path, output: Path, platform_tag: str | No
                 return files
     status_file = "backend-status.json"
     (output / status_file).write_text(json.dumps({"reason": reason}), encoding="utf-8")
-    print(f"Computer Use driver unavailable ({reason}); installing the Python SDK.", file=sys.stderr)
+    _LOG.warning("Computer Use driver unavailable (%s). Installing the Python SDK.", reason)
     return [status_file]
 
 
