@@ -20,7 +20,7 @@ from rich.console import Console
 from .conftest import answer, tool_call
 
 
-def test_cli_configuration_and_legacy_aliases(tmp_path, monkeypatch):
+def test_cli_configuration_ignores_legacy_aliases(tmp_path, monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
     path = tmp_path / "config.json"
@@ -29,7 +29,11 @@ def test_cli_configuration_and_legacy_aliases(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "environment-key")
     value = load(path, overrides={"model": "override"})
     assert value["model"] == "override"
-    assert value["api_base"] == "http://127.0.0.1/v1"
+    # Legacy camelCase spellings are no longer mapped to canonical keys.
+    assert "api_base" not in value
+    assert value["baseUrl"] == "http://127.0.0.1/v1"
+    assert value["apiKey"] == "file-key"
+    # The environment still feeds the canonical keys.
     assert value["api_key"] == "environment-key"
 
 
@@ -216,7 +220,7 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
 
     if os.name != "posix":
         pytest.skip("This test sends POSIX process signals.")
-    server = model_server([tool_call("await __import__('asyncio').sleep(60)")])
+    server = model_server([tool_call("import time; time.sleep(60)")])
     path = tmp_path / "model.json"
     path.write_text(
         json.dumps(
