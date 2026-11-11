@@ -21,6 +21,9 @@ import ApplicationServices
         let menu: AXUIElement
         var windowID: CGWindowID?
     }
+    @MainActor private final class TrackingState {
+        var opened = [TrackedMenu]()
+    }
     private var background: BackgroundTarget { BackgroundTarget(application) }
 
     func receiverReady() throws -> Bool {
@@ -152,21 +155,21 @@ import ApplicationServices
         guard let process = NativeProcessIdentity.read(application.processIdentifier) else {
             throw DriverError("menu process disappeared", code: .staleTarget)
         }
-        var opened = [TrackedMenu]()
+        let tracking = TrackingState()
         var pointerMenu: WindowGeometry.WindowMapping?
         let pointerActivity = pointerBody.map { _ in NativeForegroundResponsibility.desktopSnapshot().activity }
         func closePrepared(afterClick: Bool = false) async -> Bool {
-            var remaining = opened
+            var remaining = tracking.opened
             if let pointerActivity {
-                if afterClick, !opened.isEmpty {
+                if afterClick, !tracking.opened.isEmpty {
                     // Give the native command its own menu-close transition
                     // before sending any cancellation of our preparation.
                     let closed = await Self.waitForEvidence(seconds: 0.25, sample: {
-                        pendingTrackedMenus(opened, pid: process.pid).isEmpty ? true : nil
+                        pendingTrackedMenus(tracking.opened, pid: process.pid).isEmpty ? true : nil
                     }, pause: Self.cleanupPause)
                     if closed != nil { return true }
                 }
-                remaining = pendingTrackedMenus(opened, pid: process.pid)
+                remaining = pendingTrackedMenus(tracking.opened, pid: process.pid)
                 if !remaining.isEmpty {
                     let current = NativeForegroundResponsibility.desktopSnapshot()
                     guard current.activity == pointerActivity, current.foregroundPID == process.pid else {
@@ -196,7 +199,7 @@ import ApplicationServices
                 }
                 // Retain cleanup before calling: an AX error can still leave
                 // menu tracking active. Never invoke the requested leaf here.
-                opened.append(.init(menu: branch.menu, windowID: nil))
+                tracking.opened.append(.init(menu: branch.menu, windowID: nil))
                 onPreparation("refresh selected menu branch")
                 onNativePreparation(
                     .init(kind: .menuContext, phase: .willSend, detail: "refresh selected menu branch", window: nil))
@@ -214,7 +217,7 @@ import ApplicationServices
                     }, pause: { try await Task.sleep(for: .seconds($0)) }) else {
                         throw DriverError("the prepared menu did not publish its original popup", code: .inputUnavailable)
                     }
-                    opened[opened.count - 1].windowID = mapping.id
+                    tracking.opened[tracking.opened.count - 1].windowID = mapping.id
                     pointerMenu = mapping
                 } else {
                     try await Task.sleep(for: .milliseconds(50))

@@ -44,7 +44,11 @@ import ApplicationServices
             input["pointerRoute"] = pointer.geometry ? (pointer.route ? "yes" : "no") : "unknown"
             if let hit = pointer.hit {
                 if CFEqual(hit, unit.element) {
-                    input["pointerHit"] = geometryNode ?? binding.node!
+                    if let geometryNode {
+                        input["pointerHit"] = geometryNode
+                    } else {
+                        input["pointerHit"] = binding.node!
+                    }
                 } else if let member = unit.member, CFEqual(hit, member) {
                     input["pointerHit"] = actuator!.node
                 } else {
