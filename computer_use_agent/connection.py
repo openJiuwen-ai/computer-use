@@ -48,7 +48,7 @@ class McpConnection:
         await asyncio.shield(self._ready)
         if self._task.done():
             await self._task
-            raise RuntimeError("Computer Use connection ended.")
+            raise RuntimeError("Computer Use connection ended; previous actions may have executed.")
 
     async def _serve(self):
         desktop_keys = _DESKTOP_ENV
@@ -81,7 +81,7 @@ class McpConnection:
                 self._ready.set_exception(error)
             elif not isinstance(error, asyncio.CancelledError):
                 logger.exception("Computer Use MCP connection ended")
-                raise RuntimeError("Computer Use MCP connection ended.") from error
+                raise RuntimeError("Computer Use MCP connection ended; previous actions may have executed.") from error
         finally:
             self.session = None
 

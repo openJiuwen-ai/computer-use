@@ -104,8 +104,8 @@ def test_cancellation_resets_python_without_replay(tmp_path):
             call = asyncio.create_task(
                 toolkit.tools[0].invoke(
                     {
-                        "code": f"from pathlib import Path; marker = 'before'; "
-                        f"Path({str(started)!r}).write_text(marker); await __import__('asyncio').sleep(60)"
+                        "code": f"from pathlib import Path; import time; marker = 'before'; "
+                        f"Path({str(started)!r}).write_text(marker); time.sleep(60)"
                     }
                 )
             )
