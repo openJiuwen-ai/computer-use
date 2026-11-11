@@ -130,6 +130,19 @@ uv run --extra agent computer-use-agent "打开预定会议表单，停在提交
 
 命令行选项可通过 `uv run --extra agent computer-use-agent --help` 查看。
 
+模型历史按观察范围保留截图。新截图与同一范围的现有截图完全相同时，引用已有图片；截图像素和坐标保持原样。
+文字历史只折叠完全相同的完整树，保留不同的完整树、diff 和操作回执。
+
+Agent 在第一次请求模型前调用一次应用目录接口，确认 MCP 和原生后端可用。纯路由或无桌面场景可用
+`--no-desktop-check`，也可以设置 `AgentConfig(check_desktop=False)`。
+
+用 `--pause-on-user-input` 或 `AgentConfig(pause_on_user_input=True)` 可在检测到近期键鼠活动时暂停派发。
+桌面空闲后，Agent 会收到重新观察的提示，原调用不会派发。最多等待 60 秒。暂停检查作用于两次桌面调用之间，
+依赖 Agent 所在桌面会话提供的空闲时间。分别使用
+[macOS Core Graphics](https://developer.apple.com/documentation/coregraphics/cgeventsourcestateid)、
+[Windows GetLastInputInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo)
+和 [X11 Screen Saver Extension](https://www.x.org/releases/X11R7.7/doc/scrnsaverproto/saver.pdf)。
+
 ## 6. 更新源码
 
 修改 Python 源码后，重启宿主应用或重新创建 Agent／Toolkit 会话；修改依赖或入口后，在源码仓库重新运行 `uv sync --no-dev --extra agent`，并同步宿主项目的依赖。修改原生后端后，先运行 `uv run --no-dev --extra agent computer-use-build`，再重启会话。

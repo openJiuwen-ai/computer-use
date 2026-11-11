@@ -112,7 +112,7 @@ def test_agent_routes_task_end_to_end_without_mcp(model_server, tmp_path):
     async def run():
         async with create_agent(
             server.model(),
-            config=AgentConfig(workspace=str(tmp_path)),
+            config=AgentConfig(workspace=str(tmp_path), check_desktop=False),
             on_event=lambda kind, data: events.append((kind, data)),
         ) as agent:
             agent.toolkit.routing.registry.register(echo_path())
@@ -150,6 +150,7 @@ def test_agent_refusal_is_reported_to_model(model_server, tmp_path):
             server.model(),
             config=AgentConfig(
                 workspace=str(tmp_path),
+                check_desktop=False,
                 routing=RoutingConfig(min_confidence=0.99, refuse_floor=0.4, refuse_after_attempts=1),
             ),
             on_event=lambda kind, data: events.append((kind, data)),

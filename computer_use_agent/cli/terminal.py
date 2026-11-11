@@ -55,6 +55,14 @@ class Terminal:
                         self.line("[截图已交付模型并保存到运行记录]", style="dim")
         elif kind in ("tool_error", "tool_cancelled"):
             self.line(data.get("error", "操作已取消；之前的输入可能已发送。"), style="yellow")
+        elif kind == "desktop_check":
+            self.line("正在检查桌面后端…", style="dim")
+        elif kind == "desktop_paused":
+            self.line("检测到桌面正在使用，暂停派发。", style="yellow")
+        elif kind == "desktop_resumed":
+            self.line("桌面已空闲，Agent 可以重新观察后继续。", style="dim")
+        elif kind == "desktop_pause_unavailable":
+            self.line("当前会话无法读取桌面活动，用户输入暂停未生效。", style="yellow")
 
     def chunk(self, chunk, *, already_streamed=False):
         kind = getattr(chunk, "type", "")

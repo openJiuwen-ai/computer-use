@@ -28,7 +28,7 @@ def test_native_agent_multi_turn_and_compaction(model_server, tmp_path):
     async def run():
         async with create_agent(
             server.model(),
-            config=AgentConfig(workspace=str(tmp_path)),
+            config=AgentConfig(workspace=str(tmp_path), check_desktop=False),
             on_event=lambda kind, data: events.append((kind, data)),
         ) as agent:
             assert isinstance(agent, DeepAgent)

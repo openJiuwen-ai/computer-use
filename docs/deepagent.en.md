@@ -130,6 +130,20 @@ uv run --extra agent computer-use-agent "Open the meeting scheduling form and st
 
 Run `uv run --extra agent computer-use-agent --help` for CLI options.
 
+The model's history retains screenshots by observation scope. An identical screenshot reuses the existing image for
+that scope, preserving its pixels and coordinates. Text history folds identical full trees and retains distinct
+baselines, diffs, and action receipts.
+
+Before its first model request, the Agent lists applications once to check the MCP and native backend. For routing-only
+or headless use, pass `--no-desktop-check` or set `AgentConfig(check_desktop=False)`.
+
+Pass `--pause-on-user-input` or set `AgentConfig(pause_on_user_input=True)` to hold desktop dispatch when recent mouse
+or keyboard activity is detected. After the desktop becomes idle, the Agent is prompted to observe again. The held
+call is left unsent. The wait is bounded to 60 seconds. Activity is checked between desktop calls using the Agent's
+local session idle time on [macOS Core Graphics](https://developer.apple.com/documentation/coregraphics/cgeventsourcestateid),
+[Windows GetLastInputInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo), and
+the [X11 Screen Saver Extension](https://www.x.org/releases/X11R7.7/doc/scrnsaverproto/saver.pdf).
+
 ## 6. Update the source
 
 After changing Python source, restart the host application or recreate the Agent/Toolkit session. After dependency or entry-point changes, rerun `uv sync --no-dev --extra agent` in the checkout and update the host project dependencies. After native backend changes, run `uv run --no-dev --extra agent computer-use-build`, then restart the session.

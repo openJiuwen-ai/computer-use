@@ -58,7 +58,7 @@ class ComputerUseAgent(DeepAgent):
             "card": card,
             "tools": [*self.toolkit.tools, *(kwargs.pop("tools", None) or [])],
             "system_prompt": self.toolkit.system_prompt,
-            "rails": [context, ComputerUseRail(), *(rails or [])],
+            "rails": [context, ComputerUseRail(self.toolkit), *(rails or [])],
             "workspace": config.workspace or str(Path.home() / ".computer-use" / "agent" / "workspace"),
             "max_iterations": config.max_iterations,
             "context_engine_config": ContextEngineConfig(context_window_tokens=config.context_window),

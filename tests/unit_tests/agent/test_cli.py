@@ -114,7 +114,7 @@ def test_cli_single_task(model_server, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("API_BASE", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    assert asyncio.run(main(["--config", str(path), "Run the CLI test"])) == 0
+    assert asyncio.run(main(["--config", str(path), "--no-desktop-check", "Run the CLI test"])) == 0
     assert "CLI task complete" in capsys.readouterr().out
     records = list((tmp_path / ".computer-use/agent/runs").glob("*/events.jsonl"))
     assert len(records) == 1
@@ -133,6 +133,7 @@ def test_cli_iteration_limit_reports_failure_after_streamed_output(model_server,
                 "api_key": "test-only",
                 "api_base": server.model().model_client_config.api_base,
                 "max_iterations": 1,
+                "check_desktop": False,
             }
         )
     )
@@ -162,6 +163,7 @@ def test_interactive_commands_preserve_execution_session(model_server, tmp_path,
                 "model": "test-model",
                 "api_key": "test-only",
                 "api_base": server.model().model_client_config.api_base,
+                "check_desktop": False,
             }
         )
     )
@@ -227,6 +229,7 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
                 "model": "test-model",
                 "api_key": "test-only",
                 "api_base": server.model().model_client_config.api_base,
+                "check_desktop": False,
             }
         )
     )

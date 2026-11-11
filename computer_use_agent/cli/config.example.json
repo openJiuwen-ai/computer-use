@@ -4,6 +4,8 @@
   "api_base": "https://api.openai.com/v1",
   "api_key": "",
   "allow_global_input": true,
+  "check_desktop": true,
+  "pause_on_user_input": false,
   "max_iterations": 40,
   "context_window": 1000000,
   "model_timeout": 600,
