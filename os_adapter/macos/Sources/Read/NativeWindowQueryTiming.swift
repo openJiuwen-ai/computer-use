@@ -57,18 +57,24 @@ import Foundation
     /// includes every span. The summary labels this distinction explicitly.
     static func measure<Value>(
         _ timing: NativeWindowQueryTiming?, _ phase: String, property: String? = nil,
-        root: AXUIElement? = nil, body: () throws -> Value
+        root: AXUIElement? = nil, body: @MainActor () throws -> Value
     ) rethrows -> Value {
         guard let timing else { return try body() }
-        let began = timing.clock()
+        let began = timing.beginSpan()
         var threw = true
-        defer {
-            let duration = max(0, timing.clock() - began) * 1000
-            timing.sample(phase, property: property, root: root, duration: duration, threw: threw)
-        }
+        defer { timing.endSpan(began, phase, property: property, root: root, threw: threw) }
         let value = try body()
         threw = false
         return value
+    }
+
+    func beginSpan() -> TimeInterval { clock() }
+
+    func endSpan(
+        _ began: TimeInterval, _ phase: String, property: String? = nil, root: AXUIElement? = nil, threw: Bool
+    ) {
+        let duration = max(0, clock() - began) * 1000
+        sample(phase, property: property, root: root, duration: duration, threw: threw)
     }
 
     private func index(_ element: AXUIElement) -> Int? {

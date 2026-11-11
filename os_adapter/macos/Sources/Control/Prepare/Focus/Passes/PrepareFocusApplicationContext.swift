@@ -7,7 +7,7 @@ import ApplicationServices
 /// never establishes key-window, pointer-hit or keyboard-receiver readiness.
 @MainActor enum PrepareFocusApplicationContextPass {
     static func run(_ request: NativeFocusRequest) async throws {
-        @MainActor func checkOriginalScope() throws {
+        let checkOriginalScope: @MainActor () throws -> Void = {
             try request.check()
             try request.target.validate(input: true)
             guard request.window.pid == request.target.application.processIdentifier else {
