@@ -51,7 +51,8 @@ class ComputerUseRail(AgentRail):
         note = self._failure_advisory(inputs, data.get("execution_progress") or {})
         if note and inputs.tool_msg is not None and isinstance(inputs.tool_msg.content, str):
             inputs.tool_msg.content += "\n\n" + note
-        if isinstance(raw := data.get("mcp_result"), dict):
+        raw = data.get("mcp_result")
+        if isinstance(raw, dict):
             remember_observations(inputs.tool_msg, raw)
 
     def _failure_advisory(self, inputs, progress):
@@ -73,12 +74,8 @@ class ComputerUseRail(AgentRail):
         if not isinstance(code, str):
             return None
         previous, count = self._failed_scripts.pop(code, (None, 0))
-        if (
-            progress.get("completion") == "finished"
-            and progress.get("isError")
-            and failure.get("effect") == "none"
-            and isinstance(error, str)
-        ):
+        finished_with_error = progress.get("completion") == "finished" and progress.get("isError")
+        if finished_with_error and failure.get("effect") == "none" and isinstance(error, str):
             identity = (failure.get("code"), failure.get("target"), error)
             count = count + 1 if identity == previous else 1
             self._failed_scripts[code] = (identity, count)

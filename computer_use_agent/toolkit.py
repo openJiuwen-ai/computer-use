@@ -193,7 +193,10 @@ class ComputerUseToolkit:
             try:
                 advisory = await pause.wait(self.emit)
             except asyncio.CancelledError:
-                self.emit("tool_cancelled", {"name": name, "effect": "none", "error": "Call cancelled before dispatch."})
+                self.emit(
+                    "tool_cancelled",
+                    {"name": name, "effect": "none", "error": "Call cancelled before dispatch."},
+                )
                 raise
             if advisory is not None:
                 result = {"isError": True, "content": [{"type": "text", "text": advisory}]}
