@@ -13,6 +13,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from setuptools import find_packages, setup
@@ -98,6 +99,37 @@ def native_platform():
     return None
 
 
+def install_source_backend(build_lib: Path, output: Path, platform_tag: str | None) -> list[str]:
+    """Add the locally built driver or record why only the SDK is installed."""
+    reason = "unsupported_platform"
+    if platform_tag:
+        with TemporaryDirectory(prefix="native-", dir=build_lib) as temporary:
+            staging = Path(temporary)
+            try:
+                subprocess.run(
+                    [
+                        sys.executable, "-m", "computer_use_native_tools.native",
+                        str(ROOT), str(staging), platform_tag,
+                    ],
+                    cwd=build_lib,
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                reason = "native_build_failed"
+            else:
+                backend = json.loads((staging / "backend.json").read_bytes())
+                files = ["backend.json", *backend["files"]]
+                for name in files:
+                    target = output / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    (staging / name).replace(target)
+                return files
+    status_file = "backend-status.json"
+    (output / status_file).write_text(json.dumps({"reason": reason}), encoding="utf-8")
+    print(f"Computer Use driver unavailable ({reason}); installing the Python SDK.", file=sys.stderr)
+    return [status_file]
+
+
 class BuildWithResources(build_py):
     native_platform = None
 
@@ -146,20 +178,11 @@ class BuildWithResources(build_py):
             manifest[relative.as_posix()] = hashlib.sha256(resource.read_bytes()).hexdigest()
         if BACKEND_ARCHIVE:
             backend = BACKENDS["unpack_archive"](BACKEND_ARCHIVE, output, root=ROOT)
-            for name in ["backend.json", *backend["files"]]:
-                manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
-        elif self.native_platform:
-            subprocess.run(
-                [
-                    sys.executable, "-m", "computer_use_native_tools.native",
-                    str(ROOT), str(output), self.native_platform,
-                ],
-                cwd=resolved,
-                check=True,
-            )
-            backend = json.loads((output / "backend.json").read_bytes())
-            for name in ["backend.json", *backend["files"]]:
-                manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
+            backend_files = ["backend.json", *backend["files"]]
+        else:
+            backend_files = install_source_backend(resolved, output, self.native_platform)
+        for name in backend_files:
+            manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
         (output / "manifest.json").write_text(
             json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8"
         )

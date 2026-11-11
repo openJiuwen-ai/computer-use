@@ -1,6 +1,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import json
+import runpy
 import subprocess
 import sys
 from importlib import import_module
@@ -8,6 +9,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+import setuptools
 from computer_use import paths
 from computer_use_native_tools import native
 
@@ -144,6 +146,50 @@ def test_source_wheel_keeps_a_writable_build_tree(installed):
     root = paths.repository_root()
     assert root.is_relative_to(home)
     assert (root / source.relative_to(resources)).read_bytes() == source.read_bytes()
+
+
+def test_failed_source_build_discards_partial_driver_and_records_reason(installed, monkeypatch, tmp_path):
+    resources, home = installed
+    monkeypatch.delenv("COMPUTER_USE_BACKEND_ARCHIVE", raising=False)
+    monkeypatch.delenv("COMPUTER_USE_BACKEND_DIR", raising=False)
+    monkeypatch.setattr(setuptools, "setup", lambda **_: None)
+    builder = runpy.run_path(str(ROOT / "setup.py"))
+
+    def fail_after_writing_partial_driver(command, *, cwd, check):
+        assert cwd == tmp_path and check
+        stage = Path(command[-2])
+        (stage / "backend.json").write_text("{}", encoding="utf-8")
+        (stage / "incomplete-driver").touch()
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(subprocess, "run", fail_after_writing_partial_driver)
+    files = builder["install_source_backend"](tmp_path, resources, "macosx_14_0_arm64")
+
+    assert files == ["backend-status.json"]
+    assert not (resources / "backend.json").exists()
+    assert not (resources / "incomplete-driver").exists()
+    assert paths.installed_backend_unavailable_reason() == "native_build_failed"
+    assert not home.exists()
+
+
+@pytest.mark.parametrize(("system", "files"), [
+    ("darwin", (MAC_DRIVER,)),
+    ("win32", (WINDOWS_DRIVER, "os_adapter/windows/.build/computer-use-capture.exe",
+               "os_adapter/windows/.build/Interop.NativeUIA.dll")),
+    ("linux", (str(paths.LINUX_RUNTIME / "__main__.py"),)),
+    ("linux", (LINUX_WHEEL,)),
+])
+def test_installed_backend_check_requires_driver_resources(installed, monkeypatch, system, files):
+    resources, home = installed
+    monkeypatch.setattr(sys, "platform", system)
+    (resources / "backend.json").write_text("{}", encoding="utf-8")
+    assert paths.installed_backend_unavailable_reason() == "backend_missing"
+    for name in files:
+        path = resources / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    assert paths.installed_backend_unavailable_reason() is None
+    assert not home.exists()
 
 
 @pytest.fixture
