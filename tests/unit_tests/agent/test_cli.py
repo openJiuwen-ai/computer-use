@@ -20,12 +20,15 @@ from rich.console import Console
 from .conftest import answer, tool_call
 
 
-def test_cli_configuration_and_legacy_aliases(tmp_path, monkeypatch):
+def test_cli_configuration_and_overrides(tmp_path, monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("API_BASE", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("API_KEY", raising=False)
     path = tmp_path / "config.json"
     initialize(path)
-    path.write_text(json.dumps({"model": "configured", "baseUrl": "http://127.0.0.1/v1", "apiKey": "file-key"}))
+    path.write_text(json.dumps({"model": "configured", "api_base": "http://127.0.0.1/v1", "api_key": "file-key"}))
     monkeypatch.setenv("OPENAI_API_KEY", "environment-key")
     value = load(path, overrides={"model": "override"})
     assert value["model"] == "override"

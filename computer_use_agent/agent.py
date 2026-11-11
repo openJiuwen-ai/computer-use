@@ -14,6 +14,7 @@ from openjiuwen.harness.factory import apply_deep_agent_parts, resolve_deep_agen
 from openjiuwen.harness.rails.context_engineer.context_processor_rail import ContextProcessorRail
 
 from .config import AgentConfig
+from .rails import ComputerUseRail
 from .toolkit import ComputerUseToolkit
 
 
@@ -57,7 +58,7 @@ class ComputerUseAgent(DeepAgent):
             "card": card,
             "tools": [*self.toolkit.tools, *(kwargs.pop("tools", None) or [])],
             "system_prompt": self.toolkit.system_prompt,
-            "rails": [context, *(rails or [])],
+            "rails": [context, ComputerUseRail(), *(rails or [])],
             "workspace": config.workspace or str(Path.home() / ".computer-use" / "agent" / "workspace"),
             "max_iterations": config.max_iterations,
             "context_engine_config": ContextEngineConfig(context_window_tokens=config.context_window),

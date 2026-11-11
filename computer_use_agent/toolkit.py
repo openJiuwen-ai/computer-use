@@ -80,6 +80,9 @@ class ComputerUseToolkit:
         self.connection = McpConnection(self.config.mcp_config(), stderr=stderr)
         self.on_event = on_event
         self._closing = None
+        self._execution_id = 0
+        self._last_execution = None
+        self._last_write = None
         self._route_depth = 0
         self.routing = self._build_router()
         self.tools = [
@@ -151,6 +154,14 @@ class ComputerUseToolkit:
     def system_prompt(self):
         return system_prompt(routing=self.routing is not None)
 
+    @property
+    def progress(self):
+        """Preserve the latest receipts even if the last call only observed or failed."""
+        progress = dict(self._last_execution or {})
+        if not progress.get("receipts") and self._last_write is not None:
+            progress["lastWrite"] = self._last_write
+        return progress
+
     def emit(self, kind, data):
         if self.on_event is not None:
             try:
@@ -172,16 +183,21 @@ class ComputerUseToolkit:
         try:
             result = await self.connection.call(name, inputs)
         except asyncio.CancelledError:
+            if name == "computer_use":
+                self._last_execution = {"completion": "unknown"}
             self.emit("tool_cancelled", {"name": name, "effect": "possible"})
             self._record_gui_sample(name, inputs, started, None)
             raise
         except Exception as error:
+            if name == "computer_use":
+                self._last_execution = {"completion": "unknown"}
             logger.exception("Computer Use tool transport failed")
             self.emit("tool_error", {"name": name, "error": str(error), "effect": "possible"})
             self._record_gui_sample(name, inputs, started, None)
             raise
         self._record_gui_sample(name, inputs, started, result.isError is False)
         raw = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+        progress = self._record_progress(name, raw)
         self.emit("tool_result", {"name": name, "result": raw})
         converted = extract_mcp_tool_result_content(result, include_image_content=True, tool_name=name)
         data = converted.data if hasattr(converted, "data") else {"content": converted or ""}
@@ -197,9 +213,30 @@ class ComputerUseToolkit:
             if type(after_action) is int and after_action > 0:
                 label += f"\nCaptured after Action #{after_action}."
             item["source_path"] = label + (f"\n{caption}" if caption else "")
+            scope = metadata.get("observationScope")
+            if isinstance(scope, str) and scope:
+                item["observation_scope"] = scope
         data = {**data, "content": render_payload_text(data) or "Execution returned no text."}
         data = {**data, "mcp_result": raw}
+        if progress is not None:
+            data["execution_progress"] = progress
         return ToolOutput(success=not result.isError, data=data, error=getattr(converted, "error", None))
+
+    def _record_progress(self, name, raw):
+        metadata = raw.get("_meta", {}).get("computer-use")
+        progress = metadata.get("progress") if isinstance(metadata, dict) else None
+        execution_id = progress.get("executionId") if isinstance(progress, dict) else None
+        if type(execution_id) is int and execution_id > self._execution_id:
+            self._execution_id = execution_id
+            if progress.get("receipts"):
+                self._last_write = {"executionId": execution_id, "receipts": progress["receipts"]}
+            if progress.get("receipts") or progress.get("isError") or progress.get("completion") == "unknown":
+                self._last_execution = progress
+            return progress
+        if name == "computer_use" and raw.get("isError"):
+            # A custom MCP server may omit progress metadata.
+            self._last_execution = {"completion": "unknown"}
+        return None
 
     def _record_gui_sample(self, name, inputs, started, success):
         routing = self.routing
@@ -278,7 +315,9 @@ class ComputerUseToolkit:
             await self.connection.cancel_current()
             if self.connection.session is not None:
                 async with asyncio.timeout(10):
-                    await self.reset()
+                    reset = await self.reset()
+                    if not reset.success:
+                        raise RuntimeError(reset.data["content"])
         finally:
             try:
                 await self.connection.close()
