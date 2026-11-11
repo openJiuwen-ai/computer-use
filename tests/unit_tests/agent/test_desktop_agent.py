@@ -3,10 +3,7 @@
 import asyncio
 import json
 
-from openjiuwen.core.runner import Runner
-from openjiuwen.harness import create_deep_agent
-
-from computer_use_agent import AgentConfig, DesktopTaskTool, create_agent
+from computer_use_agent import AgentConfig, create_agent
 
 from .conftest import answer, tool_call
 
@@ -86,95 +83,9 @@ raise error
     async def run():
         async with create_agent(server.model(), config=AgentConfig(workspace=str(tmp_path))) as agent:
             await agent.invoke({"query": "Write to the test window."})
-            assert agent.toolkit.progress["failure"]["receipt"]["status"] == "dispatched"
+            reset = await agent.toolkit.reset()
+            assert reset.success
+            assert reset.data["execution_progress"]["failure"]["receipt"]["status"] == "dispatched"
 
     asyncio.run(run())
     assert "Observe the affected state before retrying" in json.dumps(server.requests[1]["messages"])
-
-
-def _delegate(task_description, **params):
-    reply = tool_call("")
-    reply["tool_calls"][0]["function"] = {
-        "name": "desktop_task",
-        "arguments": json.dumps({"task_description": task_description, **params}),
-    }
-    return reply
-
-
-def _parent_tool_reply(server):
-    return next(
-        json.loads(message["content"])
-        for message in reversed(server.requests[-1]["messages"])
-        if message["role"] == "tool"
-    )
-
-
-def test_desktop_delegation_timeout_retains_write_progress_and_resumes(model_server, tmp_path):
-    state = tmp_path / "desktop-state"
-    write = rf"""
-from pathlib import Path
-from time import sleep
-from computer_use.session.events import action_completed
-state = Path({str(state)!r})
-with state.open('a') as handle:
-    handle.write('first\n')
-action_completed(dict(status='dispatched', target='Test document', intent='write', detail='First write sent'))
-sleep(60)
-"""
-    continue_task = rf"""
-from pathlib import Path
-assert 'state' not in globals()
-fresh_state = Path({str(state)!r})
-assert fresh_state.read_text() == 'first\n'
-with fresh_state.open('a') as handle:
-    handle.write('second\n')
-print('Read back:', fresh_state.read_text())
-"""
-    child_server = model_server([tool_call(write), tool_call(continue_task), answer("Both writes observed.")])
-    parent_server = model_server([_delegate("Write both lines to the test document."), answer("It timed out.")])
-    tool = DesktopTaskTool(
-        child_server.model(),
-        config=AgentConfig(workspace=str(tmp_path / "child")),
-        timeout_s=8,
-    )
-    parent = create_deep_agent(
-        parent_server.model(),
-        tools=[tool],
-        workspace=str(tmp_path / "parent"),
-        prompt_mode="minimal",
-        enable_sys_operation=False,
-        enable_read_image_multimodal=False,
-        parallel_tool_calls=False,
-    )
-
-    async def run():
-        conversation_id = "desktop-delegation-test"
-        try:
-            await parent.invoke({"query": "Delegate the writes.", "conversation_id": conversation_id})
-            first = _parent_tool_reply(parent_server)
-            context = first["resume_context"]
-            assert context["status"] == "timeout"
-            assert "cleanup_error" not in context
-            assert context["progress"]["completion"] == "unknown"
-            assert context["progress"]["receipts"][0]["detail"] == "First write sent"
-            assert state.read_text() == "first\n"
-
-            parent_server.replies.extend(
-                [
-                    _delegate("Write the remaining second line.", resume_task_id=first["resume_task_id"]),
-                    answer("The child observed the result."),
-                ]
-            )
-            await parent.invoke({"query": "Resume the remaining work.", "conversation_id": conversation_id})
-            resumed = _parent_tool_reply(parent_server)
-            assert resumed["resume_task_id"] == first["resume_task_id"]
-            assert resumed["resume_context"]["status"] == "returned"
-            assert resumed["resume_context"]["progress"]["receipts"][0]["detail"] == "First write sent"
-            assert "Both writes observed." in resumed["output"]
-        finally:
-            Runner.resource_mgr.remove_tool(tool.card.id)
-
-    asyncio.run(run())
-    assert state.read_text() == "first\nsecond\n"
-    resume_messages = json.dumps(child_server.requests[1]["messages"])
-    assert "First write sent" in resume_messages and "Remaining task" in resume_messages

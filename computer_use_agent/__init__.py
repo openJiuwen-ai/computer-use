@@ -10,23 +10,13 @@ from .config import AgentConfig, McpConfig, RoutingConfig
 
 if TYPE_CHECKING:
     from .agent import ComputerUseAgent, create_agent
-    from .delegation import DesktopTaskTool
     from .toolkit import ComputerUseToolkit
 
-__all__ = [
-    "AgentConfig",
-    "ComputerUseAgent",
-    "ComputerUseToolkit",
-    "DesktopTaskTool",
-    "McpConfig",
-    "RoutingConfig",
-    "create_agent",
-]
+__all__ = ["AgentConfig", "ComputerUseAgent", "ComputerUseToolkit", "McpConfig", "RoutingConfig", "create_agent"]
 
 _MODULES = {
     "ComputerUseAgent": ".agent",
     "create_agent": ".agent",
-    "DesktopTaskTool": ".delegation",
     "ComputerUseToolkit": ".toolkit",
 }
 

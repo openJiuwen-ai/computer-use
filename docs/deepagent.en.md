@@ -119,24 +119,6 @@ async def run(model):
         return await agent.invoke({"query": "List the running applications"})
 ```
 
-A parent agent can register the desktop task tool to delegate work that requires observing and operating the desktop.
-
-```python
-from openjiuwen.harness import create_deep_agent
-
-from computer_use_agent import DesktopTaskTool
-
-
-async def run(parent_model, desktop_model):
-    parent = create_deep_agent(parent_model, tools=[DesktopTaskTool(desktop_model)])
-    return await parent.invoke({
-        "query": "Open the meeting scheduling form and stop before submitting",
-        "conversation_id": "meeting-draft",
-    })
-```
-
-`desktop_task` returns the child agent's answer, a `resume_task_id`, and `resume_context`. On timeout the progress includes any received action receipts and whether the effects may be uncertain. The parent can pass the ID and a description of the remaining work to `desktop_task` in the same conversation. The child resumes with a fresh MCP session and checks relevant state before repeating an uncertain action. The parent judges task completion from the answer and the observations.
-
 ## 5. Run directly with the CLI
 
 The same agent can also run from the CLI. First run `uv run --extra agent computer-use-agent --init-config` and fill in `model`, `provider`, `api_base` and `api_key` in `~/.computer-use/agent/config.json`. Start a conversation or pass a task to execute once:

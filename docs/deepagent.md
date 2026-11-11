@@ -119,21 +119,6 @@ async def run(model):
         return await agent.invoke({"query": "列出正在运行的应用"})
 ```
 
-父 Agent 可以注册本仓的桌面任务工具，由它独立完成需要桌面观察和操作的步骤。
-
-```python
-from openjiuwen.harness import create_deep_agent
-
-from computer_use_agent import DesktopTaskTool
-
-
-async def run(parent_model, desktop_model):
-    parent = create_deep_agent(parent_model, tools=[DesktopTaskTool(desktop_model)])
-    return await parent.invoke({"query": "打开预定会议表单，停在提交前", "conversation_id": "meeting-draft"})
-```
-
-`desktop_task` 返回子 Agent 的回答、`resume_task_id` 和 `resume_context`。超时后，进度包含已经收到的操作回执，以及中断时的操作可能已生效的信息。同一父会话可将返回的 ID 和剩余任务描述传给 `desktop_task`。续跑使用新建的 MCP 会话，并在重试效果不明的操作前观察相关状态。父 Agent 根据回答和观察判断任务是否完成。
-
 ## 5. 直接使用 CLI
 
 同一个 Agent 也可以通过 CLI 直接运行。首次执行 `uv run --extra agent computer-use-agent --init-config`，在生成的 `~/.computer-use/agent/config.json` 中填写 `model`、`provider`、`api_base`、`api_key`，随后进入对话或执行单次任务：
