@@ -285,9 +285,7 @@ class ComputerUseToolkit:
             await self.connection.cancel_current()
             if self.connection.session is not None:
                 async with asyncio.timeout(10):
-                    reset = await self.reset()
-                    if not reset.success:
-                        raise RuntimeError(reset.data["content"])
+                    await self.reset()
         finally:
             try:
                 await self.connection.close()

@@ -154,6 +154,34 @@ def test_partial_output_and_error_status_are_retained():
     asyncio.run(run())
 
 
+def test_close_reports_reset_failure_without_failing_completed_task():
+    from unittest.mock import AsyncMock
+
+    from mcp.types import CallToolResult, TextContent
+
+    events = []
+
+    async def run():
+        async with ComputerUseToolkit(on_event=lambda kind, data: events.append((kind, data))) as toolkit:
+            connection = toolkit.connection
+            connection.session = object()
+            connection.cancel_current = AsyncMock()
+            connection.close = AsyncMock()
+            connection.call = AsyncMock(
+                return_value=CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text="Native cleanup timed out.")],
+                )
+            )
+        connection.call.assert_awaited_once_with("computer_use_reset", {})
+        connection.close.assert_awaited_once()
+
+    asyncio.run(run())
+    reset = next(event["result"] for kind, event in events if kind == "tool_result")
+    assert reset["isError"]
+    assert reset["content"][0]["text"] == "Native cleanup timed out."
+
+
 def test_connection_shutdown_error_preserves_cause_without_reconnect(monkeypatch):
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
