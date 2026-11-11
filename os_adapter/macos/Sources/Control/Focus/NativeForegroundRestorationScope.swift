@@ -371,7 +371,7 @@ import ApplicationServices
         onCleanupUnknown: @escaping @MainActor () -> Void = {},
         afterInput: Bool = false, inputState: @escaping @MainActor () -> InputState = { .notDispatched },
         presentation: @escaping @MainActor () throws -> NativeForegroundResult.Presentation = { .absent },
-        body: () async throws -> T
+        body: @MainActor () async throws -> T
     ) async throws -> T {
         // A completed restitution cannot own a later local-activity request.
         // Give that request its own scope so any actual activation is still
@@ -382,7 +382,7 @@ import ApplicationServices
         let scope = NativeForegroundRestorationScope(
             target: target, onPreparation: onPreparation,
             onCleanupUnknown: onCleanupUnknown, afterInput: afterInput, inputState: inputState, presentation: presentation)
-        func run() async throws -> T { try await $current.withValue(scope) {
+        @MainActor func run() async throws -> T { try await $current.withValue(scope) {
             do {
                 let result = try await body()
                 try await scope.finish()

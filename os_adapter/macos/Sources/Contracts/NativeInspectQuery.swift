@@ -247,14 +247,16 @@ enum NativeInspectQuery {
             let hasActions = (raw as? [String: Any])?.keys.contains("actionDetail") == true
             let hasFocus = (raw as? [String: Any])?.keys.contains("focusedElement") == true
             let sharesCatalogues = (raw as? [String: Any])?.keys.contains("shareAttributeCatalogues") == true
-            let p = try object(
-                raw,
-                keys: Set(
-                    ["kind", "fields", "maxNodes", "maxDepth"] + (hasPage ? ["childrenPage"] : [])
-                        + (hasAdvertised ? ["advertisedFields"] : []) + (hasRelationPage ? ["relationPage"] : [])
-                        + (hasFollow ? ["followRelations"] : []) + (hasText ? ["textContent"] : [])
-                        + (hasActions ? ["actionDetail"] : []) + (hasFocus ? ["focusedElement"] : [])
-                        + (sharesCatalogues ? ["shareAttributeCatalogues"] : [])))
+            var keys: Set<String> = ["kind", "fields", "maxNodes", "maxDepth"]
+            if hasPage { keys.insert("childrenPage") }
+            if hasAdvertised { keys.insert("advertisedFields") }
+            if hasRelationPage { keys.insert("relationPage") }
+            if hasFollow { keys.insert("followRelations") }
+            if hasText { keys.insert("textContent") }
+            if hasActions { keys.insert("actionDetail") }
+            if hasFocus { keys.insert("focusedElement") }
+            if sharesCatalogues { keys.insert("shareAttributeCatalogues") }
+            let p = try object(raw, keys: keys)
             if sharesCatalogues, try !boolean(p["shareAttributeCatalogues"], label: "shareAttributeCatalogues") {
                 throw DriverError("shareAttributeCatalogues must be true when requested", code: .invalidRequest)
             }

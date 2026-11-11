@@ -22,7 +22,7 @@ import ApplicationServices
         }
         let opener = plan.qtPopupOpener
         guard preparingDocument || opener != nil else { return }
-        func validateAction() throws {
+        let validateAction: @MainActor () throws -> Void = {
             try boundary.checkConditions()
             let facts = try objects.nativeActionFacts(node)
             guard NativeAction.matches(facts.actions, name: name, description: description) else {

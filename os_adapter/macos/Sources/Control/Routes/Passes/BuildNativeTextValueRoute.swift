@@ -13,7 +13,7 @@ import ApplicationServices
         let kind = context.command.kind
         let intentKind = context.operation.request.kind
         let receipt = context.receipt
-        func beforeDispatch() throws {
+        let beforeDispatch: @MainActor () throws -> Void = {
             guard case .geckoAtomicFullReplacement(let proof) = valueContract.semantics else {
                 return try context.boundary.beforeDispatch()
             }

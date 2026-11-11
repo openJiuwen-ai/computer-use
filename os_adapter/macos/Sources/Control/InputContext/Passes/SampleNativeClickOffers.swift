@@ -24,23 +24,9 @@ import ApplicationServices
             addressedReceiver: NativeAddressedPointerReceiver.Qualification? = nil,
             foregroundHitRequired: Bool = false, captured: Bool = false,
             requiresExactElementHit: Bool = false,
-            qtComboChoice: NativeQtComboChoice? = nil,
-            qualifyPopup: ((NativePointerUnit.PhysicalClickSample) -> NativePopupPointerQualification?)? = nil
+            qtComboChoice: NativeQtComboChoice? = nil
         ) throws -> Bool {
             try pointer.validateWindowIdentity()
-            if let qualifyPopup {
-                // The existing point readiness sample retains its physical hit.
-                // No preparation or second directory is needed for this offer.
-                let physical = pointer.physicalClickSample(at: point)
-                try RequestDiagnostics.checkCancellation()
-                let proof = physical.ready ? qualifyPopup(physical) : nil
-                foreground = physical.foreground
-                input["geometryCurrent"] = "yes"
-                input["pointerRoute"] = proof == nil ? "no" : "yes"
-                declarations.declareClick(
-                    .pointer(.click), offer: NativePopupClickPolicy.pointerOffer(proof))
-                return false
-            }
             foreground = pointer.foregroundWindow(at: point)
             input["geometryCurrent"] = "yes"
             var transport = true
@@ -116,7 +102,7 @@ import ApplicationServices
                     enabled: facts.enabled, focusWritable: facts.focusWritable, actions: facts.actions,
                     same: { CFEqual($0, $1) })
             }
-            func actionOffers(preferOpaqueRowPointer: Bool) throws {
+            let actionOffers: @MainActor (Bool) throws -> Void = { preferOpaqueRowPointer in
                 guard plan.actuator == nil else { return }
                 let isMenu = applicationRoot
                 if isMenu, role == kAXMenuItemRole, facts.actions?.contains(where: { $0.name == kAXPressAction }) == true,
@@ -149,7 +135,8 @@ import ApplicationServices
                     // Menu validation and ordinary controls can depend on the
                     // selected document. Admit only that independent preparation;
                     // the addressed action still checks fresh enabled at dispatch.
-                    let supported = (isMenu || documentRequired || facts.enabled != false) && (!menu || isMenu)
+                    let enabled = facts.enabled != false
+                    let supported = (isMenu || documentRequired || enabled) && (!menu || isMenu)
                     let ordinaryOffer = NativeClickContract(
                         routeFamily: family, delivery: .objectAction,
                         admission: !supported
@@ -185,7 +172,7 @@ import ApplicationServices
                             routeFamily: selection.family, delivery: .objectSelection, admission: .ready, reason: nil,
                             preparationOptions: []))
                 }
-                func sampleElementPointer() throws -> Bool {
+                let sampleElementPointer: @MainActor () throws -> Bool = {
                     let unit = try access.units.elementPointerUnit(binding.wire, actuator: plan.actuator)
                     if continuesReveal {
                         guard plan.actuator == nil, plan.receiver == nil, unit.qtComboChoice == nil,
@@ -256,7 +243,8 @@ import ApplicationServices
                         input["pointerRoute"] = "no"
                         return false
                     }
-                    guard sampled.dispatchGeometryReady || !popupChoice && sampled.preparation != .unavailable else {
+                    let hasPreparationRoute = sampled.preparation != .unavailable
+                    guard sampled.dispatchGeometryReady || !popupChoice && hasPreparationRoute else {
                         throw DriverError(
                             "the current hit does not confirm the original element and has no window preparation route",
                             code: .inputUnavailable)
@@ -265,38 +253,53 @@ import ApplicationServices
                     let pointer = NativePointerUnit(
                         application: unit.application, window: geometry.mapping, nativeWindow: unit.window)
                     if popupChoice, let context = facts.popupContext {
-                        try pointerOffers(
-                            pointer, at: geometry.point,
-                            qualifyPopup: { physical in
-                                guard let hit = physical.hit else { return nil }
-                                if context.kind == .submenu,
-                                    facts.popupElementWindowID != context.ownerWindowID || facts.enabled == false
-                                { return nil }
-                                return NativePopupPointerQualification(
+                        // Use the existing readiness sample and its physical hit.
+                        try pointer.validateWindowIdentity()
+                        let physical = pointer.physicalClickSample(at: geometry.point)
+                        try RequestDiagnostics.checkCancellation()
+                        var proof: NativePopupPointerQualification?
+                        if physical.ready, let hit = physical.hit {
+                            let correctWindow = facts.popupElementWindowID == context.ownerWindowID
+                            let enabled = facts.enabled != false
+                            if context.kind != .submenu || correctWindow && enabled {
+                                proof = NativePopupPointerQualification(
                                     context: context, element: unit.element, pid: unit.application.processIdentifier,
                                     sample: .init(
                                         geometry: geometry, hit: sampled.hit, physicalHit: hit,
                                         foreground: physical.foreground), same: { CFEqual($0, $1) })
-                            })
+                            }
+                        }
+                        foreground = physical.foreground
+                        input["geometryCurrent"] = "yes"
+                        input["pointerRoute"] = proof == nil ? "no" : "yes"
+                        declarations.declareClick(.pointer(.click), offer: NativePopupClickPolicy.pointerOffer(proof))
                     } else {
-                        let opaqueRowContent = try plan.actuator == nil && plan.receiver == nil
-                            && facts.popupContext == nil && sampled.basis == .exactHit
-                            && sampled.hit.map { CFEqual($0, unit.element) } == true
-                            && NativePopupClickPolicy.permitsIntent(op.request)
-                            && NativeOpaqueRowClick.provesPointerReceiver(
+                        let opaqueRowContent: Bool
+                        if plan.actuator == nil, plan.receiver == nil, facts.popupContext == nil, sampled.basis == .exactHit,
+                            let hit = sampled.hit, CFEqual(hit, unit.element), NativePopupClickPolicy.permitsIntent(op.request)
+                        {
+                            opaqueRowContent = try NativeOpaqueRowClick.provesPointerReceiver(
                                 unit, role: role, enabled: facts.enabled, focusWritable: facts.focusWritable,
                                 actions: facts.actions)
+                        } else {
+                            opaqueRowContent = false
+                        }
                         let addressedReceiver: NativeAddressedPointerReceiver.Qualification?
                         if unit.qtComboChoice != nil || opaqueRowContent {
                             addressedReceiver = .declaredInteraction
                         } else if role == kAXStaticTextRole, let member = unit.member,
                             plan.actuator?.relation == "controlPart"
                         {
+                            let exactMemberHit: Bool
+                            if sampled.basis == .exactHit, let hit = sampled.hit {
+                                exactMemberHit = CFEqual(hit, member)
+                            } else {
+                                exactMemberHit = false
+                            }
                             addressedReceiver = NativeAddressedPointerReceiver.compoundTextContextQualification(
                                 intent: op.request, ownerRole: role, ownerActions: facts.actions?.map(\.name),
                                 memberRole: AXAccess.read(member, kAXRoleAttribute).value as? String,
-                                exactMemberHit: sampled.basis == .exactHit
-                                    && sampled.hit.map { CFEqual($0, member) } == true)
+                                exactMemberHit: exactMemberHit)
                         } else if plan.actuator == nil, unit.member == nil {
                             // Only an exact hit needs semantic declarations.
                             // A preparable coarse hit retains the original
@@ -332,7 +335,7 @@ import ApplicationServices
                             admission: .insufficientEvidence, reason: error.description, preparationOptions: []))
                 }
             }
-            if !continuesReveal { try actionOffers(preferOpaqueRowPointer: preferOpaqueRowPointer) }
+            if !continuesReveal { try actionOffers(preferOpaqueRowPointer) }
         } else {
             throw DriverError("click requires an element or captured target", code: .invalidRequest)
         }

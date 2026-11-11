@@ -16,7 +16,7 @@ import ApplicationServices
             let plan = try ResolveNativeClickPlanPass.run(
                 command, resolved: resolved, op: operation, step: step, access: access)
             var presentationElement: AXUIElement?
-            func execute() async throws {
+            let execute: @MainActor () async throws -> Void = {
                 var preparedPoint: NativePreparedPointerPoint?
                 let elementGeometry = try await NativeInputActivity.$stage.withValue(.preparation) {
                     let geometry = try await NativeClickPreparationPipeline.run(

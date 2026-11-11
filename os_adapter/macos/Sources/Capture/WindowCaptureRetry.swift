@@ -27,7 +27,7 @@ struct WindowCapturePending: ClassifiedFailure, CustomStringConvertible {
     static func run<Value>(
         maximumAttempts: Int, check: () throws -> Void, validateOriginalScope: () throws -> Void,
         permits: (Error) -> Bool, onRetry: (Error, Int) -> Void = { _, _ in },
-        attempt: () async throws -> Value
+        attempt: @MainActor () async throws -> Value
     ) async throws -> Value {
         var attempts = 0
         while true {

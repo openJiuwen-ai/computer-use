@@ -255,11 +255,11 @@ import ApplicationServices
                 throw DriverError("replacement editing/selection contract changed", code: .inputUnavailable)
             }
         }
-        func validate() async throws {
+        let validate: @MainActor () async throws -> Void = {
             try await validateReceiver()
             try validateImmediate()
         }
-        func beforeSelectionMutation() throws { try validateImmediate() }
+        let beforeSelectionMutation: @MainActor () throws -> Void = { try validateImmediate() }
         try await validate()
         guard let before = snapshot(selection) else {
             throw DriverError("target text extent is unavailable; no replacement sent", code: .inputUnavailable)
@@ -420,7 +420,7 @@ import ApplicationServices
                     : "the target does not have a confirmed full-text selection; no replacement text sent",
                 code: .inputUnavailable)
         }
-        func beforeContent() async throws {
+        let beforeContent: @MainActor () async throws -> Void = {
             if contentStarted {
                 try await validate()
                 return
@@ -446,7 +446,7 @@ import ApplicationServices
                 }
             }
         }
-        func posted() {
+        let posted: @MainActor () -> Void = {
             contentStarted = true
             onPosted()
         }
