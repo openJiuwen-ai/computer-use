@@ -6,30 +6,14 @@ Add desktop operation tools to an existing agent over stdio MCP. The agent clien
 
 ## 1. Prepare the environment
 
-Install Python 3.11 or later and `uv`. Build and run the MCP server on the computer whose desktop it will operate.
-
-Prepare the native dependencies on the computer whose desktop you will operate:
-
-| Platform | Requirements |
-| --- | --- |
-| macOS | macOS 14 or later, an Xcode toolchain with Swift 6, and Accessibility and Screen Recording permissions. |
-| Windows | Windows x64 with .NET Framework 4.8 and its C# compiler; window capture requires Windows 10 1903 or later. |
-| Linux | A graphical desktop session with AT-SPI and PyGObject. Use X11 for screenshots and mouse input. |
-
-Source installs on all three platforms need Rust 1.85.1 on PATH and CPython 3.11–3.15 on a supported architecture. Prebuilt wheels include the read engine. See the [packaging instructions](../PACKAGING.md).
-
-On Debian or Ubuntu, install the Linux system dependencies first:
-
-```bash
-sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
-```
+Follow the [source build guide](build-from-source.en.md) to set up Rust, the platform tools, and desktop permissions. Build and run the MCP server on the computer whose desktop it operates.
 
 ## 2. Install from source and build the backend
 
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync --no-dev --extra mcp
+uv sync --python 3.12 --no-dev --extra mcp
 ```
 
 The SDK and MCP server are installed in editable mode into the checkout's `.venv`, without model dependencies. Run the following commands from the checkout root.
@@ -37,11 +21,11 @@ The SDK and MCP server are installed in editable mode into the checkout's `.venv
 Build or prepare the native backend, then check desktop access:
 
 ```bash
-uv run --no-dev --extra mcp computer-use-build
-uv run --no-dev --extra mcp computer-use-permissions
+uv run --no-sync computer-use-build
+uv run --no-sync computer-use-permissions
 ```
 
-On macOS, use `uv run --no-dev --extra mcp computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
+On macOS, use `uv run --no-sync computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
 
 ## 3. Connect your agent
 
@@ -81,7 +65,7 @@ and connector activation.
 For manual server debugging, you can also run this from the checkout root:
 
 ```bash
-uv run --no-dev --extra mcp computer-use-mcp
+uv run --no-sync computer-use-mcp
 ```
 
 For a wheel installation, install the same wheel with its `mcp` extra, for example
@@ -110,10 +94,7 @@ below, and check the interface text and screenshot. Grant the required platform
 permissions as described above. Use `computer_use_reset` to clear the current Python
 execution session.
 
-**3. Reload after source changes.** Restart the MCP connection after editing Python
-source. After changing dependencies or entry points, first rerun
-`uv sync --no-dev --extra mcp`. After changing the native backend, run
-`uv run --no-dev --extra mcp computer-use-build`, then restart the MCP connection.
+**3. Reload after source changes.** Follow the [source build guide](build-from-source.en.md#3-verify-and-update-the-installation) to update Python, Rust, or the driver, then restart the MCP connection.
 
 On macOS, App and Element operations use object or directed input. Call a direct Computer method for global
 input. Add `--no-allow-global-input` to the connector's `args` to restrict global input. The target computer
@@ -133,7 +114,7 @@ receipt available. Request screenshots explicitly and use the UI to judge the ap
 
 ### Python SDK
 
-Save this example as `list_apps.py` and run it with `uv run --no-dev python list_apps.py`.
+Save this example as `list_apps.py` and run it with `uv run --no-sync python list_apps.py`.
 
 ```python
 from computer_use import Computer

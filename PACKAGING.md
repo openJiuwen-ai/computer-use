@@ -1,11 +1,11 @@
 # 开发打包
 
-在支持的目标主机上，以下命令生成包含本机后端的源码 wheel。
-三端的源码和 editable 安装使用 PATH 中的 Rust 1.85.1 与目标架构的 CPython 3.11–3.15。macOS 驱动构建使用 Swift 6 工具链。
-各平台的 wheel 随包提供对应 Python ABI 的无障碍读取扩展。
+先按[源码构建指南](docs/build-from-source.md)准备目标系统的工具链、运行依赖和所需 CPython 版本。wheel 包含对应 Python ABI 的无障碍读取扩展；为不同平台或 Python 小版本分别出包。
+
+在目标主机上执行以下命令构建源码发行包和 wheel。若源码 wheel 的驱动构建失败，仍可安装 SDK；应先检查构建状态并修复驱动问题，再在目标桌面使用。
 
 ```bash
-uv run --group build python -m build
+uv run --python 3.12 --no-dev --group build python -m build
 ```
 
 如需分开构建和组包，在每个目标主机上构建驱动，再为要发布的每种 Python ABI 构建一份读引擎制品。将两类制品放入同一目录后，在组包主机运行组包命令。例如：

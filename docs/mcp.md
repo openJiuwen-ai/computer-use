@@ -6,30 +6,14 @@
 
 ## 1. 准备环境
 
-安装 Python 3.11 或更高版本及 `uv`。构建和 MCP 服务均在被操作桌面的电脑上运行。
-
-在需要操作桌面的目标电脑上准备原生依赖：
-
-| 平台 | 环境要求 |
-| --- | --- |
-| macOS | macOS 14 或更高版本、包含 Swift 6 的 Xcode 工具链，以及辅助功能和屏幕录制权限。 |
-| Windows | Windows x64、.NET Framework 4.8 及其 C# 编译器；窗口截图需要 Windows 10 1903 或更高版本。 |
-| Linux | 包含 AT-SPI 和 PyGObject 的图形桌面会话；截图和鼠标输入使用 X11。 |
-
-三个平台从源码安装时均需在 PATH 中提供 Rust 1.85.1，并使用受支持架构上的 CPython 3.11–3.15。预构建 wheel 已包含读引擎。详见[开发打包](../PACKAGING.md)。
-
-Debian 或 Ubuntu 需要先安装 Linux 系统依赖：
-
-```bash
-sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
-```
+按[源码构建指南](build-from-source.md)准备 Rust、系统工具链和桌面权限。构建和 MCP 服务均在被操作桌面的电脑上运行。
 
 ## 2. 安装源码并构建后端
 
 ```bash
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
-uv sync --no-dev --extra mcp
+uv sync --python 3.12 --no-dev --extra mcp
 ```
 
 SDK 和 MCP 服务以 editable 方式安装到仓库的 `.venv`，不安装模型依赖。以下命令均在仓库根目录执行。
@@ -37,11 +21,11 @@ SDK 和 MCP 服务以 editable 方式安装到仓库的 `.venv`，不安装模�
 构建或准备原生后端，并检查桌面访问条件：
 
 ```bash
-uv run --no-dev --extra mcp computer-use-build
-uv run --no-dev --extra mcp computer-use-permissions
+uv run --no-sync computer-use-build
+uv run --no-sync computer-use-permissions
 ```
 
-macOS 可运行 `uv run --no-dev --extra mcp computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
+macOS 可运行 `uv run --no-sync computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
 
 ## 3. 接入自己的 Agent
 
@@ -77,7 +61,7 @@ Windows 对应路径为 `C:/absolute/path/to/computer-use/.venv/Scripts/computer
 需要手动启动服务调试时，也可在仓库根目录运行：
 
 ```bash
-uv run --no-dev --extra mcp computer-use-mcp
+uv run --no-sync computer-use-mcp
 ```
 
 通过 wheel 安装时，为同一个 wheel 选择 `mcp` extra，例如
@@ -101,9 +85,7 @@ print(computer.list_apps())
 随后可选择一个有窗口的应用，执行下文的 `app.read(view="both")`，核对界面文字与截图，
 并按前述说明授予所需平台权限。`computer_use_reset` 可用于清空当前 Python 执行会话。
 
-**3. 更新源码后重新加载。** 修改 Python 源码后，重启 MCP 连接以加载新代码；
-修改依赖或启动入口后，先重新运行 `uv sync --no-dev --extra mcp`。
-修改原生后端后，先运行 `uv run --no-dev --extra mcp computer-use-build`，再重启 MCP 连接。
+**3. 更新源码后重新加载。** 按[源码构建指南](build-from-source.md#3-验证与更新)更新 Python、Rust 或驱动，再重启 MCP 连接。
 
 macOS 的 App 和 Element 操作使用对象或定向输入。需要全局输入时，显式使用 Computer 的直接输入方法。
 在连接器的 `args` 加上 `--no-allow-global-input` 可限制全局输入。系统权限仍需在目标电脑授权。
@@ -120,7 +102,7 @@ SDK 方法同步返回结果。通过 `computer.app(id)` 选应用，用 `app.re
 
 ### Python SDK
 
-将以下示例保存为 `list_apps.py`，通过 `uv run --no-dev python list_apps.py` 运行。
+将以下示例保存为 `list_apps.py`，通过 `uv run --no-sync python list_apps.py` 运行。
 
 ```python
 from computer_use import Computer
