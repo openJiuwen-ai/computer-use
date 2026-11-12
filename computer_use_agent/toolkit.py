@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import time
+from pathlib import Path
 from uuid import uuid4
 
 from computer_use_mcp.instructions import CODE_DESCRIPTION, DESCRIPTION, RESET_DESCRIPTION, TITLE_DESCRIPTION
@@ -129,7 +130,7 @@ class ComputerUseToolkit:
         registry = PathRegistry()
         if routing.paths_file:
             registry.load_file(routing.paths_file)
-        store = PathMetricsStore(persistence_path=routing.metrics_file) if routing.metrics_file else PathMetricsStore()
+        store = PathMetricsStore(persistence_path=self._metrics_path())
         policy = RoutingPolicy(
             min_confidence=routing.min_confidence,
             refuse_floor=routing.refuse_floor,
@@ -146,10 +147,18 @@ class ComputerUseToolkit:
         )
         return Router(
             registry,
-            RouterConfig(policy=policy, weights=weights),
+            RouterConfig(policy=policy, weights=weights, global_input_allowed=self.config.allow_global_input),
             store=store,
             run_code=self._run_routed_code,
         )
+
+    def _metrics_path(self):
+        routing = self.config.routing
+        if routing.metrics_file:
+            return routing.metrics_file
+        if not self.config.workspace:
+            return None
+        return Path(self.config.workspace) / "routing" / "metrics.jsonl"
 
     @property
     def system_prompt(self):

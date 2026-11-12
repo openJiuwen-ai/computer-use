@@ -24,6 +24,9 @@ def _json_field(payload: Any, dotted: str) -> Any:
 async def verify(spec: VerifySpec | None, evidence: dict[str, Any]) -> tuple[Verdict, str]:
     if spec is None:
         return Verdict.UNKNOWN, "no verification contract; outcome not independently verified"
+    if spec.kind == "gui_observe":
+        # The router evaluates gui_observe against a live session; static evidence cannot confirm it.
+        return Verdict.UNKNOWN, "gui_observe needs the router's live observation runner"
     try:
         if spec.kind == "http_status":
             status = int(evidence.get("status", 0))
@@ -70,9 +73,7 @@ async def verify(spec: VerifySpec | None, evidence: dict[str, Any]) -> tuple[Ver
             actual = _json_field(payload, spec.field)
             if actual is None:
                 return Verdict.FAIL, f"field {spec.field!r} missing"
-            if str(actual) == str(spec.expect):
-                return Verdict.PASS, f"field {spec.field} == {spec.expect!r}"
-            if str(spec.expect) in str(actual):
+            if str(spec.expect) in str(actual):  # equality is subsumed by the containment check
                 return Verdict.PASS, f"field {spec.field} contains {spec.expect!r}"
             return Verdict.FAIL, f"field {spec.field} is {actual!r}, expected {spec.expect!r}"
     except (TypeError, ValueError) as error:
