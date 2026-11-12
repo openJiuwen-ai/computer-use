@@ -689,7 +689,7 @@ enum NativePointerDeliveryPolicy {
         try check()
         let current = try resolvingCaptureTranslation()
         try current.validateParameters(request)
-        func sampleGeometry(_ continuingDrag: Bool) throws -> WindowGeometry.WindowMapping {
+        let sampleGeometry: @MainActor (Bool) throws -> WindowGeometry.WindowMapping = { continuingDrag in
             guard let image = current.capturedImage else { return current.window }
             return try image.screen.validateInputGeometry(current.window, continuingDrag: continuingDrag)
         }
@@ -794,7 +794,7 @@ enum NativePointerDeliveryPolicy {
         }
         func restoreLocalActivity(_ point: CGPoint, _ missing: NativePointerActivityRecovery.Missing) async throws {
             guard missing.window == window.id else { throw missing }
-            func checkOriginal() throws {
+            let checkOriginal: @MainActor () throws -> Void = {
                 try guardOperation()
                 try queryRecipient(continuingDrag: false)
                 try check()

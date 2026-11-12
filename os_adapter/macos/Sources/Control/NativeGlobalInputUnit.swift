@@ -10,17 +10,17 @@ import CoreGraphics
     static func run(
         _ operation: NativeOperation, receipt: NativeExecutionReceipt, onEffect: @escaping () -> Void = {}
     ) async throws {
-        func check() throws {
+        let check: @MainActor () throws -> Void = {
             try operation.check(write: true)
             try Input.requireDesktopInput()
         }
-        func dispatched() throws {
+        let dispatched: @MainActor () throws -> Void = {
             try check()
             operation.recordInputDispatch()
             receipt.dispatch = "unknown"
             onEffect()
         }
-        func posted() { receipt.recordAccepted() }
+        let posted: @MainActor () -> Void = { receipt.recordAccepted() }
         func cleanupUnknown() { receipt.recordCleanupUnknown() }
         try check()
         switch operation.request.kind {

@@ -62,7 +62,7 @@ import Foundation
         released = true
     }
 
-    func run<Value>(_ operation: () async throws -> Value) async throws -> Value {
+    func run<Value>(_ operation: @MainActor () async throws -> Value) async throws -> Value {
         let result: Value
         do {
             try Task.checkCancellation()

@@ -15,11 +15,11 @@ import ApplicationServices
     ) async throws {
         let metric = RequestDiagnostics.metrics?.start(.clickDispatch)
         defer { metric?.end() }
-        func guardOperation() throws {
+        let guardOperation: @MainActor () throws -> Void = {
             try plan.operation.check(write: true)
             try RequestDiagnostics.checkCancellation()
         }
-        func actionBoundary() throws {
+        @MainActor func actionBoundary() throws {
             try boundary.checkConditions()
             var retained = plan.actionDocument
             if retained == nil, let scope = plan.documentScope, case .action(let node, let name, _) = plan.target,
@@ -36,11 +36,11 @@ import ApplicationServices
             try boundary.beforeDispatch()
             evidence.markCall("nativeAction")
         }
-        func pointerBoundary() throws {
+        let pointerBoundary: @MainActor () throws -> Void = {
             try boundary.markDispatchInFlight()
             evidence.markCall("posted")
         }
-        func posted() {
+        let posted: @MainActor () -> Void = {
             receipt.recordAccepted()
             evidence.markReturned()
         }
@@ -73,7 +73,7 @@ import ApplicationServices
                 receipt: receipt, evidence: evidence, deadline: plan.operation.deadline, check: guardOperation)
         case .action(let node, let name, let description):
             try objects.executeNativeAction(
-                node, action: name, description: description, onDispatch: actionBoundary,
+                node, action: name, description: description, onDispatch: { try actionBoundary() },
                 onReturned: evidence.markReturned)
         case .menu(let unit, let node, let name, let description):
             let facts = try objects.nativeActionFacts(node)
@@ -81,7 +81,7 @@ import ApplicationServices
                 throw DriverError("the selected menu action declaration changed", code: .inputUnavailable)
             }
             try await unit.perform(
-                action: name, opensMenu: false, check: boundary.checkConditions, onDispatch: actionBoundary,
+                action: name, opensMenu: false, check: boundary.checkConditions, onDispatch: { try actionBoundary() },
                 onReturned: evidence.markReturned)
         case .menuPointer(let unit):
             try await unit.performPointer(
