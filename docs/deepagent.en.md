@@ -43,7 +43,7 @@ On macOS, use `uv run --no-dev --extra agent computer-use-permissions --request`
 
 ## 3. Create a desktop agent
 
-For a wheel installation, select the `agent` extra instead; it includes MCP.
+For a wheel installation, select the `agent` extra. It includes MCP and requires `openjiuwen>=0.1.19.post3`.
 
 Configure a model that supports tool calls and image input using openJiuwen's `ModelClientConfig` and `ModelRequestConfig`. The example reads the provider, endpoint, credentials and model name from `MODEL_PROVIDER`, `API_BASE`, `API_KEY` and `MODEL_NAME`.
 
@@ -129,6 +129,20 @@ uv run --extra agent computer-use-agent "Open the meeting scheduling form and st
 ```
 
 Run `uv run --extra agent computer-use-agent --help` for CLI options.
+
+The model's history retains screenshots by observation scope. An identical screenshot reuses the existing image for
+that scope, preserving its pixels and coordinates. Text history folds identical full trees and retains distinct
+baselines, diffs, and action receipts.
+
+Before its first model request, the Agent lists applications once to check the MCP and native backend. For routing-only
+or headless use, pass `--no-desktop-check` or set `AgentConfig(check_desktop=False)`.
+
+Pass `--pause-on-user-input` or set `AgentConfig(pause_on_user_input=True)` to hold desktop dispatch when recent mouse
+or keyboard activity is detected. After the desktop becomes idle, the Agent is prompted to observe again. The held
+call is left unsent. The wait is bounded to 60 seconds. Activity is checked between desktop calls using the Agent's
+local session idle time on [macOS Core Graphics](https://developer.apple.com/documentation/coregraphics/cgeventsourcestateid),
+[Windows GetLastInputInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo), and
+the [X11 Screen Saver Extension](https://www.x.org/releases/X11R7.7/doc/scrnsaverproto/saver.pdf).
 
 ## 6. Update the source
 

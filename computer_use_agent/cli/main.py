@@ -33,6 +33,14 @@ def parser():
         "--allow-global-input", action=argparse.BooleanOptionalAction, default=None,
         help="Allow global mouse and keyboard input for the local MCP session (default: enabled).",
     )
+    result.add_argument(
+        "--desktop-check", action=argparse.BooleanOptionalAction, default=None,
+        help="Check the desktop backend before the first model request (default: enabled).",
+    )
+    result.add_argument(
+        "--pause-on-user-input", action=argparse.BooleanOptionalAction, default=None,
+        help="Pause desktop dispatch while the user is active (default: disabled).",
+    )
     result.add_argument("--max-iterations", type=int)
     result.add_argument("--debug", action="store_true")
     return result
@@ -133,6 +141,8 @@ async def main(argv=None):
                 "provider": args.provider,
                 "api_base": args.api_base,
                 "allow_global_input": args.allow_global_input,
+                "check_desktop": args.desktop_check,
+                "pause_on_user_input": args.pause_on_user_input,
                 "max_iterations": args.max_iterations,
             },
         )
@@ -179,6 +189,8 @@ async def main(argv=None):
                 {
                     "model": settings["model"],
                     "allow_global_input": config.allow_global_input if config.mcp is None else None,
+                    "check_desktop": config.check_desktop,
+                    "pause_on_user_input": config.pause_on_user_input,
                 },
             )
             current = asyncio.current_task()

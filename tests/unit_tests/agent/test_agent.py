@@ -28,7 +28,7 @@ def test_native_agent_multi_turn_and_compaction(model_server, tmp_path):
     async def run():
         async with create_agent(
             server.model(),
-            config=AgentConfig(workspace=str(tmp_path)),
+            config=AgentConfig(workspace=str(tmp_path), check_desktop=False),
             on_event=lambda kind, data: events.append((kind, data)),
         ) as agent:
             assert isinstance(agent, DeepAgent)
@@ -104,8 +104,8 @@ def test_cancellation_resets_python_without_replay(tmp_path):
             call = asyncio.create_task(
                 toolkit.tools[0].invoke(
                     {
-                        "code": f"from pathlib import Path; marker = 'before'; "
-                        f"Path({str(started)!r}).write_text(marker); await __import__('asyncio').sleep(60)"
+                        "code": f"from pathlib import Path; import time; marker = 'before'; "
+                        f"Path({str(started)!r}).write_text(marker); time.sleep(60)"
                     }
                 )
             )
@@ -152,6 +152,34 @@ def test_partial_output_and_error_status_are_retained():
             assert result.data["mcp_result"]["isError"] is True
 
     asyncio.run(run())
+
+
+def test_close_reports_reset_failure_without_failing_completed_task():
+    from unittest.mock import AsyncMock
+
+    from mcp.types import CallToolResult, TextContent
+
+    events = []
+
+    async def run():
+        async with ComputerUseToolkit(on_event=lambda kind, data: events.append((kind, data))) as toolkit:
+            connection = toolkit.connection
+            connection.session = object()
+            connection.cancel_current = AsyncMock()
+            connection.close = AsyncMock()
+            connection.call = AsyncMock(
+                return_value=CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text="Native cleanup timed out.")],
+                )
+            )
+        connection.call.assert_awaited_once_with("computer_use_reset", {})
+        connection.close.assert_awaited_once()
+
+    asyncio.run(run())
+    reset = next(event["result"] for kind, event in events if kind == "tool_result")
+    assert reset["isError"]
+    assert reset["content"][0]["text"] == "Native cleanup timed out."
 
 
 def test_connection_shutdown_error_preserves_cause_without_reconnect(monkeypatch):

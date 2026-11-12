@@ -70,6 +70,15 @@ def _window_closed_without_input(error: ComputerUseError) -> bool:
     return error.window_lifecycle == "closed" and confirmed_no_requested_input(error.impact)
 
 
+def _receipt_summary(receipt):
+    return {
+        "status": receipt["status"],
+        "target": receipt["target"][:256],
+        "intent": receipt.get("intent"),
+        "detail": receipt["detail"][:400],
+    }
+
+
 class Runtime:
     def __init__(self, send, computer_factory=Computer):
         self.send, self.computer_factory = send, computer_factory
@@ -129,9 +138,9 @@ class Runtime:
             execution_id = None
         self.send(dict(diagnostic=event, **({"executionId": execution_id} if execution_id is not None else {})))
 
-    def emit(self, block, merge_text=False, *, progress=None):
+    def emit(self, block, merge_text=False, *, progress=None, receipt=None):
         if not self.executor.is_owner:
-            self.executor.call(self.emit, block, merge_text, progress=progress)
+            self.executor.call(self.emit, block, merge_text, progress=progress, receipt=receipt)
             return
         run = _runs.get()
         if run is None or not run["active"]:
@@ -143,7 +152,10 @@ class Runtime:
         if not run["publishing"]:
             run["outputEntries"].append({"kind": "block", "block": dict(block), "merge": merge_text})
         output = block if progress is None else progress
-        self.send({"output": output, "mergeText": merge_text, "executionId": run["id"]})
+        message = {"output": output, "mergeText": merge_text, "executionId": run["id"]}
+        if receipt is not None:
+            message["receipt"] = receipt
+        self.send(message)
 
     def flush_observations(self, run, *, explicit=False):
         """Retain chronological slots; render only the facts actually delivered.
@@ -272,7 +284,11 @@ class Runtime:
         if write is not None:
             write["dispatched"] = receipt["status"] == "dispatched"
             write["action"] = (current_operation_budget(), number) if write["dispatched"] else None
-        self.emit({"type": "text", "text": text}, True)
+        self.emit(
+            {"type": "text", "text": text},
+            True,
+            receipt={"number": number, **_receipt_summary(receipt)},
+        )
 
     def text_page(self, source, page):
         if not self.executor.is_owner:
@@ -584,6 +600,12 @@ class Runtime:
         label = caption if context_shown else image_caption(caption_source, True, delivery.coordinates)
         text = {"type": "text", "text": f"Image {identifier}\n{caption.render()}"}
         metadata = {"imageId": identifier, "caption": label.render()}
+        if scope is not None:
+            # Only native, coordinate-bound captures can replace earlier images.
+            # A desktop capture's coordinate scope holds a weak reference.
+            metadata["observationScope"] = (
+                "desktop" if scope[0] == "desktop" else hashlib.sha256(utf8(repr(scope))).hexdigest()
+            )
         if captured_after_action is not None:
             metadata["capturedAfterAction"] = captured_after_action
         block = {"type": "image", "mimeType": "image/png", "data": data, "_meta": {"computer-use": metadata}}
@@ -701,6 +723,11 @@ class Runtime:
         message = None
         if error is not None:
             message = type(error).__name__ + ": " + str(error)
+            if isinstance(error, ComputerUseError):
+                failure = {"code": error.code, "target": error.target[:256], "effect": error.effect}
+                if error.action_receipt is not None:
+                    failure["receipt"] = _receipt_summary(error.action_receipt)
+                result["_meta"] = {"computer-use": {"failure": failure}}
             if isinstance(error, ComputerUseError) and _window_closed_without_input(error):
                 detail, newline, facts = message.partition("\n")
                 outcome = "\nRequested input: not dispatched."

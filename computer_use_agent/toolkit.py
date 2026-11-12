@@ -15,6 +15,7 @@ from openjiuwen.core.foundation.tool.mcp.base import extract_mcp_tool_result_con
 from openjiuwen.core.foundation.tool.schema import ToolOutput
 from openjiuwen.core.runner.runner import Runner
 
+from .activity import DesktopPause, build_idle_probe
 from .config import AgentConfig
 from .connection import McpConnection
 from .prompt import system_prompt
@@ -80,6 +81,9 @@ class ComputerUseToolkit:
         self.connection = McpConnection(self.config.mcp_config(), stderr=stderr)
         self.on_event = on_event
         self._closing = None
+        self._desktop_checked = False
+        self._desktop_check_lock = asyncio.Lock()
+        self._pause = DesktopPause(build_idle_probe()) if self.config.pause_on_user_input else None
         self._route_depth = 0
         self.routing = self._build_router()
         self.tools = [
@@ -158,6 +162,22 @@ class ComputerUseToolkit:
             except Exception:
                 logger.exception("Computer Use observer failed after %s", kind)
 
+    async def check_desktop(self):
+        if not self.config.check_desktop or self._desktop_checked:
+            return
+        async with self._desktop_check_lock:
+            if self._desktop_checked:
+                return
+            self.emit("desktop_check", {})
+            async with asyncio.timeout(45):
+                result = await self.connection.call(
+                    "computer_use", {"code": "len(computer.list_apps())", "title": "Check desktop availability"}
+                )
+            if result.isError:
+                detail = next((block.text for block in reversed(result.content) if block.type == "text"), "")
+                raise RuntimeError(detail[-1000:] or "The backend could not list desktop applications.")
+            self._desktop_checked = True
+
     async def call(self, name, inputs):
         if name == "route_task":
             self.emit("tool_call", {"name": name, "arguments": inputs})
@@ -167,8 +187,22 @@ class ComputerUseToolkit:
                 {"name": name, "result": {"success": output.success, "content": output.data.get("content", "")}},
             )
             return output
-        started = time.monotonic()
         self.emit("tool_call", {"name": name, "arguments": inputs})
+        pause = self._pause if name == "computer_use" else None
+        if pause is not None:
+            try:
+                advisory = await pause.wait(self.emit)
+            except asyncio.CancelledError:
+                self.emit(
+                    "tool_cancelled",
+                    {"name": name, "effect": "none", "error": "Call cancelled before dispatch."},
+                )
+                raise
+            if advisory is not None:
+                result = {"isError": True, "content": [{"type": "text", "text": advisory}]}
+                self.emit("tool_result", {"name": name, "result": result})
+                return ToolOutput(success=False, data={"content": advisory}, error=advisory)
+        started = time.monotonic()
         try:
             result = await self.connection.call(name, inputs)
         except asyncio.CancelledError:
@@ -180,6 +214,7 @@ class ComputerUseToolkit:
             self.emit("tool_error", {"name": name, "error": str(error), "effect": "possible"})
             self._record_gui_sample(name, inputs, started, None)
             raise
+        completed = time.monotonic()
         self._record_gui_sample(name, inputs, started, result.isError is False)
         raw = result.model_dump(mode="json", by_alias=True, exclude_none=True)
         self.emit("tool_result", {"name": name, "result": raw})
@@ -197,8 +232,17 @@ class ComputerUseToolkit:
             if type(after_action) is int and after_action > 0:
                 label += f"\nCaptured after Action #{after_action}."
             item["source_path"] = label + (f"\n{caption}" if caption else "")
+            scope = metadata.get("observationScope")
+            if isinstance(scope, str) and scope:
+                item["observation_scope"] = scope
         data = {**data, "content": render_payload_text(data) or "Execution returned no text."}
         data = {**data, "mcp_result": raw}
+        tool_metadata = raw.get("_meta", {}).get("computer-use")
+        progress = tool_metadata.get("progress") if isinstance(tool_metadata, dict) else None
+        if isinstance(progress, dict) and type(progress.get("executionId")) is int:
+            data["execution_progress"] = progress
+            if pause is not None:
+                pause.record_input(started, completed, progress)
         return ToolOutput(success=not result.isError, data=data, error=getattr(converted, "error", None))
 
     def _record_gui_sample(self, name, inputs, started, success):

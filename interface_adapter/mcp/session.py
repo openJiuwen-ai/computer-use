@@ -8,6 +8,7 @@ import logging
 import os
 import socket
 import sys
+from collections import deque
 
 from computer_use.native import driver_exec
 from computer_use.native.preview import is_preview_event
@@ -48,6 +49,7 @@ class ExecutionSession:
         self._worker = None
         self._generation = 0
         self._next_id = 1
+        self._last_progress = None
         self._journal = Journal(allow_global_input=allow_global_input)
         self._tasks = set()
 
@@ -173,6 +175,7 @@ class ExecutionSession:
             title=title,
             startedAt=loop.time(),
             output=OutputBuffer(),
+            receipts=deque(maxlen=8),
             future=future,
             timer=None,
             cancel=None,
@@ -391,6 +394,9 @@ class ExecutionSession:
                     if not is_output(message["output"]):
                         raise ValueError("Execution process returned invalid output.")
                     block = message["output"]
+                    receipt = message.get("receipt")
+                    if isinstance(receipt, dict):
+                        pending["receipts"].append(receipt)
                     self._journal.record(
                         dict(
                             kind="output",
@@ -437,7 +443,7 @@ class ExecutionSession:
         if worker.started:
             self.reset(reason)
 
-    def _finish(self, result):
+    def _finish(self, result, *, interrupted=False):
         pending, self._pending = self._pending, None
         if pending is None:
             return
@@ -456,12 +462,26 @@ class ExecutionSession:
                 ],
             )
         )
+        worker_meta = result.get("_meta", {}).get("computer-use", {})
+        completion = "finished"
+        if interrupted:
+            completion = "unknown" if pending["sent"] else "not_started"
+        self._last_progress = {
+            "executionId": pending["id"],
+            "completion": completion,
+            "receipts": list(pending["receipts"]),
+        }
+        if result.get("isError"):
+            self._last_progress["isError"] = True
+        if "failure" in worker_meta:
+            self._last_progress["failure"] = worker_meta["failure"]
         result["_meta"] = {
             **result.get("_meta", {}),
             "computer-use": {
                 **self._journal.metadata(),
                 "executionId": pending["id"],
                 "durationMs": duration,
+                "progress": self._last_progress,
                 **({"title": pending["title"]} if pending["title"] else {}),
             },
         }
@@ -565,26 +585,30 @@ class ExecutionSession:
                 "content"
             ]
             self._journal.record(dict(kind="execution_reset", reason=reason, complete=failure is None))
-            self._finish(result)
+            self._finish(result, interrupted=True)
             if failure is not None:
-                return execution_error(failure)
-            try:
-                if self.on_preview is not None:
-                    self.on_preview(dict(kind="reset"))
-            except Exception:
-                _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
-            return dict(
-                content=[
-                    dict(
-                        type="text",
-                        text=(
-                            "Execution session reset. Python variables, App/Element handles and "
-                            "observations cleared. Capture streams stopped."
+                reply = execution_error(failure)
+            else:
+                try:
+                    if self.on_preview is not None:
+                        self.on_preview(dict(kind="reset"))
+                except Exception:
+                    _LOG.debug("Worker cleanup or notification did not complete.", exc_info=True)
+                reply = dict(
+                    content=[
+                        dict(
+                            type="text",
+                            text=(
+                                "Execution session reset. Python variables, App/Element handles and "
+                                "observations cleared. Capture streams stopped."
+                            )
+                            + (" Preview reset requested." if self.on_preview is not None else ""),
                         )
-                        + (" Preview reset requested." if self.on_preview is not None else ""),
-                    )
-                ]
-            )
+                    ]
+                )
+            if self._last_progress is not None:
+                reply["_meta"] = {"computer-use": {"progress": self._last_progress}}
+            return reply
 
         task = asyncio.create_task(reset())
         self._resetting = task

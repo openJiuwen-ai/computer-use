@@ -286,10 +286,11 @@ app.element(item_ref).click() on the same App. If progress confirms the command 
 run, a shortcut displayed for that enabled item can be sent with
 app.press_key(shown_shortcut, window=ref), after checking the item and receiver still apply.
 
-With the app and fields already identified, batch known work and inspect the returned menu:
+After observing the name field as element 12 and the Format menu as element 18,
+batch the known operations and inspect the returned menu:
 ```python
-app.element("Name").type_text("Quarterly report", replace=True)
-app.element("Format").open_menu()
+app.element(12).type_text("Quarterly report", replace=True)
+app.element(18).open_menu()
 ```
 
 For a point from an already delivered image, choose the input method for this action:
