@@ -876,11 +876,13 @@ class ConnectionPort:
         self._check(operation)
         value = await self.connection.request(
             "prepareObservation",
-            dict(operation=operation, target=encode_fields(target, _BINDING)),
+            {"operation": operation, "target": encode_target(target)},
             dict(timeoutMs=timeout_ms),
         )
         if decode_binding(value["binding"]) != target:
-            raise ValueError("Observation preparation changed its original window")
+            raise ValueError("Observation preparation changed its original target")
+        if ("reopenStatus" in value) != isinstance(target, ApplicationBinding):
+            raise ValueError("Observation preparation returned the wrong kind of receipt")
         return value
 
     async def capture(self, operation, target, max_dimension, timeout_ms, *, kind="window"):

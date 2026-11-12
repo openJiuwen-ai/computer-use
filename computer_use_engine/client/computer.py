@@ -269,6 +269,7 @@ class App:
 
     @synchronous
     def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False, window=None):
+        """Observe the app or window, with optional foreground preparation."""
         _window(window)
         parameters.view(view, full, menu_path)
         if allow_foreground is not True and allow_foreground is not False:

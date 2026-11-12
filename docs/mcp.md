@@ -141,6 +141,8 @@ macOS 的 App 单左键坐标点击精确命中已展开菜单的可选项时，
 
 **前台与全局输入。** macOS 和 Windows 的普通读取使用窗口当前状态。可显式传入
 `app.read(window=ref, allow_foreground=True)` 允许为观察准备目标窗口，结果包含 `preparation`。
+macOS 上运行中的应用如果没有可观察窗口，可以调用 `app.read(view="both", allow_foreground=True)`，
+在同一次调用内请求系统重新显示该应用并读取出现的窗口。
 macOS 的 Computer 直接输入使用系统当前桌面和键盘焦点。裸坐标是系统屏幕 point，可以包含副屏负坐标。
 显式全局输入可以直接派发，需核对界面时另行读取。会话的 `Computer(allow_global_input=False)` 会限制全局输入。
 

@@ -42,7 +42,7 @@ from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.accessibility.preparation import WindowDisclosureContext
 from computer_use.interaction.read.accessibility.preparation import SnapshotRenderRequest
 from computer_use.interaction.read.accessibility.preparation import PrepareSnapshotPipeline
-from computer_use.native.contracts import Binding
+from computer_use.native.contracts import ApplicationBinding, Binding
 from computer_use.native.query.directory import select_surface
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
 from computer_use.pipeline.core import Control
@@ -54,7 +54,13 @@ from .application_content import collect_application_content, remember_applicati
 from .capture_companions import CapturedSharingControl, companion_capture
 from .collection import CollectionPlan, components, observation_members
 from .menus import InterfaceMenuPipeline, remember_menu
-from .observation_preparation import ObservationPreparationPipeline, annotate_preparation_failure
+from .observation_preparation import (
+    APP_REOPEN_HINT,
+    ObservationPreparationPipeline,
+    annotate_preparation_failure,
+    can_reopen_application,
+    refresh_after_preparation,
+)
 from .publication import capture_header, publish, related_focus_summary, related_window_summary, tree_document
 from .related import RelatedRead, original_lifecycle, window_lifecycle
 
@@ -247,11 +253,17 @@ class InterfaceReadPipeline:
             if item is None:
                 raise local_failure("the observation window is not confirmed in this instance")
             preparation = await ObservationPreparationPipeline(controller.port).arun(member_target(instance, item))
+        elif (
+            allow_foreground and menu_path is None and first is None and related is None
+            and can_reopen_application(controller, directory)
+        ):
+            target = ApplicationBinding(directory["session"], directory["application"])
+            preparation = await ObservationPreparationPipeline(controller.port).arun(target)
         try:
             if preparation is not None:
                 # Raising may change geometry, focus or modal membership. Reuse the
                 # original instance and refresh before any pixels are collected.
-                directory, _ = await resolve(controller, ui, view)
+                directory = await refresh_after_preparation(controller, ui, view, preparation)
                 first = None
             return await self._collect(
                 ui, view, full, menu_path, directory, first, preparation, related, on_observation,
@@ -366,6 +378,7 @@ class InterfaceReadPipeline:
             return (target, tree, tree_document(controller, target, tree, prepared=prepared), owner), gap
 
         content_gap = None
+        reopen_hint = related is None and preparation is None and can_reopen_application(controller, directory)
         # pylint: disable-next=protected-access
         if not window_family_only and instance.anchor is None and ui._anchor is None:
             state = controller.state(ui)
@@ -388,6 +401,7 @@ class InterfaceReadPipeline:
                 return publish(
                     controller, ui, DisplayDocument.join(lines), trees=((target, tree),), full=full,
                     scope=target.surface + ":" + view, directory=directory, content_owner=owner,
+                    preparation=preparation,
                     partial=bool(directory["stopReasons"]), on_observation=on_observation,
                 )
             matches_view = (
@@ -411,7 +425,8 @@ class InterfaceReadPipeline:
                         first = first.launch
                 if not directory["surfaces"] and isinstance(first, MenuAppObservation):
                     return await InterfaceMenuPipeline(controller).run(
-                        ui, (), observed=first, full=full, on_observation=on_observation,
+                        ui, (), observed=first, preparation=preparation, reopen_hint=reopen_hint,
+                        full=full, on_observation=on_observation,
                     )
         # pylint: disable-next=protected-access
         if not window_family_only and instance.anchor is None and ui._anchor is None:
@@ -424,6 +439,8 @@ class InterfaceReadPipeline:
             ]
             if not choices:
                 lines.append("Observable working window: unavailable.")
+                if reopen_hint:
+                    lines.append(APP_REOPEN_HINT)
             if related is not None:
                 lines.append(related_window_summary(related, directory, instance.windows))
             if isinstance(launch, Mapping) and "detail" in launch:
@@ -437,6 +454,7 @@ class InterfaceReadPipeline:
                 full=True,
                 scope="choices:" + str(instance.selector),
                 directory=directory,
+                preparation=preparation,
                 content_available=False,
                 partial=bool(directory["stopReasons"] or content_gap),
                 gaps=(content_gap,) if content_gap is not None else (),

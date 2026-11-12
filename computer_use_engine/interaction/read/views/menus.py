@@ -19,6 +19,7 @@ from computer_use.session.interfaces import SurfaceOwner, WindowIdentity
 from computer_use.session.operations import current_operation_budget
 from computer_use.session.state import AppState
 
+from .observation_preparation import APP_REOPEN_HINT
 from .publication import directory_text, publish, tree_document
 
 if TYPE_CHECKING:
@@ -92,6 +93,7 @@ class InterfaceMenuPipeline:
         *,
         observed: MenuAppObservation | None = None,
         preparation: dict | None = None,
+        reopen_hint: bool = False,
         full: bool = False,
         on_observation=None,
     ) -> Observation:
@@ -142,6 +144,8 @@ class InterfaceMenuPipeline:
                 template("App: {0!r}.", observed.name),
                 "No working window is bound; this is the application menu only.",
             ]
+            if reopen_hint:
+                lines.append(APP_REOPEN_HINT)
         else:
             # This is observation selection, not permission to deliver input.
             # A new App.read(menu_path=...) must not require a prior delivered

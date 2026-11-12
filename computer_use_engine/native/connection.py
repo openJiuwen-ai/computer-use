@@ -513,6 +513,8 @@ class Connection:
             if method == "inspect" and params.get("query", {}).get("kind") == "relation"
             else "nativeCapture"
             if method == "capture"
+            else "nativeApplicationReopen"
+            if method == "prepareObservation" and "application" in params["target"]
             else "nativeObservationPreparation"
             if method == "prepareObservation"
             else "nativeOperations"

@@ -43,7 +43,8 @@ import ApplicationServices
         case "locatePoint": return try resource.scopes.locatePoint(raw)
         case "capture": return try await CapturePipeline.collect(raw, operation: operation, scopes: resource.scopes)
         case "prepareObservation":
-            return try await ObservationPreparationPipeline.run(raw, operation: operation, scopes: resource.scopes)
+            return try await ObservationPreparationPipeline.run(
+                raw, operation: operation, scopes: resource.scopes, launch: launch)
         case "inspect":
             let kind = ((raw as? [String: Any])?["query"] as? [String: Any])?["kind"] as? String
             if kind == "appChanges" || kind == "waitAppChange" {

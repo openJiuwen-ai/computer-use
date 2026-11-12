@@ -345,6 +345,7 @@ def publish(
             + preparation["raiseStatus"]
             + "; foreground="
             + str(preparation["foreground"]).lower()
+            + ("; application reopen=requested" if "reopenStatus" in preparation else "")
             + ". Focus/stacking may have changed; no global input was sent. Redraw freshness remains unknown."
         )
         from dataclasses import replace

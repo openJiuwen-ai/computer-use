@@ -27,7 +27,7 @@ class ObserveUI:
         view: Requested tree, image, or combined observation.
         full: Request a complete tree rather than an eligible diff.
         menu_path: Menu hierarchy to inspect, or None for the current window.
-        allow_foreground: Explicit permission to raise the original window before observing.
+        allow_foreground: Permit preparing a window or reopening a windowless running application before observing.
     """
 
     owner: UIHandle

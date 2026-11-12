@@ -155,6 +155,8 @@ Use `app.click(at=p, force_pointer=True)` when the mouse event is required.
 
 **Foreground and global input.** Ordinary reads on macOS and Windows observe the window in its current state.
 Pass `app.read(window=ref, allow_foreground=True)` to allow observation preparation and receive its `preparation` record.
+On macOS, `app.read(view="both", allow_foreground=True)` can reopen a running app with no observable windows and
+read the window that appears.
 On macOS, direct Computer input goes to the current system desktop or keyboard focus. Bare coordinates are screen points
 and can include negative coordinates on secondary displays. Explicit global input can dispatch directly. Read separately
 for UI feedback. Set `Computer(allow_global_input=False)` to restrict the session's global input.

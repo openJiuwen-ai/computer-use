@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from .contracts import (
+    ApplicationBinding,
     Binding,
     Cleanup,
     Facts,
@@ -143,8 +144,8 @@ class NativePort(Protocol):
     ) -> dict:
         pass
 
-    async def prepare_observation(self, operation: str, target: Binding, timeout_ms: int) -> dict:
-        """Explicit window preparation, never part of an inspect or capture query."""
+    async def prepare_observation(self, operation: str, target: Binding | ApplicationBinding, timeout_ms: int) -> dict:
+        """Explicit window or application preparation separate from inspect and capture queries."""
         pass
 
     async def execute(self, operation: str, step: int, command: UnitCommand, timeout_ms: int) -> StepResult:
