@@ -1,6 +1,9 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
+import asyncio
+import hashlib
 import json
+import runpy
 import subprocess
 import sys
 from importlib import import_module
@@ -8,10 +11,14 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+import setuptools
 from computer_use import paths
+from computer_use.errors import ComputerUseError
+from computer_use.native.connection import Connection
 from computer_use_native_tools import native
 
 MAC_DRIVER = "os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver"
+MAC_TAG = "macosx_14_0_arm64"
 WINDOWS_DRIVER = "os_adapter/windows/.build/computer-use-driver.exe"
 LINUX_WHEEL = "os_adapter/linux/.build/openjiuwen_computeruse_linux-0.0.1-py3-none-any.whl"
 LINUX_LOCK = "os_adapter/linux/requirements.lock"
@@ -144,6 +151,120 @@ def test_source_wheel_keeps_a_writable_build_tree(installed):
     root = paths.repository_root()
     assert root.is_relative_to(home)
     assert (root / source.relative_to(resources)).read_bytes() == source.read_bytes()
+
+
+@pytest.fixture
+def source_builder(monkeypatch):
+    monkeypatch.delenv("COMPUTER_USE_BACKEND_ARCHIVE", raising=False)
+    monkeypatch.delenv("COMPUTER_USE_BACKEND_DIR", raising=False)
+    monkeypatch.setattr(setuptools, "setup", lambda **_: None)
+    return runpy.run_path(str(ROOT / "setup.py"))
+
+
+def stage_mac_backend(stage):
+    executable = stage / MAC_DRIVER
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"driver")
+    (stage / "backend.json").write_text(json.dumps({
+        "format": 1,
+        "target": "macos-arm64",
+        "protocol": native.NATIVE_PROTOCOL_VERSION,
+        "files": {MAC_DRIVER: {"sha256": hashlib.sha256(b"driver").hexdigest(), "mode": 0o755}},
+    }), encoding="utf-8")
+
+
+@pytest.mark.parametrize("failure", ["compile", "launch", "missing", "malformed", "metadata", "payload", "move"])
+def test_failed_source_build_discards_partial_driver_and_records_reason(
+    installed, monkeypatch, tmp_path, source_builder, failure,
+):
+    resources, home = installed
+
+    def build(command, *, cwd, check):
+        assert cwd == tmp_path and check
+        stage = Path(command[-2])
+        if failure == "launch":
+            raise FileNotFoundError("Could not launch the builder.")
+        if failure in ("compile", "payload", "move"):
+            stage_mac_backend(stage)
+        if failure == "compile":
+            raise subprocess.CalledProcessError(1, command)
+        if failure in ("malformed", "metadata"):
+            (stage / "backend.json").write_text("{" if failure == "malformed" else "{}", encoding="utf-8")
+        if failure == "payload":
+            (stage / MAC_DRIVER).write_bytes(b"corrupt")
+
+    replace = Path.replace
+
+    def move(path, target):
+        if failure == "move" and path.name in (".build", Path(MAC_DRIVER).name):
+            raise PermissionError("Could not move the driver.")
+        return replace(path, target)
+
+    monkeypatch.setattr(subprocess, "run", build)
+    monkeypatch.setattr(Path, "replace", move)
+    files = source_builder["install_source_backend"](tmp_path, resources, MAC_TAG)
+
+    assert set(files) == {"backend-status.json"}
+    assert not (resources / "backend.json").exists()
+    assert not (resources / MAC_DRIVER).exists()
+    assert paths.installed_backend_unavailable_reason() == "native_build_failed"
+    assert not home.exists()
+
+
+@pytest.mark.parametrize("platform_tag", [MAC_TAG, None])
+def test_source_build_includes_backend_or_status_in_manifest(tmp_path, monkeypatch, source_builder, platform_tag):
+    def build(command, **_):
+        assert platform_tag == MAC_TAG
+        stage_mac_backend(Path(command[-2]))
+
+    monkeypatch.setattr(subprocess, "run", build)
+    command = source_builder["BuildWithResources"](setuptools.Distribution({"packages": []}))
+    command.build_lib = str(tmp_path / "build")
+    command.native_platform = platform_tag
+    command.ensure_finalized()
+    command.run()
+    resources = Path(command.build_lib) / "computer_use/_resources"
+    manifest = json.loads((resources / "manifest.json").read_bytes())
+    files = ("backend.json", MAC_DRIVER) if platform_tag else ("backend-status.json",)
+    for name in ("os_adapter/macos/Package.swift", *files):
+        assert manifest[name] == hashlib.sha256((resources / name).read_bytes()).hexdigest()
+    if platform_tag is None:
+        assert json.loads((resources / files[0]).read_bytes()) == {"reason": "unsupported_platform"}
+
+
+@pytest.mark.parametrize(("reason", "detail", "code"), [
+    ("native_build_failed", "could not be built during installation", "execution_failed"),
+    ("unsupported_platform", "is unavailable on this operating system or architecture", "unsupported_operation"),
+])
+def test_unavailable_source_wheel_explains_startup_failure(installed, monkeypatch, reason, detail, code):
+    resources, _ = installed
+    monkeypatch.setattr(sys, "platform", "darwin")
+    (resources / "backend-status.json").write_text(json.dumps({"reason": reason}), encoding="utf-8")
+
+    with pytest.raises(ComputerUseError, match=detail) as failure:
+        asyncio.run(Connection(lambda: None)._connect())
+
+    assert failure.value.code == code
+
+
+@pytest.mark.parametrize(("system", "files"), [
+    ("darwin", (MAC_DRIVER,)),
+    ("win32", (WINDOWS_DRIVER, "os_adapter/windows/.build/computer-use-capture.exe",
+               "os_adapter/windows/.build/Interop.NativeUIA.dll")),
+    ("linux", (str(paths.LINUX_RUNTIME / "__main__.py"),)),
+    ("linux", (LINUX_WHEEL,)),
+])
+def test_installed_backend_check_requires_driver_resources(installed, monkeypatch, system, files):
+    resources, home = installed
+    monkeypatch.setattr(sys, "platform", system)
+    (resources / "backend.json").write_text("{}", encoding="utf-8")
+    assert paths.installed_backend_unavailable_reason() == "backend_missing"
+    for name in files:
+        path = resources / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    assert paths.installed_backend_unavailable_reason() is None
+    assert not home.exists()
 
 
 @pytest.fixture

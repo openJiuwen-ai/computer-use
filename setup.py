@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import runpy
@@ -13,6 +14,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from setuptools import find_packages, setup
@@ -24,6 +26,7 @@ except ModuleNotFoundError:
     from wheel.bdist_wheel import bdist_wheel
 
 ROOT = Path(__file__).resolve().parent
+_LOG = logging.getLogger(__name__)
 BACKENDS = runpy.run_path(str(ROOT / "scripts/backend_artifacts.py"))
 BACKEND_ARCHIVE = os.environ.get("COMPUTER_USE_BACKEND_ARCHIVE")
 BACKEND_DIR = os.environ.get("COMPUTER_USE_BACKEND_DIR")
@@ -98,6 +101,72 @@ def native_platform():
     return None
 
 
+def publish_source_backend(staging: Path, output: Path, platform_tag: str) -> dict[str, str]:
+    """Validate the staged files and publish the native build directory."""
+    metadata = staging / "backend.json"
+    contents = metadata.read_bytes()
+    backend = json.loads(contents)
+    target, files = backend["target"], backend["files"]
+    if (
+        backend["format"] != BACKENDS["FORMAT"]
+        or backend["protocol"] != BACKENDS["protocol_version"](ROOT)
+        or BACKENDS["TARGETS"][target][2] != platform_tag
+    ):
+        raise ValueError("Invalid source backend manifest.")
+    if not isinstance(files, dict) or not files:
+        raise ValueError("Invalid source backend manifest.")
+
+    build_path = Path("os_adapter", target.split("-", 1)[0], ".build")
+    payload = staging / build_path
+    manifest = {}
+    for path in payload.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Source backend payload contains a symlink.")
+        if path.is_file():
+            manifest[path.relative_to(staging).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if manifest != {name: details["sha256"] for name, details in files.items()}:
+        raise ValueError("Source backend payload does not match its manifest.")
+    if any(details["mode"] not in (0o644, 0o755) for details in files.values()):
+        raise ValueError("Invalid source backend file mode.")
+
+    manifest[metadata.name] = hashlib.sha256(contents).hexdigest()
+    destination = output / build_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    metadata.replace(output / metadata.name)
+    # Publish the driver in one move, after every other fallible step.
+    payload.replace(destination)
+    return manifest
+
+
+def install_source_backend(build_lib: Path, output: Path, platform_tag: str | None) -> dict[str, str]:
+    """Add the locally built driver or record why only the SDK is installed."""
+    reason = "unsupported_platform"
+    if platform_tag:
+        try:
+            with TemporaryDirectory(
+                prefix="native-", dir=build_lib.parent, ignore_cleanup_errors=True,
+            ) as temporary:
+                staging = Path(temporary)
+                subprocess.run(
+                    [
+                        sys.executable, "-m", "computer_use_native_tools.native",
+                        str(ROOT), str(staging), platform_tag,
+                    ],
+                    cwd=build_lib,
+                    check=True,
+                )
+                return publish_source_backend(staging, output, platform_tag)
+        except (subprocess.CalledProcessError, OSError, KeyError, TypeError, ValueError):
+            (output / "backend.json").unlink(missing_ok=True)
+            _LOG.debug("Could not assemble the source-built Computer Use driver.", exc_info=True)
+            reason = "native_build_failed"
+    status_file = "backend-status.json"
+    status = json.dumps({"reason": reason}).encode("utf-8")
+    (output / status_file).write_bytes(status)
+    _LOG.warning("Computer Use driver unavailable (%s). Installing the Python SDK.", reason)
+    return {status_file: hashlib.sha256(status).hexdigest()}
+
+
 class BuildWithResources(build_py):
     native_platform = None
 
@@ -148,18 +217,8 @@ class BuildWithResources(build_py):
             backend = BACKENDS["unpack_archive"](BACKEND_ARCHIVE, output, root=ROOT)
             for name in ["backend.json", *backend["files"]]:
                 manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
-        elif self.native_platform:
-            subprocess.run(
-                [
-                    sys.executable, "-m", "computer_use_native_tools.native",
-                    str(ROOT), str(output), self.native_platform,
-                ],
-                cwd=resolved,
-                check=True,
-            )
-            backend = json.loads((output / "backend.json").read_bytes())
-            for name in ["backend.json", *backend["files"]]:
-                manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
+        else:
+            manifest.update(install_source_backend(resolved, output, self.native_platform))
         (output / "manifest.json").write_text(
             json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8"
         )
