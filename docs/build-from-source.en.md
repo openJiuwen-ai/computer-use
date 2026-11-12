@@ -6,7 +6,7 @@ A source install has two steps: `uv sync` installs the Python SDK and compiles t
 
 ## 1. Install the toolchain and system dependencies
 
-Every platform needs Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), a standard CPython 3.11–3.15 interpreter that matches the target architecture, and Rust 1.85.1 (`cargo` and `rustc`) on PATH. The examples use Python 3.12, which also works with DeepAgent's Python 3.11–3.13 requirement.
+Every platform needs Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), a standard CPython 3.11–3.15 interpreter that matches the target architecture, and Rust 1.85.1 (`cargo` and `rustc`) on PATH. The examples use Python 3.12, which also works with DeepAgent's Python 3.11–3.13 requirement. If you choose another minor version, replace `3.12` in the commands below.
 
 After installing [rustup](https://rustup.rs/) and the platform tools listed below, run:
 
@@ -41,23 +41,23 @@ The SDK can use a uv-managed Python. The Linux driver uses `/usr/bin/python3` by
 git clone https://gitcode.com/openJiuwen/computer-use.git
 cd computer-use
 uv sync --python 3.12 --no-dev
-uv run --no-sync computer-use-build
-uv run --no-sync computer-use-permissions
+uv run --python 3.12 --no-sync computer-use-build
+uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-Add `--extra mcp` or `--extra agent` to `uv sync` for that integration. The project environment defaults to `.venv`. On Windows and macOS the build command compiles the desktop driver. On Linux it prepares a separate driver environment in `os_adapter/linux/.venv`. On macOS, run `uv run --no-sync computer-use-permissions --request` to prompt for missing permissions and approve them in System Settings.
+Add `--extra mcp` or `--extra agent` to `uv sync` for that integration. The project environment defaults to `.venv`. On Windows and macOS the build command compiles the desktop driver. On Linux it prepares a separate driver environment in `os_adapter/linux/.venv`. On macOS, run `uv run --python 3.12 --no-sync computer-use-permissions --request` to prompt for missing permissions and approve them in System Settings.
 
 ## 3. Verify and update the installation
 
 List the running apps, then replace `APP_NAME` with the name of an app from the list that has an open window. The second command reads its accessibility tree.
 
 ```sh
-uv run --no-sync python -c "from computer_use import Computer; print(Computer().list_apps())"
-uv run --no-sync python -c "from computer_use import Computer; print(Computer().app('APP_NAME').read(view='tree').text)"
+uv run --python 3.12 --no-sync python -c "from computer_use import Computer; print(Computer().list_apps())"
+uv run --python 3.12 --no-sync python -c "from computer_use import Computer; print(Computer().app('APP_NAME').read(view='tree').text)"
 ```
 
 - After editing Python source, restart the SDK host, MCP, or Agent session. After changing dependencies or entry points, rerun your original `uv sync` command.
 - After editing Rust source or changing the Python version, add `--reinstall-package openjiuwen-computeruse` to your original `uv sync` command to rebuild the extension, then restart the session.
-- After editing a platform driver, rerun `uv run --no-sync computer-use-build` and restart the session.
+- After editing a platform driver, rerun `uv run --python 3.12 --no-sync computer-use-build` and restart the session.
 
 Next: [MCP integration](mcp.en.md) · [DeepAgent integration](deepagent.en.md) · [Build and assemble wheels](../PACKAGING.md).

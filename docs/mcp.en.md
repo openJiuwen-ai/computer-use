@@ -21,11 +21,11 @@ The SDK and MCP server are installed in editable mode into the checkout's `.venv
 Build or prepare the native backend, then check desktop access:
 
 ```bash
-uv run --no-sync computer-use-build
-uv run --no-sync computer-use-permissions
+uv run --python 3.12 --no-sync computer-use-build
+uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-On macOS, use `uv run --no-sync computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
+On macOS, use `uv run --python 3.12 --no-sync computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
 
 ## 3. Connect your agent
 
@@ -65,7 +65,7 @@ and connector activation.
 For manual server debugging, you can also run this from the checkout root:
 
 ```bash
-uv run --no-sync computer-use-mcp
+uv run --python 3.12 --no-sync computer-use-mcp
 ```
 
 For a wheel installation, install the same wheel with its `mcp` extra, for example
@@ -114,7 +114,7 @@ receipt available. Request screenshots explicitly and use the UI to judge the ap
 
 ### Python SDK
 
-Save this example as `list_apps.py` and run it with `uv run --no-sync python list_apps.py`.
+Save this example as `list_apps.py` and run it with `uv run --python 3.12 --no-sync python list_apps.py`.
 
 ```python
 from computer_use import Computer

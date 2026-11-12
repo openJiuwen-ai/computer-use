@@ -21,11 +21,11 @@ SDK 和 MCP 服务以 editable 方式安装到仓库的 `.venv`，不安装模�
 构建或准备原生后端，并检查桌面访问条件：
 
 ```bash
-uv run --no-sync computer-use-build
-uv run --no-sync computer-use-permissions
+uv run --python 3.12 --no-sync computer-use-build
+uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-macOS 可运行 `uv run --no-sync computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
+macOS 可运行 `uv run --python 3.12 --no-sync computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
 
 ## 3. 接入自己的 Agent
 
@@ -61,7 +61,7 @@ Windows 对应路径为 `C:/absolute/path/to/computer-use/.venv/Scripts/computer
 需要手动启动服务调试时，也可在仓库根目录运行：
 
 ```bash
-uv run --no-sync computer-use-mcp
+uv run --python 3.12 --no-sync computer-use-mcp
 ```
 
 通过 wheel 安装时，为同一个 wheel 选择 `mcp` extra，例如
@@ -102,7 +102,7 @@ SDK 方法同步返回结果。通过 `computer.app(id)` 选应用，用 `app.re
 
 ### Python SDK
 
-将以下示例保存为 `list_apps.py`，通过 `uv run --no-sync python list_apps.py` 运行。
+将以下示例保存为 `list_apps.py`，通过 `uv run --python 3.12 --no-sync python list_apps.py` 运行。
 
 ```python
 from computer_use import Computer

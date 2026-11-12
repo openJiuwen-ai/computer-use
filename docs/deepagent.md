@@ -21,11 +21,11 @@ SDK、MCP 和 Agent 代码以 editable 方式安装到仓库的 `.venv`，同时
 构建或准备原生后端，并检查桌面访问条件：
 
 ```bash
-uv run --no-sync computer-use-build
-uv run --no-sync computer-use-permissions
+uv run --python 3.12 --no-sync computer-use-build
+uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-macOS 可运行 `uv run --no-sync computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
+macOS 可运行 `uv run --python 3.12 --no-sync computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
 
 ## 3. 创建电脑操作 Agent
 
@@ -66,7 +66,7 @@ asyncio.run(main())
 将上面的完整示例保存为 `desktop_agent.py`，在源码仓库根目录运行：
 
 ```bash
-uv run --no-sync python desktop_agent.py
+uv run --python 3.12 --no-sync python desktop_agent.py
 ```
 
 先核对应用枚举结果，再用流式调用检查实际窗口文字和截图。应用枚举成功仅验证本机后端调用，完整桌面访问还需所需权限和实际观察结果。
@@ -107,14 +107,14 @@ async def run(model):
 
 ## 5. 直接使用 CLI
 
-同一个 Agent 也可以通过 CLI 直接运行。首次执行 `uv run --no-sync computer-use-agent --init-config`，在生成的 `~/.computer-use/agent/config.json` 中填写 `model`、`provider`、`api_base`、`api_key`，随后进入对话或执行单次任务：
+同一个 Agent 也可以通过 CLI 直接运行。首次执行 `uv run --python 3.12 --no-sync computer-use-agent --init-config`，在生成的 `~/.computer-use/agent/config.json` 中填写 `model`、`provider`、`api_base`、`api_key`，随后进入对话或执行单次任务：
 
 ```bash
-uv run --no-sync computer-use-agent
-uv run --no-sync computer-use-agent "打开预定会议表单，停在提交前"
+uv run --python 3.12 --no-sync computer-use-agent
+uv run --python 3.12 --no-sync computer-use-agent "打开预定会议表单，停在提交前"
 ```
 
-命令行选项可通过 `uv run --no-sync computer-use-agent --help` 查看。
+命令行选项可通过 `uv run --python 3.12 --no-sync computer-use-agent --help` 查看。
 
 模型历史按观察范围保留截图。新截图与同一范围的现有截图完全相同时，引用已有图片；截图像素和坐标保持原样。
 文字历史只折叠完全相同的完整树，保留不同的完整树、diff 和操作回执。

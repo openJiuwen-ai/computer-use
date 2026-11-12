@@ -21,11 +21,11 @@ The SDK, MCP and Agent code are installed in editable mode into the checkout's `
 Build or prepare the native backend, then check desktop access:
 
 ```bash
-uv run --no-sync computer-use-build
-uv run --no-sync computer-use-permissions
+uv run --python 3.12 --no-sync computer-use-build
+uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-On macOS, use `uv run --no-sync computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
+On macOS, use `uv run --python 3.12 --no-sync computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
 
 ## 3. Create a desktop agent
 
@@ -66,7 +66,7 @@ asyncio.run(main())
 Save the complete example above as `desktop_agent.py` and run it from the source checkout:
 
 ```bash
-uv run --no-sync python desktop_agent.py
+uv run --python 3.12 --no-sync python desktop_agent.py
 ```
 
 First check application enumeration, then use the streaming call to inspect actual window text and screenshots. Enumeration only verifies local backend calls; desktop access also requires the relevant permissions and successful observations.
@@ -107,14 +107,14 @@ async def run(model):
 
 ## 5. Run directly with the CLI
 
-The same agent can also run from the CLI. First run `uv run --no-sync computer-use-agent --init-config` and fill in `model`, `provider`, `api_base` and `api_key` in `~/.computer-use/agent/config.json`. Start a conversation or pass a task to execute once:
+The same agent can also run from the CLI. First run `uv run --python 3.12 --no-sync computer-use-agent --init-config` and fill in `model`, `provider`, `api_base` and `api_key` in `~/.computer-use/agent/config.json`. Start a conversation or pass a task to execute once:
 
 ```bash
-uv run --no-sync computer-use-agent
-uv run --no-sync computer-use-agent "Open the meeting scheduling form and stop before submitting"
+uv run --python 3.12 --no-sync computer-use-agent
+uv run --python 3.12 --no-sync computer-use-agent "Open the meeting scheduling form and stop before submitting"
 ```
 
-Run `uv run --no-sync computer-use-agent --help` for CLI options.
+Run `uv run --python 3.12 --no-sync computer-use-agent --help` for CLI options.
 
 The model's history retains screenshots by observation scope. An identical screenshot reuses the existing image for
 that scope, preserving its pixels and coordinates. Text history folds identical full trees and retains distinct
