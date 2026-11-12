@@ -337,6 +337,9 @@ def test_assembly_rejects_invalid_built_wheel(distribution, linux_backend, tmp_p
     engine = sdk_native.BUILD["build_for"]("linux-x86_64", "cp311")
     extension = tmp_path / engine.filename
     extension.write_bytes(b"read engine fixture")
+    notice = sdk_native.BUILD["notice_path"](extension)
+    notice.parent.mkdir()
+    notice.write_bytes(b"generated third-party license fixture")
     engine_archive = backend.with_name(sdk_native.artifact_name(ROOT, "linux-x86_64", "cp311") + ".zip")
     sdk_native.write_archive(ROOT, engine, extension, engine_archive)
 

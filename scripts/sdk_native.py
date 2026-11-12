@@ -18,8 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = runpy.run_path(str(ROOT / "scripts/read_engine_build.py"))
 BACKENDS = runpy.run_path(str(ROOT / "scripts/backend_artifacts.py"))
-FORMAT = 1
+FORMAT = 2
 MANIFEST = "sdk-native.json"
+NOTICE = BUILD["NOTICE_FILENAME"]
 
 
 DEFAULT_PYTHON_TAG = "cp311"
@@ -30,12 +31,6 @@ def _source_fingerprint(root, build):
     paths = [root / "scripts/read_engine_build.py", root / "scripts/sdk_native.py"]
     paths.extend(crate / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml"))
     paths.extend((crate / "src").rglob("*.rs"))
-    licenses = crate / "licenses"
-    paths.extend(
-        item
-        for item in licenses.rglob("*")
-        if item.is_file() and not any(part.startswith(".") for part in item.relative_to(licenses).parts)
-    )
     inputs = {
         item.relative_to(root).as_posix(): BACKENDS["sha256"](item.read_bytes().replace(b"\r\n", b"\n"))
         for item in paths
@@ -56,6 +51,7 @@ def file_digest(filename):
 
 
 def write_archive(root, build, extension, output):
+    notice = BUILD["notice_path"](extension)
     manifest = {
         "format": FORMAT,
         "target": build.backend_target,
@@ -64,10 +60,12 @@ def write_archive(root, build, extension, output):
         "fingerprint": _source_fingerprint(root, build),
         "protocol": BACKENDS["protocol_version"](root),
         "sha256": file_digest(extension),
+        "notice_sha256": file_digest(notice),
     }
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(MANIFEST, BACKENDS["canonical"](manifest))
         archive.write(extension, build.filename)
+        archive.write(notice, NOTICE)
     return inspect_archive(root, output)
 
 
@@ -83,13 +81,13 @@ def inspect_archive(root, filename):
             or manifest["filename"] != build.filename
         ):
             raise ValueError("Invalid native SDK artifact target, ABI or extension name.")
-        if len(archive.namelist()) != 2 or set(archive.namelist()) != {MANIFEST, build.filename}:
+        if len(archive.namelist()) != 3 or set(archive.namelist()) != {MANIFEST, build.filename, NOTICE}:
             raise ValueError("Native SDK artifact file list is inconsistent.")
         if manifest["protocol"] != BACKENDS["protocol_version"](root) or manifest["fingerprint"] != _source_fingerprint(
             root, build
         ):
             raise ValueError("Native SDK artifact does not match this checkout's source or protocol.")
-        _read_extension(archive, manifest)
+        _read_payload(archive, manifest)
     return manifest
 
 
@@ -100,19 +98,26 @@ def check_archive(root, filename, target, python_tag):
     return manifest
 
 
-def _read_extension(archive, manifest):
-    member = archive.getinfo(manifest["filename"])
+def _read_member(archive, name, expected_digest):
+    member = archive.getinfo(name)
     if not member.file_size or stat.S_ISLNK(member.external_attr >> 16):
-        raise ValueError("Invalid native SDK artifact extension file.")
+        raise ValueError(f"Invalid native SDK artifact file: {name}.")
     data = archive.read(member)
-    if BACKENDS["sha256"](data) != manifest["sha256"]:
-        raise ValueError("Native SDK artifact extension checksum mismatch.")
+    if BACKENDS["sha256"](data) != expected_digest:
+        raise ValueError(f"Native SDK artifact checksum mismatch: {name}.")
     return data
 
 
-def read_extension(filename, manifest):
+def _read_payload(archive, manifest):
+    return (
+        _read_member(archive, manifest["filename"], manifest["sha256"]),
+        _read_member(archive, NOTICE, manifest["notice_sha256"]),
+    )
+
+
+def read_payload(filename, manifest):
     with zipfile.ZipFile(filename) as archive:
-        return _read_extension(archive, manifest)
+        return _read_payload(archive, manifest)
 
 
 def inspect_pair(root, driver_archive, engine_archive):
@@ -156,7 +161,9 @@ if not hasattr(module, 'open_read_envelope') or not hasattr(module, 'NativeReadR
 
 
 def assemble_wheel(root, driver_archive, engine_archive, output):
-    ignored = {".git", ".venv", ".build", "build", "dist", "target", "__pycache__", "outputs", "logs"}
+    ignored = {
+        ".git", ".venv", ".build", "build", "dist", "target", "__pycache__", "outputs", "logs", "_ax_read_licenses",
+    }
 
     def skip_local_artifacts(_directory, names):
         return {

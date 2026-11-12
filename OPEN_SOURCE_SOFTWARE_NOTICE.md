@@ -8,7 +8,7 @@ THE OPEN SOURCE SOFTWARE IN THIS PRODUCT IS DISTRIBUTED IN THE HOPE THAT IT WILL
 
 ## Scope
 
-This repository does not vendor third-party source code. The table below lists the third-party software that the engine and the optional agent host declare as dependencies and that is installed from its upstream distribution at install time. The native drivers are built on the host against operating-system SDKs only and do not bundle third-party libraries. No AI model weights or model runtimes are included in this product.
+This repository does not vendor third-party source code. Python dependencies are installed from their upstream distributions. Binary distributions include the Rust accessibility read extension and its third-party notices. The native drivers are built on the host against operating-system SDKs. No AI model weights or model runtimes are included in this product.
 
 ## Copyright Notice and License Texts
 
@@ -35,24 +35,10 @@ This repository does not vendor third-party source code. The table below lists t
 
 ### Rust accessibility read engine
 
-The accessibility read engine uses the following crates under their MIT license. The MIT license text appears below.
-
-| Software | Version | Copyright or upstream authorship |
-|---|---|---|
-| [PyO3 and PyO3 FFI](https://github.com/PyO3/pyo3) | 0.30.1 | Copyright (c) 2023-present PyO3 Project and Contributors |
-| [libc](https://github.com/rust-lang/libc) | 0.2.191 | Copyright (c) The Rust Project Developers |
-| [once_cell](https://github.com/matklad/once_cell) | 1.21.4 | Aleksey Kladov |
-| [unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) | 1.13.3 | Copyright (c) 2015 The Rust Project Developers |
-| [sha2](https://github.com/RustCrypto/hashes) | 0.10.9 | Copyright (c) 2006-2009 Graydon Hoare, 2009-2013 Mozilla Foundation, 2016 Artyom Pavlov |
-| [digest](https://github.com/RustCrypto/traits) | 0.10.7 | Copyright (c) 2017 Artyom Pavlov |
-| [crypto-common](https://github.com/RustCrypto/traits) | 0.1.7 | Copyright (c) 2021 RustCrypto Developers |
-| [block-buffer](https://github.com/RustCrypto/utils) | 0.10.4 | Copyright (c) 2018-2019 The RustCrypto Project Developers |
-| [cpufeatures](https://github.com/RustCrypto/utils) | 0.2.17 | Copyright (c) 2020-2025 The RustCrypto Project Developers |
-| [generic-array](https://github.com/fizyk20/generic-array) | 0.14.7 | Copyright (c) 2015 Bartłomiej Kamiński |
-| [typenum](https://github.com/paholg/typenum) | 1.20.1 | Copyright (c) 2014 Paho Lurie-Gregg |
-| [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.5 | Copyright (c) 2014 Alex Crichton |
-
-The read engine includes the Rust 1.85.1 standard library. Its upstream copyright and license texts, together with the upstream license texts for `adler` and `compiler_builtins`, accompany the read engine in `computer_use/interaction/read/accessibility/_ax_read_licenses`. The following MIT notices cover components of the standard library dependency graph.
+The accessibility read engine ships with a build-generated `THIRD_PARTY_LICENSES.txt` in
+`computer_use/interaction/read/accessibility/_ax_read_licenses`. It contains upstream license files from
+the locked Cargo dependencies and the Rust 1.85.1 toolchain, including `adler` and `compiler_builtins`.
+The following MIT notices cover additional components of the standard library dependency graph.
 
 | Software | Version | Copyright |
 |---|---|---|

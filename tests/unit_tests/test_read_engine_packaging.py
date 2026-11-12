@@ -61,6 +61,9 @@ def test_wheel_uses_archived_read_engine_abi(capture_wheel, monkeypatch, tmp_pat
     build = read_engine_build.build_for(target, "cp312")
     extension = tmp_path / build.filename
     extension.write_bytes(b"read engine fixture")
+    notice = read_engine_build.notice_path(extension)
+    notice.parent.mkdir()
+    notice.write_bytes(b"generated third-party license fixture")
     archive = tmp_path / "engine.zip"
     sdk_native["write_archive"](ROOT, build, extension, archive)
     driver = driver_archive(tmp_path, target, member)
@@ -77,4 +80,4 @@ def test_wheel_uses_archived_read_engine_abi(capture_wheel, monkeypatch, tmp_pat
     installed = Path(command.get_ext_fullpath(distribution.ext_modules[0].name))
     assert installed.name == build.filename
     assert installed.read_bytes() == extension.read_bytes()
-    assert (installed.parent / "_ax_read_licenses/LICENSE-MIT").is_file()
+    assert read_engine_build.notice_path(installed).read_bytes() == notice.read_bytes()

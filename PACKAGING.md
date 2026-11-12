@@ -22,6 +22,9 @@ uv run --no-dev --group build python scripts/distribution.py wheels \
 如果下载的制品有外层 ZIP，先解包并将里面的 `backend-*.zip` 和 `sdk-native-*.zip` 放入制品目录。
 组包校验制品的目标平台、协议、源码指纹和 Python ABI。
 
+读引擎构建时从锁定的 Cargo 依赖和 Rust 工具链汇总第三方许可，首次构建会从 crates.io 获取两份工具链依赖的声明并缓存。
+读引擎制品与最终 wheel 都携带生成的 `THIRD_PARTY_LICENSES.txt`，组包主机无需重新获取这些依赖。
+
 以下以 macOS ARM64 的 CPython 3.12 为例。驱动制品可以在同一平台的不同 Python ABI 间复用。
 
 ```bash

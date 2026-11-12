@@ -254,16 +254,13 @@ class BuildReadEngine(build_ext):
     def build_extension(self, extension):
         output = Path(self.get_ext_fullpath(extension.name))
         if ENGINE_ARCHIVE:
-            data = SDK_NATIVE["read_extension"](ENGINE_ARCHIVE, ENGINE_MANIFEST)
-            output.parent.mkdir(parents=True, exist_ok=True)
+            data, notice = SDK_NATIVE["read_payload"](ENGINE_ARCHIVE, ENGINE_MANIFEST)
+            destination = READ_ENGINE["notice_path"](output)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(notice)
             output.write_bytes(data)
         else:
             READ_ENGINE["build_read_engine"](ROOT, output)
-        shutil.copytree(
-            ROOT / "computer_use_engine/interaction/read/accessibility/licenses",
-            output.parent / "_ax_read_licenses",
-            dirs_exist_ok=True,
-        )
 
 
 class BackendWheel(bdist_wheel):

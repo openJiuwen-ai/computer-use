@@ -2,16 +2,21 @@
 
 """Build the SDK read engine for one native CPython release ABI."""
 
+import hashlib
+import io
+import json
 import os
 import platform
 import shutil
 import subprocess
 import sys
 import sysconfig
+import tarfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.request import urlopen
 
 HOST_REQUIREMENT = (
     "The Rust SDK requires a CPython 3.11–3.15 release ABI on macOS ARM64/x86_64, "
@@ -25,6 +30,15 @@ _TARGETS = {
     "linux-x86_64": "x86_64-unknown-linux-gnu",
     "linux-aarch64": "aarch64-unknown-linux-gnu",
 }
+NOTICE_FILENAME = "THIRD_PARTY_LICENSES.txt"
+
+# These two notices come from rust-lang/rust's library/Cargo.lock, not from
+# the read engine's Cargo.lock. The prebuilt toolchain only ships Rust's own
+# top-level copyright and license files.
+_RUST_1851_NOTICES = (
+    ("adler-1.0.2", "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe", "LICENSE-0BSD"),
+    ("compiler_builtins-0.1.140", "df14d41c5d172a886df3753d54238eefb0f61c96cbd8b363c33ccc92c457bee3", "LICENSE.txt"),
+)
 
 
 @dataclass(frozen=True)
@@ -85,6 +99,68 @@ def host_build():
     return None
 
 
+def notice_path(extension):
+    return Path(extension).parent / "_ax_read_licenses" / NOTICE_FILENAME
+
+
+def _standard_dependency_notice(cache, package, checksum, filename):
+    cached = cache / f"{package}.crate"
+    if cached.is_file():
+        data = cached.read_bytes()
+    else:
+        name = package.rsplit("-", 1)[0]
+        with urlopen(f"https://static.crates.io/crates/{name}/{cached.name}", timeout=30) as response:
+            data = response.read()
+    if hashlib.sha256(data).hexdigest() != checksum:
+        raise ValueError(f"Rust standard library dependency {package} has an unexpected checksum.")
+    if not cached.is_file():
+        with TemporaryDirectory(dir=cache) as temporary:
+            pending = Path(temporary) / cached.name
+            pending.write_bytes(data)
+            pending.replace(cached)
+    with tarfile.open(fileobj=io.BytesIO(data)) as archive, archive.extractfile(f"{package}/{filename}") as notice:
+        return notice.read().decode("utf-8")
+
+
+def _read_engine_notice(crate, build, environment, toolchain):
+    def run(*command):
+        return subprocess.check_output(command, cwd=crate, env=environment, text=True, encoding="utf-8")
+
+    def section(owner, filename, content):
+        return f"{owner} — {filename}\n\n{content.strip()}\n"
+
+    sysroot = Path(run(environment["RUSTC"], "--print", "sysroot").strip())
+    rust_docs = sysroot / "share/doc/rust"
+    sections = ["Third-party licenses for the accessibility read engine\n"]
+    for filename in ("COPYRIGHT", "LICENSE-APACHE", "LICENSE-MIT"):
+        sections.append(section(f"Rust {toolchain}", filename, (rust_docs / filename).read_text(encoding="utf-8")))
+    cache = Path(environment.get("CARGO_HOME") or Path.home() / ".cargo").expanduser() / "computer-use-license-crates"
+    cache.mkdir(parents=True, exist_ok=True)
+    for package, checksum, filename in _RUST_1851_NOTICES:
+        sections.append(section(package, filename, _standard_dependency_notice(cache, package, checksum, filename)))
+
+    metadata = json.loads(
+        run("cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", build.target)
+    )
+    for package in sorted(metadata["packages"], key=lambda item: (item["name"], item["version"])):
+        if package["id"] in metadata["workspace_members"]:
+            continue
+        directory = Path(package["manifest_path"]).parent
+        owner = f"{package['name']} {package['version']} ({package['license'] or 'see license text'})"
+        notices = {
+            path
+            for path in directory.iterdir()
+            if path.is_file() and path.name.startswith(("LICENSE", "COPYING", "COPYRIGHT", "NOTICE"))
+        }
+        if package["license_file"]:
+            notices.add(directory / package["license_file"])
+        if not notices:
+            raise ValueError(f"No upstream license file found for {owner}.")
+        for path in sorted(notices):
+            sections.append(section(owner, path.name, path.read_text(encoding="utf-8")))
+    return "\n".join(sections)
+
+
 def build_read_engine(root, output):
     build = host_build()
     if build is None:
@@ -121,9 +197,15 @@ def build_read_engine(root, output):
         env=environment,
         check=True,
     )
+    notice = _read_engine_notice(crate, build, environment, toolchain)
     output.parent.mkdir(parents=True, exist_ok=True)
+    destination = notice_path(output)
+    destination.parent.mkdir(exist_ok=True)
     with TemporaryDirectory(dir=output.parent, prefix=".read-engine-") as temporary:
         pending = Path(temporary) / output.name
+        pending_notice = Path(temporary) / NOTICE_FILENAME
         shutil.copy2(target_dir / build.target / "release" / build.library, pending)
+        pending_notice.write_text(notice, encoding="utf-8", newline="\n")
+        pending_notice.replace(destination)
         pending.replace(output)
     return output
