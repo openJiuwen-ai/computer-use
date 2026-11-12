@@ -81,13 +81,21 @@ class SdkSpec:
     code_template: str
     time_hint: float | None = None
     cost_hint: float | None = None
+    requires_global_input: bool = False  # True: ineligible when the host sets allow_global_input=False
 
 
 @dataclass(frozen=True, kw_only=True)
 class VerifySpec:
-    """Outcome contract; evidence kinds map onto executor outputs."""
+    """Outcome contract; evidence kinds map onto executor outputs.
 
-    kind: Literal["http_status", "exit_code", "output_contains", "output_regex", "json_field"]
+    gui_observe re-reads the target through the session after a completed
+    execution: field holds read-only observation code ({argument} tokens
+    allowed) and expect is the substring the observation output must contain
+    (empty: a completed read alone counts as PASS). Failed or undispatched
+    executions are never re-read; unavailable reads degrade to UNKNOWN.
+    """
+
+    kind: Literal["http_status", "exit_code", "output_contains", "output_regex", "json_field", "gui_observe"]
     expect: int | str = ""
     field: str | None = None
 

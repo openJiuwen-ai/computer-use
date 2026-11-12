@@ -13,6 +13,7 @@ import json
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -27,6 +28,18 @@ class PathArgumentError(ValueError):
 
 
 _TOKEN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)(!r)?\}")
+
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _proxy_handler(url: str) -> urllib.request.ProxyHandler:
+    """Loopback routes never go through a proxy: macOS/Windows system proxy
+    settings (surfaced by getproxies even without env vars) would otherwise
+    intercept them and answer on the target's behalf."""
+
+    if urllib.parse.urlsplit(url).hostname in _LOOPBACK_HOSTS:
+        return urllib.request.ProxyHandler({})
+    return urllib.request.ProxyHandler()
 
 
 def substitute(template: str, arguments: dict[str, Any]) -> str:
@@ -96,7 +109,8 @@ async def execute_api(path: TaskPath, arguments: dict[str, Any]) -> RouteExecuti
     )
 
     def send() -> tuple[int, str]:
-        with urllib.request.urlopen(request, timeout=path.api.timeout_s) as response:
+        opener = urllib.request.build_opener(_proxy_handler(url))
+        with opener.open(request, timeout=path.api.timeout_s) as response:
             return response.status, response.read().decode("utf-8", "replace")
 
     try:

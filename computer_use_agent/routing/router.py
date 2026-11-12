@@ -10,7 +10,15 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from .executors import CodeRunner, PathArgumentError, execute_api, execute_cli, execute_sdk, validate_arguments
+from .executors import (
+    CodeRunner,
+    PathArgumentError,
+    execute_api,
+    execute_cli,
+    execute_sdk,
+    substitute,
+    validate_arguments,
+)
 from .metrics import MetricPriors, PathMetricsStore
 from .paths import (
     ExecutionStatus,
@@ -23,6 +31,7 @@ from .paths import (
     SubtaskPlan,
     TaskPath,
     Verdict,
+    VerifySpec,
     gui_fallback_path,
 )
 from .registry import PathRegistry
@@ -48,6 +57,7 @@ class RouterConfig:
     policy: RoutingPolicy = field(default_factory=RoutingPolicy)
     weights: ScoreWeights = field(default_factory=ScoreWeights)
     priors: MetricPriors = field(default_factory=MetricPriors)
+    global_input_allowed: bool = True  # mirrors AgentConfig.allow_global_input
 
 
 class Router:
@@ -148,16 +158,8 @@ class Router:
                 latency_s=0.0,
                 error=str(error),
             )
-        verdict, verdict_detail = await verify(chosen.path.verify, _evidence(execution))
-        if validation_error:
-            success = None  # caller error; must not degrade the path's success posterior
-        elif execution.status is ExecutionStatus.COMPLETED:
-            success: bool | None = verdict is Verdict.PASS
-        elif execution.status is ExecutionStatus.EFFECT_UNKNOWN:
-            success = None
-            verdict = Verdict.UNKNOWN
-        else:
-            success = False
+        verdict, verdict_detail = await self._verify(chosen.path, execution, arguments or {})
+        success, verdict = _outcome_success(execution.status, verdict, validation_error)
         execution = RouteExecution(
             **{**execution.__dict__, "verdict": verdict, "detail": f"{execution.detail} {verdict_detail}".strip()}
         )
@@ -243,8 +245,13 @@ class Router:
                 )
         return candidates
 
+    def _global_input_blocked(self, path: TaskPath) -> bool:
+        return path.sdk is not None and path.sdk.requires_global_input and not self.config.global_input_allowed
+
     async def _eligible(self, path: TaskPath, arguments: dict) -> tuple[bool, str]:
         ok, reason = self.registry.check_preconditions(path)
+        if ok and self._global_input_blocked(path):
+            ok, reason = False, "path requires global input, disabled by the host (allow_global_input=False)"
         if not ok:
             return False, reason
         for precondition in path.preconditions:
@@ -264,6 +271,30 @@ class Router:
             if self._confirm is not None and not await _maybe_await(self._confirm(path, arguments)):
                 return False, "destructive path denied by confirmation"
         return True, ""
+
+    async def _verify(self, path: TaskPath, execution: RouteExecution, arguments: dict) -> tuple[Verdict, str]:
+        spec = path.verify
+        if spec is None or spec.kind != "gui_observe":
+            return await verify(spec, _evidence(execution))
+        return await self._verify_gui_observe(spec, execution, arguments)
+
+    async def _verify_gui_observe(
+        self, spec: VerifySpec, execution: RouteExecution, arguments: dict
+    ) -> tuple[Verdict, str]:
+        blocked = _gui_observe_block(spec, execution, self._run_code is not None)
+        if blocked is not None:
+            return Verdict.UNKNOWN, blocked
+        try:
+            code = substitute(spec.field, arguments)
+        except PathArgumentError as error:
+            return Verdict.UNKNOWN, f"gui_observe argument error: {error}"
+        try:
+            success, output = await self._run_code(code)
+        except Exception as error:  # pylint: disable=broad-exception-caught  # transport failure: no evidence either way
+            return Verdict.UNKNOWN, f"gui_observe read unavailable: {error}"
+        if not success:
+            return Verdict.UNKNOWN, f"gui_observe read failed: {output[:200]}"
+        return _observation_verdict(spec, output)
 
     async def _fallback_unproven(self, fallback: RouteCandidate) -> bool:
         attempts = self.store.snapshot(fallback.path.id, fallback.path.kind).attempts
@@ -293,6 +324,43 @@ def _evidence(execution: RouteExecution) -> dict:
         return json.loads(execution.detail) if execution.detail else {}
     except ValueError:
         return {"output": execution.output}
+
+
+def _outcome_success(status: ExecutionStatus, verdict: Verdict, validation_error: bool) -> tuple[bool | None, Verdict]:
+    """Map execution status and verdict onto the recorded outcome; UNKNOWN never fakes a failure."""
+
+    if validation_error:
+        return None, verdict  # caller error; must not degrade the path's success posterior
+    if status is ExecutionStatus.COMPLETED:
+        if verdict is Verdict.PASS:
+            return True, verdict
+        if verdict is Verdict.FAIL:
+            return False, verdict
+        return None, verdict  # outcome unconfirmed; excluded from the posterior instead
+    if status is ExecutionStatus.EFFECT_UNKNOWN:
+        return None, Verdict.UNKNOWN
+    return False, verdict
+
+
+def _gui_observe_block(spec: VerifySpec, execution: RouteExecution, has_runner: bool) -> str | None:
+    """Only a completed execution may be re-read: observing a failed or undispatched path
+    would fire a real session call for nothing and mislabel EXECUTION failures as VERIFICATION."""
+
+    if execution.status is not ExecutionStatus.COMPLETED:
+        return f"execution {execution.status.value}; target state not re-read"
+    if not has_runner:
+        return "gui_observe verifier needs a code runner"
+    if not spec.field:
+        return "gui_observe verifier needs observation code in 'field'"
+    return None
+
+
+def _observation_verdict(spec: VerifySpec, output: str) -> tuple[Verdict, str]:
+    if not str(spec.expect):
+        return Verdict.PASS, "observation completed"
+    if str(spec.expect) in output:
+        return Verdict.PASS, f"observation contains {spec.expect!r}"
+    return Verdict.FAIL, f"observation missing {spec.expect!r}"
 
 
 def _summarize(execution: RouteExecution, success: bool | None) -> str:

@@ -90,6 +90,30 @@ def test_routing_disabled_omits_route_tool_and_prompt():
         asyncio.run(enabled.close())
 
 
+def test_metrics_persist_under_workspace_by_default(tmp_path):
+    toolkit = ComputerUseToolkit(AgentConfig(workspace=str(tmp_path)))
+    try:
+        toolkit.routing.store.record(OutcomeRecord(path_id="p", task="t", success=True), PathKind.API)
+        metrics_file = tmp_path / "routing" / "metrics.jsonl"
+        assert metrics_file.exists()
+        assert '"path_id": "p"' in metrics_file.read_text(encoding="utf-8")
+    finally:
+        asyncio.run(toolkit.close())
+
+
+def test_metrics_file_override_wins_over_workspace(tmp_path):
+    override = tmp_path / "custom" / "metrics.jsonl"
+    toolkit = ComputerUseToolkit(
+        AgentConfig(workspace=str(tmp_path), routing=RoutingConfig(metrics_file=str(override)))
+    )
+    try:
+        toolkit.routing.store.record(OutcomeRecord(path_id="p", task="t", success=True), PathKind.API)
+        assert override.exists()
+        assert not (tmp_path / "routing" / "metrics.jsonl").exists()
+    finally:
+        asyncio.run(toolkit.close())
+
+
 def test_agent_routes_task_end_to_end_without_mcp(model_server, tmp_path):
     route_call = {
         "role": "assistant",
