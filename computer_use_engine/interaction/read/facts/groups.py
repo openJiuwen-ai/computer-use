@@ -4,6 +4,7 @@
 
 from typing import Any
 
+
 def reference_set(values: Any) -> str:
     """Lossless shorthand for numeric display aliases, not tree order."""
     values = sorted({int(value) for value in values})

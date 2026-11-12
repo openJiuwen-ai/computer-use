@@ -79,9 +79,7 @@ class ObservedLookupScope:
         if status == "root_unavailable":
             raise QueryRootUnavailable(target, native_domain="AXError", native_code=-25202)
         if status == "failed":
-            error = ComputerUseError({"code": value, "effect": "none", "target": "element path", "detail": detail})
-            error._observation_reason = None
-            raise error
+            raise ComputerUseError({"code": value, "effect": "none", "target": "element path", "detail": detail})
         raise ValueError("Invalid native observed lookup outcome")
 
 

@@ -253,12 +253,10 @@ class InterfaceReadPipeline:
             if item is None:
                 raise local_failure("the observation window is not confirmed in this instance")
             preparation = await ObservationPreparationPipeline(controller.port).arun(member_target(instance, item))
-        elif (
-            allow_foreground and menu_path is None and first is None and related is None
-            and can_reopen_application(controller, directory)
-        ):
-            target = ApplicationBinding(directory["session"], directory["application"])
-            preparation = await ObservationPreparationPipeline(controller.port).arun(target)
+        elif allow_foreground and menu_path is None:
+            if first is None and related is None and can_reopen_application(controller, directory):
+                target = ApplicationBinding(directory["session"], directory["application"])
+                preparation = await ObservationPreparationPipeline(controller.port).arun(target)
         try:
             if preparation is not None:
                 # Raising may change geometry, focus or modal membership. Reuse the

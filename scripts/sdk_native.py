@@ -29,7 +29,9 @@ DEFAULT_PYTHON_TAG = "cp311"
 def _source_fingerprint(root, build):
     crate = root / "computer_use_engine/interaction/read/accessibility"
     paths = [root / "scripts/read_engine_build.py", root / "scripts/sdk_native.py"]
-    paths.extend(crate / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml"))
+    paths.extend(
+        crate / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "build.rs", "build_unicode.py")
+    )
     paths.extend((crate / "src").rglob("*.rs"))
     inputs = {
         item.relative_to(root).as_posix(): BACKENDS["sha256"](item.read_bytes().replace(b"\r\n", b"\n"))

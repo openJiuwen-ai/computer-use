@@ -347,7 +347,8 @@ class Connection:
         self._requesting = True
         try:
             return await self._request(
-                method, params, options.get("timeoutMs") if options is not None else None, decode_response=decode_response
+                method, params, options.get("timeoutMs") if options is not None else None,
+                decode_response=decode_response,
             )
         finally:
             self._requesting = False

@@ -7,6 +7,7 @@ import io
 import json
 import os
 import platform
+import runpy
 import shutil
 import subprocess
 import sys
@@ -134,6 +135,8 @@ def _read_engine_notice(crate, build, environment, toolchain):
     sections = ["Third-party licenses for the accessibility read engine\n"]
     for filename in ("COPYRIGHT", "LICENSE-APACHE", "LICENSE-MIT"):
         sections.append(section(f"Rust {toolchain}", filename, (rust_docs / filename).read_text(encoding="utf-8")))
+    unicode_notice = runpy.run_path(str(crate / "build_unicode.py"))["unicode_notice"]()
+    sections.append(section("Unicode Character Database 14.0.0 and 18.0.0", "LICENSE", unicode_notice))
     cache = Path(environment.get("CARGO_HOME") or Path.home() / ".cargo").expanduser() / "computer-use-license-crates"
     cache.mkdir(parents=True, exist_ok=True)
     for package, checksum, filename in _RUST_1851_NOTICES:

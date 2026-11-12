@@ -2,7 +2,7 @@
 
 先按[源码构建指南](docs/build-from-source.md)准备目标系统的工具链、运行依赖和所需 CPython 版本。wheel 包含对应 Python ABI 的无障碍读取扩展；为不同平台或 Python 小版本分别出包。
 
-在目标主机上执行以下命令构建源码发行包和 wheel。若源码 wheel 的驱动构建失败，仍可安装 SDK；应先检查构建状态并修复驱动问题，再在目标桌面使用。
+在目标主机上执行以下命令构建源码发行包和 wheel。若本机驱动或 Rust 读取扩展编译失败，源码 wheel 仍可安装，并记录 Computer Use 不可用的原因。正式发布使用经过校验的驱动和 Rust 制品。
 
 ```bash
 uv run --python 3.12 --no-dev --group build python -m build
@@ -22,7 +22,7 @@ uv run --no-dev --group build python scripts/distribution.py wheels \
 如果下载的制品有外层 ZIP，先解包并将里面的 `backend-*.zip` 和 `sdk-native-*.zip` 放入制品目录。
 组包校验制品的目标平台、协议、源码指纹和 Python ABI。
 
-读引擎构建时从锁定的 Cargo 依赖和 Rust 工具链汇总第三方许可，首次构建会从 crates.io 获取两份工具链依赖的声明并缓存。
+读引擎构建时使用固定版本的 Unicode 数据生成字符查找表。首次构建会下载并缓存 Unicode 数据及其许可，以及两份 Rust 工具链依赖的声明。
 读引擎制品与最终 wheel 都携带生成的 `THIRD_PARTY_LICENSES.txt`，组包主机无需重新获取这些依赖。
 
 以下以 macOS ARM64 的 CPython 3.12 为例。驱动制品可以在同一平台的不同 Python ABI 间复用。

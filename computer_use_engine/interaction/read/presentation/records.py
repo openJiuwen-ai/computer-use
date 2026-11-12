@@ -10,6 +10,7 @@ from computer_use.protocol.records import Record
 
 RenderedTree: TypeAlias = Record
 
+
 class ReferenceAllocator(Protocol):
     """The existing session owner that allocates display aliases.
 

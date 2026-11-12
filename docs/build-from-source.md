@@ -4,6 +4,8 @@
 
 源码安装分两步：`uv sync` 安装 Python SDK，并编译公共 Rust 无障碍读取扩展；`computer-use-build` 准备当前系统的桌面驱动。请在要操作桌面的目标电脑上安装。按[打包指南](../PACKAGING.md)组装的预构建 wheel 已包含扩展和驱动；Linux 上仍需运行 `computer-use-build` 准备驱动环境。
 
+源码安装时，如果 Rust 扩展或驱动构建失败，Python SDK 仍可安装。依赖方可以通过 `installed_backend_unavailable_reason()` 查询原因，并继续使用不依赖 Computer Use 的功能。修复工具链后，重新安装 SDK 以编译 Rust 扩展。
+
 ## 1. 安装工具链和系统依赖
 
 所有平台都需要 Git、[uv](https://docs.astral.sh/uv/getting-started/installation/)、与系统架构匹配的常规 CPython 3.11–3.15，以及 PATH 上的 Rust 1.85.1（`cargo` 和 `rustc`）。本指南使用 Python 3.12，也适用于需要 Python 3.11–3.13 的 DeepAgent。若选择其他小版本，请替换下文命令里的 `3.12`。

@@ -5,6 +5,7 @@
 import json
 
 
+
 def _callback_body(raw):
     """Encode only a callback's ordinary JSON values without coercing custom objects."""
     try:
@@ -22,7 +23,7 @@ def _callback_body(raw):
                 continue
             seen.add(identity)
             if kind is dict:
-                if any(type(key) is not str for key in item):
+                if any(kind is not str for kind in map(type, item)):
                     return None
                 pending.extend(item.values())
             else:

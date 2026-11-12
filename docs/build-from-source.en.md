@@ -4,6 +4,8 @@
 
 A source install has two steps: `uv sync` installs the Python SDK and compiles the shared Rust accessibility extension; `computer-use-build` prepares the platform desktop driver. Install on the computer whose desktop you want to operate. A prebuilt wheel assembled as described in the [packaging guide](../PACKAGING.md) includes both components. On Linux, run `computer-use-build` to prepare the driver environment after installing the wheel.
 
+If the Rust extension or desktop driver fails to build from source, the Python SDK can still be installed. Downstream applications can use `installed_backend_unavailable_reason()` to show the failure and keep their other features available. Reinstall the SDK after fixing the Rust toolchain to build the extension.
+
 ## 1. Install the toolchain and system dependencies
 
 Every platform needs Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), a standard CPython 3.11–3.15 interpreter that matches the target architecture, and Rust 1.85.1 (`cargo` and `rustc`) on PATH. The examples use Python 3.12, which also works with DeepAgent's Python 3.11–3.13 requirement. If you choose another minor version, replace `3.12` in the commands below.

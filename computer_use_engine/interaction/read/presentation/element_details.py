@@ -13,6 +13,7 @@ from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.accessibility.snapshot import NativeSnapshot
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
 
+
 @dataclass(frozen=True)
 class _Source:
     """One frozen capture and its published scope, with lazy native-record indexes."""

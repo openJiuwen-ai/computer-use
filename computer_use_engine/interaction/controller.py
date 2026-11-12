@@ -236,18 +236,19 @@ class SessionController:
     def _native_snapshots(
         target: Binding, session: str, rows: list[RetainedElement]
     ) -> dict[str, ElementSnapshot]:
-        return {
-            row["reference"]: ElementSnapshot(
+        snapshots = {}
+        for row in rows:
+            text, children = row["text"], row["children"]
+            snapshots[row["reference"]] = ElementSnapshot(
                 container=row["container"],
                 binding=replace(target, node=row["node"], capture=None),
                 scope_kind=row["scope_kind"],
                 source={"ref": row["reference"], "observed": row["observed"]},
-                text=CapturedField(session, **field) if (field := row["text"]) is not None else None,
-                children=ChildContinuation(**children) if (children := row["children"]) is not None else None,
+                text=CapturedField(session, **text) if text is not None else None,
+                children=ChildContinuation(**children) if children is not None else None,
                 **({"native_window_outside": True} if row.get("native_window_outside") else {}),
             )
-            for row in rows
-        }
+        return snapshots
 
     async def act(self, method: str, params: Record, owner: object | None = None) -> ActionResult:
         """Translate a desktop/window operation into the session's write request.

@@ -1,6 +1,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import runpy
+import subprocess
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -49,6 +50,32 @@ def driver_archive(directory, target, member):
         for name in members:
             output.writestr(name, data)
     return archive
+
+
+def test_source_rust_build_failure_keeps_wheel_installable(capture_wheel, monkeypatch, tmp_path):
+    distribution, wheel = capture_wheel()
+    command = distribution.get_command_obj("build_ext")
+    command.ensure_finalized()
+    command.build_lib = str(tmp_path / "build")
+    extension = distribution.ext_modules[0]
+    output = Path(command.get_ext_fullpath(extension.name))
+    notice = read_engine_build.notice_path(output)
+
+    def fail(_root, destination):
+        destination.parent.mkdir(parents=True)
+        destination.write_bytes(b"partial extension")
+        notice.parent.mkdir()
+        notice.write_bytes(b"partial notice")
+        raise subprocess.CalledProcessError(1, ["cargo", "build"])
+
+    monkeypatch.setitem(command.build_extension.__globals__["READ_ENGINE"], "build_read_engine", fail)
+    command.build_extension(extension)
+
+    assert not output.exists()
+    assert not notice.exists()
+    assert command.get_outputs() == []
+    assert wheel.get_tag() == ("py3", "none", wheel.native_platform)
+    assert (output.parent / "_ax_read_status.json").read_text(encoding="utf-8") == '{"reason":"native_build_failed"}'
 
 
 @pytest.mark.parametrize(("target", "member", "platform_tag"), [

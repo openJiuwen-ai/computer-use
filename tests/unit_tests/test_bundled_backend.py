@@ -58,6 +58,20 @@ def test_platform_wheel_uses_cached_driver_without_compiling(installed, monkeypa
     assert native.build_native() == cached
 
 
+def test_installed_wheel_reports_rust_source_failure(installed, monkeypatch):
+    resources, _ = installed
+    monkeypatch.setattr(sys, "platform", "darwin")
+    (resources / "backend.json").write_text("{}", encoding="utf-8")
+    driver = resources / MAC_DRIVER
+    driver.parent.mkdir(parents=True)
+    driver.touch()
+    status = resources.parent / "interaction/read/accessibility/_ax_read_status.json"
+    status.parent.mkdir(parents=True)
+    status.write_text('{"reason":"native_build_failed"}', encoding="utf-8")
+
+    assert paths.installed_backend_unavailable_reason() == "native_build_failed"
+
+
 def test_linux_platform_wheel_prepares_venv_outside_site_packages(installed, monkeypatch):
     resources, home = installed
     monkeypatch.setattr(sys, "platform", "linux")

@@ -54,11 +54,10 @@ if ENGINE_ARCHIVE:
     ENGINE_TAG, ENGINE_FILENAME = tuple(ENGINE_MANIFEST["wheel_tag"]), ENGINE_MANIFEST["filename"]
 else:
     ENGINE_BUILD = READ_ENGINE["host_build"]()
-    if ENGINE_BUILD is None:
-        raise RuntimeError(READ_ENGINE["HOST_REQUIREMENT"])
-    if BACKEND_TARGET is not None and ENGINE_BUILD.backend_target != BACKEND_TARGET:
+    if BACKEND_TARGET is not None and (ENGINE_BUILD is None or ENGINE_BUILD.backend_target != BACKEND_TARGET):
         raise RuntimeError(READ_ENGINE["HOST_REQUIREMENT"] + " For cross-host wheel assembly, supply its SDK archive.")
-    ENGINE_TAG, ENGINE_FILENAME = ENGINE_BUILD.wheel_tag, ENGINE_BUILD.filename
+    ENGINE_TAG = ENGINE_BUILD.wheel_tag if ENGINE_BUILD else None
+    ENGINE_FILENAME = ENGINE_BUILD.filename if ENGINE_BUILD else None
 
 # Public imports retain stable, unambiguous package names while the checkout
 # groups code by responsibility. Never scan the repository or native sources as
@@ -249,7 +248,7 @@ class BuildWithResources(build_py):
 class BuildReadEngine(build_ext):
     def get_ext_filename(self, ext_name):
         filename = Path(super().get_ext_filename(ext_name))
-        return str(filename.with_name(ENGINE_FILENAME))
+        return str(filename.with_name(ENGINE_FILENAME) if ENGINE_FILENAME else filename)
 
     def build_extension(self, extension):
         output = Path(self.get_ext_fullpath(extension.name))
@@ -259,17 +258,42 @@ class BuildReadEngine(build_ext):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(notice)
             output.write_bytes(data)
-        else:
+            return
+        self.build_source_extension(output)
+
+    def build_source_extension(self, output):
+        if ENGINE_BUILD is None:
+            self.record_source_failure(output, "unsupported_platform")
+            return
+        try:
             READ_ENGINE["build_read_engine"](ROOT, output)
+        except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError):
+            _LOG.debug("Could not build the Rust accessibility read engine.", exc_info=True)
+            self.record_source_failure(output, "native_build_failed")
+        else:
+            output.with_name("_ax_read_status.json").unlink(missing_ok=True)
+
+    def record_source_failure(self, output, reason):
+        # Build outputs belong to this distribution, including partial extensions.
+        output.unlink(missing_ok=True)
+        READ_ENGINE["notice_path"](output).unlink(missing_ok=True)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.with_name("_ax_read_status.json").write_text(
+            json.dumps({"reason": reason}, separators=(",", ":")), encoding="utf-8",
+        )
+        # Setuptools must not copy a missing binary during an editable install.
+        self.extensions = []
+        _LOG.warning("Rust accessibility engine unavailable (%s). Installing the Python SDK.", reason)
 
 
 class BackendWheel(bdist_wheel):
     def finalize_options(self):
         self.native_platform = None if BACKEND_ARCHIVE or BACKEND_DIR else native_platform()
-        platform_tag = ENGINE_TAG[2]
-        if self.plat_name not in (None, platform_tag):
-            raise ValueError(f"The read engine requires wheel platform {platform_tag}.")
-        self.plat_name = platform_tag
+        platform_tag = ENGINE_TAG[2] if ENGINE_TAG else self.native_platform
+        if platform_tag:
+            if self.plat_name not in (None, platform_tag):
+                raise ValueError(f"The native build requires wheel platform {platform_tag}.")
+            self.plat_name = platform_tag
         super().finalize_options()
 
     def run(self):
@@ -279,6 +303,10 @@ class BackendWheel(bdist_wheel):
     def get_tag(self):
         if ENGINE_ARCHIVE:
             return ENGINE_TAG
+        command = self.get_finalized_command("build_ext")
+        if ENGINE_TAG is None or not command.extensions:
+            driver_platform = BACKENDS["TARGETS"][BACKEND_TARGET][2] if BACKEND_TARGET else self.native_platform
+            return "py3", "none", driver_platform or "any"
         tag = super().get_tag()
         if tag != ENGINE_TAG:
             raise ValueError(f"Wheel has tag {tag}, expected {ENGINE_TAG} for its Rust read engine.")
@@ -288,7 +316,7 @@ class BackendWheel(bdist_wheel):
 setup(
     packages=discover_packages(),
     package_dir=PACKAGE_ROOTS,
-    ext_modules=[Extension(READ_ENGINE_MODULE, sources=[])],
+    ext_modules=[Extension(READ_ENGINE_MODULE, sources=[], optional=not ENGINE_ARCHIVE)],
     cmdclass={
         "build_py": BuildWithResources,
         "bdist_wheel": BackendWheel,

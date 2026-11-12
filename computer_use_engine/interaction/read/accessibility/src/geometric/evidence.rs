@@ -8,7 +8,9 @@ use super::{
     field_text, region_role_name, role, seq, truth, GeometricContext, GeometricPlan, NodeEvidence, ParentReport,
     Relation,
 };
-use crate::{numbering::NodeId, projection::ProjectionNode, semantic::presentation_role, value::Value};
+use crate::{
+    numbering::NodeId, projection::ProjectionNode, semantic::presentation_role, unicode_tables::RTL_RANGES, value::Value,
+};
 
 fn fields<'a>(row: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
     row.iter().find_map(|(name, value)| (name == key).then_some(value))
@@ -356,8 +358,6 @@ pub(crate) fn source_partition(plan: &GeometricPlan, context: &GeometricContext<
     }
     None
 }
-
-include!("rtl.rs");
 
 pub(crate) fn rtl_text(context: &GeometricContext<'_>, id: NodeId) -> bool {
     let Some(node) = context.projection.node(id) else {

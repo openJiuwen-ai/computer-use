@@ -38,6 +38,7 @@ This repository does not vendor third-party source code. Python dependencies are
 The accessibility read engine ships with a build-generated `THIRD_PARTY_LICENSES.txt` in
 `computer_use/interaction/read/accessibility/_ax_read_licenses`. It contains upstream license files from
 the locked Cargo dependencies and the Rust 1.85.1 toolchain, including `adler` and `compiler_builtins`.
+It also includes the license for the Unicode 14.0.0 and 18.0.0 data used to generate character lookup tables.
 The following MIT notices cover additional components of the standard library dependency graph.
 
 | Software | Version | Copyright |

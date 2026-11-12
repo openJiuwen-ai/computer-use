@@ -25,6 +25,9 @@ mod publication;
 mod render;
 mod semantic;
 mod sharing;
+mod unicode_tables {
+    include!(concat!(env!("OUT_DIR"), "/unicode_tables.rs"));
+}
 mod value;
 mod wire;
 mod wire_value;

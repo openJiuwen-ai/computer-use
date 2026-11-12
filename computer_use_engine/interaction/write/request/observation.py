@@ -42,7 +42,10 @@ def selection_target(request, before_tree, before_target) -> Binding | None:
     target, intent = request.target, request.intent
     if before_tree is None or before_target is None or not isinstance(target, Binding):
         return None
-    if window_binding(before_target) != window_binding(target) or captured_metadata(before_tree).session != target.session:
+    if (
+        window_binding(before_target) != window_binding(target)
+        or captured_metadata(before_tree).session != target.session
+    ):
         return None
     click = intent.kind == "click" and intent.parameters == {"button": "left", "count": 1} and target.node is not None
     copy = intent.kind == "key" and intent.parameters.get("key") == "super+c" and before_tree.scope_kind is None
