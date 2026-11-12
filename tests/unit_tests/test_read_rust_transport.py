@@ -12,7 +12,6 @@ from computer_use import diagnostics
 from computer_use.errors import ComputerUseError
 from computer_use.native import connection as transport
 from computer_use.native.contracts import Binding, HostPolicy
-from computer_use.interaction.read.accessibility._native import require_read_engine
 from computer_use.interaction.read.accessibility.frame import NativeReadCapture
 from computer_use.native.transport import ConnectionPort
 from computer_use_mcp.worker_transport import WorkerMessageWriter, read_message
@@ -89,12 +88,6 @@ def _request(query):
 
 def _nodes():
     return dict(kind="nodes", fields=["AXRole"], maxNodes=1, maxDepth=0)
-
-
-@pytest.fixture
-def native_read():
-    pytest.importorskip("computer_use.interaction.read.accessibility._ax_read")
-    return require_read_engine()
 
 
 @pytest.mark.parametrize("encoded", [False, True])

@@ -22,7 +22,6 @@ from computer_use.interaction.read.accessibility.preparation import PreparedSnap
 from computer_use.interaction.read.presentation.rendering.document import prepare_document, render_document
 from computer_use.json import dumps, utf8
 from computer_use.pipeline.core import Control
-from computer_use.interaction.read.accessibility._native import require_read_engine
 from computer_use.session.observation import lazy_observation
 from computer_use.session.observation_data import retain_observation_data
 from computer_use.session.operations import OperationDeadlineExceeded
@@ -92,8 +91,8 @@ def _document(snapshot, *, details=False):
     )
 
 
-def test_native_delivery_keeps_exact_text_and_detached_baseline_through_spill(monkeypatch):
-    extension = require_read_engine()
+def test_native_delivery_keeps_exact_text_and_detached_baseline_through_spill(monkeypatch, native_read):
+    extension = native_read
 
     before_native = _capture(extension, "原始标题")
     after_native = _capture(extension, "Updated")
@@ -138,8 +137,8 @@ def test_native_delivery_keeps_exact_text_and_detached_baseline_through_spill(mo
     assert "Tree: diff" in render_document(grouped_after, grouped_plan)
 
 
-def test_native_delivery_preserves_missing_reference_coverage_after_spill():
-    extension = require_read_engine()
+def test_native_delivery_preserves_missing_reference_coverage_after_spill(native_read):
+    extension = native_read
 
     source = Record()
 
@@ -177,8 +176,8 @@ def test_native_delivery_preserves_missing_reference_coverage_after_spill():
     assert f"Not observed in this read: {missing}" in expected[1]
 
 
-def test_native_root_lifecycle_keeps_the_originating_control_and_budget():
-    extension = require_read_engine()
+def test_native_root_lifecycle_keeps_the_originating_control_and_budget(native_read):
+    extension = native_read
 
     snapshot = _capture(extension, "Lifecycle fixture")
     events, budget_checks = [], []

@@ -143,6 +143,7 @@ def _serve(depth):
 
 
 @pytest.mark.parametrize("depth", [8, 240])
+@pytest.mark.usefixtures("native_read")
 def test_deep_read_retains_mcp_continuation(depth, monkeypatch, tmp_path):
     monkeypatch.setenv("COMPUTER_USE_LOG_DIR", str(tmp_path))
 
