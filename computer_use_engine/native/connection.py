@@ -22,7 +22,7 @@ from computer_use.diagnostics import SDK_VERSION, diagnostic, local_failure
 from computer_use.errors import ComputerUseError
 from computer_use.native import driver_exec
 from computer_use.native.preview import get_preview_handler, read_previews
-from computer_use.paths import native_driver
+from computer_use.paths import installed_backend_unavailable_reason, native_driver
 from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.execution import (
     decode_begin,
@@ -148,8 +148,20 @@ class Connection:
         driver = self.driver if self.driver is not None else native_driver()
         command = driver["command"]
         if self.driver is None and not Path(command).exists():
+            reason = installed_backend_unavailable_reason()
+            if reason == "unsupported_platform":
+                raise local_failure(
+                    "The Computer Use driver is unavailable on this operating system or architecture.",
+                    "unsupported_operation",
+                    "connection",
+                )
+            detail = (
+                "The Computer Use driver could not be built during installation."
+                if reason == "native_build_failed"
+                else f"{sys.platform} driver missing"
+            )
             raise local_failure(
-                f"{sys.platform} driver missing",
+                detail,
                 "execution_failed",
                 "connection",
             )

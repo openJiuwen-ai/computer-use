@@ -13,6 +13,7 @@ from pathlib import Path
 from time import sleep
 
 LINUX_RUNTIME = Path("os_adapter/linux/.build/runtime")
+_MACOS_DRIVER = Path("os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver")
 _WINDOWS_BUILD = Path("os_adapter/windows/.build")
 _WINDOWS_DRIVER = "computer-use-driver.exe"
 _WINDOWS_CAPTURE = "computer-use-capture.exe"
@@ -44,6 +45,33 @@ def linux_python():
 def checkout_root():
     root = Path(__file__).resolve().parents[1]
     return root if (root / "pyproject.toml").is_file() and (root / "os_adapter").is_dir() else None
+
+
+def installed_backend_unavailable_reason() -> str | None:
+    """Check wheel resources without preparing a runtime or launching a driver."""
+    if checkout_root() is not None:
+        return None
+    assets = Path(__file__).parent / "_resources"
+    status_file = assets / "backend-status.json"
+    try:
+        if status_file.is_file():
+            reason = json.loads(status_file.read_bytes()).get("reason")
+            return reason if reason in ("native_build_failed", "unsupported_platform") else "backend_missing"
+        if not (assets / "backend.json").is_file() or not (assets / "manifest.json").is_file():
+            return "backend_missing"
+        if sys.platform == "darwin":
+            available = (assets / _MACOS_DRIVER).is_file()
+        elif sys.platform == "win32":
+            available = all((assets / _WINDOWS_BUILD / name).is_file() for name in _WINDOWS_FILES)
+        elif sys.platform == "linux":
+            available = (assets / LINUX_RUNTIME / "__main__.py").is_file() or any(
+                path.is_file() for path in (assets / LINUX_RUNTIME.parent).glob("*.whl")
+            )
+        else:
+            return "unsupported_platform"
+        return None if available else "backend_missing"
+    except (AttributeError, OSError, ValueError):
+        return "backend_missing"
 
 
 def _publish_runtime(temporary, target, *, windows):
@@ -164,10 +192,7 @@ def native_driver(platform=None, root=None):
                 return {"command": str(bundled), "args": []}
     root = Path(root) if root is not None else repository_root()
     if platform == "darwin":
-        return dict(
-            command=str(root / "os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver"),
-            args=[],
-        )
+        return dict(command=str(root / _MACOS_DRIVER), args=[])
     if platform == "linux":
         if (root / LINUX_RUNTIME / "__main__.py").is_file():
             # CPython adds the entry directory itself to the import path, including with -I.
