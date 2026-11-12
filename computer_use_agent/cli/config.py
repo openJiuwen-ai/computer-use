@@ -65,6 +65,8 @@ def build(value, *, workspace):
     routing = value.get("routing")
     config = AgentConfig(
         allow_global_input=value.get("allow_global_input", True),
+        check_desktop=value.get("check_desktop", True),
+        pause_on_user_input=value.get("pause_on_user_input", False),
         max_iterations=value.get("max_iterations", 40),
         context_window=value.get("context_window", 1_000_000),
         workspace=str(workspace),
