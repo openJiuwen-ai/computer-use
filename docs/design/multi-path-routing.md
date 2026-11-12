@@ -29,7 +29,7 @@
 `TaskPath`（`routing/paths.py`）：
 
 - `kind`：`api` / `cli` / `gui`。`api` 与 `gui` 的 engine 路线都以 SDK 代码模板（`SdkSpec.code_template`，`{参数}` 占位）经 `computer_use` 工具在同一个 Python 会话执行——**单一执行主干不变**，路由只决定"跑哪段代码 / 哪个命令 / 哪个端点"。区分在于语义：api 路线使用元素级结构化操作（可声明预期效果），gui 路线使用坐标/视觉操作（通用、概率性）。
-- 执行端点三选一：`api`（`ApiSpec`: method/url/headers/timeout）、`cli`（`CliSpec`: argv 模板 + 前置二进制）、`sdk`（`SdkSpec`）。`gui://fallback` 是隐式注册的兜底子任务路径，代表"模型自行 computer_use"的原始行为。
+- 执行端点三选一：`api`（`ApiSpec`: method/url/headers/timeout）、`cli`（`CliSpec`: argv 模板 + 前置二进制）、`sdk`（`SdkSpec`，`requires_global_input=True` 的路线在宿主 `allow_global_input=False` 时于 eligibility 阶段直接剔除）。`gui://fallback` 是隐式注册的兜底子任务路径，代表"模型自行 computer_use"的原始行为。
 - `arguments`：JSON Schema，路由执行前校验参数。
 - `risk`：`read` / `write` / `destructive`。destructive 默认需确认回调放行。
 - `preconditions`：声明式前置（如 CLI 二进制存在、SDK 路线要求某 app 在运行）。前置不满足的候选直接不可选（eligible=false），不参与打分。
@@ -43,7 +43,7 @@
 - **成功率**：Beta 后验均值 `(successes+α)/(attempts+α+β)`，先验 α/β 按 kind 配置（api 偏高、gui 偏低的冷启动偏差），用真实执行逐步修正；效果未知的尝试（超时/取消后 effect=unknown）**不计入**后验更新。
 - **时间 / 成本**：EMA 滚动均值；无样本时回退到路径声明的 `time_hint` / `cost_hint`。GUI 兜底的任务耗时按"操作样本 × 每任务操作数估计（`gui_ops_estimate`）"折算。
 - **探索奖励**：UCB1 风格 `c·sqrt(ln N / n)`，鼓励在得分相近时试探样本少的路径，防止冷启动路径永无数据。
-- 持久化：JSONL 追加（可选路径），进程重启后指标延续。
+- 持久化：JSONL 追加，进程重启后指标延续；默认落在 `<workspace>/routing/metrics.jsonl`（按 workspace 隔离，多机/多 workspace 不串数据），`RoutingConfig.metrics_file` 可显式覆盖。
 
 打分（`routing/scorer.py`，纯函数）：
 
@@ -66,7 +66,7 @@ t̂ = 预计时延 / time_scale，ĉ = 预计成本 / cost_scale
    - 否则有兜底 → **EXECUTE gui://fallback**（模型继续 computer_use）；兜底自身后验也低于地板且尝试数足够 → **REFUSE**（给出理由与证据，模型向用户说明而非硬操作）；
    - 调用方传入 `subtasks` → **DECOMPOSE**：每个子任务独立走完整管线，顺序执行，首个失败即停止并保留已完成子结果。
 5. **Execute**：按 kind 分派执行器（`routing/executors.py`）——API 走 stdlib urllib（线程内同步调用）、CLI 走 asyncio 子进程（argv 直传，无 shell）、SDK/GUI 走 `computer_use` 工具。超时/取消按项目原则**不重放**，结果记为 effect 未知。
-6. **Verify**：按契约校验（http_status / exit_code / output_contains / output_regex / json_field；gui_observe、llm_judge 为扩展口）。UNKNOWN 保留不确定性。
+6. **Verify**：按契约校验（http_status / exit_code / output_contains / output_regex / json_field / gui_observe；llm_judge 为扩展口）。`gui_observe` 仅对执行完成的路径经同一会话对目标做只读复读（`VerifySpec.field` 为观察代码模板，`expect` 为输出需包含的子串，留空则复读成功即 PASS）；执行失败/未派发不复读，复读不可用（执行器异常/会话失败）记 UNKNOWN。UNKNOWN 既保留不确定性，也不计为失败——执行完成但 verdict 为 UNKNOWN 时效果按未知处理，不写入后验。指标加载对损坏/不兼容行逐行跳过，历史文件不阻断启动。
 7. **Record**：`OutcomeRecord` 写回指标库；工具层对非路由发起的 `computer_use` 调用按 operation 粒度自动采样到兜底路径。
 
 ## 集成

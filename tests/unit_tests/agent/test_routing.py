@@ -36,7 +36,7 @@ from computer_use_agent.routing.executors import (
     substitute,
     validate_arguments,
 )
-from computer_use_agent.routing.paths import ApiSpec, CliSpec, ExecutionStatus, VerifySpec
+from computer_use_agent.routing.paths import ApiSpec, CliSpec, ExecutionStatus, SdkSpec, VerifySpec
 from computer_use_agent.routing.verifiers import verify
 
 
@@ -110,6 +110,22 @@ def test_metrics_posterior_ignores_unknown_effects_and_persists(tmp_path):
     reloaded = PathMetricsStore(persistence_path=tmp_path / "metrics.jsonl")
     assert reloaded.snapshot("p", PathKind.API).attempts == 3
     assert reloaded.posterior_success("p", PathKind.API) == pytest.approx(posterior)
+
+
+def test_metrics_load_skips_corrupt_and_incompatible_lines(tmp_path):
+    path = tmp_path / "metrics.jsonl"
+    good = json.dumps(
+        {"kind": "api", **OutcomeRecord(path_id="p", task="t", success=True).__dict__}, ensure_ascii=False
+    )
+    incompatible = json.dumps({"kind": "api", "path_id": "old", "task": "t", "removed_field": 1})
+    path.write_text(
+        '{"kind": "api", "path_id": "half"\nnot json\n' + incompatible + "\n" + good + "\n", encoding="utf-8"
+    )
+
+    store = PathMetricsStore(persistence_path=path)
+    assert store.snapshot("p", PathKind.API).attempts == 1
+    assert store.snapshot("p", PathKind.API).successes == 1
+    assert store.snapshot("old", PathKind.API).attempts == 0
 
 
 def test_metrics_ema_updates():
@@ -487,3 +503,110 @@ def test_router_destructive_path_requires_confirmation():
     allowed = asyncio.run(confirmed_router.route("remove things"))
     assert allowed.plan.chosen.path.id == "rm.stuff"
     assert allowed.success is True
+
+
+def test_router_global_input_path_ineligible_when_host_disables_it():
+    registry = PathRegistry()
+    registry.register(
+        TaskPath(
+            id="gui.global_type",
+            kind=PathKind.GUI,
+            app="editor",
+            intent="type into the focused field",
+            sdk=SdkSpec(code_template="computer.type_text({text!r})", requires_global_input=True),
+        )
+    )
+
+    disabled = Router(registry, RouterConfig(global_input_allowed=False))
+    plan = asyncio.run(disabled.plan("type into the focused field"))
+    candidate = next(item for item in plan.candidates if item.path.id == "gui.global_type")
+    assert not candidate.eligible
+    assert "global input" in candidate.reasons[0]
+    assert plan.chosen is not None and plan.chosen.path.id == GUI_FALLBACK_ID
+
+    allowed = Router(registry, RouterConfig())
+    plan = asyncio.run(allowed.plan("type into the focused field"))
+    candidate = next(item for item in plan.candidates if item.path.id == "gui.global_type")
+    assert candidate.eligible
+
+
+def _gui_observe_router(run_code):
+    registry = PathRegistry()
+    registry.register(
+        TaskPath(
+            id="sdk.note",
+            kind=PathKind.GUI,
+            app="notes",
+            intent="create a note",
+            sdk=SdkSpec(code_template="app = computer.app('Notes')"),
+            verify=VerifySpec(kind="gui_observe", expect="New Note", field="print(app.read().text)"),
+        )
+    )
+    return Router(registry, RouterConfig(policy=RoutingPolicy(min_confidence=0.4)), run_code=run_code)
+
+
+def test_router_gui_observe_verifier_passes_when_reread_confirms_effect():
+    async def run_code(code):
+        if code.startswith("print"):
+            assert code == "print(app.read().text)"
+            return True, "window: Notes\ntitle: New Note"
+        return True, "dispatched"
+
+    router = _gui_observe_router(run_code)
+    result = asyncio.run(router.route("create a note"))
+    assert result.success is True
+    assert result.executions[0].verdict is Verdict.PASS
+    snapshot = router.store.snapshot("sdk.note", PathKind.GUI)
+    assert snapshot.attempts == 1
+    assert snapshot.successes == 1
+
+
+def test_router_gui_observe_verifier_fails_when_reread_contradicts_effect():
+    codes = []
+
+    async def run_code(code):
+        codes.append(code)
+        if code.startswith("print"):
+            return True, "window: Notes\ntitle: Old Note"
+        return True, "dispatched"
+
+    router = _gui_observe_router(run_code)
+    result = asyncio.run(router.route("create a note"))
+    assert result.success is False
+    assert result.executions[0].verdict is Verdict.FAIL
+    assert codes == ["app = computer.app('Notes')", "print(app.read().text)"]
+    assert router.store.snapshot("sdk.note", PathKind.GUI).successes == 0
+
+
+def test_router_gui_observe_verifier_unknown_keeps_posterior_clean():
+    async def run_code(code):
+        if code.startswith("print"):
+            raise RuntimeError("session down")
+        return True, "dispatched"
+
+    router = _gui_observe_router(run_code)
+    prior = router.store.posterior_success("sdk.note", PathKind.GUI)
+    result = asyncio.run(router.route("create a note"))
+    assert result.success is None
+    assert result.executions[0].verdict is Verdict.UNKNOWN
+    snapshot = router.store.snapshot("sdk.note", PathKind.GUI)
+    assert snapshot.attempts == 1
+    assert snapshot.unknown_effects == 1
+    assert snapshot.successes == 0
+    assert router.store.posterior_success("sdk.note", PathKind.GUI) == pytest.approx(prior)
+
+
+def test_router_gui_observe_skips_reread_when_execution_failed():
+    codes = []
+
+    async def run_code(code):
+        codes.append(code)
+        return False, "boom"
+
+    router = _gui_observe_router(run_code)
+    result = asyncio.run(router.route("create a note"))
+    assert result.success is False
+    execution = result.executions[0]
+    assert execution.status is ExecutionStatus.FAILED
+    assert execution.verdict is Verdict.UNKNOWN
+    assert codes == ["app = computer.app('Notes')"]  # no observation call after a failed execution

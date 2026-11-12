@@ -141,9 +141,12 @@ class PathMetricsStore:
                 line = line.strip()
                 if not line:
                     continue
-                payload = json.loads(line)
-                kind = PathKind(payload.pop("kind", str(PathKind.GUI)))
-                outcome = OutcomeRecord(**payload)
+                try:
+                    payload = json.loads(line)
+                    kind = PathKind(payload.pop("kind", str(PathKind.GUI)))
+                    outcome = OutcomeRecord(**payload)
+                except (ValueError, TypeError, KeyError):
+                    continue  # corrupt or schema-incompatible line; never block startup over history
                 metrics = self._metrics.setdefault(outcome.path_id, PathMetrics())
                 metrics.attempts += 1
                 if outcome.success is None:
