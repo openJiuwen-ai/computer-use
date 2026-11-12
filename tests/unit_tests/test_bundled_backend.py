@@ -325,19 +325,27 @@ def test_rejects_mismatched_backend(distribution, linux_backend, overrides, mess
 @pytest.mark.parametrize(
     ("tag", "message"),
     [
-        ("py3-none-any", "wrong platform tag"),
-        ("py3-none-linux_x86_64", "unexpected backend files"),
+        ("cp311-cp311-any", "wrong platform tag"),
+        ("cp311-cp311-linux_x86_64", "unexpected backend files"),
     ],
 )
 def test_assembly_rejects_invalid_built_wheel(distribution, linux_backend, tmp_path, monkeypatch, tag, message):
+    from computer_use_native_tools import sdk_native
+
     staging = tmp_path / "staging"
+    backend = linux_backend()
+    engine = sdk_native.BUILD["build_for"]("linux-x86_64", "cp311")
+    extension = tmp_path / engine.filename
+    extension.write_bytes(b"read engine fixture")
+    engine_archive = backend.with_name(sdk_native.artifact_name(ROOT, "linux-x86_64", "cp311") + ".zip")
+    sdk_native.write_archive(ROOT, engine, extension, engine_archive)
 
     def build(*_args, **_kwargs):
-        wheel = staging / "openjiuwen_computeruse-0.0.1-py3-none-linux_x86_64.whl"
+        wheel = staging / "openjiuwen_computeruse-0.0.1-cp311-cp311-linux_x86_64.whl"
         with ZipFile(wheel, "w") as archive:
             archive.writestr("openjiuwen_computeruse-0.0.1.dist-info/WHEEL", f"Tag: {tag}\n")
             archive.writestr("openjiuwen_computeruse-0.0.1.dist-info/METADATA", "Version: 0.0.1\n")
 
     monkeypatch.setattr(distribution.subprocess, "run", build)
     with pytest.raises(ValueError, match=message):
-        distribution._assemble_platform(ROOT, linux_backend(), staging, "linux-x86_64")
+        distribution._assemble_platform(ROOT, backend, staging, "linux-x86_64")

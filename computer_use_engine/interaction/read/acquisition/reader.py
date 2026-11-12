@@ -12,23 +12,21 @@ from typing import TYPE_CHECKING
 
 from computer_use.interaction.control import scope_control
 from computer_use.interaction.read.acquisition.facts.helpers import validate_fact_scope
-from computer_use.interaction.read.acquisition.facts.model import FactReadRequest, RelationReadRequest
-from computer_use.interaction.read.acquisition.facts.pipeline import FactCollectionPipeline, RelationCollectionPipeline
+from computer_use.interaction.read.acquisition.facts.model import FactReadRequest
+from computer_use.interaction.read.accessibility.pipeline import AccessibilityReadPipeline
 from computer_use.interaction.read.acquisition.text.model import CapturedTextRequest
 from computer_use.interaction.read.acquisition.text.pipeline import CapturedTextPipeline
-from computer_use.interaction.read.numbering.references import DisplayReferences
+from computer_use.interaction.read.numbering.references import DisplayReferences, read_references
 from computer_use.pipeline import Control
-from computer_use.protocol.records import relation_end
 
 if TYPE_CHECKING:
-    from typing import Mapping
 
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
     from computer_use.native.port import NativePort
-    from computer_use.protocol.records import FactNode, Record, RelationPage
+    from computer_use.protocol.records import RelationPage
     from computer_use.protocol.records import TextPage as NativeTextPage
 
 
@@ -64,65 +62,6 @@ class ChildContinuation:
     total: int
 
 
-def captured_children(
-    snapshot: SemanticSnapshot,
-    reference: str,
-    *,
-    relations: Mapping[str, NativeRelation] | None = None,
-) -> ChildContinuation | None:
-    """Extract the continuation for an observed element's native child relationship.
-
-    Args:
-        snapshot: Native facts and aliases from the element's source observation.
-        reference: Display alias of the element whose children were collected.
-        relations: Optional index of native child relationships by source token.
-
-    Returns:
-        The retained cursor, consumed child count, and reported total, when available.
-    """
-    token = snapshot.refs.get(reference)
-    if relations is None:
-        relations = {r["source"]: r for r in snapshot.facts["relations"] if r["kind"] == "children"}
-    relation = relations.get(token)
-    if relation is None or relation["certainty"] != "confirmed" or "cursor" not in relation:
-        return None
-    return ChildContinuation(relation["cursor"], relation_end(relation), relation["total"])
-
-
-def captured_field(
-    snapshot: SemanticSnapshot,
-    reference: str,
-    field: str | None,
-    *,
-    nodes: Mapping[str, FactNode] | None = None,
-) -> CapturedField | None:
-    """Retain a text field as a local value or immutable native text reference.
-
-    Args:
-        snapshot: Native fact batch and field indexes for the source observation.
-        reference: Display alias of the element that supplies the field.
-        field: Native field name selected as this element's text source.
-        nodes: Optional index of native nodes by token, for repeated lookups.
-
-    Returns:
-        Captured text metadata when the requested field exposes readable text.
-    """
-    source = snapshot.text_refs.get((reference, field))
-    if source is not None and "textRef" in source:
-        return CapturedField(
-            snapshot.facts["session"], text_ref=source["textRef"], total_units=source.get("totalUnits")
-        )
-    token = snapshot.refs.get(reference)
-    node = (
-        nodes.get(token)
-        if nodes is not None
-        else next((node for node in snapshot.facts["nodes"] if node["node"] == token), None)
-    )
-    if node is None or field in node["fieldStatus"] or not isinstance(node["values"].get(field), str):
-        return None
-    return CapturedField(snapshot.facts["session"], value=node["values"][field])
-
-
 class NativeReader:
     """Bounded native-fact reads with one session-owned display allocator.
 
@@ -137,7 +76,7 @@ class NativeReader:
     async def wait_for_change(
         self,
         target: Binding,
-        snapshot: SemanticSnapshot | None,
+        snapshot: ReadSnapshot | None,
         remaining: Remaining,
         *,
         delay_ms: int = 200,
@@ -157,15 +96,16 @@ class NativeReader:
             Native event reason, or ``poll`` when the polling delay completes.
         """
         started = time.monotonic()
-        metadata = snapshot.collection if snapshot is not None else None
-        token = metadata.change_token if metadata is not None else None
+        token = snapshot.change_token if snapshot is not None else None
+        session = snapshot.session if snapshot is not None else None
+        surface = snapshot.surface if snapshot is not None else None
         matches_token = (
             True
             if (
                 "nativeReadEvents" in self.port.connection.capabilities
                 and token is not None
-                and snapshot.native.session == target.session
-                and metadata.surface == target.surface
+                and session == target.session
+                and surface == target.surface
             )
             else False
         )
@@ -190,7 +130,7 @@ class NativeReader:
         Selecting a new driver generation replaces only this reader's allocator.
         """
         if self._references is None or self._references.session != session:
-            self._references = DisplayReferences(session)
+            self._references = read_references(session, getattr(self.port, "platform", None))
         return self._references
 
     async def read(
@@ -206,7 +146,7 @@ class NativeReader:
         scope_kind: str | None = None,
         strict_window: bool = False,
         _control: Control | None = None,
-    ) -> SemanticSnapshot:
+    ) -> ReadSnapshot:
         self.validate(target, max_nodes, max_depth)
         async with self.port.calls.open(target, timeout_ms) as read:
             return await self.collect(
@@ -239,7 +179,7 @@ class NativeReader:
         query_remaining: Remaining | None = None,
         strict_window: bool = False,
         _control: Control | None = None,
-    ) -> SemanticSnapshot:
+    ) -> ReadSnapshot:
         """Collect inside an existing node or window read operation.
 
         A narrower query allowance limits the native request. Normalization
@@ -251,47 +191,7 @@ class NativeReader:
             strict_window,
         )
         control = scope_control(self.port, read.remaining, _control or Control())
-        return await FactCollectionPipeline(self).arun(request, control)
-
-    async def read_relation(
-        self,
-        target: Binding,
-        relation_property: str,
-        *,
-        cursor: str | None = None,
-        limit: int = 128,
-        timeout_ms: int = 30000,
-    ) -> Record:
-        """Read one page of an observed native relationship.
-
-        Args:
-            target: Element binding that owns the relationship.
-            property: Exact native relationship name.
-            cursor: Continuation token from the preceding page, or None for its first page.
-            limit: Maximum relationship targets to return in this page.
-            timeout_ms: Maximum duration of this relation read in milliseconds.
-
-        Returns:
-            Native relationship targets and continuation metadata.
-        """
-        return await RelationCollectionPipeline(self.port).arun(
-            RelationReadRequest(target, relation_property, cursor, limit, timeout_ms)
-        )
-
-    async def read_text(
-        self,
-        snapshot: SemanticSnapshot,
-        reference: str,
-        field: str,
-        *,
-        offset: int = 0,
-        length: int = 4096,
-        timeout_ms: int = 30000,
-    ) -> NativeTextPage:
-        source = captured_field(snapshot, reference, field)
-        if source is None:
-            raise ValueError("This observed field has no immutable full-text capture")
-        return await self.read_captured_text(source, offset=offset, length=length, timeout_ms=timeout_ms)
+        return await AccessibilityReadPipeline(self).arun(request, control)
 
     async def read_captured_text(
         self, source: CapturedField, *, offset: int = 0, length: int = 4096, timeout_ms: int = 30000
@@ -300,4 +200,4 @@ class NativeReader:
 
 
 if TYPE_CHECKING:
-    from computer_use.protocol.records import NativeRelation
+    pass

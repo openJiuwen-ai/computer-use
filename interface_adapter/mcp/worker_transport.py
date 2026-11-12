@@ -63,7 +63,7 @@ def _validate_observation_header(event):
         raise ValueError(invalid)
 
 
-def _observation_payload(message):
+def _observation_payload(message, observation_json=None):
     """Encode complete native facts once, separately from small routing fields."""
     event = message.get("diagnostic") if isinstance(message, dict) else None
     if not isinstance(event, dict) or event.get("kind") != "command_end" or event.get("method") != "inspect":
@@ -71,7 +71,8 @@ def _observation_payload(message):
     if event.get("status") != "ok":
         return None
     result = event.get("result")
-    if not isinstance(result, dict) or result.get("kind") != "observation":
+    encoded_result_only = observation_json is not None and "result" not in event
+    if not encoded_result_only and (not isinstance(result, dict) or result.get("kind") != "observation"):
         return None
     if message.keys() - {"diagnostic", "executionId"}:
         return None
@@ -84,9 +85,12 @@ def _observation_payload(message):
         )
         if len(header_json) > _MAX_DIAGNOSTIC_HEADER_BYTES:
             return None
-        result_json = json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
-            "utf-8", "backslashreplace"
-        )
+        if encoded_result_only:
+            result_json = observation_json
+        else:
+            result_json = json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
+                "utf-8", "backslashreplace"
+            )
     except (TypeError, ValueError):
         # A custom diagnostic still follows the ordinary serializer contract.
         return None
@@ -128,11 +132,14 @@ def consume_protocol():
     return protocol
 
 
-def _encode_message(message, protocol):
+def _encode_message(message, protocol, *, observation_json=None):
     if protocol != FRAMED_PROTOCOL:
         raise RuntimeError("Unsupported internal worker protocol: " + protocol)
-    payload = _observation_payload(message)
+    payload = _observation_payload(message, observation_json)
     if payload is None:
+        if observation_json is not None:
+            event = message["diagnostic"]
+            message = {**message, "diagnostic": {**event, "result": loads(observation_json)}}
         payload = dumps(message).encode("utf-8", "backslashreplace")
     if not 0 < len(payload) <= MAX_MESSAGE_BYTES:
         raise ValueError("Internal worker message exceeds the 128 MiB admission limit.")
@@ -172,6 +179,11 @@ class WorkerMessageWriter:
         else:
             self.flush()
             self.writer.write(frame)
+
+    def send_observation(self, message, observation_json):
+        frame = _encode_message(message, self.protocol, observation_json=observation_json)
+        self.flush()
+        self.writer.write(frame)
 
     def flush(self):
         if self.scheduled is not None:

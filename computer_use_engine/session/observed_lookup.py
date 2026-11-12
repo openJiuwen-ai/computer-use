@@ -3,12 +3,13 @@
 """Observation-owned name sources, separate from live input and delivery state."""
 
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import Binding
 from computer_use.native.query.observed import LookupFactsUnavailable, ObservedTargetQuery
+from computer_use.native.scopes import QueryRootUnavailable
 
 
 def scope_key(target):
@@ -52,8 +53,12 @@ class ObservedLookupScope:
         if key in self.matches:
             self.matches.move_to_end(key)
             return self.matches[key]
-        query = ObservedTargetQuery(self.facts, self.target, remaining, self.capabilities)
-        target = await query.resolve([dict(step) for step in path])
+        if self.facts.backend == "macos":
+            target = self._resolve_native(path, remaining)
+        else:
+            facts = self.facts.lookup_facts
+            query = ObservedTargetQuery(facts, self.target, remaining, self.capabilities)
+            target = await query.resolve([dict(step) for step in path])
         snapshot = self.snapshots.get(target.node)
         if snapshot is None or snapshot["binding"] != target:
             raise LookupFactsUnavailable()
@@ -62,12 +67,32 @@ class ObservedLookupScope:
             self.matches.popitem(last=False)
         return snapshot
 
+    def _resolve_native(self, path, remaining):
+        target = self.target
+        status, value, detail = self.facts.capture.resolve_observed(
+            scope_key(target), [dict(step) for step in path], self.capabilities, remaining
+        )
+        if status == "matched":
+            return replace(target, node=value)
+        if status == "unavailable":
+            raise LookupFactsUnavailable()
+        if status == "root_unavailable":
+            raise QueryRootUnavailable(target, native_domain="AXError", native_code=-25202)
+        if status == "failed":
+            error = ComputerUseError({"code": value, "effect": "none", "target": "element path", "detail": detail})
+            error._observation_reason = None
+            raise error
+        raise ValueError("Invalid native observed lookup outcome")
+
 
 def captured_lookup_scopes(instance, trees, shown, generation, capabilities, window_coverage=()):
     """Retain original numbered snapshots only from returned semantic trees."""
     scopes = []
     for target, tree in trees:
-        if not any(source is tree.native for source in shown):
+        if not shown:
+            continue
+        identity = tree.capture
+        if not any(source is identity for source in shown):
             continue
         snapshots = {}
         for element_ref, token in tree.refs.items():
@@ -77,7 +102,7 @@ def captured_lookup_scopes(instance, trees, shown, generation, capabilities, win
         scopes.append(
             ObservedLookupScope(
                 target,
-                getattr(tree.collection, "lookup_facts", None),
+                tree,
                 MappingProxyType(snapshots),
                 generation,
                 tuple(capabilities),

@@ -15,7 +15,6 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.native.contracts import Binding
 from computer_use.native.query.graph import NativeGraph
 from computer_use.native.query.path import TargetQuery
@@ -24,6 +23,7 @@ from computer_use.native.semantics import UNKNOWN, role_name
 if TYPE_CHECKING:
     from typing import NoReturn, Sequence
 
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.read.acquisition.reader import NativeReader
     from computer_use.interaction.records import Remaining
     from computer_use.native.port import NativePort
@@ -194,7 +194,7 @@ class MenuObservation:
     """
 
     target: Binding
-    tree: SemanticSnapshot
+    tree: ReadSnapshot
     directory: DirectoryFacts | None
     path: tuple[str, ...]
 
@@ -221,7 +221,7 @@ class MenuRead:
         return self.parts[0].tree.scope_kind
 
     @property
-    def observations(self) -> tuple[tuple[Binding, SemanticSnapshot], ...]:
+    def observations(self) -> tuple[tuple[Binding, ReadSnapshot], ...]:
         return tuple((part.target, part.tree) for part in self.parts)
 
     def render(self, *, compact: bool = False, _control: Control | None = None) -> str:

@@ -3,18 +3,14 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from computer_use.interaction.read.delivery.coverage import observation_coverage
-from computer_use.interaction.read.presentation.rendering.formatting import bounded, field, quoted, render_tree
-from computer_use.interaction.read.presentation.tree import unique
+from computer_use.interaction.read.presentation.formatting import bounded, field, quoted
 
 if TYPE_CHECKING:
     from typing import Sequence
 
-    from computer_use.interaction.read.presentation.records import RenderedTree
     from computer_use.protocol.records import Record
 
 
@@ -69,140 +65,3 @@ def window_context(windows: Sequence[Record], current: str | None) -> list[str]:
     if relations:
         lines.append("Window relations: " + "; ".join(relations))
     return lines
-
-
-def render_observation(observation: Record, observed: Record | None = None) -> RenderedTree:
-    """Format an application observation's scope, content, image, and collection gaps.
-
-    Args:
-        observed: Capture provenance or original observation used by the current stage.
-    """
-    rendered = render_tree(observation["root"], observation["context"]) if observation["root"] is not None else None
-    lines = (
-        rendered["text"].split("\n")
-        if rendered is not None
-        else [
-            f"App: {field(observation['context'].get('app', 'Unknown'))}.",
-            (f"Tree: unavailable ({field(observation.get('unavailable', 'no accessible tree'))})"),
-        ]
-    )
-    if "title" in observation:
-        lines[0] = (
-            f"Window: "
-            f"{quoted(bounded(observation['title'], 500))}"
-            f", App: "
-            f"{field(observation['context'].get('app', 'Unknown'))}"
-            f"."
-        )
-    document = (
-        (
-            "Document: unknown (not reported)"
-            if observation.get("document") is None
-            else "Document: " + quoted(observation["document"])
-        )
-        if "document" in observation
-        else None
-    )
-    image_context = "\n".join(
-        ([lines[0]] if re.match("^(?:Window|App):", lines[0] if lines else "") else [])
-        + ([document] if document is not None else [])
-    )
-    if document is not None:
-        lines.insert(1, document)
-    if "applicationMenu" in observation:
-        windows = {w["ref"]: w for w in observation["windows"]}
-
-        def label(ref: str | None) -> str:
-            """Format a node caption used by the observation summary.
-
-            Args:
-                ref: Display reference from the observation, not an operating-system identifier.
-            """
-            if ref is None:
-                return "unknown"
-            title = windows.get(ref, {}).get("title")
-            shown = len(windows) > 1 or (
-                title is not None and lines[0].startswith("Window: " + quoted(bounded(title, 500)) + ", ")
-            )
-            return ref + (" " + quoted(bounded(title, 160)) if not shown and title is not None else "")
-
-        def ancestry(ref: str | None) -> set[str]:
-            """Collect the visible source ancestry for an observation reference.
-
-            Args:
-                ref: Display reference from the observation, not an operating-system identifier.
-            """
-            seen = set()
-            while ref is not None and ref in windows and ref not in seen:
-                seen.add(ref)
-                ref = windows[ref].get("parent")
-            return seen
-
-        viewed, menu = ancestry(observation["current"]), observation["applicationMenu"]
-        outside = unique(
-            ref
-            for ref in (menu["mainWindow"], menu["focusedWindow"])
-            if ref is not None and observation["current"] is not None and not ancestry(ref).intersection(viewed)
-        )
-        lines.insert(
-            1,
-            (
-                f"Application menu: app-wide; reported main="
-                f"{label(menu['mainWindow'])}"
-                f"; focused="
-                f"{label(menu['focusedWindow'])}"
-            )
-            + ("; outside viewed scope: " + ", ".join(outside) if outside else "")
-            + ".",
-        )
-    tree_at = next((i_value for i_value, line_value in enumerate(lines) if line_value.startswith("Tree:")), -1)
-    screenshot = observation.get("screenshot")
-    from computer_use.interaction.read.presentation.formatting import number_string
-
-    caption = (
-        (f"Screenshot: captured {number_string(screenshot['width'])}x{number_string(screenshot['height'])} px.")
-        if screenshot is not None
-        else (f"Screenshot: unavailable ({field(observation.get('screenshotError', 'no captured window'))})")
-    )
-    lines.insert(1 if tree_at < 0 else tree_at + 1, caption)
-    if observation.get("overviewText"):
-        at = 0 if tree_at < 0 else tree_at
-        lines[at:at] = observation["overviewText"].split("\n")
-    if observed is not None:
-        lines.insert(1, "Observation: " + quoted(observed["id"]))
-    lines[:0] = window_context(observation["windows"], observation["current"])
-    refs = rendered["refs"] if rendered is not None else []
-    visible = set(refs)
-    if "sharedFocus" in observation:
-        related = []
-        for ref in observation["sharedFocus"]["refs"]:
-            if ref in visible:
-                related.append(ref)
-            else:
-                owner = rendered["projection"]["foldedInto"].get(ref) if rendered is not None else None
-                if owner and owner in visible:
-                    related.append("inside " + owner)
-        outside = observation["sharedFocus"]["outside"] + len(observation["sharedFocus"]["refs"]) - len(related)
-        if outside:
-            related.append(number_string(outside) + " outside the expanded tree")
-        if related:
-            lines.append("Shared focus: " + ", ".join(related) + " (app-declared keyboard relation).")
-    if "menuPath" in observation:
-        lines.append(
-            "[Menu path: " + " > ".join(quoted(v) for v in observation["menuPath"]) + "; scope=application menu]"
-        )
-        if observation.get("commandRef") and observation["commandRef"] in visible:
-            lines.append((f"[Command element: {quoted(observation['commandRef'])}]"))
-    for note in observation.get("notes", []):
-        lines.append("[" + field(note) + "]")
-    if observation["current"] is None and observation["windows"]:
-        lines.append("Window contents: not expanded.")
-    roots = rendered["roots"] if rendered is not None else []
-    return dict(
-        text="\n".join(lines),
-        refs=refs,
-        roots=roots,
-        coverage=observation_coverage(observation, roots),
-        contextRefs=rendered["contextRefs"] if rendered is not None else {},
-        imageContext=image_context,
-    )

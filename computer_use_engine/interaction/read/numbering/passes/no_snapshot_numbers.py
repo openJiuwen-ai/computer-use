@@ -11,11 +11,11 @@ from computer_use.interaction.read.numbering.model import PURE, NumberingRequest
 from computer_use.pipeline import Contract, Pass
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.pipeline.core import Control
 
 
-def execute(request: NumberingRequest, control: Control) -> tuple[SemanticSnapshot, ...]:
+def execute(request: NumberingRequest, control: Control) -> tuple[ReadSnapshot, ...]:
     """Return the empty numbered-snapshot sequence."""
     return ()
 

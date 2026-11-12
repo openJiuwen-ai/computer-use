@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from computer_use.interaction.read.acquisition.images.desktop.model import DesktopLease
 from computer_use.interaction.read.presentation.content import DisplayText, json_value, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.identity import freeze
 from computer_use.pipeline import Contract, Effect, Pass
 from computer_use.protocol.captures import capture_metadata
 

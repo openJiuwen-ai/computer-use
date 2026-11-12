@@ -12,9 +12,11 @@ Prepare the native dependencies on the computer whose desktop you will operate:
 
 | Platform | Requirements |
 | --- | --- |
-| macOS | macOS 14 or later, an Xcode toolchain with Swift 6, Accessibility and Screen Recording permissions. |
+| macOS | macOS 14 or later, an Xcode toolchain with Swift 6, and Accessibility and Screen Recording permissions. |
 | Windows | Windows x64 with .NET Framework 4.8 and its C# compiler; window capture requires Windows 10 1903 or later. |
 | Linux | A graphical desktop session with AT-SPI and PyGObject. Use X11 for screenshots and mouse input. |
+
+Source installs on all three platforms need Rust 1.85.1 on PATH and CPython 3.11–3.15 on a supported architecture. Prebuilt wheels include the read engine. See the [packaging instructions](../PACKAGING.md).
 
 On Debian or Ubuntu, install the Linux system dependencies first:
 

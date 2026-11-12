@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, cast
 
 from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
-from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
-from computer_use.native.scopes import RunningApplication
+from computer_use.interaction.read.accessibility.preparation import SnapshotRenderRequest
+from computer_use.interaction.read.accessibility.preparation import PrepareSnapshotPipeline
 from computer_use.native.contracts import Binding
 from computer_use.native.query.directory import select_surface
+from computer_use.native.scopes import RunningApplication
 from computer_use.pipeline.core import Control
 from computer_use.session.interfaces import SurfaceOwner, WindowIdentity
 from computer_use.session.operations import current_operation_budget
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.read.acquisition.menus.query import MenuRead
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.read.model import MenuAppObservation
     from computer_use.interaction.records import UIHandle
     from computer_use.types import Observation
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 def remember_menu(
     controller: SessionController, ui: UIHandle, menu: MenuRead, context: str | None
-) -> tuple[tuple[object, ...], tuple[tuple[Binding, SemanticSnapshot], ...]]:
+) -> tuple[tuple[object, ...], tuple[tuple[Binding, ReadSnapshot], ...]]:
     """Retain the native snapshots and bindings for each collected menu source.
 
     Args:
@@ -120,7 +120,7 @@ class InterfaceMenuPipeline:
             # receiver to any of those independent windows.
             with controller.port.calls.claim(30000) as remaining:
                 menu = await controller.reader.menus.collect(
-                    state.running.application, remaining, path=path, context=None
+                    state.running.application, remaining, path=path, context=None,
                 )
             context = None
             # pylint: disable-next=protected-access
@@ -131,7 +131,7 @@ class InterfaceMenuPipeline:
             # NativeAppReader retains the established running identity and
             # performs the same final directory/session recheck as window reads.
             observed = observed or await controller.reader.read(
-                state.running, menu_path=path or None, view="tree", overview=False
+                state.running, menu_path=path or None, view="tree", overview=False,
             )
             if observed.selection is not None:
                 raise RuntimeError("windowless menu branch unexpectedly acquired a working window")
@@ -152,7 +152,7 @@ class InterfaceMenuPipeline:
             target = Binding(instance.directory["session"], item["instance"], item["window"], item["surface"], None)
             with controller.port.calls.claim(30000) as remaining:
                 menu = await controller.reader.menus.collect(
-                    state.running.application, remaining, path=path, context=target
+                    state.running.application, remaining, path=path, context=target,
                 )
                 # Collection cannot turn a closed instance into an application
                 # menu for an unrelated document.

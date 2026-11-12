@@ -21,6 +21,7 @@ from pathlib import Path
 from computer_use.diagnostics import SDK_VERSION, diagnostic, local_failure
 from computer_use.errors import ComputerUseError
 from computer_use.native import driver_exec
+from computer_use.interaction.read.accessibility.frame import NativeReadFrame
 from computer_use.native.preview import get_preview_handler, read_previews
 from computer_use.paths import installed_backend_unavailable_reason, native_driver
 from computer_use.protocol.captures import capture_metadata
@@ -43,6 +44,7 @@ from computer_use.protocol.session import (
 from computer_use.runtime_provenance import startup_provenance
 
 requestCleanupGraceMs, driverTerminationGraceMs = 750, 1000
+_MAX_FRAME_BYTES = 64 * 1024 * 1024
 
 _LOG = logging.getLogger(__name__)
 
@@ -58,6 +60,28 @@ def _json(value):
 
 def _now():
     return asyncio.get_running_loop().time() * 1000
+
+
+def _decode_json_line(line):
+    def invalid_constant(value):
+        raise ValueError("protocol: invalid JSON constant " + value)
+
+    return json.loads(line.decode("utf-8", errors="strict"), parse_constant=invalid_constant)
+
+
+def _open_native_envelope(line, decode_response):
+    try:
+        envelope = decode_response(bytes(line), _MAX_FRAME_BYTES)
+    except ValueError:
+        # Preserve the JSON decoder's error for malformed wire syntax.
+        _decode_json_line(line)
+        raise
+    if envelope is None:
+        # Let the usual envelope checks report a nonobject or missing fields.
+        return _decode_json_line(line)
+    if "result" in envelope:
+        envelope["result"] = NativeReadFrame(envelope["result"])
+    return envelope
 
 
 class Connection:
@@ -317,12 +341,14 @@ class Connection:
                 RuntimeError(f"driver exited ({code})" + (": " + trim(self._diagnostic) if self._diagnostic else ""))
             )
 
-    async def request(self, method, params, options=None):
+    async def request(self, method, params, options=None, *, decode_response=None):
         if self._requesting:
             raise local_failure("another system call is in progress")
         self._requesting = True
         try:
-            return await self._request(method, params, options.get("timeoutMs") if options is not None else None)
+            return await self._request(
+                method, params, options.get("timeoutMs") if options is not None else None, decode_response=decode_response
+            )
         finally:
             self._requesting = False
 
@@ -356,7 +382,7 @@ class Connection:
         # connection; only driver retirement is independent cleanup work.
         await future
 
-    async def _request(self, method, params, budget):
+    async def _request(self, method, params, budget, *, decode_response=None):
         if method not in (
             None, "begin", "inspect", "execute", "finish", "capture", "prepareObservation", "locatePoint"
         ):
@@ -731,6 +757,7 @@ class Connection:
             startedAt=_now(),
             pure=pure,
             writeAdmission=write_admission,
+            decodeResponse=decode_response,
         )
 
         def timeout():
@@ -786,7 +813,7 @@ class Connection:
     def _receive(self, data: bytes) -> None:
         try:
             self._buffer.extend(data)
-            if len(self._buffer) > 64 * 1024 * 1024:
+            if len(self._buffer) > _MAX_FRAME_BYTES:
                 raise ValueError("protocol: response frame too large")
             # Earlier chunks contain no terminator. Inspect only the new bytes
             # until a complete line arrives, then decode the retained frame once.
@@ -799,11 +826,14 @@ class Connection:
                 if line.startswith(b"\xef\xbb\xbf"):
                     raise ValueError("protocol: BOM is not allowed")
 
-                def invalid_constant(value):
-                    raise ValueError("protocol: invalid JSON constant " + value)
-
                 json_started = _now()
-                value = json.loads(line.decode("utf-8", errors="strict"), parse_constant=invalid_constant)
+                pending = self._pending
+                decode_response = pending.get("decodeResponse") if pending is not None else None
+                value = (
+                    _open_native_envelope(line, decode_response)
+                    if decode_response is not None and self._handshake is None
+                    else _decode_json_line(line)
+                )
                 json_decoded = _now()
                 if not isinstance(value, dict):
                     raise ValueError("protocol: expected response object")
@@ -848,6 +878,11 @@ class Connection:
                 if "error" in response:
                     failure = decode_failure(response["error"])
                     error = failure_error(pending["method"], failure)
+                elif decode_response is not None:
+                    result = response["result"]
+                    if not isinstance(result, NativeReadFrame):
+                        raise ValueError("protocol: native read did not return an observation frame")
+                    result.native.initialize()
                 else:
                     result = decode_execution_result(pending["method"], response["result"], retain_observation=True)
                 protocol_decoded = _now()
@@ -869,22 +904,23 @@ class Connection:
                 elif pending["method"] == "capture" and result is not None:
                     summary = {**result, "image": dict(source="window", **(capture_metadata(result["image"]) or {}))}
                 diagnostic_started = _now()
-                diagnostic(
-                    dict(
-                        kind="command_end",
-                        traceId=pending["traceId"],
-                        id=pending["id"],
-                        method=pending["method"],
-                        durationMs=_now() - pending["startedAt"],
-                        target=pending["target"],
-                        status="error" if error is not None else "ok",
-                        **(
-                            dict(error=str(error), failure=failure, stage="backend")
-                            if error is not None
-                            else dict(result=summary)
-                        ),
-                    )
+                event = dict(
+                    kind="command_end",
+                    traceId=pending["traceId"],
+                    id=pending["id"],
+                    method=pending["method"],
+                    durationMs=_now() - pending["startedAt"],
+                    target=pending["target"],
+                    status="error" if error is not None else "ok",
                 )
+                if error is not None:
+                    event.update(error=str(error), failure=failure, stage="backend")
+                elif not isinstance(result, NativeReadFrame):
+                    event["result"] = summary
+                if isinstance(result, NativeReadFrame):
+                    diagnostic(event, _native_observation=result)
+                else:
+                    diagnostic(event)
                 diagnostic_elapsed = _now() - diagnostic_started
                 diagnostic(
                     dict(

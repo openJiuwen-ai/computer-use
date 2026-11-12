@@ -1,4 +1,3 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """Build one distribution from explicitly separated SDK and tool sources."""
@@ -17,7 +16,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from setuptools import find_packages, setup
+from setuptools import Extension, find_packages, setup
+from setuptools.command.build_ext import build_ext
 from setuptools.command.build_py import build_py
 
 try:
@@ -28,15 +28,37 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parent
 _LOG = logging.getLogger(__name__)
 BACKENDS = runpy.run_path(str(ROOT / "scripts/backend_artifacts.py"))
+READ_ENGINE = runpy.run_path(str(ROOT / "scripts/read_engine_build.py"))
+READ_ENGINE_MODULE = "computer_use.interaction.read.accessibility._ax_read"
 BACKEND_ARCHIVE = os.environ.get("COMPUTER_USE_BACKEND_ARCHIVE")
 BACKEND_DIR = os.environ.get("COMPUTER_USE_BACKEND_DIR")
 if BACKEND_ARCHIVE and BACKEND_DIR:
     raise ValueError("Select one backend archive or one prepared backend directory.")
+BACKEND_TARGET = None
 if BACKEND_DIR:
     CLOUD_BACKENDS = runpy.run_path(str(ROOT / "scripts/cloud_build/backend_artifact.py"))
     PREPARED_BACKEND = CLOUD_BACKENDS["inspect_directory"](BACKEND_DIR)
     if PREPARED_BACKEND["protocol"] != BACKENDS["protocol_version"](ROOT):
         raise ValueError("Prepared backend protocol does not match this checkout.")
+    BACKEND_TARGET = PREPARED_BACKEND["target"]
+elif BACKEND_ARCHIVE:
+    ARCHIVED_BACKEND = BACKENDS["inspect_archive"](BACKEND_ARCHIVE, root=ROOT)
+    BACKEND_TARGET = ARCHIVED_BACKEND["target"]
+
+ENGINE_ARCHIVE = os.environ.get("COMPUTER_USE_SDK_NATIVE_ARCHIVE")
+if ENGINE_ARCHIVE:
+    SDK_NATIVE = runpy.run_path(str(ROOT / "scripts/sdk_native.py"))
+    ENGINE_MANIFEST = SDK_NATIVE["inspect_archive"](ROOT, ENGINE_ARCHIVE)
+    if ENGINE_MANIFEST["target"] != BACKEND_TARGET:
+        raise ValueError("The Rust read engine artifact requires a matching prepared driver.")
+    ENGINE_TAG, ENGINE_FILENAME = tuple(ENGINE_MANIFEST["wheel_tag"]), ENGINE_MANIFEST["filename"]
+else:
+    ENGINE_BUILD = READ_ENGINE["host_build"]()
+    if ENGINE_BUILD is None:
+        raise RuntimeError(READ_ENGINE["HOST_REQUIREMENT"])
+    if BACKEND_TARGET is not None and ENGINE_BUILD.backend_target != BACKEND_TARGET:
+        raise RuntimeError(READ_ENGINE["HOST_REQUIREMENT"] + " For cross-host wheel assembly, supply its SDK archive.")
+    ENGINE_TAG, ENGINE_FILENAME = ENGINE_BUILD.wheel_tag, ENGINE_BUILD.filename
 
 # Public imports retain stable, unambiguous package names while the checkout
 # groups code by responsibility. Never scan the repository or native sources as
@@ -224,11 +246,33 @@ class BuildWithResources(build_py):
         )
 
 
+class BuildReadEngine(build_ext):
+    def get_ext_filename(self, ext_name):
+        filename = Path(super().get_ext_filename(ext_name))
+        return str(filename.with_name(ENGINE_FILENAME))
+
+    def build_extension(self, extension):
+        output = Path(self.get_ext_fullpath(extension.name))
+        if ENGINE_ARCHIVE:
+            data = SDK_NATIVE["read_extension"](ENGINE_ARCHIVE, ENGINE_MANIFEST)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(data)
+        else:
+            READ_ENGINE["build_read_engine"](ROOT, output)
+        shutil.copytree(
+            ROOT / "computer_use_engine/interaction/read/accessibility/licenses",
+            output.parent / "_ax_read_licenses",
+            dirs_exist_ok=True,
+        )
+
+
 class BackendWheel(bdist_wheel):
     def finalize_options(self):
         self.native_platform = None if BACKEND_ARCHIVE or BACKEND_DIR else native_platform()
-        if self.native_platform is not None:
-            self.plat_name = self.native_platform
+        platform_tag = ENGINE_TAG[2]
+        if self.plat_name not in (None, platform_tag):
+            raise ValueError(f"The read engine requires wheel platform {platform_tag}.")
+        self.plat_name = platform_tag
         super().finalize_options()
 
     def run(self):
@@ -236,16 +280,21 @@ class BackendWheel(bdist_wheel):
         super().run()
 
     def get_tag(self):
-        if BACKEND_DIR:
-            return "py3", "none", CLOUD_BACKENDS["WHEEL_PLATFORMS"][PREPARED_BACKEND["target"]]
-        if BACKEND_ARCHIVE:
-            backend = BACKENDS["inspect_archive"](BACKEND_ARCHIVE, root=ROOT)
-            return "py3", "none", BACKENDS["TARGETS"][backend["target"]][2]
-        return super().get_tag()
+        if ENGINE_ARCHIVE:
+            return ENGINE_TAG
+        tag = super().get_tag()
+        if tag != ENGINE_TAG:
+            raise ValueError(f"Wheel has tag {tag}, expected {ENGINE_TAG} for its Rust read engine.")
+        return tag
 
 
 setup(
     packages=discover_packages(),
     package_dir=PACKAGE_ROOTS,
-    cmdclass={"build_py": BuildWithResources, "bdist_wheel": BackendWheel},
+    ext_modules=[Extension(READ_ENGINE_MODULE, sources=[])],
+    cmdclass={
+        "build_py": BuildWithResources,
+        "bdist_wheel": BackendWheel,
+        "build_ext": BuildReadEngine,
+    },
 )

@@ -25,7 +25,7 @@ from computer_use.interaction.query.instances.scope import (
 )
 from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.identity import freeze
 from computer_use.interaction.read.views.pipeline import InterfaceReadPipeline, member_target
 from computer_use.interaction.read.views.publication import publish, strict_public_directory
 from computer_use.interaction.requests import ExecuteAction, FindElement

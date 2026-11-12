@@ -16,6 +16,8 @@
 | Windows | Windows x64、.NET Framework 4.8 及其 C# 编译器；窗口截图需要 Windows 10 1903 或更高版本。 |
 | Linux | 包含 AT-SPI 和 PyGObject 的图形桌面会话；截图和鼠标输入使用 X11。 |
 
+三个平台从源码安装时均需在 PATH 中提供 Rust 1.85.1，并使用受支持架构上的 CPython 3.11–3.15。预构建 wheel 已包含读引擎。详见[开发打包](../PACKAGING.md)。
+
 Debian 或 Ubuntu 需要先安装 Linux 系统依赖：
 
 ```bash

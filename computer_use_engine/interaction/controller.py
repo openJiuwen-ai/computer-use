@@ -7,14 +7,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING, cast, overload
+from typing import TYPE_CHECKING, overload
 
 from computer_use.diagnostics import diagnostic, local_failure
 from computer_use.interaction.pipeline import SessionPipeline
 from computer_use.interaction.read.acquisition.images.desktop.service import NativeDesktopReader
-from computer_use.interaction.read.acquisition.reader import captured_children, captured_field
+from computer_use.interaction.read.acquisition.reader import (
+    CapturedField,
+    ChildContinuation,
+)
 from computer_use.interaction.read.app import NativeAppReader
 from computer_use.interaction.read.pages import ContentPages
+from computer_use.interaction.records import ElementSnapshot
 from computer_use.interaction.requests import ComputerInput, ExecuteAction, FindElement
 from computer_use.interaction.write.engine import Engine
 from computer_use.native.connection import Connection
@@ -22,7 +26,6 @@ from computer_use.native.contracts import Binding, HostPolicy, Intent
 from computer_use.native.scopes import RunningApplication
 from computer_use.native.transport import ConnectionPort
 from computer_use.pipeline import Control
-from computer_use.protocol.observation import NativeNode
 from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
 from computer_use.session.bindings import SessionBindings
 from computer_use.session.desktop_store import DesktopImageAccess, DesktopStore
@@ -32,9 +35,8 @@ from computer_use.session.operations import current_operation_budget, operation_
 
 if TYPE_CHECKING:
     from computer_use.interaction.model import ControllerAdapters
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot, RetainedElement
     from computer_use.interaction.records import ElementPath as LookupPath
-    from computer_use.interaction.records import ElementSnapshot
     from computer_use.interaction.requests import InteractionRequest
     from computer_use.native.contracts import OperationTarget
     from computer_use.native.port import NativePort
@@ -221,75 +223,31 @@ class SessionController:
     def validate_element(self, target: Binding) -> None:
         self.bindings.validate_element(target, self.transport.session)
 
-    def remember_observation(self, state: AppState, target: Binding, tree: SemanticSnapshot) -> None:
+    def remember_observation(self, state: AppState, target: Binding, tree: ReadSnapshot) -> None:
         """Retain observed element identities and continuations for later SDK calls."""
-        if {"nativeRelationPages", "nativeNodePages"} & set(self.transport.capabilities):
+        include_public_pages = bool({"nativeRelationPages", "nativeNodePages"} & set(self.transport.capabilities))
+        rows = tree.retained(target, include_public_pages=include_public_pages)
+        snapshots = self._native_snapshots(target, tree.session, rows)
+        if include_public_pages:
             self.pages.remember(target, tree)
-        self.bindings.remember(state, self._snapshots(target, tree))
+        self.bindings.remember(state, snapshots)
 
     @staticmethod
-    def _snapshots(target: Binding, tree: SemanticSnapshot) -> dict[str, ElementSnapshot]:
-        """Retain bindings and continuation sources for the tree's element references.
-
-        Args:
-            target: Native scope used as the identity prefix for each element binding.
-            tree: Semantic snapshot containing raw nodes, fields, and reference mapping.
-
-        Returns:
-            Snapshots keyed by display reference, with container classification and
-            captured text/child relations for subsequent operations.
-        """
-        native_nodes = {node["node"]: node for node in tree.facts["nodes"]}
-        outside = set()
-        if tree.native.backend == "windows":
-            for token, node in tree.native.nodes.items():
-                if any(
-                    supplement.key == "observation_scope"
-                    and isinstance(supplement.value, Mapping)
-                    and supplement.value.get("ownership") == "outside"
-                    for supplement in node.supplements
-                ):
-                    outside.add(token)
-        child_relations = {r["source"]: r for r in tree.facts["relations"] if r["kind"] == "children"}
-
-        def ordinary(token: str, node: NativeNode | None) -> bool:
-            """Use native input-scope evidence before the semantic-only fallback."""
-            if tree.collection is not None and token in tree.collection.input_containers:
-                return tree.collection.input_containers[token]
-            if node is None:
-                return False
-            writable = node.states.editable is True or any(
-                action.available is True
-                and action.kind in ("set_value", "replace_selection")
-                and action.target
-                in (("control_value", "value"), ("text", "content"), ("text", "selected_text"), ("text", "selections"))
-                for action in node.actions or ()
+    def _native_snapshots(
+        target: Binding, session: str, rows: list[RetainedElement]
+    ) -> dict[str, ElementSnapshot]:
+        return {
+            row["reference"]: ElementSnapshot(
+                container=row["container"],
+                binding=replace(target, node=row["node"], capture=None),
+                scope_kind=row["scope_kind"],
+                source={"ref": row["reference"], "observed": row["observed"]},
+                text=CapturedField(session, **field) if (field := row["text"]) is not None else None,
+                children=ChildContinuation(**children) if (children := row["children"]) is not None else None,
+                **({"native_window_outside": True} if row.get("native_window_outside") else {}),
             )
-            return node.role in {"group", "unknown", "window", "sheet", "dialog", "alert"} and not writable
-
-        def text_source(ref: str, token: str) -> str | None:
-            """Use the acquisition's explicit readText source without changing input values."""
-            if tree.collection is not None:
-                path = tree.collection.text_read_fields.get(token)
-                if path:
-                    return ".".join(map(str, path))
-            return tree.value_fields.get(ref)
-
-        return cast(
-            "dict[str, ElementSnapshot]",
-            {
-                ref: dict(
-                    container=ordinary(node, tree.native.nodes.get(node)),
-                    binding=replace(target, node=node, capture=None),
-                    scope_kind=tree.scope_kind,
-                    source=dict(ref=ref, observed=tree.facts["observed"]),
-                    text=captured_field(tree, ref, text_source(ref, node), nodes=native_nodes),
-                    children=captured_children(tree, ref, relations=child_relations),
-                    **({"native_window_outside": True} if node in outside else {}),
-                )
-                for ref, node in tree.refs.items()
-            },
-        )
+            for row in rows
+        }
 
     async def act(self, method: str, params: Record, owner: object | None = None) -> ActionResult:
         """Translate a desktop/window operation into the session's write request.

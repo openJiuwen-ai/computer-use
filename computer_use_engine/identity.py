@@ -11,6 +11,19 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 
+def freeze(value):
+    kind = type(value)
+    if kind in (type(None), bool, int, float, str, bytes):
+        return value
+    if kind is dict or kind is MappingProxyType or isinstance(value, Mapping):
+        return MappingProxyType({key: freeze(item) for key, item in value.items()})
+    if kind is tuple or kind is list or isinstance(value, (tuple, list)):
+        return tuple(freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(value)
+    return value
+
+
 class WeakIdentityMap:
     """Associate values with exact objects and release entries when keys die."""
 

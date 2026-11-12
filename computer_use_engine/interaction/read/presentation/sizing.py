@@ -60,8 +60,10 @@ class DocumentSize:
         elif isinstance(value, NativeObservation):
             size = self.data(encode_observation(value))
         elif isinstance(value, DisplayText) and value.kind == "details_hint":
+            from .document import _observed
+
             prepared, ref = value.values
-            size = self.record((("kind", value.kind), ("ref", ref), ("observed", prepared.snapshot.facts["observed"])))
+            size = self.record((("kind", value.kind), ("ref", ref), ("observed", _observed(prepared))))
         elif is_dataclass(value):
             size = self.record((name, getattr(value, name)) for name in value.__dataclass_fields__)
         elif isinstance(value, Mapping):
@@ -74,36 +76,4 @@ class DocumentSize:
         return size
 
     def document(self, document: Any) -> int:
-        from .document import DisplayTree
-
-        parts = []
-        for part in document.parts:
-            if isinstance(part, DisplayTree):
-                snapshot = part.prepared.snapshot
-                parts.append(
-                    self.record(
-                        (
-                            ("kind", "tree"),
-                            ("scope", part.scope),
-                            ("indent", part.indent),
-                            ("details", part.details),
-                            ("nodes", part.nodes),
-                            ("native", snapshot.native),
-                            ("facts", snapshot.facts),
-                            ("refs", snapshot.refs),
-                            ("annotations", snapshot.annotations),
-                        )
-                    )
-                )
-            else:
-                parts.append(self.data(part))
-        # {"version":1,"context":<data>,"parts":[<data>, ...]}
-        return (
-            self.record((("version", 1), ("context", document.context)))
-            + 1
-            + self.data("parts")
-            + 1
-            + 2
-            + max(0, len(parts) - 1)
-            + sum(parts)
-        )
+        return self.data(document.to_data())

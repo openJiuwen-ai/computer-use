@@ -1,0 +1,15 @@
+[package]
+name = "cu-accessibility-read"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[lib]
+name = "_ax_read"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "=0.30.1", features = ["extension-module"] }
+sha2 = "=0.10.9"
+unicode-segmentation = "=1.13.3"

@@ -1,14 +1,10 @@
-# coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-from __future__ import annotations
+"""Describe the source of a retained text field."""
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from computer_use.interaction.read.presentation.formatting import json_string
-
-if TYPE_CHECKING:
-    from typing import Any
 
 
 def text_source_label(source: Any) -> str:

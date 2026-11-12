@@ -33,6 +33,39 @@ This repository does not vendor third-party source code. The table below lists t
 | httpx | BSD-3-Clause | PyPI package `httpx` (`https://github.com/encode/httpx`) |
 | anyio | MIT | PyPI package `anyio` (`https://github.com/agronholm/anyio`) |
 
+### Rust accessibility read engine
+
+The accessibility read engine uses the following crates under their MIT license. The MIT license text appears below.
+
+| Software | Version | Copyright or upstream authorship |
+|---|---|---|
+| [PyO3 and PyO3 FFI](https://github.com/PyO3/pyo3) | 0.30.1 | Copyright (c) 2023-present PyO3 Project and Contributors |
+| [libc](https://github.com/rust-lang/libc) | 0.2.191 | Copyright (c) The Rust Project Developers |
+| [once_cell](https://github.com/matklad/once_cell) | 1.21.4 | Aleksey Kladov |
+| [unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) | 1.13.3 | Copyright (c) 2015 The Rust Project Developers |
+| [sha2](https://github.com/RustCrypto/hashes) | 0.10.9 | Copyright (c) 2006-2009 Graydon Hoare, 2009-2013 Mozilla Foundation, 2016 Artyom Pavlov |
+| [digest](https://github.com/RustCrypto/traits) | 0.10.7 | Copyright (c) 2017 Artyom Pavlov |
+| [crypto-common](https://github.com/RustCrypto/traits) | 0.1.7 | Copyright (c) 2021 RustCrypto Developers |
+| [block-buffer](https://github.com/RustCrypto/utils) | 0.10.4 | Copyright (c) 2018-2019 The RustCrypto Project Developers |
+| [cpufeatures](https://github.com/RustCrypto/utils) | 0.2.17 | Copyright (c) 2020-2025 The RustCrypto Project Developers |
+| [generic-array](https://github.com/fizyk20/generic-array) | 0.14.7 | Copyright (c) 2015 Bartłomiej Kamiński |
+| [typenum](https://github.com/paholg/typenum) | 1.20.1 | Copyright (c) 2014 Paho Lurie-Gregg |
+| [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.5 | Copyright (c) 2014 Alex Crichton |
+
+The read engine includes the Rust 1.85.1 standard library. Its upstream copyright and license texts, together with the upstream license texts for `adler` and `compiler_builtins`, accompany the read engine in `computer_use/interaction/read/accessibility/_ax_read_licenses`. The following MIT notices cover components of the standard library dependency graph.
+
+| Software | Version | Copyright |
+|---|---|---|
+| [addr2line](https://github.com/gimli-rs/addr2line) | 0.22.0 | Copyright (c) 2016-2018 The gimli Developers |
+| [gimli](https://github.com/gimli-rs/gimli) | 0.29.0 | Copyright (c) 2015 The Rust Project Developers |
+| [object](https://github.com/gimli-rs/object) | 0.36.7 | Copyright (c) 2015 The Gimli Developers |
+| [rustc-demangle](https://github.com/rust-lang/rustc-demangle) | 0.1.24 | Copyright (c) 2014 Alex Crichton |
+| [hashbrown](https://github.com/rust-lang/hashbrown) | 0.15.2 | Copyright (c) 2016 Amanieu d'Antras |
+| [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.0 | Copyright (c) 2014 Alex Crichton |
+| [libc](https://github.com/rust-lang/libc) | 0.2.169 | Copyright (c) 2014-2020 The Rust Project Developers |
+| [memchr](https://github.com/BurntSushi/memchr) | 2.7.4 | Copyright (c) 2015 Andrew Gallant |
+| [miniz_oxide](https://github.com/Frommi/miniz_oxide) | 0.7.4 | Copyright (c) 2017 Frommi |
+
 ### Platform SDKs used by the native drivers (not redistributed)
 
 | Component | Used by | Terms |

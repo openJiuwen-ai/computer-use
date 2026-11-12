@@ -6,6 +6,8 @@ import time
 import weakref
 from contextlib import contextmanager
 from contextvars import ContextVar
+from threading import Event
+from types import MethodType
 from uuid import uuid4
 
 # Private variables hold mutable session state.
@@ -19,6 +21,8 @@ _active = 0
 _budget = ContextVar("computer_use_operation_budget", default=None)
 _cancellation_source = ContextVar("computer_use_operation_cancellation", default=None)
 OPERATION_TARGET_MS = 1000
+_NATIVE_CLOCK = time.monotonic
+_EVENT_IS_SET = Event.is_set
 
 
 class OperationDeadlineExceeded(TimeoutError):
@@ -88,6 +92,28 @@ def current_operation_budget():
     return _budget.get()
 
 
+_BUDGET_REMAINING = OperationBudget.remaining
+_BUDGET_AVAILABLE = OperationBudget.available_ms
+
+
+def _native_checkpoint(checkpoint):
+    """Identify SDK budget callbacks whose behavior is independent of caller frames."""
+    if checkpoint is None:
+        return True
+    if type(checkpoint) is not MethodType or checkpoint.__func__ is not _BUDGET_REMAINING:
+        return False
+    budget = checkpoint.__self__
+    if type(budget) is not OperationBudget or budget is not _budget.get():
+        return False
+    available = budget.available_ms
+    return (
+        type(available) is MethodType
+        and available.__func__ is _BUDGET_AVAILABLE
+        and budget._clock is _NATIVE_CLOCK
+        and budget.cancelled is getattr(budget, "_native_cancelled", None)
+    )
+
+
 @contextmanager
 def cancellation_scope(cancelled):
     """Borrow the host's original thread-safe cancellation event predicate."""
@@ -113,7 +139,17 @@ def operation_budget(timeout_ms=None):
         active = task_ref()
         return bool(source is not None and source() or active is not None and active.cancelling())
 
-    token = _budget.set(OperationBudget(timeout_ms, cancelled=cancelled))
+    budget = OperationBudget(timeout_ms, cancelled=cancelled)
+    if (task is None or type(task) is asyncio.Task) and (
+        source is None
+        or (
+            type(source) is MethodType
+            and source.__func__ is _EVENT_IS_SET
+            and type(source.__self__) is Event
+        )
+    ):
+        budget._native_cancelled = cancelled
+    token = _budget.set(budget)
     try:
         yield current_operation_budget()
     finally:

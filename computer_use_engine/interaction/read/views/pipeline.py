@@ -26,6 +26,11 @@ from computer_use.interaction.read.acquisition.components.support import Observa
 from computer_use.interaction.read.acquisition.images.fixed import FixedWindowImagePipeline
 from computer_use.interaction.read.acquisition.images.refresh import IMAGE_REFRESH_MINIMUM_MS
 from computer_use.interaction.read.acquisition.loading import window_content_unexposed
+from computer_use.interaction.read.acquisition.view_facts import (
+    captured_metadata,
+    captured_node,
+    field,
+)
 from computer_use.interaction.read.limits import DEFAULT_WINDOW_MAX_NODES
 from computer_use.interaction.read.model import (
     AppObservation,
@@ -34,9 +39,9 @@ from computer_use.interaction.read.model import (
 )
 from computer_use.interaction.read.presentation.content import DisplayText, join, template
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.interface.disclosure.groups.model import WindowDisclosureContext
-from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
-from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
+from computer_use.interaction.read.accessibility.preparation import WindowDisclosureContext
+from computer_use.interaction.read.accessibility.preparation import SnapshotRenderRequest
+from computer_use.interaction.read.accessibility.preparation import PrepareSnapshotPipeline
 from computer_use.native.contracts import Binding
 from computer_use.native.query.directory import select_surface
 from computer_use.native.scopes import FixedWindowInvalidated, FixedWindowUnconfirmed, window_binding
@@ -59,7 +64,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.read.acquisition.images.capture import WindowImage
     from computer_use.interaction.read.acquisition.menus.query import MenuRead
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.records import UIHandle
     from computer_use.protocol.records import NativeDirectory, SurfaceInfo
     from computer_use.session.interfaces import InstanceState
@@ -83,7 +88,7 @@ class WindowPart:
     """
 
     target: Binding
-    tree: SemanticSnapshot | None = None
+    tree: ReadSnapshot | None = None
     image: WindowImage | None = None
     menus: MenuRead | None = None
     gaps: tuple[ObservationGap, ...] = ()
@@ -668,17 +673,15 @@ class InterfaceReadPipeline:
             if companion is not None:
                 from computer_use.interaction.read.facts.capture_companion import (
                     SHARING_CONTROL_FIELDS,
-                    sharing_control_signature,
                 )
 
                 probe = await self.member(
                     ui, item, "tree", max_nodes=8, max_depth=2, fields=list(SHARING_CONTROL_FIELDS),
                     component_budget_ms=2000 if related is not None else None,
                 )
-                signature = (
-                    sharing_control_signature(probe.tree.native, probe.target.node)
-                    if probe.tree is not None and probe.snapshots_numbered else None
-                )
+                signature = None
+                if probe.tree is not None and probe.snapshots_numbered:
+                    signature = probe.tree.capture.sharing_control_signature(probe.target.node)
                 if signature is not None:
                     probe.capture_companion = CapturedSharingControl(companion, *signature)
                     plan.fold_capture_status(identity)
@@ -982,7 +985,7 @@ class InterfaceReadPipeline:
             if part.tree is not None and id(part) in summarized_history:
                 lines.append(template(
                     "Captured AX source retained: {0}, intervalNs={1}; outside current read scope, tree not expanded.",
-                    part.tree.native.id, part.tree.native.interval_ns,
+                    captured_metadata(part.tree).id, captured_metadata(part.tree).interval_ns,
                 ))
             elif part.tree is not None and part.snapshots_numbered:
                 member = next(window for window in header.windows if window.ref == ref)
@@ -993,8 +996,8 @@ class InterfaceReadPipeline:
                     tuple(next(r for r, w in instance.windows.items() if w == item["window"]) for item in blockers),
                     directory_complete=not directory["stopReasons"],
                     scope_confirmed=(
-                        part.tree.native.session == part.target.session
-                        and part.tree.native.roots == (part.target.node,)
+                        captured_metadata(part.tree).session == part.target.session
+                        and captured_metadata(part.tree).roots == (part.target.node,)
                     ),
                 )
                 prepared = None
@@ -1020,11 +1023,7 @@ class InterfaceReadPipeline:
                 else:
                     trees.append((part.target, part.tree))
                     member_trees[part.identity] = part.tree
-                    root_groups = (root.groups for root in prepared.roots if root.groups is not None)
-                    recovery_prefix = max(
-                        (group.recovery_units for groups in root_groups for group in groups.groups),
-                        default=recovery_prefix,
-                    )
+                    recovery_prefix = prepared.recovery_units
                     same_action_window = (
                         related is not None and part.target.session == related.original.session
                         and part.identity == current_identity == related.original_window
@@ -1229,10 +1228,11 @@ class InterfaceReadPipeline:
             ],
             detail=target,
         )
-        if part.tree is None or not part.snapshots_numbered or part.tree.native.roots != (target.node,):
+        if part.tree is None or not part.snapshots_numbered or captured_metadata(part.tree).roots != (target.node,):
             return None
-        node = part.tree.native.nodes.get(target.node)
-        if node is None or node.states.selected is not True or node.states.expanded == "expanded":
+        node = captured_node(part.tree, target.node, "states")
+        states = field(node, "states")
+        if node is None or field(states, "selected") is not True or field(states, "expanded") == "expanded":
             return None
         part.gaps += (ObservationGap(
             "tree", "observation_incomplete", "Selected item observed. Other window content was not expanded.",
@@ -1260,13 +1260,15 @@ class InterfaceReadPipeline:
         part = await self.member(ui, item, "tree", max_nodes=4, max_depth=3, component_budget_ms=500)
         if part.tree is None or not part.snapshots_numbered:
             return None
-        for root in part.tree.native.roots:
-            node = part.tree.native.nodes.get(root)
-            if node is None or node.role not in ("text_field", "text_area") or node.states.focused is not True:
+        for root in captured_metadata(part.tree).roots:
+            node = captured_node(part.tree, root, "role", "states", "actions")
+            states = field(node, "states")
+            if field(node, "role") not in ("text_field", "text_area") or field(states, "focused") is not True:
                 continue
-            if node.states.editable is True or any(
-                action.available is True and action.kind in ("replace_selection", "insert_text", "set_value")
-                for action in node.actions or ()
+            if field(states, "editable") is True or any(
+                field(action, "available") is True
+                and field(action, "kind") in ("replace_selection", "insert_text", "set_value")
+                for action in field(node, "actions") or ()
             ):
                 break
         else:
@@ -1325,7 +1327,9 @@ class InterfaceReadPipeline:
             await capture_image()
         if view != "image":
             try:
-                options = {"strict_window": True} if getattr(ui, "_strict_window", False) else {}
+                options = {}
+                if getattr(ui, "_strict_window", False):
+                    options["strict_window"] = True
                 # This exact-member component must leave room for pixels and
                 # directory reconciliation within the enclosing call deadline.
                 with (

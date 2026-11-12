@@ -10,7 +10,7 @@ from computer_use.interaction.read.acquisition.model import AcquiredObservation
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
+    from computer_use.interaction.read.accessibility.preparation import PreparedSnapshot
 
 PURE, RESOURCE = {Effect.PURE}, {Effect.RESOURCE}
 

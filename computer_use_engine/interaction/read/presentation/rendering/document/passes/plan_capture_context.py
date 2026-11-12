@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from computer_use.interaction.read.presentation.content import DisplayText
-from computer_use.interaction.read.presentation.model import PURE
+from computer_use.interaction.read.accessibility.preparation import PURE
 from computer_use.interaction.read.presentation.rendering.document.capture_context import capture_companions
 from computer_use.interaction.read.presentation.rendering.document.model import DocumentRenderRequest
 from computer_use.pipeline import Contract, Pass

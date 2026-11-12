@@ -262,8 +262,9 @@ async def observe_application(controller, ui, selector, view, *, source_applicat
         )
 
     try:
-        observed = await controller.reader.read(
-            selector, view=view, overview=False, on_scope=remember, source_applications=source_applications
+        read = controller.reader.read
+        observed = await read(
+            selector, view=view, overview=False, on_scope=remember, source_applications=source_applications,
         )
     except WindowSelectionRequired as choices:
         state.running = RunningApplication(choices.application, choices.display_name, choices.directory["session"])
