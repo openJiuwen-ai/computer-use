@@ -394,12 +394,16 @@ import ApplicationServices
         var inputFrontiers = [AXUIElement](), frontierCursor = 0
         var inputParents = [(child: AXUIElement, parent: AXUIElement?, known: Bool)]()
         var inputSheets = [AXUIElement]()
-        var inputNativeIDs = [(element: AXUIElement, id: CGWindowID?)]()
-        var modalHintCursor = 0, absentModalHints = Set<String>(), inactiveModalRelations = Set<String>()
-        let reportedID: @MainActor (AXUIElement) -> CGWindowID? = { element in
-            inputNativeIDs.first(where: { CFEqual($0.element, element) })?.id
+        // Give Swift 6.3 an explicit actor owner for the mutable IDs used by nested lookups.
+        @MainActor final class ReportedWindowIDs {
+            var entries = [(element: AXUIElement, id: CGWindowID?)]()
         }
-        let modalRow: @MainActor (ModalHint, [Window]) -> Window? = { hint, windows in
+        let inputNativeIDs = ReportedWindowIDs()
+        var modalHintCursor = 0, absentModalHints = Set<String>(), inactiveModalRelations = Set<String>()
+        @MainActor func reportedID(_ element: AXUIElement) -> CGWindowID? {
+            inputNativeIDs.entries.first(where: { CFEqual($0.element, element) })?.id
+        }
+        @MainActor func modalRow(_ hint: ModalHint, _ windows: [Window]) -> Window? {
             if let native = hint.identity.native {
                 guard hint.nativePresence == .live else { return nil }
                 let matches = windows.filter { reportedID($0.element) == native.id }
@@ -428,7 +432,7 @@ import ApplicationServices
             for window in windows where CFEqual(window.element, original) { return window }
             return nil
         }
-        let detachedHiddenModal: @MainActor (ModalHint, [Window]) -> Bool = { hint, windows in
+        @MainActor func detachedHiddenModal(_ hint: ModalHint, _ windows: [Window]) -> Bool {
             guard hint.identity.isSheet, hint.nativePresence == .live, hint.nativeOnScreen == false, hint.nativeParentID == 0,
                 let native = hint.identity.native, let original = hint.identity.element
             else { return false }
@@ -438,7 +442,7 @@ import ApplicationServices
             }
             return true
         }
-        let unresolvedModalHints: @MainActor ([Window]) -> Set<String> = { windows in
+        @MainActor func unresolvedModalHints(_ windows: [Window]) -> Set<String> {
             var unresolved = Set<String>()
             for hint in modalHints {
                 let window = hint.identity.window
@@ -508,7 +512,7 @@ import ApplicationServices
         // Only a previously observed modal identity requests this bounded path
         // query. Neither old modality/parent data nor a retained Role proves
         // liveness. Check each current parent edge in its forward relation.
-        let modalMembership: @MainActor (AXUIElement) throws -> Membership = { hint in
+        @MainActor func modalMembership(_ hint: AXUIElement) throws -> Membership {
             var reason = "unknown"
             defer { NativePointerTiming.record("modalMembership", metadata: {
                 ["nativeWindow": reportedID(hint) as Any? ?? NSNull(), "reason": reason]
@@ -707,7 +711,7 @@ import ApplicationServices
             if projection == .inputBoundary || projection == .visualCatalogue {
                 try RequestDiagnostics.checkCancellation()
                 let nativeID = query.nativeID(element)
-                inputNativeIDs.append((element, nativeID))
+                inputNativeIDs.entries.append((element, nativeID))
                 timing?.root(element, nativeID: nativeID)
             }
             // Sheets are often absent from AXWindows. Explicit native ownership
