@@ -130,7 +130,7 @@ import ApplicationServices
             onNativePreparation(.init(kind: .menuContext, phase: .returned, detail: "close prepared menu", window: nil))
         }
         if let tracked {
-            accepted = await Self.waitForEvidence(seconds: 0.30, sample: {
+            accepted = await Self.waitForEvidence(seconds: 0.30, state: tracked, sample: { tracked in
                 pendingTrackedMenus(tracked, pid: process.pid).isEmpty ? true : nil
             }, pause: Self.cleanupPause) != nil
         } else {
@@ -155,13 +155,13 @@ import ApplicationServices
         var opened = [TrackedMenu]()
         var pointerMenu: WindowGeometry.WindowMapping?
         let pointerActivity = pointerBody.map { _ in NativeForegroundResponsibility.desktopSnapshot().activity }
-        func closePrepared(afterClick: Bool = false) async -> Bool {
+        @MainActor func closePrepared(afterClick: Bool = false) async -> Bool {
             var remaining = opened
             if let pointerActivity {
                 if afterClick, !opened.isEmpty {
                     // Give the native command its own menu-close transition
                     // before sending any cancellation of our preparation.
-                    let closed = await Self.waitForEvidence(seconds: 0.25, sample: {
+                    let closed = await Self.waitForEvidence(seconds: 0.25, state: opened, sample: { opened in
                         pendingTrackedMenus(opened, pid: process.pid).isEmpty ? true : nil
                     }, pause: Self.cleanupPause)
                     if closed != nil { return true }
@@ -208,9 +208,9 @@ import ApplicationServices
                         "menu opening could not be confirmed; requested command was not sent", code: .executionUnknown)
                 }
                 if pointerBody != nil {
-                    guard let mapping = try await Self.waitForEvidence(seconds: 0.25, sample: {
+                    guard let mapping = try await Self.waitForEvidence(seconds: 0.25, state: branch.menu, sample: { menu in
                         try RequestDiagnostics.checkCancellation()
-                        return NativeMenuSurfaces.mapping(branch.menu, pid: process.pid)
+                        return NativeMenuSurfaces.mapping(menu, pid: process.pid)
                     }, pause: { try await Task.sleep(for: .seconds($0)) }) else {
                         throw DriverError("the prepared menu did not publish its original popup", code: .inputUnavailable)
                     }
@@ -248,13 +248,13 @@ import ApplicationServices
         }
     }
 
-    static func waitForEvidence<Value>(
-        seconds: TimeInterval, sample: () throws -> Value?,
+    static func waitForEvidence<State, Value>(
+        seconds: TimeInterval, state: State, sample: @MainActor (State) throws -> Value?,
         now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, pause: (TimeInterval) async throws -> Void
     ) async rethrows -> Value? {
         let deadline = now() + seconds
         while true {
-            if let evidence = try sample() { return evidence }
+            if let evidence = try sample(state) { return evidence }
             let remaining = deadline - now()
             guard remaining > 0 else { return nil }
             try await pause(min(0.015, remaining))
@@ -287,7 +287,7 @@ import ApplicationServices
         onPreparationWait: @escaping @MainActor (NativePreparationWait) -> Void = { _ in }, observeOutcome: Bool = false,
         refreshMenu: Bool = true
     ) async throws {
-        func onNativePreparation(_ event: NativePreparationEffect) {
+        let onNativePreparation: @MainActor (NativePreparationEffect) -> Void = { event in
             if let scope = NativeForegroundRestorationScope.current { scope.record(event) }
             else if event.phase == .willSend {
                 NativeForegroundResponsibility.current?.recordPreparation(target: background.capturedProcessIdentity)

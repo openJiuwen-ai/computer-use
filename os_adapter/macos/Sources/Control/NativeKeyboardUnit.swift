@@ -543,7 +543,7 @@ import ApplicationServices
         let clipboardKeyWindow = NativeForegroundResponsibility.current?.requiredKeyWindow
         let serviceCommand = windowCommandScope && request.kind == .key && request.usesWindowCommand()
             && NativeKeyboardCommandContext.isViewService(recipient)
-        func validateState(_ current: inout State) throws {
+        @MainActor func validateState(_ current: inout State) throws {
             guard current.window.map({ CFEqual($0, keyboardWindow) }) == true else {
                 throw DriverError(
                     "the surface's keyboard window changed; remaining input was not sent", code: .staleTarget)
@@ -579,13 +579,13 @@ import ApplicationServices
                     "keyboard unit readiness changed; remaining key events were not sent", code: .inputUnavailable)
             }
         }
-        func validateReceiver() async throws {
+        let validateReceiver: @MainActor () async throws -> Void = {
             try check()
             try self.checkEnabled()
             var current = try self.sample()
             try validateState(&current)
         }
-        func handoffBeforeFirstKeyDown() async throws {
+        let handoffBeforeFirstKeyDown: @MainActor () async throws -> Void = {
             // Preparation can activate an application after its native step
             // returned. The operation still owns that excursion. Return before
             // the first requested down, with the already fixed local receiver;
@@ -602,7 +602,7 @@ import ApplicationServices
                 !ownership.externalActivation,
                 ownership.foregroundPID == process.pid, responsibility.permitsForegroundPreparation()
             else { return }
-            func checkOriginal() throws {
+            @MainActor func checkOriginal() throws {
                 try check()
                 try self.checkEnabled()
                 guard NativeProcessIdentity.read(application.processIdentifier) == process else {
@@ -658,7 +658,7 @@ import ApplicationServices
                     throw DriverError("original keyboard selection is unconfirmed; no text sent", code: .inputUnavailable)
                 }
             }
-            func validateInsertion() async throws {
+            let validateInsertion: @MainActor () async throws -> Void = {
                 if !started, let geckoInsertion, let element {
                     guard try NativeGeckoTextProvider.prove(
                         element: element, presenterPID: application.processIdentifier, originalWindow: { keyboardWindow }

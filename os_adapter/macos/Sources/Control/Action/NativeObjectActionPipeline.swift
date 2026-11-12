@@ -44,7 +44,7 @@ import ApplicationServices
             guard matches else { throw DriverError("the selected native action changed", code: .staleTarget) }
             return current
         }
-        @MainActor func checkPreparationAction() throws { _ = try checkActionDeclaration() }
+        let checkPreparationAction: @MainActor () throws -> Void = { _ = try checkActionDeclaration() }
         @discardableResult @MainActor func checkReadyAction() throws -> NativeElementControl.ActionFacts {
             let current = try checkActionDeclaration()
             guard current.enabled != false else {
@@ -95,7 +95,7 @@ import ApplicationServices
             if let opener = current.qtPopupOpener, opener.applies(action: name),
                 let local = try context.access.units.actionContextUnit(context.command.target, action: name)
             {
-                @MainActor func checkPopupOpener() throws {
+                let checkPopupOpener: @MainActor () throws -> Void = {
                     guard try checkReadyAction().qtPopupOpener == opener else {
                         throw DriverError("the original Qt popup opener changed during preparation", code: .staleTarget)
                     }
@@ -115,7 +115,7 @@ import ApplicationServices
                 // no requested action has entered its dispatch barrier.
                 throw NativeSelectionBasis.Changed()
             }
-            @MainActor func actionBoundary() throws {
+            let actionBoundary: @MainActor () throws -> Void = {
                 try context.boundary.checkConditions()
                 if name == kAXPressAction {
                     let retained = try originalDocument()

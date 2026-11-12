@@ -39,7 +39,7 @@ struct NativeUnitBoundary {
             try op.check(write: true)
             try RequestDiagnostics.checkCancellation()
         }
-        @MainActor func checkBoundary() throws {
+        let checkBoundary: @MainActor () throws -> Void = {
             try checkBoundaryScope {
                 if let proof = contract.click?.popupPointer {
                     guard case .pointer(.click) = contract.unit, contract.actuator == nil, contract.receiver == nil,
@@ -64,7 +64,7 @@ struct NativeUnitBoundary {
                 ).blocked
             }
         }
-        @MainActor func checkSelection() throws {
+        let checkSelection: @MainActor () throws -> Void = {
             try access.contracts.selectionBasis(op.token).check(
                 contract.basis,
                 scope: string(binding.wire["surface"], label: "surface"))
@@ -78,7 +78,7 @@ struct NativeUnitBoundary {
             receipt.appChangeInputBaseline = op.appChangeInputBaseline
             access.recordEffect()
         }
-        @MainActor func beforeDispatch() throws {
+        let beforeDispatch: @MainActor () throws -> Void = {
             try checkBoundary()
             try markDispatch()
         }

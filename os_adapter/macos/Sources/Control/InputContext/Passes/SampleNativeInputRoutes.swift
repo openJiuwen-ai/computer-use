@@ -38,13 +38,17 @@ import ApplicationServices
             "editorOwner": NSNull(), "selectionKnown": "unknown", "geometryCurrent": "unknown",
             "windowRoute": "unknown", "pointerRoute": "unknown"
         ]
-        func recordPointer(_ unit: NativeElementPointerUnit, geometryNode: String? = nil) throws -> NativeReadiness {
+        let recordPointer: @MainActor (NativeElementPointerUnit, String?) throws -> NativeReadiness = { unit, geometryNode in
             let pointer = try unit.conditions()
             input["geometryCurrent"] = pointer.geometry ? "yes" : "unknown"
             input["pointerRoute"] = pointer.geometry ? (pointer.route ? "yes" : "no") : "unknown"
             if let hit = pointer.hit {
                 if CFEqual(hit, unit.element) {
-                    input["pointerHit"] = geometryNode ?? binding.node!
+                    if let geometryNode {
+                        input["pointerHit"] = geometryNode
+                    } else {
+                        input["pointerHit"] = binding.node!
+                    }
                 } else if let member = unit.member, CFEqual(hit, member) {
                     input["pointerHit"] = actuator!.node
                 } else {
@@ -96,14 +100,14 @@ import ApplicationServices
             foreground = facts.foreground
             nativeRole = facts.role
             let readiness = try recordPointer(
-                access.units.elementPointerUnit(binding.wire, actuator: actuator), geometryNode: actuator.region)
+                access.units.elementPointerUnit(binding.wire, actuator: actuator), actuator.region)
             declare(.pointer(.scroll), supported: true, readiness: { _ in readiness })
         } else if let actuator, actuator.relation == "controlPart" {
             let facts = try access.objects.nativeActionFacts(binding.node!)
             enabled = facts.enabled
             foreground = facts.foreground
             nativeRole = facts.role
-            let readiness = try recordPointer(access.units.elementPointerUnit(binding.wire, actuator: actuator))
+            let readiness = try recordPointer(access.units.elementPointerUnit(binding.wire, actuator: actuator), nil)
             declare(.pointer(.click), supported: true, readiness: { _ in readiness })
         } else if binding.wire["capture"] is String, let kind = NativePointerIntent.Kind(rawValue: op.intent) {
             let unit = NativePointerUnit(capture: try access.captures.input(binding.wire))
@@ -353,7 +357,7 @@ import ApplicationServices
             if op.intent == "click", access.directory.applicationRoot(binding.wire["surface"] as? String ?? "") == nil,
                 !facts.applicationMenuContext
             {
-                let readiness = try recordPointer(access.units.elementPointerUnit(binding.wire))
+                let readiness = try recordPointer(access.units.elementPointerUnit(binding.wire), nil)
                 declare(.pointer(.click), supported: true, readiness: { _ in readiness })
             }
         } else {
