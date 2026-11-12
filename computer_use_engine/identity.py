@@ -10,10 +10,12 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+_ATOMIC_TYPES = frozenset((type(None), bool, int, float, str, bytes))
+
 
 def freeze(value):
     kind = type(value)
-    if kind in (type(None), bool, int, float, str, bytes):
+    if kind in _ATOMIC_TYPES:
         return value
     if kind is dict or kind is MappingProxyType or isinstance(value, Mapping):
         return MappingProxyType({key: freeze(item) for key, item in value.items()})

@@ -8,8 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::{geometry::Geometry, numbering::NodeId, value::Value};
+use recursion::ProjectionBudget;
 
 mod semantics;
+pub(crate) mod recursion;
 mod captions;
 mod derived;
 mod editor;
@@ -37,6 +39,7 @@ pub(crate) enum ProjectionError {
     MissingField(&'static str),
     UnknownReference(String),
     DuplicateReference(String),
+    Recursion(String),
     Unsupported(&'static str),
 }
 
@@ -95,6 +98,7 @@ pub(crate) struct ProjectionOptions {
     pub(crate) subtree: Option<NodeId>,
     pub(crate) focused: Option<NodeId>,
     pub(crate) inherited_blocks: Vec<String>,
+    pub(crate) recursion: Option<ProjectionBudget>,
 }
 
 impl Default for ProjectionOptions {
@@ -111,6 +115,7 @@ impl Default for ProjectionOptions {
             subtree: None,
             focused: None,
             inherited_blocks: Vec::new(),
+            recursion: None,
         }
     }
 }
@@ -254,6 +259,7 @@ pub(crate) struct Projection {
     references: HashMap<String, NodeId>,
     active_stage: Option<usize>,
     lifecycle: Option<Vec<ProjectionEvent>>,
+    export_recursion: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -276,6 +282,7 @@ impl ProjectionEvent {
     fn finish(name: &'static str, error: Option<&ProjectionError>) -> Self {
         let error = error.map(|error| match error {
             ProjectionError::MissingField(_) | ProjectionError::UnknownReference(_) => "KeyError",
+            ProjectionError::Recursion(_) => "RecursionError",
             ProjectionError::Invalid(_) | ProjectionError::DuplicateReference(_) | ProjectionError::Unsupported(_) => "ValueError",
         });
         Self { name, phase: if error.is_some() { "error" } else { "exit" }, error, timestamp_ms: Self::timestamp_ms() }
@@ -302,6 +309,7 @@ pub(super) struct ProjectionInput {
     source: ProjectionSemantics,
     root: NodeId,
     options: ProjectionOptions,
+    export_recursion: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -334,11 +342,15 @@ impl Projection {
         source: ProjectionSemantics, aliases: &HashMap<String, NodeId>, options: ProjectionOptions,
     ) -> Result<ProjectionInput> {
         let root = lookup(aliases, source.0.nodes[0].reference())?;
-        Ok(ProjectionInput { source, root, options })
+        let export_recursion = match options.recursion {
+            Some(budget) => budget.check(&source.0)?,
+            None => None,
+        };
+        Ok(ProjectionInput { source, root, options, export_recursion })
     }
 
     pub(super) fn build_presentation_ir(input: ProjectionInput, aliases: &HashMap<String, NodeId>) -> Result<Self> {
-        let ProjectionInput { source: ProjectionSemantics(source), root: root_id, options } = input;
+        let ProjectionInput { source: ProjectionSemantics(source), root: root_id, options, export_recursion } = input;
         let mut projection = Self {
             root: root_id,
             roots: vec![root_id],
@@ -357,6 +369,7 @@ impl Projection {
             references: HashMap::new(),
             active_stage: None,
             lifecycle: None,
+            export_recursion,
         };
         let mut display = source.clone();
         semantics::annotate_interactions(&mut display, &projection.options.inherited_blocks)?;

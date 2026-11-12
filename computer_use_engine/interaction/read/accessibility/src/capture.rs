@@ -10,7 +10,7 @@ use super::{
     facts::{self, FactSnapshot, FactsError},
     geometry::{collect_geometry, Geometry},
     numbering::{acquisition_aliases, NodeId, NumberingError, Part, PartAliases, SessionAliases},
-    projection::{branch_members, BranchError, CompressionEvidence, Projection, ProjectionError, ProjectionEvent, ProjectionOptions},
+    projection::{branch_members, recursion::ProjectionBudget, BranchError, CompressionEvidence, Projection, ProjectionError, ProjectionEvent, ProjectionOptions},
     render::fallback::{FailureStage, PresentationFailure},
     semantic::{self, ReadError},
     value::{SemanticTree, Value},
@@ -282,18 +282,19 @@ impl ReadCapture {
     pub(super) fn preview_projected_checked<E: From<CaptureError>>(
         &self, aliases: &PartAliases, semantic: &Value, checkpoint: impl FnMut() -> Result<(), E>,
     ) -> Result<Vec<NodeId>, E> {
-        self.preview_projected_traced_checked(aliases, semantic, None, checkpoint)
+        self.preview_projected_traced_checked(aliases, semantic, None, None, checkpoint)
     }
 
     pub(super) fn preview_projected_traced_checked<E: From<CaptureError>>(
         &self, aliases: &PartAliases, semantic: &Value, mut trace: Option<&mut Vec<ProjectionEvent>>,
+        recursion: Option<ProjectionBudget>,
         mut checkpoint: impl FnMut() -> Result<(), E>,
     ) -> Result<Vec<NodeId>, E> {
         checkpoint()?;
         let ids = self.display_index(aliases);
         let roots = semantic.get("roots").and_then(Value::as_seq)
             .ok_or(CaptureError::Invalid("missing semantic roots"))?;
-        let options = ProjectionOptions { compact: true, ..ProjectionOptions::default() };
+        let options = ProjectionOptions { compact: true, recursion, ..ProjectionOptions::default() };
         let mut evidence = None;
         let mut geometry = None;
         let mut order = Vec::new();
@@ -361,6 +362,7 @@ fn projection_failure(error: ProjectionError) -> Result<PresentationFailure, Pro
         ProjectionError::MissingField(name) => ("KeyError", super::diff::python_str_repr(name)),
         ProjectionError::UnknownReference(reference) => ("KeyError", super::diff::python_str_repr(&reference)),
         ProjectionError::DuplicateReference(_) => ("ValueError", "Projection contains a duplicate occurrence".to_owned()),
+        ProjectionError::Recursion(detail) => ("RecursionError", detail),
         ProjectionError::Invalid(detail) => {
             let detail = match detail {
                 "projection removed an element without recording its source" => "Projection removed an element without recording its source",

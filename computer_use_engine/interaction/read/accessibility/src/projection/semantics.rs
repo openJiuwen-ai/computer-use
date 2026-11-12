@@ -14,6 +14,7 @@ const CAPABILITIES: [&str; 4] = ["click", "typeText", "replaceText", "focus"];
 pub(super) struct SemanticNode {
     pub(super) fields: Fields,
     pub(super) children: Vec<usize>,
+    pub(super) children_index: usize,
 }
 
 /// The intermediate tree owns child ordinals, so traversal, cloning and
@@ -21,13 +22,16 @@ pub(super) struct SemanticNode {
 #[derive(Clone)]
 pub(super) struct SemanticTree {
     pub(super) nodes: Vec<SemanticNode>,
+    pub(super) depth: usize,
 }
 
 impl SemanticTree {
     pub(super) fn parse(root: &Value) -> Result<Self> {
         let mut nodes: Vec<SemanticNode> = Vec::new();
-        let mut pending = vec![(root, None::<usize>)];
-        while let Some((value, parent)) = pending.pop() {
+        let mut depth = 0;
+        let mut pending = vec![(root, None::<usize>, 1)];
+        while let Some((value, parent, level)) = pending.pop() {
+            depth = depth.max(level);
             let Value::Map(record) = value else {
                 return Err(ProjectionError::Invalid("semantic node must be a record"));
             };
@@ -47,10 +51,10 @@ impl SemanticTree {
             if let Some(parent) = parent {
                 nodes[parent].children.push(index);
             }
-            nodes.push(SemanticNode { fields, children: Vec::with_capacity(children.len()) });
-            pending.extend(children.iter().rev().map(|child| (child, Some(index))));
+            nodes.push(SemanticNode { fields, children: Vec::with_capacity(children.len()), children_index: position });
+            pending.extend(children.iter().rev().map(|child| (child, Some(index), level + 1)));
         }
-        Ok(Self { nodes })
+        Ok(Self { nodes, depth })
     }
 }
 

@@ -281,6 +281,9 @@ impl Projection {
                 }
             }
         }
+        if let Some(detail) = &self.export_recursion {
+            return Err(ProjectionError::Recursion(detail.clone()));
+        }
         Ok(())
     }
 

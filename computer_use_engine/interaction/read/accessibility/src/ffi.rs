@@ -20,7 +20,7 @@ use super::{
     facts::{query::{self, Query}, FactsError, FactsFailureKind},
     legacy::LegacySnapshot,
     numbering::{PartAliases, SessionAliases},
-    projection::ProjectionOptions,
+    projection::{recursion::{ProjectionBudget, ProjectionStage}, ProjectionOptions},
     publication::{self, loading, lookup, menu, progress, view, Binding, CapturedText, Continuation, ExpectedPage, PublicationError},
     render::details::DetailSource,
     value::{SemanticTree, Value},
@@ -677,8 +677,10 @@ impl NumberedReadCapture {
         &self, py: Python<'_>, checkpoint: Option<Py<PyAny>>, observer: Option<Py<PyAny>>,
     ) -> PyResult<Vec<&str>> {
         let mut events = Vec::new();
+        let recursion = Some(ProjectionBudget::capture(py, ProjectionStage::Numbering)?);
         let visible = py.detach(|| self.capture.capture.preview_projected_traced_checked(
             &self.aliases, &self.semantic, observer.as_ref().map(|_| &mut events),
+            recursion,
             || self::checkpoint(checkpoint.as_ref()),
         ));
         if let Some(observer) = observer {
@@ -700,11 +702,13 @@ impl NumberedReadCapture {
             WindowContext { window_ref, current, modal, confirmed_blockers, directory_complete, scope_confirmed }
         });
         let geometric = compact && public_api && share_descriptions;
+        let recursion = Some(ProjectionBudget::capture(py, ProjectionStage::Publication)?);
         let prepared = py.detach(|| {
             let prepared = self.capture.capture.prepare_projected_checked(
                 &self.aliases, Arc::clone(&self.semantic),
                 ProjectionOptions {
                     compact, public_api, share_descriptions, trace, defer_visual_composition: geometric,
+                    recursion,
                     ..ProjectionOptions::default()
                 },
                 || self::checkpoint(checkpoint.as_ref()),

@@ -61,7 +61,7 @@ _SPATIAL_RULES = frozenset(
 _RESOURCE_STAGES = frozenset({"PresentationPipeline", "CompressionPipeline", "CompressionIRLifetime"})
 _PURE_EFFECTS = frozenset(PURE)
 _RESOURCE_EFFECTS = _PURE_EFFECTS | {Effect.RESOURCE}
-_PROJECTION_ERRORS = {"KeyError": KeyError, "ValueError": ValueError}
+_PROJECTION_ERRORS = {"KeyError": KeyError, "ValueError": ValueError, "RecursionError": RecursionError}
 
 
 def _emit_projection_trace(control: Control, events: EventSequence[ProjectionEvent]) -> None:
