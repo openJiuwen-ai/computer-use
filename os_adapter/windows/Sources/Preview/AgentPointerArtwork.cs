@@ -26,7 +26,9 @@ namespace ComputerUse.Windows
 
         internal static Bitmap Gradient(SizeF size, bool radial, double[] points, double[] offsets, Color[] colors)
         {
-            var image = new Bitmap((int)size.Width * GradientResolution, (int)size.Height * GradientResolution, PixelFormat.Format32bppArgb);
+            int width = (int)Math.Ceiling(size.Width * GradientResolution);
+            int height = (int)Math.Ceiling(size.Height * GradientResolution);
+            var image = new Bitmap(width, height, PixelFormat.Format32bppArgb);
             for (int y = 0; y < image.Height; y++)
                 for (int x = 0; x < image.Width; x++)
                 {

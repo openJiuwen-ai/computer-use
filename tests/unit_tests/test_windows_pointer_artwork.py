@@ -71,8 +71,11 @@ def test_virtual_pointer_diagonal_has_continuous_coverage(tmp_path):
 
     # Measure the dark outline across the SVG's straight upper edge, away from the rounded ends.
     for percent in scales:
-        scale = percent / 100
+        dpi_scale = percent / 100
+        canvas_pixels = math.ceil(50.4 * dpi_scale) + 1
+        scale = dpi_scale * 0.7
         with Image.open(tmp_path / f"{percent}.png") as pointer:
+            assert pointer.size == (canvas_pixels, canvas_pixels)
             background = Image.new("RGBA", pointer.size, "white")
             background.alpha_composite(pointer.convert("RGBA"))
         luminance = background.convert("L")
