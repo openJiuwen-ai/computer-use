@@ -51,12 +51,16 @@ class AgentConfig:
     routing: RoutingConfig = field(default_factory=RoutingConfig)
     check_desktop: bool = True
     pause_on_user_input: bool = False
+    compile_enabled: bool = True
+    compile_dir: str | None = None
 
     def __post_init__(self):
         if self.allow_global_input is not True and self.allow_global_input is not False:
             raise TypeError("allow_global_input must be a boolean")
         if not isinstance(self.check_desktop, bool) or not isinstance(self.pause_on_user_input, bool):
             raise TypeError("check_desktop and pause_on_user_input must be booleans")
+        if not isinstance(self.compile_enabled, bool):
+            raise TypeError("compile_enabled must be a boolean")
         if self.max_iterations < 1 or self.context_window < 1:
             raise ValueError("max_iterations and context_window must be positive")
 

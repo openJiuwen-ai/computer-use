@@ -12,11 +12,11 @@ import argparse
 import json
 from pathlib import Path
 
-from computer_use.programs.admission import Attempt, Evidence, HumanReview, Registry, fingerprint
-from computer_use.programs.artifact import Artifact
+from computer_use_agent.compile.artifact import Artifact, fingerprint
 
 from ..console import report
 from .ledger import EnvironmentBlocked, enumerate_episodes
+from .program_admission import Attempt, Evidence, HumanReview, Registry
 from .provenance import digest
 
 

@@ -143,7 +143,38 @@ Agent 在第一次请求模型前调用一次应用目录接口，确认 MCP 和
 [Windows GetLastInputInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo)
 和 [X11 Screen Saver Extension](https://www.x.org/releases/X11R7.7/doc/scrnsaverproto/saver.pdf)。
 
-## 6. 更新源码
+## 6. Compile 重复桌面任务
+
+照常启动 Agent 并在对话中完成一个桌面任务。
+
+```bash
+uv run --extra agent computer-use-agent
+```
+
+1. 在同一对话里说「编译刚才的任务」，也可输入 `/compile`。`/compile <任务 ID>` 可以选择本进程中保留的任务，`/debug` 会显示任务 ID。
+2. Agent 从任务记录提炼带名字和参数的 Python 函数。元素通过由角色、名称或无障碍标识符组成的路径定位。每次执行按当前界面解析路径，并从当前会话获取所需的窗口编号。源码和使用说明写入 `drafts/<修订>/program.py` 和同目录的 `README.md`。证据不足时同时保留具体原因。
+3. 只读函数可在编译时执行并验证。会修改桌面的通用函数会先保留为草稿。下次确实要执行新任务时，可以说「用刚编译的函数来完成……」，带上新任务的参数。Agent 执行草稿并独立读回结果，通过后发布该修订。原任务无需再做一遍。
+4. 已发布的函数位于 `published/<程序 ID>/<修订>/`。新会话可以按函数适用条件发现并在一次工具调用中执行。运行时重新定位目标并核对当前结果。程序确认未发出输入时可继续常规流程。效果未知时先观察原目标，再决定剩余操作。
+
+程序库默认位于 `~/.computer-use/agent/compile`。可用 `AgentConfig(compile_dir=...)` 或 CLI 配置文件中的 `compile_dir` 指定位置。设置 `compile_enabled=false` 可关闭任务采集和程序选择。
+
+Python 宿主可用 `await agent.compile_task(agent.last_task_id)` 编译，再用返回的程序 ID 调用
+`await agent.run_program(program_id, parameters, version=...)`。经授权验证草稿时传编译返回的 `draft_id`。结果包含状态、效果和验收证据。也可导入生成的 `program.py`，把当前 SDK 的 `Computer` 传给 README 中的命名函数。通过 Agent 运行时会额外执行独立验收。
+
+macOS 上已打开的 LibreOffice Calc `.xlsx` 小数格式任务也可使用专用文件验收。该流程需加装 `--extra compile`，并提供绝对文件路径、工作表、区域及小数位数。编译时回读原任务结果，并用临时工作簿验证。
+
+### 测量复用收益
+
+```bash
+uv run --extra agent --extra compile python -m scripts.evaluation.compile_benchmark \
+  --pairs 30 --output outputs/compile-benchmark
+```
+
+基准使用 CLI 中配置的真实模型、本机 MCP 和临时工作簿。每对试验以相同文件字节和任务请求开始，交替执行基线与复用顺序，分别用新对话执行。每次都回读文件确认格式、原值和范围外数字格式，并记录模型调用、提供方返回的 input/output/cache hit tokens、端到端耗时、MCP 调用、原生命令和回退情况。缓存命中是 input 的子集。缺失计数写为 `null`。
+
+`summary.json` 给出成功率、P50/P95、双方均通过的配对收益，以及单独计量的编译开销和回本次数。每次试验的 `model_calls.jsonl` 保留逐调用用量，`run.json` 记录源码与后端指纹。
+
+## 7. 更新源码
 
 修改 Python 源码后，重启宿主应用或重新创建 Agent／Toolkit 会话；修改依赖或入口后，在源码仓库重新运行 `uv sync --no-dev --extra agent`，并同步宿主项目的依赖。修改原生后端后，先运行 `uv run --no-dev --extra agent computer-use-build`，再重启会话。
 
