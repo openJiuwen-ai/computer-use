@@ -41,59 +41,45 @@ namespace ComputerUse.Windows {
 
         internal static GraphicsPath Path() { return Path0(); }
         internal static void Draw(Graphics graphics) {
-            var bounds = new RectangleF(PointF.Empty, Size);
-            var state1 = graphics.Save();
             using (var path = Path1()) {
-            var fillState = graphics.Save(); graphics.SetClip(path, CombineMode.Intersect);
-            graphics.DrawImage(Gradient0, bounds);
-            graphics.Restore(fillState);
+                using (var brush = AgentPointerArtwork.GradientBrush(Gradient0))
+                    graphics.FillPath(brush, path);
             }
-            graphics.Restore(state1);
-            var state2 = graphics.Save();
             using (var path = Path0()) {
-            AgentPointerArtwork.Shadow(graphics, path, 0f, 0.675f, 0.975f, Color.FromArgb(41, 29, 44, 64));
-            var fillState = graphics.Save(); graphics.SetClip(path, CombineMode.Intersect);
-            graphics.DrawImage(Gradient1, bounds);
-            graphics.Restore(fillState);
+                AgentPointerArtwork.Shadow(graphics, path, 0f, 0.675f, 0.975f, Color.FromArgb(41, 29, 44, 64));
+                using (var brush = AgentPointerArtwork.GradientBrush(Gradient1))
+                    graphics.FillPath(brush, path);
             }
-            graphics.Restore(state2);
-            var state3 = graphics.Save();
             using (var path = Path0()) {
-            var fillState = graphics.Save(); graphics.SetClip(path, CombineMode.Intersect);
-            graphics.DrawImage(Gradient2, bounds);
-            graphics.Restore(fillState);
+                using (var brush = AgentPointerArtwork.GradientBrush(Gradient2))
+                    graphics.FillPath(brush, path);
             }
-            graphics.Restore(state3);
-            var state4 = graphics.Save();
             using (var path = Path0()) {
-            using (var stroke = (GraphicsPath)path.Clone()) using (var pen = new Pen(Color.Black, 1.35f)) {
-            pen.LineJoin = LineJoin.Round; pen.StartCap = pen.EndCap = LineCap.Flat;
-            stroke.Widen(pen); graphics.SetClip(stroke, CombineMode.Intersect);
-            using (var brush = new SolidBrush(Color.FromArgb(217, 64, 81, 93))) graphics.FillRectangle(brush, bounds);
+                using (var pen = new Pen(Color.FromArgb(217, 64, 81, 93), 1.35f)) {
+                    pen.LineJoin = LineJoin.Round;
+                    pen.StartCap = pen.EndCap = LineCap.Flat;
+                    graphics.DrawPath(pen, path);
+                }
             }
-            }
-            graphics.Restore(state4);
-            var state5 = graphics.Save();
-            using (var path = Path0()) graphics.SetClip(path, CombineMode.Intersect);
-            var state6 = graphics.Save();
+            var clipState1 = graphics.Save();
+            using (var clip = Path0()) graphics.SetClip(clip, CombineMode.Intersect);
             using (var path = Path0()) {
-            using (var stroke = (GraphicsPath)path.Clone()) using (var pen = new Pen(Color.Black, 0.57f)) {
-            pen.LineJoin = LineJoin.Round; pen.StartCap = pen.EndCap = LineCap.Flat;
-            stroke.Widen(pen); graphics.SetClip(stroke, CombineMode.Intersect);
-            graphics.DrawImage(Gradient3, bounds);
+                using (var brush = AgentPointerArtwork.GradientBrush(Gradient3))
+                using (var pen = new Pen(brush, 0.57f)) {
+                    pen.LineJoin = LineJoin.Round;
+                    pen.StartCap = pen.EndCap = LineCap.Flat;
+                    graphics.DrawPath(pen, path);
+                }
             }
-            }
-            graphics.Restore(state6);
-            var state7 = graphics.Save();
             using (var path = Path2()) {
-            using (var stroke = (GraphicsPath)path.Clone()) using (var pen = new Pen(Color.Black, 0.33f)) {
-            pen.LineJoin = LineJoin.Miter; pen.StartCap = pen.EndCap = LineCap.Round;
-            stroke.Widen(pen); graphics.SetClip(stroke, CombineMode.Intersect);
-            graphics.DrawImage(Gradient4, bounds);
+                using (var brush = AgentPointerArtwork.GradientBrush(Gradient4))
+                using (var pen = new Pen(brush, 0.33f)) {
+                    pen.LineJoin = LineJoin.Miter;
+                    pen.StartCap = pen.EndCap = LineCap.Round;
+                    graphics.DrawPath(pen, path);
+                }
             }
-            }
-            graphics.Restore(state7);
-            graphics.Restore(state5);
+            graphics.Restore(clipState1);
         }
 
         private static GraphicsPath Path0() {

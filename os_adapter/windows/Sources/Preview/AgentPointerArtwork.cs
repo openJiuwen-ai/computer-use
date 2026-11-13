@@ -10,6 +10,8 @@ namespace ComputerUse.Windows
     // Rendering helpers for the generated SVG. No application or input state.
     internal static class AgentPointerArtwork
     {
+        const int GradientResolution = 4;
+
         internal static RectangleF Bounds
         {
             get
@@ -24,12 +26,11 @@ namespace ComputerUse.Windows
 
         internal static Bitmap Gradient(SizeF size, bool radial, double[] points, double[] offsets, Color[] colors)
         {
-            const int resolution = 4;
-            var image = new Bitmap((int)size.Width * resolution, (int)size.Height * resolution, PixelFormat.Format32bppArgb);
+            var image = new Bitmap((int)size.Width * GradientResolution, (int)size.Height * GradientResolution, PixelFormat.Format32bppArgb);
             for (int y = 0; y < image.Height; y++)
                 for (int x = 0; x < image.Width; x++)
                 {
-                    double px = (x + .5) / resolution - points[0], py = (y + .5) / resolution - points[1];
+                    double px = (x + .5) / GradientResolution - points[0], py = (y + .5) / GradientResolution - points[1];
                     double dx = radial ? 0 : points[2] - points[0], dy = radial ? 0 : points[3] - points[1];
                     double at = Math.Max(0, Math.Min(1, radial ? Math.Sqrt(px * px + py * py) / points[2] : (px * dx + py * dy) / (dx * dx + dy * dy)));
                     int i = 0;
@@ -41,6 +42,13 @@ namespace ComputerUse.Windows
                 }
 
             return image;
+        }
+
+        internal static TextureBrush GradientBrush(Bitmap image)
+        {
+            var brush = new TextureBrush(image, WrapMode.Clamp);
+            brush.ScaleTransform(1f / GradientResolution, 1f / GradientResolution);
+            return brush;
         }
 
         static int Mix(int a, int b, double f)
