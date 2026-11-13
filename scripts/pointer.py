@@ -635,84 +635,52 @@ def csharp_source(asset, digest):
         )
     drawing = []
 
-    def emit(line):
-        drawing.append("            " + line)
+    def emit(line, depth):
+        drawing.append("    " * (3 + depth) + line)
 
-    def paint(value):
+    def brush(value):
         if "color" in value:
-            emit(
-                (
-                    f"using (var brush = new SolidBrush({paint_color(value['color'])})) "
-                    "graphics.FillRectangle(brush, bounds);"
-                )
-            )
-        else:
-            emit(f"graphics.DrawImage(Gradient{value['gradient']}, bounds);")
+            return f"new SolidBrush({paint_color(value['color'])})"
+        return f"AgentPointerArtwork.GradientBrush(Gradient{value['gradient']})"
 
     sequence = 0
 
-    def draw(node):
+    def draw(node, depth=0):
         nonlocal sequence
-        sequence += 1
-        state = f"state{sequence}"
-        emit(f"var {state} = graphics.Save();")
         if "children" in node:
-            emit((f"using (var path = Path{node['clip']}()) graphics.SetClip(path, CombineMode.Intersect);"))
+            sequence += 1
+            state = f"clipState{sequence}"
+            emit(f"var {state} = graphics.Save();", depth)
+            emit(f"using (var clip = Path{node['clip']}()) graphics.SetClip(clip, CombineMode.Intersect);", depth)
             for child in node["children"]:
-                draw(child)
-        else:
-            emit(f"using (var path = Path{node['path']}()) {{")
-            if node["shadow"]:
-                s = node["shadow"]
-                emit(
-                    (
-                        f"AgentPointerArtwork.Shadow(graphics, path, "
-                        f"{n(s['dx'])}"
-                        f"f, "
-                        f"{n(s['dy'])}"
-                        f"f, "
-                        f"{n(s['radius'])}"
-                        f"f, "
-                        f"{paint_color(s['color'], s['opacity'])}"
-                        f");"
-                    )
-                )
-            if node["fill"]:
-                emit("var fillState = graphics.Save(); graphics.SetClip(path, CombineMode.Intersect);")
-                paint(node["fill"])
-                emit("graphics.Restore(fillState);")
-            if node["stroke"]:
-                emit(
-                    (
-                        f"using (var stroke = (GraphicsPath)path.Clone()) using (var pen = "
-                        f"new Pen(Color.Black, "
-                        f"{n(node['width'])}"
-                        f"f)) {{"
-                    )
-                )
-                emit(
-                    (
-                        f"pen.LineJoin = LineJoin."
-                        f"{'Round' if node['roundJoin'] else 'Miter'}"
-                        f"; pen.StartCap = pen.EndCap = LineCap."
-                        f"{'Round' if node['roundCap'] else 'Flat'}"
-                        f";"
-                    )
-                )
-                emit("stroke.Widen(pen); graphics.SetClip(stroke, CombineMode.Intersect);")
-                if "color" in node["stroke"]:
-                    emit(
-                        (
-                            f"using (var brush = new SolidBrush("
-                            f"{paint_color(node['stroke']['color'], node['opacity'])}"
-                            f")) graphics.FillRectangle(brush, bounds);"
-                        )
-                    )
-                else:
-                    paint(node["stroke"])
-                emit("}")
-            emit("}")
-        emit(f"graphics.Restore({state});")
+                draw(child, depth)
+            emit(f"graphics.Restore({state});", depth)
+            return
+
+        emit(f"using (var path = Path{node['path']}()) {{", depth)
+        if node["shadow"]:
+            s = node["shadow"]
+            emit(
+                f"AgentPointerArtwork.Shadow(graphics, path, {n(s['dx'])}f, {n(s['dy'])}f, {n(s['radius'])}f, "
+                f"{paint_color(s['color'], s['opacity'])});",
+                depth + 1,
+            )
+        # Clip regions quantize edge coverage to whole pixels. Draw fills and strokes directly for antialiasing.
+        if node["fill"]:
+            emit(f"using (var brush = {brush(node['fill'])})", depth + 1)
+            emit("graphics.FillPath(brush, path);", depth + 2)
+        if stroke := node["stroke"]:
+            if "color" in stroke:
+                stroke_paint = paint_color(stroke["color"], node["opacity"])
+            else:
+                emit(f"using (var brush = {brush(stroke)})", depth + 1)
+                stroke_paint = "brush"
+            emit(f"using (var pen = new Pen({stroke_paint}, {n(node['width'])}f)) {{", depth + 1)
+            emit(f"pen.LineJoin = LineJoin.{'Round' if node['roundJoin'] else 'Miter'};", depth + 2)
+            emit(f"pen.StartCap = pen.EndCap = LineCap.{'Round' if node['roundCap'] else 'Flat'};", depth + 2)
+            emit("graphics.DrawPath(pen, path);", depth + 2)
+            emit("}", depth + 1)
+        emit("}", depth)
 
     for node in asset["drawing"]:
         draw(node)
@@ -729,12 +697,7 @@ def csharp_source(asset, digest):
             "\n".join("        " + s for s in values),
             "\n\n",
             (f"        internal static GraphicsPath Path() {{ return Path{asset['shape']}(); }}\n"),
-            (
-                "        internal static void Draw(Graphics graphics) {\n          "
-                "  var "
-                "bounds = new RectangleF(PointF.Empty, "
-                "Size);\n"
-            ),
+            "        internal static void Draw(Graphics graphics) {\n",
             "\n".join(drawing),
             "\n        }\n\n",
             "\n\n".join("        " + s for s in paths),
