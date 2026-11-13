@@ -90,6 +90,7 @@ class Event:
         branch: Label of the selected branch.
         cleanup: Reported cleanup progress, when this event describes native resource release.
         dispatch: Reported input-dispatch progress, independent of visible effect confirmation.
+        timestamp: Optional original UTC timestamp for a buffered native event.
     """
 
     path: tuple[str, ...]
@@ -101,6 +102,7 @@ class Event:
     branch: str | int | bool | None = None
     cleanup: str | None = None
     dispatch: str | None = None
+    timestamp: str | None = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +155,7 @@ class Control:
         *,
         cleanup: str | None = None,
         dispatch: str | None = None,
+        timestamp: str | None = None,
     ) -> None:
         """Send a lifecycle event to the optional diagnostic sink.
 
@@ -164,6 +167,7 @@ class Control:
                 release.
             dispatch: Reported input-dispatch progress, independent of visible effect
                 confirmation.
+            timestamp: Original UTC timestamp when draining a buffered native event.
         """
         if self.diagnostic is not None:
             try:
@@ -178,6 +182,7 @@ class Control:
                         self.branch,
                         cleanup,
                         dispatch,
+                        timestamp,
                     )
                 )
             except BaseException:

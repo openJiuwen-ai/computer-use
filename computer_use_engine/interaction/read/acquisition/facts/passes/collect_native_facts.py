@@ -27,6 +27,7 @@ def create(*, reader: NativeReader) -> Callable[[FactProfile, Control], Awaitabl
         query_remaining = plan.scope.request.query_remaining
         if query_remaining is not None:
             timeout_ms = min(timeout_ms, query_remaining())
+        options = plan.options
         reply = await reader.port.nodes(
             read.token,
             target,
@@ -35,9 +36,9 @@ def create(*, reader: NativeReader) -> Callable[[FactProfile, Control], Awaitabl
             plan.max_depth,
             timeout_ms,
             scope_kind=plan.scope.request.scope_kind,
-            **plan.options,
+            **options,
         )
-        return CollectedFacts(plan, reply.observation, reply.metadata)
+        return CollectedFacts(plan, reply)
 
     return collect
 

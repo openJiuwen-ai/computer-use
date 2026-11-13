@@ -13,36 +13,12 @@ def source(target):
     return {"window": target.root_window, "surface": target.surface, "instance": target.instance}
 
 
-def _children(snapshot, node):
-    value = snapshot.native.nodes.get(node)
-    relation = value.relations.get("children") if value is not None else None
-    return relation.targets if relation is not None else ()
-
-
-def _reachable(snapshot):
-    pending, seen = list(snapshot.native.roots), set()
-    while pending:
-        key = pending.pop()
-        if key in seen:
-            continue
-        seen.add(key)
-        yield key
-        pending.extend(_children(snapshot, key))
-
-
 def _removed(snapshot, opener, content):
-    node = snapshot.native.nodes.get(opener)
-    if node is None:
-        return False
-    if node.states.expanded is False:
-        return True
-    relations = [item for item in snapshot.facts["relations"]
-                 if item["source"] == opener and item["kind"] == "children"]
-    return len(relations) == 1 and relations[0]["state"] == "complete" and (
-        relations[0]["certainty"] == "confirmed" and content not in relations[0]["targets"]
-        and relations[0].get("total", len(relations[0]["targets"])) == len(relations[0]["targets"])
-        and relations[0].get("offset", 0) == 0
-    )
+    return snapshot.capture.menu_removed(opener, content)
+
+
+def _presentations(snapshot):
+    return snapshot.capture.menu_presentations()
 
 
 def collect_presentations(previous, directory, parts):
@@ -65,23 +41,13 @@ def collect_presentations(previous, directory, parts):
     sampled_windows = {part.target.root_window for part in parts}
     members = {item["window"]: item for item in directory["surfaces"]}
     for part in trees.values():
-        snapshot = part.tree
-        for opener in _reachable(snapshot):
-            node = snapshot.native.nodes.get(opener)
-            if node is None:
-                continue
-            if node.role not in OPENERS or node.states.expanded is False:
-                continue
-            for key in _children(snapshot, opener):
-                content = snapshot.native.nodes.get(key)
-                if content is None or content.role not in CONTENTS or content.states.visible is False:
-                    continue
-                identity = (part.target.session, part.target.surface, key)
-                found[identity] = {
-                    "id": identity, "host": part.target.root_window, "node": key, "opener": opener,
-                    "state": "observed", "kind": "menu", "evidence": "openerChildren",
-                    "sources": (source(part.target),),
-                }
+        for opener, key in _presentations(part.tree):
+            identity = (part.target.session, part.target.surface, key)
+            found[identity] = {
+                "id": identity, "host": part.target.root_window, "node": key, "opener": opener,
+                "state": "observed", "kind": "menu", "evidence": "openerChildren",
+                "sources": (source(part.target),),
+            }
     for item in members.values():
         if content_kind(item) not in ("menu", "popup"):
             continue

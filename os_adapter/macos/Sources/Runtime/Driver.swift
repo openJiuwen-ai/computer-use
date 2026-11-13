@@ -142,7 +142,7 @@ import CoreGraphics
                                 "nativeMenuActions",
                                 "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeCaptureRetention",
                                 "nativeGlobalInput", "nativePointLocation",
-                                "nativeObservationPreparation",
+                                "nativeObservationPreparation", "nativeApplicationReopen",
                                 "nativeAppChangeEvents",
                                 "nativeQueryActionProfile", "nativeFocusedReadV1",
                                 "nativeRelations", "nativeNodePages", "nativeNodeDepthBudget", "nativeRelationPages",

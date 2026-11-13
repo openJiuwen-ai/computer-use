@@ -21,8 +21,8 @@ from computer_use.interaction.read.numbering.observation.passes.annotate_busy_co
     stage as annotate_busy_content,
 )
 from computer_use.interaction.read.numbering.pipeline import NumberSnapshotsPipeline
-from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
-from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
+from computer_use.interaction.read.accessibility.preparation import SnapshotRenderRequest
+from computer_use.interaction.read.accessibility.preparation import PrepareSnapshotPipeline
 from computer_use.pipeline import Contract, Pipeline, Sequence
 from computer_use.pipeline.core import Node
 

@@ -100,7 +100,9 @@ class App:
         self, target: ElementSelector, *, timeout_ms: int = 3000, window: int | None = None, fresh: bool = False
     ) -> Element: ...
     # Read the app/window or an application menu path of exact titles.
-    # Windows allow_foreground=True permits restore/activation; title-bound Apps reject menu_path.
+    # allow_foreground=True permits window preparation. On macOS it can reopen a running app with no window.
+    # If a read returns only the application menu, use app.read(view="both", allow_foreground=True) to show its window.
+    # Title-bound Apps reject menu_path.
     def read(
         self, *, view: View = "tree", full: bool = False, menu_path: list[str] | None = None,
         allow_foreground: bool = False, window: int | None = None

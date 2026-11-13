@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from .contracts import (
+    ApplicationBinding,
     Binding,
     Cleanup,
     Facts,
@@ -24,11 +25,11 @@ from .contracts import (
 )
 
 if TYPE_CHECKING:
-    from computer_use.protocol.observation.adapters import DriverObservationReply
     from computer_use.protocol.records import Record, RelationPage, TextPage
 
     from .connection import Connection
     from .lifecycle import CallLifecycle
+    from .observation_frame import NativeReadCapture
 
 
 class NativePort(Protocol):
@@ -101,7 +102,7 @@ class NativePort(Protocol):
         text_content: bool | None = None,
         focused_element: bool | None = None,
         strict_window: bool = False,
-    ) -> "DriverObservationReply":
+    ) -> "NativeReadCapture":
         pass
 
     async def query_nodes(
@@ -128,11 +129,6 @@ class NativePort(Protocol):
         """Read or wait for the observed App generation, independently of old Windows."""
         pass
 
-    async def relation(
-        self, operation: str, target: Binding, relation_property: str, cursor: str | None, limit: int, timeout_ms: int
-    ) -> "DriverObservationReply":
-        pass
-
     async def query_relation(
         self, operation: str, target: Binding, relation_property: str, cursor: str | None, limit: int, timeout_ms: int
     ) -> "Record":
@@ -148,8 +144,8 @@ class NativePort(Protocol):
     ) -> dict:
         pass
 
-    async def prepare_observation(self, operation: str, target: Binding, timeout_ms: int) -> dict:
-        """Explicit window preparation, never part of an inspect or capture query."""
+    async def prepare_observation(self, operation: str, target: Binding | ApplicationBinding, timeout_ms: int) -> dict:
+        """Explicit window or application preparation separate from inspect and capture queries."""
         pass
 
     async def execute(self, operation: str, step: int, command: UnitCommand, timeout_ms: int) -> StepResult:

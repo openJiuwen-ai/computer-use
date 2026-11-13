@@ -31,7 +31,10 @@ def assemble_baseline(value: BaselineInput, control: Control) -> BaselineDraft:
         document = ComparisonDocument.capture(document, checkpoint=control.remaining)
     text = observation["state"]["text"] if document is None else None
     measurement = DocumentSize(checkpoint=control.remaining)
-    size = len(utf8(text)) if text is not None else measurement.data(document)
+    if isinstance(document, ComparisonDocument):
+        size = document.measure(measurement)
+    else:
+        size = len(utf8(text)) if text is not None else measurement.data(document)
     size += measurement.data(observation["refs"]) + measurement.data(observation.get("coverage"))
     baseline = dict(
         source=observation["source"],

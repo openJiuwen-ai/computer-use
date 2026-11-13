@@ -9,13 +9,21 @@ SDK_VERSION = "0.0.1"
 # Private variables hold mutable session state.
 # pylint: disable-next=invalid-name
 _handler = None
+_observation_diagnostic = None
 # pylint: disable-next=invalid-name
 _structured = False
 
 
 def set_diagnostic_handler(handler):
-    global _handler
+    global _handler, _observation_diagnostic
     _handler = handler
+    _observation_diagnostic = None
+
+
+def _register_observation_diagnostic(handler, encoded_sink):
+    """Bind the worker's private encoded sink to its active diagnostic callback."""
+    global _observation_diagnostic
+    _observation_diagnostic = (handler, encoded_sink)
 
 
 def record_structured_observations(enabled):
@@ -27,15 +35,21 @@ def wants_structured_observations():
     return _structured
 
 
-def diagnostic(event):
+def diagnostic(event, *, _native_observation=None):
     try:
-        if _handler:
-            _handler(
-                {
-                    "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                    **event,
-                }
-            )
+        handler = _handler
+        if handler:
+            record = {
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                **event,
+            }
+            if _native_observation is not None:
+                encoded = _observation_diagnostic
+                if encoded is not None and encoded[0] is handler:
+                    encoded[1](record, _native_observation.diagnostic_bytes())
+                    return
+                record["result"] = _native_observation.raw_result()
+            handler(record)
     except Exception:
         pass  # Diagnostic failure must not change or replay desktop actions.
 

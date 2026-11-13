@@ -6,21 +6,7 @@ Integrate Computer Use DeepAgent into an application, or add its desktop tools t
 
 ## 1. Prepare the environment
 
-Install Python 3.11, 3.12 or 3.13 and `uv`. Build and run the desktop operation service on the computer whose desktop it will operate.
-
-Prepare the native dependencies on the computer whose desktop you will operate:
-
-| Platform | Requirements |
-| --- | --- |
-| macOS | macOS 14 or later, an Xcode toolchain with Swift 6, Accessibility and Screen Recording permissions. |
-| Windows | Windows x64 with .NET Framework 4.8 and its C# compiler; window capture requires Windows 10 1903 or later. |
-| Linux | A graphical desktop session with AT-SPI and PyGObject. Use X11 for screenshots and mouse input. |
-
-On Debian or Ubuntu, install the Linux system dependencies first:
-
-```bash
-sudo apt install python3-gi python3-venv gir1.2-atspi-2.0 libx11-6 libxkbcommon0
-```
+Follow the [source build guide](build-from-source.en.md) to set up Rust, the platform tools, and desktop permissions. DeepAgent uses Python 3.11–3.13; the commands below use 3.12.
 
 ## 2. Install from source and build the backend
 
@@ -35,11 +21,11 @@ The SDK, MCP and Agent code are installed in editable mode into the checkout's `
 Build or prepare the native backend, then check desktop access:
 
 ```bash
-uv run --no-dev --extra agent computer-use-build
-uv run --no-dev --extra agent computer-use-permissions
+uv run --python 3.12 --no-sync computer-use-build
+uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-On macOS, use `uv run --no-dev --extra agent computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
+On macOS, use `uv run --python 3.12 --no-sync computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
 
 ## 3. Create a desktop agent
 
@@ -80,7 +66,7 @@ asyncio.run(main())
 Save the complete example above as `desktop_agent.py` and run it from the source checkout:
 
 ```bash
-uv run --no-dev --extra agent python desktop_agent.py
+uv run --python 3.12 --no-sync python desktop_agent.py
 ```
 
 First check application enumeration, then use the streaming call to inspect actual window text and screenshots. Enumeration only verifies local backend calls; desktop access also requires the relevant permissions and successful observations.
@@ -121,14 +107,14 @@ async def run(model):
 
 ## 5. Run directly with the CLI
 
-The same agent can also run from the CLI. First run `uv run --extra agent computer-use-agent --init-config` and fill in `model`, `provider`, `api_base` and `api_key` in `~/.computer-use/agent/config.json`. Start a conversation or pass a task to execute once:
+The same agent can also run from the CLI. First run `uv run --python 3.12 --no-sync computer-use-agent --init-config` and fill in `model`, `provider`, `api_base` and `api_key` in `~/.computer-use/agent/config.json`. Start a conversation or pass a task to execute once:
 
 ```bash
-uv run --extra agent computer-use-agent
-uv run --extra agent computer-use-agent "Open the meeting scheduling form and stop before submitting"
+uv run --python 3.12 --no-sync computer-use-agent
+uv run --python 3.12 --no-sync computer-use-agent "Open the meeting scheduling form and stop before submitting"
 ```
 
-Run `uv run --extra agent computer-use-agent --help` for CLI options.
+Run `uv run --python 3.12 --no-sync computer-use-agent --help` for CLI options.
 
 The model's history retains screenshots by observation scope. An identical screenshot reuses the existing image for
 that scope, preserving its pixels and coordinates. Text history folds identical full trees and retains distinct
@@ -146,6 +132,6 @@ the [X11 Screen Saver Extension](https://www.x.org/releases/X11R7.7/doc/scrnsave
 
 ## 6. Update the source
 
-After changing Python source, restart the host application or recreate the Agent/Toolkit session. After dependency or entry-point changes, rerun `uv sync --no-dev --extra agent` in the checkout and update the host project dependencies. After native backend changes, run `uv run --no-dev --extra agent computer-use-build`, then restart the session.
+Follow the [source build guide](build-from-source.en.md#3-verify-and-update-the-installation) to update Python, Rust, or the driver. If the host project uses a separate environment, update its installation too. Then restart the application or recreate the Agent/Toolkit session.
 
 See the [MCP interface reference](mcp.en.md#4-interface-reference) for engine calls and observations, and the [packaging guide](../PACKAGING.md) for development packages.

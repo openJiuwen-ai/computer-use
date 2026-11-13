@@ -12,8 +12,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
-    from computer_use.protocol.observation import NativeObservation
-    from computer_use.protocol.observation.adapters import DriverReadMetadata
+    from computer_use.interaction.read.accessibility.frame import NativeReadCapture
     from computer_use.protocol.records import Record, RelationPage
 
 
@@ -100,44 +99,11 @@ class CollectedFacts:
 
     Attributes:
         profile: Selected fields, depth, and native query options used for this collection.
-        batch: Validated native facts, retaining source identities and incomplete-read evidence.
+        reply: Validated facts or an opaque native capture, retaining source identity and coverage.
     """
 
     profile: FactProfile
-    batch: NativeObservation
-    metadata: DriverReadMetadata
-
-
-@dataclass(frozen=True)
-class RelationReadRequest:
-    """A bounded continuation of one observed native relationship.
-
-    Attributes:
-        target: Native identity of the element, window, or application being observed.
-        property: Exact native relationship/property name to read or account for.
-        cursor: Opaque continuation token from the same source observation, or None initially.
-        limit: Existing upper bound on returned items for this local page/format operation.
-        timeout_ms: Maximum duration in milliseconds, bounded by the enclosing call deadline.
-    """
-
-    target: Binding
-    property: str
-    cursor: str | None = None
-    limit: int = 128
-    timeout_ms: int = 30000
-
-
-@dataclass(frozen=True)
-class OpenRelationRead:
-    """A relation request paired with its existing native operation lease.
-
-    Attributes:
-        request: A bounded continuation of one observed native relationship.
-        read: Open native operation lease; owns the token and original millisecond deadline.
-    """
-
-    request: RelationReadRequest
-    read: OperationLease[Binding]
+    reply: NativeReadCapture
 
 
 if TYPE_CHECKING:

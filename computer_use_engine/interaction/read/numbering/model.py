@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
-    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
+    from collections.abc import Hashable, Mapping, Sequence
+
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.read.presentation.records import ReferenceAllocator
 
 
@@ -27,7 +28,7 @@ class _References:
     """
 
     session: str
-    aliases: dict[str, str]
+    aliases: Mapping[str, str]
 
     def reference(self, native: Hashable) -> str:
         return self.aliases[native]
@@ -42,7 +43,7 @@ class NumberingRequest:
         references: Session-owned allocator used to assign display aliases.
     """
 
-    snapshots: tuple[SemanticSnapshot, ...]
+    snapshots: tuple[ReadSnapshot, ...]
     references: ReferenceAllocator | None = None
 
 
@@ -56,7 +57,7 @@ class NumberingRun:
         aliases: Per-snapshot reference rewrite maps; native bindings stay unchanged.
     """
 
-    snapshots: tuple[SemanticSnapshot, ...]
+    snapshots: tuple[ReadSnapshot, ...]
     references: ReferenceAllocator
     aliases: tuple[dict[str, str], ...] = ()
 
@@ -69,13 +70,9 @@ class _PartPreview:
         snapshot: Facts captured for this observation; display edits do not mutate native
             evidence.
         references: Session-owned allocator used to assign display aliases.
-        prepared: Immutable compressed projection and visible reference order.
+        visible_tokens: Native preview order when the Rust graph stays opaque.
     """
 
-    snapshot: SemanticSnapshot
+    snapshot: ReadSnapshot
     references: ReferenceAllocator
-    prepared: PreparedSnapshot | None = None
-
-
-if TYPE_CHECKING:
-    from typing import Hashable
+    visible_tokens: Sequence[str] = ()

@@ -18,7 +18,7 @@ from computer_use.interaction.query.passes.prepare_element_lookup import (
     stage as prepare_element_lookup,
 )
 from computer_use.interaction.query.scope import app_context
-from computer_use.interaction.read.acquisition.facts.pipeline import FactCollectionPipeline
+from computer_use.interaction.read.accessibility.pipeline import AccessibilityReadPipeline
 from computer_use.interaction.read.acquisition.scope.pipeline import WorkingScopeDiscoveryPipeline
 from computer_use.native.scopes import window_binding
 from computer_use.pipeline import Contract, Pipeline, Scope, Sequence
@@ -82,11 +82,12 @@ class FindFacts(Node["FindLease", "FindLease"]):
 
     def __init__(self, controller: SessionController) -> None:
         self.controller = controller
-        self.children = (FactCollectionPipeline(controller.reader.reader),)
+        self.children = (AccessibilityReadPipeline(controller.reader.reader),)
         super().__init__("ReadLookupFacts", Contract(FindLease, FindLease, self.children[0].contract.effects))
 
     async def _arun(self, value: FindLease, control: Control) -> FindLease:
-        tree = await self.controller.reader.reader.collect(
+        collect = self.controller.reader.reader.collect
+        tree = await collect(
             value.read,
             node=cast("Binding", value.selected).node,
             scope_kind=value.plan.state.query_scope_kind,
@@ -160,8 +161,10 @@ class FindElementPipeline(Pipeline["FindElement", "ElementSnapshot"]):
                         ],
                     ),
                 ),
-                # pylint: disable-next=protected-access
-                build_lookup_snapshot(snapshots=controller._snapshots),
+                build_lookup_snapshot(
+                    # pylint: disable-next=protected-access
+                    native_snapshots=controller._native_snapshots,
+                ),
             ],
         )
 

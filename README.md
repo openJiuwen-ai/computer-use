@@ -93,6 +93,7 @@ computer-use/
 
 ## Documentation
 
+- [Build from source: macOS, Windows and Linux dependencies](docs/build-from-source.en.md)
 - [MCP build, installation and integration](docs/mcp.en.md)
 - [DeepAgent build, installation and integration](docs/deepagent.en.md)
 - [Development packaging](PACKAGING.md)

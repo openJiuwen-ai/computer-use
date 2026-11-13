@@ -10,7 +10,7 @@ from io import BytesIO
 
 from computer_use.interaction.read.presentation.content import DisplayText
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.identity import freeze
 from computer_use.protocol.png import decode_png, png_size
 from computer_use.session.image_coordinates import ImageCoordinates
 from PIL import Image

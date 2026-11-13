@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.delta import DeltaPlan
+    from computer_use.interaction.read.presentation.delta import DeltaPlan, RustDeltaPlan
     from computer_use.protocol.records import Record
 
 PURE = {Effect.PURE}
@@ -38,4 +38,4 @@ class PlannedDelivery:
     """
 
     observation: Record
-    plan: DeltaPlan
+    plan: DeltaPlan | RustDeltaPlan

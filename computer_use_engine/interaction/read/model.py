@@ -13,7 +13,6 @@ from computer_use.interaction.read.acquisition.components.support import Observa
 from computer_use.interaction.read.acquisition.images.capture import WindowImage
 from computer_use.interaction.read.acquisition.images.overview import WindowOverview
 from computer_use.interaction.read.acquisition.menus.query import MenuRead
-from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.interaction.read.presentation.content import DisplayText
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.native.contracts import Binding
@@ -23,6 +22,7 @@ from computer_use.pipeline import Effect
 if TYPE_CHECKING:
     from typing import Any
 
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
 
 
@@ -39,7 +39,7 @@ class AppObservation:
         applications: Application catalogue captured while resolving the requested scope.
         source_directory: Catalogue captured with the source facts, before scope rechecking.
         directory: Observed application/window catalogue, including incomplete relationships.
-        tree: Semantic snapshot with retained native facts and display-reference bindings.
+        tree: Captured accessibility facts with retained display-reference bindings.
         image: Captured pixels and their original coordinate/identity metadata, when available.
         document: Immutable structured observation, rendered only when text is requested.
         context_notes: Structured scope notes consumed by the public interface composition.
@@ -58,7 +58,7 @@ class AppObservation:
     applications: DirectoryFacts | None
     source_directory: DirectoryFacts
     directory: DirectoryFacts
-    tree: SemanticSnapshot | None
+    tree: ReadSnapshot | None
     image: WindowImage | None
     document: DisplayDocument
     refs: Mapping[str, Binding]

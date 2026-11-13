@@ -6,6 +6,8 @@ import time
 import weakref
 from contextlib import contextmanager
 from contextvars import ContextVar
+from threading import Event
+from types import MethodType
 from uuid import uuid4
 
 # Private variables hold mutable session state.
@@ -19,6 +21,8 @@ _active = 0
 _budget = ContextVar("computer_use_operation_budget", default=None)
 _cancellation_source = ContextVar("computer_use_operation_cancellation", default=None)
 OPERATION_TARGET_MS = 1000
+_NATIVE_CLOCK = time.monotonic
+_EVENT_IS_SET = Event.is_set
 
 
 class OperationDeadlineExceeded(TimeoutError):
@@ -35,7 +39,8 @@ class OperationBudget:
     """
 
     def __init__(self, timeout_ms=None, *, cancelled=None, clock=time.monotonic):
-        if timeout_ms is not None and (type(timeout_ms) is not int or timeout_ms < 1):
+        timeout_type = type(timeout_ms)
+        if timeout_ms is not None and (timeout_type is not int or timeout_ms < 1):
             raise ValueError("Invalid SDK operation budget")
         self._clock = clock
         self.started = clock()
@@ -45,6 +50,7 @@ class OperationBudget:
         self.target_deadline = self.started + self.target_ms / 1000
         self.operation_id = uuid4().hex
         self.cancelled = cancelled or (lambda: False)
+        self._native_cancelled = None
 
     @property
     def elapsed_ms(self):
@@ -82,10 +88,53 @@ class OperationBudget:
         """Check before new work or within a bounded pure-work batch."""
         self.remaining()
 
+    def admit_native_cancellation(self):
+        self._native_cancelled = self.cancelled
+
+    def uses_native_checkpoint(self):
+        return (
+            _is_bound_method(self.available_ms, _BUDGET_AVAILABLE)
+            and self._clock is _NATIVE_CLOCK
+            and self.cancelled is self._native_cancelled
+        )
+
 
 def current_operation_budget():
     """Return this call's clock without creating or extending a deadline."""
     return _budget.get()
+
+
+_BUDGET_REMAINING = OperationBudget.remaining
+_BUDGET_AVAILABLE = OperationBudget.available_ms
+
+
+def _is_bound_method(callback, function):
+    # Native execution must see the exact SDK bound method, without proxy
+    # attribute access or a custom implementation.
+    kind = type(callback)
+    return kind is MethodType and callback.__func__ is function
+
+
+def _native_checkpoint(checkpoint):
+    """Identify SDK budget callbacks whose behavior is independent of caller frames."""
+    if checkpoint is None:
+        return True
+    if not _is_bound_method(checkpoint, _BUDGET_REMAINING):
+        return False
+    budget = checkpoint.__self__
+    budget_type = type(budget)
+    if budget_type is not OperationBudget or budget is not _budget.get():
+        return False
+    return OperationBudget.uses_native_checkpoint(budget)
+
+
+def _native_cancellation_source(source):
+    if source is None:
+        return True
+    if not _is_bound_method(source, _EVENT_IS_SET):
+        return False
+    event_type = type(source.__self__)
+    return event_type is Event
 
 
 @contextmanager
@@ -113,7 +162,11 @@ def operation_budget(timeout_ms=None):
         active = task_ref()
         return bool(source is not None and source() or active is not None and active.cancelling())
 
-    token = _budget.set(OperationBudget(timeout_ms, cancelled=cancelled))
+    budget = OperationBudget(timeout_ms, cancelled=cancelled)
+    task_type = type(task)
+    if (task is None or task_type is asyncio.Task) and _native_cancellation_source(source):
+        budget.admit_native_cancellation()
+    token = _budget.set(budget)
     try:
         yield current_operation_budget()
     finally:

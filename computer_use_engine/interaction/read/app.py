@@ -25,10 +25,10 @@ from computer_use.interaction.read.acquisition.images.overview import NativeOver
 from computer_use.interaction.read.acquisition.menus.query import MenuRead, NativeMenus
 from computer_use.interaction.read.acquisition.reader import NativeReader
 from computer_use.interaction.read.delivery.image_caption import window_state_summary
-from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.interaction.read.model import AppObservation, MenuAppObservation, WindowSelectionRequired
+from computer_use.interaction.read.numbering.helpers import snapshot_session
 from computer_use.interaction.read.numbering.pipeline import number_snapshots
-from computer_use.interaction.read.numbering.references import DisplayReferences
+from computer_use.interaction.read.numbering.references import DisplayReferences, read_references
 from computer_use.interaction.read.presentation.content import (
     DisplayText,
     join,
@@ -66,7 +66,8 @@ __all__ = [
 if TYPE_CHECKING:
     from typing import Any, Awaitable, Callable, Iterable, Sequence
 
-    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
+    from computer_use.interaction.read.accessibility.preparation import PreparedSnapshot
     from computer_use.interaction.read.presentation.records import RenderedTree
     from computer_use.interaction.records import Remaining
     from computer_use.native.port import NativePort
@@ -165,8 +166,8 @@ class NativeAppReader:
         )
 
     def number_snapshots(
-        self, snapshots: Iterable[SemanticSnapshot], *, _control: Control | None = None
-    ) -> tuple[SemanticSnapshot, ...]:
+        self, snapshots: Iterable[ReadSnapshot], *, _control: Control | None = None
+    ) -> tuple[ReadSnapshot, ...]:
         """Assign shared display references to the supplied native snapshots.
 
         The allocator is retained across reads and renewed when the driver session changes.
@@ -178,9 +179,9 @@ class NativeAppReader:
         snapshots = tuple(snapshots)
         if not snapshots:
             return ()
-        session = snapshots[0].facts["session"]
+        session = snapshot_session(snapshots[0])
         if self._element_references is None or self._element_references.session != session:
-            self._element_references = DisplayReferences(session)
+            self._element_references = read_references(session, getattr(self.port, "platform", None))
         return number_snapshots(snapshots, self._element_references, _control=_control)
 
     def window_aliases(self, directory: DirectoryFacts) -> dict[str, str]:

@@ -93,6 +93,7 @@ computer-use/
 
 ## 完整文档
 
+- [从源码构建：macOS、Windows 和 Linux 依赖](docs/build-from-source.md)
 - [MCP 构建、安装与接入](docs/mcp.md)
 - [DeepAgent 构建、安装与接入](docs/deepagent.md)
 - [开发打包说明](PACKAGING.md)

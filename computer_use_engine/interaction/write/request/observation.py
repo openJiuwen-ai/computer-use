@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from computer_use.errors import ComputerUseError
 from computer_use.identity import FrozenRecord
 from computer_use.interaction.query.instances.scope import require_identity
+from computer_use.interaction.read.acquisition.view_facts import captured_metadata
 from computer_use.interaction.read.views.changes import PostwriteChanges
 from computer_use.interaction.read.views.related import RelatedRead, original_lifecycle
 from computer_use.interaction.requests import ExecuteAction
@@ -41,34 +42,18 @@ def selection_target(request, before_tree, before_target) -> Binding | None:
     target, intent = request.target, request.intent
     if before_tree is None or before_target is None or not isinstance(target, Binding):
         return None
-    if window_binding(before_target) != window_binding(target) or before_tree.native.session != target.session:
+    if (
+        window_binding(before_target) != window_binding(target)
+        or captured_metadata(before_tree).session != target.session
+    ):
         return None
-    if intent.kind == "click" and intent.parameters == {"button": "left", "count": 1} and target.node is not None:
-        nodes = before_tree.native.nodes
-        source = nodes.get(target.node)
-        if source is None or source.states.has_popup is True:
-            return None
-        # A file name or caption can be the clicked part of a selectable row.
-        # Reobserve the one containing cell/row only through native child edges.
-        if source.role in ("text_field", "text", "image"):
-            parents = []
-            for ref, node in nodes.items():
-                if node.role not in ("cell", "row"):
-                    continue
-                children = node.relations.get("children")
-                if children is not None and children.evidence != "candidate" and target.node in children.targets:
-                    parents.append(ref)
-            if len(parents) == 1 and nodes[parents[0]].states.selected is not None:
-                return replace(target, node=parents[0]) if nodes[parents[0]].states.selected is False else None
-        if source.states.selected is False:
-            return target
-    is_copy = intent.kind == "key" and intent.parameters.get("key") == "super+c"
-    if is_copy and before_tree.scope_kind is None and len(before_tree.native.roots) == 1:
-        (node,) = before_tree.native.roots
-        source = before_tree.native.nodes.get(node)
-        if source is not None and source.states.selected is True:
-            return replace(target, node=node)
-    return None
+    click = intent.kind == "click" and intent.parameters == {"button": "left", "count": 1} and target.node is not None
+    copy = intent.kind == "key" and intent.parameters.get("key") == "super+c" and before_tree.scope_kind is None
+    node = (
+        before_tree.capture.selected_click_target(target.node) if click
+        else before_tree.capture.selected_copy_target() if copy else None
+    )
+    return replace(target, node=node) if node is not None else None
 
 
 class WriteWithObservation(Node[ExecuteAction, ObservedAction]):

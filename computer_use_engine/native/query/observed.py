@@ -39,6 +39,13 @@ class CapturedLookupFacts:
     edge_sources: object
 
 
+def lookup_fields(platform):
+    properties = PROPERTIES[platform]
+    return frozenset(
+        properties[key] for key in (*TargetQuery.fields_for_path, "windowContentScope") if key in properties
+    )
+
+
 def capture_lookup_facts(facts):
     """Retain narrow immutable query inputs, without another full fact graph.
 
@@ -46,10 +53,7 @@ def capture_lookup_facts(facts):
     labels, merged display names or inferred relationship completeness enter
     this source. Strings/scalars are shared; only these small records detach.
     """
-    properties = PROPERTIES[facts["platform"]]
-    selected = frozenset(
-        properties[key] for key in (*TargetQuery.fields_for_path, "windowContentScope") if key in properties
-    )
+    selected = lookup_fields(facts["platform"])
     nodes = {}
     for row in facts["nodes"]:
         nodes[row["node"]] = MappingProxyType(

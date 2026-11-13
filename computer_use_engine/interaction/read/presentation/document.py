@@ -8,13 +8,10 @@ from __future__ import annotations
 from collections.abc import Hashable, Iterable
 from dataclasses import dataclass, is_dataclass, replace
 from functools import cached_property
-from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.presentation.content import DisplayText, text
+from computer_use.interaction.read.accessibility.preparation import PreparedSnapshot
 from computer_use.protocol.observation import NativeObservation, encode_observation
-
-if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.preparation import PreparedNode, PreparedSnapshot
 
 
 def _data(value: object) -> object:
@@ -25,7 +22,7 @@ def _data(value: object) -> object:
         return encode_observation(value)
     if isinstance(value, DisplayText) and value.kind == "details_hint":
         prepared, ref = value.values
-        return dict(kind=value.kind, ref=ref, observed=_data(prepared.snapshot.facts["observed"]))
+        return {"kind": value.kind, "ref": ref, "observed": _data(_observed(prepared))}
     if is_dataclass(value):
         return {name: _data(getattr(value, name)) for name in value.__dataclass_fields__}
     if isinstance(value, Mapping):
@@ -33,6 +30,10 @@ def _data(value: object) -> object:
     if isinstance(value, (tuple, list, set, frozenset)):
         return [_data(item) for item in value]
     return value
+
+
+def _observed(prepared: PreparedSnapshot) -> object:
+    return prepared.snapshot.capture.observed
 
 
 @dataclass(frozen=True)
@@ -51,10 +52,6 @@ class DisplayTree:
     indent: int = 0
     details: bool = False
 
-    @cached_property
-    def nodes(self) -> tuple[PreparedNode, ...]:
-        """Return the displayed elements with their structural parent relationships."""
-        return tuple(replace(node, depth=node.depth + self.indent) for node in self.prepared.nodes)
 
 
 @dataclass(frozen=True)
@@ -115,20 +112,15 @@ class DisplayDocument:
         parts: list[object] = []
         for part in self.parts:
             if isinstance(part, DisplayTree):
-                snapshot = part.prepared.snapshot
-                parts.append(
-                    dict(
-                        kind="tree",
-                        scope=_data(part.scope),
-                        indent=part.indent,
-                        details=part.details,
-                        nodes=_data(part.nodes),
-                        native=_data(snapshot.native),
-                        facts=_data(snapshot.facts),
-                        refs=_data(snapshot.refs),
-                        annotations=_data(snapshot.annotations),
-                    )
-                )
+                from computer_use.interaction.read.delivery.diff.baseline import ComparisonTree
+
+                parts.append({
+                    "kind": "native_tree",
+                    "indent": part.indent,
+                    "comparison": ComparisonTree.capture(part).to_data(),
+                    "observed": _data(_observed(part.prepared)),
+                    "refs": _data(part.prepared.snapshot.refs),
+                })
             else:
                 parts.append(_data(part))
         return dict(version=1, context=_data(self.context), parts=parts)
@@ -145,14 +137,13 @@ class DisplayDocument:
         trees = []
         for part in self.parts:
             if isinstance(part, DisplayTree):
-                trees.append(
-                    dict(
-                        scope=list(part.scope),
-                        nodes=len(part.nodes),
-                        refs=[node.ref for node in part.nodes],
-                        observed=_data(part.prepared.snapshot.facts.get("observed")),
-                    )
-                )
+                refs = part.prepared.refs
+                trees.append({
+                    "scope": list(part.scope),
+                    "nodes": len(refs),
+                    "refs": list(refs),
+                    "observed": _data(_observed(part.prepared)),
+                })
         return dict(
             version=1,
             sections=len(self.parts),

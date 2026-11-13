@@ -45,11 +45,10 @@ from computer_use.interaction.read.delivery.menu.passes.format_menu_sources impo
 from computer_use.interaction.read.delivery.menu.passes.menu_has_working_window import (
     stage as menu_has_working_window,
 )
-from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
 from computer_use.interaction.read.numbering.pipeline import NumberSnapshotsPipeline
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
-from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
+from computer_use.interaction.read.accessibility.preparation import SnapshotRenderRequest
+from computer_use.interaction.read.accessibility.preparation import PrepareSnapshotPipeline
 from computer_use.pipeline import Contract, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
 
@@ -79,11 +78,8 @@ class PrepareMenuSources(Node["MenuSourceRenderRequest", "RenderedMenuSources"])
     def _run(self, request: MenuSourceRenderRequest, control: Control) -> RenderedMenuSources:
         values = []
         for part in request.menu.parts:
-            if isinstance(part.tree, SemanticSnapshot):
-                prepared = self.preparation.run(SnapshotRenderRequest(part.tree, compact=request.compact), control)
-                values.append(DisplayDocument.tree(prepared))
-            else:
-                values.append(DisplayDocument.join((part.tree.render(compact=request.compact)["text"],)))
+            prepared = self.preparation.run(SnapshotRenderRequest(part.tree, compact=request.compact), control)
+            values.append(DisplayDocument.tree(prepared))
         return RenderedMenuSources(request, tuple(values))
 
     async def _arun(self, request: MenuSourceRenderRequest, control: Control) -> RenderedMenuSources:

@@ -24,12 +24,12 @@ from computer_use.interaction.read.presentation.content import (
     text,
 )
 from computer_use.native.contracts import Binding
-from computer_use.protocol.records import relation_end
 
 if TYPE_CHECKING:
-    from typing import Iterable
+    from collections.abc import Iterable
 
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot, RetainedPage
+    from computer_use.protocol.records import Record
 
 
 @dataclass(frozen=True)
@@ -60,30 +60,14 @@ class ContentPages:
         self._pages = OrderedDict()
         self._aliases = {}
 
-    def remember(self, target: Binding, tree: SemanticSnapshot) -> None:
+    def remember(self, target: Binding, tree: ReadSnapshot) -> None:
         """Retain continuation cursors from confirmed relationships in this snapshot.
 
         Args:
             target: Binding that supplies the snapshot's application and window scope.
             tree: Snapshot containing the native relation cursors to retain.
         """
-        for relation in tree.facts["relations"]:
-            if relation["certainty"] != "confirmed" or "cursor" not in relation:
-                continue
-            selector = (
-                tree.collection.relation_fields.get((relation["source"], relation["recordKey"]))
-                if tree.collection is not None
-                else None
-            )
-            if selector is None:
-                continue
-            page = ContentPage(
-                replace(target, node=relation["source"], capture=None),
-                selector,
-                relation["cursor"],
-                relation_end(relation),
-                relation["total"],
-            )
+        for _, _, page in self._entries(target, tree):
             if page in self._aliases:
                 self._pages.move_to_end(self._aliases[page])
                 continue
@@ -94,6 +78,17 @@ class ContentPages:
             while len(self._pages) > self.capacity:
                 _, expired = self._pages.popitem(last=False)
                 del self._aliases[expired]
+
+    @staticmethod
+    def _native_page(target: Binding, row: RetainedPage) -> ContentPage:
+        return ContentPage(
+            replace(target, node=row["node"], capture=None), row["property"], row["cursor"], row["offset"], row["total"]
+        )
+
+    @classmethod
+    def _entries(cls, target: Binding, tree: ReadSnapshot) -> Iterable[tuple[str, str, ContentPage]]:
+        for row in tree.public_pages(target):
+            yield row["reference"], row["kind"], cls._native_page(target, row)
 
     def resolve(self, alias: str, target: Binding) -> Record:
         """Resolve a retained page alias within its original element binding.
@@ -120,7 +115,7 @@ class ContentPages:
     def hints(
         self,
         target: Binding,
-        tree: SemanticSnapshot,
+        tree: ReadSnapshot,
         *,
         compact: bool = False,
         inline_children: Iterable[str] = (),
@@ -154,7 +149,7 @@ class ContentPages:
     def plan_hints(
         self,
         target: Binding,
-        tree: SemanticSnapshot,
+        tree: ReadSnapshot,
         *,
         compact: bool = False,
         inline_children: Iterable[str] = (),
@@ -163,29 +158,10 @@ class ContentPages:
         concise: bool = False,
     ) -> DisplayText:
         """Capture continuation aliases and offsets for final rendering."""
-        refs = {node: ref for ref, node in tree.refs.items()}
         lines = []
         inline_children = set(inline_children) if compact else set()
-        for relation in tree.facts["relations"]:
-            if relation["certainty"] != "confirmed" or "cursor" not in relation:
-                continue
-            selector = (
-                tree.collection.relation_fields.get((relation["source"], relation["recordKey"]))
-                if tree.collection is not None
-                else None
-            )
-            if selector is None:
-                continue
-            page = ContentPage(
-                replace(target, node=relation["source"], capture=None),
-                selector,
-                relation["cursor"],
-                relation_end(relation),
-                relation["total"],
-            )
+        for ref, label, page in self._entries(target, tree):
             alias = self._aliases.get(page)
-            ref = refs[relation["source"]]
-            label = relation["kind"]
             if children_only and label != "children":
                 continue
             if not public_api and ref in inline_children and label == "children":
@@ -228,9 +204,3 @@ class ContentPages:
         if concise and compact and public_api:
             return text("") if not lines else join(("\n", join(lines)), separator="")
         return text("") if not lines else join(("\nContinuations:", join(lines)))
-
-
-if TYPE_CHECKING:
-    pass
-if TYPE_CHECKING:
-    from computer_use.protocol.records import Record

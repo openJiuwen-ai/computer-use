@@ -8,6 +8,14 @@ import AppKit
     let installation: NativeInstallation
     let discovery: ApplicationDiscovery
 
+    static func openConfiguration(activates: Bool) -> NSWorkspace.OpenConfiguration {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = activates
+        configuration.createsNewApplicationInstance = false
+        configuration.allowsRunningApplicationSubstitution = false
+        return configuration
+    }
+
     func perform(check: () throws -> Void, onDispatch: () throws -> Void) async throws -> (
         application: [String: Any], launched: Bool
     ) {
@@ -28,10 +36,7 @@ import AppKit
             app = running
             launched = false
         } else {
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = false
-            configuration.createsNewApplicationInstance = false
-            configuration.allowsRunningApplicationSubstitution = false
+            let configuration = Self.openConfiguration(activates: false)
             try check()
             try installation.validate()
             try onDispatch()

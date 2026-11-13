@@ -17,7 +17,7 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.control import NativeScopeBody
 from computer_use.interaction.read.acquisition.directory.pipeline import DirectoryCollectionPipeline
 from computer_use.interaction.read.acquisition.directory.service import NativeDirectory
-from computer_use.interaction.read.acquisition.facts.pipeline import FactCollectionPipeline
+from computer_use.interaction.read.accessibility.pipeline import AccessibilityReadPipeline
 from computer_use.interaction.read.acquisition.menus.model import (
     QUERY,
     CollectedMenuParts,
@@ -150,7 +150,7 @@ class MenuPartCollection(Node["MenuPartsPlan", "CollectedMenuParts"]):
 
     def __init__(self, reader: NativeReader) -> None:
         self.reader = reader
-        self.children = (FactCollectionPipeline(reader),)
+        self.children = (AccessibilityReadPipeline(reader),)
         super().__init__(
             "CollectMenuFactParts",
             Contract(MenuPartsPlan, CollectedMenuParts, self.children[0].contract.effects),

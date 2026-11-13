@@ -17,16 +17,16 @@ from computer_use.session.state import AppState
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
     from computer_use.interaction.read.acquisition.components.support import ObservationGap
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.records import UIHandle
     from computer_use.pipeline.core import Control
 
 
 async def collect_application_content(
     controller: SessionController, application: str, control: Control
-) -> tuple[tuple[Binding, SemanticSnapshot] | None, ObservationGap | None]:
+) -> tuple[tuple[Binding, ReadSnapshot] | None, ObservationGap | None]:
     """Reuse read admission, directory and fact collection under the original call budget."""
-    async def collect() -> tuple[Binding, SemanticSnapshot] | None:
+    async def collect() -> tuple[Binding, ReadSnapshot] | None:
         with controller.port.calls.claim(30000) as remaining:
             async with controller.port.calls.operation(None, remaining) as read:
                 roots = await controller.reader.directory.collect(
@@ -51,7 +51,7 @@ async def collect_application_content(
 
 
 def remember_application_content(
-    controller: SessionController, ui: UIHandle, target: Binding, tree: SemanticSnapshot
+    controller: SessionController, ui: UIHandle, target: Binding, tree: ReadSnapshot
 ) -> SurfaceOwner:
     """Keep content refs in the App while preserving their own native scope."""
     state = AppState(

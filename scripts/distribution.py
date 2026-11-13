@@ -19,6 +19,8 @@ from pathlib import Path
 
 from backend_artifacts import TARGETS, artifact_name, fingerprint, host_target, inspect_archive, sha256, write_archive
 from console import write_result
+from sdk_native import DEFAULT_PYTHON_TAG, check_archive
+from sdk_native import artifact_name as engine_artifact_name
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGETS = ("macos-arm64", "windows-x86_64", "linux-x86_64")
@@ -55,6 +57,13 @@ class GitCodeArtifacts:
 
     def download(self, root, target, directory):
         name = artifact_name(root, target)
+        return self._download(name, directory, lambda path: inspect_archive(path, root=root, target=target))
+
+    def download_engine(self, root, target, python_tag, directory):
+        name = engine_artifact_name(root, target, python_tag)
+        return self._download(name, directory, lambda path: check_archive(root, path, target, python_tag))
+
+    def _download(self, name, directory, validate):
         page = 1
         while True:
             query = urllib.parse.urlencode(
@@ -91,14 +100,14 @@ class GitCodeArtifacts:
                 with tempfile.TemporaryDirectory(dir=directory) as temporary:
                     pending = Path(temporary) / output.name
                     pending.write_bytes(payload)
-                    inspect_archive(pending, root=root, target=target)
+                    validate(pending)
                     shutil.copyfile(pending, output)
                 return output
             if not artifacts or page * 100 >= listing["total_count"]:
                 break
             page += 1
         raise ValueError(
-            f"No retained backend artifact matches {target}. Build a matching archive, then pass --backend-dir."
+            f"No retained artifact matches {name}. Build a matching archive, then pass --backend-dir."
         )
 
 
@@ -150,13 +159,15 @@ def build_backend(root, target, directory):
     return output
 
 
-def build_wheels(root, targets, directory, *, backend_directory=None, repository=None, token=None):
+def build_wheels(
+    root, targets, directory, *, backend_directory=None, repository=None, token=None, python_tag=DEFAULT_PYTHON_TAG,
+):
     root, directory = Path(root), Path(directory).resolve()
     if backend_directory is None and not repository:
         raise ValueError("Supply --backend-dir or --repository owner/repo (or GITCODE_REPOSITORY).")
     directory.mkdir(parents=True, exist_ok=True)
     ignore_artifacts = shutil.ignore_patterns(
-        ".git", ".venv", ".build", "build", "dist", "__pycache__", ".artifacts",
+        ".git", ".venv", ".build", "build", "dist", "__pycache__", ".artifacts", "target", "_ax_read.*.so", "_ax_read.*.pyd",
         ".pytest_cache", ".ruff_cache", "outputs", "logs", "report", "*.egg-info",
     )
     windows_sources = root / "os_adapter/windows"
@@ -179,11 +190,19 @@ def build_wheels(root, targets, directory, *, backend_directory=None, repository
                 else client.download(root, target, temporary / "backends")
             )
             inspect_archive(backend, root=root, target=target)
+            engine = (
+                Path(backend_directory) / (engine_artifact_name(root, target, python_tag) + ".zip")
+                if backend_directory is not None
+                else client.download_engine(root, target, python_tag, temporary / "engines")
+            )
+            check_archive(root, engine, target, python_tag)
             # Separate build trees prevent another target's binary leaking into a wheel.
             source = temporary / target
             shutil.copytree(root, source, ignore=skip_local_artifacts)
             environment = {**os.environ, "COMPUTER_USE_BACKEND_ARCHIVE": str(backend.resolve())}
             environment.pop("COMPUTER_USE_BACKEND_DIR", None)
+            environment.pop("COMPUTER_USE_SDK_NATIVE_ARCHIVE", None)
+            environment["COMPUTER_USE_SDK_NATIVE_ARCHIVE"] = str(engine.resolve())
             subprocess.run(
                 [sys.executable, "-m", "build", "--wheel", "--outdir", str(directory), str(source)],
                 env=environment,
@@ -202,6 +221,7 @@ def main(argv=None):
     wheels = commands.add_parser("wheels", help="Assemble SDK wheels without native compilation or publishing.")
     wheels.add_argument("--target", choices=TARGETS, action="append")
     wheels.add_argument("--backend-dir", type=Path)
+    wheels.add_argument("--python-tag", choices=("cp311", "cp312", "cp313", "cp314", "cp315"), default=DEFAULT_PYTHON_TAG)
     wheels.add_argument(
         "--repository", default=os.environ.get("GITCODE_REPOSITORY") or os.environ.get("ATOMGIT_REPOSITORY")
     )
@@ -219,6 +239,7 @@ def main(argv=None):
                 args.output,
                 backend_directory=args.backend_dir,
                 repository=args.repository,
+                python_tag=args.python_tag,
                 token=os.environ.get("GITCODE_TOKEN") or os.environ.get("ATOMGIT_TOKEN"),
             )
     except urllib.error.HTTPError as error:

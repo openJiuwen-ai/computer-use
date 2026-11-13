@@ -221,7 +221,10 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
 
     if os.name != "posix":
         pytest.skip("This test sends POSIX process signals.")
-    server = model_server([tool_call("await __import__('asyncio').sleep(60)")])
+    entered = tmp_path / "tool-entered"
+    server = model_server([
+        tool_call(f"import time\nfrom pathlib import Path\nPath({str(entered)!r}).touch()\ntime.sleep(3)")
+    ])
     path = tmp_path / "model.json"
     path.write_text(
         json.dumps(
@@ -247,11 +250,10 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
         records = []
         while time.monotonic() < deadline:
             records = list((tmp_path / ".computer-use/agent/runs").glob("*/events.jsonl"))
-            if records and '"kind": "tool_call"' in records[0].read_text():
+            if records and entered.is_file():
                 break
             time.sleep(0.05)
-        assert records
-        time.sleep(0.4)
+        assert records and entered.is_file()
         process.send_signal(signal.SIGINT)
         stdout, stderr = process.communicate(timeout=20)
         assert process.returncode == 130, stdout + stderr
