@@ -12,6 +12,12 @@ from computer_use.diagnostics import diagnostic
 from computer_use.interaction.query.instances.membership import interaction_contains
 from computer_use.interaction.query.instances.scope import allowed
 from computer_use.interaction.read.acquisition.components.support import ObservationGap
+from computer_use.interaction.read.acquisition.view_facts import (
+    captured_identity,
+    captured_metadata,
+    captured_node,
+    field,
+)
 from computer_use.interaction.read.delivery.coverage import document_coverage, tree_collection_issues
 from computer_use.interaction.read.presentation.content import DisplayText, template
 from computer_use.interaction.read.presentation.content import json_value as quoted
@@ -19,7 +25,7 @@ from computer_use.interaction.read.presentation.details import captured_details_
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
 from computer_use.interaction.read.presentation.element_details import CapturedElementDetails
 from computer_use.interaction.read.presentation.headers import InterfaceHeader, MemberHeading
-from computer_use.interaction.read.presentation.preparation import prepare_snapshot
+from computer_use.interaction.read.accessibility.preparation import prepare_snapshot
 from computer_use.protocol.primitives import frozen
 from computer_use.session.events import observation_completed, register_observation_delivery
 from computer_use.session.interfaces import ApplicationEntry, LookupContext, WindowIdentity, WindowLifetime
@@ -33,8 +39,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from computer_use.interaction.controller import SessionController
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
-    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
+    from computer_use.interaction.read.accessibility.preparation import PreparedSnapshot
     from computer_use.interaction.read.views.pipeline import WindowPart
     from computer_use.interaction.read.views.related import RelatedRead
     from computer_use.interaction.records import UIHandle
@@ -103,12 +109,12 @@ def related_focus_summary(
 ) -> DisplayText | None:
     """Present a scoped AX sample independently of unchanged tree rows."""
     snapshot = prepared.snapshot
-    collection = snapshot.collection
+    collection = snapshot.capture
     if collection is None or collection.surface != target.surface or snapshot.scope_kind != "window":
         return None
     token = collection.focused_element
-    node = snapshot.native.nodes.get(token) if token is not None else None
-    if node is None or node.states.focused is False:
+    node = captured_node(snapshot, token, "states")
+    if node is None or field(field(node, "states"), "focused") is False:
         return None
     ref = next((ref for ref in prepared.refs if snapshot.refs.get(ref) == token), None)
     if ref is None:
@@ -119,7 +125,7 @@ def related_focus_summary(
 def tree_text(
     controller: SessionController,
     target: Binding,
-    snapshot: SemanticSnapshot,
+    snapshot: ReadSnapshot,
     *,
     details: bool = False,
 ) -> str:
@@ -138,7 +144,7 @@ def tree_text(
 def tree_document(
     controller: SessionController,
     target: Binding,
-    snapshot: SemanticSnapshot,
+    snapshot: ReadSnapshot,
     *,
     prepared: PreparedSnapshot,
     details: bool = False,
@@ -148,7 +154,8 @@ def tree_document(
         (target.session, target.instance, target.root_window, target.surface, target.node)
     )
     if not details:
-        root = next((ref for ref, node in snapshot.refs.items() if node in snapshot.facts["roots"]), None)
+        roots = snapshot.roots
+        root = next((ref for ref, node in snapshot.refs.items() if node in roots), None)
         if root is not None:
             document = DisplayDocument.join((document, DisplayText("details_hint", (prepared, root))), separator="")
     if {"nativeRelationPages", "nativeNodePages"} & set(controller.transport.capabilities):
@@ -181,8 +188,8 @@ def publish(
     text: str | DisplayDocument,
     screenshot: PNG | None = None,
     *,
-    trees: tuple[tuple[Binding, SemanticSnapshot], ...] = (),
-    captured_trees: tuple[tuple[Binding, SemanticSnapshot], ...] = (),
+    trees: tuple[tuple[Binding, ReadSnapshot], ...] = (),
+    captured_trees: tuple[tuple[Binding, ReadSnapshot], ...] = (),
     full: bool = False,
     scope: str | None = None,
     view: str = "window",
@@ -197,7 +204,7 @@ def publish(
     on_observation=None,
     window_coverage=(),
     presentations=(),
-    member_trees: Mapping[WindowIdentity, SemanticSnapshot] | None = None,
+    member_trees: Mapping[WindowIdentity, ReadSnapshot] | None = None,
     transient_window: tuple[WindowIdentity, int] | None = None,
 ) -> Observation:
     """Publish the combined interface observation and retain its source data.
@@ -220,10 +227,10 @@ def publish(
     # Only sources actually included as tree components contribute to this
     # publication. A native collection cutoff is independent of whether its
     # one remaining root happens to be present or an image is also available.
-    shown = tuple(part.prepared.snapshot.native for part in document.parts if isinstance(part, DisplayTree))
+    shown = tuple(captured_identity(part.prepared.snapshot) for part in document.parts if isinstance(part, DisplayTree))
     incomplete = []
     for target, snapshot in trees:
-        if any(source is snapshot.native for source in shown):
+        if any(source is captured_identity(snapshot) for source in shown):
             issues = tree_collection_issues(snapshot)
             if issues:
                 incomplete.append((target, snapshot, issues))
@@ -233,7 +240,7 @@ def publish(
             ObservationGap(
                 "tree", "observation_incomplete",
                 "Native tree collection incomplete: " + "; ".join(dict.fromkeys(
-                    issue.detail or issue.state for issue in issues
+                    detail or state for state, detail in issues
                 )),
             )
             for _, _, issues in incomplete
@@ -259,9 +266,9 @@ def publish(
                         **record,
                         "partial": tuple(sorted(set(record.get("partial", ())) | {"tree"})),
                         "treeCollection": {
-                            "session": snapshot.native.session,
-                            "observation": snapshot.native.id,
-                            "intervalNs": snapshot.native.interval_ns,
+                            "session": captured_metadata(snapshot).session,
+                            "observation": captured_metadata(snapshot).id,
+                            "intervalNs": captured_metadata(snapshot).interval_ns,
                         },
                     }
             coverage_with_gaps.append(record)
@@ -338,6 +345,7 @@ def publish(
             + preparation["raiseStatus"]
             + "; foreground="
             + str(preparation["foreground"]).lower()
+            + ("; application reopen=requested" if "reopenStatus" in preparation else "")
             + ". Focus/stacking may have changed; no global input was sent. Redraw freshness remains unknown."
         )
         from dataclasses import replace
@@ -387,7 +395,7 @@ def publish(
         captured_query_windows = frozenset(member_trees) if member_trees is not None else frozenset(
             WindowIdentity(target.root_window, target.surface, target.instance)
             for target, snapshot in trees
-            if target.root_window is not None and any(source is snapshot.native for source in shown)
+            if target.root_window is not None and any(source is captured_identity(snapshot) for source in shown)
         )
         captured = captured_lookup.window if content_available else None
         captured_image = getattr(owner, "_image", None) if screenshot is not None else None

@@ -8,6 +8,7 @@ import logging
 import os
 import platform
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -169,7 +170,7 @@ def build_backend(root, target, output, commit):
     return result
 
 
-def _assemble_platform(source, archive, staging, target):
+def _assemble_platform(source, archive, staging, target, *, python_tag="cp311"):
     payload = staging / "payload"
     payload.mkdir(parents=True)
     manifest = validate_backend(source, archive, target, destination=payload)
@@ -181,6 +182,12 @@ def _assemble_platform(source, archive, staging, target):
         raise ValueError(f"Unknown wheel platform: {target}")
     environment = {**os.environ, "COMPUTER_USE_BACKEND_DIR": str(payload)}
     environment.pop("COMPUTER_USE_BACKEND_ARCHIVE", None)
+    environment.pop("COMPUTER_USE_SDK_NATIVE_ARCHIVE", None)
+    sdk = runpy.run_path(str(source / "scripts/sdk_native.py"))
+    engine = archive.with_name(sdk["artifact_name"](source, target, python_tag) + ".zip")
+    sdk["check_archive"](source, engine, target, python_tag)
+    environment["COMPUTER_USE_SDK_NATIVE_ARCHIVE"] = str(engine.resolve())
+    tag_prefix = f"{python_tag}-{python_tag}"
     subprocess.run(
         [
             sys.executable,
@@ -199,7 +206,7 @@ def _assemble_platform(source, archive, staging, target):
     with zipfile.ZipFile(wheel) as built:
         (dist_info,) = {name.rpartition("/")[0] for name in built.namelist() if name.endswith(".dist-info/WHEEL")}
         tags = BytesParser().parsebytes(built.read(f"{dist_info}/WHEEL")).get_all("Tag")
-        if tags != [f"py3-none-{tag}"] or not wheel.name.endswith(f"-py3-none-{tag}.whl"):
+        if tags != [f"{tag_prefix}-{tag}"] or not wheel.name.endswith(f"-{tag_prefix}-{tag}.whl"):
             raise ValueError(f"Built wheel has the wrong platform tag for {target}.")
         prefix = "computer_use/_resources/"
         installed = [name.removeprefix(prefix) for name in built.namelist() if name.startswith(prefix)]
@@ -228,7 +235,7 @@ def set_package_version(project, value):
     project.write_text(updated, encoding="utf-8")
 
 
-def package_wheels(root, targets, backend_dir, output, commit, *, package_version=None):
+def package_wheels(root, targets, backend_dir, output, commit, *, package_version=None, python_tag="cp311"):
     with tempfile.TemporaryDirectory(prefix="cu-wheel-") as temporary:
         staging = Path(temporary)
         tree = staging / "source.zip"
@@ -242,7 +249,7 @@ def package_wheels(root, targets, backend_dir, output, commit, *, package_versio
                 if package_version is not None:
                     set_package_version(source / "pyproject.toml", package_version)
                 backend = backend_dir / f"{artifact_name(source, target)}.zip"
-                wheels.append(_assemble_platform(source, backend, source.parent, target))
+                wheels.append(_assemble_platform(source, backend, source.parent, target, python_tag=python_tag))
         output.mkdir(parents=True, exist_ok=True)
         return [Path(shutil.move(wheel, output / wheel.name)) for wheel in wheels]
 
@@ -260,6 +267,7 @@ def main():
     wheels.add_argument("--backend-dir", type=Path, required=True)
     wheels.add_argument("--output", type=Path, default=Path("dist"))
     wheels.add_argument("--version")
+    wheels.add_argument("--python-tag", choices=("cp311", "cp312", "cp313", "cp314", "cp315"), default="cp311")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
     try:
@@ -277,6 +285,7 @@ def main():
                 args.output.resolve(),
                 commit,
                 package_version=args.version,
+                python_tag=args.python_tag,
             )
         for path in result:
             _LOG.info("%s", path)

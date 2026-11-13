@@ -1,0 +1,143 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
+"""Generate the Rust read engine's character tables from pinned Unicode data."""
+
+import hashlib
+import os
+import sys
+from itertools import groupby
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.request import urlopen
+
+_UPSTREAM = "https://raw.githubusercontent.com/unicode-org/unicodetools/2f97de762e1b69149a7bc389a7fa19488dcf7af6"
+_UCD = "unicodetools/data/ucd"
+_INPUTS = {
+    "unicode-14.txt": (
+        f"{_UCD}/14.0.0-Update/UnicodeData.txt",
+        "36018e68657fdcb3485f636630ffe8c8532e01c977703d2803f5b89d6c5feafb",
+    ),
+    "width-14.txt": (
+        f"{_UCD}/14.0.0-Update/EastAsianWidth.txt",
+        "f901ac011aa32a09224d6555da71e2532c59c1d3381322829de0e3b880507250",
+    ),
+    "unicode-18.txt": (
+        f"{_UCD}/18.0.0/UnicodeData.txt",
+        "0736451de439ae7baf1425136617da495e09ee5afbe6e394374db7009ea08950",
+    ),
+    "LICENSE": ("LICENSE", "fe5c62b543e287981db198f2acfa0ca732d12591a1024536dc8fd85dacd77104"),
+}
+_CODEPOINT_COUNT = 0x110000
+
+
+def _read_input(name):
+    upstream_path, digest = _INPUTS[name]
+    cache = Path(os.environ.get("CARGO_HOME") or Path.home() / ".cargo").expanduser() / "computer-use-ucd"
+    path = cache / f"{digest}-{name}"
+    if path.is_file():
+        data = path.read_bytes()
+    else:
+        with urlopen(f"{_UPSTREAM}/{upstream_path}", timeout=30) as source:
+            data = source.read()
+    if hashlib.sha256(data).hexdigest() != digest:
+        raise ValueError(f"Unexpected SHA-256 for Unicode build input {name}.")
+    if not path.is_file():
+        cache.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(dir=cache) as temporary:
+            pending = Path(temporary) / name
+            pending.write_bytes(data)
+            pending.replace(path)
+    return data.decode("utf-8")
+
+
+def unicode_notice():
+    return _read_input("LICENSE")
+
+
+def _character_records(data):
+    for row in data.splitlines():
+        code, name, category, combining, bidi, *_ = row.split(";")
+        code = int(code, 16)
+        if name.endswith(", First>"):
+            start = code
+            continue
+        yield start if name.endswith(", Last>") else code, code + 1, category, combining, bidi
+
+
+def _set_range(table, start, stop, value=True):
+    table[start:stop] = bytes([value]) * (stop - start)
+
+
+def _intervals(table):
+    stop = 0
+    for value, points in groupby(table):
+        start = stop
+        stop += sum(1 for _ in points)
+        if value:
+            yield start, stop
+
+
+def character_tables(python_data, east_asian_width, regex_data):
+    """Return half-open intervals for the Python 3.11 and regex predicates."""
+    # CPython 3.11 treats code points with no UCD record as unprintable,
+    # category Cn and full-width. Its width fallback differs from UCD @missing.
+    other = bytearray(b"\x01") * _CODEPOINT_COUNT
+    non_printable = other.copy()
+    wide = other.copy()
+    rtl = bytearray(_CODEPOINT_COUNT)
+    alpha = bytearray(_CODEPOINT_COUNT)
+    zero = bytearray(_CODEPOINT_COUNT)
+    decimal = bytearray(_CODEPOINT_COUNT)
+    for start, stop, category, combining, bidi in _character_records(python_data):
+        _set_range(other, start, stop, category.startswith("C"))
+        _set_range(non_printable, start, stop, category[0] in "CZ")
+        _set_range(wide, start, stop, False)
+        _set_range(rtl, start, stop, bidi in {"R", "AL", "RLE", "RLO", "RLI"})
+        _set_range(alpha, start, stop, category.startswith("L"))
+        _set_range(zero, start, stop, combining != "0" or category == "Cf")
+        _set_range(decimal, start, stop, category == "Nd")
+    non_printable[ord(" ")] = False
+    alpha[:128] = bytes(128)
+    for row in east_asian_width.splitlines():
+        row = row.partition("#")[0].strip()
+        if row:
+            codes, width = (field.strip() for field in row.split(";"))
+            if width in {"W", "F"}:
+                start, _, end = codes.partition("..")
+                _set_range(wide, int(start, 16), int(end or start, 16) + 1)
+
+    letters_or_numbers = bytearray(_CODEPOINT_COUNT)
+    for start, stop, category, _, _ in _character_records(regex_data):
+        if category[0] in "LN":
+            _set_range(letters_or_numbers, start, stop)
+
+    return {
+        "NON_PRINTABLE": list(_intervals(non_printable)),
+        "RTL_RANGES": list(_intervals(rtl)),
+        "CATEGORY_C": list(_intervals(other)),
+        "ALPHABETIC": list(_intervals(alpha)),
+        "ZERO": list(_intervals(zero)),
+        "WIDE": list(_intervals(wide)),
+        "DECIMAL_DIGIT": list(_intervals(decimal)),
+        "LETTER_OR_NUMBER": list(_intervals(letters_or_numbers)),
+    }
+
+
+def generate(output):
+    tables = character_tables(_read_input("unicode-14.txt"), _read_input("width-14.txt"), _read_input("unicode-18.txt"))
+    with output.open("w", encoding="utf-8", newline="\n") as rust:
+        rust.write("// Generated by build_unicode.py from Unicode 14.0.0 and 18.0.0.\n")
+        for name, ranges in tables.items():
+            if name == "NON_PRINTABLE":
+                rust.write(f"pub(crate) const {name}: &[u32] = &[\n")
+                for start, stop in ranges:
+                    rust.write(f"    {start:#x}, {stop:#x},\n")
+            else:
+                rust.write(f"pub(crate) const {name}: &[(u32, u32)] = &[\n")
+                for start, stop in ranges:
+                    rust.write(f"    ({start:#x}, {stop - 1:#x}),\n")
+            rust.write("];\n")
+
+
+if __name__ == "__main__":
+    generate(Path(sys.argv[1]))

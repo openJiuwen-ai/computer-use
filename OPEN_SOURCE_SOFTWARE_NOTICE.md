@@ -8,7 +8,7 @@ THE OPEN SOURCE SOFTWARE IN THIS PRODUCT IS DISTRIBUTED IN THE HOPE THAT IT WILL
 
 ## Scope
 
-This repository does not vendor third-party source code. The table below lists the third-party software that the engine and the optional agent host declare as dependencies and that is installed from its upstream distribution at install time. The native drivers are built on the host against operating-system SDKs only and do not bundle third-party libraries. No AI model weights or model runtimes are included in this product.
+This repository does not vendor third-party source code. Python dependencies are installed from their upstream distributions. Binary distributions include the Rust accessibility read extension and its third-party notices. The native drivers are built on the host against operating-system SDKs. No AI model weights or model runtimes are included in this product.
 
 ## Copyright Notice and License Texts
 
@@ -32,6 +32,26 @@ This repository does not vendor third-party source code. The table below lists t
 | uvicorn | BSD-3-Clause | PyPI package `uvicorn` (`https://github.com/encode/uvicorn`) |
 | httpx | BSD-3-Clause | PyPI package `httpx` (`https://github.com/encode/httpx`) |
 | anyio | MIT | PyPI package `anyio` (`https://github.com/agronholm/anyio`) |
+
+### Rust accessibility read engine
+
+The accessibility read engine ships with a build-generated `THIRD_PARTY_LICENSES.txt` in
+`computer_use/interaction/read/accessibility/_ax_read_licenses`. It contains upstream license files from
+the locked Cargo dependencies and the Rust 1.85.1 toolchain, including `adler` and `compiler_builtins`.
+It also includes the license for the Unicode 14.0.0 and 18.0.0 data used to generate character lookup tables.
+The following MIT notices cover additional components of the standard library dependency graph.
+
+| Software | Version | Copyright |
+|---|---|---|
+| [addr2line](https://github.com/gimli-rs/addr2line) | 0.22.0 | Copyright (c) 2016-2018 The gimli Developers |
+| [gimli](https://github.com/gimli-rs/gimli) | 0.29.0 | Copyright (c) 2015 The Rust Project Developers |
+| [object](https://github.com/gimli-rs/object) | 0.36.7 | Copyright (c) 2015 The Gimli Developers |
+| [rustc-demangle](https://github.com/rust-lang/rustc-demangle) | 0.1.24 | Copyright (c) 2014 Alex Crichton |
+| [hashbrown](https://github.com/rust-lang/hashbrown) | 0.15.2 | Copyright (c) 2016 Amanieu d'Antras |
+| [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.0 | Copyright (c) 2014 Alex Crichton |
+| [libc](https://github.com/rust-lang/libc) | 0.2.169 | Copyright (c) 2014-2020 The Rust Project Developers |
+| [memchr](https://github.com/BurntSushi/memchr) | 2.7.4 | Copyright (c) 2015 Andrew Gallant |
+| [miniz_oxide](https://github.com/Frommi/miniz_oxide) | 0.7.4 | Copyright (c) 2017 Frommi |
 
 ### Platform SDKs used by the native drivers (not redistributed)
 

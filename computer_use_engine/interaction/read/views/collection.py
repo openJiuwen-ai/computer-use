@@ -15,6 +15,7 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import interaction_contains
 from computer_use.interaction.query.instances.scope import allowed
 from computer_use.interaction.read.acquisition.loading import window_content_unexposed
+from computer_use.interaction.read.acquisition.view_facts import captured_metadata
 from computer_use.native.query.directory import select_surface
 from computer_use.session.interfaces import WindowIdentity
 from computer_use.session.surface_content import content_host, transient_content
@@ -58,31 +59,7 @@ def component_view(requested: frozenset[str]) -> str:
 
 def complete_content(snapshot, root):
     """An exact shared subtree can cover content; a label or root alone cannot."""
-    pending, seen = [root], set()
-    while pending:
-        key = pending.pop()
-        if key in seen:
-            continue
-        seen.add(key)
-        node = snapshot.native.nodes.get(key)
-        if node is None:
-            return False
-        relations = [item for item in snapshot.facts["relations"]
-                     if item["source"] == key and item["kind"] == "children"]
-        if not relations:
-            if node.role in ("list", "menu", "window", "group", "tree", "table"):
-                return False
-            continue
-        if len(relations) != 1:
-            return False
-        children = relations[0]
-        if children["state"] != "complete" or children["certainty"] != "confirmed":
-            return False
-        count = len(children["targets"])
-        if children.get("total", count) != count or children.get("offset", 0) != 0:
-            return False
-        pending.extend(children["targets"])
-    return True
+    return snapshot.capture.complete_content(root)
 
 
 @dataclass
@@ -239,7 +216,7 @@ class CollectionPlan:
             self.reused_content[identity] = {
                 "window": host, "surface": source.target.surface, "instance": source.target.instance,
                 "node": node,
-                "observation": source.tree.native.id,
+                "observation": captured_metadata(source.tree).id,
             }
             self.attempted[identity] = self.attempted.get(identity, frozenset()) | {"tree"}
             self.captured_components[identity] = self.captured_components.get(identity, frozenset()) | {"tree"}
@@ -320,9 +297,9 @@ class CollectionPlan:
                     }} if reused is not None or shared_image is not None else {}),
                     **({
                         "treeCollection": {
-                            "session": part.tree.native.session,
-                            "observation": part.tree.native.id,
-                            "intervalNs": part.tree.native.interval_ns,
+                            "session": captured_metadata(part.tree).session,
+                            "observation": captured_metadata(part.tree).id,
+                            "intervalNs": captured_metadata(part.tree).interval_ns,
                         },
                     } if part is not None and part.tree is not None and "tree" not in included else {}),
                     **({"historical": included} if identity not in current and included else {}),

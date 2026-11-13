@@ -9,13 +9,18 @@ from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import diagnostic
 from computer_use.interaction.read.acquisition.content import has_content_progress
+from computer_use.interaction.read.acquisition.view_facts import captured_metadata
 from computer_use.session.operations import current_operation_budget
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.protocol.png import PNG
+
+
+def _node_count(metadata):
+    return metadata.node_count
 
 
 @dataclass(frozen=True)
@@ -23,7 +28,7 @@ class PostwriteChanges:
     """Captured pre-input content and an optional pre-armed native watcher."""
 
     baseline: Mapping[str, str] | None
-    before_tree: SemanticSnapshot | None = None
+    before_tree: ReadSnapshot | None = None
     before_image: PNG | None = None
     input_sampled: bool = False
 
@@ -38,12 +43,14 @@ class PostwriteChanges:
             return True
         if part.tree is not None:
             progressed = has_content_progress(self.before_tree, part.tree)
+            before = captured_metadata(self.before_tree) if self.before_tree is not None else None
+            after = captured_metadata(part.tree)
             diagnostic({
                 "kind": "postwrite_change_decision", "contentProgress": progressed,
-                "beforeRoots": self.before_tree.native.roots if self.before_tree is not None else (),
-                "afterRoots": part.tree.native.roots,
-                "beforeNodes": len(self.before_tree.native.nodes) if self.before_tree is not None else 0,
-                "afterNodes": len(part.tree.native.nodes),
+                "beforeRoots": before.roots if before is not None else (),
+                "afterRoots": after.roots,
+                "beforeNodes": _node_count(before) if before is not None else 0,
+                "afterNodes": _node_count(after),
                 "reason": "observed_content_progress" if progressed else "no_confirmed_content_progress",
             })
             return not progressed

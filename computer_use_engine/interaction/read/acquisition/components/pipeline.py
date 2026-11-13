@@ -29,8 +29,8 @@ from computer_use.interaction.read.acquisition.components.passes.select_read_iso
 from computer_use.interaction.read.acquisition.components.support import (
     collect_component,
 )
-from computer_use.interaction.read.acquisition.facts.pipeline import (
-    FactCollectionPipeline as NativeFactCollectionPipeline,
+from computer_use.interaction.read.accessibility.pipeline import (
+    AccessibilityReadPipeline as NativeFactCollectionPipeline,
 )
 from computer_use.interaction.read.acquisition.images.passes.isolated_components_pipeline_collect_pixels import (
     stage as collect_pixels,
@@ -40,12 +40,12 @@ from computer_use.pipeline import Contract, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
 
 if TYPE_CHECKING:
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.read.app import NativeAppReader
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
     from computer_use.pipeline.core import Control, Step
 
 
-class NativeFactCollectionAdapter(Node["ComponentLease", "SemanticSnapshot"]):
+class NativeFactCollectionAdapter(Node["ComponentLease", "ReadSnapshot"]):
     """Collect window facts through the native reader's service boundary.
 
     Apply the component's field, depth, and node limits to the active lease and its bounded
@@ -60,7 +60,7 @@ class NativeFactCollectionAdapter(Node["ComponentLease", "SemanticSnapshot"]):
         self.children = (NativeFactCollectionPipeline(self.reader),)
         super().__init__("CollectWindowFacts", Contract(ComponentLease, object, self.children[0].contract.effects))
 
-    async def _arun(self, value: ComponentLease, control: Control) -> SemanticSnapshot:
+    async def _arun(self, value: ComponentLease, control: Control) -> ReadSnapshot:
         request, read = value.request, value.read
         limits = request.limits
         # Sequential tree/pixel collection already shares one enclosing
@@ -78,7 +78,7 @@ class NativeFactCollectionAdapter(Node["ComponentLease", "SemanticSnapshot"]):
             _control=control,
         )
 
-    def _run(self, value: ComponentLease, control: Control) -> SemanticSnapshot:
+    def _run(self, value: ComponentLease, control: Control) -> ReadSnapshot:
         raise TypeError("Native facts require arun()")
 
 

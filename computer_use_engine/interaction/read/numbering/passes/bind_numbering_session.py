@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from computer_use.interaction.read.numbering.helpers import snapshot_session
 from computer_use.interaction.read.numbering.model import PURE, NumberingRequest, NumberingRun
 from computer_use.interaction.read.numbering.references import DisplayReferences
 from computer_use.pipeline import Contract, Pass
@@ -18,9 +19,9 @@ if TYPE_CHECKING:
 def bind_numbering_session(request: NumberingRequest, control: Control) -> NumberingRun:
     """Bind the snapshot sequence to a display allocator owned by their common driver session."""
     snapshots, references = request.snapshots, request.references
-    session = snapshots[0].facts["session"]
+    session = snapshot_session(snapshots[0])
     references = references if references is not None else DisplayReferences(session)
-    if references.session != session or any(snapshot.facts["session"] != session for snapshot in snapshots):
+    if references.session != session or any(snapshot_session(snapshot) != session for snapshot in snapshots):
         raise ValueError("Display references belong to a different native session")
     return NumberingRun(snapshots, references)
 

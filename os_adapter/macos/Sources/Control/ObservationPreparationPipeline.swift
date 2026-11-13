@@ -6,12 +6,17 @@ import ApplicationServices
 /// Explicit PREPARE before observation. Never an inspect/capture side effect,
 /// input-receiver recipe, mouse primer, or promise of synchronized application redraw.
 @MainActor enum ObservationPreparationPipeline {
-    static func run(_ raw: Any?, operation: (Any?) throws -> NativeOperation, scopes: NativeScopeResolver)
+    static func run(
+        _ raw: Any?, operation: (Any?) throws -> NativeOperation, scopes: NativeScopeResolver, launch: NativeLaunchAccess
+    )
         async throws -> [String: Any]
     {
         let request = try object(raw, keys: ["operation", "target"])
-        let target = try NativeTarget(request["target"]).wire
         let op = try operation(request["operation"])
+        if let application = request["target"] as? [String: Any], application["application"] != nil {
+            return try await reopen(application, op: op, scopes: scopes, launch: launch)
+        }
+        let target = try NativeTarget(request["target"]).wire
         guard !op.writable, NSDictionary(dictionary: op.target).isEqual(to: target),
             target["node"] is NSNull, target["capture"] is NSNull
         else { throw DriverError("observation preparation requires its original window read scope", code: .invalidRequest) }
@@ -77,6 +82,78 @@ import ApplicationServices
                 "window observation preparation may have changed focus or stacking: \(error)",
                 code: (error as? ClassifiedFailure)?.code ?? .executionFailed, effect: .possible,
                 next: "observe the original window without activation; do not repeat preparation blindly")
+        }
+    }
+
+    private static func reopen(
+        _ raw: [String: Any], op: NativeOperation, scopes: NativeScopeResolver, launch: NativeLaunchAccess
+    ) async throws -> [String: Any] {
+        let target = try object(raw, keys: ["session", "application"])
+        let session = try string(target["session"], label: "session")
+        let application = try string(target["application"], label: "application")
+        let discoveryScope = try NativeTarget(op.target)
+        try scopes.requireSession(session)
+        try discoveryScope.requireSession(session)
+        guard !op.writable, discoveryScope.isDiscovery,
+            ApplicationInstances<NSRunningApplication>.isInstanceSelector(application)
+        else {
+            throw DriverError("application reopen requires an observed running app and a read scope", code: .invalidRequest)
+        }
+
+        var dispatch = "notDispatched"
+        let activity = NativeInputActivity(
+            operation: op.token, step: 0, command: "prepareObservation", intent: "observe", target: target,
+            globalInputAllowed: false)
+        defer { activity.finish(dispatch: dispatch, cleanup: op.cleanup) }
+        do {
+            return try await NativeInputActivity.$current.withValue(activity) {
+                try await NativeInputActivity.$stage.withValue(.preparation) {
+                    try await op.observe {
+                        try scopes.sharing.checkAvailable()
+                        guard case .running(let app) = try launch.discovery.locate(application),
+                            let url = app.bundleURL?.standardizedFileURL.resolvingSymlinksInPath()
+                        else {
+                            throw DriverError("the original running application has no reopenable bundle", code: .unsupportedOperation)
+                        }
+                        let background = BackgroundTarget(app)
+                        let workspace = NSWorkspace.shared
+                        // LaunchServices targets a bundle URL. Prove which running
+                        // process that URL addresses before sending the request.
+                        let matches = workspace.runningApplications.filter {
+                            !$0.isTerminated && $0.bundleURL?.standardizedFileURL.resolvingSymlinksInPath() == url
+                        }
+                        guard matches.count == 1, matches[0].isEqual(app) else {
+                            throw DriverError("the original running application is not the unique reopen target", code: .ambiguousTarget)
+                        }
+                        let configuration = NativeLaunchUnit.openConfiguration(activates: true)
+                        try background.validate()
+                        try op.check()
+                        try RequestDiagnostics.checkCancellation()
+                        dispatch = "unknown"
+                        launch.recordEffect()
+                        let attempt = NativeInputActivity.begin(
+                            device: .application, transport: .launch, mechanism: "NSWorkspace.openApplication")
+                        defer { attempt?.returned() }
+                        let opened = try await workspace.openApplication(at: url, configuration: configuration)
+                        dispatch = "dispatched"
+                        guard opened.isEqual(app) else {
+                            throw DriverError("application reopen returned a different process", code: .staleTarget)
+                        }
+                        try background.validate()
+                        return [
+                            "kind": "observationPreparation", "binding": target, "activation": "requested",
+                            "raiseStatus": "notRequested", "reopenStatus": "requested",
+                            "foreground": background.isForeground, "redraw": "unknown"
+                        ]
+                    }
+                }
+            }
+        } catch {
+            guard dispatch != "notDispatched" else { throw error }
+            throw DriverError(
+                "application reopen may have changed the desktop: \(error)",
+                code: (error as? ClassifiedFailure)?.code ?? .executionFailed, effect: .possible,
+                next: "observe the original application to check whether a window appeared")
         }
     }
 }

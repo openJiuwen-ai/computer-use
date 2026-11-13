@@ -125,7 +125,7 @@ class Binding:
 
 @dataclass(frozen=True)
 class ApplicationBinding:
-    """One installed application identified within a native driver session."""
+    """An installation or running application identity within a native driver session."""
 
     session: str
     application: str

@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 from computer_use.diagnostics import local_failure
 from computer_use.interaction.read.presentation.content import template
 from computer_use.interaction.read.presentation.document import DisplayDocument
-from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
-from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
+from computer_use.interaction.read.accessibility.preparation import SnapshotRenderRequest
+from computer_use.interaction.read.accessibility.preparation import PrepareSnapshotPipeline
 from computer_use.interaction.read.views.publication import publish, tree_document
 from computer_use.session.events import explicit_observation_completed
 from computer_use.session.interfaces import LookupContext, SurfaceOwner
@@ -20,7 +20,7 @@ from computer_use.session.state import AppState
 
 if TYPE_CHECKING:
     from computer_use.interaction.controller import SessionController
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.records import ElementSnapshot, UIHandle
     from computer_use.types import Observation
 
@@ -47,7 +47,7 @@ class AgentElementReadPipeline:
         cursor: str | None = None,
         *,
         max_nodes: int = 1000,
-    ) -> tuple[SemanticSnapshot, ElementSnapshot]:
+    ) -> tuple[ReadSnapshot, ElementSnapshot]:
         """Read the element request through the session controller and deliver its observation.
 
         Args:
@@ -83,12 +83,13 @@ class AgentElementReadPipeline:
             )
         if getattr(ui, "_strict_window", False):
             options["strict_window"] = True
-        tree = await controller.reader.reader.read(
+        read = controller.reader.reader.read
+        tree = await read(
             target, scope_kind=snapshot.get("scope_kind"), max_nodes=max_nodes, **options
         )
         (tree,) = controller.reader.number_snapshots((tree,))
         selected = next((ref for ref, node in tree.refs.items() if node == target.node), None)
-        if selected is None or target.node in tree.facts["unread"]:
+        if selected is None or target.node is None or not tree.capture.contains_observed(target.node):
             raise local_failure("the retained element was unconfirmed in this observation", "observation_incomplete")
         state = controller.state(ui)
         # The pipeline shares retained bindings with their owning service.

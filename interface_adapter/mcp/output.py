@@ -14,7 +14,7 @@ from computer_use.interaction.read.delivery.baseline.model import BaselineInput
 from computer_use.interaction.read.delivery.baseline.passes.assemble_baseline import stage as assemble_baseline
 from computer_use.interaction.read.delivery.baseline.passes.publish_observation import stage as publish_observation
 from computer_use.interaction.read.delivery.baseline.pipeline import BaselinePublicationPipeline
-from computer_use.interaction.read.delivery.coverage import confirms_removal
+from computer_use.interaction.read.delivery.coverage import has_unconfirmed_missing
 from computer_use.interaction.read.delivery.diff.baseline import ComparisonDocument
 from computer_use.interaction.read.delivery.diff.model import DeliverySelection
 from computer_use.interaction.read.delivery.diff.pipeline import DeliverySelectionPipeline
@@ -283,9 +283,7 @@ class ObservationOutput:
             for tree in trees:
                 if len(tree.scope) >= 4 and tuple(tree.scope[:4]) in ended:
                     ended_refs.update(tree.prepared.snapshot.refs)
-            if any(ref not in observation["refs"] and ref not in ended_refs and not confirms_removal(
-                previous.get("coverage"), observation.get("coverage"), ref,
-            ) for ref in previous["refs"]):
+            if has_unconfirmed_missing(previous, observation, ended_refs):
                 return False
         if trees:
             if not all(self.presenter.tree_key(previous, tree) in incoming

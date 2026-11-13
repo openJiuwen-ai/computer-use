@@ -11,7 +11,7 @@ from computer_use.pipeline import Effect
 
 if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.images.capture import WindowImage
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
     from computer_use.protocol.records import Record
@@ -42,12 +42,12 @@ class ComponentParts:
     """Collected window facts and pixels with any component-level failures.
 
     Attributes:
-        tree: Semantic snapshot with retained native facts and display-reference bindings.
+        tree: Captured accessibility facts with retained display-reference bindings.
         image: Captured pixels and their original coordinate/identity metadata, when available.
         gaps: Explicit collection failures or omissions retained in the observation.
     """
 
-    tree: SemanticSnapshot | None = None
+    tree: ReadSnapshot | None = None
     image: WindowImage | None = None
     gaps: tuple[ObservationGap, ...] = ()
 

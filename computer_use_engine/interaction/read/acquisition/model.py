@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from computer_use.interaction.read.acquisition.images.capture import WindowImage
     from computer_use.interaction.read.acquisition.images.overview import WindowOverview
     from computer_use.interaction.read.acquisition.menus.query import MenuRead
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.native.contracts import Binding
     from computer_use.native.scopes import WorkingWindow
     from computer_use.protocol.records import NativeDirectory as DirectoryFacts
@@ -67,7 +67,7 @@ class Components:
 
     Attributes:
         source_directory: Catalogue captured with the source facts, before scope rechecking.
-        tree: Semantic snapshot with retained native facts and display-reference bindings.
+        tree: Captured accessibility facts with retained display-reference bindings.
         image: Captured pixels and their original coordinate/identity metadata, when available.
         menus: Menu snapshots collected for the same application scope.
         overview: Related-window preview and its source metadata, when collected.
@@ -76,7 +76,7 @@ class Components:
     """
 
     source_directory: DirectoryFacts
-    tree: SemanticSnapshot | None = None
+    tree: ReadSnapshot | None = None
     image: WindowImage | None = None
     menus: MenuRead | None = None
     overview: WindowOverview | None = None

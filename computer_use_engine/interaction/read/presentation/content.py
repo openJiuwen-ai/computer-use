@@ -9,10 +9,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.identity import freeze
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.presentation.preparation import PreparedSnapshot
+    from computer_use.interaction.read.accessibility.preparation import PreparedSnapshot
     from computer_use.interaction.read.presentation.records import RenderedTree
 
 
@@ -94,13 +94,10 @@ def omit_public_details_hint(prepared: PreparedSnapshot) -> bool:
     Explicit subtrees and diagnostic formatters retain their local instruction.
     The typed source remains in the document and still supplies captured details.
     """
-    request = getattr(prepared, "request", None)
-    return bool(
-        request is not None
-        and request.compact
-        and request.public_api
-        and request.share_descriptions
-        and all(root.source is not None and not root.source.context.get("subtreeRef") for root in prepared.roots)
+    request = prepared.request
+    return (
+        request.compact and request.public_api and request.share_descriptions
+        and not prepared.handle.has_uncompressed_preparation()
     )
 
 
@@ -108,11 +105,10 @@ def render_text(value: DisplayText | str, *, snapshots: Mapping[int, RenderedTre
     """Render a structured field as part of the final output operation."""
     if isinstance(value, str):
         return value
-    from computer_use.interaction.read.presentation.formatting import json_string, number_string
-    from computer_use.interaction.read.presentation.rendering.formatting import (
+    from computer_use.interaction.read.presentation.formatting import (
         field as format_field,
-    )
-    from computer_use.interaction.read.presentation.rendering.formatting import (
+        json_string,
+        number_string,
         quoted as format_quoted,
     )
 

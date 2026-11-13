@@ -9,6 +9,9 @@ failure must not undo alias touches already made for earlier parts.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING
 
 from computer_use.interaction.read.numbering.model import (
@@ -35,17 +38,75 @@ from computer_use.interaction.read.numbering.passes.rewrite_structured_refs impo
 from computer_use.interaction.read.numbering.passes.snapshots_are_empty import (
     stage as snapshots_are_empty,
 )
-from computer_use.interaction.read.presentation.model import SnapshotRenderRequest
-from computer_use.interaction.read.presentation.pipeline import PrepareSnapshotPipeline
-from computer_use.pipeline import Contract, Pipeline, Select, Sequence
+from computer_use.pipeline import Contract, Effect, Pass, Pipeline, Select, Sequence
 from computer_use.pipeline.core import Node
 
 if TYPE_CHECKING:
-    from typing import Iterable
+    from collections.abc import Iterable
+    from collections.abc import Sequence as EventSequence
 
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ProjectionEvent, ReadSnapshot
     from computer_use.interaction.read.presentation.records import ReferenceAllocator
     from computer_use.pipeline.core import Control, Step
+
+
+_LOCAL_COMPRESSION_RULES = frozenset({
+    "promote_description", "merge_editors", "merge_control_labels", "merge_repeated_text",
+    "merge_region_labels", "flatten_redundant_hierarchy", "prune_layout", "prune_empty_rows",
+    "collapse_transparent_groups",
+})
+_SPATIAL_RULES = frozenset(
+    {"associate_spatial_labels", "group_spatial_rows", "describe_spatial_regions", "mark_visual_chains"}
+)
+_RESOURCE_STAGES = frozenset({"PresentationPipeline", "CompressionPipeline", "CompressionIRLifetime"})
+_PURE_EFFECTS = frozenset(PURE)
+_RESOURCE_EFFECTS = _PURE_EFFECTS | {Effect.RESOURCE}
+_PROJECTION_ERRORS = {"KeyError": KeyError, "ValueError": ValueError, "RecursionError": RecursionError}
+
+
+def _emit_projection_trace(control: Control, events: EventSequence[ProjectionEvent]) -> None:
+    """Attach each actual native invocation to its original host diagnostic path."""
+    presentation = control.child("PresentationPipeline")
+    semantic = presentation.child("SemanticPipeline")
+    compression = presentation.child("CompressionPipeline")
+    lifetime = compression.child("CompressionIRLifetime")
+    export = lifetime.child("CompressAndExport")
+    traversal = export.child("CompressionTraversal")
+    spatial = export.child("SpatialOrganizationPipeline")
+    stages = {
+        "PresentationPipeline": presentation,
+        "SemanticPipeline": semantic,
+        "compose_display_semantics": semantic.child("compose_display_semantics"),
+        "build_projection_input": semantic.child("build_projection_input"),
+        "collect_geometry": semantic.child("collect_geometry"),
+        "CompressionPipeline": compression,
+        "build_presentation_ir": compression.child("build_presentation_ir"),
+        "CompressionIRLifetime": lifetime,
+        "CompressAndExport": export,
+        "CompressionTraversal": traversal,
+        "SpatialOrganizationPipeline": spatial,
+    }
+    timestamp, previous_ms = None, None
+    for name, phase, error, timestamp_ms in events:
+        if timestamp_ms != previous_ms:
+            previous_ms = timestamp_ms
+            timestamp = None
+            if timestamp_ms is not None:
+                seconds, milliseconds = divmod(timestamp_ms, 1000)
+                time = datetime.fromtimestamp(seconds, UTC).replace(microsecond=milliseconds * 1000)
+                timestamp = time.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        stage = stages.get(name)
+        if stage is None:
+            parent = traversal if name in _LOCAL_COMPRESSION_RULES else spatial if name in _SPATIAL_RULES else export
+            stage = stages[name] = parent.child(name)
+        effects = _RESOURCE_EFFECTS if name in _RESOURCE_STAGES else _PURE_EFFECTS
+        stage.emit(phase, effects, _PROJECTION_ERRORS[error]() if error is not None else None, timestamp=timestamp)
+
+
+def _preview_native_roots(value: _PartPreview, control: Control) -> _PartPreview:
+    """Collect the visible order from a genuine native root preparation."""
+    observer = partial(_emit_projection_trace, control) if control.diagnostic is not None else None
+    return replace(value, visible_tokens=value.snapshot.preview_tokens(control.remaining, observer))
 
 
 class _PreviewSnapshot(Node["_PartPreview", "_PartPreview"]):
@@ -59,15 +120,16 @@ class _PreviewSnapshot(Node["_PartPreview", "_PartPreview"]):
     """
 
     def __init__(self) -> None:
-        self.presentation = PrepareSnapshotPipeline()
+        self.presentation = Pass(
+            name="PrepareSnapshotRoots",
+            function=_preview_native_roots,
+            contract=Contract(_PartPreview, _PartPreview, PURE),
+        )
         self.children = (self.presentation,)
         super().__init__("PreviewSnapshot", Contract(_PartPreview, _PartPreview, PURE))
 
     def _run(self, value: _PartPreview, control: Control) -> _PartPreview:
-        from dataclasses import replace
-
-        prepared = self.presentation.run(SnapshotRenderRequest(value.snapshot, compact=True), control)
-        return replace(value, prepared=prepared)
+        return self.presentation.run(value, control)
 
     async def _arun(self, value: _PartPreview, control: Control) -> _PartPreview:
         return self._run(value, control)
@@ -99,7 +161,7 @@ class _PreviewAndAssign(Node["NumberingRun", "NumberingRun"]):
         return self._run(value, control)
 
 
-class NumberSnapshotsPipeline(Pipeline["NumberingRequest", "tuple[SemanticSnapshot, ...]"]):
+class NumberSnapshotsPipeline(Pipeline["NumberingRequest", "tuple[ReadSnapshot, ...]"]):
     """Assign shared display aliases to a sequence of native snapshots.
 
     Bind the snapshots to their driver-session allocator and allocate visible references
@@ -110,7 +172,7 @@ class NumberSnapshotsPipeline(Pipeline["NumberingRequest", "tuple[SemanticSnapsh
     def __init__(self) -> None:
         super().__init__(root=self.build())
 
-    def build(self) -> Step[NumberingRequest, tuple[SemanticSnapshot, ...]]:
+    def build(self) -> Step[NumberingRequest, tuple[ReadSnapshot, ...]]:
         return Select(
             name="NumberSnapshotsPipeline",
             selector=snapshots_are_empty(),
@@ -130,10 +192,10 @@ class NumberSnapshotsPipeline(Pipeline["NumberingRequest", "tuple[SemanticSnapsh
 
 
 def number_snapshots(
-    snapshots: Iterable[SemanticSnapshot],
+    snapshots: Iterable[ReadSnapshot],
     references: ReferenceAllocator | None = None,
     *,
     _control: Control | None = None,
-) -> tuple[SemanticSnapshot, ...]:
+) -> tuple[ReadSnapshot, ...]:
     """Number one result's parts without merging their native binding scopes."""
     return NumberSnapshotsPipeline().run(NumberingRequest(tuple(snapshots), references), _control)

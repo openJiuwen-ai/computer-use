@@ -31,7 +31,7 @@ class DeliveredBaselineStore:
             return None
         baseline = loads(decompress(path.read_bytes()).decode("utf-8"))
         if baseline["document"] is not None:
-            baseline["document"] = ComparisonDocument.from_data(baseline["document"])
+            baseline["document"] = ComparisonDocument.from_spill_data(baseline["document"])
         return baseline
 
     def _spill(self, key, baseline):
@@ -40,7 +40,7 @@ class DeliveredBaselineStore:
         path = Path(self.directory.name) / sha256(key.encode()).hexdigest()
         data = dict(baseline)
         if data["document"] is not None:
-            data["document"] = data["document"].to_data()
+            data["document"] = data["document"].spill_data()
         pending = path.with_suffix(".tmp")
         pending.write_bytes(compress(utf8(dumps(data))))
         pending.replace(path)

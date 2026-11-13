@@ -10,7 +10,6 @@ wire DTOs. Native errors keep their effect classification; input is never resent
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import local_failure, pipeline_diagnostic
@@ -41,8 +40,9 @@ from computer_use.native.contracts import (
     StepResult,
 )
 from computer_use.native.lifecycle import CallLifecycle
+from computer_use.interaction.read.accessibility._native import require_read_engine
+from computer_use.interaction.read.accessibility.frame import NativeReadCapture, NativeReadFrame
 from computer_use.native.queries import NativeNodeQuery
-from computer_use.native.semantics import control_capabilities, input_container
 from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.primitives import utf16_length
 from computer_use.protocol.records import relation_end, relation_slots
@@ -528,7 +528,6 @@ class ConnectionPort:
         strict_window=False,
     ):
         """Collect unified observation facts with their separate query scope."""
-        from computer_use.protocol.observation.adapters import decode_driver_reply
 
         request = NativeNodeQuery(
             fields,
@@ -544,23 +543,10 @@ class ConnectionPort:
             focused_element=focused_element,
             strict_window=strict_window,
         )
-        payload, facts = await self._nodes_payload(operation, target, request, timeout_ms)
-        reply = decode_driver_reply(payload)
-        from computer_use.native.query.observed import capture_lookup_facts
-
-        hints = {
-            node["node"]: control_capabilities(self.platform, node, self.capabilities, scope_kind=scope_kind)
-            for node in facts["nodes"]
-        }
-        return replace(
-            reply,
-            metadata=replace(
-                reply.metadata,
-                operation_capabilities=hints,
-                input_containers={node["node"]: input_container(self.platform, node) for node in facts["nodes"]},
-                lookup_facts=capture_lookup_facts(facts),
-            ),
+        payload, _ = await self._nodes_payload(
+            operation, target, request, timeout_ms, decode_response=require_read_engine().open_read_envelope,
         )
+        return NativeReadCapture(payload.capture(scope_kind, tuple(sorted(self.capabilities))))
 
     async def query_nodes(self, operation, target, fields, max_nodes, max_depth, timeout_ms, **options):
         """Read exact native selection evidence for one input-resolution operation."""
@@ -569,8 +555,8 @@ class ConnectionPort:
         return facts
 
     async def _nodes_payload(
-        self, operation: str, target: Binding, request: NativeNodeQuery, timeout_ms: int
-    ) -> tuple[Record, Record]:
+        self, operation: str, target: Binding, request: NativeNodeQuery, timeout_ms: int, *, decode_response=None
+    ) -> tuple[Record | NativeReadFrame, Record | None]:
         self._check(operation)
         query = dict(kind="nodes", fields=list(request.fields), maxNodes=request.max_nodes, maxDepth=request.max_depth)
         focused_element = request.focused_element
@@ -649,8 +635,26 @@ class ConnectionPort:
             "inspect",
             dict(operation=operation, target=encode_fields(target, _BINDING), query=query),
             dict(timeoutMs=timeout_ms),
+            **({"decode_response": decode_response} if decode_response is not None else {}),
         )
         payload = result
+        if decode_response is not None:
+            if not isinstance(payload, NativeReadFrame):
+                raise ValueError("protocol: native read did not return an observation frame")
+            native_page = (
+                (property_name, int(page["limit"]), (page["cursor"], *expected[4:]) if expected else None)
+                if page is not None
+                else None
+            )
+            rows = payload.native.admit_nodes(
+                target.session, target.instance, target.root_window, target.surface, target.node,
+                self.platform, int(request.max_nodes), tuple(request.follow_relations or ()), native_page,
+            )
+            self._store_continuations(
+                (cursor, (session, surface, node, prop, offset, total))
+                for cursor, session, surface, node, prop, offset, total in rows
+            )
+            return payload, None
         from computer_use.protocol.observation.adapters import decode_query_facts
 
         result = decode_query_facts(payload)
@@ -777,25 +781,26 @@ class ConnectionPort:
         return next(key for key, meaning in RELATIONS[self.platform].items() if meaning == "children")
 
     def _remember_continuations(self, result, relations):
-        for relation in relations:
-            if "cursor" in relation:
-                self._continuations[relation["cursor"]] = (
+        self._store_continuations(
+            (
+                relation["cursor"],
+                (
                     result["session"],
                     result["surface"],
                     relation["source"],
                     relation["property"],
                     relation_end(relation),
                     relation["total"],
-                )
+                ),
+            )
+            for relation in relations
+            if "cursor" in relation
+        )
+
+    def _store_continuations(self, rows):
+        self._continuations.update(rows)
         while len(self._continuations) > 512:
             self._continuations.pop(next(iter(self._continuations)))
-
-    async def relation(self, operation, target, relation_property, cursor, limit, timeout_ms):
-        """Collect one normalized relation page and its original query selector."""
-        from computer_use.protocol.observation.adapters import decode_driver_reply
-
-        payload, _ = await self._relation_payload(operation, target, relation_property, cursor, limit, timeout_ms)
-        return decode_driver_reply(payload)
 
     async def query_relation(self, operation, target, relation_property, cursor, limit, timeout_ms):
         """Read exact native relation evidence for an operation's target lookup."""
@@ -871,11 +876,13 @@ class ConnectionPort:
         self._check(operation)
         value = await self.connection.request(
             "prepareObservation",
-            dict(operation=operation, target=encode_fields(target, _BINDING)),
+            {"operation": operation, "target": encode_target(target)},
             dict(timeoutMs=timeout_ms),
         )
         if decode_binding(value["binding"]) != target:
-            raise ValueError("Observation preparation changed its original window")
+            raise ValueError("Observation preparation changed its original target")
+        if ("reopenStatus" in value) != isinstance(target, ApplicationBinding):
+            raise ValueError("Observation preparation returned the wrong kind of receipt")
         return value
 
     async def capture(self, operation, target, max_dimension, timeout_ms, *, kind="window"):

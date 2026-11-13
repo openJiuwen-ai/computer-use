@@ -47,6 +47,18 @@ def checkout_root():
     return root if (root / "pyproject.toml").is_file() and (root / "os_adapter").is_dir() else None
 
 
+def installed_read_engine_unavailable_reason() -> str | None:
+    """Read the optional source build's recorded Rust installation outcome."""
+    status = Path(__file__).parent / "interaction/read/accessibility/_ax_read_status.json"
+    try:
+        reason = json.loads(status.read_bytes()).get("reason")
+    except FileNotFoundError:
+        return None
+    except (AttributeError, OSError, ValueError):
+        return "native_build_failed"
+    return reason if reason in ("native_build_failed", "unsupported_platform") else "native_build_failed"
+
+
 def installed_backend_unavailable_reason() -> str | None:
     """Check wheel resources without preparing a runtime or launching a driver."""
     if checkout_root() is not None:
@@ -69,7 +81,7 @@ def installed_backend_unavailable_reason() -> str | None:
             )
         else:
             return "unsupported_platform"
-        return None if available else "backend_missing"
+        return installed_read_engine_unavailable_reason() if available else "backend_missing"
     except (AttributeError, OSError, ValueError):
         return "backend_missing"
 

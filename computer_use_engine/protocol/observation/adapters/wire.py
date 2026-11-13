@@ -620,14 +620,13 @@ def query_facts(wire: DriverWire) -> dict[str, Any]:
 class DecodedDriverObservation(Mapping[str, Any]):
     """One validated response owned by its request, with reusable parsed evidence.
 
-    Diagnostics retain the original wire record. Scope checks consume query
-    facts, while the immutable semantic reply is built only when requested.
+    Diagnostics retain the original wire record. Scope checks reuse the parsed query
+    facts.
     """
 
     def __init__(self, value: Any) -> None:
         self.wire = DriverWire(value)
         self.facts = query_facts(self.wire)
-        self.reply = None
 
     def __getitem__(self, key: str) -> Any:
         return self.wire.raw[key]

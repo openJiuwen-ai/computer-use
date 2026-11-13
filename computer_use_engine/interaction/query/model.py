@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from computer_use.interaction.requests import FindElement
 
 if TYPE_CHECKING:
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot
     from computer_use.interaction.records import Remaining
     from computer_use.native.contracts import Binding
     from computer_use.native.lifecycle import OperationLease
@@ -47,4 +47,4 @@ class FindLease:
     plan: FindPlan
     read: OperationLease[Binding]
     selected: Binding | None = None
-    tree: SemanticSnapshot | None = None
+    tree: ReadSnapshot | None = None

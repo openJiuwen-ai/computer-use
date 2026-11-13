@@ -11,3 +11,6 @@ recursive-include os_adapter/windows/Sources *.cs
 recursive-include os_adapter/windows/Build *.cs *.py
 recursive-include os_adapter/windows/Workers *.cs
 recursive-include os_adapter/assets/agent-pointer *.svg *.json
+include computer_use_engine/interaction/read/accessibility/Cargo.toml computer_use_engine/interaction/read/accessibility/Cargo.lock computer_use_engine/interaction/read/accessibility/rust-toolchain.toml
+include computer_use_engine/interaction/read/accessibility/build.rs computer_use_engine/interaction/read/accessibility/build_unicode.py
+recursive-include computer_use_engine/interaction/read/accessibility/src *.rs

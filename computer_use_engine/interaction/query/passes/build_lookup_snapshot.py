@@ -13,19 +13,21 @@ from computer_use.pipeline import Contract, Pass
 if TYPE_CHECKING:
     from typing import Callable
 
-    from computer_use.interaction.read.facts.snapshot import SemanticSnapshot
+    from computer_use.interaction.read.accessibility.snapshot import ReadSnapshot, RetainedElement
     from computer_use.interaction.records import ElementSnapshot
     from computer_use.native.contracts import Binding
     from computer_use.pipeline.core import Control
 
 
 def create(
-    *, snapshots: Callable[[Binding, SemanticSnapshot], dict[str, ElementSnapshot]]
+    *,
+    native_snapshots: Callable[[Binding, str, list[RetainedElement]], dict[str, ElementSnapshot]],
 ) -> Callable[[FindLease, Control], ElementSnapshot]:
     """Bind the snapshot builder used to retain a resolved element.
 
     Args:
         snapshots: Build reference-indexed snapshots from a native binding and tree.
+        native_snapshots: Build the same retained snapshots from native binding rows.
     """
 
     def snapshot(value: FindLease, control: Control) -> ElementSnapshot:
@@ -35,14 +37,11 @@ def create(
         Its display reference is cleared because lookup has not published a
         number for this result.
         """
-        ref = next(
-            (
-                ref
-                for ref, node in cast("SemanticSnapshot", value.tree).refs.items()
-                if node == cast("Binding", value.selected).node
-            )
-        )
-        result = snapshots(cast("Binding", value.selected), cast("SemanticSnapshot", value.tree))[ref]
+        tree = cast("ReadSnapshot", value.tree)
+        selected = cast("Binding", value.selected)
+        rows = tree.retained(selected, include_public_pages=False)
+        row = next(row for row in rows if row["node"] == selected.node)
+        result = native_snapshots(selected, tree.session, [row])[row["reference"]]
         result["source"]["ref"] = None
         if result.get("scope_kind") == "applicationMenu":
             result["menu_window_identity"] = value.plan.state.menu_window_identity

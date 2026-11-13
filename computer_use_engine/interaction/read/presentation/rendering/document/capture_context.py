@@ -5,11 +5,11 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-import math
 
-from computer_use.interaction.read.facts.capture_companion import sharing_control_signature
+from computer_use.interaction.read.acquisition.view_facts import captured_metadata, captured_node, field
 from computer_use.interaction.read.presentation.content import DisplayText
 from computer_use.interaction.read.presentation.document import DisplayDocument, DisplayTree
 from computer_use.interaction.read.presentation.headers import ImageHeader, InterfaceHeader, MemberHeading
@@ -39,9 +39,11 @@ class CaptureCompanion:
     after: str
 
 
-def _bounds(node: NativeNode) -> Geometry | None:
+def _bounds(node: NativeNode | Mapping[str, object] | None) -> Geometry | None:
     """Require a complete finite native frame in its original coordinate space."""
-    value = node.geometry.get("bounds")
+    value = field(node, "geometry", {}).get("bounds")
+    if isinstance(value, Mapping):
+        value = Geometry(**value)
     if value is None or value.valid is not True:
         return None
     for component in (value.x, value.y, value.width, value.height):
@@ -113,26 +115,18 @@ def _directory_members(directory: Mapping[str, object] | None) -> tuple[Mapping[
 def _signature(tree: DisplayTree, window: MemberHeading) -> tuple[str, str] | None:
     """Check the complete small AppKit sharing-control signature without application names."""
     snapshot = tree.prepared.snapshot
-    native = snapshot.native
+    native = captured_metadata(snapshot)
     if native.backend != "macos" or native.session != (window.target or {}).get("session") or len(native.roots) != 1:
         return None
     token = native.roots[0]
-    signature = sharing_control_signature(native, token)
-    if signature is None or token != (window.target or {}).get("node"):
+    if token != (window.target or {}).get("node"):
+        return None
+    signature = snapshot.capture.capture_companion_evidence(token)
+    if signature is None:
         return None
     _, button_token = signature
-    root, button = native.nodes[token], native.nodes[button_token]
-    if root.name != "Window":
-        return None
-    for issue in native.issues:
-        path = tuple(issue.path)
-        if len(path) < 2 or path[0] != "nodes":
-            return None
-        if path[1] not in (token, button_token):
-            continue
-        relative = path[2:]
-        if not relative or relative[0] in ("name", "geometry", "actions"):
-            return None
+    root = captured_node(snapshot, token, "geometry")
+    button = captured_node(snapshot, button_token, "geometry")
     frame, hit = _bounds(root), _bounds(button)
     if frame is None or hit is None or frame.space != hit.space:
         return None
@@ -246,15 +240,18 @@ def _evidence(
     tree = _body(document, position, window)
     parent_position = positions.get(parent.ref)
     parent_tree = _body(document, parent_position, parent) if parent_position is not None else None
-    if tree is None or parent_tree is None or not parent_tree.prepared.snapshot.native.roots:
+    if tree is None or parent_tree is None:
+        return None
+    parent_snapshot, child_snapshot = parent_tree.prepared.snapshot, tree.prepared.snapshot
+    parent_roots = captured_metadata(parent_snapshot).roots
+    if not parent_roots:
         return None
     signature = _signature(tree, window)
     if signature is None:
         return None
-    native = parent_tree.prepared.snapshot.native
-    parent_node = native.nodes.get(native.roots[0])
-    child_node = tree.prepared.snapshot.native.nodes[tree.prepared.snapshot.native.roots[0]]
-    frame, enclosing = _bounds(child_node), _bounds(parent_node) if parent_node is not None else None
+    parent_node = captured_node(parent_snapshot, parent_roots[0], "geometry")
+    child_node = captured_node(child_snapshot, captured_metadata(child_snapshot).roots[0], "geometry")
+    frame, enclosing = _bounds(child_node), _bounds(parent_node)
     if frame is None or enclosing is None or frame.space != enclosing.space:
         return None
     if not 0 <= frame.x - enclosing.x <= min(180, enclosing.width / 2) or not 0 <= frame.y - enclosing.y <= 48:

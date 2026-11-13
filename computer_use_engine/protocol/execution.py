@@ -48,6 +48,7 @@ binding = obj(
     )
 )
 application_binding = obj(dict(session=identity, application=identity))
+observation_preparation_target = union(binding, application_binding)
 global_target = obj({"session": identity, "global": boolean()})
 operation_target = union(binding, application_binding, global_target)
 screen_point = obj({"x": number(), "y": number()})
@@ -59,8 +60,10 @@ def decode_point_location_request(value):
 
 
 def decode_observation_preparation_request(value):
-    result = obj(dict(operation=identity, target=binding)).parse(value)
+    result = obj({"operation": identity, "target": observation_preparation_target}).parse(value)
     target = result["target"]
+    if "application" in target:
+        return result
     if any(target[key] is None for key in ("instance", "rootWindow", "surface")) or any(
         target[key] is not None for key in ("node", "capture")
     ):
@@ -628,9 +631,10 @@ _schemas = {
     "prepareObservation": obj(
         dict(
             kind=enum("observationPreparation"),
-            binding=binding,
+            binding=observation_preparation_target,
             activation=enum("notRequested", "requested"),
             raiseStatus=enum("notRequested", "requested", "unsupported", "unknown"),
+            reopenStatus=enum("requested").optional(),
             foreground=boolean(),
             redraw=enum("unknown"),
         )

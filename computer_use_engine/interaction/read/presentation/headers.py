@@ -11,7 +11,7 @@ from typing import Literal
 
 from computer_use.interaction.read.delivery.image_caption import window_state_notes
 from computer_use.interaction.read.presentation.formatting import json_string
-from computer_use.interaction.read.presentation.ir import freeze
+from computer_use.identity import freeze
 from computer_use.json import dumps
 
 

@@ -18,6 +18,7 @@ from computer_use.interaction.read.delivery.diff.passes.plan_observation_diff im
 from computer_use.interaction.read.delivery.diff.passes.select_full_or_diff import (
     stage as select_full_or_diff,
 )
+from computer_use.interaction.read.presentation.delta import RustDeltaPlan
 from computer_use.interaction.read.presentation.document import DisplayDocument
 from computer_use.interaction.read.presentation.rendering.document.model import DocumentRenderRequest
 from computer_use.interaction.read.presentation.rendering.document.pipeline import DocumentRenderingPipeline
@@ -43,6 +44,10 @@ class _RenderPlannedDelivery(Node["PlannedDelivery", "str"]):
 
     def _run(self, value: PlannedDelivery, control: Control) -> str:
         observation = value.observation
+        plan = value.plan
+        summaries = plan.summaries if isinstance(plan, RustDeltaPlan) else (
+            None if tree is None else (len(tree.changes), len(tree.missing), len(tree.context)) for tree in plan.trees
+        )
         diagnostic(
             {
                 "kind": "observation_delivery_plan",
@@ -51,14 +56,14 @@ class _RenderPlannedDelivery(Node["PlannedDelivery", "str"]):
                 "reason": value.plan.reason,
                 "trees": [
                     {"mode": "full", "reason": "new-or-replaced-native-scope"}
-                    if tree is None
+                    if counts is None
                     else {
-                        "mode": "diff" if tree.changes or tree.missing else "unchanged",
-                        "changed": len(tree.changes),
-                        "missing": len(tree.missing),
-                        "context": len(tree.context),
+                        "mode": "diff" if counts[0] or counts[1] else "unchanged",
+                        "changed": counts[0],
+                        "missing": counts[1],
+                        "context": counts[2],
                     }
-                    for tree in value.plan.trees
+                    for counts in summaries
                 ],
             }
         )

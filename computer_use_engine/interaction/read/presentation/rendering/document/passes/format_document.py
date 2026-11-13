@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from computer_use.interaction.read.presentation.model import PURE
+from computer_use.interaction.read.accessibility.preparation import PURE
 from computer_use.interaction.read.presentation.rendering.document.formatting import format_document
 from computer_use.interaction.read.presentation.rendering.document.model import RenderedDocumentInput
 from computer_use.pipeline import Contract, Pass
