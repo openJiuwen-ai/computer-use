@@ -211,6 +211,7 @@ def test_missing_sheet_stops_before_desktop_and_saved_readback_detects_unrelated
         ("refused", "none", True),
         ("stopped", "unknown", False),
         ("failed", "unknown", False),
+        ("stopped", None, False),
     ],
 )
 def test_fallback_respects_the_whole_program_effect(tmp_path, status, effect, can_fallback):
@@ -230,7 +231,7 @@ def test_fallback_respects_the_whole_program_effect(tmp_path, status, effect, ca
                                 "definition": published.definition,
                                 "parameters": parameters,
                                 "status": status,
-                                "effect": effect,
+                                **({"effect": effect} if effect is not None else {}),
                                 "detail": "Test outcome",
                             }
                         },
@@ -239,6 +240,7 @@ def test_fallback_respects_the_whole_program_effect(tmp_path, status, effect, ca
             )
             result = await toolkit.run_program(calc.ID, parameters)
             assert result["fallback_allowed"] is can_fallback
+            assert result["effect"] == (effect or "unknown")
             assert compiler._run_code.await_count == 1
 
     asyncio.run(scenario())

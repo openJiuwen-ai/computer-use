@@ -63,11 +63,11 @@ def _check_evidence(artifact, report):
                 continue
             raise ValueError("Missing case acceptance")
         evidence = acceptance["evidence"]
-        if (
-            acceptance["condition"] != artifact.definition["acceptance"]
-            or acceptance["scope"] != scope
-            or evidence["execution_id"] != case["execution_id"]
-            or evidence["expected_sha256"] != expected_hash
+        checked_scope = (acceptance["condition"], acceptance["scope"])
+        checked_execution = (evidence["execution_id"], evidence["expected_sha256"])
+        if checked_scope != (artifact.definition["acceptance"], scope) or checked_execution != (
+            case["execution_id"],
+            expected_hash,
         ):
             raise ValueError("Validation receipt did not match its fixture and execution")
 
@@ -114,7 +114,8 @@ class Library:
         (path / "source.json").write_text(canonical(evidence) + "\n", encoding="utf-8")
         return path
 
-    def function_draft(self, path, proposal, *, read_only):
+    @staticmethod
+    def function_draft(path, proposal, *, read_only):
         metadata, examples = workflow.prepare(proposal, read_only=read_only)
         source = workflow.program(proposal["code"], metadata)
         digest = hashlib.sha256(source).hexdigest()
@@ -140,7 +141,8 @@ class Library:
         (path / "README.md").write_text(workflow.readme(metadata), encoding="utf-8")
         return Artifact.read(path), metadata, examples
 
-    def save_check(self, path, report):
+    @staticmethod
+    def save_check(path, report):
         with TemporaryDirectory(dir=path, prefix=".check-") as directory:
             pending = Path(directory) / "check.json"
             pending.write_text(canonical(report) + "\n", encoding="utf-8")

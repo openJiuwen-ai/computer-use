@@ -43,10 +43,12 @@ class Compiler:
     def last_task_id(self):
         return self._sources[-1].id if self._sources else None
 
-    def begin(self, task_id, conversation_id, query):
+    @staticmethod
+    def begin(task_id, conversation_id, query):
         return SourceTask(task_id or uuid4().hex, conversation_id, query[:4096], [])
 
-    def record(self, source, arguments, data):
+    @staticmethod
+    def record(source, arguments, data):
         raw = data.get("mcp_result")
         progress = data.get("execution_progress")
         if not isinstance(raw, dict):
@@ -104,18 +106,11 @@ class Compiler:
         return entries or None
 
     def latest_source(self, task_id=None, conversation_id=None):
-        return next(
-            (
-                source
-                for source in reversed(self._sources)
-                if (
-                    source.id == task_id
-                    if task_id
-                    else conversation_id is None or source.conversation_id == conversation_id
-                )
-            ),
-            None,
-        )
+        if task_id:
+            return next((source for source in reversed(self._sources) if source.id == task_id), None)
+        if conversation_id is None:
+            return self._sources[-1] if self._sources else None
+        return next((source for source in reversed(self._sources) if source.conversation_id == conversation_id), None)
 
     async def compile_task(self, model, task_id=None, *, conversation_id=None, parameters=None):
         source = self.latest_source(task_id, conversation_id)
@@ -286,20 +281,17 @@ class Compiler:
         if reply.get("definition") != artifact.definition or reply.get("parameters") != parameters:
             # A worker can reject an incompatible local version before loading or executing it.
             if reply.get("status") == "refused" and reply.get("effect") == "none" and not progress.get("receipts"):
-                return _refused(reply["detail"])
+                return _refused(reply.get("detail") or "The worker refused this program revision")
             return _unconfirmed("The result does not identify the selected revision and parameters")
-        if reply.get("status") == "succeeded" and not workflow.confirmed(artifact, parameters, reply):
+        status, effect = reply.get("status"), reply.get("effect")
+        if effect not in ("none", "confirmed", "unknown"):
+            return _unconfirmed("The worker did not report a valid execution effect")
+        if status == "succeeded" and not workflow.confirmed(artifact, parameters, reply):
             return _unconfirmed("The outcome was not independently verified for this execution")
-        result = {**reply, "mcp_progress": progress}
-        if result["effect"] == "none" and workflow.had_input({"progress": progress, "content": ""}):
-            result["effect"] = "unknown"
-        result["fallback_allowed"] = result["effect"] == "none" and reply.get("status") in (
-            "refused",
-            "stopped",
-            "failed",
-            "unconfirmed",
-        )
-        return result
+        if effect == "none" and workflow.had_input({"progress": progress, "content": ""}):
+            effect = "unknown"
+        fallback_allowed = effect == "none" and status in ("refused", "stopped", "failed", "unconfirmed")
+        return {**reply, "effect": effect, "mcp_progress": progress, "fallback_allowed": fallback_allowed}
 
 
 def _catalog_entry(program_id, metadata, *, draft=False):
@@ -377,8 +369,9 @@ async def _infer(model, evidence, *, repair=None):
                     "computer.list_windows(app_name=...).windows by its observed title or context, then use "
                     "computer.app(row.app_id) and pass window=row.window_ref when a specific window is needed. "
                     "For every element use app.element(path, window=...) with an explicit semantic path, such as "
-                    "[{'role': 'button', 'name': 'Save'}]. Use observed roles, accessible names or stable accessibility "
-                    "identifiers, with parent segments to disambiguate. Never store or extract numeric element refs "
+                    "[{'role': 'button', 'name': 'Save'}]. Use observed roles, accessible names or stable "
+                    "accessibility identifiers, with parent segments to disambiguate. "
+                    "Never store or extract numeric element refs "
                     "from the tree. Re-query after the target UI changes. App reads return state.text. Element "
                     "read_text returns .text. "
                     "Use App or Element operations where the recorded route supports them. Preserve only methods and "
@@ -397,7 +390,8 @@ async def _infer(model, evidence, *, repair=None):
                     "that show the successful route and outcome. "
                     "End that selection at the confirmed business outcome, before unrelated actions or dismissal of "
                     "a confirmation. The task is already complete. Compile does not repeat its writes. "
-                    'If the record cannot support a usable function, return {"unsupported":"specific missing evidence"}. '
+                    "If the record cannot support a usable function, "
+                    'return {"unsupported":"specific missing evidence"}. '
                     f"Specialized Calc profile: {calc.DESCRIPTION}"
                 ),
             },

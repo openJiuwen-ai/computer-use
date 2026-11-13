@@ -29,12 +29,13 @@ async def _dispatch(computer, operation, bundle, parameters):
         (path / "manifest.json").write_text(canonical(bundle["manifest"]), encoding="utf-8")
         (path / "program.py").write_text(bundle["source"], encoding="utf-8")
         artifact = Artifact.read(path)
-        if (
-            artifact.definition != bundle["definition"]
-            or artifact.definition["id"] != calc.ID
-            or artifact.manifest["constraints"] != calc.revision()
-            or artifact.source != calc.PROGRAM.encode()
-        ):
+        definition = artifact.definition
+        matching_bundle = definition == bundle["definition"] and definition["id"] == calc.ID
+        matching_implementation = (artifact.manifest["constraints"], artifact.source) == (
+            calc.revision(),
+            calc.PROGRAM.encode(),
+        )
+        if not matching_bundle or not matching_implementation:
             return {"status": "refused", "effect": "none", "detail": "Compile implementation differs on the MCP host"}
         parameters = artifact.parameters(parameters)
         if operation == "check":

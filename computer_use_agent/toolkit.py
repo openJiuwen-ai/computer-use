@@ -145,7 +145,7 @@ class ComputerUseToolkit:
                         "program_id": {"type": "string", "description": "Program ID from the offered catalog."},
                         "parameters": {
                             "type": "object",
-                            "description": "Current request values using the offered input schema. Use {} for no inputs.",
+                            "description": "Use the offered input schema. Supply {} for a function without inputs.",
                         },
                         "reply_language": {
                             "type": "string",
@@ -164,7 +164,10 @@ class ComputerUseToolkit:
                     DesktopTool(
                         self,
                         name="compile_task",
-                        description="Compile the last completed desktop task in this conversation. Use only on explicit request.",
+                        description=(
+                            "Compile the last completed desktop task in this conversation. "
+                            "Use only on explicit request."
+                        ),
                         properties={},
                         required=[],
                     )

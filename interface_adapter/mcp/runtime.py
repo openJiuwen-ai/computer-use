@@ -763,10 +763,11 @@ class Runtime:
         self.send(result)
         return result
 
-    def report_result(self, value):
+    def report_result(self, value) -> None:
         """Deliver one structured result from the current script."""
         if not self.executor.is_owner:
-            return self.executor.call(self.report_result, value)
+            self.executor.call(self.report_result, value)
+            return
         run = _runs.get()
         if run is None or not run["active"] or run["phase"] != "code":
             raise RuntimeError("No active script to report a result for.")

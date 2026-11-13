@@ -95,14 +95,11 @@ def _validate_code(code, method, parameters):
     if entry is None:
         raise ValueError(f"The module must define {method}(computer, *, ...)")
     args = entry.args
-    if (
-        [arg.arg for arg in (*args.posonlyargs, *args.args)] != ["computer"]
-        or args.defaults
-        or args.vararg
-        or args.kwarg
-        or {arg.arg for arg in args.kwonlyargs} != set(parameters)
-        or any(default is not None for default in args.kw_defaults)
-    ):
+    positional = [arg.arg for arg in (*args.posonlyargs, *args.args)]
+    keyword_only = {arg.arg for arg in args.kwonlyargs}
+    has_defaults = bool(args.defaults) or any(default is not None for default in args.kw_defaults)
+    has_variadic = args.vararg is not None or args.kwarg is not None
+    if (positional, keyword_only) != (["computer"], set(parameters)) or has_defaults or has_variadic:
         raise ValueError(f"{method} must take computer and exactly the declared keyword-only inputs")
 
     postponed = any(isinstance(node, ast.ImportFrom) and node.module == "__future__" for node in tree.body)
@@ -113,34 +110,26 @@ def _validate_code(code, method, parameters):
             raise ValueError("Use public SDK attributes")
         if isinstance(node, (ast.Import, ast.ImportFrom)) and node not in tree.body:
             raise ValueError("Keep imports at module scope")
-        if not postponed and (
-            isinstance(node, ast.arg)
-            and node.annotation is not None
-            or isinstance(node, ast.FunctionDef)
-            and node.returns is not None
-        ):
+        annotation = None
+        if isinstance(node, ast.arg):
+            annotation = node.annotation
+        elif isinstance(node, ast.FunctionDef):
+            annotation = node.returns
+        if not postponed and annotation is not None:
             raise ValueError("Use from __future__ import annotations for function annotations")
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and (
-                (
-                    node.func.attr in {"app", "close_window"}
-                    and node.args
-                    and isinstance(node.args[0], ast.Constant)
-                    and type(node.args[0].value) is int
-                )
-                or any(
-                    arg.arg == "window" and isinstance(arg.value, ast.Constant) and type(arg.value.value) is int
-                    for arg in node.keywords
-                )
-            )
-        ):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        argument = node.args[0] if node.args else None
+        window = next((arg.value for arg in node.keywords if arg.arg == "window"), None)
+        uses_numeric_app_or_close = node.func.attr in {"app", "close_window"} and _is_numeric_reference(argument)
+        if uses_numeric_app_or_close or _is_numeric_reference(window):
             raise ValueError("Resolve application and window references from the current desktop")
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "element":
-            selector = next((arg.value for arg in node.keywords if arg.arg == "target"), None)
-            if node.args:
-                selector = node.args[0]
+        if node.func.attr == "element":
+            selector = (
+                argument
+                if argument is not None
+                else next((arg.value for arg in node.keywords if arg.arg == "target"), None)
+            )
             if selector is not None:
                 try:
                     value = ast.literal_eval(selector)
@@ -156,6 +145,10 @@ def _validate_code(code, method, parameters):
                 raise ValueError(f"{symbol.get_name()} is undeclared in the function module")
         scopes.extend(scope.get_children())
     compile(code, "program.py", "exec")
+
+
+def _is_numeric_reference(node):
+    return isinstance(node, ast.Constant) and type(node.value) is int
 
 
 def _literal(node, purpose):
@@ -186,13 +179,9 @@ def prepare(proposal, *, read_only):
         raise TypeError("Function inputs must be an object")
     examples, parameters = {}, {}
     for name, spec in inputs.items():
-        if (
-            not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name)
-            or name == "computer"
-            or keyword.iskeyword(name)
-            or not isinstance(spec, dict)
-            or set(spec) != {"value", "meaning"}
-        ):
+        valid_name = re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name) and name != "computer" and not keyword.iskeyword(name)
+        valid_spec = isinstance(spec, dict) and set(spec) == {"value", "meaning"}
+        if not valid_name or not valid_spec:
             raise ValueError("Each input needs a name, original scalar value and meaning")
         _text(spec["meaning"], f"meaning of {name}", 512)
         value = spec["value"]
@@ -282,7 +271,7 @@ def verification(metadata, inputs):
             raise ValueError("File verification needs an absolute path")
     if op == "list_apps":
         fields.add("running_only")
-        if type(step.get("running_only", False)) is not bool:
+        if not isinstance(step.get("running_only", False), bool):
             raise ValueError("running_only must be boolean")
     for field in ("contains", "absent"):
         markers = step.get(field, [])
@@ -322,13 +311,15 @@ def check_history(metadata, examples, evidence, execution_ids):
     step = verification(metadata, examples)
     if not isinstance(execution_ids, list) or not execution_ids or any(type(item) is not int for item in execution_ids):
         raise ValueError("Name the successful source execution IDs that support the function")
-    calls = [
-        call
-        for call in evidence["calls"]
-        if call["progress"].get("executionId") in execution_ids
-        and not call["is_error"]
-        and call["progress"].get("completion") == "finished"
-    ]
+    calls = []
+    for call in evidence["calls"]:
+        progress = call["progress"]
+        if (
+            progress.get("executionId") in execution_ids
+            and progress.get("completion") == "finished"
+            and not call["is_error"]
+        ):
+            calls.append(call)
     if {call["progress"]["executionId"] for call in calls} != set(execution_ids):
         raise ValueError("The function cites an incomplete or unsuccessful source execution")
     if not metadata["read_only"] and not any(had_input(call) for call in calls):
@@ -372,12 +363,14 @@ class _Desktop:
         if name not in _HANDLES | _READS | _WRITES | {"point"} or name == "read_file":
             raise AttributeError(name)
         operation = getattr(self._target, name)
+        read_only_app_lookup = self._root and name == "app" and self._read_only
+        can_report_launch = name == "read" and not self._root and not self._read_only
 
         def invoke(*args, **kwargs):
             if name in _HANDLES:
                 if name == "element":
                     _require_element_path(args[0] if args else kwargs.get("target"))
-                if self._root and name == "app" and self._read_only and (args or "selector" in kwargs):
+                if read_only_app_lookup and (args or "selector" in kwargs):
                     selector = args[0] if args else kwargs.pop("selector")
                     matches = [
                         row
@@ -395,7 +388,7 @@ class _Desktop:
                     if error.effect != "none":
                         self._writes.append({"method": name, "effect": error.effect})
                     raise
-                if name == "read" and not self._root and not self._read_only and "\nLaunch: " in "\n" + value.text:
+                if can_report_launch and "\nLaunch: " in "\n" + value.text:
                     self._writes.append({"method": "launch", "effect": "unknown"})
                 return value
             if self._read_only:

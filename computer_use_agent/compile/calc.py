@@ -72,12 +72,13 @@ def snapshot(path):
         for sheet in book.worksheets:
             if sheet.max_row is None or sheet.max_column is None or sheet.max_row * sheet.max_column > 200_000:
                 raise OutOfScope("The worksheet dimensions exceed the bounded verifier")
-            result[sheet.title] = {
-                cell.coordinate: (cell.data_type, cell.value, cell.number_format)
-                for row in sheet.iter_rows()
-                for cell in row
-                if cell.value is not None or getattr(cell, "number_format", None) not in (None, "General")
-            }
+            cells = {}
+            for row in sheet.iter_rows():
+                for cell in row:
+                    number_format = getattr(cell, "number_format", None)
+                    if cell.value is not None or number_format not in (None, "General"):
+                        cells[cell.coordinate] = (cell.data_type, cell.value, number_format)
+            result[sheet.title] = cells
         return result
     finally:
         book.close()
@@ -155,13 +156,9 @@ async def format_decimals(ctx, computer, parameters):
     await ctx.step("confirm range", lambda: app.press_key("Return", window=window), write=True)
     text = await read(window, "read selected cells")
     ctx.check("selected worksheet", "TRUE" if re.search(table, text, re.MULTILINE) else "UNKNOWN")
-    selected = {
-        address
-        for flags, address in re.findall(
-            r"(?:^|\|)\s*\d+ text field \(([^\n)]+)\) ([A-Z]+\d+)(?=[:, \n|]|$)", text, re.MULTILINE
-        )
-        if "selected" in flags.split(", ")
-    }
+    cell_pattern = r"(?:^|\|)\s*\d+ text field \(([^\n)]+)\) ([A-Z]+\d+)(?=[:, \n|]|$)"
+    reported_cells = re.findall(cell_pattern, text, re.MULTILINE)
+    selected = {address for flags, address in reported_cells if "selected" in flags.split(", ")}
     ctx.check("selected range", "TRUE" if cells == selected else "UNKNOWN", selected=sorted(selected))
 
     await ctx.step("open Format Cells", lambda: app.press_key("super+1", window=window), write=True)
