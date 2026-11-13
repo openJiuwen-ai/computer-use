@@ -1,12 +1,8 @@
 # 开发打包
 
-先按[源码构建指南](docs/build-from-source.md)准备目标系统的工具链、运行依赖和所需 CPython 版本。wheel 包含对应 Python ABI 的无障碍读取扩展；为不同平台或 Python 小版本分别出包。
+从源码生成、安装和验证单个平台的 wheel，请按[源码构建指南](docs/build-from-source.md)操作。若还需生成源码发行包（sdist），在该指南第 2 步的最后一条命令中省略 `--wheel`。
 
-在目标主机上执行以下命令构建源码发行包和 wheel。若本机驱动或 Rust 读取扩展编译失败，源码 wheel 仍可安装，并记录 Computer Use 不可用的原因。正式发布使用经过校验的驱动和 Rust 制品。
-
-```bash
-uv run --python 3.12 --no-dev --group build python -m build
-```
+正式发布使用经过校验的驱动和 Rust 制品。wheel 包含对应 Python ABI 的无障碍读取扩展，为不同平台或 Python 小版本分别出包。
 
 如需分开构建和组包，在每个目标主机上构建驱动，再为要发布的每种 Python ABI 构建一份读引擎制品。将两类制品放入同一目录后，在组包主机运行组包命令。例如：
 

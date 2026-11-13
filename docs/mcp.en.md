@@ -94,7 +94,7 @@ below, and check the interface text and screenshot. Grant the required platform
 permissions as described above. Use `computer_use_reset` to clear the current Python
 execution session.
 
-**3. Reload after source changes.** Follow the [source build guide](build-from-source.en.md#3-verify-and-update-the-installation) to update Python, Rust, or the driver, then restart the MCP connection.
+**3. Reload after source changes.** Follow the [source build guide](build-from-source.en.md#local-development) to update Python, Rust, or the driver, then restart the MCP connection.
 
 On macOS, App and Element operations use object or directed input. Call a direct Computer method for global
 input. Add `--no-allow-global-input` to the connector's `args` to restrict global input. The target computer
