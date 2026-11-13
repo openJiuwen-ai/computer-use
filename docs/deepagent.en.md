@@ -132,6 +132,6 @@ the [X11 Screen Saver Extension](https://www.x.org/releases/X11R7.7/doc/scrnsave
 
 ## 6. Update the source
 
-Follow the [source build guide](build-from-source.en.md#3-verify-and-update-the-installation) to update Python, Rust, or the driver. If the host project uses a separate environment, update its installation too. Then restart the application or recreate the Agent/Toolkit session.
+Follow the [source build guide](build-from-source.en.md#local-development) to update Python, Rust, or the driver. If the host project uses a separate environment, update its installation too. Then restart the application or recreate the Agent/Toolkit session.
 
 See the [MCP interface reference](mcp.en.md#4-interface-reference) for engine calls and observations, and the [packaging guide](../PACKAGING.md) for development packages.

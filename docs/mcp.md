@@ -85,7 +85,7 @@ print(computer.list_apps())
 随后可选择一个有窗口的应用，执行下文的 `app.read(view="both")`，核对界面文字与截图，
 并按前述说明授予所需平台权限。`computer_use_reset` 可用于清空当前 Python 执行会话。
 
-**3. 更新源码后重新加载。** 按[源码构建指南](build-from-source.md#3-验证与更新)更新 Python、Rust 或驱动，再重启 MCP 连接。
+**3. 更新源码后重新加载。** 按[源码构建指南](build-from-source.md#本地开发)更新 Python、Rust 或驱动，再重启 MCP 连接。
 
 macOS 的 App 和 Element 操作使用对象或定向输入。需要全局输入时，显式使用 Computer 的直接输入方法。
 在连接器的 `args` 加上 `--no-allow-global-input` 可限制全局输入。系统权限仍需在目标电脑授权。

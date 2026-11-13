@@ -24,6 +24,18 @@ Computer Use 是 openJiuwen 智能体系统服务层（Agent System Service）�
 
 ## 快速开始
 
+### 运行要求
+
+在要操作的电脑上运行 Computer Use，使用已登录且未锁屏的图形桌面会话。
+
+| 平台 | 系统版本与运行条件 |
+| --- | --- |
+| macOS | macOS 14.0（Sonoma）及以上，支持 Apple 芯片和 Intel Mac。读取无障碍树和控制应用需要辅助功能权限，截图需要屏幕录制权限。 |
+| Windows | Windows 10 1903（Build 18362）及以上，或 Windows 11，均为 x64。驱动需要 .NET Framework 4.8 或 4.8.1。 |
+| Linux | 使用 glibc 的 x86_64 或 ARM64 Linux。驱动需要 PyGObject、AT-SPI 2、图形会话的 D-Bus，以及 X11 和 xkbcommon 库。Debian 13 自带的 AT-SPI 已验证，Debian 12 自带的版本可能导致应用枚举超时。截图和模拟鼠标键盘输入需要 X11 会话。Wayland 下可读取应用提供的无障碍树并执行其无障碍动作。预编译包的 glibc 版本要求取决于具体制品。 |
+
+SDK 和 MCP 使用标准版 CPython 3.11–3.15，DeepAgent 使用 CPython 3.11–3.13。预编译 wheel 须与 Python 小版本和系统架构匹配。Linux 驱动还需要能加载 PyGObject 的系统 Python 3.11 或更高版本。依赖安装和构建步骤见[源码构建指南](docs/build-from-source.md)。
+
 ### 一句话接入现有 Agent
 
 将对应文案发送给能修改项目代码、执行命令的编程 Agent：

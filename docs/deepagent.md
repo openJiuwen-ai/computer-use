@@ -131,6 +131,6 @@ Agent 在第一次请求模型前调用一次应用目录接口，确认 MCP 和
 
 ## 6. 更新源码
 
-按[源码构建指南](build-from-source.md#3-验证与更新)更新 Python、Rust 或驱动。若宿主项目通过独立的环境引用本仓库，也需在该环境更新安装，再重启应用或重新创建 Agent／Toolkit 会话。
+按[源码构建指南](build-from-source.md#本地开发)更新 Python、Rust 或驱动。若宿主项目通过独立的环境引用本仓库，也需在该环境更新安装，再重启应用或重新创建 Agent／Toolkit 会话。
 
 引擎调用与观察行为见[MCP 指南中的接口参考](mcp.md#4-接口使用参考)；开发出包见[打包说明](../PACKAGING.md)。

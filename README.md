@@ -24,6 +24,18 @@ Developers can adopt it in two ways:
 
 ## Quick Start
 
+### Runtime requirements
+
+Run Computer Use on the computer you want to control, in a logged-in and unlocked graphical desktop session.
+
+| Platform | OS version and runtime requirements |
+| --- | --- |
+| macOS | macOS 14.0 (Sonoma) or later on Apple silicon or Intel Macs. Grant Accessibility permission to read the accessibility tree and control apps, and Screen Recording permission to take screenshots. |
+| Windows | Windows 10 version 1903 (build 18362) or later, or Windows 11, on x64. The driver requires .NET Framework 4.8 or 4.8.1. |
+| Linux | A glibc-based distribution on x86_64 or ARM64. The driver needs PyGObject, AT-SPI 2, the graphical session's D-Bus, and the X11 and xkbcommon libraries. Debian 13's AT-SPI passed verification. The version shipped with Debian 12 can time out when listing apps. Screenshots and simulated mouse and keyboard input require an X11 session. On Wayland, Computer Use can read the accessibility tree and perform the accessibility actions exposed by the app. The minimum glibc version for a prebuilt wheel depends on the artifact. |
+
+The SDK and MCP use standard CPython 3.11–3.15. DeepAgent uses CPython 3.11–3.13. Choose a prebuilt wheel that matches your Python minor version and system architecture. The Linux driver also needs a system Python 3.11 or later that can load PyGObject. See the [source build guide](docs/build-from-source.en.md) for dependency installation and build steps.
+
 ### Connect your existing agent with one prompt
 
 Send the appropriate prompt to a coding agent that can edit your project and run commands:
