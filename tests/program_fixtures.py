@@ -6,7 +6,7 @@
 import hashlib
 import json
 
-from computer_use.programs.artifact import Artifact
+from computer_use_agent.compile.artifact import Artifact
 
 
 DOCUMENT_PROGRAM = """import hashlib

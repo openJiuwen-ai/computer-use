@@ -8,7 +8,8 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from computer_use.programs.admission import Attempt, Evidence, HumanReview, Registry, fingerprint
+from computer_use_agent.compile.artifact import fingerprint
+from computer_use_native_tools.evaluation.program_admission import Attempt, Evidence, HumanReview, Registry
 
 
 DEFINITION = dict(

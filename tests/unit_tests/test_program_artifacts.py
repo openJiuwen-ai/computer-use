@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from computer_use.programs.admission import Attempt, Evidence, HumanReview, Registry, fingerprint
-from computer_use.programs.artifact import Artifact, validate_parameters
-from computer_use.programs.pipeline import execute
+from computer_use_agent.compile.artifact import Artifact, fingerprint, validate_parameters
+from computer_use_agent.compile.pipeline import execute
+from computer_use_native_tools.evaluation.program_admission import Attempt, Evidence, HumanReview, Registry
 from program_fixtures import artifact_at
 
 
@@ -60,7 +60,7 @@ def test_candidate_is_not_imported_before_admission_or_explicit_development_auth
     artifact = artifact_at(tmp_path / "candidate", source='raise RuntimeError("must not import candidate")\n')
     registry = Registry(tmp_path / "registry.sqlite")
     registry.register(artifact.definition)
-    result = invoke(artifact, None, dict(document="doc", initial="a", replacement="b"), registry=registry)
+    result = invoke(artifact, None, dict(document="doc", initial="a", replacement="b"), select=registry.select)
     assert result.status == "refused" and result.failure["effect"] == "none"
     assert "must not import" not in result.failure["detail"]
     missing = invoke(artifact, None, dict(document="doc", initial="a", replacement="b"))
@@ -103,9 +103,9 @@ def test_admitted_artifact_executes_but_changed_source_invalidates_before_import
         program["id"], "1", HumanReview("unit-test reviewer", "synthetic approval fixture", packet["packet_sha256"])
     )
     parameters = dict(document="doc", initial="old", replacement="new")
-    assert invoke(artifact, None, parameters, registry=registry).status == "awaiting_acceptance"
+    assert invoke(artifact, None, parameters, select=registry.select).status == "awaiting_acceptance"
     changed = artifact_at(artifact.path, source='raise AssertionError("changed code must not load")\n')
-    result = invoke(changed, None, parameters, registry=registry)
+    result = invoke(changed, None, parameters, select=registry.select)
     assert result.status == "refused" and "definition_changed" in result.failure["detail"]
     assert registry.select(artifact.definition).state == "invalidated"
 
@@ -226,11 +226,9 @@ async def run(ctx, computer, p):
     assert "owning task" in result.failure["detail"]
 
 
-def test_product_has_no_builtin_task_import_or_catalog():
+def test_compile_programs_are_outside_the_sdk():
     root = Path(__file__).resolve().parents[2]
-    for folder in (root / "computer_use_engine/programs", root / "scripts/evaluation"):
-        for source in folder.glob("*.py"):
-            assert "TextEdit" not in source.read_text()
-            assert "programs.textedit" not in source.read_text()
-    assert not (root / "computer_use_engine/programs/textedit/pipeline.py").exists()
-    assert not (root / "scripts/evaluation/textedit.py").exists()
+    engine = root / "computer_use_engine"
+    assert not list((engine / "programs").glob("*.py"))
+    for source in engine.rglob("*.py"):
+        assert "computer_use_agent.compile" not in source.read_text(encoding="utf-8")

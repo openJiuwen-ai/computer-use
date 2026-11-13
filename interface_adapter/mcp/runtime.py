@@ -9,6 +9,7 @@ import base64
 import builtins
 import hashlib
 import io
+import json
 import os
 import pprint
 import signal
@@ -720,6 +721,8 @@ class Runtime:
         run["active"] = False
         run["phase"] = "finished"
         result = dict(content=run["output"].content.copy())
+        if "structured" in run:
+            result["structuredContent"] = run["structured"]
         message = None
         if error is not None:
             message = type(error).__name__ + ": " + str(error)
@@ -760,6 +763,20 @@ class Runtime:
         self.send(result)
         return result
 
+    def report_result(self, value):
+        """Deliver one structured result from the current script."""
+        if not self.executor.is_owner:
+            return self.executor.call(self.report_result, value)
+        run = _runs.get()
+        if run is None or not run["active"] or run["phase"] != "code":
+            raise RuntimeError("No active script to report a result for.")
+        if not isinstance(value, dict):
+            raise TypeError("report_result expects a JSON object.")
+        encoded = json.dumps(value, allow_nan=False, ensure_ascii=False)
+        if len(utf8(encoded)) > OutputBuffer.TEXT_LIMIT:
+            raise ValueError("Structured result exceeds the 256 KiB limit.")
+        run["structured"] = json.loads(encoded)
+
     def namespace(self):
         computer = self.computer_factory()
         return dict(
@@ -768,6 +785,7 @@ class Runtime:
             computer=computer,
             print=self.print,
             print_image=self.print_image,
+            report_result=self.report_result,
         )
 
     def evaluate(self, compiled, run):

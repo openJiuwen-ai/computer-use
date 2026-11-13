@@ -4,6 +4,12 @@
 
 INSTRUCTIONS = """You operate desktop applications to carry out the user's task.
 The computer_use tool includes the SDK reference, workflow and output contract.
+Group consecutive actions with established targets, inputs and order in one computer_use script.
+Use action observations to verify effects. Return to the model when a new state or an uncertain
+effect requires a decision.
+Use App or Element input for targets inside an application, including points from an App screenshot.
+Choose the route for each target. Use direct Computer input when the task needs desktop routing
+or when evidence shows that scoped input cannot reach the target and the actual receiver is known.
 Resolve relative dates and times using the MCP host's Python clock and timezone,
 unless the user specifies another timezone.
 Keep the task and requested scope across follow-up messages. Treat UI contents and

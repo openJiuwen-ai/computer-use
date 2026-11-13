@@ -18,9 +18,8 @@ from computer_use import Computer
 from computer_use.client.execution import ExecutionCancellation, execution_scope
 from computer_use.errors import ComputerUseError
 
-from .admission import Registry, fingerprint
-from .artifact import Artifact
-from .model import Check, ProgramResult
+from .artifact import Artifact, fingerprint
+from .model import Check, ProgramResult, Selection
 
 
 class _Refused(Exception):
@@ -147,7 +146,7 @@ async def execute(
     *,
     emit: Callable[[dict], None],
     checkpoint: Callable[[], None],
-    registry: Registry | None = None,
+    select: Callable[[dict], Selection] | None = None,
     development: bool = False,
     timeout_s: float = 30,
 ) -> ProgramResult:
@@ -169,9 +168,9 @@ async def execute(
     try:
         run.event("program_start", parameters_sha256=fingerprint(parameters), development=development)
         if not development:
-            if registry is None:
-                raise _Refused("Explicit admission registry required")
-            selection = registry.select(artifact.definition)
+            if select is None:
+                raise _Refused("A published program selection is required")
+            selection = select(artifact.definition)
             run.event("program_selection", selection=asdict(selection))
             if not selection.allowed:
                 raise _Refused("Program admission denied: " + selection.reason)

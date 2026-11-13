@@ -3,6 +3,7 @@
 """Desktop startup, context and failure guidance adapted from agent-core."""
 
 import json
+import logging
 
 from openjiuwen.core.runner.callback import AbortError
 from openjiuwen.core.single_agent.rail.base import AgentRail, ToolCallInputs
@@ -10,6 +11,7 @@ from openjiuwen.core.single_agent.rail.base import AgentRail, ToolCallInputs
 from .history import compact_observations, compact_screenshots, remember_observations
 
 _ADVISE_AFTER = 3
+logger = logging.getLogger(__name__)
 
 
 class ComputerUseRail(AgentRail):
@@ -30,11 +32,46 @@ class ComputerUseRail(AgentRail):
             raise AbortError(
                 f"Desktop startup check failed. Check the native backend and desktop session. {detail}"
             ) from error
+        compiler = self._toolkit.compiler
+        query = ctx.inputs.query
+        if compiler is not None and isinstance(query, str) and query.strip():
+            source = compiler.begin(ctx.inputs.invocation_id, ctx.inputs.conversation_id, query)
+            try:
+                request = query.casefold()
+                wants_draft = "草稿" in request or "draft" in request or (
+                    "编译" in request and "函数" in request or "compiled" in request and "function" in request
+                )
+                source.offered = compiler.catalog(include_drafts=wants_draft)
+            except (OSError, KeyError, TypeError, ValueError):
+                logger.warning("Published Compile revision is unavailable", exc_info=True)
+            source.can_compile = compiler.latest_source(conversation_id=source.conversation_id) is not None
+            ctx.extra["compile_turn_token"] = compiler.turn.set(source)
+
+    async def after_invoke(self, ctx):
+        token = ctx.extra.pop("compile_turn_token", None)
+        if token is not None:
+            compiler = self._toolkit.compiler
+            source = compiler.turn.get()
+            compiler.turn.reset(token)
+            compiler.finish(source, ctx.inputs.result)
 
     async def after_tool_call(self, ctx):
         inputs = ctx.inputs
         if not isinstance(inputs, ToolCallInputs):
             return
+        # Tool callbacks inherit the active turn from the outer DeepAgent.
+        compiler = self._toolkit.compiler
+        source = compiler.turn.get() if compiler is not None else None
+        if source is not None and inputs.tool_name in ("computer_use", "route_task", "run_compiled", "compile_task"):
+            source.offered = None
+            source.can_compile = False
+        if source is not None and inputs.tool_name in ("compile_task", "run_compiled"):
+            result = inputs.tool_result
+            data = getattr(result, "data", None)
+            if isinstance(data, dict):
+                answer = data.get("content" if inputs.tool_name == "compile_task" else "verified_answer")
+                if answer:
+                    ctx.request_force_finish({"result_type": "answer", "output": answer})
         if inputs.tool_name != "computer_use":
             self._failed_scripts.clear()
             return
@@ -42,6 +79,8 @@ class ComputerUseRail(AgentRail):
         if not isinstance(data, dict):
             self._failed_scripts.clear()
             return
+        if source is not None:
+            self._toolkit.compiler.record(source, inputs.tool_args, data)
         for item in data.get("multimodal", ()):
             scope = item.get("observation_scope")
             if scope:
@@ -87,6 +126,28 @@ class ComputerUseRail(AgentRail):
         return None
 
     async def before_model_call(self, ctx):
+        if self._toolkit.compiler is not None and ctx.inputs.tools:
+            source = self._toolkit.compiler.turn.get()
+            offered = []
+            for tool in ctx.inputs.tools:
+                if tool.name == "compile_task" and (source is None or not source.can_compile):
+                    continue
+                if tool.name == "run_compiled":
+                    if source is None or not source.offered:
+                        continue
+                    tool = tool.model_copy(
+                        update={
+                            "description": (
+                                "Call this first when the entire request matches an entry in the catalog. "
+                                "Supply the current task's inputs. Set reply_language for the Calc profile. "
+                                "Use a ready_to_validate entry only when the user explicitly asks to run the "
+                                "draft on a new task. Never use it to re-run the original task as a test.\n"
+                                + json.dumps(source.offered, ensure_ascii=False)
+                            )
+                        }
+                    )
+                offered.append(tool)
+            ctx.inputs.tools = offered
         if ctx.context is None:
             return
         messages = list(ctx.context.get_messages())

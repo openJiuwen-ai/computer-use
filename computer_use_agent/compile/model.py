@@ -9,6 +9,15 @@ from typing import Literal
 
 
 @dataclass(frozen=True)
+class Selection:
+    allowed: bool
+    reason: str
+    state: str | None
+    definition_sha256: str
+    review: dict | None = None
+
+
+@dataclass(frozen=True)
 class Check:
     condition: str
     value: Literal["TRUE", "FALSE", "UNKNOWN"]

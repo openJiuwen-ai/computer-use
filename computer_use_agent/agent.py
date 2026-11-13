@@ -41,7 +41,8 @@ class ComputerUseAgent(DeepAgent):
             name="computer_use_agent", description="Operate desktop applications using UI observations."
         )
         super().__init__(card)
-        self.toolkit = ComputerUseToolkit(config, on_event=on_event, stderr=stderr)
+        self._compile_model = model
+        self.toolkit = ComputerUseToolkit(config, on_event=on_event, stderr=stderr, compile_task=self.compile_task)
         context = ContextProcessorRail(
             preset=True,
             processors=[
@@ -76,6 +77,22 @@ class ComputerUseAgent(DeepAgent):
     async def compact(self, session=None, *, conversation_id: str | None = None):
         await self.ensure_initialized()
         return await self.react_agent.context_engine.compress_context(session=session, session_id=conversation_id)
+
+    @property
+    def last_task_id(self):
+        compiler = self.toolkit.compiler
+        return compiler.last_task_id if compiler is not None else None
+
+    async def compile_task(self, task_id=None, *, conversation_id=None, parameters=None):
+        compiler = self.toolkit.compiler
+        if compiler is None:
+            raise RuntimeError("Compile is disabled")
+        return await compiler.compile_task(
+            self._compile_model, task_id, conversation_id=conversation_id, parameters=parameters
+        )
+
+    async def run_program(self, program_id, parameters, *, version=None):
+        return await self.toolkit.run_program(program_id, parameters, version=version)
 
     async def close(self):
         await self.toolkit.close()

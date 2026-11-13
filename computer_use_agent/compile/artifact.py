@@ -15,7 +15,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .admission import canonical, fingerprint
+
+def canonical(value) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def fingerprint(value) -> str:
+    return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
 def validate_parameters(schema: dict, values: dict) -> dict:
@@ -96,11 +102,11 @@ class Artifact:
         source = entry.read_bytes()
         if hashlib.sha256(source).hexdigest() != manifest["source_sha256"]:
             raise ValueError("Artifact source digest does not match its manifest")
-        # Changes to generic execution/validation/admission invalidate old review.
+        # A published revision binds the executor and artifact contract used by its checks.
         runtime = Path(__file__).parent
         runtime_hashes = {
             name: hashlib.sha256((runtime / name).read_bytes()).hexdigest()
-            for name in ("artifact.py", "pipeline.py", "model.py", "admission.py")
+            for name in ("artifact.py", "pipeline.py", "model.py")
         }
         return cls(root, canonical(manifest), source, fingerprint(runtime_hashes))
 
